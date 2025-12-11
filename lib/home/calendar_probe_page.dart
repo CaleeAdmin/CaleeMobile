@@ -1,0 +1,308 @@
+import 'package:caleesync/common/route_constant.dart';
+import 'package:caleesync/home/sync_settings_page.dart';
+import 'package:caleesync/home/task_lists_page.dart';
+import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import 'calendars_page.dart';
+import 'dashboard_page.dart';
+
+class CalendarProbePage extends StatefulWidget {
+  const CalendarProbePage({super.key});
+
+  @override
+  State<CalendarProbePage> createState() => _CalendarProbePageState();
+}
+
+class _CalendarProbePageState extends State<CalendarProbePage> {
+  int _selectedIndex = 0;
+
+  final List<Widget> _pages = const [
+    DashboardPage(),
+    CalendarsPage(),
+    TaskListsPage(),
+    SyncSettingsPage(),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF2C2C2E), // Dark gray background
+      drawer: _buildDrawer(),
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        leading: Builder(
+          builder: (context) => IconButton(
+            icon: const Icon(Icons.menu, color: Colors.black87),
+            onPressed: () => Scaffold.of(context).openDrawer(),
+          ),
+        ),
+        title: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.max,
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: Colors.blue,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Center(
+                  child: Text(
+                    'C',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              const Text(
+                'Calee',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.black87,
+                ),
+              ),
+            ],
+          ),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: ElevatedButton.icon(
+            onPressed: () {
+              // TODO: Implement sync action
+            },
+            icon: const Icon(Icons.sync, size: 18),
+            label: const Text('Sync'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.blue,
+              foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+                ),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                minimumSize: const Size(0, 36),
+              ),
+            ),
+          ),
+        ],
+        centerTitle: true,
+      ),
+      body: Column(
+        children: [
+          // Top navigation icons row
+          _buildBottomNavigation(),
+          // Main content area
+          Expanded(
+            child: _pages[_selectedIndex],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDrawer() {
+    return Drawer(
+      elevation: 12,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+      child: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              height: 104,
+              child: DrawerHeader(
+                margin: EdgeInsets.zero,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: const BoxDecoration(
+                  border: Border(
+                    bottom: BorderSide(color: Color(0xFFE5E7EB), width: 1),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF2E7AFE),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Center(
+                        child: Text(
+                          'C',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 22,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    const Text(
+                      'Calee',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.black87,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            _drawerItem(
+              icon: Icons.person_outline,
+              label: 'Profile',
+              onTap: () {
+                Navigator.of(context).pop(); // Close drawer
+                context.go(RouteConstant.profile);
+              },
+            ),
+            _drawerItem(
+              icon: Icons.qr_code_2_outlined,
+              label: 'Link a device',
+              onTap: () {},
+            ),
+            _drawerItem(
+              icon: Icons.shield_outlined,
+              label: 'Manage devices',
+              onTap: () {},
+            ),
+            const Spacer(),
+            _buildSyncButton(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _drawerItem({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        child: Row(
+          children: [
+            Icon(icon, color: Colors.black87, size: 20),
+            const SizedBox(width: 12),
+            Text(
+              label,
+              style: const TextStyle(
+                fontSize: 15,
+                color: Colors.black87,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSyncButton() {
+    final bottomPadding = MediaQuery.of(context).padding.bottom;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(16, 12, 16, bottomPadding),
+      child: SizedBox(
+        width: double.infinity,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: const Color(0xFF0D0C14),
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.1),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              )
+            ],
+          ),
+          child: ElevatedButton.icon(
+            onPressed: () {
+              // TODO: Sync action
+            },
+            style: ElevatedButton.styleFrom(
+              elevation: 0,
+              backgroundColor: Colors.transparent,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            icon: const Icon(Icons.sync, size: 18),
+            label: const Text(
+              'Sync Now',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBottomNavigation() {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        children: [
+          _buildNavItem(Icons.dashboard_outlined, 'Dashboard', 0),
+          _buildNavItem(Icons.calendar_today_outlined, 'Calendars', 1),
+          _buildNavItem(Icons.checklist_outlined, 'Task Lists', 2),
+          _buildNavItem(Icons.settings, 'Sync Settings', 3),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNavItem(IconData icon, String label, int index) {
+    final isSelected = _selectedIndex == index;
+    // Last item (Sync Settings) should have dark background when selected
+    final isLastItem = index == 3;
+    
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          _selectedIndex = index;
+        });
+      },
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+        decoration: BoxDecoration(
+          color: isSelected 
+              ? (isLastItem ? const Color(0xFF1A1A1C) : Colors.black87)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Icon(
+          icon,
+          color: isSelected 
+              ? Colors.white 
+              : (isLastItem && !isSelected ? Colors.black54 : Colors.black54),
+          size: 24,
+        ),
+      ),
+    );
+  }
+}
+
