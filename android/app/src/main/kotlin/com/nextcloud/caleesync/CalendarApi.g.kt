@@ -45,183 +45,111 @@ class FlutterError (
 ) : Throwable()
 
 /**
- * Calendar data contract exposed via Pigeon.
- *
- * Scope (first milestone):
- * - List calendars
- * - List events within a time window
- *
- * Note: Permission handling is done via permission_handler in Flutter,
- * not through this Pigeon API.
+ * 配置 Pigeon 生成代码的路径
  *
  * Generated class from Pigeon that represents data sent in messages.
  */
-data class TimeWindow (
-  /** Inclusive UTC start timestamp in milliseconds. */
-  val startMillis: Long,
-  /** Exclusive UTC end timestamp in milliseconds. */
-  val endMillis: Long,
-  /** Optional filter for specific calendar IDs (device identifiers). */
-  val calendarIds: List<Long?>? = null
-
-) {
-  companion object {
-    @Suppress("LocalVariableName")
-    fun fromList(__pigeon_list: List<Any?>): TimeWindow {
-      val startMillis = __pigeon_list[0].let { num -> if (num is Int) num.toLong() else num as Long }
-      val endMillis = __pigeon_list[1].let { num -> if (num is Int) num.toLong() else num as Long }
-      val calendarIds = __pigeon_list[2] as List<Long?>?
-      return TimeWindow(startMillis, endMillis, calendarIds)
-    }
-  }
-  fun toList(): List<Any?> {
-    return listOf<Any?>(
-      startMillis,
-      endMillis,
-      calendarIds,
-    )
-  }
-}
-
-/** Generated class from Pigeon that represents data sent in messages. */
-data class PigeonCalendar (
-  /** Device-level calendar identifier (Calendar Provider / EventKit). */
-  val id: Long,
-  val accountName: String,
-  val accountType: String,
-  val ownerAccount: String? = null,
+data class PlatformCalendar (
+  val id: String? = null,
   val name: String? = null,
-  val displayName: String? = null,
-  val color: Long,
-  val visible: Boolean,
-  val syncEvents: Boolean,
-  val isPrimary: Boolean,
-  val isLocal: Boolean,
-  val accessLevel: Long
+  val color: String? = null,
+  val isReadOnly: Boolean? = null,
+  val supportsEvents: Boolean? = null,
+  val supportsTasks: Boolean? = null
 
 ) {
   companion object {
     @Suppress("LocalVariableName")
-    fun fromList(__pigeon_list: List<Any?>): PigeonCalendar {
-      val id = __pigeon_list[0].let { num -> if (num is Int) num.toLong() else num as Long }
-      val accountName = __pigeon_list[1] as String
-      val accountType = __pigeon_list[2] as String
-      val ownerAccount = __pigeon_list[3] as String?
-      val name = __pigeon_list[4] as String?
-      val displayName = __pigeon_list[5] as String?
-      val color = __pigeon_list[6].let { num -> if (num is Int) num.toLong() else num as Long }
-      val visible = __pigeon_list[7] as Boolean
-      val syncEvents = __pigeon_list[8] as Boolean
-      val isPrimary = __pigeon_list[9] as Boolean
-      val isLocal = __pigeon_list[10] as Boolean
-      val accessLevel = __pigeon_list[11].let { num -> if (num is Int) num.toLong() else num as Long }
-      return PigeonCalendar(id, accountName, accountType, ownerAccount, name, displayName, color, visible, syncEvents, isPrimary, isLocal, accessLevel)
+    fun fromList(__pigeon_list: List<Any?>): PlatformCalendar {
+      val id = __pigeon_list[0] as String?
+      val name = __pigeon_list[1] as String?
+      val color = __pigeon_list[2] as String?
+      val isReadOnly = __pigeon_list[3] as Boolean?
+      val supportsEvents = __pigeon_list[4] as Boolean?
+      val supportsTasks = __pigeon_list[5] as Boolean?
+      return PlatformCalendar(id, name, color, isReadOnly, supportsEvents, supportsTasks)
     }
   }
   fun toList(): List<Any?> {
     return listOf<Any?>(
       id,
-      accountName,
-      accountType,
-      ownerAccount,
       name,
-      displayName,
       color,
-      visible,
-      syncEvents,
-      isPrimary,
-      isLocal,
-      accessLevel,
+      isReadOnly,
+      supportsEvents,
+      supportsTasks,
     )
   }
 }
 
 /** Generated class from Pigeon that represents data sent in messages. */
-data class PigeonEvent (
-  /** Device-level event identifier (Calendar Provider / EventKit). */
-  val id: String,
-  val calendarId: String,
-  val title: String,
-  val startMillis: Long,
-  val endMillis: Long,
-  val description: String? = null,
+data class PlatformItem (
+  val localId: String? = null,
+  val uid: String? = null,
+  val title: String? = null,
+  val notes: String? = null,
   val location: String? = null,
-  val allDay: Boolean,
-  val timeZone: String? = null,
-  /** RRULE string (e.g. FREQ=WEEKLY;BYDAY=MO,WE,FR). */
-  val recurrenceRule: String? = null,
-  /** UTC millis for EXDATE-like exceptions. */
-  val recurrenceExceptionMillis: List<Long?>? = null,
-  /** Attendee emails or identifiers. */
-  val attendees: List<String?>? = null,
-  val organizer: String? = null,
-  val status: String? = null,
-  val etag: String? = null,
-  val updatedAtMillis: Long? = null,
-  val isCanceled: Boolean
+  val startTime: Long? = null,
+  val endTime: Long? = null,
+  val lastModified: Long? = null,
+  val isTask: Boolean? = null,
+  val isAllDay: Boolean? = null,
+  val status: Long? = null,
+  val priority: Long? = null
 
 ) {
   companion object {
     @Suppress("LocalVariableName")
-    fun fromList(__pigeon_list: List<Any?>): PigeonEvent {
-      val id = __pigeon_list[0] as String
-      val calendarId = __pigeon_list[1] as String
-      val title = __pigeon_list[2] as String
-      val startMillis = __pigeon_list[3].let { num -> if (num is Int) num.toLong() else num as Long }
-      val endMillis = __pigeon_list[4].let { num -> if (num is Int) num.toLong() else num as Long }
-      val description = __pigeon_list[5] as String?
-      val location = __pigeon_list[6] as String?
-      val allDay = __pigeon_list[7] as Boolean
-      val timeZone = __pigeon_list[8] as String?
-      val recurrenceRule = __pigeon_list[9] as String?
-      val recurrenceExceptionMillis = __pigeon_list[10] as List<Long?>?
-      val attendees = __pigeon_list[11] as List<String?>?
-      val organizer = __pigeon_list[12] as String?
-      val status = __pigeon_list[13] as String?
-      val etag = __pigeon_list[14] as String?
-      val updatedAtMillis = __pigeon_list[15].let { num -> if (num is Int) num.toLong() else num as Long? }
-      val isCanceled = __pigeon_list[16] as Boolean
-      return PigeonEvent(id, calendarId, title, startMillis, endMillis, description, location, allDay, timeZone, recurrenceRule, recurrenceExceptionMillis, attendees, organizer, status, etag, updatedAtMillis, isCanceled)
+    fun fromList(__pigeon_list: List<Any?>): PlatformItem {
+      val localId = __pigeon_list[0] as String?
+      val uid = __pigeon_list[1] as String?
+      val title = __pigeon_list[2] as String?
+      val notes = __pigeon_list[3] as String?
+      val location = __pigeon_list[4] as String?
+      val startTime = __pigeon_list[5].let { num -> if (num is Int) num.toLong() else num as Long? }
+      val endTime = __pigeon_list[6].let { num -> if (num is Int) num.toLong() else num as Long? }
+      val lastModified = __pigeon_list[7].let { num -> if (num is Int) num.toLong() else num as Long? }
+      val isTask = __pigeon_list[8] as Boolean?
+      val isAllDay = __pigeon_list[9] as Boolean?
+      val status = __pigeon_list[10].let { num -> if (num is Int) num.toLong() else num as Long? }
+      val priority = __pigeon_list[11].let { num -> if (num is Int) num.toLong() else num as Long? }
+      return PlatformItem(localId, uid, title, notes, location, startTime, endTime, lastModified, isTask, isAllDay, status, priority)
     }
   }
   fun toList(): List<Any?> {
     return listOf<Any?>(
-      id,
-      calendarId,
+      localId,
+      uid,
       title,
-      startMillis,
-      endMillis,
-      description,
+      notes,
       location,
-      allDay,
-      timeZone,
-      recurrenceRule,
-      recurrenceExceptionMillis,
-      attendees,
-      organizer,
+      startTime,
+      endTime,
+      lastModified,
+      isTask,
+      isAllDay,
       status,
-      etag,
-      updatedAtMillis,
-      isCanceled,
+      priority,
     )
   }
 }
-private object CalendarHostApiCodec : StandardMessageCodec() {
+
+private object NativeCalendarApiCodec : StandardMessageCodec() {
   override fun readValueOfType(type: Byte, buffer: ByteBuffer): Any? {
     return when (type) {
       128.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
-          PigeonCalendar.fromList(it)
+          PlatformCalendar.fromList(it)
         }
       }
       129.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
-          PigeonEvent.fromList(it)
+          PlatformItem.fromList(it)
         }
       }
       130.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
-          TimeWindow.fromList(it)
+          PlatformItem.fromList(it)
         }
       }
       else -> super.readValueOfType(type, buffer)
@@ -229,15 +157,15 @@ private object CalendarHostApiCodec : StandardMessageCodec() {
   }
   override fun writeValue(stream: ByteArrayOutputStream, value: Any?)   {
     when (value) {
-      is PigeonCalendar -> {
+      is PlatformCalendar -> {
         stream.write(128)
         writeValue(stream, value.toList())
       }
-      is PigeonEvent -> {
+      is PlatformItem -> {
         stream.write(129)
         writeValue(stream, value.toList())
       }
-      is TimeWindow -> {
+      is PlatformItem -> {
         stream.write(130)
         writeValue(stream, value.toList())
       }
@@ -247,41 +175,62 @@ private object CalendarHostApiCodec : StandardMessageCodec() {
 }
 
 /**
- * Host API implemented on Android/iOS. Flutter calls into this.
- *
- * Note: Permission must be granted before calling these methods.
- * Use permission_handler in Flutter to request calendar permissions.
+ * 定义原生侧必须实现的方法
  *
  * Generated interface from Pigeon that represents a handler of messages from Flutter.
  */
-interface CalendarHostApi {
+interface NativeCalendarApi {
+  /** 获取日历列表前请求权限 */
+  fun requestPermission(forTask: Boolean, callback: (Result<Boolean>) -> Unit)
+  /** 获取所有可同步的日历 */
+  fun getCalendars(): List<PlatformCalendar>
   /**
-   * List calendars available on the device.
-   *
-   * Throws if permission is not granted.
+   * 获取指定日历在时间范围内的所有条目
+   * 注意：Android 上由于系统限制，可能只返回 Event
    */
-  fun listCalendars(): List<PigeonCalendar?>
+  fun getItems(calendarId: String, startMs: Long, endMs: Long): List<PlatformItem>
   /**
-   * List events in the given UTC time window (can filter calendars).
-   *
-   * Throws if permission is not granted.
+   * 创建或更新条目
+   * 返回写入成功后的系统 localId
    */
-  fun listEvents(window: TimeWindow): List<PigeonEvent?>
+  fun upsertItem(calendarId: String, item: PlatformItem, callback: (Result<String>) -> Unit)
+  /** 根据 ID 删除条目 */
+  fun deleteItem(localId: String, callback: (Result<Unit>) -> Unit)
 
   companion object {
-    /** The codec used by CalendarHostApi. */
+    /** The codec used by NativeCalendarApi. */
     val codec: MessageCodec<Any?> by lazy {
-      CalendarHostApiCodec
+      NativeCalendarApiCodec
     }
-    /** Sets up an instance of `CalendarHostApi` to handle messages through the `binaryMessenger`. */
-    fun setUp(binaryMessenger: BinaryMessenger, api: CalendarHostApi?, messageChannelSuffix: String = "") {
+    /** Sets up an instance of `NativeCalendarApi` to handle messages through the `binaryMessenger`. */
+    fun setUp(binaryMessenger: BinaryMessenger, api: NativeCalendarApi?, messageChannelSuffix: String = "") {
       val separatedMessageChannelSuffix = if (messageChannelSuffix.isNotEmpty()) ".$messageChannelSuffix" else ""
       run {
-        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.calendar_api.CalendarHostApi.listCalendars$separatedMessageChannelSuffix", codec)
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.caleesync.NativeCalendarApi.requestPermission$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val forTaskArg = args[0] as Boolean
+            api.requestPermission(forTaskArg) { result: Result<Boolean> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(wrapError(error))
+              } else {
+                val data = result.getOrNull()
+                reply.reply(wrapResult(data))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.caleesync.NativeCalendarApi.getCalendars$separatedMessageChannelSuffix", codec)
         if (api != null) {
           channel.setMessageHandler { _, reply ->
             val wrapped: List<Any?> = try {
-              listOf<Any?>(api.listCalendars())
+              listOf<Any?>(api.getCalendars())
             } catch (exception: Throwable) {
               wrapError(exception)
             }
@@ -292,17 +241,59 @@ interface CalendarHostApi {
         }
       }
       run {
-        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.calendar_api.CalendarHostApi.listEvents$separatedMessageChannelSuffix", codec)
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.caleesync.NativeCalendarApi.getItems$separatedMessageChannelSuffix", codec)
         if (api != null) {
           channel.setMessageHandler { message, reply ->
             val args = message as List<Any?>
-            val windowArg = args[0] as TimeWindow
+            val calendarIdArg = args[0] as String
+            val startMsArg = args[1].let { num -> if (num is Int) num.toLong() else num as Long }
+            val endMsArg = args[2].let { num -> if (num is Int) num.toLong() else num as Long }
             val wrapped: List<Any?> = try {
-              listOf<Any?>(api.listEvents(windowArg))
+              listOf<Any?>(api.getItems(calendarIdArg, startMsArg, endMsArg))
             } catch (exception: Throwable) {
               wrapError(exception)
             }
             reply.reply(wrapped)
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.caleesync.NativeCalendarApi.upsertItem$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val calendarIdArg = args[0] as String
+            val itemArg = args[1] as PlatformItem
+            api.upsertItem(calendarIdArg, itemArg) { result: Result<String> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(wrapError(error))
+              } else {
+                val data = result.getOrNull()
+                reply.reply(wrapResult(data))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.caleesync.NativeCalendarApi.deleteItem$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val localIdArg = args[0] as String
+            api.deleteItem(localIdArg) { result: Result<Unit> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(wrapError(error))
+              } else {
+                reply.reply(wrapResult(null))
+              }
+            }
           }
         } else {
           channel.setMessageHandler(null)

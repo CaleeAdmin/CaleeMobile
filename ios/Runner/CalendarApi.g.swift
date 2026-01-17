@@ -39,219 +39,134 @@ private func nilOrValue<T>(_ value: Any?) -> T? {
   return value as! T?
 }
 
-/// Calendar data contract exposed via Pigeon.
-///
-/// Scope (first milestone):
-/// - List calendars
-/// - List events within a time window
-///
-/// Note: Permission handling is done via permission_handler in Flutter,
-/// not through this Pigeon API.
+/// 配置 Pigeon 生成代码的路径
 ///
 /// Generated class from Pigeon that represents data sent in messages.
-struct TimeWindow {
-  /// Inclusive UTC start timestamp in milliseconds.
-  var startMillis: Int64
-  /// Exclusive UTC end timestamp in milliseconds.
-  var endMillis: Int64
-  /// Optional filter for specific calendar IDs (device identifiers).
-  var calendarIds: [Int64?]? = nil
-
-  // swift-format-ignore: AlwaysUseLowerCamelCase
-  static func fromList(_ __pigeon_list: [Any?]) -> TimeWindow? {
-    let startMillis = __pigeon_list[0] is Int64 ? __pigeon_list[0] as! Int64 : Int64(__pigeon_list[0] as! Int32)
-    let endMillis = __pigeon_list[1] is Int64 ? __pigeon_list[1] as! Int64 : Int64(__pigeon_list[1] as! Int32)
-    let calendarIds: [Int64?]? = nilOrValue(__pigeon_list[2])
-
-    return TimeWindow(
-      startMillis: startMillis,
-      endMillis: endMillis,
-      calendarIds: calendarIds
-    )
-  }
-  func toList() -> [Any?] {
-    return [
-      startMillis,
-      endMillis,
-      calendarIds,
-    ]
-  }
-}
-
-/// Generated class from Pigeon that represents data sent in messages.
-struct PigeonCalendar {
-  /// Device-level calendar identifier (Calendar Provider / EventKit).
-  var id: Int64
-  var accountName: String
-  var accountType: String
-  var ownerAccount: String? = nil
+struct PlatformCalendar {
+  var id: String? = nil
   var name: String? = nil
-  var displayName: String? = nil
-  var color: Int64
-  var visible: Bool
-  var syncEvents: Bool
-  var isPrimary: Bool
-  var isLocal: Bool
-  var accessLevel: Int64
+  var color: String? = nil
+  var isReadOnly: Bool? = nil
+  var supportsEvents: Bool? = nil
+  var supportsTasks: Bool? = nil
 
   // swift-format-ignore: AlwaysUseLowerCamelCase
-  static func fromList(_ __pigeon_list: [Any?]) -> PigeonCalendar? {
-    let id = __pigeon_list[0] is Int64 ? __pigeon_list[0] as! Int64 : Int64(__pigeon_list[0] as! Int32)
-    let accountName = __pigeon_list[1] as! String
-    let accountType = __pigeon_list[2] as! String
-    let ownerAccount: String? = nilOrValue(__pigeon_list[3])
-    let name: String? = nilOrValue(__pigeon_list[4])
-    let displayName: String? = nilOrValue(__pigeon_list[5])
-    let color = __pigeon_list[6] is Int64 ? __pigeon_list[6] as! Int64 : Int64(__pigeon_list[6] as! Int32)
-    let visible = __pigeon_list[7] as! Bool
-    let syncEvents = __pigeon_list[8] as! Bool
-    let isPrimary = __pigeon_list[9] as! Bool
-    let isLocal = __pigeon_list[10] as! Bool
-    let accessLevel = __pigeon_list[11] is Int64 ? __pigeon_list[11] as! Int64 : Int64(__pigeon_list[11] as! Int32)
+  static func fromList(_ __pigeon_list: [Any?]) -> PlatformCalendar? {
+    let id: String? = nilOrValue(__pigeon_list[0])
+    let name: String? = nilOrValue(__pigeon_list[1])
+    let color: String? = nilOrValue(__pigeon_list[2])
+    let isReadOnly: Bool? = nilOrValue(__pigeon_list[3])
+    let supportsEvents: Bool? = nilOrValue(__pigeon_list[4])
+    let supportsTasks: Bool? = nilOrValue(__pigeon_list[5])
 
-    return PigeonCalendar(
+    return PlatformCalendar(
       id: id,
-      accountName: accountName,
-      accountType: accountType,
-      ownerAccount: ownerAccount,
       name: name,
-      displayName: displayName,
       color: color,
-      visible: visible,
-      syncEvents: syncEvents,
-      isPrimary: isPrimary,
-      isLocal: isLocal,
-      accessLevel: accessLevel
+      isReadOnly: isReadOnly,
+      supportsEvents: supportsEvents,
+      supportsTasks: supportsTasks
     )
   }
   func toList() -> [Any?] {
     return [
       id,
-      accountName,
-      accountType,
-      ownerAccount,
       name,
-      displayName,
       color,
-      visible,
-      syncEvents,
-      isPrimary,
-      isLocal,
-      accessLevel,
+      isReadOnly,
+      supportsEvents,
+      supportsTasks,
     ]
   }
 }
 
 /// Generated class from Pigeon that represents data sent in messages.
-struct PigeonEvent {
-  /// Device-level event identifier (Calendar Provider / EventKit).
-  var id: String
-  var calendarId: String
-  var title: String
-  var startMillis: Int64
-  var endMillis: Int64
-  var description: String? = nil
+struct PlatformItem {
+  var localId: String? = nil
+  var uid: String? = nil
+  var title: String? = nil
+  var notes: String? = nil
   var location: String? = nil
-  var allDay: Bool
-  var timeZone: String? = nil
-  /// RRULE string (e.g. FREQ=WEEKLY;BYDAY=MO,WE,FR).
-  var recurrenceRule: String? = nil
-  /// UTC millis for EXDATE-like exceptions.
-  var recurrenceExceptionMillis: [Int64?]? = nil
-  /// Attendee emails or identifiers.
-  var attendees: [String?]? = nil
-  var organizer: String? = nil
-  var status: String? = nil
-  var etag: String? = nil
-  var updatedAtMillis: Int64? = nil
-  var isCanceled: Bool
+  var startTime: Int64? = nil
+  var endTime: Int64? = nil
+  var lastModified: Int64? = nil
+  var isTask: Bool? = nil
+  var isAllDay: Bool? = nil
+  var status: Int64? = nil
+  var priority: Int64? = nil
 
   // swift-format-ignore: AlwaysUseLowerCamelCase
-  static func fromList(_ __pigeon_list: [Any?]) -> PigeonEvent? {
-    let id = __pigeon_list[0] as! String
-    let calendarId = __pigeon_list[1] as! String
-    let title = __pigeon_list[2] as! String
-    let startMillis = __pigeon_list[3] is Int64 ? __pigeon_list[3] as! Int64 : Int64(__pigeon_list[3] as! Int32)
-    let endMillis = __pigeon_list[4] is Int64 ? __pigeon_list[4] as! Int64 : Int64(__pigeon_list[4] as! Int32)
-    let description: String? = nilOrValue(__pigeon_list[5])
-    let location: String? = nilOrValue(__pigeon_list[6])
-    let allDay = __pigeon_list[7] as! Bool
-    let timeZone: String? = nilOrValue(__pigeon_list[8])
-    let recurrenceRule: String? = nilOrValue(__pigeon_list[9])
-    let recurrenceExceptionMillis: [Int64?]? = nilOrValue(__pigeon_list[10])
-    let attendees: [String?]? = nilOrValue(__pigeon_list[11])
-    let organizer: String? = nilOrValue(__pigeon_list[12])
-    let status: String? = nilOrValue(__pigeon_list[13])
-    let etag: String? = nilOrValue(__pigeon_list[14])
-    let updatedAtMillis: Int64? = isNullish(__pigeon_list[15]) ? nil : (__pigeon_list[15] is Int64? ? __pigeon_list[15] as! Int64? : Int64(__pigeon_list[15] as! Int32))
-    let isCanceled = __pigeon_list[16] as! Bool
+  static func fromList(_ __pigeon_list: [Any?]) -> PlatformItem? {
+    let localId: String? = nilOrValue(__pigeon_list[0])
+    let uid: String? = nilOrValue(__pigeon_list[1])
+    let title: String? = nilOrValue(__pigeon_list[2])
+    let notes: String? = nilOrValue(__pigeon_list[3])
+    let location: String? = nilOrValue(__pigeon_list[4])
+    let startTime: Int64? = isNullish(__pigeon_list[5]) ? nil : (__pigeon_list[5] is Int64? ? __pigeon_list[5] as! Int64? : Int64(__pigeon_list[5] as! Int32))
+    let endTime: Int64? = isNullish(__pigeon_list[6]) ? nil : (__pigeon_list[6] is Int64? ? __pigeon_list[6] as! Int64? : Int64(__pigeon_list[6] as! Int32))
+    let lastModified: Int64? = isNullish(__pigeon_list[7]) ? nil : (__pigeon_list[7] is Int64? ? __pigeon_list[7] as! Int64? : Int64(__pigeon_list[7] as! Int32))
+    let isTask: Bool? = nilOrValue(__pigeon_list[8])
+    let isAllDay: Bool? = nilOrValue(__pigeon_list[9])
+    let status: Int64? = isNullish(__pigeon_list[10]) ? nil : (__pigeon_list[10] is Int64? ? __pigeon_list[10] as! Int64? : Int64(__pigeon_list[10] as! Int32))
+    let priority: Int64? = isNullish(__pigeon_list[11]) ? nil : (__pigeon_list[11] is Int64? ? __pigeon_list[11] as! Int64? : Int64(__pigeon_list[11] as! Int32))
 
-    return PigeonEvent(
-      id: id,
-      calendarId: calendarId,
+    return PlatformItem(
+      localId: localId,
+      uid: uid,
       title: title,
-      startMillis: startMillis,
-      endMillis: endMillis,
-      description: description,
+      notes: notes,
       location: location,
-      allDay: allDay,
-      timeZone: timeZone,
-      recurrenceRule: recurrenceRule,
-      recurrenceExceptionMillis: recurrenceExceptionMillis,
-      attendees: attendees,
-      organizer: organizer,
+      startTime: startTime,
+      endTime: endTime,
+      lastModified: lastModified,
+      isTask: isTask,
+      isAllDay: isAllDay,
       status: status,
-      etag: etag,
-      updatedAtMillis: updatedAtMillis,
-      isCanceled: isCanceled
+      priority: priority
     )
   }
   func toList() -> [Any?] {
     return [
-      id,
-      calendarId,
+      localId,
+      uid,
       title,
-      startMillis,
-      endMillis,
-      description,
+      notes,
       location,
-      allDay,
-      timeZone,
-      recurrenceRule,
-      recurrenceExceptionMillis,
-      attendees,
-      organizer,
+      startTime,
+      endTime,
+      lastModified,
+      isTask,
+      isAllDay,
       status,
-      etag,
-      updatedAtMillis,
-      isCanceled,
+      priority,
     ]
   }
 }
-private class CalendarHostApiCodecReader: FlutterStandardReader {
+
+private class NativeCalendarApiCodecReader: FlutterStandardReader {
   override func readValue(ofType type: UInt8) -> Any? {
     switch type {
     case 128:
-      return PigeonCalendar.fromList(self.readValue() as! [Any?])
+      return PlatformCalendar.fromList(self.readValue() as! [Any?])
     case 129:
-      return PigeonEvent.fromList(self.readValue() as! [Any?])
+      return PlatformItem.fromList(self.readValue() as! [Any?])
     case 130:
-      return TimeWindow.fromList(self.readValue() as! [Any?])
+      return PlatformItem.fromList(self.readValue() as! [Any?])
     default:
       return super.readValue(ofType: type)
     }
   }
 }
 
-private class CalendarHostApiCodecWriter: FlutterStandardWriter {
+private class NativeCalendarApiCodecWriter: FlutterStandardWriter {
   override func writeValue(_ value: Any) {
-    if let value = value as? PigeonCalendar {
+    if let value = value as? PlatformCalendar {
       super.writeByte(128)
       super.writeValue(value.toList())
-    } else if let value = value as? PigeonEvent {
+    } else if let value = value as? PlatformItem {
       super.writeByte(129)
       super.writeValue(value.toList())
-    } else if let value = value as? TimeWindow {
+    } else if let value = value as? PlatformItem {
       super.writeByte(130)
       super.writeValue(value.toList())
     } else {
@@ -260,77 +175,133 @@ private class CalendarHostApiCodecWriter: FlutterStandardWriter {
   }
 }
 
-private class CalendarHostApiCodecReaderWriter: FlutterStandardReaderWriter {
+private class NativeCalendarApiCodecReaderWriter: FlutterStandardReaderWriter {
   override func reader(with data: Data) -> FlutterStandardReader {
-    return CalendarHostApiCodecReader(data: data)
+    return NativeCalendarApiCodecReader(data: data)
   }
 
   override func writer(with data: NSMutableData) -> FlutterStandardWriter {
-    return CalendarHostApiCodecWriter(data: data)
+    return NativeCalendarApiCodecWriter(data: data)
   }
 }
 
-class CalendarHostApiCodec: FlutterStandardMessageCodec {
-  static let shared = CalendarHostApiCodec(readerWriter: CalendarHostApiCodecReaderWriter())
+class NativeCalendarApiCodec: FlutterStandardMessageCodec {
+  static let shared = NativeCalendarApiCodec(readerWriter: NativeCalendarApiCodecReaderWriter())
 }
 
-/// Host API implemented on Android/iOS. Flutter calls into this.
-///
-/// Note: Permission must be granted before calling these methods.
-/// Use permission_handler in Flutter to request calendar permissions.
+/// 定义原生侧必须实现的方法
 ///
 /// Generated protocol from Pigeon that represents a handler of messages from Flutter.
-protocol CalendarHostApi {
-  /// List calendars available on the device.
-  ///
-  /// Throws if permission is not granted.
-  func listCalendars() throws -> [PigeonCalendar?]
-  /// List events in the given UTC time window (can filter calendars).
-  ///
-  /// Throws if permission is not granted.
-  func listEvents(window: TimeWindow) throws -> [PigeonEvent?]
+protocol NativeCalendarApi {
+  /// 获取日历列表前请求权限
+  func requestPermission(forTask: Bool, completion: @escaping (Result<Bool, Error>) -> Void)
+  /// 获取所有可同步的日历
+  func getCalendars() throws -> [PlatformCalendar]
+  /// 获取指定日历在时间范围内的所有条目
+  /// 注意：Android 上由于系统限制，可能只返回 Event
+  func getItems(calendarId: String, startMs: Int64, endMs: Int64) throws -> [PlatformItem]
+  /// 创建或更新条目
+  /// 返回写入成功后的系统 localId
+  func upsertItem(calendarId: String, item: PlatformItem, completion: @escaping (Result<String, Error>) -> Void)
+  /// 根据 ID 删除条目
+  func deleteItem(localId: String, completion: @escaping (Result<Void, Error>) -> Void)
 }
 
 /// Generated setup class from Pigeon to handle messages through the `binaryMessenger`.
-class CalendarHostApiSetup {
-  /// The codec used by CalendarHostApi.
-  static var codec: FlutterStandardMessageCodec { CalendarHostApiCodec.shared }
-  /// Sets up an instance of `CalendarHostApi` to handle messages through the `binaryMessenger`.
-  static func setUp(binaryMessenger: FlutterBinaryMessenger, api: CalendarHostApi?, messageChannelSuffix: String = "") {
+class NativeCalendarApiSetup {
+  /// The codec used by NativeCalendarApi.
+  static var codec: FlutterStandardMessageCodec { NativeCalendarApiCodec.shared }
+  /// Sets up an instance of `NativeCalendarApi` to handle messages through the `binaryMessenger`.
+  static func setUp(binaryMessenger: FlutterBinaryMessenger, api: NativeCalendarApi?, messageChannelSuffix: String = "") {
     let channelSuffix = messageChannelSuffix.count > 0 ? ".\(messageChannelSuffix)" : ""
-    /// List calendars available on the device.
-    ///
-    /// Throws if permission is not granted.
-    let listCalendarsChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.calendar_api.CalendarHostApi.listCalendars\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    /// 获取日历列表前请求权限
+    let requestPermissionChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.caleesync.NativeCalendarApi.requestPermission\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
     if let api = api {
-      listCalendarsChannel.setMessageHandler { _, reply in
-        do {
-          let result = try api.listCalendars()
-          reply(wrapResult(result))
-        } catch {
-          reply(wrapError(error))
-        }
-      }
-    } else {
-      listCalendarsChannel.setMessageHandler(nil)
-    }
-    /// List events in the given UTC time window (can filter calendars).
-    ///
-    /// Throws if permission is not granted.
-    let listEventsChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.calendar_api.CalendarHostApi.listEvents\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
-    if let api = api {
-      listEventsChannel.setMessageHandler { message, reply in
+      requestPermissionChannel.setMessageHandler { message, reply in
         let args = message as! [Any?]
-        let windowArg = args[0] as! TimeWindow
+        let forTaskArg = args[0] as! Bool
+        api.requestPermission(forTask: forTaskArg) { result in
+          switch result {
+          case .success(let res):
+            reply(wrapResult(res))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      requestPermissionChannel.setMessageHandler(nil)
+    }
+    /// 获取所有可同步的日历
+    let getCalendarsChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.caleesync.NativeCalendarApi.getCalendars\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      getCalendarsChannel.setMessageHandler { _, reply in
         do {
-          let result = try api.listEvents(window: windowArg)
+          let result = try api.getCalendars()
           reply(wrapResult(result))
         } catch {
           reply(wrapError(error))
         }
       }
     } else {
-      listEventsChannel.setMessageHandler(nil)
+      getCalendarsChannel.setMessageHandler(nil)
+    }
+    /// 获取指定日历在时间范围内的所有条目
+    /// 注意：Android 上由于系统限制，可能只返回 Event
+    let getItemsChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.caleesync.NativeCalendarApi.getItems\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      getItemsChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let calendarIdArg = args[0] as! String
+        let startMsArg = args[1] is Int64 ? args[1] as! Int64 : Int64(args[1] as! Int32)
+        let endMsArg = args[2] is Int64 ? args[2] as! Int64 : Int64(args[2] as! Int32)
+        do {
+          let result = try api.getItems(calendarId: calendarIdArg, startMs: startMsArg, endMs: endMsArg)
+          reply(wrapResult(result))
+        } catch {
+          reply(wrapError(error))
+        }
+      }
+    } else {
+      getItemsChannel.setMessageHandler(nil)
+    }
+    /// 创建或更新条目
+    /// 返回写入成功后的系统 localId
+    let upsertItemChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.caleesync.NativeCalendarApi.upsertItem\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      upsertItemChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let calendarIdArg = args[0] as! String
+        let itemArg = args[1] as! PlatformItem
+        api.upsertItem(calendarId: calendarIdArg, item: itemArg) { result in
+          switch result {
+          case .success(let res):
+            reply(wrapResult(res))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      upsertItemChannel.setMessageHandler(nil)
+    }
+    /// 根据 ID 删除条目
+    let deleteItemChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.caleesync.NativeCalendarApi.deleteItem\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      deleteItemChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let localIdArg = args[0] as! String
+        api.deleteItem(localId: localIdArg) { result in
+          switch result {
+          case .success:
+            reply(wrapResult(nil))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      deleteItemChannel.setMessageHandler(nil)
     }
   }
 }

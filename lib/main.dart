@@ -8,11 +8,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import 'data/database_helper.dart';
 import 'home/calendar_probe_page.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
+  await DatabaseHelper.instance.database;
   // 初始化 MMKV
   await MMKVUtils.instance.init();
   

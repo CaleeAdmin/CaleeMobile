@@ -15,241 +15,140 @@ PlatformException _createConnectionError(String channelName) {
   );
 }
 
-/// Calendar data contract exposed via Pigeon.
-///
-/// Scope (first milestone):
-/// - List calendars
-/// - List events within a time window
-///
-/// Note: Permission handling is done via permission_handler in Flutter,
-/// not through this Pigeon API.
-class TimeWindow {
-  TimeWindow({
-    required this.startMillis,
-    required this.endMillis,
-    this.calendarIds,
-  });
-
-  /// Inclusive UTC start timestamp in milliseconds.
-  int startMillis;
-
-  /// Exclusive UTC end timestamp in milliseconds.
-  int endMillis;
-
-  /// Optional filter for specific calendar IDs (device identifiers).
-  List<int?>? calendarIds;
-
-  Object encode() {
-    return <Object?>[
-      startMillis,
-      endMillis,
-      calendarIds,
-    ];
-  }
-
-  static TimeWindow decode(Object result) {
-    result as List<Object?>;
-    return TimeWindow(
-      startMillis: result[0]! as int,
-      endMillis: result[1]! as int,
-      calendarIds: (result[2] as List<Object?>?)?.cast<int?>(),
-    );
-  }
-}
-
-class PigeonCalendar {
-  PigeonCalendar({
-    required this.id,
-    required this.accountName,
-    required this.accountType,
-    this.ownerAccount,
+/// 配置 Pigeon 生成代码的路径
+class PlatformCalendar {
+  PlatformCalendar({
+    this.id,
     this.name,
-    this.displayName,
-    required this.color,
-    required this.visible,
-    required this.syncEvents,
-    required this.isPrimary,
-    required this.isLocal,
-    required this.accessLevel,
+    this.color,
+    this.isReadOnly,
+    this.supportsEvents,
+    this.supportsTasks,
   });
 
-  /// Device-level calendar identifier (Calendar Provider / EventKit).
-  int id;
-
-  String accountName;
-
-  String accountType;
-
-  String? ownerAccount;
+  String? id;
 
   String? name;
 
-  String? displayName;
+  String? color;
 
-  int color;
+  bool? isReadOnly;
 
-  bool visible;
+  bool? supportsEvents;
 
-  bool syncEvents;
-
-  bool isPrimary;
-
-  bool isLocal;
-
-  int accessLevel;
+  bool? supportsTasks;
 
   Object encode() {
     return <Object?>[
       id,
-      accountName,
-      accountType,
-      ownerAccount,
       name,
-      displayName,
       color,
-      visible,
-      syncEvents,
-      isPrimary,
-      isLocal,
-      accessLevel,
+      isReadOnly,
+      supportsEvents,
+      supportsTasks,
     ];
   }
 
-  static PigeonCalendar decode(Object result) {
+  static PlatformCalendar decode(Object result) {
     result as List<Object?>;
-    return PigeonCalendar(
-      id: result[0]! as int,
-      accountName: result[1]! as String,
-      accountType: result[2]! as String,
-      ownerAccount: result[3] as String?,
-      name: result[4] as String?,
-      displayName: result[5] as String?,
-      color: result[6]! as int,
-      visible: result[7]! as bool,
-      syncEvents: result[8]! as bool,
-      isPrimary: result[9]! as bool,
-      isLocal: result[10]! as bool,
-      accessLevel: result[11]! as int,
+    return PlatformCalendar(
+      id: result[0] as String?,
+      name: result[1] as String?,
+      color: result[2] as String?,
+      isReadOnly: result[3] as bool?,
+      supportsEvents: result[4] as bool?,
+      supportsTasks: result[5] as bool?,
     );
   }
 }
 
-class PigeonEvent {
-  PigeonEvent({
-    required this.id,
-    required this.calendarId,
-    required this.title,
-    required this.startMillis,
-    required this.endMillis,
-    this.description,
+class PlatformItem {
+  PlatformItem({
+    this.localId,
+    this.uid,
+    this.title,
+    this.notes,
     this.location,
-    this.allDay = false,
-    this.timeZone,
-    this.recurrenceRule,
-    this.recurrenceExceptionMillis,
-    this.attendees,
-    this.organizer,
+    this.startTime,
+    this.endTime,
+    this.lastModified,
+    this.isTask,
+    this.isAllDay,
     this.status,
-    this.etag,
-    this.updatedAtMillis,
-    this.isCanceled = false,
+    this.priority,
   });
 
-  /// Device-level event identifier (Calendar Provider / EventKit).
-  String id;
+  String? localId;
 
-  String calendarId;
+  String? uid;
 
-  String title;
+  String? title;
 
-  int startMillis;
-
-  int endMillis;
-
-  String? description;
+  String? notes;
 
   String? location;
 
-  bool allDay;
+  int? startTime;
 
-  String? timeZone;
+  int? endTime;
 
-  /// RRULE string (e.g. FREQ=WEEKLY;BYDAY=MO,WE,FR).
-  String? recurrenceRule;
+  int? lastModified;
 
-  /// UTC millis for EXDATE-like exceptions.
-  List<int?>? recurrenceExceptionMillis;
+  bool? isTask;
 
-  /// Attendee emails or identifiers.
-  List<String?>? attendees;
+  bool? isAllDay;
 
-  String? organizer;
+  int? status;
 
-  String? status;
-
-  String? etag;
-
-  int? updatedAtMillis;
-
-  bool isCanceled;
+  int? priority;
 
   Object encode() {
     return <Object?>[
-      id,
-      calendarId,
+      localId,
+      uid,
       title,
-      startMillis,
-      endMillis,
-      description,
+      notes,
       location,
-      allDay,
-      timeZone,
-      recurrenceRule,
-      recurrenceExceptionMillis,
-      attendees,
-      organizer,
+      startTime,
+      endTime,
+      lastModified,
+      isTask,
+      isAllDay,
       status,
-      etag,
-      updatedAtMillis,
-      isCanceled,
+      priority,
     ];
   }
 
-  static PigeonEvent decode(Object result) {
+  static PlatformItem decode(Object result) {
     result as List<Object?>;
-    return PigeonEvent(
-      id: result[0]! as String,
-      calendarId: result[1]! as String,
-      title: result[2]! as String,
-      startMillis: result[3]! as int,
-      endMillis: result[4]! as int,
-      description: result[5] as String?,
-      location: result[6] as String?,
-      allDay: result[7]! as bool,
-      timeZone: result[8] as String?,
-      recurrenceRule: result[9] as String?,
-      recurrenceExceptionMillis: (result[10] as List<Object?>?)?.cast<int?>(),
-      attendees: (result[11] as List<Object?>?)?.cast<String?>(),
-      organizer: result[12] as String?,
-      status: result[13] as String?,
-      etag: result[14] as String?,
-      updatedAtMillis: result[15] as int?,
-      isCanceled: result[16]! as bool,
+    return PlatformItem(
+      localId: result[0] as String?,
+      uid: result[1] as String?,
+      title: result[2] as String?,
+      notes: result[3] as String?,
+      location: result[4] as String?,
+      startTime: result[5] as int?,
+      endTime: result[6] as int?,
+      lastModified: result[7] as int?,
+      isTask: result[8] as bool?,
+      isAllDay: result[9] as bool?,
+      status: result[10] as int?,
+      priority: result[11] as int?,
     );
   }
 }
 
-class _CalendarHostApiCodec extends StandardMessageCodec {
-  const _CalendarHostApiCodec();
+class _NativeCalendarApiCodec extends StandardMessageCodec {
+  const _NativeCalendarApiCodec();
   @override
   void writeValue(WriteBuffer buffer, Object? value) {
-    if (value is PigeonCalendar) {
+    if (value is PlatformCalendar) {
       buffer.putUint8(128);
       writeValue(buffer, value.encode());
-    } else if (value is PigeonEvent) {
+    } else if (value is PlatformItem) {
       buffer.putUint8(129);
       writeValue(buffer, value.encode());
-    } else if (value is TimeWindow) {
+    } else if (value is PlatformItem) {
       buffer.putUint8(130);
       writeValue(buffer, value.encode());
     } else {
@@ -261,39 +160,62 @@ class _CalendarHostApiCodec extends StandardMessageCodec {
   Object? readValueOfType(int type, ReadBuffer buffer) {
     switch (type) {
       case 128: 
-        return PigeonCalendar.decode(readValue(buffer)!);
+        return PlatformCalendar.decode(readValue(buffer)!);
       case 129: 
-        return PigeonEvent.decode(readValue(buffer)!);
+        return PlatformItem.decode(readValue(buffer)!);
       case 130: 
-        return TimeWindow.decode(readValue(buffer)!);
+        return PlatformItem.decode(readValue(buffer)!);
       default:
         return super.readValueOfType(type, buffer);
     }
   }
 }
 
-/// Host API implemented on Android/iOS. Flutter calls into this.
-///
-/// Note: Permission must be granted before calling these methods.
-/// Use permission_handler in Flutter to request calendar permissions.
-class CalendarHostApi {
-  /// Constructor for [CalendarHostApi].  The [binaryMessenger] named argument is
+/// 定义原生侧必须实现的方法
+class NativeCalendarApi {
+  /// Constructor for [NativeCalendarApi].  The [binaryMessenger] named argument is
   /// available for dependency injection.  If it is left null, the default
   /// BinaryMessenger will be used which routes to the host platform.
-  CalendarHostApi({BinaryMessenger? binaryMessenger, String messageChannelSuffix = ''})
+  NativeCalendarApi({BinaryMessenger? binaryMessenger, String messageChannelSuffix = ''})
       : __pigeon_binaryMessenger = binaryMessenger,
         __pigeon_messageChannelSuffix = messageChannelSuffix.isNotEmpty ? '.$messageChannelSuffix' : '';
   final BinaryMessenger? __pigeon_binaryMessenger;
 
-  static const MessageCodec<Object?> pigeonChannelCodec = _CalendarHostApiCodec();
+  static const MessageCodec<Object?> pigeonChannelCodec = _NativeCalendarApiCodec();
 
   final String __pigeon_messageChannelSuffix;
 
-  /// List calendars available on the device.
-  ///
-  /// Throws if permission is not granted.
-  Future<List<PigeonCalendar?>> listCalendars() async {
-    final String __pigeon_channelName = 'dev.flutter.pigeon.calendar_api.CalendarHostApi.listCalendars$__pigeon_messageChannelSuffix';
+  /// 获取日历列表前请求权限
+  Future<bool> requestPermission(bool forTask) async {
+    final String __pigeon_channelName = 'dev.flutter.pigeon.caleesync.NativeCalendarApi.requestPermission$__pigeon_messageChannelSuffix';
+    final BasicMessageChannel<Object?> __pigeon_channel = BasicMessageChannel<Object?>(
+      __pigeon_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: __pigeon_binaryMessenger,
+    );
+    final List<Object?>? __pigeon_replyList =
+        await __pigeon_channel.send(<Object?>[forTask]) as List<Object?>?;
+    if (__pigeon_replyList == null) {
+      throw _createConnectionError(__pigeon_channelName);
+    } else if (__pigeon_replyList.length > 1) {
+      throw PlatformException(
+        code: __pigeon_replyList[0]! as String,
+        message: __pigeon_replyList[1] as String?,
+        details: __pigeon_replyList[2],
+      );
+    } else if (__pigeon_replyList[0] == null) {
+      throw PlatformException(
+        code: 'null-error',
+        message: 'Host platform returned null value for non-null return value.',
+      );
+    } else {
+      return (__pigeon_replyList[0] as bool?)!;
+    }
+  }
+
+  /// 获取所有可同步的日历
+  Future<List<PlatformCalendar?>> getCalendars() async {
+    final String __pigeon_channelName = 'dev.flutter.pigeon.caleesync.NativeCalendarApi.getCalendars$__pigeon_messageChannelSuffix';
     final BasicMessageChannel<Object?> __pigeon_channel = BasicMessageChannel<Object?>(
       __pigeon_channelName,
       pigeonChannelCodec,
@@ -315,22 +237,21 @@ class CalendarHostApi {
         message: 'Host platform returned null value for non-null return value.',
       );
     } else {
-      return (__pigeon_replyList[0] as List<Object?>?)!.cast<PigeonCalendar?>();
+      return (__pigeon_replyList[0] as List<Object?>?)!.cast<PlatformCalendar?>();
     }
   }
 
-  /// List events in the given UTC time window (can filter calendars).
-  ///
-  /// Throws if permission is not granted.
-  Future<List<PigeonEvent?>> listEvents(TimeWindow window) async {
-    final String __pigeon_channelName = 'dev.flutter.pigeon.calendar_api.CalendarHostApi.listEvents$__pigeon_messageChannelSuffix';
+  /// 获取指定日历在时间范围内的所有条目
+  /// 注意：Android 上由于系统限制，可能只返回 Event
+  Future<List<PlatformItem?>> getItems(String calendarId, int startMs, int endMs) async {
+    final String __pigeon_channelName = 'dev.flutter.pigeon.caleesync.NativeCalendarApi.getItems$__pigeon_messageChannelSuffix';
     final BasicMessageChannel<Object?> __pigeon_channel = BasicMessageChannel<Object?>(
       __pigeon_channelName,
       pigeonChannelCodec,
       binaryMessenger: __pigeon_binaryMessenger,
     );
     final List<Object?>? __pigeon_replyList =
-        await __pigeon_channel.send(<Object?>[window]) as List<Object?>?;
+        await __pigeon_channel.send(<Object?>[calendarId, startMs, endMs]) as List<Object?>?;
     if (__pigeon_replyList == null) {
       throw _createConnectionError(__pigeon_channelName);
     } else if (__pigeon_replyList.length > 1) {
@@ -345,7 +266,59 @@ class CalendarHostApi {
         message: 'Host platform returned null value for non-null return value.',
       );
     } else {
-      return (__pigeon_replyList[0] as List<Object?>?)!.cast<PigeonEvent?>();
+      return (__pigeon_replyList[0] as List<Object?>?)!.cast<PlatformItem?>();
+    }
+  }
+
+  /// 创建或更新条目
+  /// 返回写入成功后的系统 localId
+  Future<String> upsertItem(String calendarId, PlatformItem item) async {
+    final String __pigeon_channelName = 'dev.flutter.pigeon.caleesync.NativeCalendarApi.upsertItem$__pigeon_messageChannelSuffix';
+    final BasicMessageChannel<Object?> __pigeon_channel = BasicMessageChannel<Object?>(
+      __pigeon_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: __pigeon_binaryMessenger,
+    );
+    final List<Object?>? __pigeon_replyList =
+        await __pigeon_channel.send(<Object?>[calendarId, item]) as List<Object?>?;
+    if (__pigeon_replyList == null) {
+      throw _createConnectionError(__pigeon_channelName);
+    } else if (__pigeon_replyList.length > 1) {
+      throw PlatformException(
+        code: __pigeon_replyList[0]! as String,
+        message: __pigeon_replyList[1] as String?,
+        details: __pigeon_replyList[2],
+      );
+    } else if (__pigeon_replyList[0] == null) {
+      throw PlatformException(
+        code: 'null-error',
+        message: 'Host platform returned null value for non-null return value.',
+      );
+    } else {
+      return (__pigeon_replyList[0] as String?)!;
+    }
+  }
+
+  /// 根据 ID 删除条目
+  Future<void> deleteItem(String localId) async {
+    final String __pigeon_channelName = 'dev.flutter.pigeon.caleesync.NativeCalendarApi.deleteItem$__pigeon_messageChannelSuffix';
+    final BasicMessageChannel<Object?> __pigeon_channel = BasicMessageChannel<Object?>(
+      __pigeon_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: __pigeon_binaryMessenger,
+    );
+    final List<Object?>? __pigeon_replyList =
+        await __pigeon_channel.send(<Object?>[localId]) as List<Object?>?;
+    if (__pigeon_replyList == null) {
+      throw _createConnectionError(__pigeon_channelName);
+    } else if (__pigeon_replyList.length > 1) {
+      throw PlatformException(
+        code: __pigeon_replyList[0]! as String,
+        message: __pigeon_replyList[1] as String?,
+        details: __pigeon_replyList[2],
+      );
+    } else {
+      return;
     }
   }
 }

@@ -1,6 +1,7 @@
 import 'package:caleesync/common/route_constant.dart';
 import 'package:caleesync/home/sync_settings_page.dart';
 import 'package:caleesync/home/task_lists_page.dart';
+import 'package:caleesync/home/test_page.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'calendars_page.dart';
@@ -17,7 +18,7 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
   int _selectedIndex = 0;
 
   final List<Widget> _pages = const [
-    DashboardPage(),
+    TestPage(),
     CalendarsPage(),
     TaskListsPage(),
     SyncSettingsPage(),

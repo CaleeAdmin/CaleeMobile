@@ -1,186 +1,253 @@
 package com.nextcloud.caleesync
 
-import android.content.ContentResolver
+import android.Manifest
 import android.content.ContentUris
+import android.content.ContentValues
+import android.content.Context
+import android.content.pm.PackageManager
 import android.database.Cursor
 import android.net.Uri
 import android.provider.CalendarContract
-import android.util.Log
+import androidx.core.content.ContextCompat
+import com.nextcloud.caleesync.PlatformCalendar
+import com.nextcloud.caleesync.PlatformItem
+import com.nextcloud.caleesync.NativeCalendarApi
 
-/**
- * Implementation of CalendarHostApi for Android using Calendar Provider.
- */
-private object CalendarAccessLevel {
-    // Calendar access level constants (from CalendarContract.Calendars)
-    const val CAL_ACCESS_OWNER = 700
-    const val CAL_ACCESS_EDITOR = 600
-    const val CAL_ACCESS_CONTRIBUTOR = 500
-    const val CAL_ACCESS_READ_ONLY = 400
-}
-class CalendarHostApiImpl(
-    private val contentResolver: ContentResolver
-) : CalendarHostApi {
+class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
 
-    override fun listCalendars(): List<PigeonCalendar?> {
-        val projection = arrayOf(
+    companion object {
+        private val CALENDAR_PROJECTION = arrayOf(
             CalendarContract.Calendars._ID,
-            CalendarContract.Calendars.ACCOUNT_NAME,
-            CalendarContract.Calendars.ACCOUNT_TYPE,
-            CalendarContract.Calendars.OWNER_ACCOUNT,
+            CalendarContract.Calendars.NAME,
             CalendarContract.Calendars.CALENDAR_DISPLAY_NAME,
             CalendarContract.Calendars.CALENDAR_COLOR,
-            CalendarContract.Calendars.VISIBLE,
-            CalendarContract.Calendars.SYNC_EVENTS,
-            CalendarContract.Calendars.IS_PRIMARY,
-            CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL
+            CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL,
+            CalendarContract.Calendars.VISIBLE
         )
-        val cursor: Cursor? = contentResolver.query(
-            CalendarContract.Calendars.CONTENT_URI,
-            projection,
-            null,
-            null,
-            null
+
+        private val EVENT_PROJECTION = arrayOf(
+            CalendarContract.Events._ID,
+            CalendarContract.Events.TITLE,
+            CalendarContract.Events.DESCRIPTION,
+            CalendarContract.Events.EVENT_LOCATION,
+            CalendarContract.Events.DTSTART,
+            CalendarContract.Events.DTEND,
+            CalendarContract.Events.ALL_DAY,
+            CalendarContract.Events.LAST_DATE,
+            CalendarContract.Events.CALENDAR_ID
         )
-        val result = mutableListOf<PigeonCalendar?>()
-        cursor?.use {
-            val idxId = it.getColumnIndex(CalendarContract.Calendars._ID)
-            val idxAccountName = it.getColumnIndex(CalendarContract.Calendars.ACCOUNT_NAME)
-            val idxAccountType = it.getColumnIndex(CalendarContract.Calendars.ACCOUNT_TYPE)
-            val idxOwnerAccount = it.getColumnIndex(CalendarContract.Calendars.OWNER_ACCOUNT)
-            val idxDisplayName = it.getColumnIndex(CalendarContract.Calendars.CALENDAR_DISPLAY_NAME)
-            val idxColor = it.getColumnIndex(CalendarContract.Calendars.CALENDAR_COLOR)
-            val idxVisible = it.getColumnIndex(CalendarContract.Calendars.VISIBLE)
-            val idxSyncEvents = it.getColumnIndex(CalendarContract.Calendars.SYNC_EVENTS)
-            val idxPrimary = it.getColumnIndex(CalendarContract.Calendars.IS_PRIMARY)
-            val idxAccess = it.getColumnIndex(CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL)
-            
-            while (it.moveToNext()) {
-                val raw = mutableMapOf<String, Any?>()
-                it.columnNames.forEach { col ->
-                    val colIdx = it.getColumnIndex(col)
-                    if (colIdx >= 0) {
-                        val value = when (it.getType(colIdx)) {
-                            Cursor.FIELD_TYPE_STRING -> it.getString(colIdx)
-                            Cursor.FIELD_TYPE_INTEGER -> it.getLong(colIdx)
-                            Cursor.FIELD_TYPE_FLOAT -> it.getDouble(colIdx)
-                            Cursor.FIELD_TYPE_BLOB -> it.getBlob(colIdx)?.toString()
-                            Cursor.FIELD_TYPE_NULL -> null
-                            else -> null
-                        }
-                        raw[col] = value
-                    }
-                }
-                Log.d("CalendarDebug", "Calendar raw: $raw")
-                
-                val calendarId = if (idxId >= 0) it.getLong(idxId) else 0L
-                val accountName = if (idxAccountName >= 0) it.getString(idxAccountName) ?: "" else ""
-                val accountType = if (idxAccountType >= 0) it.getString(idxAccountType) ?: "" else ""
-                val displayName = if (idxDisplayName >= 0) it.getString(idxDisplayName) else null
-                
-                result.add(
-                    PigeonCalendar(
-                        id = calendarId,
-                        accountName = accountName,
-                        accountType = accountType,
-                        ownerAccount = if (idxOwnerAccount >= 0) it.getString(idxOwnerAccount) else null,
-                        name = displayName, // Use displayName as name
-                        displayName = displayName,
-                        color = if (idxColor >= 0) it.getInt(idxColor).toLong() else 0L,
-                        visible = if (idxVisible >= 0) (it.getInt(idxVisible) == 1) else true,
-                        syncEvents = if (idxSyncEvents >= 0) (it.getInt(idxSyncEvents) == 1) else true,
-                        isPrimary = if (idxPrimary >= 0) (it.getInt(idxPrimary) == 1) else false,
-                        isLocal = accountType.isEmpty() || accountType == "LOCAL", // Determine if local calendar
-                        accessLevel = if (idxAccess >= 0) it.getInt(idxAccess).toLong() else 0L
-                    )
-                )
-            }
-        }
-        return result
     }
 
-    override fun listEvents(window: TimeWindow): List<PigeonEvent?> {
-        val eventsUri: Uri = CalendarContract.Instances.CONTENT_URI.buildUpon().apply {
-            ContentUris.appendId(this, window.startMillis)
-            ContentUris.appendId(this, window.endMillis)
-        }.build()
+    override fun requestPermission(forTask: Boolean, callback: (Result<Boolean>) -> Unit) {
+        try {
+            val hasPermission = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.READ_CALENDAR
+            ) == PackageManager.PERMISSION_GRANTED &&
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.WRITE_CALENDAR
+            ) == PackageManager.PERMISSION_GRANTED
 
-        val projection = arrayOf(
-            CalendarContract.Instances.EVENT_ID,
-            CalendarContract.Instances.BEGIN,
-            CalendarContract.Instances.END,
-            CalendarContract.Instances.TITLE,
-            CalendarContract.Instances.EVENT_LOCATION,
-            CalendarContract.Instances.ALL_DAY,
-            CalendarContract.Instances.CALENDAR_ID,
-            CalendarContract.Instances.EVENT_TIMEZONE,
-            CalendarContract.Instances.DESCRIPTION
-        )
+            callback(Result.success(hasPermission))
+        } catch (e: Exception) {
+            callback(Result.failure(e))
+        }
+    }
 
-        val selectionArgs = mutableListOf<String>()
-        val selection = StringBuilder().apply {
-            if (!window.calendarIds.isNullOrEmpty()) {
-                append("${CalendarContract.Instances.CALENDAR_ID} IN (")
-                append(window.calendarIds.joinToString(",") { "?" })
-                append(")")
-                selectionArgs.addAll(window.calendarIds.filterNotNull().map { it.toString() })
-            }
-        }.toString().ifEmpty { null }
+    override fun getCalendars(): List<PlatformCalendar> {
+        val calendars = mutableListOf<PlatformCalendar>()
 
-        val cursor = contentResolver.query(
-            eventsUri,
-            projection,
-            selection,
-            if (selectionArgs.isEmpty()) null else selectionArgs.toTypedArray(),
-            "${CalendarContract.Instances.BEGIN} ASC"
-        )
+        try {
+            val uri = CalendarContract.Calendars.CONTENT_URI
+            val cursor = context.contentResolver.query(
+                uri,
+                CALENDAR_PROJECTION,
+                null,
+                null,
+                null
+            )
 
-        val result = mutableListOf<PigeonEvent?>()
-        cursor?.use {
-            val idxEventId = it.getColumnIndex(CalendarContract.Instances.EVENT_ID)
-            val idxBegin = it.getColumnIndex(CalendarContract.Instances.BEGIN)
-            val idxEnd = it.getColumnIndex(CalendarContract.Instances.END)
-            val idxTitle = it.getColumnIndex(CalendarContract.Instances.TITLE)
-            val idxLoc = it.getColumnIndex(CalendarContract.Instances.EVENT_LOCATION)
-            val idxAllDay = it.getColumnIndex(CalendarContract.Instances.ALL_DAY)
-            val idxCalId = it.getColumnIndex(CalendarContract.Instances.CALENDAR_ID)
-            val idxTz = it.getColumnIndex(CalendarContract.Instances.EVENT_TIMEZONE)
-            val idxDesc = it.getColumnIndex(CalendarContract.Instances.DESCRIPTION)
-            
-            while (it.moveToNext()) {
-                val raw = mutableMapOf<String, Any?>()
-                it.columnNames.forEach { col ->
-                    val colIdx = it.getColumnIndex(col)
-                    if (colIdx >= 0) {
-                        val value = when (it.getType(colIdx)) {
-                            Cursor.FIELD_TYPE_STRING -> it.getString(colIdx)
-                            Cursor.FIELD_TYPE_INTEGER -> it.getLong(colIdx)
-                            Cursor.FIELD_TYPE_FLOAT -> it.getDouble(colIdx)
-                            Cursor.FIELD_TYPE_BLOB -> it.getBlob(colIdx)?.toString()
-                            Cursor.FIELD_TYPE_NULL -> null
-                            else -> null
-                        }
-                        raw[col] = value
-                    }
+            cursor?.use {
+                while (it.moveToNext()) {
+                    val id = it.getLong(it.getColumnIndexOrThrow(CalendarContract.Calendars._ID)).toString()
+                    val name = it.getString(it.getColumnIndexOrThrow(CalendarContract.Calendars.CALENDAR_DISPLAY_NAME))
+                    val color = "#${Integer.toHexString(it.getInt(it.getColumnIndexOrThrow(CalendarContract.Calendars.CALENDAR_COLOR)))}"
+                    val accessLevel = it.getInt(it.getColumnIndexOrThrow(CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL))
+                    val isReadOnly = accessLevel == CalendarContract.Calendars.CAL_ACCESS_READ
+                    val visible = it.getInt(it.getColumnIndexOrThrow(CalendarContract.Calendars.VISIBLE)) == 1
+
+                    // Android Calendar Provider 主要支持事件，不直接支持任务
+                    // 但可以通过扩展属性或自定义字段来支持
+                    calendars.add(PlatformCalendar(
+                        id = id,
+                        name = name,
+                        color = color,
+                        isReadOnly = isReadOnly,
+                        supportsEvents = true,
+                        supportsTasks = false // Android 原生不支持任务，但可以通过扩展实现
+                    ))
                 }
-                Log.d("CalendarDebug", "Event raw: $raw")
-                
-                result.add(
-                    PigeonEvent(
-                        id = if (idxEventId >= 0) it.getLong(idxEventId).toString() else "",
-                        calendarId = if (idxCalId >= 0) it.getLong(idxCalId).toString() else "",
-                        title = if (idxTitle >= 0) it.getString(idxTitle) ?: "" else "",
-                        startMillis = if (idxBegin >= 0) it.getLong(idxBegin) else 0L,
-                        endMillis = if (idxEnd >= 0) it.getLong(idxEnd) else 0L,
-                        location = if (idxLoc >= 0) it.getString(idxLoc) else null,
-                        allDay = if (idxAllDay >= 0) (it.getInt(idxAllDay) == 1) else false,
-                        timeZone = if (idxTz >= 0) it.getString(idxTz) else null,
-                        description = if (idxDesc >= 0) it.getString(idxDesc) else null,
-                        isCanceled = false // Calendar Provider doesn't have a direct canceled status
-                    )
-                )
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
+        return calendars
+    }
+
+    override fun getItems(calendarId: String, startMs: Long, endMs: Long): List<PlatformItem> {
+        val items = mutableListOf<PlatformItem>()
+
+        // 1. 先抓取活动 (Events)
+        items.addAll(fetchEvents(calendarId, startMs, endMs))
+
+        // 2. 再抓取任务 (Tasks)
+        items.addAll(fetchTasks(calendarId))
+
+        return items
+    }
+
+    // 1. 更新你的投影数组
+    private val EVENT_PROJECTION = arrayOf(
+        CalendarContract.Events._ID,
+        CalendarContract.Events.TITLE,
+        CalendarContract.Events.DESCRIPTION,
+        CalendarContract.Events.EVENT_LOCATION,
+        CalendarContract.Events.DTSTART,
+        CalendarContract.Events.DTEND,
+        CalendarContract.Events.ALL_DAY,
+        CalendarContract.Events.LAST_DATE, // 对应 lastDate
+        CalendarContract.Events.CALENDAR_ID,
+        CalendarContract.Events._SYNC_ID // <--- 必须加上这一行
+    )
+
+    // 2. 修改 fetchEvents 里的读取逻辑（增加安全性检查）
+    private fun fetchEvents(calendarId: String, startMs: Long, endMs: Long): List<PlatformItem> {
+        val eventList = mutableListOf<PlatformItem>()
+        val uri = CalendarContract.Events.CONTENT_URI
+
+        // 注意：selection 保持不变
+        val selection = "${CalendarContract.Events.CALENDAR_ID} = ? AND ${CalendarContract.Events.DTSTART} >= ? AND ${CalendarContract.Events.DTSTART} <= ?"
+        val selectionArgs = arrayOf(calendarId, startMs.toString(), endMs.toString())
+
+        context.contentResolver.query(uri, EVENT_PROJECTION, selection, selectionArgs, null)?.use { cursor ->
+            while (cursor.moveToNext()) {
+                val id = cursor.getLong(cursor.getColumnIndexOrThrow(CalendarContract.Events._ID)).toString()
+
+                // 使用 safe get，防止某些本地日历确实没有 _sync_id
+                val syncIdIndex = cursor.getColumnIndex(CalendarContract.Events._SYNC_ID)
+                val syncId = if (syncIdIndex != -1) cursor.getString(syncIdIndex) else null
+
+                // 如果没有系统 UID，我们用 "local_" + ID 拼接一个，确保唯一性
+                val uid = syncId ?: "local_event_$id"
+
+                eventList.add(PlatformItem(
+                    localId = id,
+                    uid = uid,
+                    title = cursor.getString(cursor.getColumnIndexOrThrow(CalendarContract.Events.TITLE)) ?: "",
+                    notes = cursor.getString(cursor.getColumnIndexOrThrow(CalendarContract.Events.DESCRIPTION)),
+                    startTime = cursor.getLong(cursor.getColumnIndexOrThrow(CalendarContract.Events.DTSTART)),
+                    endTime = cursor.getLong(cursor.getColumnIndexOrThrow(CalendarContract.Events.DTEND)),
+                    lastModified = cursor.getLong(cursor.getColumnIndexOrThrow(CalendarContract.Events.LAST_DATE)),
+                    isTask = false,
+                    isAllDay = cursor.getInt(cursor.getColumnIndexOrThrow(CalendarContract.Events.ALL_DAY)) == 1,
+                    status = 1L
+                ))
             }
         }
-        return result
+        return eventList
+    }
+
+    private fun fetchTasks(calendarId: String): List<PlatformItem> {
+        val taskList = mutableListOf<PlatformItem>()
+        val taskUri = Uri.parse("content://org.dmfs.tasks/tasks")
+
+        try {
+            // 建议明确指定 Projection，避免获取不需要的列
+            val projection = arrayOf("_id", "title", "description", "status", "is_closed", "dtstart", "due", "last_modified", "uid")
+
+            // 注意：有些系统的 list_id 可能是 Long，有些是 String，这里保持一致
+            val selection = "list_id = ?"
+            val selectionArgs = arrayOf(calendarId)
+
+            context.contentResolver.query(taskUri, projection, selection, selectionArgs, null)?.use { cursor ->
+                while (cursor.moveToNext()) {
+                    // 使用 getColumnIndex 防止字段不存在时崩溃
+                    val idIdx = cursor.getColumnIndex("_id")
+                    val titleIdx = cursor.getColumnIndex("title")
+                    val statusIdx = cursor.getColumnIndex("status")
+                    val closedIdx = cursor.getColumnIndex("is_closed")
+                    val uidIdx = cursor.getColumnIndex("uid")
+
+                    val id = if (idIdx != -1) cursor.getLong(idIdx).toString() else ""
+                    val title = if (titleIdx != -1) cursor.getString(titleIdx) ?: "" else ""
+                    val isClosed = if (closedIdx != -1) cursor.getInt(closedIdx) == 1 else false
+
+                    taskList.add(PlatformItem(
+                        localId = id,
+                        uid = if (uidIdx != -1) cursor.getString(uidIdx) else "task_$id",
+                        title = title,
+                        notes = if (cursor.getColumnIndex("description") != -1) cursor.getString(cursor.getColumnIndex("description")) else null,
+                        startTime = if (cursor.getColumnIndex("dtstart") != -1) cursor.getLong(cursor.getColumnIndex("dtstart")) else 0L,
+                        endTime = if (cursor.getColumnIndex("due") != -1) cursor.getLong(cursor.getColumnIndex("due")) else 0L,
+                        lastModified = if (cursor.getColumnIndex("last_modified") != -1) cursor.getLong(cursor.getColumnIndex("last_modified")) else 0L,
+                        isTask = true,
+                        status = if (isClosed) 2L else (if (statusIdx != -1) cursor.getInt(statusIdx).toLong() else 0L)
+                    ))
+                }
+            }
+        } catch (e: Exception) {
+            // 这里很重要：如果用户没装 OpenTasks，query 会抛出 SecurityException 或 NullPointerException
+            // 我们返回空列表，代表该设备不支持从系统层面读 Task
+            return emptyList()
+        }
+        return taskList
+    }
+
+    override fun upsertItem(calendarId: String, item: PlatformItem, callback: (Result<String>) -> Unit) {
+        try {
+            val values = ContentValues().apply {
+                put(CalendarContract.Events.CALENDAR_ID, calendarId.toLong())
+                put(CalendarContract.Events.TITLE, item.title ?: "")
+                put(CalendarContract.Events.DESCRIPTION, item.notes)
+                put(CalendarContract.Events.EVENT_LOCATION, item.location)
+                put(CalendarContract.Events.DTSTART, item.startTime)
+                put(CalendarContract.Events.DTEND, item.endTime)
+                put(CalendarContract.Events.ALL_DAY, if (item.isAllDay == true) 1 else 0)
+                put(CalendarContract.Events.EVENT_TIMEZONE, "UTC")
+                put(CalendarContract.Events.STATUS, CalendarContract.Events.STATUS_CONFIRMED)
+            }
+
+            val uri = if (item.localId != null) {
+                // 更新现有事件
+                val eventUri = ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, item.localId!!.toLong())
+                context.contentResolver.update(eventUri, values, null, null)
+                item.localId!!
+            } else {
+                // 创建新事件
+                val newUri = context.contentResolver.insert(CalendarContract.Events.CONTENT_URI, values)
+                newUri?.lastPathSegment ?: throw Exception("Failed to create event")
+            }
+
+            callback(Result.success(uri))
+        } catch (e: Exception) {
+            callback(Result.failure(e))
+        }
+    }
+
+    override fun deleteItem(localId: String, callback: (Result<Unit>) -> Unit) {
+        try {
+            val uri = ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, localId.toLong())
+            val rowsDeleted = context.contentResolver.delete(uri, null, null)
+
+            if (rowsDeleted > 0) {
+                callback(Result.success(Unit))
+            } else {
+                callback(Result.failure(Exception("Event not found or could not be deleted")))
+            }
+        } catch (e: Exception) {
+            callback(Result.failure(e))
+        }
     }
 }
-

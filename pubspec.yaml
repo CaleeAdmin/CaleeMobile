@@ -40,6 +40,8 @@ dependencies:
   flutter_riverpod: ^2.6.1
   http: ^1.2.2
   url_launcher: ^6.3.1
+  xml: ^6.5.0   # 用于解析 Nextcloud 返回的 XML 数据
+  sqflite: ^2.3.0
 
 dev_dependencies:
   flutter_test:

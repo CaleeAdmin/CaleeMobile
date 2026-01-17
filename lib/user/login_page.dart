@@ -1,6 +1,7 @@
 import 'package:caleesync/common/app_constant.dart';
 import 'package:caleesync/common/route_constant.dart';
 import 'package:caleesync/common/utils/mmkv_utils.dart';
+import 'package:caleesync/data/account_repository.dart';
 import 'package:caleesync/models/nextcloud_auth_state.dart';
 import 'package:caleesync/providers/nextcloud_auth_provider.dart';
 import 'package:flutter/gestures.dart';
@@ -72,14 +73,34 @@ class _LoginPageState extends ConsumerState<LoginPage> {
       return;
     }
 
-    // 保存登录凭据到 MMKV
-    await MMKVUtils.instance.setString(AppConstant.mmkvKeyNextcloudServer, state.serverUrl!);
-    await MMKVUtils.instance.setString(AppConstant.mmkvKeyNextcloudLoginName, state.loginName!);
-    await MMKVUtils.instance.setString(AppConstant.mmkvKeyNextcloudAppPassword, state.appPassword!);
+    try {
+      // 保存登录凭据到 MMKV
+      await MMKVUtils.instance.setString(AppConstant.mmkvKeyNextcloudServer, state.serverUrl!);
+      await MMKVUtils.instance.setString(AppConstant.mmkvKeyNextcloudLoginName, state.loginName!);
+      await MMKVUtils.instance.setString(AppConstant.mmkvKeyNextcloudAppPassword, state.appPassword!);
 
-    // 跳转到主页
-    if (mounted) {
-      context.go(RouteConstant.home);
+      // 保存用户数据到数据库
+      final accountRepository = AccountRepository();
+      await accountRepository.saveAccount(
+        url: state.serverUrl!,
+        username: state.loginName!,
+      );
+
+      // 跳转到主页
+      if (mounted) {
+        context.go(RouteConstant.home);
+      }
+    } catch (e) {
+      // 如果保存失败，显示错误信息
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('保存用户数据失败: $e'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
     }
   }
 
