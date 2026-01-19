@@ -12,9 +12,9 @@ class AppConstant {
   static const String adminPassword = '4Geme5oLn8KQz4qrVpqm3w5wugHdmOsi'; // 需要配置管理员密码
 
   /// MMKV 存储 Key
-  static const String mmkvKeyNextcloudServer = 'nextcloud_server';
-  static const String mmkvKeyNextcloudLoginName = 'nextcloud_login_name';
-  static const String mmkvKeyNextcloudAppPassword = 'nextcloud_app_password';
+  static const String Server = 'nextcloud_server';
+  static const String loginName = 'nextcloud_login_name';
+  static const String password = 'nextcloud_app_password';
   static const String mmkvKeyAdminUsername = 'nextcloud_admin_username';
   static const String mmkvKeyAdminPassword = 'nextcloud_admin_password';
 }

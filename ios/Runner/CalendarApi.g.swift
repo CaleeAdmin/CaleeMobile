@@ -45,6 +45,8 @@ private func nilOrValue<T>(_ value: Any?) -> T? {
 struct PlatformCalendar {
   var id: String? = nil
   var name: String? = nil
+  var accountName: String? = nil
+  var accountType: String? = nil
   var color: String? = nil
   var isReadOnly: Bool? = nil
   var supportsEvents: Bool? = nil
@@ -54,14 +56,18 @@ struct PlatformCalendar {
   static func fromList(_ __pigeon_list: [Any?]) -> PlatformCalendar? {
     let id: String? = nilOrValue(__pigeon_list[0])
     let name: String? = nilOrValue(__pigeon_list[1])
-    let color: String? = nilOrValue(__pigeon_list[2])
-    let isReadOnly: Bool? = nilOrValue(__pigeon_list[3])
-    let supportsEvents: Bool? = nilOrValue(__pigeon_list[4])
-    let supportsTasks: Bool? = nilOrValue(__pigeon_list[5])
+    let accountName: String? = nilOrValue(__pigeon_list[2])
+    let accountType: String? = nilOrValue(__pigeon_list[3])
+    let color: String? = nilOrValue(__pigeon_list[4])
+    let isReadOnly: Bool? = nilOrValue(__pigeon_list[5])
+    let supportsEvents: Bool? = nilOrValue(__pigeon_list[6])
+    let supportsTasks: Bool? = nilOrValue(__pigeon_list[7])
 
     return PlatformCalendar(
       id: id,
       name: name,
+      accountName: accountName,
+      accountType: accountType,
       color: color,
       isReadOnly: isReadOnly,
       supportsEvents: supportsEvents,
@@ -72,6 +78,8 @@ struct PlatformCalendar {
     return [
       id,
       name,
+      accountName,
+      accountType,
       color,
       isReadOnly,
       supportsEvents,
@@ -150,8 +158,6 @@ private class NativeCalendarApiCodecReader: FlutterStandardReader {
       return PlatformCalendar.fromList(self.readValue() as! [Any?])
     case 129:
       return PlatformItem.fromList(self.readValue() as! [Any?])
-    case 130:
-      return PlatformItem.fromList(self.readValue() as! [Any?])
     default:
       return super.readValue(ofType: type)
     }
@@ -165,9 +171,6 @@ private class NativeCalendarApiCodecWriter: FlutterStandardWriter {
       super.writeValue(value.toList())
     } else if let value = value as? PlatformItem {
       super.writeByte(129)
-      super.writeValue(value.toList())
-    } else if let value = value as? PlatformItem {
-      super.writeByte(130)
       super.writeValue(value.toList())
     } else {
       super.writeValue(value)
@@ -199,12 +202,12 @@ protocol NativeCalendarApi {
   func getCalendars() throws -> [PlatformCalendar]
   /// 获取指定日历在时间范围内的所有条目
   /// 注意：Android 上由于系统限制，可能只返回 Event
-  func getItems(calendarId: String, startMs: Int64, endMs: Int64) throws -> [PlatformItem]
-  /// 创建或更新条目
-  /// 返回写入成功后的系统 localId
-  func upsertItem(calendarId: String, item: PlatformItem, completion: @escaping (Result<String, Error>) -> Void)
-  /// 根据 ID 删除条目
-  func deleteItem(localId: String, completion: @escaping (Result<Void, Error>) -> Void)
+  func getEvents(calendarId: String, startMs: Int64, endMs: Int64) throws -> [PlatformItem]
+  func createEvent(calendarId: String, title: String, start: Int64, end: Int64, notes: String?, uid: String?, completion: @escaping (Result<String?, Error>) -> Void)
+  /// 获取指定日历下所有事件的 ID 列表（用于检测本地删除了哪些）
+  func getSystemEventIds(calendarId: String) throws -> [String]
+  /// 根据 ID 删除本地事件（用于同步云端的删除操作）
+  func deleteEvent(eventId: String) throws -> Bool
 }
 
 /// Generated setup class from Pigeon to handle messages through the `binaryMessenger`.
@@ -248,32 +251,34 @@ class NativeCalendarApiSetup {
     }
     /// 获取指定日历在时间范围内的所有条目
     /// 注意：Android 上由于系统限制，可能只返回 Event
-    let getItemsChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.caleesync.NativeCalendarApi.getItems\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    let getEventsChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.caleesync.NativeCalendarApi.getEvents\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
     if let api = api {
-      getItemsChannel.setMessageHandler { message, reply in
+      getEventsChannel.setMessageHandler { message, reply in
         let args = message as! [Any?]
         let calendarIdArg = args[0] as! String
         let startMsArg = args[1] is Int64 ? args[1] as! Int64 : Int64(args[1] as! Int32)
         let endMsArg = args[2] is Int64 ? args[2] as! Int64 : Int64(args[2] as! Int32)
         do {
-          let result = try api.getItems(calendarId: calendarIdArg, startMs: startMsArg, endMs: endMsArg)
+          let result = try api.getEvents(calendarId: calendarIdArg, startMs: startMsArg, endMs: endMsArg)
           reply(wrapResult(result))
         } catch {
           reply(wrapError(error))
         }
       }
     } else {
-      getItemsChannel.setMessageHandler(nil)
+      getEventsChannel.setMessageHandler(nil)
     }
-    /// 创建或更新条目
-    /// 返回写入成功后的系统 localId
-    let upsertItemChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.caleesync.NativeCalendarApi.upsertItem\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    let createEventChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.caleesync.NativeCalendarApi.createEvent\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
     if let api = api {
-      upsertItemChannel.setMessageHandler { message, reply in
+      createEventChannel.setMessageHandler { message, reply in
         let args = message as! [Any?]
         let calendarIdArg = args[0] as! String
-        let itemArg = args[1] as! PlatformItem
-        api.upsertItem(calendarId: calendarIdArg, item: itemArg) { result in
+        let titleArg = args[1] as! String
+        let startArg = args[2] is Int64 ? args[2] as! Int64 : Int64(args[2] as! Int32)
+        let endArg = args[3] is Int64 ? args[3] as! Int64 : Int64(args[3] as! Int32)
+        let notesArg: String? = nilOrValue(args[4])
+        let uidArg: String? = nilOrValue(args[5])
+        api.createEvent(calendarId: calendarIdArg, title: titleArg, start: startArg, end: endArg, notes: notesArg, uid: uidArg) { result in
           switch result {
           case .success(let res):
             reply(wrapResult(res))
@@ -283,25 +288,39 @@ class NativeCalendarApiSetup {
         }
       }
     } else {
-      upsertItemChannel.setMessageHandler(nil)
+      createEventChannel.setMessageHandler(nil)
     }
-    /// 根据 ID 删除条目
-    let deleteItemChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.caleesync.NativeCalendarApi.deleteItem\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    /// 获取指定日历下所有事件的 ID 列表（用于检测本地删除了哪些）
+    let getSystemEventIdsChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.caleesync.NativeCalendarApi.getSystemEventIds\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
     if let api = api {
-      deleteItemChannel.setMessageHandler { message, reply in
+      getSystemEventIdsChannel.setMessageHandler { message, reply in
         let args = message as! [Any?]
-        let localIdArg = args[0] as! String
-        api.deleteItem(localId: localIdArg) { result in
-          switch result {
-          case .success:
-            reply(wrapResult(nil))
-          case .failure(let error):
-            reply(wrapError(error))
-          }
+        let calendarIdArg = args[0] as! String
+        do {
+          let result = try api.getSystemEventIds(calendarId: calendarIdArg)
+          reply(wrapResult(result))
+        } catch {
+          reply(wrapError(error))
         }
       }
     } else {
-      deleteItemChannel.setMessageHandler(nil)
+      getSystemEventIdsChannel.setMessageHandler(nil)
+    }
+    /// 根据 ID 删除本地事件（用于同步云端的删除操作）
+    let deleteEventChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.caleesync.NativeCalendarApi.deleteEvent\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      deleteEventChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let eventIdArg = args[0] as! String
+        do {
+          let result = try api.deleteEvent(eventId: eventIdArg)
+          reply(wrapResult(result))
+        } catch {
+          reply(wrapError(error))
+        }
+      }
+    } else {
+      deleteEventChannel.setMessageHandler(nil)
     }
   }
 }

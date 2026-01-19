@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:xml/xml.dart' as xml;
 
 import '../common/app_constant.dart';
+import '../common/utils/IcsSerializer.dart';
 import '../common/utils/mmkv_utils.dart';
 
 class NextcloudService {
@@ -76,56 +77,83 @@ class NextcloudService {
 
   /// 2. 获取并解析云端条目 (对应 sync_map)
   /// 批量获取日历中的所有事件
-  /// 批量获取日历中的所有事件 (严格参考你的旧分支实现)
+  /// 批量获取日历中的所有事件 (严格参考你的旧分支实现
   Future<List<Map<String, dynamic>>> fetchRemoteEvents({
     required String calendarPath,
-    required String userId,
   }) async {
-    // 1. 严格使用你参考代码中的配置获取方式
-    final server = _normalizeServer(AppConstant.nextcloudServer);
-    final password = MMKVUtils.instance.getString(AppConstant.mmkvKeyNextcloudAppPassword);
-    if (password == null || password.isEmpty) return [];
+    final String userId = MMKVUtils.instance.getString(AppConstant.loginName) ?? "";
+    final String password = MMKVUtils.instance.getString(AppConstant.password) ?? "";
+    final url = "https://nc-dev.ywpl.com.au$calendarPath";
+    print('🌐 发起请求: $url');
 
-    // 2. 严格按照你参考代码的路径拼接逻辑
-    // 注意：calendarPath 如果已经是 /remote.php... 开头，不要再加前缀
-    final uri = Uri.parse('$server$calendarPath');
-
-    debugPrint('[Nextcloud] fetchRemoteEvents: Requesting $uri for user $userId');
-
-    final xmlBody = '''<?xml version="1.0" encoding="utf-8" ?>
-<c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
-  <d:prop>
-    <d:getetag />
-    <c:calendar-data />
-  </d:prop>
-  <c:filter>
-    <c:comp-filter name="VCALENDAR">
-      <c:comp-filter name="VEVENT" />
-    </c:comp-filter>
-  </c:filter>
-</c:calendar-query>''';
-
-    // 3. 严格使用 http.Request('REPORT', uri) 模式
-    final req = http.Request('REPORT', uri)
-      ..headers.addAll({
-        'Authorization': _getAuthString(userId, password), // 使用你原来的 auth 生成函数
-        'Content-Type': 'application/xml; charset=utf-8',
+    try {
+      final request = http.Request('PROPFIND', Uri.parse(url));
+      request.headers.addAll({
+        'Authorization': 'Basic ${base64Encode(utf8.encode('$userId:$password'))}',
         'Depth': '1',
-      })
-      ..body = xmlBody;
+        'Content-Type': 'application/xml; charset=utf-8',
+        'User-Agent': 'curl/7.81.0', // 伪装成 curl，防止服务器对移动端有限制
+      });
 
-    final streamed = await _client.send(req);
-    final respBody = await streamed.stream.bytesToString();
+      request.body = '<?xml version="1.0" encoding="utf-8" ?><d:propfind xmlns:d="DAV:"><d:prop><d:getetag /></d:prop></d:propfind>';
 
-    debugPrint('[Nextcloud] fetchRemoteEvents: Response status ${streamed.statusCode}');
+      final client = http.Client();
+      final streamedResponse = await client.send(request);
+      final response = await http.Response.fromStream(streamedResponse);
 
-    if (streamed.statusCode != 207) {
-      debugPrint('[Nextcloud] fetchRemoteEvents: Error Body: $respBody');
-      throw Exception('REPORT failed: ${streamed.statusCode}');
+      print('📡 响应状态码: ${response.statusCode}');
+
+      if (response.statusCode == 207) {
+        // ⚠️ 这一行是关键，请在日志中确认是否看到了 <d:href>
+        print('📄 原始响应内容前500字: ${response.body.length > 500 ? response.body.substring(0, 500) : response.body}');
+
+        final document = xml.XmlDocument.parse(response.body);
+        final List<Map<String, dynamic>> events = [];
+
+        // 彻底放弃 namespace 匹配，使用这种最原始的方式查找所有 response
+        final responses = document.descendants
+            .whereType<xml.XmlElement>()
+            .where((node) => node.name.local == 'response');
+
+        for (var responseNode in responses) {
+          // 查找 href
+          final hrefNode = responseNode.descendants
+              .whereType<xml.XmlElement>()
+              .where((node) => node.name.local == 'href')
+              .firstOrNull;
+
+          final href = hrefNode?.innerText ?? '';
+
+          // 查找 status
+          final statusNode = responseNode.descendants
+              .whereType<xml.XmlElement>()
+              .where((node) => node.name.local == 'status')
+              .firstOrNull;
+
+          final status = statusNode?.innerText ?? '';
+
+          if (href.endsWith('.ics') && status.contains('200')) {
+            final etagNode = responseNode.descendants
+                .whereType<xml.XmlElement>()
+                .where((node) => node.name.local == 'getetag')
+                .firstOrNull;
+
+            final etag = etagNode?.innerText.replaceAll('&quot;', '').replaceAll('"', '') ?? '';
+
+            events.add({
+              'href': href,
+              'etag': etag,
+            });
+          }
+        }
+
+        print('✨ 最终拉取到: ${events.length} 个事件');
+        return events;
+      }
+    } catch (e) {
+      print('❌ 严重错误: $e');
     }
-
-    // 4. 解析结果映射到我们新定义的数据结构
-    return _parseEventsXmlToMap(respBody);
+    return [];
   }
 
   List<Map<String, dynamic>> _parseEventsXmlToMap(String xmlString) {
@@ -151,6 +179,184 @@ class NextcloudService {
       }
     }
     return events;
+  }
+
+  /// [MKCALENDAR] 在云端创建一个新的日历
+  /// [MKCALENDAR] 修复后的版本
+  Future<String?> createRemoteCalendar({
+    required String userId,
+    required String calendarName,
+    required String calendarId,
+  }) async {
+    final server = _normalizeServer(AppConstant.nextcloudServer);
+    final password = MMKVUtils.instance.getString(AppConstant.password);
+
+    final calendarPath = '/remote.php/dav/calendars/$userId/$calendarId/';
+    final uri = Uri.parse('$server$calendarPath');
+
+    // 重点修复：根节点改为 c:mkcalendar，并正确定义命名空间
+    final xmlBody = '''<?xml version="1.0" encoding="utf-8" ?>
+<c:mkcalendar xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+  <d:set>
+    <d:prop>
+      <d:displayname>$calendarName</d:displayname>
+      <c:supported-calendar-component-set>
+        <c:comp name="VEVENT" />
+      </c:supported-calendar-component-set>
+    </d:prop>
+  </d:set>
+</c:mkcalendar>''';
+
+    final req = http.Request('MKCALENDAR', uri)
+      ..headers.addAll({
+        'Authorization': _getAuthString(userId, password!),
+        'Content-Type': 'application/xml; charset=utf-8',
+      })
+      ..body = xmlBody;
+
+    final res = await _client.send(req);
+
+    // 调试打印
+    debugPrint('[Nextcloud] MKCALENDAR Status: ${res.statusCode}');
+
+    if (res.statusCode == 201) {
+      return calendarPath;
+    } else {
+      final body = await res.stream.bytesToString();
+      debugPrint('[Nextcloud] MKCALENDAR Failed Body: $body');
+      return null;
+    }
+  }
+
+
+  // 在 NextcloudService 类中
+  Future<String?> uploadEventData({
+    required String userId,
+    required String calendarPath,
+    required String uid,
+    required String title,
+    DateTime? start,
+    DateTime? end,
+  }) async {
+    // 1. 调用工具类生成标准的 ICS 文本
+    final icsString = IcsSerializer.toIcs(
+      uid: uid,
+      summary: title,
+      start: start,
+      end: end,
+    );
+
+    // 2. 调用原有的 putEvent 或 uploadEvent 方法执行底层网络请求
+    return await putEvent(
+      calendarPath: calendarPath,
+      uid: uid,
+      icsData: icsString,
+      userId: userId,
+    );
+  }
+
+  /// [PUT] 上传单个事件到云端
+// 在 NextcloudService.dart 中
+  Future<String?> putEvent({
+    required String calendarPath, // 正确格式应该是: /remote.php/dav/calendars/user/calendar_id/
+    required String uid,
+    required String icsData,
+    required String userId,
+  }) async {
+    // 补全基础域名
+    final baseUrl = "https://nc-dev.ywpl.com.au";
+
+    // 确保路径以 / 结尾，文件名以 .ics 结尾
+    final fullUrl = "$baseUrl${calendarPath.endsWith('/') ? calendarPath : '$calendarPath/'}$uid.ics";
+
+    print("[Nextcloud] 正在上传至: $fullUrl");
+
+    final response = await http.put(
+      Uri.parse(fullUrl),
+      headers: {
+        'Content-Type': 'text/calendar; charset=utf-8',
+        'Authorization': 'Basic ${base64Encode(utf8.encode('$userId:${MMKVUtils.instance.getString(AppConstant.password)}'))}',
+        'If-None-Match': '*', // 如果是新创建，防止覆盖
+      },
+      body: utf8.encode(icsData),
+    );
+
+    if (response.statusCode == 201 || response.statusCode == 204) {
+      return response.headers['etag']?.replaceAll('"', '');
+    } else {
+      print("[Nextcloud] PUT Failed: ${response.statusCode}");
+      return null;
+    }
+  }
+
+  // 在 NextcloudService 中检查 getEventDetail 方法
+  Future<String?> getEventDetail({required String eventPath}) async {
+    // 注意：href 已经是 /remote.php/dav... 开头的完整路径了
+    // 不要重复拼接！
+    final String userId = MMKVUtils.instance.getString(AppConstant.loginName) ?? "";
+    final url = "https://nc-dev.ywpl.com.au$eventPath";
+
+    final response = await http.get(
+      Uri.parse(url),
+      headers: {
+        'Authorization': _getAuthString(userId, MMKVUtils.instance.getString(AppConstant.password)!),
+      },
+    );
+    return response.statusCode == 200 ? response.body : null;
+  }
+
+  /// [PUT] 上传事件并返回最新的 ETag
+  Future<String?> uploadEvent({
+    required String path,      // 这里的 path 应该是完整的文件路径，如 /remote.php/.../uid.ics
+    required String content,   // ics 文本内容
+  }) async {
+    final String userId = MMKVUtils.instance.getString(AppConstant.loginName) ?? "";
+    final String password = MMKVUtils.instance.getString(AppConstant.password) ?? "";
+    final baseUrl = "https://nc-dev.ywpl.com.au";
+    final url = "$baseUrl${path.startsWith('/') ? path : '/$path'}";
+
+    print("[Nextcloud] 准备上传事件至: $url");
+
+    try {
+      final response = await http.put(
+        Uri.parse(url),
+        headers: {
+          'Content-Type': 'text/calendar; charset=utf-8',
+          'Authorization': 'Basic ${base64Encode(utf8.encode('$userId:$password'))}',
+          // 不使用 'If-None-Match': '*'，因为我们需要支持“更新”现有事件
+        },
+        body: utf8.encode(content),
+      );
+
+      if (response.statusCode == 201 || response.statusCode == 204) {
+        // 🚀 核心：成功后，云端通常会在 Header 中返回 ETag
+        String? etag = response.headers['etag']?.replaceAll('"', '');
+        print("[Nextcloud] 上传成功，新 ETag: $etag");
+        return etag;
+      } else {
+        print("[Nextcloud] 上传失败，状态码: ${response.statusCode}, 响应: ${response.body}");
+        return null;
+      }
+    } catch (e) {
+      print("[Nextcloud] 上传异常: $e");
+      return null;
+    }
+  }
+
+  // 在 NextcloudService 类中添加
+  Future<bool> deleteEvent({
+    required String eventPath,
+  }) async {
+    final String userId = MMKVUtils.instance.getString(AppConstant.loginName) ?? "";
+    final String password = MMKVUtils.instance.getString(AppConstant.password) ?? "";
+    final url = "https://nc-dev.ywpl.com.au$eventPath";
+    final response = await http.delete(
+      Uri.parse(url),
+      headers: {
+        'Authorization': 'Basic ${base64Encode(utf8.encode('$userId:$password'))}',
+      },
+    );
+    return response.statusCode == 204 || response.statusCode == 200;
   }
 
   // --- 辅助工具函数 ---

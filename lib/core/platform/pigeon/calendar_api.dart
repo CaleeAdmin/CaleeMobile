@@ -14,6 +14,8 @@ import 'package:pigeon/pigeon.dart'; // 必须是这个路径
 class PlatformCalendar {
   String? id;              // 系统原生 ID
   String? name;            // 名称
+  String? accountName;     // 账号名 (如 "test@gmail.com" 或 "iCloud")
+  String? accountType;     // 账号类型 (如 "com.google" 或 "com.apple.account.icloud")
   String? color;           // ARGB 格式颜色: 0xAARRGGBB
   bool? isReadOnly;        // 是否只读（如节假日日历）
   bool? supportsEvents;    // 是否支持活动 (VEVENT)
@@ -47,14 +49,22 @@ abstract class NativeCalendarApi {
 
   /// 获取指定日历在时间范围内的所有条目
   /// 注意：Android 上由于系统限制，可能只返回 Event
-  List<PlatformItem> getItems(String calendarId, int startMs, int endMs);
+  List<PlatformItem> getEvents(String calendarId, int startMs, int endMs);
 
-  /// 创建或更新条目
-  /// 返回写入成功后的系统 localId
+  // 🚀 新增：将云端数据写入本地系统日历
   @async
-  String upsertItem(String calendarId, PlatformItem item);
+  String? createEvent(
+      String calendarId,
+      String title,
+      int start,
+      int end,
+      String? notes,
+      String? uid // 传入生成的 UUID
+      );
 
-  /// 根据 ID 删除条目
-  @async
-  void deleteItem(String localId);
+  /// 获取指定日历下所有事件的 ID 列表（用于检测本地删除了哪些）
+  List<String> getSystemEventIds(String calendarId);
+
+  /// 根据 ID 删除本地事件（用于同步云端的删除操作）
+  bool deleteEvent(String eventId);
 }

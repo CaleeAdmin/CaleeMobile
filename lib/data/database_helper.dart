@@ -21,51 +21,63 @@ class DatabaseHelper {
       path,
       version: 1,
       onCreate: _createDB,
-      // 如果需要外键支持（级联删除），必须开启此配置
+      // 开启外键支持
       onConfigure: (db) async => await db.execute('PRAGMA foreign_keys = ON'),
     );
   }
 
   Future _createDB(Database db, int version) async {
-    // 1. 账号表
+    // 1. 日历映射表：增加账号维度和同步模式
     await db.execute('''
-      CREATE TABLE account_map (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        server_url TEXT NOT NULL,
-        username TEXT NOT NULL,
+      CREATE TABLE IF NOT EXISTS calendar_map (
+        local_id TEXT PRIMARY KEY,
+        account_name TEXT,           -- 账号标识 (e.g. gmail_user)
+        account_type TEXT,           -- 账号来源 (e.g. com.google / iCloud)
+        remote_path TEXT,
         display_name TEXT,
-        sync_token TEXT
+        color TEXT,                  -- 存储 #AARRGGBB
+        last_ctag TEXT,
+        sync_mode INTEGER DEFAULT 0, -- 0:双向, 1:只读
+        sync_status INTEGER DEFAULT 0
       )
     ''');
 
-    // 2. 日历映射表
+    // 2. 事件映射表：保持 UID 核心，增加索引优化查询
     await db.execute('''
-      CREATE TABLE calendar_map (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        local_id TEXT UNIQUE,      -- Android 系统 ID
-        account_id INTEGER NOT NULL,
-        remote_path TEXT,          -- 云端 URL 路径（Push 成功后获得）
-        display_name TEXT,
-        last_ctag TEXT,            -- 核心：云端日历整体变化的标识
-        sync_status INTEGER DEFAULT 0, -- 0:同步, 1:本地新建, 2:本地修改
-        is_active INTEGER DEFAULT 1,
-        FOREIGN KEY (account_id) REFERENCES account_map (id) ON DELETE CASCADE
+      CREATE TABLE IF NOT EXISTS sync_map (
+        uid TEXT PRIMARY KEY,
+        local_id TEXT,
+        calendar_local_id TEXT,
+        summary TEXT,
+        description TEXT,
+        dtstart INTEGER,
+        dtend INTEGER,
+        last_etag TEXT,
+        last_mtime INTEGER,
+        item_type TEXT,
+        sync_status INTEGER DEFAULT 0
       )
     ''');
 
-    // 3. 条目详情映射表 (Event/Task)
-    await db.execute('''
-      CREATE TABLE sync_map (
-        uid TEXT PRIMARY KEY,      -- 跨端唯一的 UID
-        local_id TEXT NOT NULL,    -- 系统日历中的 Event ID
-        calendar_local_id TEXT NOT NULL, -- 关联 calendar_map 的 local_id
-        remote_href TEXT,          -- 服务器上的路径，如 'xxx.ics'
-        last_etag TEXT,            -- 服务器条目版本标识
-        last_mtime INTEGER NOT NULL, -- 本地最后修改时间戳
-        item_type TEXT,            -- 'event' 或 'task'
-        sync_status INTEGER DEFAULT 0, -- 0:同步完成, 1:本地更新待上传, 2:待删除
-        FOREIGN KEY (calendar_local_id) REFERENCES calendar_map (local_id) ON DELETE CASCADE
-      )
-    ''');
+    // 建议增加索引，提高同步扫描时的查询速度
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_sync_cal ON sync_map (calendar_local_id)');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_sync_local ON sync_map (local_id)');
+  }
+  // 物理删除数据库（调试用：调用后需重启 App）
+  Future<void> deleteMyDatabase() async {
+    final dbPath = await getDatabasesPath();
+    final path = join(dbPath, 'caleesync.db');
+    await _database?.close();
+    _database = null;
+    await deleteDatabase(path);
+  }
+
+  Future<void> close() async {
+    if (_database != null) {
+      await _database!.close();
+      _database = null;
+    }
   }
 }

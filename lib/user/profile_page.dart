@@ -46,7 +46,7 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   void _loadAccountName() {
-    final loginName = MMKVUtils.instance.getString(AppConstant.mmkvKeyNextcloudLoginName);
+    final loginName = MMKVUtils.instance.getString(AppConstant.loginName);
     setState(() {
       _accountName = loginName;
     });
@@ -65,9 +65,9 @@ class _ProfilePageState extends State<ProfilePage> {
 
   void _onLogout() {
     // Clear stored credentials
-    MMKVUtils.instance.remove(AppConstant.mmkvKeyNextcloudServer);
-    MMKVUtils.instance.remove(AppConstant.mmkvKeyNextcloudLoginName);
-    MMKVUtils.instance.remove(AppConstant.mmkvKeyNextcloudAppPassword);
+    MMKVUtils.instance.remove(AppConstant.Server);
+    MMKVUtils.instance.remove(AppConstant.loginName);
+    MMKVUtils.instance.remove(AppConstant.password);
     
     // Navigate to login page
     context.go(RouteConstant.login);

@@ -26,9 +26,9 @@ void main() async {
 
 /// 检查用户是否已登录
 bool _isLoggedIn() {
-  final serverUrl = MMKVUtils.instance.getString(AppConstant.mmkvKeyNextcloudServer);
-  final loginName = MMKVUtils.instance.getString(AppConstant.mmkvKeyNextcloudLoginName);
-  final appPassword = MMKVUtils.instance.getString(AppConstant.mmkvKeyNextcloudAppPassword);
+  final serverUrl = MMKVUtils.instance.getString(AppConstant.Server);
+  final loginName = MMKVUtils.instance.getString(AppConstant.loginName);
+  final appPassword = MMKVUtils.instance.getString(AppConstant.password);
 
   // 如果三个凭据都存在，则认为已登录
   return serverUrl != null && 

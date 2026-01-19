@@ -1,9 +1,15 @@
+import 'package:caleesync/common/app_constant.dart';
 import 'package:caleesync/common/route_constant.dart';
+import 'package:caleesync/common/utils/mmkv_utils.dart';
 import 'package:caleesync/home/sync_settings_page.dart';
 import 'package:caleesync/home/task_lists_page.dart';
-import 'package:caleesync/home/test_page.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:permission_handler/permission_handler.dart';
+import '../data/SyncEngine.dart';
+import '../data/database_helper.dart';
+import '../data/sync_repository.dart';
+import '../test/UnifiedSyncTestPage.dart';
 import 'calendars_page.dart';
 import 'dashboard_page.dart';
 
@@ -16,13 +22,95 @@ class CalendarProbePage extends StatefulWidget {
 
 class _CalendarProbePageState extends State<CalendarProbePage> {
   int _selectedIndex = 0;
+  final SyncRepository _repo = SyncRepository();
 
   final List<Widget> _pages = const [
-    TestPage(),
+    DashboardPage(),
     CalendarsPage(),
     TaskListsPage(),
     SyncSettingsPage(),
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    // 关键：在第一帧之后触发权限请求
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _requestCalendarPermission();
+    });
+  }
+
+  Future<void> _requestCalendarPermission() async {
+    // 1. 根据平台选择最准确的权限类型
+    // iOS 17+ 必须使用 calendarFullAccess 才能读取系统事件
+    Permission calendarPermission = Permission.calendarFullAccess;
+
+    // 2. 检查当前状态
+    var status = await calendarPermission.status;
+
+    if (status.isPermanentlyDenied) {
+      // 如果用户之前永久拒绝了，直接弹窗引导去系统设置
+      _showSettingsDialog();
+      return;
+    }
+
+    // 3. 发起请求
+    status = await calendarPermission.request();
+
+    // 4. 处理结果
+    if (status.isGranted) {
+      print("✅ 日历读写权限已授予");
+      // 权限成功后，建议先刷新本地日历列表，再执行重置或同步
+      await _repo.scanLocalCalendars(MMKVUtils.instance.getString(AppConstant.loginName)!);
+      // _nuclearReset();
+    } else if (status.isLimited) {
+      // iOS 特有：受限访问（通常对你的同步 App 来说是不够的）
+      print("⚠️ 权限受限，可能无法读取所有日历");
+    } else {
+      print("❌ 权限被拒绝: $status");
+      _showPermissionDialog();
+    }
+  }
+
+  void _showSettingsDialog() {
+    // 引导用户跳转到手机设置页面
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("需要权限"),
+        content: const Text("同步功能需要日历完整访问权限，请在设置中开启。"),
+        actions: [
+          TextButton(onPressed: () => openAppSettings(), child: const Text("去设置")),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("取消")),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _nuclearReset() async {
+    await DatabaseHelper.instance.deleteMyDatabase(); // 调用我之前给你写的物理删除方法
+    print("☢️ 数据库物理文件已删除，请重启 App 后再试");
+  }
+
+  void _showPermissionDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("权限请求"),
+        content: const Text("同步功能需要日历访问权限，请在设置中开启。"),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text("取消"),
+          ),
+          TextButton(
+            onPressed: () => openAppSettings(), // 打开系统设置
+            child: const Text("去设置"),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -75,8 +163,12 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
           Padding(
             padding: const EdgeInsets.only(right: 12),
             child: ElevatedButton.icon(
-            onPressed: () {
-              // TODO: Implement sync action
+            onPressed: () async {
+              final engine = SyncEngine();
+              await engine.executeFullSync(onProgress: (summary) {
+                print("进度更新: 成功 ${summary.success}, 失败 ${summary.failed}, 正在处理 ${summary.processing}");
+                // 这里调用 setState(() => _mySummary = summary); 即可更新 UI
+              });
             },
             icon: const Icon(Icons.sync, size: 18),
             label: const Text('Sync'),

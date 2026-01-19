@@ -21,15 +21,6 @@ class NextcloudAuthService {
     return url;
   }
 
-  /// Step 1: 初始化 Login Flow v2，获取登录 URL 和轮询 token
-  /// 
-  /// 返回: {
-  ///   'login': 'https://server/index.php/login/v2',
-  ///   'poll': {
-  ///     'token': 'xxx',
-  ///     'endpoint': 'https://server/login/v2/poll'
-  ///   }
-  /// }
   Future<Map<String, dynamic>> initiateLoginFlow() async {
     final url = Uri.parse('${normalizedUrl}index.php/login/v2');
     

@@ -20,6 +20,8 @@ class PlatformCalendar {
   PlatformCalendar({
     this.id,
     this.name,
+    this.accountName,
+    this.accountType,
     this.color,
     this.isReadOnly,
     this.supportsEvents,
@@ -29,6 +31,10 @@ class PlatformCalendar {
   String? id;
 
   String? name;
+
+  String? accountName;
+
+  String? accountType;
 
   String? color;
 
@@ -42,6 +48,8 @@ class PlatformCalendar {
     return <Object?>[
       id,
       name,
+      accountName,
+      accountType,
       color,
       isReadOnly,
       supportsEvents,
@@ -54,10 +62,12 @@ class PlatformCalendar {
     return PlatformCalendar(
       id: result[0] as String?,
       name: result[1] as String?,
-      color: result[2] as String?,
-      isReadOnly: result[3] as bool?,
-      supportsEvents: result[4] as bool?,
-      supportsTasks: result[5] as bool?,
+      accountName: result[2] as String?,
+      accountType: result[3] as String?,
+      color: result[4] as String?,
+      isReadOnly: result[5] as bool?,
+      supportsEvents: result[6] as bool?,
+      supportsTasks: result[7] as bool?,
     );
   }
 }
@@ -148,9 +158,6 @@ class _NativeCalendarApiCodec extends StandardMessageCodec {
     } else if (value is PlatformItem) {
       buffer.putUint8(129);
       writeValue(buffer, value.encode());
-    } else if (value is PlatformItem) {
-      buffer.putUint8(130);
-      writeValue(buffer, value.encode());
     } else {
       super.writeValue(buffer, value);
     }
@@ -162,8 +169,6 @@ class _NativeCalendarApiCodec extends StandardMessageCodec {
       case 128: 
         return PlatformCalendar.decode(readValue(buffer)!);
       case 129: 
-        return PlatformItem.decode(readValue(buffer)!);
-      case 130: 
         return PlatformItem.decode(readValue(buffer)!);
       default:
         return super.readValueOfType(type, buffer);
@@ -243,8 +248,8 @@ class NativeCalendarApi {
 
   /// 获取指定日历在时间范围内的所有条目
   /// 注意：Android 上由于系统限制，可能只返回 Event
-  Future<List<PlatformItem?>> getItems(String calendarId, int startMs, int endMs) async {
-    final String __pigeon_channelName = 'dev.flutter.pigeon.caleesync.NativeCalendarApi.getItems$__pigeon_messageChannelSuffix';
+  Future<List<PlatformItem?>> getEvents(String calendarId, int startMs, int endMs) async {
+    final String __pigeon_channelName = 'dev.flutter.pigeon.caleesync.NativeCalendarApi.getEvents$__pigeon_messageChannelSuffix';
     final BasicMessageChannel<Object?> __pigeon_channel = BasicMessageChannel<Object?>(
       __pigeon_channelName,
       pigeonChannelCodec,
@@ -270,17 +275,38 @@ class NativeCalendarApi {
     }
   }
 
-  /// 创建或更新条目
-  /// 返回写入成功后的系统 localId
-  Future<String> upsertItem(String calendarId, PlatformItem item) async {
-    final String __pigeon_channelName = 'dev.flutter.pigeon.caleesync.NativeCalendarApi.upsertItem$__pigeon_messageChannelSuffix';
+  Future<String?> createEvent(String calendarId, String title, int start, int end, String? notes, String? uid) async {
+    final String __pigeon_channelName = 'dev.flutter.pigeon.caleesync.NativeCalendarApi.createEvent$__pigeon_messageChannelSuffix';
     final BasicMessageChannel<Object?> __pigeon_channel = BasicMessageChannel<Object?>(
       __pigeon_channelName,
       pigeonChannelCodec,
       binaryMessenger: __pigeon_binaryMessenger,
     );
     final List<Object?>? __pigeon_replyList =
-        await __pigeon_channel.send(<Object?>[calendarId, item]) as List<Object?>?;
+        await __pigeon_channel.send(<Object?>[calendarId, title, start, end, notes, uid]) as List<Object?>?;
+    if (__pigeon_replyList == null) {
+      throw _createConnectionError(__pigeon_channelName);
+    } else if (__pigeon_replyList.length > 1) {
+      throw PlatformException(
+        code: __pigeon_replyList[0]! as String,
+        message: __pigeon_replyList[1] as String?,
+        details: __pigeon_replyList[2],
+      );
+    } else {
+      return (__pigeon_replyList[0] as String?);
+    }
+  }
+
+  /// 获取指定日历下所有事件的 ID 列表（用于检测本地删除了哪些）
+  Future<List<String?>> getSystemEventIds(String calendarId) async {
+    final String __pigeon_channelName = 'dev.flutter.pigeon.caleesync.NativeCalendarApi.getSystemEventIds$__pigeon_messageChannelSuffix';
+    final BasicMessageChannel<Object?> __pigeon_channel = BasicMessageChannel<Object?>(
+      __pigeon_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: __pigeon_binaryMessenger,
+    );
+    final List<Object?>? __pigeon_replyList =
+        await __pigeon_channel.send(<Object?>[calendarId]) as List<Object?>?;
     if (__pigeon_replyList == null) {
       throw _createConnectionError(__pigeon_channelName);
     } else if (__pigeon_replyList.length > 1) {
@@ -295,20 +321,20 @@ class NativeCalendarApi {
         message: 'Host platform returned null value for non-null return value.',
       );
     } else {
-      return (__pigeon_replyList[0] as String?)!;
+      return (__pigeon_replyList[0] as List<Object?>?)!.cast<String?>();
     }
   }
 
-  /// 根据 ID 删除条目
-  Future<void> deleteItem(String localId) async {
-    final String __pigeon_channelName = 'dev.flutter.pigeon.caleesync.NativeCalendarApi.deleteItem$__pigeon_messageChannelSuffix';
+  /// 根据 ID 删除本地事件（用于同步云端的删除操作）
+  Future<bool> deleteEvent(String eventId) async {
+    final String __pigeon_channelName = 'dev.flutter.pigeon.caleesync.NativeCalendarApi.deleteEvent$__pigeon_messageChannelSuffix';
     final BasicMessageChannel<Object?> __pigeon_channel = BasicMessageChannel<Object?>(
       __pigeon_channelName,
       pigeonChannelCodec,
       binaryMessenger: __pigeon_binaryMessenger,
     );
     final List<Object?>? __pigeon_replyList =
-        await __pigeon_channel.send(<Object?>[localId]) as List<Object?>?;
+        await __pigeon_channel.send(<Object?>[eventId]) as List<Object?>?;
     if (__pigeon_replyList == null) {
       throw _createConnectionError(__pigeon_channelName);
     } else if (__pigeon_replyList.length > 1) {
@@ -317,8 +343,13 @@ class NativeCalendarApi {
         message: __pigeon_replyList[1] as String?,
         details: __pigeon_replyList[2],
       );
+    } else if (__pigeon_replyList[0] == null) {
+      throw PlatformException(
+        code: 'null-error',
+        message: 'Host platform returned null value for non-null return value.',
+      );
     } else {
-      return;
+      return (__pigeon_replyList[0] as bool?)!;
     }
   }
 }

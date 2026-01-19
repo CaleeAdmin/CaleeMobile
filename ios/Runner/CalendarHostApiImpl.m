@@ -2,9 +2,7 @@
 #import <EventKit/EventKit.h>
 
 @interface CalendarHostApiImpl ()
-
 @property (nonatomic, strong) EKEventStore *eventStore;
-
 @end
 
 @implementation CalendarHostApiImpl
@@ -17,200 +15,164 @@
     return self;
 }
 
+// 请求权限
 - (void)requestPermissionForTask:(BOOL)forTask completion:(void (^)(NSNumber *_Nullable, FlutterError *_Nullable))completion {
-    // iOS使用统一的日历权限，forTask参数在这里不使用
     [self.eventStore requestAccessToEntityType:EKEntityTypeEvent completion:^(BOOL granted, NSError * _Nullable error) {
         if (error) {
-            completion(nil, [FlutterError errorWithCode:@"PERMISSION_ERROR"
-                                                message:error.localizedDescription
-                                                details:nil]);
+            completion(nil, [FlutterError errorWithCode:@"PERMISSION_ERROR" message:error.localizedDescription details:nil]);
         } else {
             completion(@(granted), nil);
         }
     }];
 }
 
+// 获取日历列表（增加 Account 分组支持）
 - (nullable NSArray<PlatformCalendar *> *)getCalendarsWithError:(FlutterError *_Nullable *_Nonnull)error {
     NSMutableArray<PlatformCalendar *> *calendars = [NSMutableArray array];
 
-    // 检查权限
     EKAuthorizationStatus status = [EKEventStore authorizationStatusForEntityType:EKEntityTypeEvent];
     if (status != EKAuthorizationStatusAuthorized) {
-        *error = [FlutterError errorWithCode:@"PERMISSION_DENIED"
-                                     message:@"Calendar access not authorized"
-                                     details:nil];
+        *error = [FlutterError errorWithCode:@"PERMISSION_DENIED" message:@"Calendar access not authorized" details:nil];
         return nil;
     }
 
-    // 获取所有日历
-    NSArray<EKCalendar *> *ekCalendars = [self.eventStore calendarsForEntityType:EKEntityTypeEvent];
+    // iOS 的分组逻辑：Source (账号) -> Calendar (日历)
+    NSArray<EKSource *> *sources = [self.eventStore sources];
 
-    for (EKCalendar *ekCalendar in ekCalendars) {
-        // 转换颜色为十六进制字符串
-        UIColor *color = [UIColor colorWithCGColor:ekCalendar.CGColor];
-        CGFloat red, green, blue, alpha;
-        [color getRed:&red green:&green blue:&blue alpha:&alpha];
-        NSString *colorHex = [NSString stringWithFormat:@"#%02X%02X%02X",
-                             (int)(red * 255), (int)(green * 255), (int)(blue * 255)];
+    for (EKSource *source in sources) {
+        NSSet<EKCalendar *> *ekCalendars = [source calendarsForEntityType:EKEntityTypeEvent];
 
-        PlatformCalendar *calendar = [[PlatformCalendar alloc] init];
-        calendar.id = ekCalendar.calendarIdentifier;
-        calendar.name = ekCalendar.title;
-        calendar.color = colorHex;
-        calendar.isReadOnly = @(!ekCalendar.allowsContentModifications);
-        calendar.supportsEvents = @(ekCalendar.supportedEventAvailabilities & EKCalendarEventAvailabilityBusy);
-        calendar.supportsTasks = @NO; // iOS EventKit 主要支持事件，不直接支持任务
+        for (EKCalendar *ekCalendar in ekCalendars) {
+            PlatformCalendar *pc = [[PlatformCalendar alloc] init];
+            pc.id = ekCalendar.calendarIdentifier;
+            pc.name = ekCalendar.title;
 
-        [calendars addObject:calendar];
+            // 🚀 核心改动：设置账号分组信息
+            pc.accountName = source.title; // 例如 "iCloud", "Gmail"
+            pc.accountType = [self stringFromSourceType:source.sourceType];
+
+            // 颜色转换
+            CGColorRef colorRef = ekCalendar.CGColor;
+            const CGFloat *components = CGColorGetComponents(colorRef);
+            pc.color = [NSString stringWithFormat:@"#%02X%02X%02X",
+                                                  (int)(components[0] * 255), (int)(components[1] * 255), (int)(components[2] * 255)];
+
+            pc.isReadOnly = @(!ekCalendar.allowsContentModifications);
+            pc.supportsEvents = @YES;
+            pc.supportsTasks = @NO;
+
+            [calendars addObject:pc];
+        }
     }
-
     return [calendars copy];
 }
 
-- (nullable NSArray<PlatformItem *> *)getItemsCalendarId:(NSString *)calendarId startMs:(NSNumber *)startMs endMs:(NSNumber *)endMs error:(FlutterError *_Nullable *_Nonnull)error {
+// 辅助方法：转换账号类型为字符串
+- (NSString *)stringFromSourceType:(EKSourceType)type {
+    switch (type) {
+        case EKSourceTypeLocal: return @"Local";
+        case EKSourceTypeExchange: return @"Exchange";
+        case EKSourceTypeCalDAV: return @"CalDAV";
+        case EKSourceTypeMobileMe: return @"iCloud";
+        case EKSourceTypeSubscribed: return @"Subscribed";
+        case EKSourceTypeBirthdays: return @"Birthdays";
+        default: return @"Other";
+    }
+}
+
+// 获取事件列表
+- (nullable NSArray<PlatformItem *> *)getEventsCalendarId:(NSString *)calendarId startMs:(NSNumber *)startMs endMs:(NSNumber *)endMs error:(FlutterError *_Nullable *_Nonnull)error {
     NSMutableArray<PlatformItem *> *items = [NSMutableArray array];
 
-    // 检查权限
-    EKAuthorizationStatus status = [EKEventStore authorizationStatusForEntityType:EKEntityTypeEvent];
-    if (status != EKAuthorizationStatusAuthorized) {
-        *error = [FlutterError errorWithCode:@"PERMISSION_DENIED"
-                                     message:@"Calendar access not authorized"
-                                     details:nil];
-        return nil;
-    }
-
-    // 获取指定日历
     EKCalendar *calendar = [self.eventStore calendarWithIdentifier:calendarId];
-    if (!calendar) {
-        *error = [FlutterError errorWithCode:@"CALENDAR_NOT_FOUND"
-                                     message:@"Calendar not found"
-                                     details:nil];
-        return nil;
-    }
+    if (!calendar) return @[];
 
-    // 创建时间范围
     NSDate *startDate = [NSDate dateWithTimeIntervalSince1970:(startMs.longLongValue / 1000.0)];
     NSDate *endDate = [NSDate dateWithTimeIntervalSince1970:(endMs.longLongValue / 1000.0)];
 
-    // 创建谓词
-    NSPredicate *predicate = [self.eventStore predicateForEventsWithStartDate:startDate
-                                                                       endDate:endDate
-                                                                     calendars:@[calendar]];
-
-    // 获取事件
+    NSPredicate *predicate = [self.eventStore predicateForEventsWithStartDate:startDate endDate:endDate calendars:@[calendar]];
     NSArray<EKEvent *> *events = [self.eventStore eventsMatchingPredicate:predicate];
 
     for (EKEvent *event in events) {
         PlatformItem *item = [[PlatformItem alloc] init];
         item.localId = event.eventIdentifier;
-        item.uid = event.eventIdentifier; // 使用本地ID作为UID
+
+        // 🚀 核心改动：优先使用系统的 externalIdentifier (通常是原生的 UUID)
+        item.uid = event.calendarItemExternalIdentifier ?: event.eventIdentifier;
+
         item.title = event.title;
         item.notes = event.notes;
-        item.location = event.location;
         item.startTime = @([event.startDate timeIntervalSince1970] * 1000);
         item.endTime = @([event.endDate timeIntervalSince1970] * 1000);
         item.lastModified = @([event.lastModifiedDate timeIntervalSince1970] * 1000);
-        item.isTask = @NO; // EventKit 主要是事件
         item.isAllDay = @(event.isAllDay);
-        item.status = @1; // 假设状态为确认
-        item.priority = nil;
+        item.isTask = @NO;
 
         [items addObject:item];
     }
-
-    return [items copy];
+    return items;
 }
 
-- (void)upsertItemCalendarId:(NSString *)calendarId item:(PlatformItem *)item completion:(void (^)(NSString *_Nullable, FlutterError *_Nullable))completion {
-    // 检查权限
-    EKAuthorizationStatus status = [EKEventStore authorizationStatusForEntityType:EKEntityTypeEvent];
-    if (status != EKAuthorizationStatusAuthorized) {
-        completion(nil, [FlutterError errorWithCode:@"PERMISSION_DENIED"
-                                           message:@"Calendar access not authorized"
-                                           details:nil]);
-        return;
-    }
+// 创建事件（支持传入外部生成的 UID）
+- (void)createEventCalendarId:(NSString *)calendarId title:(NSString *)title start:(NSNumber *)start end:(NSNumber *)end notes:(nullable NSString *)notes uid:(nullable NSString *)uid completion:(void (^)(NSString *_Nullable, FlutterError *_Nullable))completion {
 
-    // 获取指定日历
     EKCalendar *calendar = [self.eventStore calendarWithIdentifier:calendarId];
     if (!calendar) {
-        completion(nil, [FlutterError errorWithCode:@"CALENDAR_NOT_FOUND"
-                                           message:@"Calendar not found"
-                                           details:nil]);
+        completion(nil, [FlutterError errorWithCode:@"NOT_FOUND" message:@"Calendar not found" details:nil]);
         return;
     }
 
-    EKEvent *event;
-    if (item.localId && item.localId.length > 0) {
-        // 更新现有事件
-        event = [self.eventStore eventWithIdentifier:item.localId];
-        if (!event) {
-            completion(nil, [FlutterError errorWithCode:@"EVENT_NOT_FOUND"
-                                               message:@"Event not found"
-                                               details:nil]);
-            return;
-        }
-    } else {
-        // 创建新事件
-        event = [EKEvent eventWithEventStore:self.eventStore];
-        event.calendar = calendar;
-    }
+    EKEvent *event = [EKEvent eventWithEventStore:self.eventStore];
+    event.calendar = calendar;
+    event.title = title;
+    event.notes = notes;
+    event.startDate = [NSDate dateWithTimeIntervalSince1970:(start.longLongValue / 1000.0)];
+    event.endDate = [NSDate dateWithTimeIntervalSince1970:(end.longLongValue / 1000.0)];
 
-    // 设置事件属性
-    event.title = item.title ?: @"";
-    event.notes = item.notes;
-    event.location = item.location;
+    // 注意：iOS 系统的 calendarItemExternalIdentifier 是只读的，主要由同步句柄维护。
+    // 如果要在推送时严格匹配，建议在本地数据库中记录映射关系。
 
-    if (item.startTime && item.endTime) {
-        event.startDate = [NSDate dateWithTimeIntervalSince1970:(item.startTime.longLongValue / 1000.0)];
-        event.endDate = [NSDate dateWithTimeIntervalSince1970:(item.endTime.longLongValue / 1000.0)];
-    }
-
-    event.allDay = item.isAllDay.boolValue;
-
-    // 保存事件
     NSError *saveError;
     BOOL success = [self.eventStore saveEvent:event span:EKSpanThisEvent commit:YES error:&saveError];
 
     if (success) {
         completion(event.eventIdentifier, nil);
     } else {
-        completion(nil, [FlutterError errorWithCode:@"SAVE_ERROR"
-                                           message:saveError.localizedDescription ?: @"Failed to save event"
-                                           details:nil]);
+        completion(nil, [FlutterError errorWithCode:@"SAVE_ERROR" message:saveError.localizedDescription details:nil]);
     }
 }
 
-- (void)deleteItemLocalId:(NSString *)localId completion:(void (^)(FlutterError *_Nullable))completion {
-    // 检查权限
-    EKAuthorizationStatus status = [EKEventStore authorizationStatusForEntityType:EKEntityTypeEvent];
-    if (status != EKAuthorizationStatusAuthorized) {
-        completion([FlutterError errorWithCode:@"PERMISSION_DENIED"
-                                      message:@"Calendar access not authorized"
-                                      details:nil]);
-        return;
-    }
+// 获取所有系统事件 ID
+- (nullable NSArray<NSString *> *)getSystemEventIdsCalendarId:(NSString *)calendarId error:(FlutterError *_Nullable *_Nonnull)error {
+    EKCalendar *calendar = [self.eventStore calendarWithIdentifier:calendarId];
+    if (!calendar) return @[];
 
-    // 获取事件
-    EKEvent *event = [self.eventStore eventWithIdentifier:localId];
+    // iOS 无法直接查询全量 ID，通常需要给一个较宽的时间范围（如前后一年）
+    NSDate *now = [NSDate date];
+    NSDate *startDate = [now dateByAddingTimeInterval:-365*24*3600];
+    NSDate *endDate = [now dateByAddingTimeInterval:365*24*3600];
+
+    NSPredicate *predicate = [self.eventStore predicateForEventsWithStartDate:startDate endDate:endDate calendars:@[calendar]];
+    NSArray<EKEvent *> *events = [self.eventStore eventsMatchingPredicate:predicate];
+
+    NSMutableArray *ids = [NSMutableArray array];
+    for (EKEvent *e in events) {
+        [ids addObject:e.eventIdentifier];
+    }
+    return ids;
+}
+
+// 删除事件
+- (void)deleteEventEventId:(NSString *)eventId completion:(void (^)(NSNumber *_Nullable, FlutterError *_Nullable))completion {
+    EKEvent *event = [self.eventStore eventWithIdentifier:eventId];
     if (!event) {
-        completion([FlutterError errorWithCode:@"EVENT_NOT_FOUND"
-                                      message:@"Event not found"
-                                      details:nil]);
+        completion(@NO, nil);
         return;
     }
 
-    // 删除事件
-    NSError *deleteError;
-    BOOL success = [self.eventStore removeEvent:event span:EKSpanThisEvent commit:YES error:&deleteError];
-
-    if (success) {
-        completion(nil);
-    } else {
-        completion([FlutterError errorWithCode:@"DELETE_ERROR"
-                                      message:deleteError.localizedDescription ?: @"Failed to delete event"
-                                      details:nil]);
-    }
+    NSError *error;
+    BOOL success = [self.eventStore removeEvent:event span:EKSpanThisEvent commit:YES error:&error];
+    completion(@(success), error ? [FlutterError errorWithCode:@"DELETE_ERROR" message:error.localizedDescription details:nil] : nil);
 }
 
 @end

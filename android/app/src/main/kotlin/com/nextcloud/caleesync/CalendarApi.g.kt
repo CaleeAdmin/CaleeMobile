@@ -52,6 +52,8 @@ class FlutterError (
 data class PlatformCalendar (
   val id: String? = null,
   val name: String? = null,
+  val accountName: String? = null,
+  val accountType: String? = null,
   val color: String? = null,
   val isReadOnly: Boolean? = null,
   val supportsEvents: Boolean? = null,
@@ -63,17 +65,21 @@ data class PlatformCalendar (
     fun fromList(__pigeon_list: List<Any?>): PlatformCalendar {
       val id = __pigeon_list[0] as String?
       val name = __pigeon_list[1] as String?
-      val color = __pigeon_list[2] as String?
-      val isReadOnly = __pigeon_list[3] as Boolean?
-      val supportsEvents = __pigeon_list[4] as Boolean?
-      val supportsTasks = __pigeon_list[5] as Boolean?
-      return PlatformCalendar(id, name, color, isReadOnly, supportsEvents, supportsTasks)
+      val accountName = __pigeon_list[2] as String?
+      val accountType = __pigeon_list[3] as String?
+      val color = __pigeon_list[4] as String?
+      val isReadOnly = __pigeon_list[5] as Boolean?
+      val supportsEvents = __pigeon_list[6] as Boolean?
+      val supportsTasks = __pigeon_list[7] as Boolean?
+      return PlatformCalendar(id, name, accountName, accountType, color, isReadOnly, supportsEvents, supportsTasks)
     }
   }
   fun toList(): List<Any?> {
     return listOf<Any?>(
       id,
       name,
+      accountName,
+      accountType,
       color,
       isReadOnly,
       supportsEvents,
@@ -147,11 +153,6 @@ private object NativeCalendarApiCodec : StandardMessageCodec() {
           PlatformItem.fromList(it)
         }
       }
-      130.toByte() -> {
-        return (readValue(buffer) as? List<Any?>)?.let {
-          PlatformItem.fromList(it)
-        }
-      }
       else -> super.readValueOfType(type, buffer)
     }
   }
@@ -163,10 +164,6 @@ private object NativeCalendarApiCodec : StandardMessageCodec() {
       }
       is PlatformItem -> {
         stream.write(129)
-        writeValue(stream, value.toList())
-      }
-      is PlatformItem -> {
-        stream.write(130)
         writeValue(stream, value.toList())
       }
       else -> super.writeValue(stream, value)
@@ -188,14 +185,12 @@ interface NativeCalendarApi {
    * 获取指定日历在时间范围内的所有条目
    * 注意：Android 上由于系统限制，可能只返回 Event
    */
-  fun getItems(calendarId: String, startMs: Long, endMs: Long): List<PlatformItem>
-  /**
-   * 创建或更新条目
-   * 返回写入成功后的系统 localId
-   */
-  fun upsertItem(calendarId: String, item: PlatformItem, callback: (Result<String>) -> Unit)
-  /** 根据 ID 删除条目 */
-  fun deleteItem(localId: String, callback: (Result<Unit>) -> Unit)
+  fun getEvents(calendarId: String, startMs: Long, endMs: Long): List<PlatformItem>
+  fun createEvent(calendarId: String, title: String, start: Long, end: Long, notes: String?, uid: String?, callback: (Result<String?>) -> Unit)
+  /** 获取指定日历下所有事件的 ID 列表（用于检测本地删除了哪些） */
+  fun getSystemEventIds(calendarId: String): List<String>
+  /** 根据 ID 删除本地事件（用于同步云端的删除操作） */
+  fun deleteEvent(eventId: String): Boolean
 
   companion object {
     /** The codec used by NativeCalendarApi. */
@@ -241,7 +236,7 @@ interface NativeCalendarApi {
         }
       }
       run {
-        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.caleesync.NativeCalendarApi.getItems$separatedMessageChannelSuffix", codec)
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.caleesync.NativeCalendarApi.getEvents$separatedMessageChannelSuffix", codec)
         if (api != null) {
           channel.setMessageHandler { message, reply ->
             val args = message as List<Any?>
@@ -249,7 +244,7 @@ interface NativeCalendarApi {
             val startMsArg = args[1].let { num -> if (num is Int) num.toLong() else num as Long }
             val endMsArg = args[2].let { num -> if (num is Int) num.toLong() else num as Long }
             val wrapped: List<Any?> = try {
-              listOf<Any?>(api.getItems(calendarIdArg, startMsArg, endMsArg))
+              listOf<Any?>(api.getEvents(calendarIdArg, startMsArg, endMsArg))
             } catch (exception: Throwable) {
               wrapError(exception)
             }
@@ -260,13 +255,17 @@ interface NativeCalendarApi {
         }
       }
       run {
-        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.caleesync.NativeCalendarApi.upsertItem$separatedMessageChannelSuffix", codec)
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.caleesync.NativeCalendarApi.createEvent$separatedMessageChannelSuffix", codec)
         if (api != null) {
           channel.setMessageHandler { message, reply ->
             val args = message as List<Any?>
             val calendarIdArg = args[0] as String
-            val itemArg = args[1] as PlatformItem
-            api.upsertItem(calendarIdArg, itemArg) { result: Result<String> ->
+            val titleArg = args[1] as String
+            val startArg = args[2].let { num -> if (num is Int) num.toLong() else num as Long }
+            val endArg = args[3].let { num -> if (num is Int) num.toLong() else num as Long }
+            val notesArg = args[4] as String?
+            val uidArg = args[5] as String?
+            api.createEvent(calendarIdArg, titleArg, startArg, endArg, notesArg, uidArg) { result: Result<String?> ->
               val error = result.exceptionOrNull()
               if (error != null) {
                 reply.reply(wrapError(error))
@@ -281,19 +280,34 @@ interface NativeCalendarApi {
         }
       }
       run {
-        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.caleesync.NativeCalendarApi.deleteItem$separatedMessageChannelSuffix", codec)
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.caleesync.NativeCalendarApi.getSystemEventIds$separatedMessageChannelSuffix", codec)
         if (api != null) {
           channel.setMessageHandler { message, reply ->
             val args = message as List<Any?>
-            val localIdArg = args[0] as String
-            api.deleteItem(localIdArg) { result: Result<Unit> ->
-              val error = result.exceptionOrNull()
-              if (error != null) {
-                reply.reply(wrapError(error))
-              } else {
-                reply.reply(wrapResult(null))
-              }
+            val calendarIdArg = args[0] as String
+            val wrapped: List<Any?> = try {
+              listOf<Any?>(api.getSystemEventIds(calendarIdArg))
+            } catch (exception: Throwable) {
+              wrapError(exception)
             }
+            reply.reply(wrapped)
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.caleesync.NativeCalendarApi.deleteEvent$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val eventIdArg = args[0] as String
+            val wrapped: List<Any?> = try {
+              listOf<Any?>(api.deleteEvent(eventIdArg))
+            } catch (exception: Throwable) {
+              wrapError(exception)
+            }
+            reply.reply(wrapped)
           }
         } else {
           channel.setMessageHandler(null)
