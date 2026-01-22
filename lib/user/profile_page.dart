@@ -1,8 +1,9 @@
 import 'package:caleesync/common/app_constant.dart';
 import 'package:caleesync/common/route_constant.dart';
 import 'package:caleesync/common/utils/mmkv_utils.dart';
+import 'package:caleesync/controllers/app_controller.dart';
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
+import 'package:get/get.dart';
 
 /// Profile Settings page
 class ProfilePage extends StatefulWidget {
@@ -64,13 +65,9 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   void _onLogout() {
-    // Clear stored credentials
-    MMKVUtils.instance.remove(AppConstant.Server);
-    MMKVUtils.instance.remove(AppConstant.loginName);
-    MMKVUtils.instance.remove(AppConstant.password);
-    
-    // Navigate to login page
-    context.go(RouteConstant.login);
+    // 使用GetX的AppController处理登出
+    final appController = Get.find<AppController>();
+    appController.logout();
   }
 
   void _onSavePersonalInfo() {
@@ -156,10 +153,10 @@ class _ProfilePageState extends State<ProfilePage> {
           ),
           onPressed: () {
             // 如果可以 pop，则 pop；否则返回到 home
-            if (context.canPop()) {
-              context.pop();
+            if (Get.previousRoute.isNotEmpty) {
+              Get.back();
             } else {
-              context.go(RouteConstant.home);
+              Get.offAllNamed(RouteConstant.home);
             }
           },
         ),

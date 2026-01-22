@@ -186,11 +186,22 @@ interface NativeCalendarApi {
    * 注意：Android 上由于系统限制，可能只返回 Event
    */
   fun getEvents(calendarId: String, startMs: Long, endMs: Long): List<PlatformItem>
+  /**
+   * 🚀 关键新增：在手机系统里创建一个新的日历账簿
+   * 返回系统分配的数字 ID (String 形式的 Long)
+   */
+  fun createCalendar(displayName: String, accountName: String, callback: (Result<String?>) -> Unit)
+  /**
+   * 🚀 关键新增：根据 ID 删除整个日历账簿
+   * Android 上删除日历会自动联级删除该日历下的所有事件 (Events)
+   */
+  fun deleteCalendar(calendarId: String, accountName: String, accountType: String, callback: (Result<Boolean>) -> Unit)
   fun createEvent(calendarId: String, title: String, start: Long, end: Long, notes: String?, uid: String?, callback: (Result<String?>) -> Unit)
   /** 获取指定日历下所有事件的 ID 列表（用于检测本地删除了哪些） */
   fun getSystemEventIds(calendarId: String): List<String>
   /** 根据 ID 删除本地事件（用于同步云端的删除操作） */
   fun deleteEvent(eventId: String): Boolean
+  fun modifyCalendarTitle(calendarId: String, newTitle: String, accountName: String, accountType: String, callback: (Result<Boolean>) -> Unit)
 
   companion object {
     /** The codec used by NativeCalendarApi. */
@@ -255,6 +266,49 @@ interface NativeCalendarApi {
         }
       }
       run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.caleesync.NativeCalendarApi.createCalendar$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val displayNameArg = args[0] as String
+            val accountNameArg = args[1] as String
+            api.createCalendar(displayNameArg, accountNameArg) { result: Result<String?> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(wrapError(error))
+              } else {
+                val data = result.getOrNull()
+                reply.reply(wrapResult(data))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.caleesync.NativeCalendarApi.deleteCalendar$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val calendarIdArg = args[0] as String
+            val accountNameArg = args[1] as String
+            val accountTypeArg = args[2] as String
+            api.deleteCalendar(calendarIdArg, accountNameArg, accountTypeArg) { result: Result<Boolean> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(wrapError(error))
+              } else {
+                val data = result.getOrNull()
+                reply.reply(wrapResult(data))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
         val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.caleesync.NativeCalendarApi.createEvent$separatedMessageChannelSuffix", codec)
         if (api != null) {
           channel.setMessageHandler { message, reply ->
@@ -308,6 +362,29 @@ interface NativeCalendarApi {
               wrapError(exception)
             }
             reply.reply(wrapped)
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.caleesync.NativeCalendarApi.modifyCalendarTitle$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val calendarIdArg = args[0] as String
+            val newTitleArg = args[1] as String
+            val accountNameArg = args[2] as String
+            val accountTypeArg = args[3] as String
+            api.modifyCalendarTitle(calendarIdArg, newTitleArg, accountNameArg, accountTypeArg) { result: Result<Boolean> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(wrapError(error))
+              } else {
+                val data = result.getOrNull()
+                reply.reply(wrapResult(data))
+              }
+            }
           }
         } else {
           channel.setMessageHandler(null)

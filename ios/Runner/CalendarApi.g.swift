@@ -203,11 +203,18 @@ protocol NativeCalendarApi {
   /// 获取指定日历在时间范围内的所有条目
   /// 注意：Android 上由于系统限制，可能只返回 Event
   func getEvents(calendarId: String, startMs: Int64, endMs: Int64) throws -> [PlatformItem]
+  /// 🚀 关键新增：在手机系统里创建一个新的日历账簿
+  /// 返回系统分配的数字 ID (String 形式的 Long)
+  func createCalendar(displayName: String, accountName: String, completion: @escaping (Result<String?, Error>) -> Void)
+  /// 🚀 关键新增：根据 ID 删除整个日历账簿
+  /// Android 上删除日历会自动联级删除该日历下的所有事件 (Events)
+  func deleteCalendar(calendarId: String, accountName: String, accountType: String, completion: @escaping (Result<Bool, Error>) -> Void)
   func createEvent(calendarId: String, title: String, start: Int64, end: Int64, notes: String?, uid: String?, completion: @escaping (Result<String?, Error>) -> Void)
   /// 获取指定日历下所有事件的 ID 列表（用于检测本地删除了哪些）
   func getSystemEventIds(calendarId: String) throws -> [String]
   /// 根据 ID 删除本地事件（用于同步云端的删除操作）
   func deleteEvent(eventId: String) throws -> Bool
+  func modifyCalendarTitle(calendarId: String, newTitle: String, accountName: String, accountType: String, completion: @escaping (Result<Bool, Error>) -> Void)
 }
 
 /// Generated setup class from Pigeon to handle messages through the `binaryMessenger`.
@@ -268,6 +275,47 @@ class NativeCalendarApiSetup {
     } else {
       getEventsChannel.setMessageHandler(nil)
     }
+    /// 🚀 关键新增：在手机系统里创建一个新的日历账簿
+    /// 返回系统分配的数字 ID (String 形式的 Long)
+    let createCalendarChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.caleesync.NativeCalendarApi.createCalendar\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      createCalendarChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let displayNameArg = args[0] as! String
+        let accountNameArg = args[1] as! String
+        api.createCalendar(displayName: displayNameArg, accountName: accountNameArg) { result in
+          switch result {
+          case .success(let res):
+            reply(wrapResult(res))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      createCalendarChannel.setMessageHandler(nil)
+    }
+    /// 🚀 关键新增：根据 ID 删除整个日历账簿
+    /// Android 上删除日历会自动联级删除该日历下的所有事件 (Events)
+    let deleteCalendarChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.caleesync.NativeCalendarApi.deleteCalendar\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      deleteCalendarChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let calendarIdArg = args[0] as! String
+        let accountNameArg = args[1] as! String
+        let accountTypeArg = args[2] as! String
+        api.deleteCalendar(calendarId: calendarIdArg, accountName: accountNameArg, accountType: accountTypeArg) { result in
+          switch result {
+          case .success(let res):
+            reply(wrapResult(res))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      deleteCalendarChannel.setMessageHandler(nil)
+    }
     let createEventChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.caleesync.NativeCalendarApi.createEvent\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
     if let api = api {
       createEventChannel.setMessageHandler { message, reply in
@@ -321,6 +369,26 @@ class NativeCalendarApiSetup {
       }
     } else {
       deleteEventChannel.setMessageHandler(nil)
+    }
+    let modifyCalendarTitleChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.caleesync.NativeCalendarApi.modifyCalendarTitle\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      modifyCalendarTitleChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let calendarIdArg = args[0] as! String
+        let newTitleArg = args[1] as! String
+        let accountNameArg = args[2] as! String
+        let accountTypeArg = args[3] as! String
+        api.modifyCalendarTitle(calendarId: calendarIdArg, newTitle: newTitleArg, accountName: accountNameArg, accountType: accountTypeArg) { result in
+          switch result {
+          case .success(let res):
+            reply(wrapResult(res))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      modifyCalendarTitleChannel.setMessageHandler(nil)
     }
   }
 }

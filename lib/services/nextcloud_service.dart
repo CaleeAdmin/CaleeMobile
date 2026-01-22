@@ -6,9 +6,11 @@ import 'package:xml/xml.dart' as xml;
 import '../common/app_constant.dart';
 import '../common/utils/IcsSerializer.dart';
 import '../common/utils/mmkv_utils.dart';
+import 'nextcloud_auth_service.dart';
 
 class NextcloudService {
   final http.Client _client = http.Client();
+  final NextcloudAuthService _authService = NextcloudAuthService(serverBaseUrl: AppConstant.nextcloudServer);
 
   /// 1. 获取并解析云端日历 (对应 calendar_map)
   Future<List<Map<String, dynamic>>> fetchRemoteCalendars({
@@ -154,31 +156,6 @@ class NextcloudService {
       print('❌ 严重错误: $e');
     }
     return [];
-  }
-
-  List<Map<String, dynamic>> _parseEventsXmlToMap(String xmlString) {
-    final List<Map<String, dynamic>> events = [];
-    final document = xml.XmlDocument.parse(xmlString);
-
-    for (var response in document.findAllElements('d:response')) {
-      final href = response.findElements('d:href').firstOrNull?.innerText;
-      final etag = response.findAllElements('d:getetag').firstOrNull?.innerText?.replaceAll('"', '');
-      final icsData = response.findAllElements('c:calendar-data').firstOrNull?.innerText;
-
-      if (href != null && href.endsWith('.ics') && icsData != null) {
-        // 从 ICS 字符串中提取 UID (同步的核心主键)
-        final uid = _extractUidFromIcs(icsData);
-        if (uid != null) {
-          events.add({
-            'uid': uid, // 对应 sync_map.uid
-            'remote_href': href, // 对应 sync_map.remote_href
-            'last_etag': etag, // 对应 sync_map.last_etag
-            'item_type': 'event',
-          });
-        }
-      }
-    }
-    return events;
   }
 
   /// [MKCALENDAR] 在云端创建一个新的日历
@@ -349,14 +326,174 @@ class NextcloudService {
   }) async {
     final String userId = MMKVUtils.instance.getString(AppConstant.loginName) ?? "";
     final String password = MMKVUtils.instance.getString(AppConstant.password) ?? "";
-    final url = "https://nc-dev.ywpl.com.au$eventPath";
-    final response = await http.delete(
-      Uri.parse(url),
-      headers: {
-        'Authorization': 'Basic ${base64Encode(utf8.encode('$userId:$password'))}',
-      },
-    );
-    return response.statusCode == 204 || response.statusCode == 200;
+
+    // 建议：确保 eventPath 以 / 开头，避免 URL 拼接错误
+    final String cleanPath = eventPath.startsWith('/') ? eventPath : '/$eventPath';
+    final url = "https://nc-dev.ywpl.com.au$cleanPath";
+
+    try {
+      final response = await http.delete(
+        Uri.parse(url),
+        headers: {
+          'Authorization': 'Basic ${base64Encode(utf8.encode('$userId:$password'))}',
+        },
+      );
+
+      print("🗑️ WebDAV Delete Request: $url | Status: ${response.statusCode}");
+
+      // 💡 关键修改：
+      // 204: No Content (WebDAV 标准删除成功状态码)
+      // 200: OK (某些服务器实现的成功码)
+      // 404: Not Found (云端已不存在，同步视为完成，允许本地清理)
+      return response.statusCode == 204 ||
+          response.statusCode == 200 ||
+          response.statusCode == 404;
+
+    } catch (e) {
+      print("❌ WebDAV Delete Error: $e");
+      return false; // 网络异常或其他错误导致删除动作未确认，保持本地状态供下次重试
+    }
+  }
+
+  /// [DELETE] 删除云端日历
+  Future<bool> deleteRemoteCalendar({
+    required String userId,
+    required String calendarPath, // 数据库存的: /remote.php/dav/calendars/444/personal-back-1769363944/
+  }) async {
+    // 使用你提供的规范化方法，确保 server 不带末尾斜杠
+    final server = _normalizeServer(AppConstant.nextcloudServer);
+    final password = MMKVUtils.instance.getString(AppConstant.password);
+
+    // 拼接 URL：server(无斜杠) + calendarPath(以斜杠开头)
+    // 结果应该是: https://nc-dev.ywpl.com.au/remote.php/dav/calendars/444/personal-back-1769363944/
+    final fullUrl = '$server$calendarPath';
+    final uri = Uri.parse(fullUrl);
+
+    debugPrint('[Nextcloud] 🚀 执行 DELETE 请求: $fullUrl');
+
+    final req = http.Request('DELETE', uri)
+      ..headers.addAll({
+        'Authorization': _getAuthString(userId, password!),
+      });
+
+    try {
+      final res = await _client.send(req);
+      debugPrint('[Nextcloud] DELETE 状态码: ${res.statusCode}');
+
+      // 204: 成功删除, 404: 云端原本就不存在
+      return res.statusCode == 204 || res.statusCode == 404;
+    } catch (e) {
+      debugPrint('[Nextcloud] DELETE 网络异常: $e');
+      return false;
+    }
+  }
+
+  Future<bool> renameRemoteCalendar({
+    required String userId,
+    required String calendarPath,
+    required String newName,
+  }) async {
+    final server = _normalizeServer(AppConstant.nextcloudServer);
+    final password = MMKVUtils.instance.getString(AppConstant.password);
+    final uri = Uri.parse('$server$calendarPath');
+
+    // 使用 PROPPATCH 修改 displayname
+    final xmlBody = '''<?xml version="1.0" encoding="utf-8" ?>
+<d:propertyupdate xmlns:d="DAV:">
+  <d:set>
+    <d:prop>
+      <d:displayname>$newName</d:displayname>
+    </d:prop>
+  </d:set>
+</d:propertyupdate>''';
+
+    final req = http.Request('PROPPATCH', uri)
+      ..headers.addAll({
+        'Authorization': _getAuthString(userId, password!),
+        'Content-Type': 'application/xml; charset=utf-8',
+      })
+      ..body = xmlBody;
+
+    final res = await _client.send(req);
+    return res.statusCode == 207; // Multi-Status
+  }
+
+  /// 从 ICS 文本中提取日历名称
+  Future<String?> getIcsNameFromUrl(String url) async {
+    try {
+      final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final text = response.body;
+
+        // 使用正则匹配 X-WR-CALNAME: 之后的内容
+        // 支持多种换行符 (\r?\n)
+        final regExp = RegExp(r'X-WR-CALNAME:(.*)', caseSensitive: false);
+        final match = regExp.firstMatch(text);
+
+        if (match != null && match.groupCount >= 1) {
+          String name = match.group(1)!.trim();
+          // 过滤掉一些可能存在的特殊字符
+          return name.replaceAll('\r', '').replaceAll('\n', '');
+        }
+      }
+    } catch (e) {
+      print("⚠️ 抓取 ICS 名称失败: $e");
+    }
+    return null;
+  }
+
+  /// [MKCALENDAR] 在云端订阅一个外部公共 ICS 日历
+  Future<String?> subscribeRemotePublicIcs({
+    required String userId,
+    required String calendarName,
+    required String calendarId, // 这里的 ID 建议用 sub_时间戳
+    required String icsUrl,     // 外部公共 ICS 链接
+  }) async {
+    final server = _normalizeServer(AppConstant.nextcloudServer);
+    final password = MMKVUtils.instance.getString(AppConstant.password);
+
+    // 1. 构建云端路径
+    final calendarPath = '/remote.php/dav/calendars/$userId/$calendarId/';
+    final uri = Uri.parse('$server$calendarPath');
+
+    // 2. 构建带 source 的 XML 负载
+    // 注意：Nextcloud 识别 <c:source> 来实现远程挂载
+    final xmlBody = '''<?xml version="1.0" encoding="utf-8" ?>
+<c:mkcalendar xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+  <d:set>
+    <d:prop>
+      <d:displayname>$calendarName</d:displayname>
+      <c:source><d:href>$icsUrl</d:href></c:source>
+      <c:supported-calendar-component-set>
+        <c:comp name="VEVENT" />
+      </c:supported-calendar-component-set>
+    </d:prop>
+  </d:set>
+</c:mkcalendar>''';
+
+    final req = http.Request('MKCALENDAR', uri)
+      ..headers.addAll({
+        'Authorization': _getAuthString(userId, password!),
+        'Content-Type': 'application/xml; charset=utf-8',
+      })
+      ..body = xmlBody;
+
+    try {
+      final res = await _client.send(req);
+      debugPrint('[Nextcloud] Subscription Status: ${res.statusCode}');
+
+      if (res.statusCode == 201) {
+        return calendarPath;
+      } else {
+        final body = await res.stream.bytesToString();
+        debugPrint('[Nextcloud] Subscription Failed Body: $body');
+        return null;
+      }
+    } catch (e) {
+      debugPrint('[Nextcloud] Subscription Exception: $e');
+      return null;
+    }
   }
 
   // --- 辅助工具函数 ---
@@ -369,13 +506,6 @@ class NextcloudService {
 
   bool _isSpecialFolder(String href) {
     return href.contains('/inbox/') || href.contains('/outbox/') || href.contains('/trashbin/');
-  }
-
-  String? _extractUidFromIcs(String ics) {
-    // 简单的正则匹配 UID:xxx
-    final reg = RegExp(r'UID:(.*)\r?\n');
-    final match = reg.firstMatch(ics);
-    return match?.group(1)?.trim();
   }
 
   String _normalizeServer(String base) {

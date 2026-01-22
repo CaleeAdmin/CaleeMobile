@@ -51,6 +51,16 @@ abstract class NativeCalendarApi {
   /// 注意：Android 上由于系统限制，可能只返回 Event
   List<PlatformItem> getEvents(String calendarId, int startMs, int endMs);
 
+  /// 🚀 关键新增：在手机系统里创建一个新的日历账簿
+  /// 返回系统分配的数字 ID (String 形式的 Long)
+  @async
+  String? createCalendar(String displayName, String accountName);
+
+  /// 🚀 关键新增：根据 ID 删除整个日历账簿
+  /// Android 上删除日历会自动联级删除该日历下的所有事件 (Events)
+  @async
+  bool deleteCalendar(String calendarId, String accountName, String accountType);
+
   // 🚀 新增：将云端数据写入本地系统日历
   @async
   String? createEvent(
@@ -67,4 +77,7 @@ abstract class NativeCalendarApi {
 
   /// 根据 ID 删除本地事件（用于同步云端的删除操作）
   bool deleteEvent(String eventId);
+
+  @async
+  bool modifyCalendarTitle(String calendarId, String newTitle, String accountName, String accountType);
 }

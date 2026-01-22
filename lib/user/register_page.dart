@@ -1,69 +1,72 @@
 import 'package:caleesync/common/route_constant.dart';
+import 'package:caleesync/controllers/auth_controller.dart';
 import 'package:caleesync/models/nextcloud_register_state.dart';
-import 'package:caleesync/providers/nextcloud_register_provider.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
+import 'package:get/get.dart';
 
-class RegisterPage extends ConsumerStatefulWidget {
+class RegisterPage extends StatefulWidget {
   const RegisterPage({super.key});
 
   @override
-  ConsumerState<RegisterPage> createState() => _RegisterPageState();
+  State<RegisterPage> createState() => _RegisterPageState();
 }
 
-class _RegisterPageState extends ConsumerState<RegisterPage> {
+class _RegisterPageState extends State<RegisterPage> {
   final _formKey = GlobalKey<FormState>();
   final _accountController = TextEditingController();
+  final _displayNameController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmController = TextEditingController();
   bool _agree = false;
+  Worker? _registerStateWorker;
 
   @override
   void initState() {
     super.initState();
+
+    // 获取AuthController实例
+    final authController = Get.find<AuthController>();
+
     // 监听注册状态变化
-    ref.listenManual<NextcloudRegisterState>(
-      nextcloudRegisterStateProvider,
-      (previous, next) {
-        // 注册成功，显示成功提示并跳转到登录页
-        if (next.isSuccess && !previous!.isSuccess) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Registration successful'),
-              backgroundColor: Colors.green,
-              duration: Duration(seconds: 2),
-            ),
-          );
-          // 延迟跳转，让用户看到成功提示
-          Future.delayed(const Duration(milliseconds: 500), () {
-            if (mounted) {
-              context.go(RouteConstant.login);
-            }
-          });
-        }
-        
-        // 显示注册失败错误信息
-        if (next.hasError && 
-            next.status == NextcloudRegisterStatus.error &&
-            previous?.errorMessage != next.errorMessage) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(next.errorMessage ?? 'Registration failed'),
-              backgroundColor: Colors.red,
-              duration: const Duration(seconds: 3),
-            ),
-          );
-        }
-      },
-    );
+    _registerStateWorker = ever(authController.registerStateRx, (NextcloudRegisterState state) {
+      // 检查页面是否还挂载
+      if (!mounted) return;
+
+      // 注册成功，显示成功提示并跳转到登录页
+      if (state.isSuccess) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Registration successful'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
+          ),
+        );
+        // 延迟跳转，让用户看到成功提示
+        Future.delayed(const Duration(milliseconds: 500), () {
+          Get.offAllNamed(RouteConstant.login);
+        });
+      }
+
+      // 显示注册失败错误信息
+      if (state.hasError && state.status == NextcloudRegisterStatus.error) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(state.errorMessage ?? 'Registration failed'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    });
   }
 
   @override
   void dispose() {
+    _registerStateWorker?.dispose();
     _accountController.dispose();
+    _displayNameController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
     _confirmController.dispose();
@@ -81,20 +84,23 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
 
     // 使用 Provisioning API 注册用户
     final userid = _accountController.text.trim();
+    final displayName = _displayNameController.text.trim();
     final email = _emailController.text.trim();
     final password = _passwordController.text.trim();
 
-    ref.read(nextcloudRegisterStateProvider.notifier).register(
-      userid: userid,
-      password: password,
+    final authController = Get.find<AuthController>();
+    authController.registerWithCredentials(
+      loginName: userid,
+      displayName: displayName,
       email: email,
+      password: password,
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final registerState = ref.watch(nextcloudRegisterStateProvider);
-    final isLoading = registerState.isLoading;
+    final authController = Get.find<AuthController>();
+    final isLoading = authController.registerState.isLoading;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF7F9FB),
@@ -276,7 +282,7 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
                       ),
                       TextButton(
                         onPressed: () {
-                          context.go(RouteConstant.login);
+                          Get.toNamed(RouteConstant.login);
                         },
                         child: const Text(
                           'Login',

@@ -28,6 +28,8 @@
 	<true/>
 	<key>NSCalendarsUsageDescription</key>
 	<string>需要访问您的日历以读取和展示事件。</string>
+	<key>NSCameraUsageDescription</key>
+	<string>需要访问相机以扫描二维码并链接设备。</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UILaunchStoryboardName</key>

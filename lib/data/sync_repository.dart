@@ -1,6 +1,7 @@
 import 'package:caleesync/common/app_constant.dart';
 import 'package:caleesync/common/utils/mmkv_utils.dart';
 import 'package:caleesync/core/platform/pigeon/calendar_api.g.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../common/utils/IcsParser.dart';
@@ -40,8 +41,7 @@ class SyncRepository {
     // 3. 统一从数据库拉取所有“可写”的日历映射
     // 这样逻辑更清晰：原生负责采集，数据库负责持久化配置
     final List<Map<String, dynamic>> maps = await db.query(
-      'calendar_map',
-      // 假设你在 scanLocalCalendars 里已经标记了只读状态，或者这里直接查
+      'calendar_map', where: 'sync_status = 1'
     );
 
     List<SyncContext> contexts = [];
@@ -54,6 +54,7 @@ class SyncRepository {
         accountName: row['account_name'] as String? ?? '',
         accountType: row['account_type'] as String? ?? '',
         displayName: row['display_name'] as String? ?? '未命名日历', // 对应你之前的需求
+        syncStatus: row['sync_status'] as int? ?? 0,
       ));
     }
 
@@ -143,13 +144,13 @@ class SyncRepository {
         if (cal == null) continue;
         await txn.rawInsert('''
         INSERT INTO calendar_map (
-          local_id, account_name, account_type, display_name, color, sync_status
+          local_id, account_name, account_type, display_name, color, sync_mode,sync_status
         )
-        VALUES (?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?,?)
         ON CONFLICT(local_id) DO UPDATE SET 
           display_name = excluded.display_name,
           color = excluded.color
-      ''', [cal.id, cal.accountName, cal.accountType, cal.name, cal.color, 0]);
+      ''', [cal.id, cal.accountName, cal.accountType, cal.name, cal.color,cal.isReadOnly == true ? 1 : 0, 0]);
       }
     });
   }
@@ -506,6 +507,362 @@ class SyncRepository {
       print('❌ 删除操作异常: $e');
       return false;
     }
+  }
+
+  Future<Map<String, dynamic>> getCalendarDetailData(String localId) async {
+    final db = await DatabaseHelper.instance.database;
+
+    // 1. 查询基础配置
+    final List<Map<String, dynamic>> maps = await db.query(
+      'calendar_map',
+      where: 'local_id = ?',
+      whereArgs: [localId],
+    );
+
+    if (maps.isEmpty) return {};
+    final cal = maps.first;
+
+    // 2. 统计该日历下的本地有效事件数（过滤 status 2）
+    final countResult = await db.rawQuery(
+        'SELECT COUNT(*) as count FROM sync_map WHERE calendar_local_id = ? AND sync_status != 2',
+        [localId]
+    );
+
+    // 3. 逻辑判定：纯靠 account_type 区分
+    final String accType = cal['account_type'] ?? '';
+    // 如果是 Nextcloud 说明是云端发现的，否则视为系统日历
+    final bool isNextcloudNative = (accType == 'Nextcloud');
+
+    return {
+      'title': cal['display_name'] ?? 'Primary Calendar',
+      'source': isNextcloudNative ? 'Nextcloud' : 'System',
+      'url': cal['remote_path'] ?? 'Not linked',
+      'owner': cal['account_name'] ?? 'Unknown',
+      'eventCount': countResult.first['count'] ?? 0,
+      'isTwoWay': cal['remote_path'] != null && cal['remote_path'].toString().isNotEmpty,
+    };
+  }
+
+  Future<void> updateCalendarLocalId(String oldId, String newId) async {
+    final db = await DatabaseHelper.instance.database;
+
+    await db.transaction((txn) async {
+      // 1. 查找老记录（带有虚拟 ID 和可能已存在的 remote_path 的记录）
+      final List<Map<String, dynamic>> oldRecords = await txn.query(
+        'calendar_map',
+        where: 'local_id = ?',
+        whereArgs: [oldId],
+      );
+
+      if (oldRecords.isEmpty) {
+        print("⚠️ [ID 洗白] 未找到旧 ID: $oldId，可能已处理过。");
+        return;
+      }
+
+      final oldRecord = oldRecords.first;
+      // 提取关键属性，确保它们能带到新 ID 身上
+      final String? remotePath = oldRecord['remote_path'];
+      final String? accountType = oldRecord['account_type'];
+
+      // 2. 🌟 预清理冲突：如果新 ID (比如 '7') 已经存在记录（例如 scanLocalCalendars 扫出来的）
+      // 我们先删除它，因为我们要把“带路径”的老记录合并过去
+      await txn.delete('calendar_map', where: 'local_id = ?', whereArgs: [newId]);
+
+      // 3. 执行核心洗白：将虚拟 ID 改为真实系统 ID
+      // 注意：我们这里不显式 update account_type，它会随着整行保留下来
+      final calendarUpdateCount = await txn.update(
+        'calendar_map',
+        {
+          'local_id': newId,
+          'remote_path': remotePath, // 确保路径被继承
+          // 这里不改 account_type，它依然是最初定义的 Nextcloud 或 com.google
+        },
+        where: 'local_id = ?',
+        whereArgs: [oldId],
+      );
+
+      // 4. 更新事件关联的外键
+      final eventUpdateCount = await txn.update(
+        'sync_map',
+        {'calendar_local_id': newId},
+        where: 'calendar_local_id = ?',
+        whereArgs: [oldId],
+      );
+
+      print("✅ [ID 洗白成功] $oldId -> $newId");
+      print("📌 属性保留: AccountType=$accountType, RemotePath=$remotePath");
+      print("📊 统计: 日历更新($calendarUpdateCount), 事件外键关联($eventUpdateCount)");
+    });
+  }
+
+  /// 🗑️ 核心合并删除逻辑：物理销毁或解除绑定
+  Future<void> performAbsoluteDelete(String localId) async {
+    final db = await _dbHelper.database;
+    final String userId = MMKVUtils.instance.getString(AppConstant.loginName) ?? "";
+
+    // 1. 提取元数据
+    final List<Map<String, dynamic>> maps = await db.query(
+        'calendar_map',
+        where: 'local_id = ?',
+        whereArgs: [localId]
+    );
+
+    if (maps.isEmpty) {
+      debugPrint("⚠️ [Delete] 数据库中已无此 ID，无需重复操作: $localId");
+      return;
+    }
+
+    final cal = maps.first;
+    final String accountName = cal['account_name'] ?? '';
+    final String accountType = cal['account_type'] ?? '';
+    final String? remotePath = cal['remote_path'];
+
+    debugPrint("🚀 启动彻底删除流程: ID $localId, Path: $remotePath");
+
+    try {
+      // --- Step A: 云端删除 ---
+      // 逻辑：只有当它是 Nextcloud 类型且有路径时才调接口
+      if (accountType.contains('Nextcloud')) {
+        if (remotePath != null && remotePath.isNotEmpty) {
+          bool cloudOk = await NextcloudService().deleteRemoteCalendar(
+              userId: userId,
+              calendarPath: remotePath
+          );
+          debugPrint(cloudOk ? "✅ 云端销毁成功" : "❌ 云端销毁失败 (状态码不符)");
+        }
+      }
+
+      // --- Step B: 本地系统层删除 (你反馈这步已成功) ---
+      if (!localId.startsWith('rc_')) {
+        await _nativeApi.deleteCalendar(localId, accountName, accountType);
+        debugPrint("✅ 手机系统日历已移除");
+      }
+
+    } catch (e) {
+      // 即使 Step A 或 B 出错（比如断网），也要捕获它，防止程序中断
+      debugPrint("⚠️ 物理层删除报错 (但这不影响清理本地库): $e");
+    } finally {
+      // --- Step C: 核心保底 - 本地数据库清理 ---
+      // 无论前面是成功还是失败，必须抹掉本地记录，防止“死而复生”
+      await db.transaction((txn) async {
+        // 1. 删除关联的事件追踪 (sync_map)
+        int sCount = await txn.delete(
+            'sync_map',
+            where: 'calendar_local_id = ?',
+            whereArgs: [localId]
+        );
+        // 2. 删除日历自身的配置 (calendar_map)
+        int cCount = await txn.delete(
+            'calendar_map',
+            where: 'local_id = ?',
+            whereArgs: [localId]
+        );
+        debugPrint("🗑️ 数据库清理完毕: 删除了 $sCount 条事件, $cCount 条日历记录");
+      });
+    }
+  }
+
+  Future<void> renameCalendar(String localId, String newName) async {
+    final db = await _dbHelper.database;
+
+    // 1. 获取当前日历元数据
+    final maps = await db.query('calendar_map', where: 'local_id = ?', whereArgs: [localId]);
+    if (maps.isEmpty) return;
+    final cal = maps.first;
+// 如果字段可能为空，用 String?
+    final String? path = cal['remote_path'] as String?;
+
+// 如果你确定 account_name 绝对有值，用 String
+    final String userId = cal['account_name'] as String;
+
+    try {
+      // 2. 先改云端 (如果失败，建议直接抛异常，不改本地)
+      if (path != null) {
+        bool isCloudOk = await NextcloudService().renameRemoteCalendar(
+            userId: userId,
+            calendarPath: path,
+            newName: newName
+        );
+        if (!isCloudOk) throw Exception("云端改名失败");
+      }
+
+      // 3. 修改手机系统日历 (Android 系统层)
+      // 这一步确保在手机自带日历 App 里看到的也是新名字
+      await _nativeApi.modifyCalendarTitle(
+          localId,
+          newName,
+          userId,
+          "NextCloud"
+      );
+
+      // 4. 修改本地数据库记录
+      await db.update(
+        'calendar_map',
+        {'display_name': newName},
+        where: 'local_id = ?',
+        whereArgs: [localId],
+      );
+
+      print("✅ 日历 $localId 已在三端同步更名为: $newName");
+
+    } catch (e) {
+      print("❌ 改名流程中断: $e");
+    }
+  }
+
+  /// 创建一个全新的本地日历条目
+  /// 此时只在【系统日历】和【本地数据库】占位，暂不推送到云端
+  Future<bool> createNewLocalCalendar(String displayName) async {
+    final db = await _dbHelper.database;
+    final String userId = MMKVUtils.instance.getString(AppConstant.loginName) ?? "";
+    const String accountType = "com.nextcloud.caleesync";
+
+    try {
+      // 1. 🌟 优先：在云端创建日历 (Nextcloud)
+      // 生成一个唯一的云端 ID，例如: cal_1712345678
+      final String cloudId = "cal_${DateTime.now().millisecondsSinceEpoch}";
+
+      print("🚀 [Repository] 正在云端创建日历: $displayName (ID: $cloudId)");
+      final String? remotePath = await NextcloudService().createRemoteCalendar(
+        userId: userId,
+        calendarName: displayName,
+        calendarId: cloudId,
+      );
+
+      if (remotePath == null) {
+        print("❌ [Repository] 云端创建失败，放弃本地入库");
+        return false;
+      }
+
+      // 2. 🌟 生成本地虚拟 ID (rc_ 开头)
+      // 因为现在还没同步到手机系统，所以没有 system_id (1, 2, 3...)
+      // 我们先用虚拟 ID 占位
+      final String virtualId = "rc_${DateTime.now().millisecondsSinceEpoch}";
+
+      // 3. 🌟 将数据缓存到本地数据库
+      await db.insert(
+        'calendar_map',
+        {
+          'local_id': virtualId,        // 虚拟 ID
+          'account_name': userId,
+          'account_type': accountType,
+          'display_name': displayName,
+          'remote_path': remotePath,    // 存入刚刚拿到的云端路径
+          'sync_status': 0,             // 🌟 默认不勾选同步
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+
+      print("✅ [Repository] 云端日历已创建并缓存到本地: $remotePath");
+      return true;
+    } catch (e) {
+      print("❌ [Repository] 创建逻辑发生异常: $e");
+      return false;
+    }
+  }
+
+  Future<bool> handlePublicSubscription(String icsUrl) async {
+    // 1. 使用你提供的方法获取原始名称
+    String? originalName = await NextcloudService().getIcsNameFromUrl(icsUrl);
+
+    // 确定用于显示的名称
+    final String displayName = originalName ?? "公共订阅_${DateTime.now().millisecond}";
+    final String userId = MMKVUtils.instance.getString(AppConstant.loginName)!;
+
+    // 2. 生成一个“干净”的 ID 用于 URL 路径
+    // 比如将 "公司 2024" 转换为 "sub_1712345678"
+    final String safeCalendarId = "sub_${DateTime.now().millisecondsSinceEpoch}";
+
+    // 3. 提交给云端
+    final String? remotePath = await NextcloudService().subscribeRemotePublicIcs(
+      userId: userId,
+      calendarName: displayName,  // 🌟 这里用你抓取到的原始中文名
+      calendarId: safeCalendarId, // 🌟 这里用纯数字/字母的 ID
+      icsUrl: icsUrl,
+    );
+
+    if (remotePath != null) {
+      // 插入本地数据库...
+      return true;
+    }
+    return false;
+  }
+
+  /// 获取订阅日历列表及其对应的事件总数（含详细打印）
+  Future<List<Map<String, dynamic>>> getSubscribedCalendarsWithCount() async {
+    final db = await _dbHelper.database;
+
+    try {
+      print("------------------------------------------------------------");
+      print("🔍 [Repository] 开始查询订阅列表 (基于 local_id 排序)...");
+
+      // 🌟 核心修正：
+      // 1. 去掉 c.id，全部使用 c.local_id
+      // 2. COUNT(s.uid) 统计 sync_map 中的事件总数
+      final String sql = '''
+      SELECT 
+        c.*, 
+        COUNT(s.uid) as event_count 
+      FROM calendar_map c
+      LEFT JOIN sync_map s ON c.local_id = s.calendar_local_id
+      WHERE c.local_id LIKE ? OR c.remote_path LIKE ? OR c.remote_path LIKE ?
+      GROUP BY c.local_id
+      ORDER BY c.local_id DESC
+    ''';
+
+      final List<Map<String, dynamic>> results = await db.rawQuery(
+          sql,
+          ['%sub%', '%sub_%', '%?export%']
+      );
+
+      print("📊 [Repository] 查询完成，共找到 ${results.length} 条订阅记录");
+
+      for (var i = 0; i < results.length; i++) {
+        final item = results[i];
+        final String currentLocalId = item['local_id'].toString();
+        final bool isVirtual = currentLocalId.startsWith('rc_');
+
+        print("""
+  📍 记录 [#$i]
+     显示名称: ${item['display_name']}
+     本地 ID : $currentLocalId ${isVirtual ? "[未同步到系统]" : "[已同步到系统]"}
+     事件数量: ${item['event_count']}
+     同步状态: ${item['sync_status'] == 1 ? "✅ 开启" : "⚪ 关闭"}
+     远程路径: ${item['remote_path']}
+  ------------------------------------------------------------""");
+      }
+
+      return results;
+    } catch (e) {
+      print("❌ [Repository] 获取带计数的订阅列表失败: $e");
+      return [];
+    }
+  }
+
+  Future<void> updateSystemCalendarId(String oldRcId, String newSystemId) async {
+    final db = await DatabaseHelper.instance.database;
+
+    // 使用事务确保两张表同步更新
+    await db.transaction((txn) async {
+      // 1. 更新日历主表，把临时 ID 换成系统数字 ID
+      await txn.update(
+        'calendar_map',
+        {'local_id': newSystemId},
+        where: 'local_id = ?',
+        whereArgs: [oldRcId],
+      );
+
+      // 2. 更新同步映射表（如果有外键关联，这一步非常重要）
+      // 确保属于这个日历的所有事件记录都能关联到新的系统 ID
+      await txn.update(
+        'sync_map',
+        {'local_id': newSystemId},
+        where: 'local_id = ?',
+        whereArgs: [oldRcId],
+      );
+    });
+
+    print("[DB] 日历 ID 已从 $oldRcId 成功洗白为 $newSystemId");
   }
 
   // ==========================================

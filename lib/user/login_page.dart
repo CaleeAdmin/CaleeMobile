@@ -1,29 +1,31 @@
 import 'package:caleesync/common/app_constant.dart';
 import 'package:caleesync/common/route_constant.dart';
 import 'package:caleesync/common/utils/mmkv_utils.dart';
+import 'package:caleesync/controllers/app_controller.dart';
+import 'package:caleesync/controllers/auth_controller.dart';
 import 'package:caleesync/models/nextcloud_auth_state.dart';
-import 'package:caleesync/providers/nextcloud_auth_provider.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
+import 'package:get/get.dart';
 
 /// Login page with Nextcloud Login Flow v2 integration.
-class LoginPage extends ConsumerStatefulWidget {
+class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
 
   @override
-  ConsumerState<LoginPage> createState() => _LoginPageState();
+  State<LoginPage> createState() => _LoginPageState();
 }
 
-class _LoginPageState extends ConsumerState<LoginPage> {
+class _LoginPageState extends State<LoginPage> {
   final _formKey = GlobalKey<FormState>();
   final _accountController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _agree = false;
+  Worker? _authStateWorker;
 
   @override
   void dispose() {
+    _authStateWorker?.dispose();
     _accountController.dispose();
     _passwordController.dispose();
     super.dispose();
@@ -32,36 +34,38 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   @override
   void initState() {
     super.initState();
-    // 监听登录状态变化
-    ref.listenManual<NextcloudAuthState>(
-      nextcloudAuthStateProvider,
-      (previous, next) {
-        // 登录成功，保存凭据并跳转
-        if (next.isAuthenticated && !previous!.isAuthenticated) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Login success'),
-              backgroundColor: Colors.green,
-              duration: Duration(seconds: 2),
-            ),
-          );
-          _saveCredentialsAndNavigate(next);
-        }
-        
+
+    // 获取AuthController实例
+    final authController = Get.find<AuthController>();
+
+    // 监听认证状态变化
+    _authStateWorker = ever(authController.authStateRx, (NextcloudAuthState state) {
+      // 检查页面是否还挂载
+      if (!mounted) return;
+
+      if (state.isAuthenticated) {
+        // 登录成功
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Login success'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
+          ),
+        );
+        _saveCredentialsAndNavigate(state);
+      }
+
+      if (state.hasError && state.status == NextcloudAuthStatus.error) {
         // 显示登录失败错误信息
-        if (next.hasError && 
-            next.status == NextcloudAuthStatus.error &&
-            previous?.errorMessage != next.errorMessage) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(next.errorMessage ?? 'Login failed'),
-              backgroundColor: Colors.red,
-              duration: const Duration(seconds: 3),
-            ),
-          );
-        }
-      },
-    );
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(state.errorMessage ?? 'Login failed'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    });
   }
 
   /// 保存登录凭据并跳转到主页
@@ -74,14 +78,13 @@ class _LoginPageState extends ConsumerState<LoginPage> {
 
     try {
       // 保存登录凭据到 MMKV
-      await MMKVUtils.instance.setString(AppConstant.Server, state.serverUrl!);
-      await MMKVUtils.instance.setString(AppConstant.loginName, state.loginName!);
-      await MMKVUtils.instance.setString(AppConstant.password, state.appPassword!);
+      MMKVUtils.instance.setString(AppConstant.Server, state.serverUrl!);
+      MMKVUtils.instance.setString(AppConstant.loginName, state.loginName!);
+      MMKVUtils.instance.setString(AppConstant.password, state.appPassword!);
 
-      // 跳转到主页
-      if (mounted) {
-        context.go(RouteConstant.home);
-      }
+      // 使用GetX的AppController处理登录成功
+      final appController = Get.find<AppController>();
+      appController.onLoginSuccess();
     } catch (e) {
       // 如果保存失败，显示错误信息
       if (mounted) {
@@ -108,8 +111,9 @@ class _LoginPageState extends ConsumerState<LoginPage> {
     // 使用用户名密码登录
     final loginName = _accountController.text.trim();
     final password = _passwordController.text.trim();
-    
-    ref.read(nextcloudAuthStateProvider.notifier).loginWithCredentials(
+
+    final authController = Get.find<AuthController>();
+    authController.loginWithCredentials(
       loginName: loginName,
       password: password,
     );
@@ -117,8 +121,8 @@ class _LoginPageState extends ConsumerState<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
-    final authState = ref.watch(nextcloudAuthStateProvider);
-    final isLoading = authState.isLoading;
+    final authController = Get.find<AuthController>();
+    final isLoading = authController.authState.isLoading;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF7F9FB),
@@ -267,7 +271,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                         onPressed: isLoading
                             ? null
                             : () {
-                                context.go(RouteConstant.register);
+                                Get.toNamed(RouteConstant.register);
                               },
                         child: const Text(
                           'SignUp',

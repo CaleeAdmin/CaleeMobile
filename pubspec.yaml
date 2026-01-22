@@ -33,6 +33,9 @@ dependencies:
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
+  # 1. 状态管理与路由
+  get: ^4.6.6
+  get_storage: ^2.1.1  # GetX 持久化存储
   cupertino_icons: ^1.0.8
   permission_handler: ^11.3.1
   mmkv: ^1.3.4
@@ -44,6 +47,9 @@ dependencies:
   sqflite: ^2.3.0
   intl: ^0.19.0  # 或者最新版本
   uuid: ^4.3.3 # 请检查 pub.dev 获取最新版本
+  device_calendar: ^4.3.2
+  mobile_scanner: ^3.3.0
+  webview_flutter: ^4.13.1
 
 dev_dependencies:
   flutter_test:

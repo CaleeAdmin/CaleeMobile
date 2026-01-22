@@ -1,0 +1,318 @@
+import 'package:caleesync/common/app_constant.dart';
+import 'package:caleesync/common/utils/mmkv_utils.dart';
+import 'package:device_calendar/device_calendar.dart';
+import 'package:get/get.dart';
+import 'package:sqflite/sqflite.dart';
+import 'dart:ui';
+
+import '../data/SyncEngine.dart';
+import '../data/database_helper.dart';
+import '../data/sync_repository.dart';
+import '../services/nextcloud_service.dart';
+import 'calendar_probe_controller.dart';
+
+// 1. 数据模型定义
+class CalendarGroup {
+  final String accountName;
+  final List<CalendarDisplayItem> calendars;
+
+  CalendarGroup({required this.accountName, required this.calendars});
+}
+
+class CalendarDisplayItem {
+  final String id;
+  final String name;
+  final String color;
+  final int eventCount;
+  final bool isTwoWay;
+  bool isSelected; // 👈 可变：映射数据库中的 sync_status 或特定开关字段
+
+  CalendarDisplayItem({
+    required this.id,
+    required this.name,
+    required this.color,
+    required this.eventCount,
+    required this.isTwoWay,
+    required this.isSelected,
+  });
+}
+
+// 2. Controller 实现
+class CalendarPageController extends GetxController {
+  // 静态访问器
+  static CalendarPageController get to => Get.find();
+
+  // 依赖注入：Repo 必须在 InitialBinding 或 main 中已 put
+  final SyncRepository _repo = Get.find<SyncRepository>();
+  final NextcloudService _nc = NextcloudService();
+  final engine = SyncEngine();
+
+  // 响应式变量
+  var calendarGroups = <CalendarGroup>[].obs;
+  var isLoading = false.obs;
+  /// 选中的日历 ID 集合（用于 UI 绑定）
+  var selectedCalendarIds = <String>{}.obs;
+
+  @override
+  void onInit() {
+    super.onInit();
+    // 页面加载时自动执行一次扫描和数据拉取
+    refreshDashboard();
+  }
+
+  /// 处理 Checkbox 点击事件
+  Future<void> toggleCalendarSelection(String localId, bool? newValue) async {
+    if (newValue == null) return;
+
+    try {
+      // 乐观更新本地模型，局部刷新 UI
+      CalendarDisplayItem? target;
+      for (var g in calendarGroups) {
+        for (var c in g.calendars) {
+          if (c.id == localId) {
+            target = c;
+            break;
+          }
+        }
+        if (target != null) break;
+      }
+      if (target == null) return;
+
+      final oldValue = target.isSelected;
+      target.isSelected = newValue;
+      // 通知 observers 局部刷新
+      calendarGroups.refresh();
+
+      // 持久化到数据库
+      final db = await DatabaseHelper.instance.database;
+      await db.update(
+        'calendar_map',
+        {'sync_status': newValue ? 1 : 0},
+        where: 'local_id = ?',
+        whereArgs: [localId],
+      );
+
+      // 可选：如果用户开启了勾选，可以触发一次静默同步
+      if (newValue == true) {
+        // _triggerSilentSync(localId);
+      }
+
+    } catch (e) {
+      print("❌ 切换日历状态失败: $e");
+      Get.snackbar("错误", "无法更新日历同步状态");
+      // 回滚本地模型并刷新 UI
+      CalendarDisplayItem? target;
+      for (var g in calendarGroups) {
+        for (var c in g.calendars) {
+          if (c.id == localId) {
+            target = c;
+            break;
+          }
+        }
+        if (target != null) break;
+      }
+      if (target != null) {
+        target.isSelected = !newValue;
+        calendarGroups.refresh();
+      }
+    }
+  }
+
+  /// 核心方法：刷新并重新构建 UI 模型
+  Future<void> refreshDashboard() async {
+    try {
+      isLoading.value = true;
+      final String? loginName = MMKVUtils.instance.getString(AppConstant.loginName);
+      if (loginName == null) return;
+
+      final db = await DatabaseHelper.instance.database;
+
+      // 1. 🌟 双向扫描：确保云端新日历和本地新日历都能进入 calendar_map
+      await _repo.scanLocalCalendars(loginName);
+      await engine.discoverRemoteCalendars(loginName);
+
+      // 2. 获取所有日历记录
+      final List<Map<String, dynamic>> calendarMaps = await db.query(
+        'calendar_map',
+        where: 'account_name = ? OR account_type != ?',
+        whereArgs: [loginName, 'com.nextcloud.caleesync'],
+      );
+      final deviceCalendarPlugin = DeviceCalendarPlugin();
+      Map<String, List<CalendarDisplayItem>> tempMap = {};
+
+      for (var cal in calendarMaps) {
+        final String account = cal['account_type'] ?? 'Unknown';
+        final String localId = cal['local_id'].toString();
+        final String? remotePath = cal['remote_path'];
+        final String accType = account.toLowerCase();
+        final int? syncMode = cal['sync_mode'];
+
+        int realCount = 0;
+
+        // --- 🌟 核心修改：针对云端日历的实时计数 ---
+        if (accType == 'com.nextcloud.caleesync' && remotePath != null && remotePath.isNotEmpty) {
+          // A. 先查本地数据库 sync_map
+          final localCountResult = await db.rawQuery(
+              'SELECT COUNT(*) as count FROM sync_map WHERE calendar_local_id = ? AND sync_status != 2',
+              [localId]);
+          realCount = (localCountResult.first['count'] as int?) ?? 0;
+
+          // B. 如果本地计数为 0，说明还没同步过，触发一次“静默拉取”
+          if (realCount == 0) {
+            print("🌐 [静默拉取] 正在为日历 ${cal['display_name']} 获取云端事件数...");
+            try {
+              // 仅拉取快照，不涉及复杂的系统日历写入，速度非常快
+              final remoteItems = await _nc.fetchRemoteEvents(calendarPath: remotePath);
+
+              // 将云端 UID 存入 sync_map（ local_id 设为 v_ 前缀的影子 ID）
+              // 这一步是让 Dashboard 统计生效的关键
+              await db.transaction((txn) async {
+                for (var item in remoteItems) {
+                  String uid = item['uid'] ?? item['href'].split('/').last;
+                  // 使用 insert ignore 或 replace 防止重复
+                  await txn.insert('sync_map', {
+                    'uid': uid,
+                    'local_id': 'v_$uid', // 影子 ID，表示未洗白到系统
+                    'calendar_local_id': localId,
+                    'last_etag': item['etag'] ?? '',
+                    'sync_status': 0,
+                  }, conflictAlgorithm: ConflictAlgorithm.ignore);
+                }
+              });
+
+              // 重新计算数量
+              realCount = remoteItems.length;
+            } catch (e) {
+              print("❌ 静默拉取失败: $e");
+            }
+          }
+        } else {
+          // --- C. 普通本地系统日历统计 ---
+          try {
+            final now = DateTime.now();
+            final eventsResult = await deviceCalendarPlugin.retrieveEvents(
+                localId,
+                RetrieveEventsParams(
+                    startDate: now.subtract(const Duration(days: 365)),
+                    endDate: now.add(const Duration(days: 365))
+                )
+            );
+            if (eventsResult.isSuccess) realCount = eventsResult.data?.length ?? 0;
+          } catch (_) {}
+        }
+
+        // 组装 UI 模型
+        var displayItem = CalendarDisplayItem(
+          id: localId,
+          name: cal['display_name'] ?? 'Unknown',
+          color: cal['color'] ?? '#808080',
+          eventCount: realCount,
+          isTwoWay: remotePath != null && remotePath.isNotEmpty && (syncMode == 0),
+          isSelected: cal['sync_status'] == 1,
+        );
+
+        tempMap.putIfAbsent(account, () => []).add(displayItem);
+      }
+
+      // 排序并更新 UI
+      final entries = tempMap.entries.toList();
+      entries.sort((a, b) {
+        final la = a.key.toLowerCase();
+        if (la == 'nextcloud') return -1;
+        return 1;
+      });
+
+      calendarGroups.assignAll(entries.map((e) => CalendarGroup(accountName: e.key, calendars: e.value)).toList());
+
+    } catch (e) {
+      print("❌ Dashboard 刷新异常: $e");
+    } finally {
+      isLoading.value = false;
+    }
+  }
+  /// 供外部调用的同步接口
+  Future<void> syncAll() async {
+    // 1. 执行全量同步服务 (处理合并、上传、下载、删除 status 2)
+    // await Get.find<SyncService>().executeFullSync();
+
+    // 2. 同步完成后重刷界面
+    await refreshDashboard();
+  }
+
+  /// 彻底删除一个日历（包含云端、系统日历与本地 DB 清理）
+  Future<void> deleteCalendarTotally(String localId) async {
+    try {
+      isLoading.value = true;
+      await _repo.performAbsoluteDelete(localId);
+      await refreshDashboard();
+    } catch (e) {
+      print('❌ Dashboard 删除日历失败: $e');
+      Get.snackbar('错误', '删除日历失败');
+    } finally {
+      isLoading.value = false;
+    }
+  }
+
+  /// 重命名日历（委托给仓库并刷新）
+  Future<void> renameCalendar(String localId, String newName) async {
+    try {
+      isLoading.value = true;
+      await _repo.renameCalendar(localId, newName);
+      await refreshDashboard();
+    } catch (e) {
+      print('❌ Dashboard 重命名失败: $e');
+      Get.snackbar('错误', '重命名失败');
+      rethrow;
+    } finally {
+      isLoading.value = false;
+    }
+  }
+
+  /// 创建新的本地日历（委托给 SyncRepository），并刷新界面
+  Future<bool> createNewLocalCalendar(String displayName) async {
+    try {
+      isLoading.value = true;
+      final ok = await _repo.createNewLocalCalendar(displayName);
+      if (ok) {
+        await refreshDashboard();
+        return true;
+      } else {
+        Get.snackbar('错误', '创建日历失败');
+        return false;
+      }
+    } catch (e) {
+      print('❌ 创建本地日历失败: $e');
+      Get.snackbar('错误', '创建日历失败');
+      return false;
+    } finally {
+      isLoading.value = false;
+    }
+  }
+
+  /// 订阅一个公开的 ICS 链接（委托给仓库），并在成功后刷新界面
+  Future<bool> subscribePublicIcs(String icsUrl) async {
+    try {
+      isLoading.value = true;
+      final ok = await _repo.handlePublicSubscription(icsUrl);
+      if (ok) {
+        await refreshDashboard();
+        // 刷新已订阅列表（如果 probe controller 已注册）
+        if (Get.isRegistered<CalendarProbeController>()) {
+          await Get.find<CalendarProbeController>().fetchSubscribedCalendars();
+        }
+        Get.snackbar('Success', 'Subscribed to calendar');
+        return true;
+      } else {
+        Get.snackbar('错误', '订阅失败');
+        return false;
+      }
+    } catch (e) {
+      print('❌ 订阅失败: $e');
+      Get.snackbar('错误', '订阅失败');
+      return false;
+    } finally {
+      isLoading.value = false;
+    }
+  }
+
+}

@@ -70,6 +70,13 @@ class PlatformCalendar {
       supportsTasks: result[7] as bool?,
     );
   }
+
+  @override
+  String toString() {
+    return 'PlatformCalendar{id: $id, name: $name, accountName: $accountName, accountType: $accountType, color: $color, isReadOnly: $isReadOnly, supportsEvents: $supportsEvents, supportsTasks: $supportsTasks}';
+  }
+
+
 }
 
 class PlatformItem {
@@ -275,6 +282,59 @@ class NativeCalendarApi {
     }
   }
 
+  /// 🚀 关键新增：在手机系统里创建一个新的日历账簿
+  /// 返回系统分配的数字 ID (String 形式的 Long)
+  Future<String?> createCalendar(String displayName, String accountName) async {
+    final String __pigeon_channelName = 'dev.flutter.pigeon.caleesync.NativeCalendarApi.createCalendar$__pigeon_messageChannelSuffix';
+    final BasicMessageChannel<Object?> __pigeon_channel = BasicMessageChannel<Object?>(
+      __pigeon_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: __pigeon_binaryMessenger,
+    );
+    final List<Object?>? __pigeon_replyList =
+        await __pigeon_channel.send(<Object?>[displayName, accountName]) as List<Object?>?;
+    if (__pigeon_replyList == null) {
+      throw _createConnectionError(__pigeon_channelName);
+    } else if (__pigeon_replyList.length > 1) {
+      throw PlatformException(
+        code: __pigeon_replyList[0]! as String,
+        message: __pigeon_replyList[1] as String?,
+        details: __pigeon_replyList[2],
+      );
+    } else {
+      return (__pigeon_replyList[0] as String?);
+    }
+  }
+
+  /// 🚀 关键新增：根据 ID 删除整个日历账簿
+  /// Android 上删除日历会自动联级删除该日历下的所有事件 (Events)
+  Future<bool> deleteCalendar(String calendarId, String accountName, String accountType) async {
+    final String __pigeon_channelName = 'dev.flutter.pigeon.caleesync.NativeCalendarApi.deleteCalendar$__pigeon_messageChannelSuffix';
+    final BasicMessageChannel<Object?> __pigeon_channel = BasicMessageChannel<Object?>(
+      __pigeon_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: __pigeon_binaryMessenger,
+    );
+    final List<Object?>? __pigeon_replyList =
+        await __pigeon_channel.send(<Object?>[calendarId, accountName, accountType]) as List<Object?>?;
+    if (__pigeon_replyList == null) {
+      throw _createConnectionError(__pigeon_channelName);
+    } else if (__pigeon_replyList.length > 1) {
+      throw PlatformException(
+        code: __pigeon_replyList[0]! as String,
+        message: __pigeon_replyList[1] as String?,
+        details: __pigeon_replyList[2],
+      );
+    } else if (__pigeon_replyList[0] == null) {
+      throw PlatformException(
+        code: 'null-error',
+        message: 'Host platform returned null value for non-null return value.',
+      );
+    } else {
+      return (__pigeon_replyList[0] as bool?)!;
+    }
+  }
+
   Future<String?> createEvent(String calendarId, String title, int start, int end, String? notes, String? uid) async {
     final String __pigeon_channelName = 'dev.flutter.pigeon.caleesync.NativeCalendarApi.createEvent$__pigeon_messageChannelSuffix';
     final BasicMessageChannel<Object?> __pigeon_channel = BasicMessageChannel<Object?>(
@@ -335,6 +395,33 @@ class NativeCalendarApi {
     );
     final List<Object?>? __pigeon_replyList =
         await __pigeon_channel.send(<Object?>[eventId]) as List<Object?>?;
+    if (__pigeon_replyList == null) {
+      throw _createConnectionError(__pigeon_channelName);
+    } else if (__pigeon_replyList.length > 1) {
+      throw PlatformException(
+        code: __pigeon_replyList[0]! as String,
+        message: __pigeon_replyList[1] as String?,
+        details: __pigeon_replyList[2],
+      );
+    } else if (__pigeon_replyList[0] == null) {
+      throw PlatformException(
+        code: 'null-error',
+        message: 'Host platform returned null value for non-null return value.',
+      );
+    } else {
+      return (__pigeon_replyList[0] as bool?)!;
+    }
+  }
+
+  Future<bool> modifyCalendarTitle(String calendarId, String newTitle, String accountName, String accountType) async {
+    final String __pigeon_channelName = 'dev.flutter.pigeon.caleesync.NativeCalendarApi.modifyCalendarTitle$__pigeon_messageChannelSuffix';
+    final BasicMessageChannel<Object?> __pigeon_channel = BasicMessageChannel<Object?>(
+      __pigeon_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: __pigeon_binaryMessenger,
+    );
+    final List<Object?>? __pigeon_replyList =
+        await __pigeon_channel.send(<Object?>[calendarId, newTitle, accountName, accountType]) as List<Object?>?;
     if (__pigeon_replyList == null) {
       throw _createConnectionError(__pigeon_channelName);
     } else if (__pigeon_replyList.length > 1) {

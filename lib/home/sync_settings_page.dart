@@ -1,14 +1,185 @@
 import 'package:flutter/material.dart';
+import '../common/utils/mmkv_utils.dart';
+import '../common/app_constant.dart';
 
-class SyncSettingsPage extends StatelessWidget {
+class SyncSettingsPage extends StatefulWidget {
   const SyncSettingsPage({super.key});
 
   @override
+  State<SyncSettingsPage> createState() => _SyncSettingsPageState();
+}
+
+class _SyncSettingsPageState extends State<SyncSettingsPage> {
+  final List<Map<String, dynamic>> _intervalOptions = const [
+    {'label': 'Every 15 minutes', 'minutes': 15},
+    {'label': 'Every 30 minutes', 'minutes': 30},
+    {'label': 'Every hour', 'minutes': 60},
+    {'label': 'Every 6 hours', 'minutes': 360},
+    {'label': 'Every 24 hours', 'minutes': 1440},
+  ];
+
+  int _calendarInterval = 15;
+  int _tasksInterval = 30;
+  bool _wifiOnly = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSettings();
+  }
+
+  void _loadSettings() {
+    try {
+      int valCal = MMKVUtils.instance.getInt('sync_interval_calendar') ?? 15;
+      int valTask = MMKVUtils.instance.getInt('sync_interval_tasks') ?? 30;
+      // validate against available options to avoid Dropdown assertion errors
+      final validMinutes = _intervalOptions.map((e) => e['minutes'] as int).toSet();
+      if (!validMinutes.contains(valCal) || valCal <= 0) valCal = 15;
+      if (!validMinutes.contains(valTask) || valTask <= 0) valTask = 30;
+      final wifi = MMKVUtils.instance.getBool('sync_wifi_only') ?? true;
+      setState(() {
+        _calendarInterval = valCal;
+        _tasksInterval = valTask;
+        _wifiOnly = wifi;
+      });
+    } catch (_) {}
+  }
+
+  void _saveSettings() {
+    try {
+      MMKVUtils.instance.setInt('sync_interval_calendar', _calendarInterval);
+      MMKVUtils.instance.setInt('sync_interval_tasks', _tasksInterval);
+      MMKVUtils.instance.setBool('sync_wifi_only', _wifiOnly);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Settings saved')));
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Save failed: $e')));
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return const Center(
-      child: Text(
-        'Sync Settings',
-        style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Card(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Synchronization', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 6),
+                  const Text('Configure how often your calendars and tasks sync with their sources', style: TextStyle(color: Colors.black54)),
+                  const SizedBox(height: 16),
+
+                  const Text('Calendar Sync Interval', style: TextStyle(fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<int>(
+                    value: _calendarInterval,
+                    items: _intervalOptions.map((opt) {
+                      return DropdownMenuItem<int>(value: opt['minutes'] as int, child: Text(opt['label'] as String));
+                    }).toList(),
+                    onChanged: (v) {
+                      if (v != null) setState(() => _calendarInterval = v);
+                    },
+                    decoration: InputDecoration(
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text('More frequent syncing may impact battery life on mobile devices', style: TextStyle(color: Colors.black54, fontSize: 12)),
+                  const SizedBox(height: 16),
+
+                  const Text('Tasks Sync Interval', style: TextStyle(fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<int>(
+                    value: _tasksInterval,
+                    items: _intervalOptions.map((opt) {
+                      return DropdownMenuItem<int>(value: opt['minutes'] as int, child: Text(opt['label'] as String));
+                    }).toList(),
+                    onChanged: (v) {
+                      if (v != null) setState(() => _tasksInterval = v);
+                    },
+                    decoration: InputDecoration(
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text('More frequent syncing may impact battery life on mobile devices', style: TextStyle(color: Colors.black54, fontSize: 12)),
+                  const SizedBox(height: 16),
+
+                  // Wi-Fi only card
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.grey.shade200),
+                      color: Colors.grey.shade50,
+                    ),
+                    child: Row(
+                      children: [
+                        Checkbox(
+                          value: _wifiOnly,
+                          onChanged: (v) => setState(() => _wifiOnly = v ?? true),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: const [
+                              Text('Sync on Wi‑Fi only', style: TextStyle(fontWeight: FontWeight.w600)),
+                              SizedBox(height: 4),
+                              Text('Prevent syncing over cellular data to save bandwidth and reduce data usage', style: TextStyle(color: Colors.black54, fontSize: 12)),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: _saveSettings,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.black87,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      child: const Text('Save Settings',style: TextStyle(color: Colors.white),),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 16),
+          Card(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: const [
+                  Text('About Sync', style: TextStyle(fontWeight: FontWeight.w600)),
+                  SizedBox(height: 8),
+                  Text(
+                    'Calee automatically synchronizes your calendars and tasks with Google, iCloud, Outlook, and other connected services. When "Two-way sync" is enabled, changes made in either location will be synced bidirectionally. Otherwise, data is read-only in the respective location to prevent conflicts.',
+                    style: TextStyle(color: Colors.black54),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
