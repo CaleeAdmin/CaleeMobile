@@ -20,6 +20,7 @@ class _LoginPageState extends State<LoginPage> {
   final _formKey = GlobalKey<FormState>();
   final _accountController = TextEditingController();
   final _passwordController = TextEditingController();
+  bool _obscurePassword = true;
   bool _agree = false;
   Worker? _authStateWorker;
 
@@ -187,7 +188,20 @@ class _LoginPageState extends State<LoginPage> {
                   _buildInput(
                     controller: _passwordController,
                     hint: 'Enter your password',
-                    obscure: true,
+                    obscure: _obscurePassword,
+                    suffixIcon: IconButton(
+                      onPressed: isLoading
+                          ? null
+                          : () {
+                              setState(() {
+                                _obscurePassword = !_obscurePassword;
+                              });
+                            },
+                      icon: Icon(
+                        _obscurePassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
                     validator: (v) =>
                         (v == null || v.length < 6) ? 'Password must be at least 6 characters' : null,
                     enabled: !isLoading,
@@ -326,6 +340,7 @@ class _LoginPageState extends State<LoginPage> {
     required String hint,
     bool obscure = false,
     bool enabled = true,
+    Widget? suffixIcon,
     String? Function(String?)? validator,
   }) {
     return TextFormField(
@@ -338,6 +353,7 @@ class _LoginPageState extends State<LoginPage> {
         filled: true,
         fillColor: enabled ? const Color(0xFFF4F3F7) : Colors.grey.shade200,
         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        suffixIcon: suffixIcon,
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
           borderSide: BorderSide(color: Colors.grey.shade300, width: 0.8),
@@ -354,4 +370,3 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 }
-
