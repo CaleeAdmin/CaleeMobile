@@ -93,7 +93,6 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
     override fun getEvents(calendarId: String, startMs: Long, endMs: Long): List<PlatformItem> {
         val items = mutableListOf<PlatformItem>()
         items.addAll(fetchEvents(calendarId, startMs, endMs))
-        items.addAll(fetchTasks(calendarId))
         return items
     }
 
@@ -189,34 +188,6 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
             }
         }
         return eventList
-    }
-
-    private fun fetchTasks(calendarId: String): List<PlatformItem> {
-        val taskList = mutableListOf<PlatformItem>()
-        val taskUri = Uri.parse("content://org.dmfs.tasks/tasks")
-        try {
-            val projection = arrayOf("_id", "title", "description", "status", "is_closed", "dtstart", "due", "last_modified", "uid")
-            context.contentResolver.query(taskUri, projection, "list_id = ?", arrayOf(calendarId), null)?.use { cursor ->
-                while (cursor.moveToNext()) {
-                    val id = cursor.getLong(cursor.getColumnIndexOrThrow("_id")).toString()
-                    val isClosed = cursor.getInt(cursor.getColumnIndexOrThrow("is_closed")) == 1
-                    taskList.add(PlatformItem(
-                        localId = id,
-                        uid = cursor.getString(cursor.getColumnIndexOrThrow("uid")) ?: "task_$id",
-                        title = cursor.getString(cursor.getColumnIndexOrThrow("title")) ?: "",
-                        notes = cursor.getString(cursor.getColumnIndexOrThrow("description")),
-                        startTime = cursor.getLong(cursor.getColumnIndexOrThrow("dtstart")),
-                        endTime = cursor.getLong(cursor.getColumnIndexOrThrow("due")),
-                        lastModified = cursor.getLong(cursor.getColumnIndexOrThrow("last_modified")),
-                        isTask = true,
-                        status = if (isClosed) 2L else cursor.getInt(cursor.getColumnIndexOrThrow("status")).toLong()
-                    ))
-                }
-            }
-        } catch (e: Exception) {
-            return emptyList()
-        }
-        return taskList
     }
 
     override fun createEvent(
