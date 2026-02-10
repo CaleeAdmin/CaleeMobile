@@ -144,14 +144,12 @@ class _LoginPageState extends State<LoginPage> {
                       color: const Color(0xFF2E7AFE),
                       borderRadius: BorderRadius.circular(16),
                     ),
-                    child: const Center(
-                      child: Text(
-                        'C',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 30,
-                          fontWeight: FontWeight.bold,
-                        ),
+                    clipBehavior: Clip.antiAlias,
+                    child: Padding(
+                      padding: const EdgeInsets.all(10),
+                      child: Image.asset(
+                        'assets/images/logo.png',
+                        fit: BoxFit.contain,
                       ),
                     ),
                   ),
