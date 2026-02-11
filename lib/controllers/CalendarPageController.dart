@@ -24,16 +24,16 @@ class CalendarDisplayItem {
   final String name;
   final String color;
   final int eventCount;
-  final bool isTwoWay;
-  bool isSelected; // 👈 可变：映射数据库中的 sync_status 或特定开关字段
+  final bool isReadOnly;
+  bool isEnabled; // 👈 可变：映射数据库中的 is_enabled 或特定开关字段
 
   CalendarDisplayItem({
     required this.id,
     required this.name,
     required this.color,
     required this.eventCount,
-    required this.isTwoWay,
-    required this.isSelected,
+    required this.isReadOnly,
+    required this.isEnabled,
   });
 }
 
@@ -78,8 +78,7 @@ class CalendarPageController extends GetxController {
       }
       if (target == null) return;
 
-      final oldValue = target.isSelected;
-      target.isSelected = newValue;
+      target.isEnabled = newValue;
       // 通知 observers 局部刷新
       calendarGroups.refresh();
 
@@ -87,7 +86,7 @@ class CalendarPageController extends GetxController {
       final db = await DatabaseHelper.instance.database;
       await db.update(
         'calendar_map',
-        {'sync_status': newValue ? 1 : 0},
+        {'is_enabled': newValue ? 1 : 0},
         where: 'local_id = ?',
         whereArgs: [localId],
       );
@@ -112,7 +111,7 @@ class CalendarPageController extends GetxController {
         if (target != null) break;
       }
       if (target != null) {
-        target.isSelected = !newValue;
+        target.isEnabled = !newValue;
         calendarGroups.refresh();
       }
     }
@@ -128,14 +127,14 @@ class CalendarPageController extends GetxController {
       final db = await DatabaseHelper.instance.database;
 
       // 1. 🌟 双向扫描：确保云端新日历和本地新日历都能进入 calendar_map
-      await _repo.scanLocalCalendars(loginName);
-      await engine.discoverRemoteCalendars(loginName);
+      // await _repo.scanLocalCalendars(loginName);
+      // await engine.discoverRemoteCalendars(loginName);
 
       // 2. 获取所有日历记录
       final List<Map<String, dynamic>> calendarMaps = await db.query(
         'calendar_map',
-        where: 'account_name = ? OR account_type != ?',
-        whereArgs: [loginName, 'com.nextcloud.caleesync'],
+        where: 'account_name = ?',
+        whereArgs: [loginName],
       );
       final deviceCalendarPlugin = DeviceCalendarPlugin();
       Map<String, List<CalendarDisplayItem>> tempMap = {};
@@ -150,43 +149,43 @@ class CalendarPageController extends GetxController {
         int realCount = 0;
 
         // --- 🌟 核心修改：针对云端日历的实时计数 ---
-        if (accType == 'com.nextcloud.caleesync' && remotePath != null && remotePath.isNotEmpty) {
-          // A. 先查本地数据库 sync_map
-          final localCountResult = await db.rawQuery(
-              'SELECT COUNT(*) as count FROM sync_map WHERE calendar_local_id = ? AND sync_status != 2',
-              [localId]);
-          realCount = (localCountResult.first['count'] as int?) ?? 0;
-
-          // B. 如果本地计数为 0，说明还没同步过，触发一次“静默拉取”
-          if (realCount == 0) {
-            print("🌐 [静默拉取] 正在为日历 ${cal['display_name']} 获取云端事件数...");
-            try {
-              // 仅拉取快照，不涉及复杂的系统日历写入，速度非常快
-              final remoteItems = await _nc.fetchRemoteEvents(calendarPath: remotePath);
-
-              // 将云端 UID 存入 sync_map（ local_id 设为 v_ 前缀的影子 ID）
-              // 这一步是让 Dashboard 统计生效的关键
-              await db.transaction((txn) async {
-                for (var item in remoteItems) {
-                  String uid = item['uid'] ?? item['href'].split('/').last;
-                  // 使用 insert ignore 或 replace 防止重复
-                  await txn.insert('sync_map', {
-                    'uid': uid,
-                    'local_id': 'v_$uid', // 影子 ID，表示未洗白到系统
-                    'calendar_local_id': localId,
-                    'last_etag': item['etag'] ?? '',
-                    'sync_status': 0,
-                  }, conflictAlgorithm: ConflictAlgorithm.ignore);
-                }
-              });
-
-              // 重新计算数量
-              realCount = remoteItems.length;
-            } catch (e) {
-              print("❌ 静默拉取失败: $e");
-            }
-          }
-        } else {
+        // if (remotePath != null && remotePath.isNotEmpty) {
+        //   // A. 先查本地数据库 sync_map
+        //   final localCountResult = await db.rawQuery(
+        //       'SELECT COUNT(*) as count FROM sync_map WHERE calendar_local_id = ?',
+        //       [localId]);
+        //   realCount = (localCountResult.first['count'] as int?) ?? 0;
+        //
+        //   // B. 如果本地计数为 0，说明还没同步过，触发一次“静默拉取”
+        //   if (realCount == 0) {
+        //     print("🌐 [静默拉取] 正在为日历 ${cal['display_name']} 获取云端事件数...");
+        //     try {
+        //       // 仅拉取快照，不涉及复杂的系统日历写入，速度非常快
+        //       final remoteItems = await _nc.fetchRemoteEvents(calendarPath: remotePath);
+        //
+        //       // 将云端 UID 存入 sync_map（ local_id 设为 v_ 前缀的影子 ID）
+        //       // 这一步是让 Dashboard 统计生效的关键
+        //       await db.transaction((txn) async {
+        //         for (var item in remoteItems) {
+        //           String uid = item['uid'] ?? item['href'].split('/').last;
+        //           // 使用 insert ignore 或 replace 防止重复
+        //           await txn.insert('sync_map', {
+        //             'uid': uid,
+        //             'local_id': 'v_$uid', // 影子 ID，表示未洗白到系统
+        //             'calendar_local_id': localId,
+        //             'last_etag': item['etag'] ?? '',
+        //             'sync_status': 0,
+        //           }, conflictAlgorithm: ConflictAlgorithm.ignore);
+        //         }
+        //       });
+        //
+        //       // 重新计算数量
+        //       realCount = remoteItems.length;
+        //     } catch (e) {
+        //       print("❌ 静默拉取失败: $e");
+        //     }
+        //   }
+        // } else {
           // --- C. 普通本地系统日历统计 ---
           try {
             final now = DateTime.now();
@@ -199,7 +198,7 @@ class CalendarPageController extends GetxController {
             );
             if (eventsResult.isSuccess) realCount = eventsResult.data?.length ?? 0;
           } catch (_) {}
-        }
+        // }
 
         // 组装 UI 模型
         var displayItem = CalendarDisplayItem(
@@ -207,8 +206,8 @@ class CalendarPageController extends GetxController {
           name: cal['display_name'] ?? 'Unknown',
           color: cal['color'] ?? '#808080',
           eventCount: realCount,
-          isTwoWay: remotePath != null && remotePath.isNotEmpty && (syncMode == 0),
-          isSelected: cal['sync_status'] == 1,
+          isReadOnly: syncMode == 1,
+          isEnabled: cal['is_enabled'] == 1,
         );
 
         tempMap.putIfAbsent(account, () => []).add(displayItem);

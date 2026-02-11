@@ -486,7 +486,7 @@ class _CalendarRow extends StatelessWidget {
         children: [
           // 使用 item.isSelected（非响应式），由外层列表刷新驱动 UI 更新
           Checkbox(
-            value: item.isSelected,
+            value: item.isEnabled,
             onChanged: (bool? newValue) {
               controller.toggleCalendarSelection(item.id, newValue);
             },
@@ -531,7 +531,7 @@ class _CalendarRow extends StatelessWidget {
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
-                        item.isTwoWay ? 'Two-way sync' : 'Read-only in Calee',
+                        item.isReadOnly ? 'Read-only in Calee' : 'Two-way sync',
                         style: const TextStyle(fontSize: 12, color: Colors.black54),
                       ),
                     ),

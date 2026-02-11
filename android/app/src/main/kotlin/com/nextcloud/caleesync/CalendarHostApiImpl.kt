@@ -5,12 +5,10 @@ import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
 import android.content.pm.PackageManager
-import android.database.Cursor
-import android.net.Uri
+import java.util.TimeZone
 import android.provider.CalendarContract
 import android.util.Log
 import androidx.core.content.ContextCompat
-import java.util.TimeZone
 
 class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
 
@@ -58,32 +56,89 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
     override fun getCalendars(): List<PlatformCalendar> {
         val calendars = mutableListOf<PlatformCalendar>()
         try {
+            // 检查权限
+            val hasPermission = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.READ_CALENDAR
+            ) == PackageManager.PERMISSION_GRANTED
+
+            if (!hasPermission) {
+                Log.w("CalendarNative", "getCalendars: READ_CALENDAR permission not granted")
+                return calendars
+            }
+
             val uri = CalendarContract.Calendars.CONTENT_URI
+
+            // 不再按 VISIBLE 过滤，支持获取隐藏日历
             context.contentResolver.query(uri, CALENDAR_PROJECTION, null, null, null)?.use { cursor ->
+                // 预先获取列索引，避免在循环中重复查找，同时处理字段可能不存在的情况
+                val idIndex = cursor.getColumnIndex(CalendarContract.Calendars._ID)
+                val nameIndex = cursor.getColumnIndex(CalendarContract.Calendars.CALENDAR_DISPLAY_NAME)
+                val accountNameIndex = cursor.getColumnIndex(CalendarContract.Calendars.ACCOUNT_NAME)
+                val accountTypeIndex = cursor.getColumnIndex(CalendarContract.Calendars.ACCOUNT_TYPE)
+                val colorIndex = cursor.getColumnIndex(CalendarContract.Calendars.CALENDAR_COLOR)
+                val accessLevelIndex = cursor.getColumnIndex(CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL)
+
+                // _ID 是必需字段，如果不存在则无法继续
+                if (idIndex < 0) {
+                    Log.e("CalendarNative", "getCalendars: _ID column not found")
+                    return calendars
+                }
+
                 while (cursor.moveToNext()) {
-                    val id = cursor.getLong(cursor.getColumnIndexOrThrow(CalendarContract.Calendars._ID)).toString()
-                    val name = cursor.getString(cursor.getColumnIndexOrThrow(CalendarContract.Calendars.CALENDAR_DISPLAY_NAME))
-                    val accountName = cursor.getString(cursor.getColumnIndexOrThrow(CalendarContract.Calendars.ACCOUNT_NAME))
-                    val accountType = cursor.getString(cursor.getColumnIndexOrThrow(CalendarContract.Calendars.ACCOUNT_TYPE))
-                    val colorInt = cursor.getInt(cursor.getColumnIndexOrThrow(CalendarContract.Calendars.CALENDAR_COLOR))
-                    val colorHex = String.format("#%06X", (0xFFFFFF and colorInt))
-                    val accessLevel = cursor.getInt(cursor.getColumnIndexOrThrow(CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL))
+                    try {
+                        val id = cursor.getLong(idIndex).toString()
 
-                    // 权限判定：如果不是贡献者或所有者，则视为只读
-                    val isReadOnly = accessLevel < CalendarContract.Calendars.CAL_ACCESS_CONTRIBUTOR
+                        // 安全获取可选字段，字段不存在时返回 null
+                        val name = if (nameIndex >= 0) cursor.getString(nameIndex) else null
+                        val accountName = if (accountNameIndex >= 0) cursor.getString(accountNameIndex) else null
+                        val accountType = if (accountTypeIndex >= 0) cursor.getString(accountTypeIndex) else null
 
-                    calendars.add(PlatformCalendar(
-                        id = id,
-                        name = name,
-                        accountName = accountName,
-                        accountType = accountType,
-                        color = colorHex,
-                        isReadOnly = isReadOnly,
-                        supportsEvents = true,
-                        supportsTasks = false // 原生 Android 日历不支持任务
-                    ))
+                        // 处理颜色：Android 日历颜色是 ARGB 格式（0xAARRGGBB）
+                        // Flutter 端期望 #RRGGBB 格式（会自动加上 0xFF alpha）
+                        // 所以需要提取 RGB 部分，去掉 alpha 和 0x 前缀
+                        val colorHex = if (colorIndex >= 0) {
+                            val colorInt = cursor.getInt(colorIndex)
+                            if (colorInt != -1) {
+                                // 提取 RGB 部分（去掉 alpha 通道），格式化为 #RRGGBB
+                                // 注意：0x00000000（黑色）是有效颜色，只有 -1 表示未设置
+                                val rgb = colorInt and 0x00FFFFFF // 去掉 alpha，保留 RGB
+                                String.format("#%06X", rgb)
+                            } else {
+                                null // 未设置颜色（-1）
+                            }
+                        } else {
+                            null // 字段不存在
+                        }
+
+                        // 处理访问级别，默认视为只读（更安全）
+                        val isReadOnly = if (accessLevelIndex >= 0) {
+                            val accessLevel = cursor.getInt(accessLevelIndex)
+                            accessLevel < CalendarContract.Calendars.CAL_ACCESS_CONTRIBUTOR
+                        } else {
+                            true // 字段不存在时默认视为只读
+                        }
+
+                        calendars.add(
+                            PlatformCalendar(
+                                id = id,
+                                name = name,
+                                accountName = accountName,
+                                accountType = accountType,
+                                color = colorHex,
+                                isReadOnly = isReadOnly,
+                                supportsEvents = true,
+                                supportsTasks = false // 原生 Android 日历不支持任务
+                            )
+                        )
+                    } catch (e: Exception) {
+                        // 跳过有问题的记录，继续处理其他日历，避免单条记录错误导致整个方法失败
+                        Log.w("CalendarNative", "getCalendars: Failed to parse calendar record, skipping", e)
+                    }
                 }
             }
+        } catch (e: SecurityException) {
+            Log.e("CalendarNative", "getCalendars: SecurityException - permission denied", e)
         } catch (e: Exception) {
             Log.e("CalendarNative", "getCalendars error", e)
         }
@@ -164,30 +219,89 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
         val eventList = mutableListOf<PlatformItem>()
         val uri = CalendarContract.Events.CONTENT_URI
 
-        val selection = "${CalendarContract.Events.CALENDAR_ID} = ? AND ${CalendarContract.Events.DTSTART} >= ? AND ${CalendarContract.Events.DTSTART} <= ? AND ${CalendarContract.Events.DELETED} = 0"
+        // 1. 完善投影，增加 UID 存储列和 DURATION 列
+        val EVENT_PROJECTION = arrayOf(
+            CalendarContract.Events._ID,
+            CalendarContract.Events.TITLE,
+            CalendarContract.Events.DESCRIPTION,
+            CalendarContract.Events.DTSTART,
+            CalendarContract.Events.DTEND,
+            CalendarContract.Events.DURATION,
+            CalendarContract.Events.ALL_DAY,
+            CalendarContract.Events.SYNC_DATA1, // 💡 通常 Nextcloud/Google 的 UID 存在这里
+            CalendarContract.Events.EVENT_TIMEZONE
+        )
+
+        val selection = "${CalendarContract.Events.CALENDAR_ID} = ? AND " +
+                "${CalendarContract.Events.DTSTART} >= ? AND " +
+                "${CalendarContract.Events.DTSTART} <= ? AND " +
+                "${CalendarContract.Events.DELETED} = 0"
         val selectionArgs = arrayOf(calendarId, startMs.toString(), endMs.toString())
 
         context.contentResolver.query(uri, EVENT_PROJECTION, selection, selectionArgs, null)?.use { cursor ->
             while (cursor.moveToNext()) {
                 val id = cursor.getLong(cursor.getColumnIndexOrThrow(CalendarContract.Events._ID)).toString()
 
-                val uid = "system_event_$id"
+                // 💡 优先获取系统存储的原始 UID，如果没有（本地新建），则暂时用 ID 或 生成新的
+                var uid = cursor.getString(cursor.getColumnIndexOrThrow(CalendarContract.Events.SYNC_DATA1))
+                if (uid.isNullOrEmpty()) {
+                    uid = "local_$id" // 或者是你生成的 UUID
+                }
+
+                val startTime = cursor.getLong(cursor.getColumnIndexOrThrow(CalendarContract.Events.DTSTART))
+                var endTime = cursor.getLong(cursor.getColumnIndexOrThrow(CalendarContract.Events.DTEND))
+
+                // 💡 处理重复日程没有 DTEND 的情况
+                if (endTime <= 0) {
+                    val duration = cursor.getString(cursor.getColumnIndexOrThrow(CalendarContract.Events.DURATION))
+                    endTime = calculateEndTime(startTime, duration)
+                }
 
                 eventList.add(PlatformItem(
                     localId = id,
                     uid = uid,
                     title = cursor.getString(cursor.getColumnIndexOrThrow(CalendarContract.Events.TITLE)) ?: "",
                     notes = cursor.getString(cursor.getColumnIndexOrThrow(CalendarContract.Events.DESCRIPTION)),
-                    startTime = cursor.getLong(cursor.getColumnIndexOrThrow(CalendarContract.Events.DTSTART)),
-                    endTime = cursor.getLong(cursor.getColumnIndexOrThrow(CalendarContract.Events.DTEND)),
-                    lastModified = cursor.getLong(cursor.getColumnIndexOrThrow(CalendarContract.Events.LAST_DATE)),
-                    isTask = false,
+                    startTime = startTime,
+                    endTime = endTime,
                     isAllDay = cursor.getInt(cursor.getColumnIndexOrThrow(CalendarContract.Events.ALL_DAY)) == 1,
                     status = 1L
                 ))
             }
         }
         return eventList
+    }
+
+    // 2. 实现计算结束时间的工具函数
+    private fun calculateEndTime(startTime: Long, duration: String?): Long {
+        if (duration.isNullOrEmpty()) return startTime
+
+        return try {
+            // RFC5545 Duration 格式简单处理: P3600S, PT1H 等
+            // 生产环境建议使用 org.rfc5545.icu.DurationParser 或类似的正则解析
+            val seconds = parseRFC5545Duration(duration)
+            startTime + (seconds * 1000)
+        } catch (e: Exception) {
+            Log.e("CalendarHost", "Duration parse error: $duration", e)
+            startTime
+        }
+    }
+
+    // 简单的 Duration 解析逻辑 (示例处理 PT1H 或 P3600S)
+    private fun parseRFC5545Duration(duration: String): Long {
+        // 这是一个极简实现，仅处理秒数结尾的情况。
+        // 如果你的应用涉及复杂重复日程，建议引入专门的 ICS 解析库
+        val regex = """PT?(\d+)([SHM])""".toRegex()
+        val match = regex.find(duration)
+        return if (match != null) {
+            val (value, unit) = match.destructured
+            when (unit) {
+                "S" -> value.toLong()
+                "M" -> value.toLong() * 60
+                "H" -> value.toLong() * 3600
+                else -> 0L
+            }
+        } else 0L
     }
 
     override fun createEvent(

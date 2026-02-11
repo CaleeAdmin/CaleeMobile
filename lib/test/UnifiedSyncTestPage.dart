@@ -59,7 +59,8 @@ class _UnifiedSyncTestPageState extends State<UnifiedSyncTestPage> {
       var remotePath = await _ncService.createRemoteCalendar(
           userId: loginName,
           calendarName: "cal_sync_2",
-          calendarId: "cal_sync_2"
+          calendarId: "cal_sync_2",
+        color: ""
       );
 
       _addLog("===remotePath==${remotePath}");

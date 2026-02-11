@@ -17,7 +17,7 @@ class _CalendarOptionsDialogState extends State<CalendarOptionsDialog> {
   @override
   void initState() {
     super.initState();
-    isTwoWay = widget.item.isTwoWay;
+    isTwoWay = widget.item.isReadOnly;
   }
 
   @override
