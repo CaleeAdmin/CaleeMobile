@@ -2,6 +2,7 @@ import 'package:caleesync/common/app_constant.dart';
 import 'package:caleesync/common/route_constant.dart';
 import 'package:caleesync/common/utils/mmkv_utils.dart';
 import 'package:caleesync/controllers/app_controller.dart';
+import 'package:caleesync/services/nextcloud_user_service.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
@@ -27,12 +28,15 @@ class _ProfilePageState extends State<ProfilePage> {
   
   // Account name from stored credentials
   String? _accountName;
+  final NextcloudUserService _userService = NextcloudUserService();
+  bool _isSavingPersonalInfo = false;
 
   @override
   void initState() {
     super.initState();
     // Load account name from stored credentials
     _loadAccountName();
+    _loadUserInfoFromNextcloud();
   }
 
   void _loadAccountName() {
@@ -60,15 +64,58 @@ class _ProfilePageState extends State<ProfilePage> {
     appController.logout();
   }
 
-  void _onSavePersonalInfo() {
-    // TODO: Implement save personal information logic
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Personal information saved successfully'),
-        backgroundColor: Colors.green,
-        duration: Duration(seconds: 2),
-      ),
-    );
+  Future<void> _loadUserInfoFromNextcloud() async {
+    try {
+      final userInfo = await _userService.fetchUserInfo();
+      if (!mounted) return;
+
+      _fullNameController.text = userInfo['displayName'] ?? '';
+      _emailController.text = userInfo['email'] ?? '';
+      _postCodeController.text = userInfo['address'] ?? '';
+      _timezoneController.text = userInfo['timezone'] ?? '';
+    } catch (_) {
+      // Ignore load error and keep local defaults so page remains usable.
+    }
+  }
+
+  Future<void> _onSavePersonalInfo() async {
+    if (_isSavingPersonalInfo) return;
+
+    setState(() {
+      _isSavingPersonalInfo = true;
+    });
+
+    try {
+      await _userService.syncUserInfo(
+        displayName: _fullNameController.text.trim(),
+        email: _emailController.text.trim(),
+        address: _postCodeController.text.trim(),
+        timezone: _timezoneController.text.trim(),
+      );
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Personal information synced with Nextcloud successfully'),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 2),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Sync failed: $e'),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        _isSavingPersonalInfo = false;
+      });
+    }
   }
 
   void _onChangePassword() {
@@ -258,7 +305,7 @@ class _ProfilePageState extends State<ProfilePage> {
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
-                        onPressed: _onSavePersonalInfo,
+                        onPressed: _isSavingPersonalInfo ? null : _onSavePersonalInfo,
                         style: ElevatedButton.styleFrom(
                           backgroundColor: const Color(0xFF0D0C14),
                           foregroundColor: Colors.white,
@@ -267,9 +314,9 @@ class _ProfilePageState extends State<ProfilePage> {
                             borderRadius: BorderRadius.circular(8),
                           ),
                         ),
-                        child: const Text(
-                          'Save Changes',
-                          style: TextStyle(
+                        child: Text(
+                          _isSavingPersonalInfo ? 'Saving...' : 'Save Changes',
+                          style: const TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w600,
                           ),
