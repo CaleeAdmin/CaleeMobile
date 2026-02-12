@@ -49,11 +49,16 @@ class NextcloudAuthNotifier extends StateNotifier<NextcloudAuthState> {
       );
 
       if (success) {
+        final appPassword = await _service.getAppPassword(
+          loginName: loginName,
+          password: password,
+        );
+
         state = state.copyWith(
           status: NextcloudAuthStatus.success,
           serverUrl: _service.normalizedUrl,
           loginName: loginName,
-          appPassword: password, // 注意：这里存储的是密码，实际应该使用 App Password
+          appPassword: appPassword,
         );
       } else {
         throw Exception('Invalid username or password');
