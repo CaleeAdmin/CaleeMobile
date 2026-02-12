@@ -59,7 +59,7 @@ class _QRScannerPageState extends State<QRScannerPage> {
         backgroundColor: Colors.transparent,
         elevation: 0,
         centerTitle: true,
-        title: const Text('扫描二维码'),
+        title: const Text('Scan QR Code'),
         leading: SafeArea(
           child: IconButton(
             icon: const Icon(Icons.close, color: Colors.white),
@@ -111,7 +111,7 @@ class _QRScannerPageState extends State<QRScannerPage> {
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: const Text(
-                    '将二维码完整置于取景框内，应用会自动识别',
+                    'Place the full QR code inside the frame for automatic detection',
                     style: TextStyle(color: Colors.white),
                     textAlign: TextAlign.center,
                   ),
@@ -122,7 +122,7 @@ class _QRScannerPageState extends State<QRScannerPage> {
                   children: [
                     _actionButton(
                       icon: Icons.flash_on,
-                      label: '手电',
+                      label: 'Torch',
                       onPressed: () => _controller.toggleTorch(),
                     ),
                   ],
