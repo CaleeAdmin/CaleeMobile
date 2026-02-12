@@ -13,7 +13,6 @@ class _QRScannerPageState extends State<QRScannerPage> with WidgetsBindingObserv
   final MobileScannerController _controller = MobileScannerController(
     formats: const [BarcodeFormat.qrCode],
     detectionSpeed: DetectionSpeed.noDuplicates,
-    autoZoom: true,
     facing: CameraFacing.back,
   );
 
