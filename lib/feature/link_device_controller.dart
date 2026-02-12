@@ -1,65 +1,179 @@
+import 'dart:convert';
+
+import 'package:caleesync/common/app_constant.dart';
+import 'package:caleesync/common/utils/mmkv_utils.dart';
+import 'package:caleesync/feature/qr_scanner_page.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:http/http.dart' as http;
 import 'package:permission_handler/permission_handler.dart';
-import 'package:flutter/services.dart';
-import 'package:caleesync/feature/nextcloud_auth_automator.dart';
-import 'package:caleesync/feature/qr_scanner_page.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 class LinkDeviceController {
-  final String portalDomain = 'https://portal.calee.com.au';
-  final String loginName = 'test';
-  final String password = 'test@Calee';
-
-
-  Future<void> handleQrScan(BuildContext context, String scannedUrl) async {
-    final Uri url = Uri.parse(scannedUrl);
-
+  Future<void> handleQrScan(BuildContext context, String scannedValue) async {
     try {
-      // 1. 检查系统是否能打开该 URL
-      if (await canLaunchUrl(url)) {
-        // 2. 关键步骤：使用 externalApplication 模式打开系统浏览器
-        // 这样可以复用用户在浏览器中已经登录的 Nextcloud 会话，从而跳过输入密码步骤
-        await launchUrl(
-          url,
-          mode: LaunchMode.externalApplication,
-        );
+      final approvalRequest = _parseApprovalRequest(scannedValue);
+      if (!context.mounted) return;
 
-        // 3. 提示用户在浏览器中操作
-        _showSuccessSnackBar(context);
-      } else {
-        throw '无法打开授权页面，请确保已安装浏览器';
+      final bool? shouldApprove = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) {
+          return AlertDialog(
+            title: const Text('Approve device link?', textAlign: TextAlign.left),
+            titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
+            contentPadding: const EdgeInsets.fromLTRB(24, 0, 24, 12),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: _detailRow('Device name', approvalRequest.deviceName),
+            ),
+            actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.of(dialogContext).pop(true),
+                child: const Text('Approve'),
+              ),
+            ],
+          );
+        },
+      );
+
+      if (shouldApprove != true) return;
+
+      await _sendApproval(approvalRequest);
+
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Device approval sent successfully.'),
+            backgroundColor: Colors.green,
+          ),
+        );
       }
     } catch (e) {
-      debugPrint('[Auth] 授权跳转失败: $e');
-      _showErrorDialog(context, e.toString());
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.toString().replaceFirst('Exception: ', '')),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
-  static void _showSuccessSnackBar(BuildContext context) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('已跳转至浏览器，请点击“授权”完成平板关联'),
-        backgroundColor: Colors.green,
-        duration: Duration(seconds: 5),
-      ),
+  Widget _detailRow(String label, String value) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
+        const SizedBox(height: 2),
+        SelectableText(value),
+      ],
     );
   }
 
-  static void _showErrorDialog(BuildContext context, String message) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('跳转失败'),
-        content: Text(message),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('确定'),
-          ),
-        ],
-      ),
+  Future<void> _sendApproval(_ApprovalRequest request) async {
+    final endpoint = Uri.parse('${request.serverBase}/index.php/apps/caleeflow/approve');
+    final auth = base64Encode(utf8.encode('${request.loginName}:${request.appPassword}'));
+
+    final response = await http.post(
+      endpoint,
+      headers: {
+        'Authorization': 'Basic $auth',
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: jsonEncode({
+        'pollToken': request.pollToken,
+        'deviceName': request.deviceName,
+      }),
     );
+
+    if (response.statusCode != 200) {
+      throw Exception(
+        'Approval failed (${response.statusCode}): ${response.body}',
+      );
+    }
+  }
+
+  _ApprovalRequest _parseApprovalRequest(String scannedValue) {
+    final payload = _extractCaleePayload(scannedValue);
+    final pollToken = (payload['pollToken'] as String?)?.trim() ?? '';
+    if (pollToken.isEmpty) {
+      throw const FormatException('QR payload missing pollToken');
+    }
+
+    final deviceName = (payload['deviceName'] as String?)?.trim() ?? '';
+    if (deviceName.isEmpty) {
+      throw const FormatException('QR payload missing deviceName');
+    }
+
+    final serverFromQr = (payload['server'] as String?)?.trim() ?? '';
+    final savedServer = MMKVUtils.instance.getString(AppConstant.Server)?.trim() ?? '';
+    final serverBase = _normalizeServerBase(serverFromQr.isNotEmpty ? serverFromQr : savedServer);
+    if (serverBase == null) {
+      throw const FormatException('Server is missing in QR payload and local settings');
+    }
+
+    final loginName = MMKVUtils.instance.getString(AppConstant.loginName)?.trim() ?? '';
+    final appPassword = MMKVUtils.instance.getString(AppConstant.password)?.trim() ?? '';
+    if (loginName.isEmpty || appPassword.isEmpty) {
+      throw const FormatException('Missing saved Nextcloud credentials (loginName/appPassword)');
+    }
+
+    return _ApprovalRequest(
+      pollToken: pollToken,
+      serverBase: serverBase,
+      deviceName: deviceName,
+      loginName: loginName,
+      appPassword: appPassword,
+    );
+  }
+
+  Map<String, dynamic> _extractCaleePayload(String qrData) {
+    final uri = Uri.parse(qrData);
+    final fragment = uri.fragment;
+    if (!fragment.startsWith('calee=')) {
+      throw const FormatException('QR fragment must contain calee payload');
+    }
+
+    final encoded = fragment.substring('calee='.length);
+    if (encoded.isEmpty) {
+      throw const FormatException('Empty calee payload');
+    }
+
+    final normalized = base64Url.normalize(encoded);
+    final decoded = utf8.decode(base64Url.decode(normalized));
+    final dynamic jsonData = jsonDecode(decoded);
+    if (jsonData is! Map<String, dynamic>) {
+      throw const FormatException('Invalid calee payload JSON');
+    }
+
+    return jsonData;
+  }
+
+  String? _normalizeServerBase(String serverBase) {
+    if (serverBase.isEmpty) return null;
+
+    final withScheme = serverBase.startsWith('http://') || serverBase.startsWith('https://')
+        ? serverBase
+        : 'https://$serverBase';
+
+    final uri = Uri.tryParse(withScheme);
+    if (uri == null || uri.host.isEmpty) return null;
+
+    final normalizedPath = uri.path.endsWith('/') ? uri.path.substring(0, uri.path.length - 1) : uri.path;
+    return Uri(
+      scheme: uri.scheme,
+      userInfo: uri.userInfo,
+      host: uri.host,
+      port: uri.hasPort ? uri.port : null,
+      path: normalizedPath,
+    ).toString();
   }
 
   Future<void> scanAndAuthorize(BuildContext context) async {
@@ -77,12 +191,7 @@ class LinkDeviceController {
       final result = await Get.to<String>(() => const QRScannerPage());
       if (result == null || result.isEmpty) return;
 
-      debugPrint('🔍 QR scan result: $result');
-      await Clipboard.setData(ClipboardData(text: result));
-
-      final flowUrl = result.startsWith('http') ? result : '$portalDomain$result';
-      debugPrint('[LinkDeviceController] flowUrl: $flowUrl');
-      handleQrScan(context, result);
+      await handleQrScan(context, result);
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Scan failed: $e')));
@@ -91,4 +200,18 @@ class LinkDeviceController {
   }
 }
 
+class _ApprovalRequest {
+  const _ApprovalRequest({
+    required this.pollToken,
+    required this.serverBase,
+    required this.deviceName,
+    required this.loginName,
+    required this.appPassword,
+  });
 
+  final String pollToken;
+  final String serverBase;
+  final String deviceName;
+  final String loginName;
+  final String appPassword;
+}
