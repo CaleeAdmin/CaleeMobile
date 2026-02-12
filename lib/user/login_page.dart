@@ -124,16 +124,15 @@ class _LoginPageState extends State<LoginPage> {
   Future<void> _openForgotPasswordPage() async {
     final resetPasswordUri = Uri.https(
       AppConstant.nextcloudServer,
-      '/index.php/lostpassword',
+      '/index.php/login',
     );
 
-    if (await canLaunchUrl(resetPasswordUri)) {
-      await launchUrl(
-        resetPasswordUri,
-        mode: LaunchMode.externalApplication,
-      );
-      return;
-    }
+    final opened = await launchUrl(
+      resetPasswordUri,
+      mode: LaunchMode.platformDefault,
+    );
+
+    if (opened) return;
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
