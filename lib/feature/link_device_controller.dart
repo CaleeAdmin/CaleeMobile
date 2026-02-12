@@ -18,8 +18,14 @@ class LinkDeviceController {
         context: context,
         builder: (dialogContext) {
           return AlertDialog(
-            title: const Text('Approve device link?'),
-            content: _detailRow('Device name', approvalRequest.deviceName),
+            title: const Text('Approve device link?', textAlign: TextAlign.left),
+            titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
+            contentPadding: const EdgeInsets.fromLTRB(24, 0, 24, 12),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: _detailRow('Device name', approvalRequest.deviceName),
+            ),
+            actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(dialogContext).pop(false),
@@ -60,6 +66,7 @@ class LinkDeviceController {
 
   Widget _detailRow(String label, String value) {
     return Column(
+      mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
