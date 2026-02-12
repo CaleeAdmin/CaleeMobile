@@ -1,4 +1,5 @@
 import 'package:caleesync/common/app_constant.dart';
+import 'package:caleesync/common/user_profile_timezones.dart';
 import 'package:caleesync/common/route_constant.dart';
 import 'package:caleesync/common/utils/mmkv_utils.dart';
 import 'package:caleesync/controllers/app_controller.dart';
@@ -20,7 +21,7 @@ class _ProfilePageState extends State<ProfilePage> {
   final _fullNameController = TextEditingController(text: 'John Doe');
   final _emailController = TextEditingController(text: 'john.doe@example.com');
   final _postCodeController = TextEditingController(text: '10001');
-  final _timezoneController = TextEditingController(text: 'UTC');
+  String _selectedTimezone = 'UTC';
   
   // Password controllers
   final _currentPasswordController = TextEditingController();
@@ -51,7 +52,6 @@ class _ProfilePageState extends State<ProfilePage> {
     _fullNameController.dispose();
     _emailController.dispose();
     _postCodeController.dispose();
-    _timezoneController.dispose();
     _currentPasswordController.dispose();
     _newPasswordController.dispose();
     _confirmPasswordController.dispose();
@@ -68,7 +68,7 @@ class _ProfilePageState extends State<ProfilePage> {
         _fullNameController.text = profile['displayname'] ?? '';
         _emailController.text = profile['email'] ?? '';
         _postCodeController.text = profile['address'] ?? '';
-        _timezoneController.text = profile['timezone'] ?? 'UTC';
+        _selectedTimezone = _normalizeTimezone(profile['timezone']);
       });
     } catch (_) {
       // Keep local defaults when remote profile is unavailable.
@@ -85,7 +85,7 @@ class _ProfilePageState extends State<ProfilePage> {
     final displayName = _fullNameController.text.trim();
     final email = _emailController.text.trim();
     final address = _postCodeController.text.trim();
-    final timezone = _timezoneController.text.trim();
+    final timezone = _selectedTimezone.trim();
 
     if (displayName.isEmpty || email.isEmpty || timezone.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -311,10 +311,7 @@ class _ProfilePageState extends State<ProfilePage> {
                     // Timezone
                     _buildLabel('Timezone'),
                     const SizedBox(height: 6),
-                    _buildInput(
-                      controller: _timezoneController,
-                      hint: 'Enter your timezone',
-                    ),
+                    _buildTimezoneDropdown(),
                     const SizedBox(height: 24),
 
                     // Save Changes button
@@ -419,6 +416,53 @@ class _ProfilePageState extends State<ProfilePage> {
           ),
         ),
       ),
+    );
+  }
+
+
+  String _normalizeTimezone(dynamic timezone) {
+    final raw = timezone?.toString().trim() ?? '';
+    if (raw.isEmpty) {
+      return 'UTC';
+    }
+
+    return kNextcloudTimezones.contains(raw) ? raw : 'UTC';
+  }
+
+  Widget _buildTimezoneDropdown() {
+    return DropdownButtonFormField<String>(
+      initialValue: _selectedTimezone,
+      isExpanded: true,
+      decoration: InputDecoration(
+        filled: true,
+        fillColor: const Color(0xFFF4F3F7),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide(color: Colors.grey.shade300, width: 0.8),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: Color(0xFF2E7AFE), width: 1.2),
+        ),
+      ),
+      items: kNextcloudTimezones
+          .map(
+            (timezone) => DropdownMenuItem<String>(
+              value: timezone,
+              child: Text(
+                timezone,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          )
+          .toList(),
+      onChanged: (value) {
+        if (value == null) return;
+        setState(() {
+          _selectedTimezone = value;
+        });
+      },
     );
   }
 
