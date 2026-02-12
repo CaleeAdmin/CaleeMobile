@@ -120,8 +120,10 @@ class NextcloudProfileService {
       final meta = ((payload['ocs'] as Map<String, dynamic>?)?['meta'] as Map<String, dynamic>?) ??
           <String, dynamic>{};
       final statusCode = int.tryParse(meta['statuscode']?.toString() ?? '') ?? -1;
+      final status = meta['status']?.toString().toLowerCase() ?? '';
+      final isSuccess = statusCode == 100 || status == 'ok';
 
-      if (statusCode != 100) {
+      if (!isSuccess) {
         final message = meta['message']?.toString() ?? 'Unknown error';
         errors.add('${entry.key}: $message');
       }
