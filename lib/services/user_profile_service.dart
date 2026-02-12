@@ -4,10 +4,10 @@ import 'package:caleesync/common/app_constant.dart';
 import 'package:caleesync/common/utils/mmkv_utils.dart';
 import 'package:http/http.dart' as http;
 
-class NextcloudProfileService {
+class UserProfileService {
   final http.Client _client;
 
-  NextcloudProfileService({http.Client? client}) : _client = client ?? http.Client();
+  UserProfileService({http.Client? client}) : _client = client ?? http.Client();
 
   Uri _buildUri(String path) {
     final rawServer =
