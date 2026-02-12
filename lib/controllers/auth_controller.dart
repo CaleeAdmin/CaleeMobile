@@ -1,29 +1,18 @@
 import 'package:caleesync/common/app_constant.dart';
 import 'package:caleesync/models/nextcloud_auth_state.dart';
-import 'package:caleesync/models/nextcloud_register_state.dart';
 import 'package:caleesync/services/nextcloud_auth_service.dart';
-import 'package:caleesync/services/nextcloud_register_service.dart';
 import 'package:get/get.dart';
 
 class AuthController extends GetxController {
   final NextcloudAuthService _authService = NextcloudAuthService(serverBaseUrl: AppConstant.nextcloudServer);
-  final NextcloudRegisterService _registerService = NextcloudRegisterService();
 
   // 认证状态
   final Rx<NextcloudAuthState> authStateRx = const NextcloudAuthState().obs;
   NextcloudAuthState get authState => authStateRx.value;
 
-  // 注册状态
-  final Rx<NextcloudRegisterState> registerStateRx = const NextcloudRegisterState().obs;
-  NextcloudRegisterState get registerState => registerStateRx.value;
-
   // 登录状态
   final Rx<NextcloudAuthStatus> _authStatus = NextcloudAuthStatus.initial.obs;
   NextcloudAuthStatus get authStatus => _authStatus.value;
-
-  // 注册状态
-  final Rx<NextcloudRegisterStatus> _registerStatus = NextcloudRegisterStatus.initial.obs;
-  NextcloudRegisterStatus get registerStatus => _registerStatus.value;
 
   @override
   void onInit() {
@@ -75,45 +64,8 @@ class AuthController extends GetxController {
     }
   }
 
-  // 注册方法
-  Future<void> registerWithCredentials({
-    required String loginName,
-    required String displayName,
-    required String email,
-    required String password,
-  }) async {
-    try {
-      registerStateRx.value = const NextcloudRegisterState(status: NextcloudRegisterStatus.registering);
-
-      final success = await _registerService.register(
-        userid: loginName,
-        password: password,
-        email: email,
-      );
-
-      if (success) {
-        registerStateRx.value = const NextcloudRegisterState(status: NextcloudRegisterStatus.success);
-      } else {
-        registerStateRx.value = const NextcloudRegisterState(
-          status: NextcloudRegisterStatus.error,
-          errorMessage: 'Registration failed',
-        );
-      }
-    } catch (e) {
-      registerStateRx.value = NextcloudRegisterState(
-        status: NextcloudRegisterStatus.error,
-        errorMessage: e.toString().replaceFirst('Exception: ', ''),
-      );
-    }
-  }
-
   // 重置认证状态
   void resetAuthState() {
     authStateRx.value = const NextcloudAuthState();
-  }
-
-  // 重置注册状态
-  void resetRegisterState() {
-    registerStateRx.value = const NextcloudRegisterState();
   }
 }

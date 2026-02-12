@@ -8,7 +8,6 @@ import 'package:caleesync/middlewares/auth_middleware.dart';
 import 'package:caleesync/user/login_page.dart';
 import 'package:caleesync/user/profile_page.dart';
 import 'package:caleesync/user/security_page.dart';
-import 'package:caleesync/user/register_page.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
@@ -54,11 +53,6 @@ class CaleeApp extends StatelessWidget {
         GetPage(
           name: RouteConstant.login,
           page: () => const LoginPage(),
-          middlewares: [AuthMiddleware()],
-        ),
-        GetPage(
-          name: RouteConstant.register,
-          page: () => const RegisterPage(),
           middlewares: [AuthMiddleware()],
         ),
         GetPage(
