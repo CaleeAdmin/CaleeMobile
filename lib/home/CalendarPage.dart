@@ -106,7 +106,7 @@ extension on _CalendarRow {
         final bool? confirm = await _showDeleteConfirm(context);
         if (confirm == true) {
           try {
-            await controller.deleteCalendarTotally(item.id);
+            await controller.deleteCalendarTotally(item.localId);
           } catch (_) {}
         }
         break;
@@ -196,7 +196,7 @@ extension on _CalendarRow {
                       final newName = _nameCtrl.text.trim();
                       if (newName.isEmpty) return;
                       try {
-                        await Get.find<CalendarPageController>().renameCalendar(item.id, newName);
+                        await Get.find<CalendarPageController>().renameCalendar(item.localId, newName);
                         Navigator.of(context).pop(true);
                       } catch (e) {
                         Navigator.of(context).pop(false);
@@ -488,7 +488,7 @@ class _CalendarRow extends StatelessWidget {
           Checkbox(
             value: item.isEnabled,
             onChanged: (bool? newValue) {
-              controller.toggleCalendarSelection(item.id, newValue);
+              controller.toggleCalendarSelection(item, newValue);
             },
           ),
           Container(

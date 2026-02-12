@@ -6,6 +6,8 @@ import 'package:caleesync/common/utils/mmkv_utils.dart';
 import 'package:caleesync/data/sync_repository.dart';
 import '../controllers/CalendarPageController.dart';
 import '../controllers/calendar_probe_controller.dart';
+import '../services/nextcloud_auth_service.dart';
+import '../services/nextcloud_service.dart';
 import 'sync_status_details_page.dart';
 import '../feature/public_subscriptions_page.dart';
 
@@ -18,6 +20,8 @@ class DashboardPage extends StatefulWidget {
 
 class _DashboardPageState extends State<DashboardPage> {
   final SyncRepository _repo = SyncRepository();
+  final NextcloudService _nc = NextcloudService();
+  final NextcloudAuthService _authService = NextcloudAuthService(serverBaseUrl: AppConstant.nextcloudServer);
 
   @override
   void initState() {
@@ -40,6 +44,9 @@ class _DashboardPageState extends State<DashboardPage> {
       // refresh local calendars and dashboard
       final loginName = MMKVUtils.instance.getString(AppConstant.loginName) ?? 'current_user_id';
       await _repo.scanLocalCalendars(loginName);
+      await _nc.scanRemoteCalendars(
+          serverUrl: _authService.normalizedUrl,
+          userId: loginName);
       if (Get.isRegistered<CalendarPageController>()) {
         Get.find<CalendarPageController>().refreshDashboard();
       }

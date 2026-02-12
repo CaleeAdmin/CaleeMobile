@@ -608,7 +608,7 @@ class SyncRepository {
 
       // --- Step B: 本地系统层删除 (你反馈这步已成功) ---
       if (!localId.startsWith('rc_')) {
-        await _nativeApi.deleteCalendar(localId, accountName, accountType);
+        await _nativeApi.deleteCalendar(localId, accountName);
         debugPrint("✅ 手机系统日历已移除");
       }
 

@@ -206,33 +206,38 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
         }
     }
 
-    override fun deleteCalendar(calendarId: String, accountName: String, accountType: String, callback: (Result<Boolean>) -> Unit) {
-        try {
-            val cr = context.contentResolver
-            val idLong = calendarId.toLong()
+    override fun deleteCalendar(calendarId: String, accountName: String, callback: (Result<Boolean>) -> Unit) {
+        // 建议在子线程执行
+        Thread {
+            try {
+                val accountType = "com.nextcloud.caleesync"
+                val cr = context.contentResolver
+                val idLong = calendarId.toLongOrNull() ?: throw IllegalArgumentException("Invalid ID")
 
-            // 尝试方式 A：带同步适配器参数（最安全，但对参数要求极严）
-            val syncUri = ContentUris.withAppendedId(CalendarContract.Calendars.CONTENT_URI, idLong)
-                .buildUpon()
-                .appendQueryParameter(CalendarContract.CALLER_IS_SYNCADAPTER, "true")
-                .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_NAME, accountName)
-                .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_TYPE, accountType)
-                .build()
+                // 1. 构建 URI
+                val baseUri = ContentUris.withAppendedId(CalendarContract.Calendars.CONTENT_URI, idLong)
 
-            var rows = cr.delete(syncUri, null, null)
+                // 2. 优先尝试同步删除（彻底抹除数据，不留残余）
+                val syncUri = baseUri.buildUpon()
+                    .appendQueryParameter(CalendarContract.CALLER_IS_SYNCADAPTER, "true")
+                    .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_NAME, accountName)
+                    .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_TYPE, accountType)
+                    .build()
 
-            // 🌟 兜底方案 B：如果 A 失败了，尝试普通删除（不带账户参数）
-            if (rows == 0) {
-                Log.w("CalendarSync", "Sync delete failed, trying simple delete for ID: $calendarId")
-                val simpleUri = ContentUris.withAppendedId(CalendarContract.Calendars.CONTENT_URI, idLong)
-                rows = cr.delete(simpleUri, null, null)
+                var rows = cr.delete(syncUri, null, null)
+
+                // 3. 兜底方案
+                if (rows <= 0) {
+                    // 如果是手动添加的本地日历，可能不受 SyncAdapter 管辖
+                    rows = cr.delete(baseUri, null, null)
+                }
+
+                callback(Result.success(rows > 0))
+            } catch (e: Exception) {
+                Log.e("CalendarSync", "Delete failed: ${e.message}")
+                callback(Result.failure(e))
             }
-
-            Log.d("CalendarSync", "Final delete result: $rows rows affected")
-            callback(Result.success(rows > 0))
-        } catch (e: Exception) {
-            callback(Result.failure(e))
-        }
+        }.start()
     }
 
     private fun fetchEvents(calendarId: String, startMs: Long, endMs: Long): List<PlatformItem> {

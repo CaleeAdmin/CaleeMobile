@@ -33,9 +33,12 @@ class SyncEngine {
     final db = await _dbHelper.database;
     final List<Map<String, dynamic>> localRecords = await db.query(
       'calendar_map',
-      where: 'account_name = ? AND is_enabled = 1',
+      where: 'account_name = ?',
       whereArgs: [userId],
     );
+
+    debugPrint("==remoteResults==${remoteResults}");
+    debugPrint("==localRecords==${localRecords}");
 
     List<SyncContext> contexts = [];
 
@@ -53,23 +56,32 @@ class SyncEngine {
     for (var remote in remoteResults) {
       final path = remote['remote_path'];
       final local = localMapByPath[path];
-
+      debugPrint("===local==$local");
+      //I/flutter (21325): ===local=={local_id: null, account_name: yiwen, account_type: null, remote_path: /remote.php/dav/calendars/yiwen/personal/, display_name: Personal, color: null, last_ctag: http://sabre.io/ns/sync/43, sync_mode: 0, is_enabled: 0, is_provisioned: 0, origin: 1}
       if (local == null) {
         // 【场景 2】：云端有新坑，本地无记录 -> createLocal
         contexts.add(_buildContext(remote, null, SyncAction.createLocal));
       } else {
+        // 🛡️ 核心修复：即使本地有记录，但如果 local_id 为空，说明系统日历尚未初始化
+        if (local['local_id'] == null) {
+          debugPrint("⚠️ 发现本地占位记录但无系统 ID，触发创建动作: $path");
+          // 强制走创建流程，让原生端去生成 calendarId 并回填数据库
+          contexts.add(_buildContext(remote, local, SyncAction.createLocal));
+          continue; // 处理完这个，跳过后续的同步判定
+        }
+
+        // 只有 local_id 存在时，下方的同步模式判定才有意义
         final int origin = local['origin'] ?? 0;
         final int mode = local['sync_mode'] ?? 0;
-        // 注意：根据你的表结构，目前没有显式的 logic_delete 字段，
-        // 这里的待删状态可以预留逻辑，或者目前均视为正常同步
+
+        // 这里的逻辑保持你原来的业务判定
         final bool isPendingDeletion = false;
 
         SyncAction action;
         if (isPendingDeletion) {
-          // 【场景 11, 12, 13, 14】：本地用户删除了日历
           action = (mode == 0) ? SyncAction.deleteRemote : SyncAction.deleteLocal;
         } else {
-          // 【场景 3, 4, 5, 6】：正常同步流向判定
+          // 这里的 fullSync 系列动作前提是 local_id 必须已经有效
           if (mode == 0) {
             action = SyncAction.fullSyncBidi;
           } else {
@@ -174,8 +186,8 @@ class SyncEngine {
 
             // 2. 扩大扫描窗口，确保存量数据全部覆盖
             // 首次上云：取过去 2 年到未来 10 年
-            final start = DateTime.now().subtract(const Duration(days: 365 * 2)).millisecondsSinceEpoch;
-            final end = DateTime.now().add(const Duration(days: 365 * 10)).millisecondsSinceEpoch;
+            final start = DateTime.now().subtract(const Duration(days: 30)).millisecondsSinceEpoch;
+            final end = DateTime.now().add(const Duration(days: 30)).millisecondsSinceEpoch;
 
             // 3. 抓取本地系统日程
             final List<PlatformItem?> items = await _native.getEvents(ctx.calendarId, start, end);
@@ -328,6 +340,31 @@ class SyncEngine {
             client.close(); // 释放长连接资源
           }
           break;
+        case SyncAction.deleteLocal:
+          try {
+          bool result = await _native.deleteCalendar(ctx.calendarId, ctx.accountName);
+          if(result){
+            final db = await _dbHelper.database;
+            await db.transaction((txn) async {
+              // 1. 删除关联的事件追踪 (sync_map)
+              int sCount = await txn.delete(
+                  'sync_map',
+                  where: 'calendar_local_id = ?',
+                  whereArgs: [ctx.calendarId]
+              );
+              // 2. 删除日历自身的配置 (calendar_map)
+              int cCount = await txn.delete(
+                  'calendar_map',
+                  where: 'local_id = ?',
+                  whereArgs: [ctx.calendarId]
+              );
+              debugPrint("🗑️ 数据库清理完毕: 删除了 $sCount 条事件, $cCount 条日历记录");
+            });
+          }
+          }catch (e){
+            debugPrint("❌ 删除本地日历失败: $e");
+          }
+          break;
           default:{}
       }
 
@@ -420,7 +457,7 @@ class SyncEngine {
           // A. 如果已经洗白成系统日历，调用原生接口从系统日历 App 中删除
           if (!localId.startsWith('rc_')) {
             try {
-              await _native.deleteCalendar(localId,accountName,accountType);
+              await _native.deleteCalendar(localId,accountName);
               print("  ✅ 系统日历实体已移除: $localId");
             } catch (e) {
               print("  ⚠️ 系统日历移除失败 (可能已被手动删除): $e");
