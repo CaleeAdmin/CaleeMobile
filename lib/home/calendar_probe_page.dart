@@ -187,6 +187,14 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
               },
             ),
             _drawerItem(
+              icon: Icons.security_outlined,
+              label: 'Security',
+              onTap: () {
+                Navigator.of(context).pop(); // Close drawer
+                Get.toNamed(RouteConstant.security);
+              },
+            ),
+            _drawerItem(
               icon: Icons.qr_code_2_outlined,
               label: 'Link a device',
               onTap: () {

@@ -23,11 +23,6 @@ class _ProfilePageState extends State<ProfilePage> {
   final _postCodeController = TextEditingController(text: '10001');
   String _selectedTimezone = 'UTC';
   
-  // Password controllers
-  final _currentPasswordController = TextEditingController();
-  final _newPasswordController = TextEditingController();
-  final _confirmPasswordController = TextEditingController();
-  
   // Account name from stored credentials
   String? _accountName;
   bool _isSyncingProfile = false;
@@ -52,9 +47,6 @@ class _ProfilePageState extends State<ProfilePage> {
     _fullNameController.dispose();
     _emailController.dispose();
     _postCodeController.dispose();
-    _currentPasswordController.dispose();
-    _newPasswordController.dispose();
-    _confirmPasswordController.dispose();
     super.dispose();
   }
 
@@ -132,56 +124,6 @@ class _ProfilePageState extends State<ProfilePage> {
         _isSyncingProfile = false;
       });
     }
-  }
-
-  void _onChangePassword() {
-    final currentPassword = _currentPasswordController.text.trim();
-    final newPassword = _newPasswordController.text.trim();
-    final confirmPassword = _confirmPasswordController.text.trim();
-
-    if (currentPassword.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please enter current password'),
-          backgroundColor: Colors.red,
-        ),
-      );
-      return;
-    }
-
-    if (newPassword.isEmpty || newPassword.length < 6) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('New password must be at least 6 characters'),
-          backgroundColor: Colors.red,
-        ),
-      );
-      return;
-    }
-
-    if (newPassword != confirmPassword) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('New passwords do not match'),
-          backgroundColor: Colors.red,
-        ),
-      );
-      return;
-    }
-
-    // TODO: Implement change password logic
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Password changed successfully'),
-        backgroundColor: Colors.green,
-        duration: Duration(seconds: 2),
-      ),
-    );
-
-    // Clear password fields
-    _currentPasswordController.clear();
-    _newPasswordController.clear();
-    _confirmPasswordController.clear();
   }
 
   @override
@@ -338,70 +280,6 @@ class _ProfilePageState extends State<ProfilePage> {
                               )
                             : const Text(
                           'Save Changes',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ),
-
-                    const SizedBox(height: 40),
-                    const Divider(),
-                    const SizedBox(height: 40),
-
-                    // Change Password Section
-                    _buildSectionTitle(
-                      'Change Password',
-                      'Update your password to keep your account secure',
-                    ),
-                    const SizedBox(height: 24),
-
-                    // Current Password
-                    _buildLabel('Current Password'),
-                    const SizedBox(height: 6),
-                    _buildInput(
-                      controller: _currentPasswordController,
-                      hint: 'Enter current password',
-                      obscure: true,
-                    ),
-                    const SizedBox(height: 20),
-
-                    // New Password
-                    _buildLabel('New Password'),
-                    const SizedBox(height: 6),
-                    _buildInput(
-                      controller: _newPasswordController,
-                      hint: 'Enter new password',
-                      obscure: true,
-                    ),
-                    const SizedBox(height: 20),
-
-                    // Confirm New Password
-                    _buildLabel('Confirm New Password'),
-                    const SizedBox(height: 6),
-                    _buildInput(
-                      controller: _confirmPasswordController,
-                      hint: 'Confirm new password',
-                      obscure: true,
-                    ),
-                    const SizedBox(height: 24),
-
-                    // Change Password button
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: _onChangePassword,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF0D0C14),
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                        child: const Text(
-                          'Change Password',
                           style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w600,
