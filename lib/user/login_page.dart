@@ -127,13 +127,12 @@ class _LoginPageState extends State<LoginPage> {
       '/index.php/login',
     );
 
-    if (await canLaunchUrl(resetPasswordUri)) {
-      await launchUrl(
-        resetPasswordUri,
-        mode: LaunchMode.externalApplication,
-      );
-      return;
-    }
+    final opened = await launchUrl(
+      resetPasswordUri,
+      mode: LaunchMode.platformDefault,
+    );
+
+    if (opened) return;
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
