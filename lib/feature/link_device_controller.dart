@@ -19,17 +19,7 @@ class LinkDeviceController {
         builder: (dialogContext) {
           return AlertDialog(
             title: const Text('Approve device link?'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _detailRow('Server', approvalRequest.serverBase),
-                const SizedBox(height: 8),
-                _detailRow('Device name', approvalRequest.deviceName),
-                const SizedBox(height: 8),
-                _detailRow('Poll token', approvalRequest.pollToken),
-              ],
-            ),
+            content: _detailRow('Device name', approvalRequest.deviceName),
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(dialogContext).pop(false),
@@ -109,7 +99,6 @@ class LinkDeviceController {
     if (pollToken.isEmpty) {
       throw const FormatException('QR payload missing pollToken');
     }
-
 
     final deviceName = (payload['deviceName'] as String?)?.trim() ?? '';
     if (deviceName.isEmpty) {
