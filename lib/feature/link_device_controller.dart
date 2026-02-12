@@ -11,46 +11,40 @@ import 'package:permission_handler/permission_handler.dart';
 class LinkDeviceController {
   Future<void> handleQrScan(BuildContext context, String scannedValue) async {
     try {
-      final payload = _extractCaleePayload(scannedValue);
-      final pollToken = (payload['pollToken'] as String?)?.trim() ?? '';
-      if (pollToken.isEmpty) {
-        throw const FormatException('QR payload missing pollToken');
-      }
+      final approvalRequest = _parseApprovalRequest(scannedValue);
+      if (!context.mounted) return;
 
-      final serverFromQr = (payload['server'] as String?)?.trim() ?? '';
-      final savedServer = MMKVUtils.instance.getString(AppConstant.Server)?.trim() ?? '';
-      final serverBase = _normalizeServerBase(serverFromQr.isNotEmpty ? serverFromQr : savedServer);
-      if (serverBase == null) {
-        throw const FormatException('Server is missing in QR payload and local settings');
-      }
-
-      final loginName = MMKVUtils.instance.getString(AppConstant.loginName)?.trim() ?? '';
-      final appPassword = MMKVUtils.instance.getString(AppConstant.password)?.trim() ?? '';
-      if (loginName.isEmpty || appPassword.isEmpty) {
-        throw const FormatException('Missing saved Nextcloud credentials (loginName/appPassword)');
-      }
-
-      final endpoint = Uri.parse('$serverBase/index.php/apps/caleeflow/approve');
-      final auth = base64Encode(utf8.encode('$loginName:$appPassword'));
-
-      final response = await http.post(
-        endpoint,
-        headers: {
-          'Authorization': 'Basic $auth',
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
+      final bool? shouldApprove = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) {
+          return AlertDialog(
+            title: const Text('Approve device link?'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _detailRow('Server', approvalRequest.serverBase),
+                const SizedBox(height: 8),
+                _detailRow('Poll token', approvalRequest.pollToken),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.of(dialogContext).pop(true),
+                child: const Text('Approve'),
+              ),
+            ],
+          );
         },
-        body: jsonEncode({
-          'pollToken': pollToken,
-          'deviceName': 'CaleeSync',
-        }),
       );
 
-      if (response.statusCode != 200) {
-        throw Exception(
-          'Approval failed (${response.statusCode}): ${response.body}',
-        );
-      }
+      if (shouldApprove != true) return;
+
+      await _sendApproval(approvalRequest);
 
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -70,6 +64,69 @@ class LinkDeviceController {
         );
       }
     }
+  }
+
+  Widget _detailRow(String label, String value) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
+        const SizedBox(height: 2),
+        SelectableText(value),
+      ],
+    );
+  }
+
+  Future<void> _sendApproval(_ApprovalRequest request) async {
+    final endpoint = Uri.parse('${request.serverBase}/index.php/apps/caleeflow/approve');
+    final auth = base64Encode(utf8.encode('${request.loginName}:${request.appPassword}'));
+
+    final response = await http.post(
+      endpoint,
+      headers: {
+        'Authorization': 'Basic $auth',
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: jsonEncode({
+        'pollToken': request.pollToken,
+        'deviceName': 'CaleeSync',
+      }),
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception(
+        'Approval failed (${response.statusCode}): ${response.body}',
+      );
+    }
+  }
+
+  _ApprovalRequest _parseApprovalRequest(String scannedValue) {
+    final payload = _extractCaleePayload(scannedValue);
+    final pollToken = (payload['pollToken'] as String?)?.trim() ?? '';
+    if (pollToken.isEmpty) {
+      throw const FormatException('QR payload missing pollToken');
+    }
+
+    final serverFromQr = (payload['server'] as String?)?.trim() ?? '';
+    final savedServer = MMKVUtils.instance.getString(AppConstant.Server)?.trim() ?? '';
+    final serverBase = _normalizeServerBase(serverFromQr.isNotEmpty ? serverFromQr : savedServer);
+    if (serverBase == null) {
+      throw const FormatException('Server is missing in QR payload and local settings');
+    }
+
+    final loginName = MMKVUtils.instance.getString(AppConstant.loginName)?.trim() ?? '';
+    final appPassword = MMKVUtils.instance.getString(AppConstant.password)?.trim() ?? '';
+    if (loginName.isEmpty || appPassword.isEmpty) {
+      throw const FormatException('Missing saved Nextcloud credentials (loginName/appPassword)');
+    }
+
+    return _ApprovalRequest(
+      pollToken: pollToken,
+      serverBase: serverBase,
+      loginName: loginName,
+      appPassword: appPassword,
+    );
   }
 
   Map<String, dynamic> _extractCaleePayload(String qrData) {
@@ -136,4 +193,18 @@ class LinkDeviceController {
       }
     }
   }
+}
+
+class _ApprovalRequest {
+  const _ApprovalRequest({
+    required this.pollToken,
+    required this.serverBase,
+    required this.loginName,
+    required this.appPassword,
+  });
+
+  final String pollToken;
+  final String serverBase;
+  final String loginName;
+  final String appPassword;
 }
