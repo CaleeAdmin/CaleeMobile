@@ -156,10 +156,9 @@ class NextcloudAuthService {
       'Accept': 'application/json',
     };
 
-    // 兼容不同 Nextcloud 部署路径（rewrite 开/关）。
+    // 使用 Nextcloud 文档中的标准 endpoint。
     final urls = [
       Uri.parse('${normalizedUrl}ocs/v2.php/core/getapppassword?format=json'),
-      Uri.parse('${normalizedUrl}index.php/ocs/v2.php/core/getapppassword?format=json'),
     ];
 
     http.Response? lastResponse;
