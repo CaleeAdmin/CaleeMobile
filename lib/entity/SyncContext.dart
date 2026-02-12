@@ -1,11 +1,19 @@
 // 定义同步任务的配置上下文
+import '../common/enums/SyncEnum.dart';
+
 class SyncContext {
   final String calendarId;    // 本地数据库中的 ID (可能是 "rc_..." 或数字 "6")
   final String remotePath;    // 云端路径
   final String accountName;   // 账户名
   final String accountType;   // 账户类型
   final String displayName;   // 日历显示名称
+  final String color;   // 日历显示名称
   final int syncStatus;       // ⚠️ 新增：同步状态 (0: 仅本地库, 1: 同步至系统)
+  final int syncMode;
+// 💡 新增执行指令
+  final SyncAction action;
+  final String? ctag;               // 增量同步版本号
+  final Map<String, dynamic> extra; // 存放描述、报错信息等
 
   SyncContext({
     required this.calendarId,
@@ -13,7 +21,12 @@ class SyncContext {
     required this.accountName,
     required this.accountType,
     required this.displayName,
+    required this.color,
+    required this.syncMode,
     this.syncStatus = 0,       // 默认为 0
+    required this.action, // 必须指定要做什么
+    this.ctag,
+    this.extra = const {},
   });
 
   /// 💡 新增 copyWith：用于在同步过程中动态更新 ID 或状态
@@ -23,7 +36,12 @@ class SyncContext {
     String? accountName,
     String? accountType,
     String? displayName,
+    String? color,
+    int? syncMode,
     int? syncStatus,
+    SyncAction? action,
+    String? ctag,
+    Map<String, dynamic>? extra
   }) {
     return SyncContext(
       calendarId: calendarId ?? this.calendarId,
@@ -31,7 +49,12 @@ class SyncContext {
       accountName: accountName ?? this.accountName,
       accountType: accountType ?? this.accountType,
       displayName: displayName ?? this.displayName,
+      color: color ?? this.color,
+      syncMode: syncMode ?? this.syncMode,
       syncStatus: syncStatus ?? this.syncStatus,
+      action: action ?? this.action,
+      ctag: ctag ?? this.ctag,
+      extra: extra ?? this.extra,
     );
   }
 }

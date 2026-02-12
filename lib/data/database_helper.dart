@@ -39,39 +39,41 @@ class DatabaseHelper {
         local_id TEXT PRIMARY KEY,
         account_name TEXT,           -- 账号标识 (e.g. gmail_user)
         account_type TEXT,           -- 账号来源 (e.g. com.google / iCloud)
-        remote_path TEXT,
+        remote_path TEXT UNIQUE,     -- 远端路径，允许 NULL (但必须唯一)
         display_name TEXT,
         color TEXT,                  -- 存储 #AARRGGBB
         last_ctag TEXT,
-        sync_mode INTEGER DEFAULT 0, -- 0:双向, 1:只读
-        sync_status INTEGER DEFAULT 0
+        sync_mode INTEGER DEFAULT 0,    -- 0:双向, 1:只读
+        is_enabled INTEGER DEFAULT 0,   -- 0:暂停, 1:正常
+        is_provisioned INTEGER DEFAULT 0, -- 0:初始, 1:就绪
+        origin INTEGER DEFAULT 0        -- 0:本地创建 (Local), 1:远端同步 (Remote)
       )
     ''');
 
     // 2. 事件映射表：保持 UID 核心，增加索引优化查询
     // 彻底补全后的 sync_map
     await db.execute('''
-  CREATE TABLE IF NOT EXISTS sync_map (
-    uid TEXT PRIMARY KEY,           -- 跨设备唯一标识
-    local_id TEXT,                  -- 对应系统日历的 event id
-    calendar_local_id TEXT,         -- 所属日历 ID
-    summary TEXT,
-    description TEXT,
-    dtstart INTEGER,
-    dtend INTEGER,
-    last_etag TEXT,                 -- 云端版本标识
-    last_mtime INTEGER,             -- 本地最后修改时间
-    item_type TEXT,
-    remote_href TEXT,               -- 💡 必须有！存储云端文件的精准路径
-    sync_status INTEGER DEFAULT 0   -- 0:已同步, 1:需上传/更新, 2:需删除
-  )
+     CREATE TABLE IF NOT EXISTS sync_map (
+        uid TEXT PRIMARY KEY,
+        local_id TEXT,                  -- 系统日历 _ID
+        calendar_local_id TEXT,         -- 关联 calendar_map.local_id
+        summary TEXT,
+        description TEXT,
+        dtstart INTEGER,                -- 毫秒时间戳
+        dtend INTEGER,                  -- 毫秒时间戳
+        last_etag TEXT,
+        last_mtime INTEGER,             -- 系统日历的最后修改时间
+        item_type TEXT DEFAULT 'event', -- event / task
+        remote_href TEXT,
+        sync_status INTEGER DEFAULT 0   -- 0:Synced, 1:Dirty, 2:Deleted, 3:Pending
+    );
 ''');
 
     // 建议增加索引，提高同步扫描时的查询速度
     await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_sync_cal ON sync_map (calendar_local_id)');
+        'CREATE INDEX IF NOT EXISTS idx_sync_local_event ON sync_map (local_id)');
     await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_sync_local ON sync_map (local_id)');
+        'CREATE INDEX IF NOT EXISTS idx_sync_calendar_group ON sync_map (calendar_local_id, sync_status)');
   }
   // 物理删除数据库（调试用：调用后需重启 App）
   Future<void> deleteMyDatabase() async {

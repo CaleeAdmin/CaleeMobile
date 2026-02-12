@@ -190,7 +190,7 @@ interface NativeCalendarApi {
    * 🚀 关键新增：在手机系统里创建一个新的日历账簿
    * 返回系统分配的数字 ID (String 形式的 Long)
    */
-  fun createCalendar(displayName: String, accountName: String, callback: (Result<String?>) -> Unit)
+  fun createCalendar(displayName: String, accountName: String, color: Long, callback: (Result<String?>) -> Unit)
   /**
    * 🚀 关键新增：根据 ID 删除整个日历账簿
    * Android 上删除日历会自动联级删除该日历下的所有事件 (Events)
@@ -272,7 +272,8 @@ interface NativeCalendarApi {
             val args = message as List<Any?>
             val displayNameArg = args[0] as String
             val accountNameArg = args[1] as String
-            api.createCalendar(displayNameArg, accountNameArg) { result: Result<String?> ->
+            val colorArg = args[2].let { num -> if (num is Int) num.toLong() else num as Long }
+            api.createCalendar(displayNameArg, accountNameArg, colorArg) { result: Result<String?> ->
               val error = result.exceptionOrNull()
               if (error != null) {
                 reply.reply(wrapError(error))

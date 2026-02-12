@@ -205,7 +205,7 @@ protocol NativeCalendarApi {
   func getEvents(calendarId: String, startMs: Int64, endMs: Int64) throws -> [PlatformItem]
   /// 🚀 关键新增：在手机系统里创建一个新的日历账簿
   /// 返回系统分配的数字 ID (String 形式的 Long)
-  func createCalendar(displayName: String, accountName: String, completion: @escaping (Result<String?, Error>) -> Void)
+  func createCalendar(displayName: String, accountName: String, color: Int64, completion: @escaping (Result<String?, Error>) -> Void)
   /// 🚀 关键新增：根据 ID 删除整个日历账簿
   /// Android 上删除日历会自动联级删除该日历下的所有事件 (Events)
   func deleteCalendar(calendarId: String, accountName: String, accountType: String, completion: @escaping (Result<Bool, Error>) -> Void)
@@ -283,7 +283,8 @@ class NativeCalendarApiSetup {
         let args = message as! [Any?]
         let displayNameArg = args[0] as! String
         let accountNameArg = args[1] as! String
-        api.createCalendar(displayName: displayNameArg, accountName: accountNameArg) { result in
+        let colorArg = args[2] is Int64 ? args[2] as! Int64 : Int64(args[2] as! Int32)
+        api.createCalendar(displayName: displayNameArg, accountName: accountNameArg, color: colorArg) { result in
           switch result {
           case .success(let res):
             reply(wrapResult(res))

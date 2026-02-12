@@ -54,7 +54,7 @@ abstract class NativeCalendarApi {
   /// 🚀 关键新增：在手机系统里创建一个新的日历账簿
   /// 返回系统分配的数字 ID (String 形式的 Long)
   @async
-  String? createCalendar(String displayName, String accountName);
+  String? createCalendar(String displayName, String accountName,int color);
 
   /// 🚀 关键新增：根据 ID 删除整个日历账簿
   /// Android 上删除日历会自动联级删除该日历下的所有事件 (Events)

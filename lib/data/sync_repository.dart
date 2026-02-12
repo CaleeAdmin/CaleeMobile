@@ -14,53 +14,6 @@ class SyncRepository {
   final NativeCalendarApi _nativeApi = NativeCalendarApi();
   final DatabaseHelper _dbHelper = DatabaseHelper.instance;
 
-  /// 扫描并更新本地日历表，返回所有可双向同步的日历 ID
-  Future<List<SyncContext>> prepareSyncContexts() async {
-    final db = await _dbHelper.database;
-
-    // 1. 从原生侧拉取手机系统当前的日历列表
-    final List<PlatformCalendar?> locals = await _nativeApi.getCalendars();
-
-    for (var cal in locals) {
-      if (cal == null || cal.isReadOnly == true) continue;
-
-      // 2. 使用 ConflictAlgorithm.replace 或者特定逻辑更新
-      // 这样可以确保如果用户改了日历颜色或名字，本地数据库也能同步更新
-      await db.insert('calendar_map', {
-        'local_id': cal.id,
-        'account_name': cal.accountName,
-        'account_type': cal.accountType,
-        'display_name': cal.name,
-        'color': cal.color,
-        // 注意：这里不要覆盖 remote_path，如果已存在应保留
-      }, conflictAlgorithm: ConflictAlgorithm.ignore);
-
-      // 如果想更新名字但保留 remote_path，可以用 update + where local_id
-    }
-
-    // 3. 统一从数据库拉取所有“可写”的日历映射
-    // 这样逻辑更清晰：原生负责采集，数据库负责持久化配置
-    final List<Map<String, dynamic>> maps = await db.query(
-      'calendar_map', where: 'sync_status = 1'
-    );
-
-    List<SyncContext> contexts = [];
-    for (var row in maps) {
-      // 💡 这里的关键：即使 remote_path 为空，也要加入 contexts
-      // 这样 executeFullSync 才能感知到这是一个需要“自动创建”的新日历
-      contexts.add(SyncContext(
-        calendarId: row['local_id'] as String,
-        remotePath: row['remote_path'] as String? ?? "", // 允许为空字符串
-        accountName: row['account_name'] as String? ?? '',
-        accountType: row['account_type'] as String? ?? '',
-        displayName: row['display_name'] as String? ?? '未命名日历', // 对应你之前的需求
-        syncStatus: row['sync_status'] as int? ?? 0,
-      ));
-    }
-
-    return contexts;
-  }
-
   /// 步骤 A: 扫描系统变更（新增/修改/删除）
   Future<void> scanSystemChanges(SyncContext ctx) async {
     final db = await _dbHelper.database;
@@ -137,20 +90,41 @@ class SyncRepository {
   // ==========================================
   Future<void> scanLocalCalendars(String accountId) async {
     final db = await _dbHelper.database;
+    // 假设 _nativeApi.getCalendars() 返回的是系统日历列表
     final List<PlatformCalendar?> localCalendars = await _nativeApi.getCalendars();
 
     await db.transaction((txn) async {
       for (var cal in localCalendars) {
         if (cal == null) continue;
+
+        // 使用原生 SQL 的 ON CONFLICT 机制，严格对齐表结构
         await txn.rawInsert('''
         INSERT INTO calendar_map (
-          local_id, account_name, account_type, display_name, color, sync_mode,sync_status
+          local_id, 
+          account_name, 
+          account_type, 
+          display_name, 
+          color, 
+          sync_mode, 
+          is_enabled,
+          is_provisioned,
+          origin
         )
-        VALUES (?, ?, ?, ?, ?, ?,?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(local_id) DO UPDATE SET 
           display_name = excluded.display_name,
           color = excluded.color
-      ''', [cal.id, cal.accountName, cal.accountType, cal.name, cal.color,cal.isReadOnly == true ? 1 : 0, 0]);
+      ''', [
+          cal.id,               // local_id
+          accountId,            // account_name (userId)
+          cal.accountType,      // account_type
+          cal.name,             // display_name
+          cal.color,            // color (#AARRGGBB)
+          cal.isReadOnly == true ? 1 : 0, // sync_mode: 1 为只读, 0 为双向
+          0,                    // is_enabled: 默认开启
+          0,                    // is_provisioned: 初始状态为 0，等待同步洗白
+          0                     // origin: 0 (Local)，因为是从本地扫描到的
+        ]);
       }
     });
   }
@@ -317,9 +291,9 @@ class SyncRepository {
 
       // 4. 📥 下载详情并写入系统日历
       print('📥 正在更新事件详情: $uid');
-      final icsData = await NextcloudService().getEventDetail(
-          eventPath: href,
-      );
+      final icsData = "";// await NextcloudService().getEventDetail(
+      //     eventPath: href,
+      // );
 
       if (icsData != null) {
         final parsed = IcsParser.parse(icsData, uid);
@@ -720,19 +694,20 @@ class SyncRepository {
     try {
       // 1. 🌟 优先：在云端创建日历 (Nextcloud)
       // 生成一个唯一的云端 ID，例如: cal_1712345678
-      final String cloudId = "cal_${DateTime.now().millisecondsSinceEpoch}";
-
-      print("🚀 [Repository] 正在云端创建日历: $displayName (ID: $cloudId)");
-      final String? remotePath = await NextcloudService().createRemoteCalendar(
-        userId: userId,
-        calendarName: displayName,
-        calendarId: cloudId,
-      );
-
-      if (remotePath == null) {
-        print("❌ [Repository] 云端创建失败，放弃本地入库");
-        return false;
-      }
+      // final String cloudId = "cal_${DateTime.now().millisecondsSinceEpoch}";
+      //
+      // print("🚀 [Repository] 正在云端创建日历: $displayName (ID: $cloudId)");
+      // final String? remotePath = await NextcloudService().createRemoteCalendar(
+      //   userId: userId,
+      //   calendarName: displayName,
+      //   calendarId: cloudId,
+      //
+      // );
+      //
+      // if (remotePath == null) {
+      //   print("❌ [Repository] 云端创建失败，放弃本地入库");
+      //   return false;
+      // }
 
       // 2. 🌟 生成本地虚拟 ID (rc_ 开头)
       // 因为现在还没同步到手机系统，所以没有 system_id (1, 2, 3...)
@@ -747,13 +722,12 @@ class SyncRepository {
           'account_name': userId,
           'account_type': accountType,
           'display_name': displayName,
-          'remote_path': remotePath,    // 存入刚刚拿到的云端路径
+          // 'remote_path': remotePath,    // 存入刚刚拿到的云端路径
           'sync_status': 0,             // 🌟 默认不勾选同步
         },
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
 
-      print("✅ [Repository] 云端日历已创建并缓存到本地: $remotePath");
       return true;
     } catch (e) {
       print("❌ [Repository] 创建逻辑发生异常: $e");
