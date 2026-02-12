@@ -50,11 +50,16 @@ class AuthController extends GetxController {
       );
 
       if (success) {
+        final appPassword = await _authService.getAppPassword(
+          loginName: loginName,
+          password: password,
+        );
+
         authStateRx.value = NextcloudAuthState(
           status: NextcloudAuthStatus.success,
           serverUrl: _authService.normalizedUrl,
           loginName: loginName,
-          appPassword: password,
+          appPassword: appPassword,
         );
       } else {
         authStateRx.value = const NextcloudAuthState(
