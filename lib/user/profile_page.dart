@@ -18,24 +18,13 @@ class _ProfilePageState extends State<ProfilePage> {
   final _fullNameController = TextEditingController(text: 'John Doe');
   final _emailController = TextEditingController(text: 'john.doe@example.com');
   final _postCodeController = TextEditingController(text: '10001');
+  final _timezoneController = TextEditingController(text: 'UTC');
   
   // Password controllers
   final _currentPasswordController = TextEditingController();
   final _newPasswordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
   
-  // First Day of Week dropdown value
-  String _firstDayOfWeek = 'Monday';
-  final List<String> _weekDays = [
-    'Monday',
-    'Tuesday',
-    'Wednesday',
-    'Thursday',
-    'Friday',
-    'Saturday',
-    'Sunday',
-  ];
-
   // Account name from stored credentials
   String? _accountName;
 
@@ -58,6 +47,7 @@ class _ProfilePageState extends State<ProfilePage> {
     _fullNameController.dispose();
     _emailController.dispose();
     _postCodeController.dispose();
+    _timezoneController.dispose();
     _currentPasswordController.dispose();
     _newPasswordController.dispose();
     _confirmPasswordController.dispose();
@@ -245,20 +235,23 @@ class _ProfilePageState extends State<ProfilePage> {
                     ),
                     const SizedBox(height: 20),
 
-                    // Post Code
-                    _buildLabel('Post Code'),
+                    // Postcode
+                    _buildLabel('Postcode'),
                     const SizedBox(height: 6),
                     _buildInput(
                       controller: _postCodeController,
-                      hint: 'Enter your post code',
+                      hint: 'Enter your postcode',
                       keyboardType: TextInputType.number,
                     ),
                     const SizedBox(height: 20),
 
-                    // First Day of Week
-                    _buildLabel('First Day of Week'),
+                    // Timezone
+                    _buildLabel('Timezone'),
                     const SizedBox(height: 6),
-                    _buildDropdown(),
+                    _buildInput(
+                      controller: _timezoneController,
+                      hint: 'Enter your timezone',
+                    ),
                     const SizedBox(height: 24),
 
                     // Save Changes button
@@ -442,41 +435,4 @@ class _ProfilePageState extends State<ProfilePage> {
       ),
     );
   }
-
-  Widget _buildDropdown() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF4F3F7),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.grey.shade300, width: 0.8),
-      ),
-      child: DropdownButton<String>(
-        value: _firstDayOfWeek,
-        isExpanded: true,
-        underline: const SizedBox(),
-        icon: Icon(Icons.keyboard_arrow_down, color: Colors.grey.shade600),
-        items: _weekDays.map((String day) {
-          return DropdownMenuItem<String>(
-            value: day,
-            child: Text(
-              day,
-              style: const TextStyle(
-                fontSize: 16,
-                color: Colors.black87,
-              ),
-            ),
-          );
-        }).toList(),
-        onChanged: (String? newValue) {
-          if (newValue != null) {
-            setState(() {
-              _firstDayOfWeek = newValue;
-            });
-          }
-        },
-      ),
-    );
-  }
 }
-
