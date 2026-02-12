@@ -7,6 +7,7 @@ import 'package:caleesync/models/nextcloud_auth_state.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 /// Login page with Nextcloud Login Flow v2 integration.
 class LoginPage extends StatefulWidget {
@@ -117,6 +118,28 @@ class _LoginPageState extends State<LoginPage> {
     authController.loginWithCredentials(
       loginName: loginName,
       password: password,
+    );
+  }
+
+  Future<void> _openForgotPasswordPage() async {
+    final resetPasswordUri = Uri.https(
+      AppConstant.nextcloudServer,
+      '/index.php/lostpassword',
+    );
+
+    if (await canLaunchUrl(resetPasswordUri)) {
+      await launchUrl(
+        resetPasswordUri,
+        mode: LaunchMode.externalApplication,
+      );
+      return;
+    }
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Could not open reset password page in browser'),
+      ),
     );
   }
 
@@ -277,14 +300,10 @@ class _LoginPageState extends State<LoginPage> {
                   ),
                   const SizedBox(height: 16),
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
+                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       TextButton(
-                        onPressed: isLoading
-                            ? null
-                            : () {
-                                // TODO: navigate to Forgot password page
-                              },
+                        onPressed: isLoading ? null : _openForgotPasswordPage,
                         child: const Text(
                           'Forgot password?',
                           style: TextStyle(
