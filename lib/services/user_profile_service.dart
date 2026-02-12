@@ -32,6 +32,22 @@ class UserProfileService {
     };
   }
 
+  bool _isSuccessResponse(String body) {
+    final payload = jsonDecode(body) as Map<String, dynamic>;
+    final meta = ((payload['ocs'] as Map<String, dynamic>?)?['meta'] as Map<String, dynamic>?) ??
+        <String, dynamic>{};
+    final statusCode = int.tryParse(meta['statuscode']?.toString() ?? '') ?? -1;
+    final status = meta['status']?.toString().toLowerCase() ?? '';
+    return statusCode == 100 || status == 'ok';
+  }
+
+  String _extractErrorMessage(String body) {
+    final payload = jsonDecode(body) as Map<String, dynamic>;
+    final meta = ((payload['ocs'] as Map<String, dynamic>?)?['meta'] as Map<String, dynamic>?) ??
+        <String, dynamic>{};
+    return meta['message']?.toString() ?? 'Unknown error';
+  }
+
   Future<Map<String, String>> fetchCurrentProfile() async {
     final userId = MMKVUtils.instance.getString(AppConstant.loginName) ?? '';
     final password = MMKVUtils.instance.getString(AppConstant.password) ?? '';
@@ -131,6 +147,46 @@ class UserProfileService {
 
     if (errors.isNotEmpty) {
       throw Exception('Failed to sync some fields: ${errors.join(', ')}');
+    }
+  }
+
+  Future<void> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    final userId = MMKVUtils.instance.getString(AppConstant.loginName) ?? '';
+
+    if (userId.isEmpty) {
+      throw Exception('Missing Nextcloud credentials');
+    }
+
+    final validateUri = _buildUri('/ocs/v2.php/cloud/user?format=json');
+    final validateResponse = await _client.get(
+      validateUri,
+      headers: _headers(userId, currentPassword),
+    );
+
+    if (validateResponse.statusCode != 200 || !_isSuccessResponse(validateResponse.body)) {
+      throw Exception('Current password is incorrect');
+    }
+
+    final updateUri = _buildUri('/ocs/v2.php/cloud/users/${Uri.encodeComponent(userId)}?format=json');
+    final updateResponse = await _client.put(
+      updateUri,
+      headers: _headers(userId, currentPassword),
+      body: {
+        'key': 'password',
+        'value': newPassword,
+      },
+    );
+
+    if (updateResponse.statusCode != 200) {
+      throw Exception('Failed to change password: HTTP ${updateResponse.statusCode}');
+    }
+
+    if (!_isSuccessResponse(updateResponse.body)) {
+      final message = _extractErrorMessage(updateResponse.body);
+      throw Exception('Failed to change password: $message');
     }
   }
 }

@@ -1,5 +1,6 @@
 import 'package:caleesync/common/route_constant.dart';
 import 'package:caleesync/controllers/app_controller.dart';
+import 'package:caleesync/services/user_profile_service.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
@@ -18,6 +19,7 @@ class _SecurityPageState extends State<SecurityPage> {
   bool _obscureCurrentPassword = true;
   bool _obscureNewPassword = true;
   bool _obscureConfirmPassword = true;
+  bool _isChangingPassword = false;
 
   @override
   void dispose() {
@@ -32,7 +34,11 @@ class _SecurityPageState extends State<SecurityPage> {
     appController.logout();
   }
 
-  void _onChangePassword() {
+  Future<void> _onChangePassword() async {
+    if (_isChangingPassword) {
+      return;
+    }
+
     final currentPassword = _currentPasswordController.text.trim();
     final newPassword = _newPasswordController.text.trim();
     final confirmPassword = _confirmPasswordController.text.trim();
@@ -67,18 +73,65 @@ class _SecurityPageState extends State<SecurityPage> {
       return;
     }
 
-    // TODO: Implement change password logic
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Password changed successfully'),
-        backgroundColor: Colors.green,
-        duration: Duration(seconds: 2),
-      ),
-    );
+    if (newPassword == currentPassword) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('New password must be different from current password'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
 
-    _currentPasswordController.clear();
-    _newPasswordController.clear();
-    _confirmPasswordController.clear();
+    setState(() {
+      _isChangingPassword = true;
+    });
+
+    try {
+      final userProfileService = UserProfileService();
+      await userProfileService.changePassword(
+        currentPassword: currentPassword,
+        newPassword: newPassword,
+      );
+
+      _currentPasswordController.clear();
+      _newPasswordController.clear();
+      _confirmPasswordController.clear();
+
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Password changed successfully. Logging out...'),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 2),
+        ),
+      );
+
+      await Future<void>.delayed(const Duration(seconds: 1));
+      if (!mounted) {
+        return;
+      }
+      _onLogout();
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.toString().replaceFirst('Exception: ', '')),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isChangingPassword = false;
+        });
+      }
+    }
   }
 
   @override
@@ -221,7 +274,7 @@ class _SecurityPageState extends State<SecurityPage> {
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
-                        onPressed: _onChangePassword,
+                        onPressed: _isChangingPassword ? null : _onChangePassword,
                         style: ElevatedButton.styleFrom(
                           backgroundColor: const Color(0xFF0D0C14),
                           foregroundColor: Colors.white,
@@ -230,13 +283,22 @@ class _SecurityPageState extends State<SecurityPage> {
                             borderRadius: BorderRadius.circular(8),
                           ),
                         ),
-                        child: const Text(
-                          'Change Password',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
+                        child: _isChangingPassword
+                            ? const SizedBox(
+                                height: 20,
+                                width: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                ),
+                              )
+                            : const Text(
+                                'Change Password',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
                       ),
                     ),
                   ],
