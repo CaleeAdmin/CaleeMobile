@@ -25,6 +25,8 @@ class LinkDeviceController {
               children: [
                 _detailRow('Server', approvalRequest.serverBase),
                 const SizedBox(height: 8),
+                _detailRow('Device name', approvalRequest.deviceName),
+                const SizedBox(height: 8),
                 _detailRow('Poll token', approvalRequest.pollToken),
               ],
             ),
@@ -90,7 +92,7 @@ class LinkDeviceController {
       },
       body: jsonEncode({
         'pollToken': request.pollToken,
-        'deviceName': 'CaleeSync',
+        'deviceName': request.deviceName,
       }),
     );
 
@@ -106,6 +108,12 @@ class LinkDeviceController {
     final pollToken = (payload['pollToken'] as String?)?.trim() ?? '';
     if (pollToken.isEmpty) {
       throw const FormatException('QR payload missing pollToken');
+    }
+
+
+    final deviceName = (payload['deviceName'] as String?)?.trim() ?? '';
+    if (deviceName.isEmpty) {
+      throw const FormatException('QR payload missing deviceName');
     }
 
     final serverFromQr = (payload['server'] as String?)?.trim() ?? '';
@@ -124,6 +132,7 @@ class LinkDeviceController {
     return _ApprovalRequest(
       pollToken: pollToken,
       serverBase: serverBase,
+      deviceName: deviceName,
       loginName: loginName,
       appPassword: appPassword,
     );
@@ -199,12 +208,14 @@ class _ApprovalRequest {
   const _ApprovalRequest({
     required this.pollToken,
     required this.serverBase,
+    required this.deviceName,
     required this.loginName,
     required this.appPassword,
   });
 
   final String pollToken;
   final String serverBase;
+  final String deviceName;
   final String loginName;
   final String appPassword;
 }
