@@ -9,21 +9,47 @@ class QRScannerPage extends StatefulWidget {
   State<QRScannerPage> createState() => _QRScannerPageState();
 }
 
-class _QRScannerPageState extends State<QRScannerPage> {
+class _QRScannerPageState extends State<QRScannerPage> with WidgetsBindingObserver {
   final MobileScannerController _controller = MobileScannerController(
     formats: const [BarcodeFormat.qrCode],
     detectionSpeed: DetectionSpeed.noDuplicates,
+    autoZoom: true,
+    facing: CameraFacing.back,
   );
 
   bool _isProcessing = false;
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (!mounted || _isProcessing) return;
+
+    switch (state) {
+      case AppLifecycleState.resumed:
+        _controller.start();
+        break;
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.paused:
+      case AppLifecycleState.detached:
+      case AppLifecycleState.hidden:
+        _controller.stop();
+        break;
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _controller.dispose();
     super.dispose();
   }
 
-  void _onDetect(BarcodeCapture capture) {
+  Future<void> _onDetect(BarcodeCapture capture) async {
     if (_isProcessing) return;
 
     String? raw;
@@ -38,6 +64,7 @@ class _QRScannerPageState extends State<QRScannerPage> {
     if (raw == null) return;
 
     _isProcessing = true;
+    await _controller.stop();
     if (mounted) {
       Navigator.of(context).pop(raw);
     }
@@ -46,12 +73,6 @@ class _QRScannerPageState extends State<QRScannerPage> {
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
-    final scanWindow = Rect.fromCenter(
-      center: Offset(size.width / 2, size.height / 2),
-      width: size.width * 0.82,
-      height: size.width * 0.82,
-    );
-
     return Scaffold(
       extendBodyBehindAppBar: true,
       backgroundColor: Colors.black,
@@ -73,8 +94,7 @@ class _QRScannerPageState extends State<QRScannerPage> {
             child: MobileScanner(
               controller: _controller,
               onDetect: _onDetect,
-              scanWindow: scanWindow,
-              fit: BoxFit.contain,
+              fit: BoxFit.cover,
             ),
           ),
           Center(
@@ -116,38 +136,9 @@ class _QRScannerPageState extends State<QRScannerPage> {
                     textAlign: TextAlign.center,
                   ),
                 ),
-                const SizedBox(height: 12),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    _actionButton(
-                      icon: Icons.flash_on,
-                      label: 'Torch',
-                      onPressed: () => _controller.toggleTorch(),
-                    ),
-                  ],
-                ),
               ],
             ),
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _actionButton({required IconData icon, required String label, required VoidCallback onPressed}) {
-    return ElevatedButton(
-      style: ElevatedButton.styleFrom(
-        backgroundColor: Colors.black54,
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      ),
-      onPressed: onPressed,
-      child: Row(
-        children: [
-          Icon(icon, color: Colors.white, size: 20),
-          const SizedBox(width: 8),
-          Text(label, style: const TextStyle(color: Colors.white)),
         ],
       ),
     );
