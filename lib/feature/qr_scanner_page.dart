@@ -116,38 +116,9 @@ class _QRScannerPageState extends State<QRScannerPage> {
                     textAlign: TextAlign.center,
                   ),
                 ),
-                const SizedBox(height: 12),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    _actionButton(
-                      icon: Icons.flash_on,
-                      label: 'Torch',
-                      onPressed: () => _controller.toggleTorch(),
-                    ),
-                  ],
-                ),
               ],
             ),
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _actionButton({required IconData icon, required String label, required VoidCallback onPressed}) {
-    return ElevatedButton(
-      style: ElevatedButton.styleFrom(
-        backgroundColor: Colors.black54,
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      ),
-      onPressed: onPressed,
-      child: Row(
-        children: [
-          Icon(icon, color: Colors.white, size: 20),
-          const SizedBox(width: 8),
-          Text(label, style: const TextStyle(color: Colors.white)),
         ],
       ),
     );
