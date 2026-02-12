@@ -68,7 +68,9 @@ class NextcloudProfileService {
       'email': accountValue('email').isNotEmpty
           ? accountValue('email')
           : (data['email']?.toString() ?? ''),
-      'address': accountValue('address'),
+      'address': accountValue('address').isNotEmpty
+          ? accountValue('address')
+          : (data['address']?.toString() ?? ''),
       'timezone': accountValue('timezone').isNotEmpty
           ? accountValue('timezone')
           : (data['timezone']?.toString() ?? ''),
