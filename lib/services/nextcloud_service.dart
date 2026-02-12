@@ -155,7 +155,6 @@ class NextcloudService {
     final String userId = MMKVUtils.instance.getString(AppConstant.loginName) ?? "";
     final String password = MMKVUtils.instance.getString(AppConstant.password) ?? "";
     final url = "https://nc-dev.ywpl.com.au$calendarPath";
-    print('🌐 发起请求: $url');
 
     try {
       final request = http.Request('PROPFIND', Uri.parse(url));
@@ -163,68 +162,125 @@ class NextcloudService {
         'Authorization': 'Basic ${base64Encode(utf8.encode('$userId:$password'))}',
         'Depth': '1',
         'Content-Type': 'application/xml; charset=utf-8',
-        'User-Agent': 'curl/7.81.0', // 伪装成 curl，防止服务器对移动端有限制
       });
 
-      request.body = '<?xml version="1.0" encoding="utf-8" ?><d:propfind xmlns:d="DAV:"><d:prop><d:getetag /></d:prop></d:propfind>';
+      // 🛡️ 修复点 1：请求 calendar-data，这样才能拿到标题和时间
+      request.body = '''<?xml version="1.0" encoding="utf-8" ?>
+<d:propfind xmlns:d="DAV:" xmlns:cal="urn:ietf:params:xml:ns:caldav">
+  <d:prop>
+    <d:getetag />
+    <cal:calendar-data />
+  </d:prop>
+</d:propfind>''';
 
       final client = http.Client();
       final streamedResponse = await client.send(request);
       final response = await http.Response.fromStream(streamedResponse);
 
-      print('📡 响应状态码: ${response.statusCode}');
-
       if (response.statusCode == 207) {
-        // ⚠️ 这一行是关键，请在日志中确认是否看到了 <d:href>
-        print('📄 原始响应内容前500字: ${response.body.length > 500 ? response.body.substring(0, 500) : response.body}');
-
         final document = xml.XmlDocument.parse(response.body);
         final List<Map<String, dynamic>> events = [];
 
-        // 彻底放弃 namespace 匹配，使用这种最原始的方式查找所有 response
         final responses = document.descendants
             .whereType<xml.XmlElement>()
             .where((node) => node.name.local == 'response');
 
         for (var responseNode in responses) {
-          // 查找 href
-          final hrefNode = responseNode.descendants
+          final href = responseNode.findElements('d:href').firstOrNull?.innerText ?? '';
+
+          // 🛡️ 修复点 2：精准过滤，只处理 .ics 文件，跳过目录本身
+          if (!href.endsWith('.ics')) continue;
+
+          // 查找 200 OK 的属性部分
+          final prop = responseNode.descendants
               .whereType<xml.XmlElement>()
-              .where((node) => node.name.local == 'href')
+              .where((node) => node.name.local == 'prop')
               .firstOrNull;
 
-          final href = hrefNode?.innerText ?? '';
+          if (prop != null) {
+            final etag = prop.findElements('d:getetag').firstOrNull?.innerText ?? '';
+            final calendarData = prop.findElements('cal:calendar-data').firstOrNull?.innerText ?? '';
 
-          // 查找 status
-          final statusNode = responseNode.descendants
-              .whereType<xml.XmlElement>()
-              .where((node) => node.name.local == 'status')
-              .firstOrNull;
+            if (calendarData.isNotEmpty) {
+              // 🛡️ 修复点 3：解析 ICS 内容
+              // 这里建议调用你之前的 IcsParser。注意：根据你之前的日志，
+              // 确保解析出来的 map 使用小写的 'summary', 'dtstart', 'dtend'
+              final Map<String, dynamic> parsedIcs = _parseIcsContent(calendarData);
 
-          final status = statusNode?.innerText ?? '';
-
-          if (href.endsWith('.ics') && status.contains('200')) {
-            final etagNode = responseNode.descendants
-                .whereType<xml.XmlElement>()
-                .where((node) => node.name.local == 'getetag')
-                .firstOrNull;
-
-            final etag = etagNode?.innerText.replaceAll('&quot;', '').replaceAll('"', '') ?? '';
-
-            events.add({
-              'href': href,
-              'etag': etag,
-            });
+              events.add({
+                'href': href,
+                'etag': etag.replaceAll('"', '').replaceAll('W/', ''),
+                'summary': parsedIcs['summary'] ?? '无标题', // 这里的 Key 必须和解析器一致
+                'start': parsedIcs['dtstart'],
+                'end': parsedIcs['dtend'],
+                'uid': parsedIcs['uid'],
+              });
+            }
           }
         }
 
-        print('✨ 最终拉取到: ${events.length} 个事件');
+        print('✨ 最终拉取到: ${events.length} 个有效事件');
         return events;
       }
     } catch (e) {
       print('❌ 严重错误: $e');
     }
     return [];
+  }
+
+  Map<String, dynamic> _parseIcsContent(String icsString) {
+    final Map<String, dynamic> result = {};
+
+    // 这里推荐使用你项目中已经有的 ical 库，或者简单的正则匹配
+    // 下面是一个基于你之前打印结果的逻辑模拟：
+    try {
+      // 假设你使用的是 ical 库：
+      // final iCalendar = ICalendar.fromString(icsString);
+      // final event = iCalendar.data.first;
+
+      // 如果你是手动解析，确保 Key 和你 fetchRemoteEvents 调用的地方一致
+      // 重点：统一使用全小写，避免大小写导致的 null
+      result['summary'] = _findValue(icsString, 'SUMMARY');
+      result['uid'] = _findValue(icsString, 'UID');
+
+      // 提取时间并转为毫秒时间戳（符合你之前的日志格式）
+      String? dtStart = _findValue(icsString, 'DTSTART');
+      if (dtStart != null) {
+        result['dtstart'] = _parseIcsDateTime(dtStart).millisecondsSinceEpoch;
+      }
+
+      String? dtEnd = _findValue(icsString, 'DTEND');
+      if (dtEnd != null) {
+        result['dtend'] = _parseIcsDateTime(dtEnd).millisecondsSinceEpoch;
+      }
+    } catch (e) {
+      print('解析 ICS 失败: $e');
+    }
+
+    return result;
+  }
+
+// 辅助方法：简单的正则提取
+  String? _findValue(String ics, String key) {
+    final regExp = RegExp('$key:(.*)');
+    final match = regExp.firstMatch(ics);
+    return match?.group(1)?.trim();
+  }
+
+// 辅助方法：将 ICS 时间格式转为 DateTime
+  DateTime _parseIcsDateTime(String icsDate) {
+    // 处理格式如：20260211T090000Z
+    icsDate = icsDate.replaceAll('Z', '');
+    if (icsDate.contains(':')) icsDate = icsDate.split(':').last;
+
+    final year = int.parse(icsDate.substring(0, 4));
+    final month = int.parse(icsDate.substring(4, 6));
+    final day = int.parse(icsDate.substring(6, 8));
+    final hour = int.parse(icsDate.substring(9, 11));
+    final minute = int.parse(icsDate.substring(11, 13));
+    final second = int.parse(icsDate.substring(13, 15));
+
+    return DateTime.utc(year, month, day, hour, minute, second).toLocal();
   }
 
   /// [MKCALENDAR] 在云端创建一个新的日历
@@ -358,19 +414,33 @@ class NextcloudService {
   }
 
   // 在 NextcloudService 中检查 getEventDetail 方法
-  Future<String?> getEventDetail({required String eventPath}) async {
-    // 注意：href 已经是 /remote.php/dav... 开头的完整路径了
-    // 不要重复拼接！
-    final String userId = MMKVUtils.instance.getString(AppConstant.loginName) ?? "";
+  /// 建议在同步引擎开始时创建一个 client，结束后 close
+  Future<String?> getEventDetail({
+    required http.Client client,
+    required String eventPath,
+    required String authHeader,
+  }) async {
     final url = "https://nc-dev.ywpl.com.au$eventPath";
 
-    final response = await http.get(
-      Uri.parse(url),
-      headers: {
-        'Authorization': _getAuthString(userId, MMKVUtils.instance.getString(AppConstant.password)!),
-      },
-    );
-    return response.statusCode == 200 ? response.body : null;
+    try {
+      final response = await client.get(
+        Uri.parse(url),
+        headers: {
+          'Authorization': authHeader,
+          'User-Agent': 'CaleeSync/1.0',
+        },
+      ).timeout(const Duration(seconds: 15));
+
+      if (response.statusCode == 200) {
+        return response.body;
+      } else {
+        print('⚠️ 下载失败 [$eventPath]: ${response.statusCode}');
+        return null;
+      }
+    } catch (e) {
+      print('❌ 网络异常 [$eventPath]: $e');
+      return null;
+    }
   }
 
   /// [PUT] 上传事件并返回最新的 ETag

@@ -1,7 +1,11 @@
+import 'dart:convert';
+
 import 'package:caleesync/common/app_constant.dart';
 import 'package:caleesync/common/utils/mmkv_utils.dart';
 import 'package:caleesync/core/platform/pigeon/calendar_api.g.dart';
 import 'package:caleesync/data/sync_repository.dart';
+import 'package:flutter/cupertino.dart';
+import 'package:http/http.dart' as http;
 import 'package:sqflite/sqflite.dart';
 
 import '../common/enums/SyncEnum.dart';
@@ -224,6 +228,104 @@ class SyncEngine {
                 whereArgs: [ctx.calendarId]
             );
             summary.success++;
+          }
+          break;
+        case SyncAction.createLocal:
+          print('🚀 开始执行 createLocal: ${ctx.displayName}');
+
+          // 1. 在 Android 系统侧创建日历坑位
+          final int colorValue = int.tryParse(ctx.color.replaceAll('#', '0x')) ?? 0xFF2196F3;
+
+          final String? newLocalId = await _native.createCalendar(
+            ctx.displayName ,
+            loginName,
+            colorValue,
+          );
+
+          if (newLocalId == null) {
+            print('❌ 原生创建日历失败');
+            summary.failed++;
+            break;
+          }
+
+          final db = await _dbHelper.database;
+
+          // 2. 立即关联本地 ID 并更新状态，防止后续流程崩溃导致重复创建日历
+          await db.update('calendar_map', {
+            'local_id': newLocalId,
+            'is_enabled': 1,      // 既然是同步下来的，默认开启
+            'is_provisioned': 0,  // 标记为“洗白中”，尚未完成初始拉取
+          }, where: 'remote_path = ?', whereArgs: [ctx.remotePath]);
+
+          // 3. 准备批量下载环境 (复用 Client 提升性能)
+          final client = http.Client();
+          final String auth = 'Basic ${base64Encode(utf8.encode('$loginName:${MMKVUtils.instance.getString(AppConstant.password)}'))}';
+
+          try {
+            // 4. 获取远端该日历下所有事件的列表 (Href 和 ETag)
+            final List<Map<String, dynamic>> remoteEvents = await _nc.fetchRemoteEvents(
+              calendarPath: ctx.remotePath,
+            );
+
+            int eventSuccessCount = 0;
+
+            for (var remote in remoteEvents) {
+              final String href = remote['href'];
+              final String etag = remote['etag'];
+
+              // 5. 调用你复用的 getEventDetail 下载具体的 .ics 内容
+              final icsData = await _nc.getEventDetail(
+                client: client,
+                eventPath: href,
+                authHeader: auth,
+              );
+
+              if (icsData == null) {
+                print('⚠️ 无法下载事件内容: $href');
+                continue;
+              }
+
+              // 6. 解析 ICS (利用你之前的 IcsParser)
+              // 即使 remote['uid'] 为空，我们也传一个基于 href 的标识符进去
+              final String fallbackUid = href.split('/').last.replaceAll('.ics', '');
+              final parsed = IcsParser.parse(icsData, remote['uid'] ?? fallbackUid);
+              // 7. 调用原生的 createEvent 写入 Android 系统日历
+              String title = parsed['summary'] ?? parsed['SUMMARY'] ?? '未命名事件';
+              final String? systemEventId = await _native.createEvent(
+                newLocalId,
+                title,
+                parsed['dtstart'],      // 毫秒级 Long
+                parsed['dtend'],        // 毫秒级 Long
+                parsed['description'],
+                parsed['uid'],        // 核心：存入系统 _SYNC_ID
+              );
+              if (systemEventId != null) {
+                // 8. 建立 sync_map 关系映射
+                await db.insert('sync_map', {
+                  'uid': parsed['uid'],
+                  'local_id': systemEventId,
+                  'calendar_local_id': newLocalId,
+                  'summary': parsed['title'],
+                  'last_etag': etag,      // 存下 ETag，下次同步时比对
+                  'remote_href': href,
+                  'sync_status': 0,       // 0 代表正常同步状态
+                });
+                eventSuccessCount++;
+              }
+            }
+            // 9. 初始拉取全量完成，更新日历状态为“就绪”
+            await db.update('calendar_map', {
+              'is_provisioned': 1
+            }, where: 'local_id = ?', whereArgs: [newLocalId]);
+
+            print('✅ createLocal 完成: 已拉取 $eventSuccessCount 个事件');
+            summary.success++;
+          } catch (e,s) {
+            print('❌ createLocal 过程发生异常: $e');
+            print('📍 错误位置追踪:\n$s'); // 👈 打印堆栈
+            summary.failed++;
+          } finally {
+            client.close(); // 释放长连接资源
           }
           break;
           default:{}
@@ -531,41 +633,41 @@ class SyncEngine {
 
   // 下载云端到本地
   Future<void> _downloadFromCloud(dynamic remote, SyncContext ctx) async {
-    final icsData = await _nc.getEventDetail(eventPath: remote['href']);
-    if (icsData == null) return;
-    final parsed = IcsParser.parse(icsData, remote['uid']);
-
-    String? systemEventId;
-
-    // 💡 只有当：1. 用户勾选了同步  且 2. 日历 ID 已经洗白成数字
-    // 我们才真正调用原生 API 在手机系统里创建事件
-    if (ctx.syncStatus == 1 && !ctx.calendarId.startsWith('rc_')) {
-      try {
-        systemEventId = await _native.createEvent(
-          ctx.calendarId, // 必须是数字字符串，如 "6"
-          parsed['summary'],
-          parsed['dtstart'],
-          parsed['dtend'],
-          parsed['description'],
-          remote['uid'],
-        );
-        print("✅ 原生事件创建成功: $systemEventId");
-      } catch (e) {
-        print("❌ 原生创建失败 (可能是权限问题): $e");
-      }
-    }
-
-    // 更新数据库（无论原生是否成功，都要更新数据库里的信息，确保 Dashboard 正确）
-    final db = await DatabaseHelper.instance.database;
-    await db.insert('sync_map', {
-      'uid': remote['uid'],
-      'local_id': systemEventId ?? 'v_${remote['uid']}', // 有系统 ID 用系统 ID，没有用虚拟
-      'calendar_local_id': ctx.calendarId,
-      'last_etag': remote['etag'],
-      'summary': parsed['summary'],
-      'dtstart': parsed['dtstart'],
-      'dtend': parsed['dtend'],
-      'sync_status': ctx.syncStatus,
-    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    // final icsData = await _nc.getEventDetail(eventPath: remote['href']);
+    // if (icsData == null) return;
+    // final parsed = IcsParser.parse(icsData, remote['uid']);
+    //
+    // String? systemEventId;
+    //
+    // // 💡 只有当：1. 用户勾选了同步  且 2. 日历 ID 已经洗白成数字
+    // // 我们才真正调用原生 API 在手机系统里创建事件
+    // if (ctx.syncStatus == 1 && !ctx.calendarId.startsWith('rc_')) {
+    //   try {
+    //     systemEventId = await _native.createEvent(
+    //       ctx.calendarId, // 必须是数字字符串，如 "6"
+    //       parsed['summary'],
+    //       parsed['dtstart'],
+    //       parsed['dtend'],
+    //       parsed['description'],
+    //       remote['uid'],
+    //     );
+    //     print("✅ 原生事件创建成功: $systemEventId");
+    //   } catch (e) {
+    //     print("❌ 原生创建失败 (可能是权限问题): $e");
+    //   }
+    // }
+    //
+    // // 更新数据库（无论原生是否成功，都要更新数据库里的信息，确保 Dashboard 正确）
+    // final db = await DatabaseHelper.instance.database;
+    // await db.insert('sync_map', {
+    //   'uid': remote['uid'],
+    //   'local_id': systemEventId ?? 'v_${remote['uid']}', // 有系统 ID 用系统 ID，没有用虚拟
+    //   'calendar_local_id': ctx.calendarId,
+    //   'last_etag': remote['etag'],
+    //   'summary': parsed['summary'],
+    //   'dtstart': parsed['dtstart'],
+    //   'dtend': parsed['dtend'],
+    //   'sync_status': ctx.syncStatus,
+    // }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 }

@@ -151,37 +151,57 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
         return items
     }
 
-    // CalendarHostApiImpl.kt 内部实现参考
-    override fun createCalendar(displayName: String, accountName: String, callback: (Result<String?>) -> Unit) {
+    override fun createCalendar(
+        displayName: String,
+        accountName: String,
+        color: Long,
+        callback: (Result<String?>) -> Unit
+    ) {
+        val accountType = "com.nextcloud.caleesync"
+        val cr = context.contentResolver
+
+        // 1. 构建带有 SyncAdapter 标识的 URI
+        val uri = CalendarContract.Calendars.CONTENT_URI.buildUpon()
+            .appendQueryParameter(CalendarContract.CALLER_IS_SYNCADAPTER, "true")
+            .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_NAME, accountName)
+            .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_TYPE, accountType)
+            .build()
+
+        // 2. 准备日历元数据
+        val values = ContentValues().apply {
+            put(CalendarContract.Calendars.ACCOUNT_NAME, accountName)
+            put(CalendarContract.Calendars.ACCOUNT_TYPE, accountType)
+            put(CalendarContract.Calendars.NAME, displayName)
+            put(CalendarContract.Calendars.CALENDAR_DISPLAY_NAME, displayName)
+
+            // 使用传入的颜色，Android 系统需要的是补码格式的 Int
+            put(CalendarContract.Calendars.CALENDAR_COLOR, color.toInt())
+            // 权限设置：设为 OWNER 才能增删改查
+            put(CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL, CalendarContract.Calendars.CAL_ACCESS_OWNER)
+            put(CalendarContract.Calendars.OWNER_ACCOUNT, accountName)
+
+            // 关键：允许提醒和可见性
+            put(CalendarContract.Calendars.VISIBLE, 1)
+            put(CalendarContract.Calendars.SYNC_EVENTS, 1)
+            put(CalendarContract.Calendars.CALENDAR_TIME_ZONE, TimeZone.getDefault().id)
+
+            // 🌟 必须：允许同步适配器对事件进行操作
+            put(CalendarContract.Calendars.CAN_ORGANIZER_RESPOND, 1)
+            put(CalendarContract.Calendars.ALLOWED_REMINDERS, "0,1,2") // 允许方法：METHOD_DEFAULT, METHOD_ALERT, METHOD_EMAIL
+            put(CalendarContract.Calendars.ALLOWED_AVAILABILITY, "0,1") // 允许：AVAILABILITY_BUSY, AVAILABILITY_FREE
+        }
+
         try {
-            val accountType = "com.nextcloud.caleesync"
-            val cr = context.contentResolver
-
-            val uri = CalendarContract.Calendars.CONTENT_URI.buildUpon()
-                .appendQueryParameter(CalendarContract.CALLER_IS_SYNCADAPTER, "true")
-                .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_NAME, accountName)
-                .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_TYPE, accountType)
-                .build()
-
-            // 🌟 直接执行插入，不查询 existingId
-            val values = ContentValues().apply {
-                put(CalendarContract.Calendars.ACCOUNT_NAME, accountName)
-                put(CalendarContract.Calendars.ACCOUNT_TYPE, accountType)
-                put(CalendarContract.Calendars.NAME, displayName)
-                put(CalendarContract.Calendars.CALENDAR_DISPLAY_NAME, displayName)
-                put(CalendarContract.Calendars.CALENDAR_COLOR, -0xcc4a1b)
-                put(CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL, CalendarContract.Calendars.CAL_ACCESS_OWNER)
-                put(CalendarContract.Calendars.OWNER_ACCOUNT, accountName)
-                put(CalendarContract.Calendars.VISIBLE, 1)
-                put(CalendarContract.Calendars.SYNC_EVENTS, 1)
-                put(CalendarContract.Calendars.CALENDAR_TIME_ZONE, TimeZone.getDefault().id)
-            }
-
             val resultUri = cr.insert(uri, values)
-            val newId = resultUri?.lastPathSegment // 这次它会返回 8, 9, 10...
+            val newId = resultUri?.lastPathSegment
 
-            callback(Result.success(newId))
+            if (newId != null) {
+                callback(Result.success(newId))
+            } else {
+                callback(Result.failure(Exception("Calendar creation failed: URI is null")))
+            }
         } catch (e: Exception) {
+            // 捕获权限异常或数据库异常
             callback(Result.failure(e))
         }
     }

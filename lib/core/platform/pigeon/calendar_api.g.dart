@@ -70,13 +70,6 @@ class PlatformCalendar {
       supportsTasks: result[7] as bool?,
     );
   }
-
-  @override
-  String toString() {
-    return 'PlatformCalendar{id: $id, name: $name, accountName: $accountName, accountType: $accountType, color: $color, isReadOnly: $isReadOnly, supportsEvents: $supportsEvents, supportsTasks: $supportsTasks}';
-  }
-
-
 }
 
 class PlatformItem {
@@ -284,7 +277,7 @@ class NativeCalendarApi {
 
   /// 🚀 关键新增：在手机系统里创建一个新的日历账簿
   /// 返回系统分配的数字 ID (String 形式的 Long)
-  Future<String?> createCalendar(String displayName, String accountName) async {
+  Future<String?> createCalendar(String displayName, String accountName, int color) async {
     final String __pigeon_channelName = 'dev.flutter.pigeon.caleesync.NativeCalendarApi.createCalendar$__pigeon_messageChannelSuffix';
     final BasicMessageChannel<Object?> __pigeon_channel = BasicMessageChannel<Object?>(
       __pigeon_channelName,
@@ -292,7 +285,7 @@ class NativeCalendarApi {
       binaryMessenger: __pigeon_binaryMessenger,
     );
     final List<Object?>? __pigeon_replyList =
-        await __pigeon_channel.send(<Object?>[displayName, accountName]) as List<Object?>?;
+        await __pigeon_channel.send(<Object?>[displayName, accountName, color]) as List<Object?>?;
     if (__pigeon_replyList == null) {
       throw _createConnectionError(__pigeon_channelName);
     } else if (__pigeon_replyList.length > 1) {

@@ -291,9 +291,9 @@ class SyncRepository {
 
       // 4. 📥 下载详情并写入系统日历
       print('📥 正在更新事件详情: $uid');
-      final icsData = await NextcloudService().getEventDetail(
-          eventPath: href,
-      );
+      final icsData = "";// await NextcloudService().getEventDetail(
+      //     eventPath: href,
+      // );
 
       if (icsData != null) {
         final parsed = IcsParser.parse(icsData, uid);
