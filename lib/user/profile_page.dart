@@ -3,7 +3,7 @@ import 'package:caleesync/common/user_profile_timezones.dart';
 import 'package:caleesync/common/route_constant.dart';
 import 'package:caleesync/common/utils/mmkv_utils.dart';
 import 'package:caleesync/controllers/app_controller.dart';
-import 'package:caleesync/services/nextcloud_profile_service.dart';
+import 'package:caleesync/services/user_profile_service.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
@@ -16,7 +16,7 @@ class ProfilePage extends StatefulWidget {
 }
 
 class _ProfilePageState extends State<ProfilePage> {
-  final NextcloudProfileService _profileService = NextcloudProfileService();
+  final UserProfileService _profileService = UserProfileService();
   // Personal Information controllers
   final _fullNameController = TextEditingController(text: 'John Doe');
   final _emailController = TextEditingController(text: 'john.doe@example.com');
