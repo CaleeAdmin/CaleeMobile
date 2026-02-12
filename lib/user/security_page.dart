@@ -15,6 +15,9 @@ class _SecurityPageState extends State<SecurityPage> {
   final _currentPasswordController = TextEditingController();
   final _newPasswordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
+  bool _obscureCurrentPassword = true;
+  bool _obscureNewPassword = true;
+  bool _obscureConfirmPassword = true;
 
   @override
   void dispose() {
@@ -157,7 +160,20 @@ class _SecurityPageState extends State<SecurityPage> {
                     _buildInput(
                       controller: _currentPasswordController,
                       hint: 'Enter current password',
-                      obscure: true,
+                      obscure: _obscureCurrentPassword,
+                      suffixIcon: IconButton(
+                        onPressed: () {
+                          setState(() {
+                            _obscureCurrentPassword = !_obscureCurrentPassword;
+                          });
+                        },
+                        icon: Icon(
+                          _obscureCurrentPassword
+                              ? Icons.visibility_off_outlined
+                              : Icons.visibility_outlined,
+                          color: Colors.grey.shade600,
+                        ),
+                      ),
                     ),
                     const SizedBox(height: 20),
                     _buildLabel('New Password'),
@@ -165,7 +181,20 @@ class _SecurityPageState extends State<SecurityPage> {
                     _buildInput(
                       controller: _newPasswordController,
                       hint: 'Enter new password',
-                      obscure: true,
+                      obscure: _obscureNewPassword,
+                      suffixIcon: IconButton(
+                        onPressed: () {
+                          setState(() {
+                            _obscureNewPassword = !_obscureNewPassword;
+                          });
+                        },
+                        icon: Icon(
+                          _obscureNewPassword
+                              ? Icons.visibility_off_outlined
+                              : Icons.visibility_outlined,
+                          color: Colors.grey.shade600,
+                        ),
+                      ),
                     ),
                     const SizedBox(height: 20),
                     _buildLabel('Confirm New Password'),
@@ -173,7 +202,20 @@ class _SecurityPageState extends State<SecurityPage> {
                     _buildInput(
                       controller: _confirmPasswordController,
                       hint: 'Confirm new password',
-                      obscure: true,
+                      obscure: _obscureConfirmPassword,
+                      suffixIcon: IconButton(
+                        onPressed: () {
+                          setState(() {
+                            _obscureConfirmPassword = !_obscureConfirmPassword;
+                          });
+                        },
+                        icon: Icon(
+                          _obscureConfirmPassword
+                              ? Icons.visibility_off_outlined
+                              : Icons.visibility_outlined,
+                          color: Colors.grey.shade600,
+                        ),
+                      ),
                     ),
                     const SizedBox(height: 24),
                     SizedBox(
@@ -247,6 +289,7 @@ class _SecurityPageState extends State<SecurityPage> {
     required String hint,
     TextInputType keyboardType = TextInputType.text,
     bool obscure = false,
+    Widget? suffixIcon,
   }) {
     return TextField(
       controller: controller,
@@ -254,6 +297,7 @@ class _SecurityPageState extends State<SecurityPage> {
       obscureText: obscure,
       decoration: InputDecoration(
         hintText: hint,
+        suffixIcon: suffixIcon,
         hintStyle: TextStyle(color: Colors.grey.shade500),
         filled: true,
         fillColor: const Color(0xFFF4F3F7),
