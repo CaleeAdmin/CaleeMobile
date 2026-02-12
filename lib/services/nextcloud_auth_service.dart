@@ -142,5 +142,83 @@ class NextcloudAuthService {
       return false;
     }
   }
-}
 
+  /// 使用登录凭据换取 Nextcloud App Password，后续 API 调用应使用该密码。
+  ///
+  /// Nextcloud 文档接口：GET /ocs/v2.php/core/getapppassword
+  Future<String> getAppPassword({
+    required String loginName,
+    required String password,
+  }) async {
+    final headers = {
+      'Authorization': 'Basic ${base64Encode(utf8.encode('$loginName:$password'))}',
+      'OCS-APIRequest': 'true',
+      'Accept': 'application/json',
+    };
+
+    // 兼容不同 Nextcloud 部署路径（rewrite 开/关）。
+    final urls = [
+      Uri.parse('${normalizedUrl}ocs/v2.php/core/getapppassword?format=json'),
+      Uri.parse('${normalizedUrl}index.php/ocs/v2.php/core/getapppassword?format=json'),
+    ];
+
+    http.Response? lastResponse;
+    for (final url in urls) {
+      final response = await http.get(url, headers: headers).timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          throw Exception('Request timeout: Unable to retrieve app password');
+        },
+      );
+
+      if (response.statusCode == 404) {
+        lastResponse = response;
+        continue;
+      }
+
+      if (response.statusCode != 200) {
+        throw Exception(
+          'Failed to retrieve app password: ${response.statusCode} - ${response.body}',
+        );
+      }
+
+      return _parseAppPasswordResponse(response.body);
+    }
+
+    throw Exception(
+      'Failed to retrieve app password: ${lastResponse?.statusCode ?? 'unknown'} - ${lastResponse?.body ?? ''}',
+    );
+  }
+
+  String _parseAppPasswordResponse(String body) {
+    final rawBody = body.trim();
+
+    try {
+      final dynamic decoded = jsonDecode(rawBody);
+      if (decoded is Map<String, dynamic>) {
+        final ocs = decoded['ocs'];
+        if (ocs is Map<String, dynamic>) {
+          final data = ocs['data'];
+          if (data is String && data.isNotEmpty) {
+            return data;
+          }
+          if (data is Map<String, dynamic>) {
+            final appPassword = data['apppassword']?.toString();
+            if (appPassword != null && appPassword.isNotEmpty) {
+              return appPassword;
+            }
+          }
+        }
+      }
+    } catch (_) {
+      // 某些 Nextcloud 版本可能直接返回纯文本密码。
+    }
+
+    if (rawBody.isNotEmpty && !rawBody.startsWith('{') && !rawBody.startsWith('<')) {
+      return rawBody;
+    }
+
+    throw Exception('Invalid app password response from server');
+  }
+
+}
