@@ -156,37 +156,22 @@ class NextcloudAuthService {
       'Accept': 'application/json',
     };
 
-    // 使用 Nextcloud 文档中的标准 endpoint。
-    final urls = [
-      Uri.parse('${normalizedUrl}ocs/v2.php/core/getapppassword?format=json'),
-    ];
+    final url = Uri.parse('${normalizedUrl}ocs/v2.php/core/getapppassword?format=json');
 
-    http.Response? lastResponse;
-    for (final url in urls) {
-      final response = await http.get(url, headers: headers).timeout(
-        const Duration(seconds: 10),
-        onTimeout: () {
-          throw Exception('Request timeout: Unable to retrieve app password');
-        },
+    final response = await http.get(url, headers: headers).timeout(
+      const Duration(seconds: 10),
+      onTimeout: () {
+        throw Exception('Request timeout: Unable to retrieve app password');
+      },
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception(
+        'Failed to retrieve app password: ${response.statusCode} - ${response.body}',
       );
-
-      if (response.statusCode == 404) {
-        lastResponse = response;
-        continue;
-      }
-
-      if (response.statusCode != 200) {
-        throw Exception(
-          'Failed to retrieve app password: ${response.statusCode} - ${response.body}',
-        );
-      }
-
-      return _parseAppPasswordResponse(response.body);
     }
 
-    throw Exception(
-      'Failed to retrieve app password: ${lastResponse?.statusCode ?? 'unknown'} - ${lastResponse?.body ?? ''}',
-    );
+    return _parseAppPasswordResponse(response.body);
   }
 
   String _parseAppPasswordResponse(String body) {
