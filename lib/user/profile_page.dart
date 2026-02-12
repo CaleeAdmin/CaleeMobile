@@ -2,6 +2,7 @@ import 'package:caleesync/common/app_constant.dart';
 import 'package:caleesync/common/route_constant.dart';
 import 'package:caleesync/common/utils/mmkv_utils.dart';
 import 'package:caleesync/controllers/app_controller.dart';
+import 'package:caleesync/services/nextcloud_profile_service.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
@@ -14,6 +15,7 @@ class ProfilePage extends StatefulWidget {
 }
 
 class _ProfilePageState extends State<ProfilePage> {
+  final NextcloudProfileService _profileService = NextcloudProfileService();
   // Personal Information controllers
   final _fullNameController = TextEditingController(text: 'John Doe');
   final _emailController = TextEditingController(text: 'john.doe@example.com');
@@ -27,12 +29,14 @@ class _ProfilePageState extends State<ProfilePage> {
   
   // Account name from stored credentials
   String? _accountName;
+  bool _isSyncingProfile = false;
 
   @override
   void initState() {
     super.initState();
     // Load account name from stored credentials
     _loadAccountName();
+    _loadProfileFromNextcloud();
   }
 
   void _loadAccountName() {
@@ -54,21 +58,80 @@ class _ProfilePageState extends State<ProfilePage> {
     super.dispose();
   }
 
+
+
+  Future<void> _loadProfileFromNextcloud() async {
+    try {
+      final profile = await _profileService.fetchCurrentProfile();
+      if (!mounted) return;
+      setState(() {
+        _fullNameController.text = profile['displayname'] ?? '';
+        _emailController.text = profile['email'] ?? '';
+        _postCodeController.text = profile['address'] ?? '';
+        _timezoneController.text = profile['timezone'] ?? 'UTC';
+      });
+    } catch (_) {
+      // Keep local defaults when remote profile is unavailable.
+    }
+  }
+
   void _onLogout() {
     // 使用GetX的AppController处理登出
     final appController = Get.find<AppController>();
     appController.logout();
   }
 
-  void _onSavePersonalInfo() {
-    // TODO: Implement save personal information logic
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Personal information saved successfully'),
-        backgroundColor: Colors.green,
-        duration: Duration(seconds: 2),
-      ),
-    );
+  Future<void> _onSavePersonalInfo() async {
+    final displayName = _fullNameController.text.trim();
+    final email = _emailController.text.trim();
+    final address = _postCodeController.text.trim();
+    final timezone = _timezoneController.text.trim();
+
+    if (displayName.isEmpty || email.isEmpty || timezone.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Full name, email, and timezone are required'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _isSyncingProfile = true;
+    });
+
+    try {
+      await _profileService.updateCurrentProfile(
+        displayName: displayName,
+        email: email,
+        address: address,
+        timezone: timezone,
+      );
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Personal information synced to Nextcloud'),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 2),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Sync failed: $e'),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        _isSyncingProfile = false;
+      });
+    }
   }
 
   void _onChangePassword() {
@@ -258,7 +321,7 @@ class _ProfilePageState extends State<ProfilePage> {
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
-                        onPressed: _onSavePersonalInfo,
+                        onPressed: _isSyncingProfile ? null : _onSavePersonalInfo,
                         style: ElevatedButton.styleFrom(
                           backgroundColor: const Color(0xFF0D0C14),
                           foregroundColor: Colors.white,
@@ -267,7 +330,16 @@ class _ProfilePageState extends State<ProfilePage> {
                             borderRadius: BorderRadius.circular(8),
                           ),
                         ),
-                        child: const Text(
+                        child: _isSyncingProfile
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                ),
+                              )
+                            : const Text(
                           'Save Changes',
                           style: TextStyle(
                             fontSize: 16,
