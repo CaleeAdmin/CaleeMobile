@@ -64,8 +64,8 @@ class AppController extends GetxController {
   String? checkRoutePermission(String route) {
     final isLoggedIn = this.isLoggedIn;
 
-    // 如果已登录，但访问登录或注册页面，重定向到主页
-    if (isLoggedIn && (route == RouteConstant.login || route == RouteConstant.register)) {
+    // 如果已登录，但访问登录页面，重定向到主页
+    if (isLoggedIn && route == RouteConstant.login) {
       return RouteConstant.home;
     }
 

@@ -277,22 +277,8 @@ class _LoginPageState extends State<LoginPage> {
                   ),
                   const SizedBox(height: 16),
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    mainAxisAlignment: MainAxisAlignment.end,
                     children: [
-                      TextButton(
-                        onPressed: isLoading
-                            ? null
-                            : () {
-                                Get.toNamed(RouteConstant.register);
-                              },
-                        child: const Text(
-                          'SignUp',
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: Color(0xFF2E7AFE),
-                          ),
-                        ),
-                      ),
                       TextButton(
                         onPressed: isLoading
                             ? null
