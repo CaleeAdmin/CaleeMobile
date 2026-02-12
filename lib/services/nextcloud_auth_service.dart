@@ -149,28 +149,45 @@ class NextcloudAuthService {
     required String password,
   }) async {
     final url = Uri.parse('${normalizedUrl}ocs/v2.php/core/getapppassword?format=json');
+    final headers = {
+      'Authorization': 'Basic ${base64Encode(utf8.encode('$loginName:$password'))}',
+      'OCS-APIRequest': 'true',
+      'Accept': 'application/json',
+    };
 
-    final response = await http.post(
-      url,
-      headers: {
-        'Authorization': 'Basic ${base64Encode(utf8.encode('$loginName:$password'))}',
-        'OCS-APIRequest': 'true',
-        'Accept': 'application/json',
-      },
-    ).timeout(
-      const Duration(seconds: 10),
-      onTimeout: () {
-        throw Exception('Request timeout: Unable to retrieve app password');
-      },
-    );
-
-    if (response.statusCode != 200) {
-      throw Exception(
-        'Failed to retrieve app password: ${response.statusCode} - ${response.body}',
+    http.Response? lastResponse;
+    for (final method in const ['GET', 'POST']) {
+      final response = await (method == 'GET'
+              ? http.get(url, headers: headers)
+              : http.post(url, headers: headers))
+          .timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          throw Exception('Request timeout: Unable to retrieve app password');
+        },
       );
+
+      if (response.statusCode == 405) {
+        lastResponse = response;
+        continue;
+      }
+
+      if (response.statusCode != 200) {
+        throw Exception(
+          'Failed to retrieve app password: ${response.statusCode} - ${response.body}',
+        );
+      }
+
+      return _parseAppPasswordResponse(response.body);
     }
 
-    final rawBody = response.body.trim();
+    throw Exception(
+      'Failed to retrieve app password: ${lastResponse?.statusCode ?? 'unknown'} - ${lastResponse?.body ?? ''}',
+    );
+  }
+
+  String _parseAppPasswordResponse(String body) {
+    final rawBody = body.trim();
 
     try {
       final dynamic decoded = jsonDecode(rawBody);
@@ -199,4 +216,5 @@ class NextcloudAuthService {
 
     throw Exception('Invalid app password response from server');
   }
+
 }
