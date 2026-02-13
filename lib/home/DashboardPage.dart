@@ -320,27 +320,6 @@ class _DashboardPageState extends State<DashboardPage> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 8),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Row(
-                          children: [
-                            const Icon(Icons.wifi, size: 18, color: Colors.black54),
-                            const SizedBox(width: 8),
-                            const Text('Sync mode', style: TextStyle(color: Colors.black54)),
-                          ],
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: Colors.grey.shade100,
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Text(probeCtrl.syncMode.value, style: const TextStyle(fontSize: 12)),
-                        ),
-                      ],
-                    ),
                   ],
                 ),
               ),
