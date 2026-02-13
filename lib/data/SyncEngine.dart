@@ -29,86 +29,108 @@ class SyncEngine {
       String userId,
       List<Map<String, dynamic>> remoteResults,
       ) async {
-    // 1. 获取该用户下的所有本地日历记录
+    // 1. 获取该用户下的所有本地数据库记录（包含状态为 2 的记录）
     final db = await _dbHelper.database;
     final List<Map<String, dynamic>> localRecords = await db.query(
       'calendar_map',
-      where: 'account_name = ? AND is_enabled = 1',
+      where: 'account_name = ?',
       whereArgs: [userId],
     );
 
     List<SyncContext> contexts = [];
 
-    // 2. 建立远端索引 (href -> remoteMap)
+    // 2. 建立索引
     final remoteMap = {for (var r in remoteResults) r['remote_path'] as String: r};
-
-    // 3. 建立本地索引 (remote_path -> localMap)
     final localMapByPath = {
       for (var l in localRecords)
         if (l['remote_path'] != null && (l['remote_path'] as String).isNotEmpty)
           l['remote_path'] as String: l
     };
 
-    // --- 策略 A：以远端发现为准 (涵盖场景 2, 3, 4, 5, 6, 11, 12, 13, 14) ---
+    // --- 策略 A：处理远端发现的日历 (针对：同步、初始化) ---
     for (var remote in remoteResults) {
       final path = remote['remote_path'];
       final local = localMapByPath[path];
 
       if (local == null) {
-        // 【场景 2】：云端有新坑，本地无记录 -> createLocal
+        // 数据库彻底没记录 -> 真正的云端新坑
         contexts.add(_buildContext(remote, null, SyncAction.createLocal));
-      } else {
-        final int origin = local['origin'] ?? 0;
-        final int mode = local['sync_mode'] ?? 0;
-        // 注意：根据你的表结构，目前没有显式的 logic_delete 字段，
-        // 这里的待删状态可以预留逻辑，或者目前均视为正常同步
-        final bool isPendingDeletion = false;
+        continue;
+      }
 
+      final int provisionStatus = local['is_provisioned'] ?? 0;
+      final int isEnabled = local['is_enabled'] ?? 0;
+      final int origin = local['origin'] ?? 0;
+      final int mode = local['sync_mode'] ?? 0;
+
+      // 如果该记录已经被标记为待删除（状态2），跳过策略 A 的同步逻辑，交由策略 B 处理
+      if (provisionStatus == 2) continue;
+
+      // 处理尚未在本地系统创建的情况 (状态 0)
+      if (local['local_id'] == null || local['local_id'].isEmpty ||
+          provisionStatus == 0) {
+        if (isEnabled == 1) {
+          contexts.add(_buildContext(remote, local, SyncAction.createLocal));
+        }
+        continue;
+      }
+
+      // 正常同步 (状态 1)
+      if (isEnabled == 1) {
         SyncAction action;
-        if (isPendingDeletion) {
-          // 【场景 11, 12, 13, 14】：本地用户删除了日历
-          action = (mode == 0) ? SyncAction.deleteRemote : SyncAction.deleteLocal;
+        if (mode == 0) {
+          action = SyncAction.fullSyncBidi;
         } else {
-          // 【场景 3, 4, 5, 6】：正常同步流向判定
-          if (mode == 0) {
-            action = SyncAction.fullSyncBidi;
-          } else {
-            action = (origin == 1) ? SyncAction.fullSyncPull : SyncAction.fullSyncPush;
-          }
+          action = (origin == 1) ? SyncAction.fullSyncPull : SyncAction.fullSyncPush;
         }
         contexts.add(_buildContext(remote, local, action));
       }
     }
 
-    // --- 策略 B：以本地记录为准，查漏补缺 (涵盖场景 1, 7, 8, 9, 10) ---
+    // --- 策略 B：以本地数据库记录为准 (针对：删除、本地新建) ---
     for (var local in localRecords) {
       final String? path = local['remote_path'];
-      final bool remoteExists = (path != null && path.isNotEmpty) && remoteMap.containsKey(path);
+      final int origin = local['origin'] ?? 0;
+      final int mode = local['sync_mode'] ?? 0;
+      final int isEnabled = local['is_enabled'] ?? 0;
+      final int provisionStatus = local['is_provisioned'] ?? 0;
 
-      if (!remoteExists) {
-        final int origin = local['origin'] ?? 0;
-        final int mode = local['sync_mode'] ?? 0;
-
-        if (path == null || path.isEmpty) {
-          // 【场景 1】：本地新建日历，remote_path 尚未分配 -> createRemote
-          contexts.add(_buildContext({}, local, SyncAction.createRemote));
+      // 1. 【核心修复】：优先处理状态码 2 (待删除)
+      if (provisionStatus == 2) {
+        if (origin == 1) {
+          // 远端起源：服务器上已经没了，生成任务删除手机本地实体
+          debugPrint("🗑️ 状态2：远端源已删，执行本地清理: $path");
+          contexts.add(_buildContext(
+              remoteMap[path] ?? {}, local, SyncAction.deleteLocal));
         } else {
-          // 远端路径在最新扫描中消失了
-          if (mode == 1) {
-            if (origin == 1) {
-              // 【场景 7】：远程源消失 (ReadOnly) -> deleteLocal
-              contexts.add(_buildContext({}, local, SyncAction.deleteLocal));
-            } else {
-              // 【场景 8】：远程源消失 (母本保护) -> ignore
-              contexts.add(_buildContext({}, local, SyncAction.ignore));
-            }
-          } else {
-            // 【场景 9, 10】：双向日历远端删，本地跟进 -> deleteLocal
-            contexts.add(_buildContext({}, local, SyncAction.deleteLocal));
-          }
+          // 本地起源：手机上已经删了，生成任务删除服务器日历
+          debugPrint("🚫 状态2：本地系统已删，执行远端清理: $path");
+          contexts.add(_buildContext(remoteMap[path] ?? {}, local, SyncAction.deleteRemote));
+        }
+        continue;
+      }
+
+      // 2. 处理本地新建尚未同步的情况 (没有路径)
+      if (path == null || path.isEmpty) {
+        if (isEnabled == 1 && provisionStatus == 0) {
+          contexts.add(_buildContext({}, local, SyncAction.createRemote));
+        }
+        continue;
+      }
+
+      // 3. 处理查漏补缺：如果数据库里是状态 1，但远端结果里突然搜不到了
+      // 虽然 persistRemoteCalendars 应该已经把这种记录改成了状态 2，
+      // 但作为双保险，这里可以保留一个简单的判定逻辑
+      final bool remoteExists = remoteMap.containsKey(path);
+      if (!remoteExists && provisionStatus == 1) {
+        // 这种情况理论上不应发生，因为 persistRemoteCalendars 会提前处理
+        // 如果发生了，说明还没来得及执行 persist 就开始 generateTasks 了
+        if (origin == 1 || (origin == 0 && mode == 0)) {
+          contexts.add(_buildContext({}, local, SyncAction.deleteLocal));
         }
       }
     }
+
     return contexts;
   }
 
@@ -174,8 +196,8 @@ class SyncEngine {
 
             // 2. 扩大扫描窗口，确保存量数据全部覆盖
             // 首次上云：取过去 2 年到未来 10 年
-            final start = DateTime.now().subtract(const Duration(days: 365 * 2)).millisecondsSinceEpoch;
-            final end = DateTime.now().add(const Duration(days: 365 * 10)).millisecondsSinceEpoch;
+            final start = DateTime.now().subtract(const Duration(days: 30)).millisecondsSinceEpoch;
+            final end = DateTime.now().add(const Duration(days: 30)).millisecondsSinceEpoch;
 
             // 3. 抓取本地系统日程
             final List<PlatformItem?> items = await _native.getEvents(ctx.calendarId, start, end);
@@ -328,6 +350,65 @@ class SyncEngine {
             client.close(); // 释放长连接资源
           }
           break;
+        case SyncAction.deleteLocal:
+          try {
+          bool result = await _native.deleteCalendar(ctx.calendarId, ctx.accountName);
+          if(result){
+            final db = await _dbHelper.database;
+            await db.transaction((txn) async {
+              // 1. 删除关联的事件追踪 (sync_map)
+              int sCount = await txn.delete(
+                  'sync_map',
+                  where: 'calendar_local_id = ?',
+                  whereArgs: [ctx.calendarId]
+              );
+              // 2. 删除日历自身的配置 (calendar_map)
+              int cCount = await txn.delete(
+                  'calendar_map',
+                  where: 'local_id = ?',
+                  whereArgs: [ctx.calendarId]
+              );
+              debugPrint("🗑️ 数据库清理完毕: 删除了 $sCount 条事件, $cCount 条日历记录");
+            });
+          }
+          }catch (e){
+            debugPrint("❌ 删除本地日历失败: $e");
+          }
+          break;
+        case SyncAction.deleteRemote:
+        // 1. 执行远程删除任务
+          bool isRemoteDeleted = await _nc.deleteRemoteCalendar(
+            userId: loginName,
+            calendarPath: ctx.remotePath, // 确保 ctx 包含这个路径
+          );
+
+          if (isRemoteDeleted) {
+            final db = await _dbHelper.database;
+
+            // 2. 开启事务进行本地“斩草除根”
+            await db.transaction((txn) async {
+              // A. 清理 sync_map (关联的事件映射)
+              // 理由：日历都没了，它下面所有 ics 文件的 ETag 记录必须清空
+              int sCount = await txn.delete(
+                'sync_map',
+                where: 'calendar_local_id = ? OR remote_path LIKE ?',
+                whereArgs: [ctx.calendarId, '${ctx.remotePath}%'],
+              );
+
+              // B. 清理 calendar_map (日历自身配置)
+              int cCount = await txn.delete(
+                'calendar_map',
+                where: 'local_id = ?',
+                whereArgs: [ctx.calendarId],
+              );
+              debugPrint("🧹 云端删除成功，本地清理完成: 删除了 $cCount 个日历配置, $sCount 条同步映射");
+            });
+            // 3. 通知 UI 刷新 (如果是使用 GetX 或 Provider)
+            // calendarController.removeItemFromUI(ctx.calendarId);
+          } else {
+            debugPrint("❌ 云端删除失败，停止清理本地数据库以防状态不一致");
+          }
+          break;
           default:{}
       }
 
@@ -420,7 +501,7 @@ class SyncEngine {
           // A. 如果已经洗白成系统日历，调用原生接口从系统日历 App 中删除
           if (!localId.startsWith('rc_')) {
             try {
-              await _native.deleteCalendar(localId,accountName,accountType);
+              await _native.deleteCalendar(localId,accountName);
               print("  ✅ 系统日历实体已移除: $localId");
             } catch (e) {
               print("  ⚠️ 系统日历移除失败 (可能已被手动删除): $e");

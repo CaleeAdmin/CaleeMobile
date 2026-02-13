@@ -59,7 +59,7 @@ abstract class NativeCalendarApi {
   /// 🚀 关键新增：根据 ID 删除整个日历账簿
   /// Android 上删除日历会自动联级删除该日历下的所有事件 (Events)
   @async
-  bool deleteCalendar(String calendarId, String accountName, String accountType);
+  bool deleteCalendar(String calendarId, String accountName);
 
   // 🚀 新增：将云端数据写入本地系统日历
   @async

@@ -195,7 +195,7 @@ interface NativeCalendarApi {
    * 🚀 关键新增：根据 ID 删除整个日历账簿
    * Android 上删除日历会自动联级删除该日历下的所有事件 (Events)
    */
-  fun deleteCalendar(calendarId: String, accountName: String, accountType: String, callback: (Result<Boolean>) -> Unit)
+  fun deleteCalendar(calendarId: String, accountName: String, callback: (Result<Boolean>) -> Unit)
   fun createEvent(calendarId: String, title: String, start: Long, end: Long, notes: String?, uid: String?, callback: (Result<String?>) -> Unit)
   /** 获取指定日历下所有事件的 ID 列表（用于检测本地删除了哪些） */
   fun getSystemEventIds(calendarId: String): List<String>
@@ -294,8 +294,7 @@ interface NativeCalendarApi {
             val args = message as List<Any?>
             val calendarIdArg = args[0] as String
             val accountNameArg = args[1] as String
-            val accountTypeArg = args[2] as String
-            api.deleteCalendar(calendarIdArg, accountNameArg, accountTypeArg) { result: Result<Boolean> ->
+            api.deleteCalendar(calendarIdArg, accountNameArg) { result: Result<Boolean> ->
               val error = result.exceptionOrNull()
               if (error != null) {
                 reply.reply(wrapError(error))

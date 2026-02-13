@@ -1,6 +1,7 @@
 import 'package:caleesync/common/app_constant.dart';
 import 'package:caleesync/common/utils/mmkv_utils.dart';
 import 'package:device_calendar/device_calendar.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:get/get.dart';
 import 'package:sqflite/sqflite.dart';
 import 'dart:ui';
@@ -20,21 +21,44 @@ class CalendarGroup {
 }
 
 class CalendarDisplayItem {
-  final String id;
+  // 1. 标识符
+  final String? localId;     // Android/iOS 系统日历 ID (对应数据库 local_id)，可能为 null
+  final String? remotePath;   // 远程 WebDAV 路径 (作为数据库更新的绝对 Key)，不应为 null
+
+  // 2. 显示内容
   final String name;
   final String color;
   final int eventCount;
+
+  // 3. 状态控制
   final bool isReadOnly;
-  bool isEnabled; // 👈 可变：映射数据库中的 is_enabled 或特定开关字段
+  bool isEnabled;            // 对应数据库 is_enabled
+  final int origin;          // 0: 本地创建, 1: 云端同步
 
   CalendarDisplayItem({
-    required this.id,
+    this.localId,            // 允许为空
+    required this.remotePath, // 必须有，否则无法同步
     required this.name,
     required this.color,
     required this.eventCount,
     required this.isReadOnly,
     required this.isEnabled,
+    required this.origin,
   });
+
+  // 方便从数据库 Map 转换
+  factory CalendarDisplayItem.fromMap(Map<String, dynamic> map) {
+    return CalendarDisplayItem(
+      localId: map['local_id']?.toString(), // 转为 String 处理
+      remotePath: map['remote_path'] ?? '',
+      name: map['display_name'] ?? '未命名',
+      color: map['color'] ?? '#000000',
+      eventCount: 0, // 可以在外部查询后再填入
+      isReadOnly: false,
+      isEnabled: (map['is_enabled'] ?? 0) == 1,
+      origin: map['origin'] ?? 0,
+    );
+  }
 }
 
 // 2. Controller 实现
@@ -61,60 +85,66 @@ class CalendarPageController extends GetxController {
   }
 
   /// 处理 Checkbox 点击事件
-  Future<void> toggleCalendarSelection(String localId, bool? newValue) async {
+  Future<void> toggleCalendarSelection(CalendarDisplayItem item, bool? newValue) async {
     if (newValue == null) return;
 
     try {
-      // 乐观更新本地模型，局部刷新 UI
-      CalendarDisplayItem? target;
-      for (var g in calendarGroups) {
-        for (var c in g.calendars) {
-          if (c.id == localId) {
-            target = c;
-            break;
-          }
-        }
-        if (target != null) break;
-      }
-      if (target == null) return;
+      // 直接更新当前 item，避免通过 ID 再次查找导致错位
+      item.isEnabled = newValue;
 
-      target.isEnabled = newValue;
+      // 如果后面有地方要用到 selectedCalendarIds，这里也同步一下
+      final key = (item.remotePath != null && item.remotePath!.isNotEmpty)
+          ? item.remotePath!
+          : (item.localId ?? '');
+      if (key.isNotEmpty) {
+        if (newValue) {
+          selectedCalendarIds.add(key);
+        } else {
+          selectedCalendarIds.remove(key);
+        }
+      }
+
       // 通知 observers 局部刷新
       calendarGroups.refresh();
 
       // 持久化到数据库
-      final db = await DatabaseHelper.instance.database;
-      await db.update(
-        'calendar_map',
-        {'is_enabled': newValue ? 1 : 0},
-        where: 'local_id = ?',
-        whereArgs: [localId],
-      );
-
-      // 可选：如果用户开启了勾选，可以触发一次静默同步
-      if (newValue == true) {
-        // _triggerSilentSync(localId);
-      }
+      await updateEnabledStatus(item, newValue);
 
     } catch (e) {
       print("❌ 切换日历状态失败: $e");
       Get.snackbar("错误", "无法更新日历同步状态");
       // 回滚本地模型并刷新 UI
-      CalendarDisplayItem? target;
-      for (var g in calendarGroups) {
-        for (var c in g.calendars) {
-          if (c.id == localId) {
-            target = c;
-            break;
-          }
-        }
-        if (target != null) break;
-      }
-      if (target != null) {
-        target.isEnabled = !newValue;
-        calendarGroups.refresh();
-      }
+      item.isEnabled = !newValue;
+      calendarGroups.refresh();
     }
+  }
+
+  Future<void> updateEnabledStatus(CalendarDisplayItem item, bool newValue) async {
+    final db = await DatabaseHelper.instance.database;
+
+    String whereClause;
+    List<dynamic> whereArgs;
+
+    // 1. 优先判断身份：谁有值就用谁查
+    if (item.remotePath != null && item.remotePath!.isNotEmpty) {
+      // 它是远端日历（即使 localId 为空，路径也是唯一的）
+      whereClause = 'remote_path = ?';
+      whereArgs = [item.remotePath];
+    } else {
+      // 它是纯本地日历（一定有系统分配的 ID）
+      whereClause = 'local_id = ?';
+      whereArgs = [item.localId];
+    }
+
+    // 2. 执行更新
+    int count = await db.update(
+      'calendar_map',
+      {'is_enabled': newValue ? 1 : 0},
+      where: whereClause,
+      whereArgs: whereArgs,
+    );
+
+    debugPrint("✅ 更新成功，影响行数: $count (条件: $whereClause = ${whereArgs[0]})");
   }
 
   /// 核心方法：刷新并重新构建 UI 模型
@@ -143,49 +173,49 @@ class CalendarPageController extends GetxController {
         final String account = cal['account_type'] ?? 'Unknown';
         final String localId = cal['local_id'].toString();
         final String? remotePath = cal['remote_path'];
-        final String accType = account.toLowerCase();
         final int? syncMode = cal['sync_mode'];
+        final int origin = cal['origin'];
 
         int realCount = 0;
 
         // --- 🌟 核心修改：针对云端日历的实时计数 ---
-        // if (remotePath != null && remotePath.isNotEmpty) {
-        //   // A. 先查本地数据库 sync_map
-        //   final localCountResult = await db.rawQuery(
-        //       'SELECT COUNT(*) as count FROM sync_map WHERE calendar_local_id = ?',
-        //       [localId]);
-        //   realCount = (localCountResult.first['count'] as int?) ?? 0;
-        //
-        //   // B. 如果本地计数为 0，说明还没同步过，触发一次“静默拉取”
-        //   if (realCount == 0) {
-        //     print("🌐 [静默拉取] 正在为日历 ${cal['display_name']} 获取云端事件数...");
-        //     try {
-        //       // 仅拉取快照，不涉及复杂的系统日历写入，速度非常快
-        //       final remoteItems = await _nc.fetchRemoteEvents(calendarPath: remotePath);
-        //
-        //       // 将云端 UID 存入 sync_map（ local_id 设为 v_ 前缀的影子 ID）
-        //       // 这一步是让 Dashboard 统计生效的关键
-        //       await db.transaction((txn) async {
-        //         for (var item in remoteItems) {
-        //           String uid = item['uid'] ?? item['href'].split('/').last;
-        //           // 使用 insert ignore 或 replace 防止重复
-        //           await txn.insert('sync_map', {
-        //             'uid': uid,
-        //             'local_id': 'v_$uid', // 影子 ID，表示未洗白到系统
-        //             'calendar_local_id': localId,
-        //             'last_etag': item['etag'] ?? '',
-        //             'sync_status': 0,
-        //           }, conflictAlgorithm: ConflictAlgorithm.ignore);
-        //         }
-        //       });
-        //
-        //       // 重新计算数量
-        //       realCount = remoteItems.length;
-        //     } catch (e) {
-        //       print("❌ 静默拉取失败: $e");
-        //     }
-        //   }
-        // } else {
+        if (remotePath != null && remotePath.isNotEmpty) {
+          // A. 先查本地数据库 sync_map
+          final localCountResult = await db.rawQuery(
+              'SELECT COUNT(*) as count FROM sync_map WHERE calendar_local_id = ?',
+              [localId]);
+          realCount = (localCountResult.first['count'] as int?) ?? 0;
+
+          // B. 如果本地计数为 0，说明还没同步过，触发一次“静默拉取”
+          if (realCount == 0) {
+            print("🌐 [静默拉取] 正在为日历 ${cal['display_name']} 获取云端事件数...");
+            try {
+              // 仅拉取快照，不涉及复杂的系统日历写入，速度非常快
+              final remoteItems = await _nc.fetchRemoteEvents(calendarPath: remotePath);
+
+              // 将云端 UID 存入 sync_map（ local_id 设为 v_ 前缀的影子 ID）
+              // 这一步是让 Dashboard 统计生效的关键
+              await db.transaction((txn) async {
+                for (var item in remoteItems) {
+                  String uid = item['uid'] ?? item['href'].split('/').last;
+                  // 使用 insert ignore 或 replace 防止重复
+                  await txn.insert('sync_map', {
+                    'uid': uid,
+                    'local_id': 'v_$uid', // 影子 ID，表示未洗白到系统
+                    'calendar_local_id': localId,
+                    'last_etag': item['etag'] ?? '',
+                    'is_enabled': 0,
+                  }, conflictAlgorithm: ConflictAlgorithm.ignore);
+                }
+              });
+
+              // 重新计算数量
+              realCount = remoteItems.length;
+            } catch (e) {
+              print("❌ 静默拉取失败: $e");
+            }
+          }
+        } else {
           // --- C. 普通本地系统日历统计 ---
           try {
             final now = DateTime.now();
@@ -198,16 +228,18 @@ class CalendarPageController extends GetxController {
             );
             if (eventsResult.isSuccess) realCount = eventsResult.data?.length ?? 0;
           } catch (_) {}
-        // }
+        }
 
         // 组装 UI 模型
         var displayItem = CalendarDisplayItem(
-          id: localId,
+          localId: localId,
           name: cal['display_name'] ?? 'Unknown',
           color: cal['color'] ?? '#808080',
           eventCount: realCount,
           isReadOnly: syncMode == 1,
           isEnabled: cal['is_enabled'] == 1,
+          remotePath: remotePath,
+          origin: origin,
         );
 
         tempMap.putIfAbsent(account, () => []).add(displayItem);
@@ -239,8 +271,9 @@ class CalendarPageController extends GetxController {
   }
 
   /// 彻底删除一个日历（包含云端、系统日历与本地 DB 清理）
-  Future<void> deleteCalendarTotally(String localId) async {
+  Future<void> deleteCalendarTotally(String? localId) async {
     try {
+      if(localId == null) return;
       isLoading.value = true;
       await _repo.performAbsoluteDelete(localId);
       await refreshDashboard();
@@ -253,8 +286,9 @@ class CalendarPageController extends GetxController {
   }
 
   /// 重命名日历（委托给仓库并刷新）
-  Future<void> renameCalendar(String localId, String newName) async {
+  Future<void> renameCalendar(String? localId, String newName) async {
     try {
+      if(localId == null) return;
       isLoading.value = true;
       await _repo.renameCalendar(localId, newName);
       await refreshDashboard();

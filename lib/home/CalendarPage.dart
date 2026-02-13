@@ -106,7 +106,7 @@ extension on _CalendarRow {
         final bool? confirm = await _showDeleteConfirm(context);
         if (confirm == true) {
           try {
-            await controller.deleteCalendarTotally(item.id);
+            await controller.deleteCalendarTotally(item.localId);
           } catch (_) {}
         }
         break;
@@ -196,7 +196,7 @@ extension on _CalendarRow {
                       final newName = _nameCtrl.text.trim();
                       if (newName.isEmpty) return;
                       try {
-                        await Get.find<CalendarPageController>().renameCalendar(item.id, newName);
+                        await Get.find<CalendarPageController>().renameCalendar(item.localId, newName);
                         Navigator.of(context).pop(true);
                       } catch (e) {
                         Navigator.of(context).pop(false);
@@ -453,7 +453,14 @@ class _AccountCard extends StatelessWidget {
             ],
             const SizedBox(height: 12),
             Column(
-              children: group.calendars.map((c) => _CalendarRow(item: c)).toList(),
+              children: group.calendars
+                  .map(
+                    (c) => _CalendarRow(
+                      key: ValueKey(c.remotePath ?? c.localId ?? c.name),
+                      item: c,
+                    ),
+                  )
+                  .toList(),
             ),
           ],
         ),
@@ -464,7 +471,7 @@ class _AccountCard extends StatelessWidget {
 
 class _CalendarRow extends StatelessWidget {
   final CalendarDisplayItem item;
-  const _CalendarRow({required this.item});
+  const _CalendarRow({Key? key, required this.item}) : super(key: key);
 
   Color _parseColor(String hex) {
     try {
@@ -488,7 +495,7 @@ class _CalendarRow extends StatelessWidget {
           Checkbox(
             value: item.isEnabled,
             onChanged: (bool? newValue) {
-              controller.toggleCalendarSelection(item.id, newValue);
+              controller.toggleCalendarSelection(item, newValue);
             },
           ),
           Container(

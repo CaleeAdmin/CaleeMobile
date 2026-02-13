@@ -301,7 +301,7 @@ class NativeCalendarApi {
 
   /// 🚀 关键新增：根据 ID 删除整个日历账簿
   /// Android 上删除日历会自动联级删除该日历下的所有事件 (Events)
-  Future<bool> deleteCalendar(String calendarId, String accountName, String accountType) async {
+  Future<bool> deleteCalendar(String calendarId, String accountName) async {
     final String __pigeon_channelName = 'dev.flutter.pigeon.caleesync.NativeCalendarApi.deleteCalendar$__pigeon_messageChannelSuffix';
     final BasicMessageChannel<Object?> __pigeon_channel = BasicMessageChannel<Object?>(
       __pigeon_channelName,
@@ -309,7 +309,7 @@ class NativeCalendarApi {
       binaryMessenger: __pigeon_binaryMessenger,
     );
     final List<Object?>? __pigeon_replyList =
-        await __pigeon_channel.send(<Object?>[calendarId, accountName, accountType]) as List<Object?>?;
+        await __pigeon_channel.send(<Object?>[calendarId, accountName]) as List<Object?>?;
     if (__pigeon_replyList == null) {
       throw _createConnectionError(__pigeon_channelName);
     } else if (__pigeon_replyList.length > 1) {

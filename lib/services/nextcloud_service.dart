@@ -1,5 +1,5 @@
 import 'dart:convert';
-import 'dart:developer';
+
 import 'package:flutter/cupertino.dart';
 import 'package:http/http.dart' as http;
 import 'package:xml/xml.dart' as xml;
@@ -8,7 +8,6 @@ import '../common/app_constant.dart';
 import '../common/utils/IcsSerializer.dart';
 import '../common/utils/mmkv_utils.dart';
 import '../data/database_helper.dart';
-import 'nextcloud_auth_service.dart';
 
 class NextcloudService {
   final http.Client _client = http.Client();
@@ -16,31 +15,30 @@ class NextcloudService {
 
   /// 1. 获取并解析云端日历 (对应 calendar_map)
   Future<List<Map<String, dynamic>>> scanRemoteCalendars({
-    required String serverUrl, // 假设传入的是 "https://nc-dev.ywpl.com.au"
-    required String userId,    // 假设传入的是 "yiwen"
+    required String serverUrl,
+    required String userId,
   }) async {
-    // 1. 构建 URI：确保路径与 curl 保持一致
-    // 注意：如果 serverUrl 已经包含路径，需根据实际情况调整拼接逻辑
     final uri = Uri.parse('$serverUrl/remote.php/dav/calendars/${Uri.encodeComponent(userId)}/');
-
     final String password = MMKVUtils.instance.getString(AppConstant.password) ?? "";
 
-    // 2. 结合 curl 调整 XML Body
-    // 增加了 nc:subscribe 并保留了你需要的 calendar-color 等信息
+    // 1. 增加 cs 命名空间定义，并请求该属性
     final xmlBody = '''<?xml version="1.0" encoding="utf-8" ?>
-    <d:propfind xmlns:d="DAV:" xmlns:cal="urn:ietf:params:xml:ns:caldav" xmlns:nc="http://nextcloud.org/ns" xmlns:oc="http://owncloud.org/ns">
-      <d:prop>
-        <d:displayname />
-        <d:resourcetype />
-        <d:current-user-privilege-set />
-        <nc:calendar-color /> 
-        <nc:subscribe />
-        <cal:supported-calendar-component-set />
-        <cs:getctag xmlns:cs="http://calendarserver.org/ns/" />
-      </d:prop>
-    </d:propfind>''';
+  <d:propfind xmlns:d="DAV:" 
+              xmlns:cal="urn:ietf:params:xml:ns:caldav" 
+              xmlns:nc="http://nextcloud.org/ns" 
+              xmlns:cs="http://calendarserver.org/ns/"
+              xmlns:oc="http://owncloud.org/ns">
+    <d:prop>
+      <d:displayname />
+      <d:resourcetype />
+      <d:current-user-privilege-set />
+      <nc:calendar-color /> 
+      <nc:subscribe />
+      <cal:supported-calendar-component-set />
+      <cs:getctag />
+    </d:prop>
+  </d:propfind>''';
 
-    // 3. 发送请求
     final request = http.Request('PROPFIND', uri)
       ..headers.addAll({
         'Authorization': 'Basic ${base64Encode(utf8.encode('$userId:$password'))}',
@@ -52,12 +50,12 @@ class NextcloudService {
     final res = await _client.send(request);
     final respBody = await res.stream.bytesToString();
 
-    // 4. 状态码校验 (WebDAV PROPFIND 成功通常返回 207 Multi-Status)
     if (res.statusCode != 207) {
       throw StateError('PROPFIND failed: ${res.statusCode} - $respBody');
     }
+
     final List<Map<String, dynamic>> results = _parseCalendarXmlToMap(respBody);
-    persistRemoteCalendars(results,userId);
+    persistRemoteCalendars(results, userId);
     return results;
   }
 
@@ -70,78 +68,132 @@ class NextcloudService {
       final prop = response.findAllElements('d:prop').firstOrNull;
 
       if (prop == null || href == null) continue;
-      if (_isDeleted(prop) || _isSpecialFolder(href)) continue;
+      // 过滤掉根路径和特殊系统文件夹
+      if (_isSpecialFolder(href)) continue;
 
+      // --- 核心判定逻辑：识别资源类型 ---
       final resourceType = prop.findElements('d:resourcetype').firstOrNull;
-      final isCalendar = resourceType?.findElements('cal:calendar').isNotEmpty ?? false;
-      if (!isCalendar) continue;
 
-      // --- 核心字段提取 ---
+      // a. 检查是否是标准日历
+      final isStandardCalendar = resourceType?.findElements('cal:calendar').isNotEmpty ?? false;
+      // b. 检查是否是订阅日历 (你的 curl 结果显示订阅日历带这个标签)
+      final isSubscribedResource = resourceType?.findElements('cs:subscribed').isNotEmpty ?? false;
+
+      // 如果两者都不是，说明是普通文件夹或 inbox/outbox，跳过
+      if (!isStandardCalendar && !isSubscribedResource) continue;
+
+      // --- 字段提取 ---
       final displayName = prop.findElements('d:displayname').firstOrNull?.innerText;
+      // 订阅日历可能没有 ctag，使用空字符串兜底
       final ctag = prop.findAllElements('cs:getctag').firstOrNull?.innerText;
       final color = prop.findElements('nc:calendar-color').firstOrNull?.innerText;
 
       // --- 权限与模式逻辑 ---
 
-      // 1. 检查是否为订阅日历 (Nextcloud 字段)
-      final isSubscribed = prop.findElements('nc:subscribe').firstOrNull?.innerText == "1";
+      // 1. 订阅判定：
+      // 满足以下任一条件即视为订阅日历：
+      // - resourcetype 包含 cs:subscribed
+      // - nc:subscribe 字段值为 "1"
+      final ncSubscribe = prop.findElements('nc:subscribe').firstOrNull?.innerText;
+      bool isSubscribed = isSubscribedResource || ncSubscribe == "1";
 
-      // 2. 检查是否有写权限 (WebDAV 标准字段)
+      // 2. 检查写权限
       final privileges = prop.findElements('d:current-user-privilege-set').firstOrNull;
       bool hasWritePrivilege = privileges?.findAllElements('d:write').isNotEmpty ?? false;
 
-      // 3. 统一 sync_mode 逻辑:
-      // 如果是订阅日历，或者是没有写权限，则设为只读 (1)
-      // 否则设为双向同步 (0)
+      // 3. 设定同步模式：订阅日历或无写权限均设为只读 (1)
       int syncMode = (isSubscribed || !hasWritePrivilege) ? 1 : 0;
 
       results.add({
         'remote_path': href,
-        'display_name': displayName ?? "未命名日历",
+        'display_name': displayName ?? (isSubscribed ? "订阅日历" : "未命名日历"),
         'last_ctag': ctag ?? "",
         'sync_mode': syncMode,
         'color': color,
+        'is_subscription': isSubscribed, // 建议增加此字段方便 UI 展示
       });
     }
     return results;
+  }
+
+// 辅助工具：确保不把根目录 /calendars/focus/ 当做日历处理
+  bool _isSpecialFolder(String href) {
+    // 如果 href 刚好等于根路径，或者包含系统保留关键字
+    final path = href.toLowerCase();
+    return path.endsWith('/inbox/') ||
+        path.endsWith('/outbox/') ||
+        path.endsWith('/trashbin/') ||
+        // 这里的正则或判断逻辑应根据你的具体 userId 路径调整
+        // 如果 path 只有 4 层级且以用户名为结尾，通常是根目录
+        RegExp(r'/dav/calendars/[^/]+/$').hasMatch(path);
   }
 
   Future<void> persistRemoteCalendars(List<Map<String, dynamic>> remoteMaps, String accountName) async {
     final db = await _dbHelper.database;
 
     await db.transaction((txn) async {
+      // 1. 提取本次远端扫描到的所有合法路径，作为“白名单”
+      final List<String> currentRemotePaths = remoteMaps
+          .map((m) => m['remote_path'] as String)
+          .toList();
+
+      debugPrint("开始持久化远端日历列表，当前有效路径数量: ${currentRemotePaths.length}");
+
+      // 2. 遍历远端列表：执行“增”或“改”
       for (var map in remoteMaps) {
-        // 使用 INSERT OR IGNORE 或手动检查是否存在
-        // 这里的策略是：如果路径已存在，更新关键元数据；如果不存在，插入新行
         await txn.rawInsert('''
         INSERT INTO calendar_map (
-          remote_path,
-          display_name,
-          last_ctag,
-          sync_mode,
-          color,
-          account_name,
-          origin,
-          is_enabled,
+          remote_path, 
+          display_name, 
+          last_ctag, 
+          sync_mode, 
+          color, 
+          account_name, 
+          account_type, -- 新增字段
+          origin, 
+          is_enabled, 
           is_provisioned
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) -- 增加一个占位符
         ON CONFLICT(remote_path) DO UPDATE SET
           display_name = excluded.display_name,
           last_ctag = excluded.last_ctag,
           sync_mode = excluded.sync_mode,
-          -- 只有当远端传了新颜色时才更新，否则保留旧的
-          color = CASE WHEN excluded.color IS NOT NULL THEN excluded.color ELSE calendar_map.color END
+          -- 只有当远端提供了新颜色且不为空时才更新本地颜色
+          color = CASE WHEN excluded.color IS NOT NULL AND excluded.color != "" 
+                       THEN excluded.color 
+                       ELSE calendar_map.color END
+          -- 注意：这里没有写 account_type = excluded.account_type，
+          -- 所以如果是更新旧记录，account_type 会维持原样。
       ''', [
-          map['remote_path'],
-          map['display_name'],
-          map['last_ctag'],
-          map['sync_mode'],
-          map['color'], // 注意：如果是 #AARRGGBB 格式，请确保 Nextcloud 传回来的格式一致
-          accountName,
-          1,
-          0,
-          0
-        ]);
+              map['remote_path'],
+              map['display_name'],
+              map['last_ctag'],
+              map['sync_mode'],
+              map['color'],
+              accountName,
+              "NextCloud", // 对应 account_type，仅在首次插入时生效
+              1, // origin = 1 (远端起源)
+              0, // is_enabled
+              0 // is_provisioned
+            ]);
+      }
+
+      // 3. 【标记删除逻辑】
+      if (currentRemotePaths.isNotEmpty) {
+        final placeholders = List.filled(currentRemotePaths.length, '?').join(',');
+        await txn.update(
+          'calendar_map',
+          {'is_provisioned': 2}, // 标记为待删除
+          where: 'account_name = ? AND origin = 1 AND remote_path NOT IN ($placeholders) AND is_provisioned != 2',
+          whereArgs: [accountName, ...currentRemotePaths],
+        );
+      } else {
+        await txn.update(
+          'calendar_map',
+          {'is_provisioned': 2},
+          where: 'account_name = ? AND origin = 1',
+          whereArgs: [accountName],
+        );
       }
     });
   }
@@ -519,32 +571,41 @@ class NextcloudService {
   /// [DELETE] 删除云端日历
   Future<bool> deleteRemoteCalendar({
     required String userId,
-    required String calendarPath, // 数据库存的: /remote.php/dav/calendars/444/personal-back-1769363944/
+    required String calendarPath,
   }) async {
-    // 使用你提供的规范化方法，确保 server 不带末尾斜杠
     final server = _normalizeServer(AppConstant.nextcloudServer);
     final password = MMKVUtils.instance.getString(AppConstant.password);
 
-    // 拼接 URL：server(无斜杠) + calendarPath(以斜杠开头)
-    // 结果应该是: https://nc-dev.ywpl.com.au/remote.php/dav/calendars/444/personal-back-1769363944/
-    final fullUrl = '$server$calendarPath';
+    if (password == null) return false;
+
+    // 拼接优化：确保只有一个斜杠连接
+    final String fullUrl = "${server.replaceAll(RegExp(r'/+$'), '')}/${calendarPath.replaceAll(RegExp(r'^/+'), '')}/";
     final uri = Uri.parse(fullUrl);
 
-    debugPrint('[Nextcloud] 🚀 执行 DELETE 请求: $fullUrl');
-
-    final req = http.Request('DELETE', uri)
-      ..headers.addAll({
-        'Authorization': _getAuthString(userId, password!),
-      });
+    debugPrint('[Nextcloud] 🚀 DELETE Calendar: $fullUrl');
 
     try {
-      final res = await _client.send(req);
-      debugPrint('[Nextcloud] DELETE 状态码: ${res.statusCode}');
+      final response = await _client.delete(
+        uri,
+        headers: {
+          'Authorization': _getAuthString(userId, password),
+          'Depth': 'infinity', // 有些服务器删除目录时需要明确 Depth
+        },
+      ).timeout(const Duration(seconds: 15));
 
-      // 204: 成功删除, 404: 云端原本就不存在
-      return res.statusCode == 204 || res.statusCode == 404;
+      debugPrint('[Nextcloud] DELETE Status: ${response.statusCode}');
+
+      // 204 No Content 是标准成功响应
+      // 200 OK 有时也会返回
+      // 404 说明云端已无此路径，视为一致
+      if (response.statusCode == 204 || response.statusCode == 200 || response.statusCode == 404) {
+        return true;
+      }
+
+      debugPrint('[Nextcloud] DELETE 失败响应体: ${response.body}');
+      return false;
     } catch (e) {
-      debugPrint('[Nextcloud] DELETE 网络异常: $e');
+      debugPrint('[Nextcloud] DELETE 异常: $e');
       return false;
     }
   }
@@ -663,10 +724,6 @@ class NextcloudService {
     return prop.descendants
         .whereType<xml.XmlElement>()
         .any((e) => e.name.local == 'deleted-calendar');
-  }
-
-  bool _isSpecialFolder(String href) {
-    return href.contains('/inbox/') || href.contains('/outbox/') || href.contains('/trashbin/');
   }
 
   String _normalizeServer(String base) {

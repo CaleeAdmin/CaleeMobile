@@ -90,41 +90,61 @@ class SyncRepository {
   // ==========================================
   Future<void> scanLocalCalendars(String accountId) async {
     final db = await _dbHelper.database;
-    // 假设 _nativeApi.getCalendars() 返回的是系统日历列表
     final List<PlatformCalendar?> localCalendars = await _nativeApi.getCalendars();
 
     await db.transaction((txn) async {
+      // 1. 提取当前系统“活着的”ID白名单
+      final List<String> currentLocalIds = localCalendars
+          .where((cal) => cal != null)
+          .map((cal) => cal!.id.toString())
+          .toList();
+
+      // 2. 增量更新或插入
       for (var cal in localCalendars) {
         if (cal == null) continue;
 
-        // 使用原生 SQL 的 ON CONFLICT 机制，严格对齐表结构
+        // 注意：如果之前是状态 2（待删除），但现在又扫到了（用户可能撤销了删除或手动加回了同名日历）
+        // 我们通过更新将其恢复为状态 1（就绪）或保持现状
         await txn.rawInsert('''
         INSERT INTO calendar_map (
-          local_id, 
-          account_name, 
-          account_type, 
-          display_name, 
-          color, 
-          sync_mode, 
-          is_enabled,
-          is_provisioned,
-          origin
+          local_id, account_name, account_type, display_name, color, 
+          sync_mode, is_enabled, is_provisioned, origin
         )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(local_id) DO UPDATE SET 
           display_name = excluded.display_name,
-          color = excluded.color
+          color = excluded.color,
+          account_type = excluded.account_type,
+          sync_mode = excluded.sync_mode,
+          -- 如果之前被标记为待删除(2)，现在重新扫到了，恢复为就绪状态(1)
+          is_provisioned = CASE WHEN is_provisioned = 2 THEN 1 ELSE is_provisioned END
       ''', [
-          cal.id,               // local_id
-          accountId,            // account_name (userId)
-          cal.accountType,      // account_type
-          cal.name,             // display_name
-          cal.color,            // color (#AARRGGBB)
-          cal.isReadOnly == true ? 1 : 0, // sync_mode: 1 为只读, 0 为双向
-          0,                    // is_enabled: 默认开启
-          0,                    // is_provisioned: 初始状态为 0，等待同步洗白
-          0                     // origin: 0 (Local)，因为是从本地扫描到的
+          cal.id, accountId, cal.accountType, cal.name, cal.color,
+          cal.isReadOnly == true ? 1 : 0,
+          1, // is_enabled: 本地日历扫描到默认开启
+          1, // is_provisioned: 本地扫到的已经是实物，设为就绪
+          0 // origin: 本地起源
         ]);
+      }
+
+      // 3. 【状态机转换】：标记消失的日历为“待删除”
+      // 逻辑：属于该账号、本地起源(0)、且不在白名单内、且目前不是待删除状态
+      if (currentLocalIds.isNotEmpty) {
+        final placeholders = List.filled(currentLocalIds.length, '?').join(',');
+        await txn.update(
+          'calendar_map',
+          {'is_provisioned': 2},
+          where: 'account_name = ? AND origin = 0 AND local_id NOT IN ($placeholders) AND is_provisioned != 2',
+          whereArgs: [accountId, ...currentLocalIds],
+        );
+      } else {
+        // 系统日历全空了
+        await txn.update(
+          'calendar_map',
+          {'is_provisioned': 2},
+          where: 'account_name = ? AND origin = 0 AND is_provisioned != 2',
+          whereArgs: [accountId],
+        );
       }
     });
   }
@@ -588,7 +608,6 @@ class SyncRepository {
 
     final cal = maps.first;
     final String accountName = cal['account_name'] ?? '';
-    final String accountType = cal['account_type'] ?? '';
     final String? remotePath = cal['remote_path'];
 
     debugPrint("🚀 启动彻底删除流程: ID $localId, Path: $remotePath");
@@ -596,19 +615,17 @@ class SyncRepository {
     try {
       // --- Step A: 云端删除 ---
       // 逻辑：只有当它是 Nextcloud 类型且有路径时才调接口
-      if (accountType.contains('Nextcloud')) {
-        if (remotePath != null && remotePath.isNotEmpty) {
+      if (remotePath != null && remotePath.isNotEmpty) {
           bool cloudOk = await NextcloudService().deleteRemoteCalendar(
               userId: userId,
               calendarPath: remotePath
           );
           debugPrint(cloudOk ? "✅ 云端销毁成功" : "❌ 云端销毁失败 (状态码不符)");
-        }
       }
 
       // --- Step B: 本地系统层删除 (你反馈这步已成功) ---
       if (!localId.startsWith('rc_')) {
-        await _nativeApi.deleteCalendar(localId, accountName, accountType);
+        await _nativeApi.deleteCalendar(localId, accountName);
         debugPrint("✅ 手机系统日历已移除");
       }
 
