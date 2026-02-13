@@ -66,7 +66,7 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
               ),
               const SizedBox(width: 12),
               const Text(
-                'Calee',
+                'CaleeSync',
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.w600,
@@ -163,7 +163,7 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
                     ),
                     const SizedBox(width: 12),
                     const Text(
-                      'Calee',
+                      'CaleeSync',
                       style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.w600,
