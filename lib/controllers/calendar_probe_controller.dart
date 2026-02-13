@@ -18,8 +18,6 @@ class CalendarProbeController extends GetxController {
   }
   /// 上次同步时间
   final Rxn<DateTime> lastSyncAt = Rxn<DateTime>();
-  /// 当前同步模式描述
-  final RxString syncMode = 'Wi-Fi only'.obs;
   /// 当前同步摘要
   final Rxn<SyncSummary> summary = Rxn<SyncSummary>();
   /// 订阅日历列表（含 event_count 等字段），由仓库提供
