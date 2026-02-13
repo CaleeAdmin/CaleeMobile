@@ -154,14 +154,12 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
                         color: const Color(0xFF2E7AFE),
                         borderRadius: BorderRadius.circular(12),
                       ),
-                      child: const Center(
-                        child: Text(
-                          'C',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                          ),
+                      clipBehavior: Clip.antiAlias,
+                      child: const Padding(
+                        padding: EdgeInsets.all(7),
+                        child: Image(
+                          image: AssetImage('assets/images/logo.png'),
+                          fit: BoxFit.contain,
                         ),
                       ),
                     ),
@@ -207,8 +205,6 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
             //   label: 'Manage devices',
             //   onTap: () {},
             // ),
-            const Spacer(),
-            _buildSyncButton(),
           ],
         ),
       ),
@@ -237,51 +233,6 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
               ),
             ),
           ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSyncButton() {
-    final bottomPadding = MediaQuery.of(context).padding.bottom;
-    return Padding(
-      padding: EdgeInsets.fromLTRB(16, 12, 16, bottomPadding),
-      child: SizedBox(
-        width: double.infinity,
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: const Color(0xFF0D0C14),
-            borderRadius: BorderRadius.circular(12),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.1),
-                blurRadius: 10,
-                offset: const Offset(0, 4),
-              )
-            ],
-          ),
-          child: ElevatedButton.icon(
-            onPressed: () {
-              // TODO: Sync action
-            },
-            style: ElevatedButton.styleFrom(
-              elevation: 0,
-              backgroundColor: Colors.transparent,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            icon: const Icon(Icons.sync, size: 18),
-            label: const Text(
-              'Sync Now',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
         ),
       ),
     );
@@ -336,4 +287,3 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
     );
   }
 }
-
