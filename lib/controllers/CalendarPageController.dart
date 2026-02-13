@@ -89,44 +89,33 @@ class CalendarPageController extends GetxController {
     if (newValue == null) return;
 
     try {
-      // 乐观更新本地模型，局部刷新 UI
-      CalendarDisplayItem? target;
-      for (var g in calendarGroups) {
-        for (var c in g.calendars) {
-          if (c.localId == item.localId || c.remotePath == item.remotePath) {
-            target = c;
-            break;
-          }
-        }
-        if (target != null) break;
-      }
-      if (target == null) return;
+      // 直接更新当前 item，避免通过 ID 再次查找导致错位
+      item.isEnabled = newValue;
 
-      target.isEnabled = newValue;
+      // 如果后面有地方要用到 selectedCalendarIds，这里也同步一下
+      final key = (item.remotePath != null && item.remotePath!.isNotEmpty)
+          ? item.remotePath!
+          : (item.localId ?? '');
+      if (key.isNotEmpty) {
+        if (newValue) {
+          selectedCalendarIds.add(key);
+        } else {
+          selectedCalendarIds.remove(key);
+        }
+      }
+
       // 通知 observers 局部刷新
       calendarGroups.refresh();
 
       // 持久化到数据库
-      updateEnabledStatus(item,newValue);
+      await updateEnabledStatus(item, newValue);
 
     } catch (e) {
       print("❌ 切换日历状态失败: $e");
       Get.snackbar("错误", "无法更新日历同步状态");
       // 回滚本地模型并刷新 UI
-      CalendarDisplayItem? target;
-      for (var g in calendarGroups) {
-        for (var c in g.calendars) {
-          if (c.localId == item.localId) {
-            target = c;
-            break;
-          }
-        }
-        if (target != null) break;
-      }
-      if (target != null) {
-        target.isEnabled = !newValue;
-        calendarGroups.refresh();
-      }
+      item.isEnabled = !newValue;
+      calendarGroups.refresh();
     }
   }
 

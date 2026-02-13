@@ -453,7 +453,14 @@ class _AccountCard extends StatelessWidget {
             ],
             const SizedBox(height: 12),
             Column(
-              children: group.calendars.map((c) => _CalendarRow(item: c)).toList(),
+              children: group.calendars
+                  .map(
+                    (c) => _CalendarRow(
+                      key: ValueKey(c.remotePath ?? c.localId ?? c.name),
+                      item: c,
+                    ),
+                  )
+                  .toList(),
             ),
           ],
         ),
@@ -464,7 +471,7 @@ class _AccountCard extends StatelessWidget {
 
 class _CalendarRow extends StatelessWidget {
   final CalendarDisplayItem item;
-  const _CalendarRow({required this.item});
+  const _CalendarRow({Key? key, required this.item}) : super(key: key);
 
   Color _parseColor(String hex) {
     try {
