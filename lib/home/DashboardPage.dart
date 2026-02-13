@@ -347,68 +347,6 @@ class _DashboardPageState extends State<DashboardPage> {
             );
           }),
           const SizedBox(height: 16),
-          Card(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Quick Actions', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 6),
-                  const Text('Manage your calendars and tasks', style: TextStyle(color: Colors.black54)),
-                  const SizedBox(height: 12),
-                  Container(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.grey.shade200),
-                    ),
-                    child: ListTile(
-                      leading: Container(
-                        width: 36,
-                        height: 36,
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.grey.shade300),
-                        ),
-                        child: const Icon(Icons.calendar_today_outlined, color: Colors.black54),
-                      ),
-                      title: const Text('Manage Calendars', style: TextStyle(fontWeight: FontWeight.w600)),
-                      subtitle: const Text('View and organize your calendars', style: TextStyle(color: Colors.black54)),
-                      onTap: () {
-                        probeCtrl.setSelectedIndex(1);
-                      },
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  Container(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.grey.shade200),
-                    ),
-                    child: ListTile(
-                      leading: Container(
-                        width: 36,
-                        height: 36,
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.grey.shade300),
-                        ),
-                        child: const Icon(Icons.checklist_outlined, color: Colors.black54),
-                      ),
-                      title: const Text('Manage Tasks', style: TextStyle(fontWeight: FontWeight.w600)),
-                      subtitle: const Text('View and organize your task lists', style: TextStyle(color: Colors.black54)),
-                      onTap: () {
-                        probeCtrl.setSelectedIndex(2);
-                      },
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
           const SizedBox(height: 32),
         ],
       ),

@@ -52,17 +52,15 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
                 width: 40,
                 height: 40,
                 decoration: BoxDecoration(
-                  color: Colors.blue,
+                  color: const Color(0xFF2E7AFE),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Center(
-                  child: Text(
-                    'C',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                    ),
+                clipBehavior: Clip.antiAlias,
+                child: const Padding(
+                  padding: EdgeInsets.all(6),
+                  child: Image(
+                    image: AssetImage('assets/images/logo.png'),
+                    fit: BoxFit.contain,
                   ),
                 ),
               ),
