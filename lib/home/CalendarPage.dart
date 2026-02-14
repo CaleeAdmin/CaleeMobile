@@ -262,7 +262,7 @@ class _AccountCard extends StatelessWidget {
               ],
             ),
             // Nextcloud specific quick actions
-            if (group.accountName == 'com.nextcloud.caleesync') ...[
+            if (group.accountName == 'NextCloud') ...[
               const SizedBox(height: 12),
               SizedBox(
                 width: double.infinity,

@@ -1,12 +1,13 @@
-import 'package:caleesync/sync/DeleteLocalStrategy.dart';
-import 'package:caleesync/sync/DeleteRemoteStrategy.dart';
-import 'package:caleesync/sync/FullSyncPullStrategy.dart';
-import 'package:caleesync/sync/FullSyncPushStrategy.dart';
+import 'package:caleesync/sync/strategy/DeleteRemoteStrategy.dart';
 
-import 'SyncEnum.dart';
-import 'CreateLocalStrategy.dart';
-import 'CreateRemoteStrategy.dart';
-import 'SyncStrategy.dart';
+import '../strategy/DeleteLocalStrategy.dart';
+import '../strategy/FullSyncBidiStrategy.dart';
+import '../SyncEnum.dart';
+import '../strategy/CreateLocalStrategy.dart';
+import '../strategy/CreateRemoteStrategy.dart';
+import '../strategy/FullSyncPullStrategy.dart';
+import '../strategy/FullSyncPushStrategy.dart';
+import '../strategy/SyncStrategy.dart';
 
 class SyncStrategyFactory {
   static final Map<SyncAction, SyncStrategy> _strategies = {
@@ -17,7 +18,7 @@ class SyncStrategyFactory {
     SyncAction.fullSyncPull: FullSyncPullStrategy(),
     SyncAction.fullSyncPush: FullSyncPushStrategy(),
     SyncAction.deleteDatabaseOnly: DeleteRemoteStrategy(),
-    // SyncAction.fullSync: FullSyncStrategy(), // 以后添加双向同步
+    SyncAction.fullSyncBidi: FullSyncBidiStrategy(),
   };
 
   static SyncStrategy? getStrategy(SyncAction action) => _strategies[action];

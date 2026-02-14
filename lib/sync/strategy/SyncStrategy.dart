@@ -1,12 +1,12 @@
-import '../common/app_constant.dart';
-import '../common/utils/mmkv_utils.dart';
-import '../core/platform/pigeon/calendar_api.g.dart';
-import '../data/database_helper.dart';
-import '../data/sync_repository.dart';
-import '../entity/SyncContext.dart';
-import '../entity/SyncSummary.dart';
-import '../services/nextcloud_auth_service.dart';
-import '../services/nextcloud_service.dart';
+import '../../common/app_constant.dart';
+import '../../common/utils/mmkv_utils.dart';
+import '../../core/platform/pigeon/calendar_api.g.dart';
+import '../../data/database_helper.dart';
+import '../../data/sync_repository.dart';
+import '../../entity/SyncContext.dart';
+import '../../entity/SyncSummary.dart';
+import '../../services/nextcloud_auth_service.dart';
+import '../../services/nextcloud_service.dart';
 
 abstract class SyncStrategy {
   // 共用服务组件

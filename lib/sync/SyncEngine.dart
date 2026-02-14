@@ -3,6 +3,7 @@ import 'package:caleesync/common/utils/mmkv_utils.dart';
 import 'package:caleesync/core/platform/pigeon/calendar_api.g.dart';
 import 'package:caleesync/data/sync_repository.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:sqflite/sqflite.dart';
 
 import 'SyncEnum.dart';
 import '../common/utils/IcsGenerator.dart';
@@ -11,7 +12,7 @@ import '../entity/SyncContext.dart';
 import '../entity/SyncSummary.dart';
 import '../services/nextcloud_auth_service.dart';
 import '../services/nextcloud_service.dart';
-import 'SyncStrategyFactory.dart';
+import 'factory/SyncStrategyFactory.dart';
 
 class SyncEngine {
   final SyncRepository _repo = SyncRepository();
@@ -44,12 +45,13 @@ class SyncEngine {
     };
 
     // --- 策略 A：处理远端发现的日历 (针对：同步、初始化) ---
+// --- 策略 A：处理远端发现的日历 (针对：同步、初始化) ---
     for (var remote in remoteResults) {
       final path = remote['remote_path'];
       final local = localMapByPath[path];
 
+      // 1. 数据库彻底没记录 -> 真正的云端新坑
       if (local == null) {
-        // 数据库彻底没记录 -> 真正的云端新坑
         contexts.add(_buildContext(remote, null, SyncAction.createLocal));
         continue;
       }
@@ -58,27 +60,53 @@ class SyncEngine {
       final int isEnabled = local['is_enabled'] ?? 0;
       final int origin = local['origin'] ?? 0;
       final int mode = local['sync_mode'] ?? 0;
+      final String localId = local['local_id'] ?? '';
 
-      // 如果该记录已经被标记为待删除（状态2），跳过策略 A 的同步逻辑，交由策略 B 处理
+      // 2. 如果标记为待删除，交给策略 B 处理
       if (provisionStatus == 2) continue;
 
-      // 处理尚未在本地系统创建的情况 (状态 0)
-      if (local['local_id'] == null || local['local_id'].isEmpty ||
-          provisionStatus == 0) {
+      // 3. 处理尚未在本地创建的情况 (状态 0)
+      if (localId.isEmpty || provisionStatus == 0) {
         if (isEnabled == 1) {
           contexts.add(_buildContext(remote, local, SyncAction.createLocal));
         }
         continue;
       }
 
-      // 正常同步 (状态 1)
+      // 4. 正常同步 (状态 1)：引入增量检查逻辑
       if (isEnabled == 1) {
+        // --- 【关键修改点：性能过滤】 ---
+
+        // A. 检查云端是否有变动 (CTag 对比)
+        final String? dbCtag = local['last_ctag'];
+        final String? remoteCtag = remote['ctag']; // 确保 scanRemoteCalendars 返回了 ctag
+        final bool remoteChanged = (remoteCtag != null && remoteCtag != dbCtag);
+
+        // B. 检查本地是否有变动 (查询该日历下是否有 Dirty 或 Deleted 的事件)
+        // 注意：这里需要一个简单的异步查询或提前准备好的脏数据 Map
+        final bool localChanged = await _isCalendarDirty(db, localId);
+
+        // C. 检查日历元数据是否有变动 (名称、颜色)
+        final bool metaChanged = remote['displayname'] != local['display_name'] ||
+            remote['color'] != local['color'];
+
+        // 如果没有任何变化，直接跳过，不生成任何同步任务
+        if (!remoteChanged && !localChanged && !metaChanged) {
+          debugPrint("💤 日历无任何变动，跳过任务生成: ${remote['displayname']}");
+          continue;
+        }
+
+        // --- 【任务分发】 ---
         SyncAction action;
         if (mode == 0) {
+          // 双向模式：只要有一边变了，就进双向策略处理冲突
           action = SyncAction.fullSyncBidi;
         } else {
+          // 单向模式：根据起源决定是推还是拉
+          // 如果是 Pull 模式但只有本地变了，其实会被 Pull 策略内部忽略，这是安全的
           action = (origin == 1) ? SyncAction.fullSyncPull : SyncAction.fullSyncPush;
         }
+
         contexts.add(_buildContext(remote, local, action));
       }
     }
@@ -146,6 +174,16 @@ class SyncEngine {
     return contexts;
   }
 
+  Future<bool> _isCalendarDirty(Database db, String localId) async {
+    // 这里的状态码对应：1 (Dirty/Modified), 2 (Deleted)
+    final List<Map<String, dynamic>> dirtyCheck = await db.rawQuery('''
+    SELECT 1 FROM sync_map 
+    WHERE calendar_local_id = ? AND sync_status IN (1, 2) 
+    LIMIT 1
+  ''', [localId]);
+    return dirtyCheck.isNotEmpty;
+  }
+
   SyncContext _buildContext(Map remote, Map? local, SyncAction action) {
     return SyncContext(
       calendarId: local?['local_id'] ?? "",
@@ -173,6 +211,7 @@ class SyncEngine {
 
     // 1. 扫描本地系统日历
     await _repo.scanLocalCalendars(loginName);
+    await _repo.refreshAllLocalEvents(loginName);
 
     // 2. 发现云端新日历
     final List<Map<String, dynamic>> remoteCalendars = await _nc.scanRemoteCalendars(

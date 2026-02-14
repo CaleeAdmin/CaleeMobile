@@ -313,47 +313,6 @@ class NextcloudService {
     return eventRegex.allMatches(fullIcs).map((m) => m.group(0)!).toList();
   }
 
-  /// 从 REPORT 返回的 XML 中提取所有的 calendar-data
-  List<String> _extractIcsFromXml(String xmlBody) {
-    try {
-      final document = xml.XmlDocument.parse(xmlBody);
-      // 使用非命名空间敏感的查找方式
-      final List<String> results = [];
-
-      // 找到所有的 response 节点
-      final responses = document.findAllElements('response', namespace: '*');
-
-      for (var response in responses) {
-        final dataNode = response.findAllElements('calendar-data', namespace: '*').firstOrNull;
-        if (dataNode != null) {
-          results.add(dataNode.innerText);
-        }
-      }
-      return results;
-    } catch (e) {
-      print('XML 解析异常: $e');
-      return [];
-    }
-  }
-
-  /// 你现有的解析逻辑（示意）
-  Map<String, dynamic> _parseIcsContent(String icsBlock) {
-    // 这里是你之前实现的解析代码，例如使用 RegExp 提取 DTSTART, DTEND, UID 等
-    // 确保它能处理类似 DTSTART;TZID=Asia/Shanghai:20260213T020000 的情况
-    return {
-      'uid': _regexExtract(icsBlock, r'UID:(.*)'),
-      'dtstart': _regexExtract(icsBlock, r'DTSTART(?:;TZID=.*)?:(.*)'),
-      'dtend': _regexExtract(icsBlock, r'DTEND(?:;TZID=.*)?:(.*)'),
-      'summary': _regexExtract(icsBlock, r'SUMMARY:(.*)'),
-      'dtstamp': _regexExtract(icsBlock, r'DTSTAMP:(.*)'),
-    };
-  }
-
-  String _regexExtract(String source, String pattern) {
-    final reg = RegExp(pattern);
-    return reg.firstMatch(source)?.group(1)?.trim() ?? '';
-  }
-
   Map<String, String> _getAuthHeaders() {
     final String userId = MMKVUtils.instance.getString(AppConstant.loginName) ?? "";
     final String password = MMKVUtils.instance.getString(AppConstant.password) ?? "";
@@ -365,29 +324,6 @@ class NextcloudService {
       'Authorization': basicAuth,
       'Content-Type': 'application/xml; charset=utf-8', // 必须加，否则服务器可能无法解析 REPORT
     };
-  }
-
-// 辅助方法：简单的正则提取
-  String? _findValue(String ics, String key) {
-    final regExp = RegExp('$key:(.*)');
-    final match = regExp.firstMatch(ics);
-    return match?.group(1)?.trim();
-  }
-
-// 辅助方法：将 ICS 时间格式转为 DateTime
-  DateTime _parseIcsDateTime(String icsDate) {
-    // 处理格式如：20260211T090000Z
-    icsDate = icsDate.replaceAll('Z', '');
-    if (icsDate.contains(':')) icsDate = icsDate.split(':').last;
-
-    final year = int.parse(icsDate.substring(0, 4));
-    final month = int.parse(icsDate.substring(4, 6));
-    final day = int.parse(icsDate.substring(6, 8));
-    final hour = int.parse(icsDate.substring(9, 11));
-    final minute = int.parse(icsDate.substring(11, 13));
-    final second = int.parse(icsDate.substring(13, 15));
-
-    return DateTime.utc(year, month, day, hour, minute, second).toLocal();
   }
 
   /// [MKCALENDAR] 在云端创建一个新的日历
@@ -771,14 +707,6 @@ class NextcloudService {
       debugPrint('[Nextcloud] Subscription Exception: $e');
       return null;
     }
-  }
-
-  // --- 辅助工具函数 ---
-
-  bool _isDeleted(xml.XmlElement prop) {
-    return prop.descendants
-        .whereType<xml.XmlElement>()
-        .any((e) => e.name.local == 'deleted-calendar');
   }
 
   String _normalizeServer(String base) {

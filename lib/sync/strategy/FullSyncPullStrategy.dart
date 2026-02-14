@@ -1,11 +1,11 @@
 import 'package:caleesync/entity/SyncContext.dart';
 import 'package:caleesync/entity/SyncSummary.dart';
-import 'package:caleesync/sync/SyncStrategy.dart';
+import 'package:caleesync/sync/strategy/SyncStrategy.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:sqflite/sqflite.dart';
 
-import '../core/platform/pigeon/calendar_api.g.dart';
-import '../utils/TimeUtils.dart';
+import '../../core/platform/pigeon/calendar_api.g.dart';
+import '../../utils/TimeUtils.dart';
 
 class FullSyncPullStrategy extends SyncStrategy {
   @override

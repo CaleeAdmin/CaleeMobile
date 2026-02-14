@@ -156,7 +156,6 @@ class CalendarPageController extends GetxController {
       final String? loginName = MMKVUtils.instance.getString(AppConstant.loginName);
       if (loginName == null) return;
 
-      final db = await DatabaseHelper.instance.database;
       // 1. 扫描本地系统日历
       await _repo.scanLocalCalendars(loginName);
 
@@ -166,6 +165,7 @@ class CalendarPageController extends GetxController {
           userId: loginName);
 
       // 2. 获取所有日历记录
+      final db = await DatabaseHelper.instance.database;
       final List<Map<String, dynamic>> calendarMaps = await db.query(
         'calendar_map',
         where: 'account_name = ?',

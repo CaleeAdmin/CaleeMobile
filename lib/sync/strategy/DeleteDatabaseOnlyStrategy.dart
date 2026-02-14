@@ -1,7 +1,8 @@
 import 'package:caleesync/entity/SyncContext.dart';
 import 'package:caleesync/entity/SyncSummary.dart';
-import 'package:caleesync/sync/SyncStrategy.dart';
 import 'package:flutter/cupertino.dart';
+
+import 'SyncStrategy.dart';
 
 class Deletedatabaseonlystrategy extends SyncStrategy {
   @override

@@ -4,8 +4,8 @@ import 'package:caleesync/entity/SyncSummary.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:sqflite/sqflite.dart';
 
-import '../common/utils/EventParsedUtils.dart';
-import '../core/platform/pigeon/calendar_api.g.dart';
+import '../../common/utils/EventParsedUtils.dart';
+import '../../core/platform/pigeon/calendar_api.g.dart';
 import 'SyncStrategy.dart';
 
 class CreateLocalStrategy extends SyncStrategy {
