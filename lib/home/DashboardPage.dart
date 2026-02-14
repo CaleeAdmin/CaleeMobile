@@ -26,9 +26,9 @@ class _DashboardPageState extends State<DashboardPage> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _requestCalendarPermission();
-    });
+    // WidgetsBinding.instance.addPostFrameCallback((_) {
+    //   _requestCalendarPermission();
+    // });
   }
 
   Future<void> _requestCalendarPermission() async {

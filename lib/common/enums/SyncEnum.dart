@@ -13,6 +13,7 @@ enum SyncAction {
   // --- 销毁阶段 (清理门户) ---
   deleteLocal,    // 物理动作：DB Delete
   deleteRemote,   // 物理动作：WebDAV DELETE
+  deleteDatabaseOnly,
   ignore          // 物理动作：静默 (保护 B)
 }
 

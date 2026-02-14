@@ -148,15 +148,69 @@ class PlatformItem {
   }
 }
 
+class CalendarEventRequest {
+  CalendarEventRequest({
+    required this.calendarId,
+    required this.title,
+    required this.start,
+    required this.end,
+    this.notes,
+    required this.uid,
+    this.eventId,
+  });
+
+  String calendarId;
+
+  String title;
+
+  int start;
+
+  int end;
+
+  String? notes;
+
+  String uid;
+
+  String? eventId;
+
+  Object encode() {
+    return <Object?>[
+      calendarId,
+      title,
+      start,
+      end,
+      notes,
+      uid,
+      eventId,
+    ];
+  }
+
+  static CalendarEventRequest decode(Object result) {
+    result as List<Object?>;
+    return CalendarEventRequest(
+      calendarId: result[0]! as String,
+      title: result[1]! as String,
+      start: result[2]! as int,
+      end: result[3]! as int,
+      notes: result[4] as String?,
+      uid: result[5]! as String,
+      eventId: result[6] as String?,
+    );
+  }
+}
+
 class _NativeCalendarApiCodec extends StandardMessageCodec {
   const _NativeCalendarApiCodec();
   @override
   void writeValue(WriteBuffer buffer, Object? value) {
-    if (value is PlatformCalendar) {
+    if (value is CalendarEventRequest) {
       buffer.putUint8(128);
       writeValue(buffer, value.encode());
-    } else if (value is PlatformItem) {
+    } else if (value is PlatformCalendar) {
       buffer.putUint8(129);
+      writeValue(buffer, value.encode());
+    } else if (value is PlatformItem) {
+      buffer.putUint8(130);
       writeValue(buffer, value.encode());
     } else {
       super.writeValue(buffer, value);
@@ -167,8 +221,10 @@ class _NativeCalendarApiCodec extends StandardMessageCodec {
   Object? readValueOfType(int type, ReadBuffer buffer) {
     switch (type) {
       case 128: 
-        return PlatformCalendar.decode(readValue(buffer)!);
+        return CalendarEventRequest.decode(readValue(buffer)!);
       case 129: 
+        return PlatformCalendar.decode(readValue(buffer)!);
+      case 130: 
         return PlatformItem.decode(readValue(buffer)!);
       default:
         return super.readValueOfType(type, buffer);
@@ -337,6 +393,28 @@ class NativeCalendarApi {
     );
     final List<Object?>? __pigeon_replyList =
         await __pigeon_channel.send(<Object?>[calendarId, title, start, end, notes, uid]) as List<Object?>?;
+    if (__pigeon_replyList == null) {
+      throw _createConnectionError(__pigeon_channelName);
+    } else if (__pigeon_replyList.length > 1) {
+      throw PlatformException(
+        code: __pigeon_replyList[0]! as String,
+        message: __pigeon_replyList[1] as String?,
+        details: __pigeon_replyList[2],
+      );
+    } else {
+      return (__pigeon_replyList[0] as String?);
+    }
+  }
+
+  Future<String?> createOrUpdateEvent(CalendarEventRequest request) async {
+    final String __pigeon_channelName = 'dev.flutter.pigeon.caleesync.NativeCalendarApi.createOrUpdateEvent$__pigeon_messageChannelSuffix';
+    final BasicMessageChannel<Object?> __pigeon_channel = BasicMessageChannel<Object?>(
+      __pigeon_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: __pigeon_binaryMessenger,
+    );
+    final List<Object?>? __pigeon_replyList =
+        await __pigeon_channel.send(<Object?>[request]) as List<Object?>?;
     if (__pigeon_replyList == null) {
       throw _createConnectionError(__pigeon_channelName);
     } else if (__pigeon_replyList.length > 1) {

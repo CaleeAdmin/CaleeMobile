@@ -140,15 +140,57 @@ data class PlatformItem (
   }
 }
 
+/** Generated class from Pigeon that represents data sent in messages. */
+data class CalendarEventRequest (
+  val calendarId: String,
+  val title: String,
+  val start: Long,
+  val end: Long,
+  val notes: String? = null,
+  val uid: String,
+  val eventId: String? = null
+
+) {
+  companion object {
+    @Suppress("LocalVariableName")
+    fun fromList(__pigeon_list: List<Any?>): CalendarEventRequest {
+      val calendarId = __pigeon_list[0] as String
+      val title = __pigeon_list[1] as String
+      val start = __pigeon_list[2].let { num -> if (num is Int) num.toLong() else num as Long }
+      val end = __pigeon_list[3].let { num -> if (num is Int) num.toLong() else num as Long }
+      val notes = __pigeon_list[4] as String?
+      val uid = __pigeon_list[5] as String
+      val eventId = __pigeon_list[6] as String?
+      return CalendarEventRequest(calendarId, title, start, end, notes, uid, eventId)
+    }
+  }
+  fun toList(): List<Any?> {
+    return listOf<Any?>(
+      calendarId,
+      title,
+      start,
+      end,
+      notes,
+      uid,
+      eventId,
+    )
+  }
+}
+
 private object NativeCalendarApiCodec : StandardMessageCodec() {
   override fun readValueOfType(type: Byte, buffer: ByteBuffer): Any? {
     return when (type) {
       128.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
-          PlatformCalendar.fromList(it)
+          CalendarEventRequest.fromList(it)
         }
       }
       129.toByte() -> {
+        return (readValue(buffer) as? List<Any?>)?.let {
+          PlatformCalendar.fromList(it)
+        }
+      }
+      130.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
           PlatformItem.fromList(it)
         }
@@ -158,12 +200,16 @@ private object NativeCalendarApiCodec : StandardMessageCodec() {
   }
   override fun writeValue(stream: ByteArrayOutputStream, value: Any?)   {
     when (value) {
-      is PlatformCalendar -> {
+      is CalendarEventRequest -> {
         stream.write(128)
         writeValue(stream, value.toList())
       }
-      is PlatformItem -> {
+      is PlatformCalendar -> {
         stream.write(129)
+        writeValue(stream, value.toList())
+      }
+      is PlatformItem -> {
+        stream.write(130)
         writeValue(stream, value.toList())
       }
       else -> super.writeValue(stream, value)
@@ -197,6 +243,7 @@ interface NativeCalendarApi {
    */
   fun deleteCalendar(calendarId: String, accountName: String, callback: (Result<Boolean>) -> Unit)
   fun createEvent(calendarId: String, title: String, start: Long, end: Long, notes: String?, uid: String?, callback: (Result<String?>) -> Unit)
+  fun createOrUpdateEvent(request: CalendarEventRequest, callback: (Result<String?>) -> Unit)
   /** 获取指定日历下所有事件的 ID 列表（用于检测本地删除了哪些） */
   fun getSystemEventIds(calendarId: String): List<String>
   /** 根据 ID 删除本地事件（用于同步云端的删除操作） */
@@ -320,6 +367,26 @@ interface NativeCalendarApi {
             val notesArg = args[4] as String?
             val uidArg = args[5] as String?
             api.createEvent(calendarIdArg, titleArg, startArg, endArg, notesArg, uidArg) { result: Result<String?> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(wrapError(error))
+              } else {
+                val data = result.getOrNull()
+                reply.reply(wrapResult(data))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.caleesync.NativeCalendarApi.createOrUpdateEvent$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val requestArg = args[0] as CalendarEventRequest
+            api.createOrUpdateEvent(requestArg) { result: Result<String?> ->
               val error = result.exceptionOrNull()
               if (error != null) {
                 reply.reply(wrapError(error))

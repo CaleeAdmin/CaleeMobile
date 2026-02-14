@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:caleesync/common/app_constant.dart';
+import 'package:caleesync/common/utils/EventParsedUtils.dart';
 import 'package:caleesync/common/utils/mmkv_utils.dart';
 import 'package:caleesync/core/platform/pigeon/calendar_api.g.dart';
 import 'package:caleesync/data/sync_repository.dart';
@@ -15,7 +16,8 @@ import '../entity/SyncContext.dart';
 import '../entity/SyncSummary.dart';
 import '../services/nextcloud_auth_service.dart';
 import '../services/nextcloud_service.dart';
-import 'database_helper.dart';
+import '../data/database_helper.dart';
+import '../utils/TimeUtils.dart';
 
 class SyncEngine {
   final SyncRepository _repo = SyncRepository();
@@ -97,14 +99,30 @@ class SyncEngine {
 
       // 1. 【核心修复】：优先处理状态码 2 (待删除)
       if (provisionStatus == 2) {
+        final String? localId = local['local_id'];
+
+        // 核心判定：local_id 是否为一个真实的系统数字 ID
+        // 如果 local_id 为空，或者包含 "rc_" (你之前定义的临时 ID 前缀)，说明本地无实物
+        final bool hasPhysicalLocalEntity = localId != null &&
+            localId.isNotEmpty &&
+            !localId.startsWith('rc_') &&
+            int.tryParse(localId) != null;
+
         if (origin == 1) {
-          // 远端起源：服务器上已经没了，生成任务删除手机本地实体
-          debugPrint("🗑️ 状态2：远端源已删，执行本地清理: $path");
-          contexts.add(_buildContext(
-              remoteMap[path] ?? {}, local, SyncAction.deleteLocal));
+          // 【场景 A】：远端起源（订阅/同步日历）
+          if (hasPhysicalLocalEntity) {
+            debugPrint("🗑️ 状态2：远端已删且本地有实物，执行本地物理清理: $path (ID: $localId)");
+            contexts.add(_buildContext(remoteMap[path] ?? {}, local, SyncAction.deleteLocal));
+          } else {
+            // 关键修复：本地根本没创建过，直接标记为“仅清理数据库记录”
+            debugPrint("⏭️ 状态2：远端已删但本地无实物，跳过原生调用，直接清理数据库: $path");
+            // 这里可以复用一个 Action 或者在执行器里直接处理
+            contexts.add(_buildContext({}, local, SyncAction.deleteDatabaseOnly));
+          }
         } else {
-          // 本地起源：手机上已经删了，生成任务删除服务器日历
-          debugPrint("🚫 状态2：本地系统已删，执行远端清理: $path");
+          // 【场景 B】：本地起源（用户在手机上删了）
+          // 既然本地已经删了（通过 scanLocal 发现的），肯定要通知远端清理
+          debugPrint("🚫 状态2：本地系统已删，准备通知云端删除: $path");
           contexts.add(_buildContext(remoteMap[path] ?? {}, local, SyncAction.deleteRemote));
         }
         continue;
@@ -145,6 +163,7 @@ class SyncEngine {
       syncMode: local?['sync_mode'] ?? remote['sync_mode'] ?? 0,
       action: action,
       ctag: remote['last_ctag'] ?? local?['last_ctag'],
+      isSubscription: remote['is_subscription'] ?? false,
       extra: {
         'is_provisioned': local?['is_provisioned'] ?? 0,
         'origin': local?['origin'] ?? 0,
@@ -168,6 +187,9 @@ class SyncEngine {
 
     // 3. 获取任务列表
     final List<SyncContext> tasks = await generateSyncTasks(loginName, remoteCalendars);
+
+    debugPrint("====generateSyncTasks===$tasks");
+
     summary.reset(tasks.length);
 
     for (var originalCtx in tasks) {
@@ -255,11 +277,10 @@ class SyncEngine {
         case SyncAction.createLocal:
           print('🚀 开始执行 createLocal: ${ctx.displayName}');
 
-          // 1. 在 Android 系统侧创建日历坑位
+          // 1. 在 Android 系统侧创建日历
           final int colorValue = int.tryParse(ctx.color.replaceAll('#', '0x')) ?? 0xFF2196F3;
-
           final String? newLocalId = await _native.createCalendar(
-            ctx.displayName ,
+            ctx.displayName,
             loginName,
             colorValue,
           );
@@ -272,82 +293,102 @@ class SyncEngine {
 
           final db = await _dbHelper.database;
 
-          // 2. 立即关联本地 ID 并更新状态，防止后续流程崩溃导致重复创建日历
+          // 2. 关联本地 ID 并预设状态
           await db.update('calendar_map', {
             'local_id': newLocalId,
-            'is_enabled': 1,      // 既然是同步下来的，默认开启
-            'is_provisioned': 0,  // 标记为“洗白中”，尚未完成初始拉取
+            'is_enabled': 1,
+            'is_provisioned': 0,
           }, where: 'remote_path = ?', whereArgs: [ctx.remotePath]);
 
-          // 3. 准备批量下载环境 (复用 Client 提升性能)
-          final client = http.Client();
-          final String auth = 'Basic ${base64Encode(utf8.encode('$loginName:${MMKVUtils.instance.getString(AppConstant.password)}'))}';
-
           try {
-            // 4. 获取远端该日历下所有事件的列表 (Href 和 ETag)
-            final List<Map<String, dynamic>> remoteEvents = await _nc.fetchRemoteEvents(
+            // 3. 统一获取远端事件元数据
+            final List<Map<String, dynamic>> remoteEvents = await _nc.fetchUnifiedEvents(
               calendarPath: ctx.remotePath,
+              isSubscription: ctx.isSubscription ?? false,
             );
 
+            // 4. 加载本地 sync_map 缓存用于 Diff 比对
+            final List<Map<String, dynamic>> localEntries = await db.query(
+              'sync_map',
+              where: 'calendar_local_id = ?',
+              whereArgs: [newLocalId],
+            );
+            final Map<String, Map<String, dynamic>> localSyncMap = {
+              for (var entry in localEntries) entry['uid'] as String: entry
+            };
+
             int eventSuccessCount = 0;
+            final _api = NativeCalendarApi(); // Pigeon API
 
             for (var remote in remoteEvents) {
-              final String href = remote['href'];
-              final String etag = remote['etag'];
+              final String remoteUid = remote['uid'] ?? '';
+              final String remoteEtag = (remote['etag'] ?? '').replaceAll('"', '');
 
-              // 5. 调用你复用的 getEventDetail 下载具体的 .ics 内容
-              final icsData = await _nc.getEventDetail(
-                client: client,
-                eventPath: href,
-                authHeader: auth,
-              );
-
-              if (icsData == null) {
-                print('⚠️ 无法下载事件内容: $href');
-                continue;
+              // 5. 差异比对：ETag 没变且本地已有系统 ID 则跳过
+              if (localSyncMap.containsKey(remoteUid)) {
+                final localEtag = localSyncMap[remoteUid]!['last_etag'];
+                final localSystemId = localSyncMap[remoteUid]!['local_id'];
+                if (localEtag == remoteEtag && localSystemId != null) {
+                  eventSuccessCount++;
+                  continue;
+                }
               }
 
-              // 6. 解析 ICS (利用你之前的 IcsParser)
-              // 即使 remote['uid'] 为空，我们也传一个基于 href 的标识符进去
-              final String fallbackUid = href.split('/').last.replaceAll('.ics', '');
-              final parsed = IcsParser.parse(icsData, remote['uid'] ?? fallbackUid);
-              // 7. 调用原生的 createEvent 写入 Android 系统日历
-              String title = parsed['summary'] ?? parsed['SUMMARY'] ?? '未命名事件';
-              final String? systemEventId = await _native.createEvent(
-                newLocalId,
-                title,
-                parsed['dtstart'],      // 毫秒级 Long
-                parsed['dtend'],        // 毫秒级 Long
-                parsed['description'],
-                parsed['uid'],        // 核心：存入系统 _SYNC_ID
+              // 6. 获取事件详情（内部兼容订阅/普通日历，解决 404 问题）
+              final eventData = await Eventparsedutils.resolveEventData(
+                remote: remote,
+                isSubscription: ctx.isSubscription ?? false,
               );
-              if (systemEventId != null) {
-                // 8. 建立 sync_map 关系映射
-                await db.insert('sync_map', {
-                  'uid': parsed['uid'],
-                  'local_id': systemEventId,
-                  'calendar_local_id': newLocalId,
-                  'summary': parsed['title'],
-                  'last_etag': etag,      // 存下 ETag，下次同步时比对
-                  'remote_href': href,
-                  'sync_status': 0,       // 0 代表正常同步状态
-                });
-                eventSuccessCount++;
+
+              if (eventData == null) continue;
+
+              // 7. 构建 Pigeon 请求对象
+              final request = CalendarEventRequest(
+                calendarId: newLocalId.toString(),
+                title: eventData.summary,
+                start: eventData.dtstart,
+                end: eventData.dtend,
+                notes: eventData.description,
+                uid: eventData.uid,
+                // 关键：传入已有的 local_id 则触发原生 Update
+                eventId: localSyncMap[eventData.uid]?['local_id']?.toString(),
+              );
+
+              try {
+                // 8. 调用原生 createOrUpdateEvent
+                final String? systemEventId = await _api.createOrUpdateEvent(request);
+
+                if (systemEventId != null) {
+                  // 9. 更新 sync_map 映射
+                  await db.insert('sync_map', {
+                    'uid': eventData.uid,
+                    'local_id': systemEventId,
+                    'calendar_local_id': newLocalId,
+                    'summary': eventData.summary,
+                    'last_etag': remoteEtag,
+                    'remote_href': eventData.href,
+                    'sync_status': 0,
+                    'dtstart': eventData.dtstart,
+                    'dtend': eventData.dtend,
+                  }, conflictAlgorithm: ConflictAlgorithm.replace);
+
+                  eventSuccessCount++;
+                }
+              } catch (e) {
+                debugPrint("❌ 同步单条事件失败: $e");
               }
             }
-            // 9. 初始拉取全量完成，更新日历状态为“就绪”
+
+            // 10. 标记初始拉取完成
             await db.update('calendar_map', {
               'is_provisioned': 1
             }, where: 'local_id = ?', whereArgs: [newLocalId]);
 
-            print('✅ createLocal 完成: 已拉取 $eventSuccessCount 个事件');
+            print('✅ createLocal 完成: 已处理 $eventSuccessCount 个事件');
             summary.success++;
-          } catch (e,s) {
+          } catch (e) {
             print('❌ createLocal 过程发生异常: $e');
-            print('📍 错误位置追踪:\n$s'); // 👈 打印堆栈
             summary.failed++;
-          } finally {
-            client.close(); // 释放长连接资源
           }
           break;
         case SyncAction.deleteLocal:
@@ -409,6 +450,106 @@ class SyncEngine {
             debugPrint("❌ 云端删除失败，停止清理本地数据库以防状态不一致");
           }
           break;
+        case SyncAction.fullSyncPull:
+          final String localCalendarId = ctx.calendarId;
+          final String remotePath = ctx.remotePath;
+          final String? newCtag = ctx.ctag;
+          final String accountName = ctx.accountName;
+
+          if (localCalendarId.isEmpty) break;
+
+          try {
+            // 1. 获取远端最新全量数据
+            final List<Map<String, dynamic>> remoteEvents = await _nc.fetchUnifiedEvents(calendarPath: remotePath,
+                isSubscription: ctx.isSubscription ?? false
+            );
+            final db = await _dbHelper.database;
+
+            // 2. 获取本地 sync_map 缓存
+            final List<Map<String, dynamic>> localSyncRecords = await db.query(
+              'sync_map',
+              where: 'calendar_local_id = ?',
+              whereArgs: [localCalendarId],
+            );
+            final Map<String, Map<String, dynamic>> localSyncMap = {
+              for (var row in localSyncRecords) row['uid'] as String: row
+            };
+
+            final Set<String> remoteUids = {};
+
+            // 3. 遍历远端，处理 新增/更新
+            for (var remoteEvent in remoteEvents) {
+              final String uid = remoteEvent['uid'];
+              final String etag = remoteEvent['etag'];
+              remoteUids.add(uid);
+
+              final localRecord = localSyncMap[uid];
+
+              // 只有 ETag 不一致时才触发原生操作
+              if (localRecord == null || localRecord['last_etag'] != etag) {
+                // 调用新增的 createOrUpdateEvent 接口
+                // 如果 localRecord 为 null，eventId 传 null 触发原生 Insert
+                final request = CalendarEventRequest(
+                  calendarId: localCalendarId.toString(),
+                  title: remoteEvent['summary'] ?? '无标题',
+                  start: Timeutils.parseToMillis(remoteEvent['start']),
+                  end: Timeutils.parseToMillis(remoteEvent['end']),
+                  notes: remoteEvent['description'] ?? "UID: $uid",
+                  uid: uid,
+                  // 关键：如果 localRecord 存在，则传入其 local_id 告诉原生端执行 Update
+                  eventId: localRecord?['local_id']?.toString(),
+                );
+
+                final String? systemEventId = await _native.createOrUpdateEvent(
+                    request
+                );
+
+                if (systemEventId != null) {
+                  await db.insert('sync_map', {
+                    'uid': uid,
+                    'local_id': systemEventId,
+                    'calendar_local_id': localCalendarId,
+                    'summary': remoteEvent['summary'],
+                    'last_etag': etag,
+                    'remote_href': remoteEvent['href'],
+                    'sync_status': 0,
+                  }, conflictAlgorithm: ConflictAlgorithm.replace);
+                }
+              }
+            }
+
+            // 4. 处理 物理删除 (本地有但远端没了)
+            for (var uid in localSyncMap.keys) {
+              if (!remoteUids.contains(uid)) {
+                final recordToDelete = localSyncMap[uid]!;
+                final bool isDeleted = await _native.deleteEvent(recordToDelete['local_id']);
+                if (isDeleted) {
+                  await db.delete('sync_map', where: 'uid = ?', whereArgs: [uid]);
+                }
+              }
+            }
+
+            // 5. 更新日历 CTAG
+            await db.update('calendar_map',
+                {'last_ctag': newCtag, 'is_provisioned': 1},
+                where: 'remote_path = ? AND account_name = ?',
+                whereArgs: [remotePath, accountName]);
+
+            debugPrint("✅ FullSyncPull 完成，CTAG 更新为: $newCtag");
+          } catch (e) {
+            debugPrint("❌ FullSyncPull 异常: $e");
+          }
+          break;
+        case SyncAction.deleteDatabaseOnly:
+        // 无需原生操作，直接从数据库抹除映射关系
+          final db = await _dbHelper.database;
+          await db.delete(
+            'calendar_map',
+            where: 'remote_path = ? AND account_name = ?',
+            whereArgs: [ctx.remotePath, ctx.accountName],
+          );
+          debugPrint("🧹 已从数据库彻底移除未落地的日历记录");
+          break;
           default:{}
       }
 
@@ -463,6 +604,8 @@ class SyncEngine {
     }
     return summary;
   }
+
+
 
   // 在 SyncEngine 类中
   Future<void> discoverRemoteCalendars(String userId) async {

@@ -38,10 +38,11 @@ class _CalendarPageState extends State<CalendarPage> {
       }
 
       if (status.isGranted) {
-        try {
-          final nativeApi = NativeCalendarApi();
-          await nativeApi.requestPermission(false);
-        } catch (_) {}
+        // try {
+        //   final nativeApi = NativeCalendarApi();
+        //   await nativeApi.requestPermission(false);
+        // } catch (_) {}
+
         // 仅在尚未加载数据时才触发一次刷新，避免每次切换 tab 重复刷新
         if (controller.calendarGroups.isEmpty && !controller.isLoading.value) {
           await controller.refreshDashboard();

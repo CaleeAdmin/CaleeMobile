@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:xml/xml.dart' as xml;
 
 import '../common/app_constant.dart';
+import '../common/utils/IcsParser.dart';
 import '../common/utils/IcsSerializer.dart';
 import '../common/utils/mmkv_utils.dart';
 import '../data/database_helper.dart';
@@ -129,6 +130,8 @@ class NextcloudService {
   }
 
   Future<void> persistRemoteCalendars(List<Map<String, dynamic>> remoteMaps, String accountName) async {
+    debugPrint("==remoteMaps===$remoteMaps");
+
     final db = await _dbHelper.database;
 
     await db.transaction((txn) async {
@@ -199,117 +202,169 @@ class NextcloudService {
   }
 
   /// 2. 获取并解析云端条目 (对应 sync_map)
-  /// 批量获取日历中的所有事件
-  /// 批量获取日历中的所有事件 (严格参考你的旧分支实现
-  Future<List<Map<String, dynamic>>> fetchRemoteEvents({
+  final String baseUrl = "https://nc-dev.ywpl.com.au";
+
+  /// 核心方法：统一获取事件（适配普通与订阅日历）
+  Future<List<Map<String, dynamic>>> fetchUnifiedEvents({
     required String calendarPath,
+    required bool isSubscription,
   }) async {
-    final String userId = MMKVUtils.instance.getString(AppConstant.loginName) ?? "";
-    final String password = MMKVUtils.instance.getString(AppConstant.password) ?? "";
-    final url = "https://nc-dev.ywpl.com.au$calendarPath";
+    final String fullUrl = "$baseUrl$calendarPath${isSubscription ? '?export' : ''}";
+    final Map<String, String> headers = _getAuthHeaders();
 
     try {
-      final request = http.Request('PROPFIND', Uri.parse(url));
-      request.headers.addAll({
-        'Authorization': 'Basic ${base64Encode(utf8.encode('$userId:$password'))}',
-        'Depth': '1',
-        'Content-Type': 'application/xml; charset=utf-8',
-      });
+      final response = isSubscription
+          ? await http.get(Uri.parse(fullUrl), headers: headers)
+          : await _sendReportRequest(fullUrl, headers);
 
-      // 🛡️ 修复点 1：请求 calendar-data，这样才能拿到标题和时间
-      request.body = '''<?xml version="1.0" encoding="utf-8" ?>
-<d:propfind xmlns:d="DAV:" xmlns:cal="urn:ietf:params:xml:ns:caldav">
-  <d:prop>
-    <d:getetag />
-    <cal:calendar-data />
-  </d:prop>
-</d:propfind>''';
+      if (response.statusCode == 200 || response.statusCode == 207) {
+        // --- 关键修正：区分提取逻辑 ---
+        List<Map<String, String>> eventRawData = [];
 
-      final client = http.Client();
-      final streamedResponse = await client.send(request);
-      final response = await http.Response.fromStream(streamedResponse);
-
-      if (response.statusCode == 207) {
-        final document = xml.XmlDocument.parse(response.body);
-        final List<Map<String, dynamic>> events = [];
-
-        final responses = document.descendants
-            .whereType<xml.XmlElement>()
-            .where((node) => node.name.local == 'response');
-
-        for (var responseNode in responses) {
-          final href = responseNode.findElements('d:href').firstOrNull?.innerText ?? '';
-
-          // 🛡️ 修复点 2：精准过滤，只处理 .ics 文件，跳过目录本身
-          if (!href.endsWith('.ics')) continue;
-
-          // 查找 200 OK 的属性部分
-          final prop = responseNode.descendants
-              .whereType<xml.XmlElement>()
-              .where((node) => node.name.local == 'prop')
-              .firstOrNull;
-
-          if (prop != null) {
-            final etag = prop.findElements('d:getetag').firstOrNull?.innerText ?? '';
-            final calendarData = prop.findElements('cal:calendar-data').firstOrNull?.innerText ?? '';
-
-            if (calendarData.isNotEmpty) {
-              // 🛡️ 修复点 3：解析 ICS 内容
-              // 这里建议调用你之前的 IcsParser。注意：根据你之前的日志，
-              // 确保解析出来的 map 使用小写的 'summary', 'dtstart', 'dtend'
-              final Map<String, dynamic> parsedIcs = _parseIcsContent(calendarData);
-
-              events.add({
-                'href': href,
-                'etag': etag.replaceAll('"', '').replaceAll('W/', ''),
-                'summary': parsedIcs['summary'] ?? '无标题', // 这里的 Key 必须和解析器一致
-                'start': parsedIcs['dtstart'],
-                'end': parsedIcs['dtend'],
-                'uid': parsedIcs['uid'],
-              });
-            }
-          }
+        if (isSubscription) {
+          // 订阅日历：切分全量文本
+          final blocks = _splitVevents(response.body);
+          eventRawData = blocks.map((b) => {'ics': b, 'href': ''}).toList();
+        } else {
+          // 普通日历：从 XML 提取 ics 内容和对应的 href
+          eventRawData = _extractIcsAndHrefFromXml(response.body);
         }
 
-        print('✨ 最终拉取到: ${events.length} 个有效事件');
-        return events;
+        return eventRawData.map((item) {
+          final icsString = item['ics']!;
+          // 这里才调用你的 IcsParser
+          final parsed = IcsParser.parse(item['ics']!, item['href']!);
+          if (parsed.isEmpty) return null;
+
+          return {
+            'uid': parsed['uid'],
+            'summary': parsed['summary'],
+            'start': parsed['dtstart'], // 确保 IcsParser 返回的 key 是这个
+            'end': parsed['dtend'],
+            'href': isSubscription ? '$calendarPath${parsed['uid']}.ics' : item['href'],
+            'etag': parsed['dtstamp'] ?? 'no-etag',
+            'calendar_data': icsString,
+          };
+        }).whereType<Map<String, dynamic>>().toList();
       }
     } catch (e) {
-      print('❌ 严重错误: $e');
+      debugPrint("❌ 同步异常: $e");
     }
     return [];
   }
 
-  Map<String, dynamic> _parseIcsContent(String icsString) {
-    final Map<String, dynamic> result = {};
+  List<Map<String, String>> _extractIcsAndHrefFromXml(String xmlBody) {
+    final document = xml.XmlDocument.parse(xmlBody);
+    final List<Map<String, String>> results = [];
 
-    // 这里推荐使用你项目中已经有的 ical 库，或者简单的正则匹配
-    // 下面是一个基于你之前打印结果的逻辑模拟：
-    try {
-      // 假设你使用的是 ical 库：
-      // final iCalendar = ICalendar.fromString(icsString);
-      // final event = iCalendar.data.first;
+    // 查找所有 response 节点
+    final responses = document.findAllElements('response', namespace: '*');
 
-      // 如果你是手动解析，确保 Key 和你 fetchRemoteEvents 调用的地方一致
-      // 重点：统一使用全小写，避免大小写导致的 null
-      result['summary'] = _findValue(icsString, 'SUMMARY');
-      result['uid'] = _findValue(icsString, 'UID');
+    for (var response in responses) {
+      final href = response.findAllElements('href', namespace: '*').firstOrNull?.innerText;
+      final data = response.findAllElements('calendar-data', namespace: '*').firstOrNull?.innerText;
 
-      // 提取时间并转为毫秒时间戳（符合你之前的日志格式）
-      String? dtStart = _findValue(icsString, 'DTSTART');
-      if (dtStart != null) {
-        result['dtstart'] = _parseIcsDateTime(dtStart).millisecondsSinceEpoch;
+      if (href != null && data != null && data.isNotEmpty) {
+        results.add({'href': href, 'ics': data});
       }
-
-      String? dtEnd = _findValue(icsString, 'DTEND');
-      if (dtEnd != null) {
-        result['dtend'] = _parseIcsDateTime(dtEnd).millisecondsSinceEpoch;
-      }
-    } catch (e) {
-      print('解析 ICS 失败: $e');
     }
+    return results;
+  }
 
-    return result;
+  /// 针对普通日历发送 REPORT 请求
+  Future<http.Response> _sendReportRequest(String url, Map<String, String> headers) async {
+    // 1. 确保 URL 以斜杠结尾，否则某些 WebDAV 服务器会返回 501 或 405
+    final requestUrl = url.endsWith('/') ? url : '$url/';
+
+    // 2. 构造 REPORT 请求体
+    // 注意：确保命名空间和标签没有拼写错误
+    final body = '''<?xml version="1.0" encoding="utf-8" ?>
+<c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+  <d:prop>
+    <d:getetag />
+    <c:calendar-data />
+  </d:prop>
+  <c:filter>
+    <c:comp-filter name="VCALENDAR">
+      <c:comp-filter name="VEVENT" />
+    </c:comp-filter>
+  </c:filter>
+</c:calendar-query>''';
+
+    // 3. 必须包含正确的 Content-Type 和 Depth
+    // 某些服务器如果没看到 text/xml 会直接 501
+    headers['Content-Type'] = 'application/xml; charset=utf-8';
+    headers['Depth'] = '1';
+
+    print('DEBUG: 正在发起 REPORT 请求 -> $requestUrl');
+
+    // 4. 使用 http.Request 显式指定 REPORT 方法
+    final request = http.Request('REPORT', Uri.parse(requestUrl))
+      ..headers.addAll(headers)
+      ..body = body;
+
+    final streamedResponse = await http.Client().send(request);
+    return await http.Response.fromStream(streamedResponse);
+  }
+
+  /// 将包含多个 VEVENT 的大字符串拆分成独立的列表
+  List<String> _splitVevents(String fullIcs) {
+    final eventRegex = RegExp(r'BEGIN:VEVENT[\s\S]*?END:VEVENT');
+    return eventRegex.allMatches(fullIcs).map((m) => m.group(0)!).toList();
+  }
+
+  /// 从 REPORT 返回的 XML 中提取所有的 calendar-data
+  List<String> _extractIcsFromXml(String xmlBody) {
+    try {
+      final document = xml.XmlDocument.parse(xmlBody);
+      // 使用非命名空间敏感的查找方式
+      final List<String> results = [];
+
+      // 找到所有的 response 节点
+      final responses = document.findAllElements('response', namespace: '*');
+
+      for (var response in responses) {
+        final dataNode = response.findAllElements('calendar-data', namespace: '*').firstOrNull;
+        if (dataNode != null) {
+          results.add(dataNode.innerText);
+        }
+      }
+      return results;
+    } catch (e) {
+      print('XML 解析异常: $e');
+      return [];
+    }
+  }
+
+  /// 你现有的解析逻辑（示意）
+  Map<String, dynamic> _parseIcsContent(String icsBlock) {
+    // 这里是你之前实现的解析代码，例如使用 RegExp 提取 DTSTART, DTEND, UID 等
+    // 确保它能处理类似 DTSTART;TZID=Asia/Shanghai:20260213T020000 的情况
+    return {
+      'uid': _regexExtract(icsBlock, r'UID:(.*)'),
+      'dtstart': _regexExtract(icsBlock, r'DTSTART(?:;TZID=.*)?:(.*)'),
+      'dtend': _regexExtract(icsBlock, r'DTEND(?:;TZID=.*)?:(.*)'),
+      'summary': _regexExtract(icsBlock, r'SUMMARY:(.*)'),
+      'dtstamp': _regexExtract(icsBlock, r'DTSTAMP:(.*)'),
+    };
+  }
+
+  String _regexExtract(String source, String pattern) {
+    final reg = RegExp(pattern);
+    return reg.firstMatch(source)?.group(1)?.trim() ?? '';
+  }
+
+  Map<String, String> _getAuthHeaders() {
+    final String userId = MMKVUtils.instance.getString(AppConstant.loginName) ?? "";
+    final String password = MMKVUtils.instance.getString(AppConstant.password) ?? "";
+
+    // 核心：生成 Base64 字符串
+    String basicAuth = 'Basic ' + base64Encode(utf8.encode('$userId:$password'));
+
+    return {
+      'Authorization': basicAuth,
+      'Content-Type': 'application/xml; charset=utf-8', // 必须加，否则服务器可能无法解析 REPORT
+    };
   }
 
 // 辅助方法：简单的正则提取

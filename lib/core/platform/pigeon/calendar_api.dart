@@ -37,6 +37,28 @@ class PlatformItem {
   int? priority;
 }
 
+class CalendarEventRequest {
+  // 确保这里的定义符合你的业务需求
+  String calendarId;
+  String title;
+  int start;
+  int end;
+  String? notes;
+  String uid;
+  String? eventId; // 更新时有值，新建时为 null
+
+  // Pigeon 会根据这个类生成 Dart 端对应的构造函数
+  CalendarEventRequest({
+    required this.calendarId,
+    required this.title,
+    required this.start,
+    required this.end,
+    this.notes,
+    required this.uid,
+    this.eventId,
+  });
+}
+
 /// 定义原生侧必须实现的方法
 @HostApi()
 abstract class NativeCalendarApi {
@@ -71,6 +93,9 @@ abstract class NativeCalendarApi {
       String? notes,
       String? uid // 传入生成的 UUID
       );
+
+  @async
+  String? createOrUpdateEvent(CalendarEventRequest request);
 
   /// 获取指定日历下所有事件的 ID 列表（用于检测本地删除了哪些）
   List<String> getSystemEventIds(String calendarId);

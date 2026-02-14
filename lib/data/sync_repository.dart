@@ -121,7 +121,7 @@ class SyncRepository {
       ''', [
           cal.id, accountId, cal.accountType, cal.name, cal.color,
           cal.isReadOnly == true ? 1 : 0,
-          1, // is_enabled: 本地日历扫描到默认开启
+          0, // is_enabled: 本地日历扫描到默认开启
           1, // is_provisioned: 本地扫到的已经是实物，设为就绪
           0 // origin: 本地起源
         ]);
@@ -259,8 +259,9 @@ class SyncRepository {
     print("📡 准备从分组 [${calConfig['account_name']}] 拉取路径: $remotePath");
 
     // 2. 获取云端所有事件
-    final remoteEvents = await NextcloudService().fetchRemoteEvents(
+    final remoteEvents = await NextcloudService().fetchUnifiedEvents(
       calendarPath: remotePath,
+      isSubscription: false
     );
 
     // --- 【删除逻辑】对比云端与本地 UID 集合 ---

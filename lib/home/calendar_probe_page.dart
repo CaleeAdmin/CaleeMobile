@@ -3,7 +3,7 @@ import 'package:caleesync/home/sync_settings_page.dart';
 import 'package:caleesync/home/task_lists_page.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import '../data/SyncEngine.dart';
+import '../sync/SyncEngine.dart';
 import '../controllers/calendar_probe_controller.dart';
 import '../data/sync_repository.dart';
 import 'DashboardPage.dart';
