@@ -7,7 +7,7 @@ import 'package:sqflite/sqflite.dart';
 import '../core/platform/pigeon/calendar_api.g.dart';
 import '../utils/TimeUtils.dart';
 
-class Fullsyncpullstrategy extends SyncStrategy {
+class FullSyncPullStrategy extends SyncStrategy {
   @override
   Future<void> execute(SyncContext ctx, SyncSummary summary) async{
     final String localCalendarId = ctx.calendarId;

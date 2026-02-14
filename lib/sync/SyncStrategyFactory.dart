@@ -1,8 +1,9 @@
 import 'package:caleesync/sync/DeleteLocalStrategy.dart';
 import 'package:caleesync/sync/DeleteRemoteStrategy.dart';
 import 'package:caleesync/sync/FullSyncPullStrategy.dart';
+import 'package:caleesync/sync/FullSyncPushStrategy.dart';
 
-import '../common/enums/SyncEnum.dart';
+import 'SyncEnum.dart';
 import 'CreateLocalStrategy.dart';
 import 'CreateRemoteStrategy.dart';
 import 'SyncStrategy.dart';
@@ -13,7 +14,8 @@ class SyncStrategyFactory {
     SyncAction.createLocal: CreateLocalStrategy(),
     SyncAction.deleteLocal: Deletelocalstrategy(),
     SyncAction.deleteRemote: DeleteRemoteStrategy(),
-    SyncAction.fullSyncPull: Fullsyncpullstrategy(),
+    SyncAction.fullSyncPull: FullSyncPullStrategy(),
+    SyncAction.fullSyncPush: FullSyncPushStrategy(),
     SyncAction.deleteDatabaseOnly: DeleteRemoteStrategy(),
     // SyncAction.fullSync: FullSyncStrategy(), // 以后添加双向同步
   };

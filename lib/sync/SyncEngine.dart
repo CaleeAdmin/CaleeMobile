@@ -4,7 +4,7 @@ import 'package:caleesync/core/platform/pigeon/calendar_api.g.dart';
 import 'package:caleesync/data/sync_repository.dart';
 import 'package:flutter/cupertino.dart';
 
-import '../common/enums/SyncEnum.dart';
+import 'SyncEnum.dart';
 import '../common/utils/IcsGenerator.dart';
 import '../data/database_helper.dart';
 import '../entity/SyncContext.dart';

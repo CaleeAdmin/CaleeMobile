@@ -1,5 +1,5 @@
 // 定义同步任务的配置上下文
-import '../common/enums/SyncEnum.dart';
+import '../sync/SyncEnum.dart';
 
 class SyncContext {
   final String calendarId;    // 本地数据库中的 ID (可能是 "rc_..." 或数字 "6")
