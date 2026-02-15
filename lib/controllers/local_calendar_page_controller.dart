@@ -67,6 +67,15 @@ class LocalCalendarPageController extends GetxController {
           row['local_id'].toString(): (row['is_enabled'] ?? 0) == 1,
       };
 
+      final List<Map<String, dynamic>> remoteProvisionedRows = await db.query(
+        'calendar_map',
+        columns: ['local_id'],
+        where: 'origin = 1 AND local_id IS NOT NULL AND local_id != ""',
+      );
+      final Set<String> remoteProvisionedLocalIds = {
+        for (final row in remoteProvisionedRows) row['local_id'].toString(),
+      };
+
       final List<PlatformCalendar?> rawCalendars = await _nativeApi.getCalendars();
       final DateTime now = DateTime.now();
       final int rangeStart = now.subtract(const Duration(days: 365)).millisecondsSinceEpoch;
@@ -81,6 +90,10 @@ class LocalCalendarPageController extends GetxController {
 
         final String id = calendar.id ?? '';
         if (id.isEmpty) {
+          continue;
+        }
+
+        if (remoteProvisionedLocalIds.contains(id)) {
           continue;
         }
 
