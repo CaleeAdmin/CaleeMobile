@@ -107,7 +107,7 @@ extension on _CalendarRow {
         final bool? confirm = await _showDeleteConfirm(context);
         if (confirm == true) {
           try {
-            await controller.deleteCalendarTotally(item.localId);
+            await controller.deleteCalendarTotally(localId: item.localId, remotePath: item.remotePath);
           } catch (_) {}
         }
         break;

@@ -682,46 +682,60 @@ class SyncRepository {
   }
 
   /// 🗑️ 核心合并删除逻辑：物理销毁或解除绑定
-  Future<void> performAbsoluteDelete(String localId) async {
+  Future<void> performAbsoluteDelete({String? localId, String? remotePath}) async {
     final db = await _dbHelper.database;
     final String userId = MMKVUtils.instance.getString(AppConstant.loginName) ?? "";
 
-    // 1. 提取元数据
-    final List<Map<String, dynamic>> maps = await db.query(
-        'calendar_map',
-        where: 'local_id = ?',
-        whereArgs: [localId]
-    );
+    final String? sanitizedLocalId = (localId != null && localId.isNotEmpty) ? localId : null;
+    final String? sanitizedRemotePath = (remotePath != null && remotePath.isNotEmpty) ? remotePath : null;
+
+    if (sanitizedLocalId == null && sanitizedRemotePath == null) {
+      debugPrint("⚠️ [Delete] 传入参数为空，跳过删除");
+      return;
+    }
+
+    // 1. 提取元数据（优先 local_id，兜底 remote_path）
+    final List<Map<String, dynamic>> maps = sanitizedLocalId != null
+        ? await db.query(
+            'calendar_map',
+            where: 'local_id = ?',
+            whereArgs: [sanitizedLocalId],
+          )
+        : await db.query(
+            'calendar_map',
+            where: 'remote_path = ?',
+            whereArgs: [sanitizedRemotePath],
+          );
 
     if (maps.isEmpty) {
-      debugPrint("⚠️ [Delete] 数据库中已无此 ID，无需重复操作: $localId");
+      debugPrint("⚠️ [Delete] 数据库中已无此日历，无需重复操作: local=$sanitizedLocalId remote=$sanitizedRemotePath");
       return;
     }
 
     final cal = maps.first;
     final String accountName = cal['account_name'] ?? '';
-    final String? remotePath = cal['remote_path'];
+    final String resolvedLocalId = cal['local_id']?.toString() ?? sanitizedLocalId ?? '';
+    final String? resolvedRemotePath = cal['remote_path']?.toString() ?? sanitizedRemotePath;
     final int? syncMode = cal['sync_mode'];
 
-    debugPrint("🚀 启动彻底删除流程: ID $localId, Path: $remotePath");
+    debugPrint("🚀 启动彻底删除流程: ID $resolvedLocalId, Path: $resolvedRemotePath");
 
     try {
       // --- Step A: 云端删除 ---
-      // 逻辑：只有当它是 Nextcloud 类型且有路径时才调接口
-      if (remotePath != null && remotePath.isNotEmpty && syncMode == 0) {
-          bool cloudOk = await NextcloudService().deleteRemoteCalendar(
-              userId: userId,
-              calendarPath: remotePath
-          );
-          debugPrint(cloudOk ? "✅ 云端销毁成功" : "❌ 云端销毁失败 (状态码不符)");
+      // 逻辑：有远端路径且非只读时才尝试
+      if (resolvedRemotePath != null && resolvedRemotePath.isNotEmpty && syncMode == 0) {
+        bool cloudOk = await NextcloudService().deleteRemoteCalendar(
+          userId: userId,
+          calendarPath: resolvedRemotePath,
+        );
+        debugPrint(cloudOk ? "✅ 云端销毁成功" : "❌ 云端销毁失败 (状态码不符)");
       }
 
-      // --- Step B: 本地系统层删除 (你反馈这步已成功) ---
-      if (!localId.startsWith('rc_') && syncMode == 0) {
-        await _nativeApi.deleteCalendar(localId, accountName);
+      // --- Step B: 本地系统层删除 ---
+      if (resolvedLocalId.isNotEmpty && !resolvedLocalId.startsWith('rc_') && syncMode == 0) {
+        await _nativeApi.deleteCalendar(resolvedLocalId, accountName);
         debugPrint("✅ 手机系统日历已移除");
       }
-
     } catch (e) {
       // 即使 Step A 或 B 出错（比如断网），也要捕获它，防止程序中断
       debugPrint("⚠️ 物理层删除报错 (但这不影响清理本地库): $e");
@@ -730,17 +744,28 @@ class SyncRepository {
       // 无论前面是成功还是失败，必须抹掉本地记录，防止“死而复生”
       await db.transaction((txn) async {
         // 1. 删除关联的事件追踪 (sync_map)
-        int sCount = await txn.delete(
+        int sCount = 0;
+        if (resolvedLocalId.isNotEmpty) {
+          sCount = await txn.delete(
             'sync_map',
             where: 'calendar_local_id = ?',
-            whereArgs: [localId]
-        );
+            whereArgs: [resolvedLocalId],
+          );
+        }
+
         // 2. 删除日历自身的配置 (calendar_map)
-        int cCount = await txn.delete(
-            'calendar_map',
-            where: 'local_id = ?',
-            whereArgs: [localId]
-        );
+        final int cCount = resolvedLocalId.isNotEmpty
+            ? await txn.delete(
+                'calendar_map',
+                where: 'local_id = ?',
+                whereArgs: [resolvedLocalId],
+              )
+            : await txn.delete(
+                'calendar_map',
+                where: 'remote_path = ?',
+                whereArgs: [resolvedRemotePath],
+              );
+
         debugPrint("🗑️ 数据库清理完毕: 删除了 $sCount 条事件, $cCount 条日历记录");
       });
     }
