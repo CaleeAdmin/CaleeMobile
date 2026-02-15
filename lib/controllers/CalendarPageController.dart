@@ -176,7 +176,7 @@ class CalendarPageController extends GetxController {
 
       for (var cal in calendarMaps) {
         final String account = cal['account_type'] ?? 'Unknown';
-        final String localId = cal['local_id'].toString();
+        final String? localId = cal['local_id']?.toString();
         final String? remotePath = cal['remote_path'];
         final int? syncMode = cal['sync_mode'];
         final int origin = cal['origin'];
@@ -188,7 +188,7 @@ class CalendarPageController extends GetxController {
           // A. 先查本地数据库 sync_map
           final localCountResult = await db.rawQuery(
               'SELECT COUNT(*) as count FROM sync_map WHERE calendar_local_id = ?',
-              [localId]);
+              [localId ?? '']);
           realCount = (localCountResult.first['count'] as int?) ?? 0;
 
           // B. 如果本地计数为 0，说明还没同步过，触发一次“静默拉取”
@@ -207,7 +207,7 @@ class CalendarPageController extends GetxController {
                   await txn.insert('sync_map', {
                     'uid': uid,
                     'local_id': 'v_$uid', // 影子 ID，表示未洗白到系统
-                    'calendar_local_id': localId,
+                    'calendar_local_id': localId ?? remotePath ?? '',
                     'last_etag': item['etag'] ?? '',
                   }, conflictAlgorithm: ConflictAlgorithm.ignore);
                 }
@@ -219,12 +219,12 @@ class CalendarPageController extends GetxController {
               print("❌ 静默拉取失败: $e");
             }
           }
-        } else {
+        } else if (localId != null && localId.isNotEmpty) {
           // --- C. 普通本地系统日历统计 ---
           try {
             final now = DateTime.now();
             final eventsResult = await deviceCalendarPlugin.retrieveEvents(
-                localId,
+                localId ?? '',
                 RetrieveEventsParams(
                     startDate: now.subtract(const Duration(days: 365)),
                     endDate: now.add(const Duration(days: 365))

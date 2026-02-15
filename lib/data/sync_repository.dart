@@ -753,17 +753,37 @@ class SyncRepository {
   }) async {
     final db = await _dbHelper.database;
 
-    if ((localId == null || localId.isEmpty) && (remotePath == null || remotePath.isEmpty)) {
+    final String? sanitizedLocalId = (localId != null && localId.trim().isNotEmpty && localId.trim().toLowerCase() != 'null')
+        ? localId.trim()
+        : null;
+    final String? sanitizedRemotePath = (remotePath != null && remotePath.trim().isNotEmpty && remotePath.trim().toLowerCase() != 'null')
+        ? remotePath.trim()
+        : null;
+
+    if (sanitizedLocalId == null && sanitizedRemotePath == null) {
       throw Exception('缺少日历标识，无法改名');
     }
 
     // 1. 获取当前日历元数据（优先 local_id，兜底 remote_path）
-    final maps = await db.query(
-      'calendar_map',
-      where: (localId != null && localId.isNotEmpty) ? 'local_id = ?' : 'remote_path = ?',
-      whereArgs: [(localId != null && localId.isNotEmpty) ? localId : remotePath],
-      limit: 1,
-    );
+    List<Map<String, dynamic>> maps = [];
+    if (sanitizedLocalId != null) {
+      maps = await db.query(
+        'calendar_map',
+        where: 'local_id = ?',
+        whereArgs: [sanitizedLocalId],
+        limit: 1,
+      );
+    }
+
+    if (maps.isEmpty && sanitizedRemotePath != null) {
+      maps = await db.query(
+        'calendar_map',
+        where: 'remote_path = ?',
+        whereArgs: [sanitizedRemotePath],
+        limit: 1,
+      );
+    }
+
     if (maps.isEmpty) {
       throw Exception('未找到目标日历记录');
     }
