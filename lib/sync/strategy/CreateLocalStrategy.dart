@@ -39,7 +39,6 @@ class CreateLocalStrategy extends SyncStrategy {
     await db.update('calendar_map', {
       'local_id': newLocalId,
       'is_enabled': 1,
-      'is_provisioned': 0,
     }, where: 'remote_path = ?', whereArgs: [ctx.remotePath]);
 
     try {
@@ -120,11 +119,6 @@ class CreateLocalStrategy extends SyncStrategy {
           debugPrint("❌ 同步单条事件失败: $e");
         }
       }
-
-      // 10. 标记初始拉取完成
-      await db.update('calendar_map', {
-        'is_provisioned': 1
-      }, where: 'local_id = ?', whereArgs: [newLocalId]);
 
       print('✅ createLocal 完成: 已处理 $eventSuccessCount 个事件');
       summary.success++;

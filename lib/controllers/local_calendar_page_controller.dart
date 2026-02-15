@@ -160,7 +160,6 @@ class LocalCalendarPageController extends GetxController {
           'display_name': item.name,
           'color': item.color,
           'is_enabled': enabled ? 1 : 0,
-          'is_provisioned': 1,
           'origin': 0,
         });
       }

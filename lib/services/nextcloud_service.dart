@@ -154,9 +154,8 @@ class NextcloudService {
           account_name, 
           account_type, -- 新增字段
           origin, 
-          is_enabled, 
-          is_provisioned
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) -- 增加一个占位符
+          is_enabled
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) -- 增加一个占位符
         ON CONFLICT(remote_path) DO UPDATE SET
           display_name = excluded.display_name,
           last_ctag = excluded.last_ctag,
@@ -177,23 +176,20 @@ class NextcloudService {
               "NextCloud", // 对应 account_type，仅在首次插入时生效
               1, // origin = 1 (远端起源)
               0, // is_enabled
-              0 // is_provisioned
             ]);
       }
 
-      // 3. 【标记删除逻辑】
+      // 3. 删除云端已不存在的远端起源记录
       if (currentRemotePaths.isNotEmpty) {
         final placeholders = List.filled(currentRemotePaths.length, '?').join(',');
-        await txn.update(
+        await txn.delete(
           'calendar_map',
-          {'is_provisioned': 2}, // 标记为待删除
-          where: 'account_name = ? AND origin = 1 AND remote_path NOT IN ($placeholders) AND is_provisioned != 2',
+          where: 'account_name = ? AND origin = 1 AND remote_path NOT IN ($placeholders)',
           whereArgs: [accountName, ...currentRemotePaths],
         );
       } else {
-        await txn.update(
+        await txn.delete(
           'calendar_map',
-          {'is_provisioned': 2},
           where: 'account_name = ? AND origin = 1',
           whereArgs: [accountName],
         );

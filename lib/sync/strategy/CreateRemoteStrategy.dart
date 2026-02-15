@@ -14,9 +14,7 @@ class CreateRemoteStrategy extends SyncStrategy {
         password?.isEmpty == true) {
       return;
     }
-    final String safeId = ctx.calendarId.replaceAll('rc_', '');
-    // 建议对 ID 进行一次 URL 编码安全处理
-    final String targetPathId = "calee_${Uri.encodeComponent(safeId)}";
+    final String targetPathId = "calee_${DateTime.now().millisecondsSinceEpoch}";
 
     // 调用创建接口
     final resultPath = await nc.createRemoteCalendar(
@@ -91,7 +89,6 @@ class CreateRemoteStrategy extends SyncStrategy {
         'calendar_map',
         {
           'remote_path': resultPath, // 核心：存入刚开好的云端坑位路径
-          'is_provisioned': 1, // 激活：本地是母本，开坑即就绪
         },
         where: 'local_id = ?',
         whereArgs: [ctx.calendarId],

@@ -100,7 +100,7 @@ class SyncRepository {
     // 1. 获取所有当前已就绪的本地日历
     final List<Map<String, dynamic>> activeCalendars = await db.query(
       'calendar_map',
-      where: 'account_name = ? AND local_id IS NOT NULL AND is_provisioned = 1',
+      where: 'account_name = ? AND local_id IS NOT NULL',
       whereArgs: [accountId],
     );
 
@@ -677,7 +677,7 @@ class SyncRepository {
       }
 
       // --- Step B: 本地系统层删除 ---
-      if (resolvedLocalId.isNotEmpty && !resolvedLocalId.startsWith('rc_') && syncMode == 0) {
+      if (resolvedLocalId.isNotEmpty && syncMode == 0) {
         await _nativeApi.deleteCalendar(resolvedLocalId, accountName);
         debugPrint("✅ 手机系统日历已移除");
       }
@@ -779,9 +779,9 @@ class SyncRepository {
       }
 
       // 3. 修改手机系统日历 (Android/iOS 系统层)
-      // 仅当存在 local_id（且不是虚拟 rc_）时尝试系统改名
+      // 仅当存在 local_id 时尝试系统改名
       final String? resolvedLocalId = cal['local_id']?.toString();
-      if (resolvedLocalId != null && resolvedLocalId.isNotEmpty && !resolvedLocalId.startsWith('rc_')) {
+      if (resolvedLocalId != null && resolvedLocalId.isNotEmpty) {
         final bool localRenameOk = await _nativeApi.modifyCalendarTitle(
           resolvedLocalId,
           newName,
@@ -914,12 +914,10 @@ class SyncRepository {
       for (var i = 0; i < results.length; i++) {
         final item = results[i];
         final String currentLocalId = item['local_id'].toString();
-        final bool isVirtual = currentLocalId.startsWith('rc_');
-
         print("""
   📍 记录 [#$i]
      显示名称: ${item['display_name']}
-     本地 ID : $currentLocalId ${isVirtual ? "[未同步到系统]" : "[已同步到系统]"}
+     本地 ID : $currentLocalId
      事件数量: ${item['event_count']}
      同步状态: ${item['sync_status'] == 1 ? "✅ 开启" : "⚪ 关闭"}
      远程路径: ${item['remote_path']}
@@ -933,7 +931,7 @@ class SyncRepository {
     }
   }
 
-  Future<void> updateSystemCalendarId(String oldRcId, String newSystemId) async {
+  Future<void> updateSystemCalendarId(String oldLocalId, String newSystemId) async {
     final db = await DatabaseHelper.instance.database;
 
     // 使用事务确保两张表同步更新
@@ -943,7 +941,7 @@ class SyncRepository {
         'calendar_map',
         {'local_id': newSystemId},
         where: 'local_id = ?',
-        whereArgs: [oldRcId],
+        whereArgs: [oldLocalId],
       );
 
       // 2. 更新同步映射表（如果有外键关联，这一步非常重要）
@@ -952,11 +950,11 @@ class SyncRepository {
         'sync_map',
         {'local_id': newSystemId},
         where: 'local_id = ?',
-        whereArgs: [oldRcId],
+        whereArgs: [oldLocalId],
       );
     });
 
-    print("[DB] 日历 ID 已从 $oldRcId 成功洗白为 $newSystemId");
+    print("[DB] 日历 ID 已从 $oldLocalId 更新为 $newSystemId");
   }
 
   // ==========================================
