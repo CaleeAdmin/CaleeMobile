@@ -9,7 +9,6 @@ import '../controllers/calendar_probe_controller.dart';
 import '../services/nextcloud_auth_service.dart';
 import '../services/nextcloud_service.dart';
 import 'sync_status_details_page.dart';
-import '../feature/public_subscriptions_page.dart';
 
 class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
@@ -74,99 +73,6 @@ class _DashboardPageState extends State<DashboardPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Subscribed Calee Calendars card
-          Card(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Subscribed Calee Calendars', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 6),
-                  const Text('Public calendars you\'re subscribed to', style: TextStyle(color: Colors.black54)),
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: () {
-                        Get.to(() => const PublicSubscriptionsGetxPage());
-                      },
-                      icon: const Icon(Icons.add, size: 16),
-                      label: const Text('Subscribe to Calee Calendar'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF2563EB),
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      ),
-                    ),
-                  ),
-                    const SizedBox(height: 12),
-                    // Subscribed list (from probe controller)
-                    Obx(() {
-                      final list = Get.find<CalendarProbeController>().subscribedCalendars;
-                      if (list.isEmpty) return const SizedBox.shrink();
-                      return Column(
-                        children: list.map((m) {
-                          final title = (m['display_name'] ?? m['displayName'] ?? '').toString();
-                          final owner = (m['account_name'] ?? '').toString();
-                          final events = (m['event_count'] ?? m['eventCount'] ?? 0).toString();
-                          // final isActive = (m['sync_status'] == 1);
-                          Color iconColor = Colors.blue;
-                          try {
-                            final col = m['color'];
-                            if (col != null) {
-                              if (col is int) iconColor = Color(col);
-                              else if (col is String) {
-                                final t = col.replaceAll('#', '');
-                                final p = int.tryParse(t, radix: 16);
-                                if (p != null) iconColor = Color(0xFF000000 | p);
-                              }
-                            }
-                          } catch (_) {}
-
-                          return Container(
-                            margin: const EdgeInsets.only(bottom: 12),
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(10),
-                              border: Border.all(color: Colors.grey.shade200),
-                              color: Colors.white,
-                            ),
-                            child: ListTile(
-                              leading: Container(
-                                width: 44,
-                                height: 44,
-                                decoration: BoxDecoration(color: iconColor, borderRadius: BorderRadius.circular(8)),
-                                child: const Icon(Icons.calendar_today, color: Colors.white),
-                              ),
-                              title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
-                              subtitle: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const SizedBox(height: 4),
-                                  Text('By ${owner.isEmpty ? 'Calee Official' : owner} • $events events', style: const TextStyle(color: Colors.black54)),
-                                ],
-                              ),
-                              trailing: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                decoration: BoxDecoration(
-                                  color:  Colors.green.shade50,
-                                  borderRadius: BorderRadius.circular(20),
-                                ),
-                                child: Text('Active', style: TextStyle(color:   Colors.green  )),
-                              ),
-                            ),
-                          );
-                        }).toList(),
-                      );
-                    }),
-
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
           // Sync Overview card
           Obx(() {
             return Card(
