@@ -30,7 +30,7 @@ class SyncEngine {
     final db = await _dbHelper.database;
     final List<Map<String, dynamic>> localRecords = await db.query(
       'calendar_map',
-      where: 'account_name = ?',
+      where: 'account_name = ? AND remote_path IS NOT NULL AND remote_path != ""',
       whereArgs: [userId],
     );
 
@@ -119,6 +119,12 @@ class SyncEngine {
       final int isEnabled = local['is_enabled'] ?? 0;
       final int provisionStatus = local['is_provisioned'] ?? 0;
 
+      // calendar_map 已改为远端中心表：没有 remote_path 的记录不参与同步决策。
+      if (path == null || path.isEmpty) {
+        debugPrint('⏭️ 跳过无远端路径记录: ${local['local_id']}');
+        continue;
+      }
+
       // 1. 【核心修复】：优先处理状态码 2 (待删除)
       if (provisionStatus == 2) {
         final String? localId = local['local_id'];
@@ -150,15 +156,7 @@ class SyncEngine {
         continue;
       }
 
-      // 2. 处理本地新建尚未同步的情况 (没有路径)
-      if (path == null || path.isEmpty) {
-        if (isEnabled == 1 && provisionStatus == 0) {
-          contexts.add(_buildContext({}, local, SyncAction.createRemote));
-        }
-        continue;
-      }
-
-      // 3. 处理查漏补缺：如果数据库里是状态 1，但远端结果里突然搜不到了
+      // 2. 处理查漏补缺：如果数据库里是状态 1，但远端结果里突然搜不到了
       // 虽然 persistRemoteCalendars 应该已经把这种记录改成了状态 2，
       // 但作为双保险，这里可以保留一个简单的判定逻辑
       final bool remoteExists = remoteMap.containsKey(path);
@@ -320,7 +318,7 @@ class SyncEngine {
       final db = await DatabaseHelper.instance.database;
       final List<Map<String, dynamic>> localRecords = await db.query(
         'calendar_map',
-        where: 'account_name = ?',
+        where: 'account_name = ? AND remote_path IS NOT NULL AND remote_path != ""',
         whereArgs: [userId],
       );
 
@@ -380,36 +378,17 @@ class SyncEngine {
             whereArgs: [path],
           );
         } else {
-          final List<Map<String, dynamic>> orphans = await db.query(
-            'calendar_map',
-            where: 'display_name = ? AND account_name = ? AND remote_path IS NULL',
-            whereArgs: [displayName, userId],
-          );
-          if (orphans.isNotEmpty) {
-            final String orphanLocalId = orphans.first['local_id'];
-            print("♻️ [认领] 发现残留本地日历 $displayName ($orphanLocalId)，正在绑定路径...");
-            await db.update(
-              'calendar_map',
-              {
-                'remote_path': path,
-                'sync_status': 1, // 既然有 local_id 了，说明是已存在的系统日历，设为已洗白
-              },
-              where: 'local_id = ?',
-              whereArgs: [orphanLocalId],
-            );
-          } else {
-            // ✅ 场景 B: 全新云端日历 -> 插入新记录
-            print("🆕 [云端发现] 创建新映射: $displayName");
-            final String virtualId = 'rc_${DateTime.now().millisecondsSinceEpoch}_${path.hashCode % 1000}';
-            await db.insert('calendar_map', {
-              'local_id': virtualId,
-              'account_name': userId,
-              'account_type': 'com.nextcloud.caleesync',
-              'display_name': displayName,
-              'remote_path': path,
-              'is_provisioned': 0, // 初始状态，等待后续同步洗白
-            });
-          }
+          // ✅ 场景 B: 全新云端日历 -> 插入新记录
+          print("🆕 [云端发现] 创建新映射: $displayName");
+          final String virtualId = 'rc_${DateTime.now().millisecondsSinceEpoch}_${path.hashCode % 1000}';
+          await db.insert('calendar_map', {
+            'local_id': virtualId,
+            'account_name': userId,
+            'account_type': 'com.nextcloud.caleesync',
+            'display_name': displayName,
+            'remote_path': path,
+            'is_provisioned': 0, // 初始状态，等待后续同步洗白
+          });
         }
       }
 
