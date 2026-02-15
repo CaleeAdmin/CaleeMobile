@@ -176,7 +176,7 @@ class CalendarPageController extends GetxController {
 
       for (var cal in calendarMaps) {
         final String account = cal['account_type'] ?? 'Unknown';
-        final String localId = cal['local_id'].toString();
+        final String? localId = cal['local_id']?.toString();
         final String? remotePath = cal['remote_path'];
         final int? syncMode = cal['sync_mode'];
         final int origin = cal['origin'];
@@ -186,10 +186,12 @@ class CalendarPageController extends GetxController {
         // --- 🌟 核心修改：针对云端日历的实时计数 ---
         if (remotePath != null && remotePath.isNotEmpty) {
           // A. 先查本地数据库 sync_map
-          final localCountResult = await db.rawQuery(
-              'SELECT COUNT(*) as count FROM sync_map WHERE calendar_local_id = ?',
-              [localId]);
-          realCount = (localCountResult.first['count'] as int?) ?? 0;
+          if (localId != null && localId.isNotEmpty) {
+            final localCountResult = await db.rawQuery(
+                'SELECT COUNT(*) as count FROM sync_map WHERE calendar_local_id = ?',
+                [localId]);
+            realCount = (localCountResult.first['count'] as int?) ?? 0;
+          }
 
           // B. 如果本地计数为 0，说明还没同步过，触发一次“静默拉取”
           if (realCount == 0) {
@@ -223,14 +225,16 @@ class CalendarPageController extends GetxController {
           // --- C. 普通本地系统日历统计 ---
           try {
             final now = DateTime.now();
-            final eventsResult = await deviceCalendarPlugin.retrieveEvents(
-                localId,
-                RetrieveEventsParams(
-                    startDate: now.subtract(const Duration(days: 365)),
-                    endDate: now.add(const Duration(days: 365))
-                )
-            );
-            if (eventsResult.isSuccess) realCount = eventsResult.data?.length ?? 0;
+            if (localId != null && localId.isNotEmpty) {
+              final eventsResult = await deviceCalendarPlugin.retrieveEvents(
+                  localId,
+                  RetrieveEventsParams(
+                      startDate: now.subtract(const Duration(days: 365)),
+                      endDate: now.add(const Duration(days: 365))
+                  )
+              );
+              if (eventsResult.isSuccess) realCount = eventsResult.data?.length ?? 0;
+            }
           } catch (_) {}
         }
 
