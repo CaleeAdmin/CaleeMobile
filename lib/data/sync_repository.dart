@@ -746,18 +746,56 @@ class SyncRepository {
     }
   }
 
-  Future<void> renameCalendar(String localId, String newName) async {
+  Future<void> renameCalendar({
+    String? localId,
+    String? remotePath,
+    required String newName,
+  }) async {
     final db = await _dbHelper.database;
 
-    // 1. 获取当前日历元数据
-    final maps = await db.query('calendar_map', where: 'local_id = ?', whereArgs: [localId]);
-    if (maps.isEmpty) return;
+    final String? sanitizedLocalId = (localId != null && localId.trim().isNotEmpty && localId.trim().toLowerCase() != 'null')
+        ? localId.trim()
+        : null;
+    final String? sanitizedRemotePath = (remotePath != null && remotePath.trim().isNotEmpty && remotePath.trim().toLowerCase() != 'null')
+        ? remotePath.trim()
+        : null;
+
+    if (sanitizedLocalId == null && sanitizedRemotePath == null) {
+      throw Exception('缺少日历标识，无法改名');
+    }
+
+    // 1. 获取当前日历元数据（优先 local_id，兜底 remote_path）
+    List<Map<String, dynamic>> maps = [];
+    if (sanitizedLocalId != null) {
+      maps = await db.query(
+        'calendar_map',
+        where: 'local_id = ?',
+        whereArgs: [sanitizedLocalId],
+        limit: 1,
+      );
+    }
+
+    if (maps.isEmpty && sanitizedRemotePath != null) {
+      maps = await db.query(
+        'calendar_map',
+        where: 'remote_path = ?',
+        whereArgs: [sanitizedRemotePath],
+        limit: 1,
+      );
+    }
+
+    if (maps.isEmpty) {
+      throw Exception('未找到目标日历记录');
+    }
     final cal = maps.first;
 // 如果字段可能为空，用 String?
     final String? path = cal['remote_path'] as String?;
 
 // 如果你确定 account_name 绝对有值，用 String
     final String userId = cal['account_name'] as String;
+    final String accountType = (cal['account_type'] as String?)?.trim().isNotEmpty == true
+        ? (cal['account_type'] as String)
+        : 'com.nextcloud.caleesync';
 
     try {
       // 2. 先改云端 (如果失败，建议直接抛异常，不改本地)
@@ -770,27 +808,43 @@ class SyncRepository {
         if (!isCloudOk) throw Exception("云端改名失败");
       }
 
-      // 3. 修改手机系统日历 (Android 系统层)
-      // 这一步确保在手机自带日历 App 里看到的也是新名字
-      await _nativeApi.modifyCalendarTitle(
-          localId,
+      // 3. 修改手机系统日历 (Android/iOS 系统层)
+      // 仅当存在 local_id（且不是虚拟 rc_）时尝试系统改名
+      final String? resolvedLocalId = cal['local_id']?.toString();
+      if (resolvedLocalId != null && resolvedLocalId.isNotEmpty && !resolvedLocalId.startsWith('rc_')) {
+        final bool localRenameOk = await _nativeApi.modifyCalendarTitle(
+          resolvedLocalId,
           newName,
           userId,
-          "NextCloud"
-      );
+          accountType == 'NextCloud' ? 'com.nextcloud.caleesync' : accountType,
+        );
+        if (!localRenameOk) {
+          throw Exception('系统日历改名失败');
+        }
+      }
 
       // 4. 修改本地数据库记录
-      await db.update(
-        'calendar_map',
-        {'display_name': newName},
-        where: 'local_id = ?',
-        whereArgs: [localId],
-      );
+      if (resolvedLocalId != null && resolvedLocalId.isNotEmpty) {
+        await db.update(
+          'calendar_map',
+          {'display_name': newName},
+          where: 'local_id = ?',
+          whereArgs: [resolvedLocalId],
+        );
+      } else {
+        await db.update(
+          'calendar_map',
+          {'display_name': newName},
+          where: 'remote_path = ?',
+          whereArgs: [path],
+        );
+      }
 
-      print("✅ 日历 $localId 已在三端同步更名为: $newName");
+      print("✅ 日历 ${resolvedLocalId ?? path} 已在三端同步更名为: $newName");
 
     } catch (e) {
       print("❌ 改名流程中断: $e");
+      rethrow;
     }
   }
 

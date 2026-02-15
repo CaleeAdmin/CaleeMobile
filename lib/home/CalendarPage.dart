@@ -197,7 +197,7 @@ extension on _CalendarRow {
                       final newName = _nameCtrl.text.trim();
                       if (newName.isEmpty) return;
                       try {
-                        await Get.find<CalendarPageController>().renameCalendar(item.localId, newName);
+                        await Get.find<CalendarPageController>().renameCalendar(item.localId, item.remotePath, newName);
                         Navigator.of(context).pop(true);
                       } catch (e) {
                         Navigator.of(context).pop(false);
