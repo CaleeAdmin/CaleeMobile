@@ -207,6 +207,13 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
     }
 
     override fun deleteCalendar(calendarId: String, accountName: String, callback: (Result<Boolean>) -> Unit) {
+        val idLong = calendarId.toLongOrNull()
+        if (idLong == null) {
+            // 如果不是纯数字，说明不是系统合法的日历 ID
+            Log.e("CalendarSync", "Invalid ID received: $calendarId")
+            callback(Result.success(false)) // 优雅返回而非崩溃
+            return
+        }
         // 建议在子线程执行
         Thread {
             try {
@@ -392,6 +399,49 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
 
         } catch (e: Exception) {
             Log.e("CalendarSync", "❌ 插入事件异常: ${e.message}")
+            callback(Result.failure(e))
+        }
+    }
+
+    override fun createOrUpdateEvent(
+        request: CalendarEventRequest,
+        callback: (Result<String?>) -> Unit
+    ) {
+        try {
+            val contentResolver = context.contentResolver
+            val values = ContentValues().apply {
+                put(CalendarContract.Events.DTSTART, request.start)
+                put(CalendarContract.Events.DTEND, request.end)
+                put(CalendarContract.Events.TITLE, request.title)
+                put(CalendarContract.Events.DESCRIPTION, request.notes)
+                put(CalendarContract.Events.CALENDAR_ID, request.calendarId.toLong())
+                put(CalendarContract.Events.EVENT_TIMEZONE, TimeZone.getDefault().id)
+                // 存入 UID 以便原生层也可以通过 UID 检索
+                put(CalendarContract.Events.UID_2445, request.uid)
+            }
+
+            if (request.eventId != null && request.eventId.isNotEmpty()) {
+                // --- 执行更新 UPDATE ---
+                val updateUri = ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, request.eventId.toLong())
+                val rows = contentResolver.update(updateUri, values, null, null)
+
+                if (rows > 0) {
+                    callback(Result.success(request.eventId))
+                } else {
+                    // 如果传入了 ID 但没找到记录，转为插入或返回失败
+                    callback(Result.failure(Exception("Event with ID ${request.eventId} not found for update")))
+                }
+            } else {
+                // --- 执行插入 INSERT ---
+                val uri = contentResolver.insert(CalendarContract.Events.CONTENT_URI, values)
+                if (uri != null) {
+                    val newId = uri.lastPathSegment
+                    callback(Result.success(newId))
+                } else {
+                    callback(Result.failure(Exception("Failed to insert calendar event")))
+                }
+            }
+        } catch (e: Exception) {
             callback(Result.failure(e))
         }
     }

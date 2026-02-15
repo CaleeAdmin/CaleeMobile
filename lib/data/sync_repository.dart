@@ -121,8 +121,8 @@ class SyncRepository {
       ''', [
           cal.id, accountId, cal.accountType, cal.name, cal.color,
           cal.isReadOnly == true ? 1 : 0,
-          1, // is_enabled: 本地日历扫描到默认开启
-          1, // is_provisioned: 本地扫到的已经是实物，设为就绪
+          0, // is_enabled: 本地日历扫描到默认开启
+          0, // is_provisioned: 本地扫到的已经是实物，设为就绪
           0 // origin: 本地起源
         ]);
       }
@@ -147,6 +147,97 @@ class SyncRepository {
         );
       }
     });
+  }
+
+  Future<void> refreshAllLocalEvents(String accountId) async {
+    final db = await _dbHelper.database;
+
+    // 1. 获取所有当前已就绪的本地日历
+    final List<Map<String, dynamic>> activeCalendars = await db.query(
+      'calendar_map',
+      where: 'account_name = ? AND local_id IS NOT NULL AND is_provisioned = 1',
+      whereArgs: [accountId],
+    );
+
+    for (var cal in activeCalendars) {
+      final String localCalId = cal['local_id'].toString();
+
+      // 2. 拍一张系统日历的“物理快照”
+      final start = DateTime.now().subtract(const Duration(days: 365)).millisecondsSinceEpoch;
+      final end = DateTime.now().add(const Duration(days: 730)).millisecondsSinceEpoch;
+      final List<PlatformItem?> items = await _nativeApi.getEvents(localCalId, start, end);
+
+      // 转换为 Map: { local_id : PlatformItem }
+      final Map<String, PlatformItem> systemSnap = {
+        for (var e in items.whereType<PlatformItem>()) e.localId.toString(): e
+      };
+
+      // 3. 获取该日历在数据库里的“旧记录”
+      final List<Map<String, dynamic>> dbRecords = await db.query(
+        'sync_map',
+        where: 'calendar_local_id = ?',
+        whereArgs: [localCalId],
+      );
+      final Map<String, Map<String, dynamic>> dbMap = {
+        for (var r in dbRecords) r['local_id'].toString(): r
+      };
+
+      await db.transaction((txn) async {
+        // --- 环节一：处理【修改】和【漏网之鱼】 ---
+        for (var entry in systemSnap.entries) {
+          final String sid = entry.key;
+          final PlatformItem systemEvent = entry.value;
+          final record = dbMap[sid];
+
+          if (record == null) {
+            // 💡 情况 A：系统有，数据库没。这就是你说的【新增事件b】
+            debugPrint("🆕 发现本地物理新增: ${systemEvent.title}");
+            await txn.insert('sync_map', {
+              'uid': systemEvent.uid ?? 'local_${DateTime.now().microsecondsSinceEpoch}',
+              'local_id': sid,
+              'calendar_local_id': localCalId,
+              'summary': systemEvent.title,
+              'last_mtime': systemEvent.lastModified,
+              'sync_status': 1, // 标记为 Dirty，待 Push
+              'item_type': 'event'
+            });
+          } else {
+            // 💡 情况 B：数据库有。对比修改时间戳，这就是你说的【修改名称】
+            final int systemMtime = systemEvent.lastModified ?? 0;
+            final int dbMtime = record['last_mtime'] ?? 0;
+
+            if (systemMtime > dbMtime) {
+              debugPrint("📝 发现本地物理修改: ${systemEvent.title}");
+              await txn.update(
+                'sync_map',
+                {
+                  'summary': systemEvent.title,
+                  'last_mtime': systemMtime,
+                  'sync_status': 1, // 标记为 Dirty，待 Push
+                },
+                where: 'local_id = ?',
+                whereArgs: [sid],
+              );
+            }
+          }
+        }
+
+        // --- 环节二：处理【删除】 ---
+        for (var record in dbRecords) {
+          final String mappedId = record['local_id'].toString();
+          if (!systemSnap.containsKey(mappedId)) {
+            // 💡 情况 C：数据库有，系统没了。说明用户在系统日历删了。
+            debugPrint("🗑️ 发现本地物理删除: ${record['summary']}");
+            await txn.update(
+              'sync_map',
+              {'sync_status': 2}, // 标记为 Deleted，待通知云端
+              where: 'local_id = ?',
+              whereArgs: [mappedId],
+            );
+          }
+        }
+      });
+    }
   }
 
   // ==========================================
@@ -259,8 +350,9 @@ class SyncRepository {
     print("📡 准备从分组 [${calConfig['account_name']}] 拉取路径: $remotePath");
 
     // 2. 获取云端所有事件
-    final remoteEvents = await NextcloudService().fetchRemoteEvents(
+    final remoteEvents = await NextcloudService().fetchUnifiedEvents(
       calendarPath: remotePath,
+      isSubscription: false
     );
 
     // --- 【删除逻辑】对比云端与本地 UID 集合 ---
@@ -609,13 +701,14 @@ class SyncRepository {
     final cal = maps.first;
     final String accountName = cal['account_name'] ?? '';
     final String? remotePath = cal['remote_path'];
+    final int? syncMode = cal['sync_mode'];
 
     debugPrint("🚀 启动彻底删除流程: ID $localId, Path: $remotePath");
 
     try {
       // --- Step A: 云端删除 ---
       // 逻辑：只有当它是 Nextcloud 类型且有路径时才调接口
-      if (remotePath != null && remotePath.isNotEmpty) {
+      if (remotePath != null && remotePath.isNotEmpty && syncMode == 0) {
           bool cloudOk = await NextcloudService().deleteRemoteCalendar(
               userId: userId,
               calendarPath: remotePath
@@ -624,7 +717,7 @@ class SyncRepository {
       }
 
       // --- Step B: 本地系统层删除 (你反馈这步已成功) ---
-      if (!localId.startsWith('rc_')) {
+      if (!localId.startsWith('rc_') && syncMode == 0) {
         await _nativeApi.deleteCalendar(localId, accountName);
         debugPrint("✅ 手机系统日历已移除");
       }

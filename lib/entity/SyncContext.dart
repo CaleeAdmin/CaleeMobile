@@ -1,5 +1,5 @@
 // 定义同步任务的配置上下文
-import '../common/enums/SyncEnum.dart';
+import '../sync/SyncEnum.dart';
 
 class SyncContext {
   final String calendarId;    // 本地数据库中的 ID (可能是 "rc_..." 或数字 "6")
@@ -13,6 +13,7 @@ class SyncContext {
 // 💡 新增执行指令
   final SyncAction action;
   final String? ctag;               // 增量同步版本号
+  final bool? isSubscription;
   final Map<String, dynamic> extra; // 存放描述、报错信息等
 
   SyncContext({
@@ -26,6 +27,7 @@ class SyncContext {
     this.syncStatus = 0,       // 默认为 0
     required this.action, // 必须指定要做什么
     this.ctag,
+    this.isSubscription,
     this.extra = const {},
   });
 
@@ -41,6 +43,7 @@ class SyncContext {
     int? syncStatus,
     SyncAction? action,
     String? ctag,
+    bool? isSubscription,
     Map<String, dynamic>? extra
   }) {
     return SyncContext(
@@ -54,7 +57,15 @@ class SyncContext {
       syncStatus: syncStatus ?? this.syncStatus,
       action: action ?? this.action,
       ctag: ctag ?? this.ctag,
+      isSubscription: isSubscription ?? this.isSubscription,
       extra: extra ?? this.extra,
     );
   }
+
+  @override
+  String toString() {
+    return 'SyncContext{calendarId: $calendarId, remotePath: $remotePath, accountName: $accountName, accountType: $accountType, displayName: $displayName, color: $color, syncStatus: $syncStatus, syncMode: $syncMode, action: $action, ctag: $ctag, isSubscription: $isSubscription, extra: $extra}';
+  }
+
+
 }

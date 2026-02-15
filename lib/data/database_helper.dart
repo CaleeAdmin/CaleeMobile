@@ -65,7 +65,7 @@ class DatabaseHelper {
         last_mtime INTEGER,             -- 系统日历的最后修改时间
         item_type TEXT DEFAULT 'event', -- event / task
         remote_href TEXT,
-        sync_status INTEGER DEFAULT 0   -- 0:Synced, 1:Dirty, 2:Deleted, 3:Pending
+        sync_status INTEGER DEFAULT 3   -- 0:Synced, 1:Dirty, 2:Deleted, 3:Pending
     );
 ''');
 

@@ -1,5 +1,5 @@
 import 'package:get/get.dart';
-import '../data/SyncEngine.dart';
+import '../sync/SyncEngine.dart';
 import '../entity/SyncSummary.dart';
 import 'CalendarPageController.dart';
 import '../data/sync_repository.dart';

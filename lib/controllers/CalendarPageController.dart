@@ -6,7 +6,8 @@ import 'package:get/get.dart';
 import 'package:sqflite/sqflite.dart';
 import 'dart:ui';
 
-import '../data/SyncEngine.dart';
+import '../services/nextcloud_auth_service.dart';
+import '../sync/SyncEngine.dart';
 import '../data/database_helper.dart';
 import '../data/sync_repository.dart';
 import '../services/nextcloud_service.dart';
@@ -70,6 +71,7 @@ class CalendarPageController extends GetxController {
   final SyncRepository _repo = Get.find<SyncRepository>();
   final NextcloudService _nc = NextcloudService();
   final engine = SyncEngine();
+  final NextcloudAuthService _authService = NextcloudAuthService(serverBaseUrl: AppConstant.nextcloudServer);
 
   // 响应式变量
   var calendarGroups = <CalendarGroup>[].obs;
@@ -154,13 +156,16 @@ class CalendarPageController extends GetxController {
       final String? loginName = MMKVUtils.instance.getString(AppConstant.loginName);
       if (loginName == null) return;
 
-      final db = await DatabaseHelper.instance.database;
+      // 1. 扫描本地系统日历
+      await _repo.scanLocalCalendars(loginName);
 
-      // 1. 🌟 双向扫描：确保云端新日历和本地新日历都能进入 calendar_map
-      // await _repo.scanLocalCalendars(loginName);
-      // await engine.discoverRemoteCalendars(loginName);
+      // 2. 发现云端新日历
+       await _nc.scanRemoteCalendars(
+          serverUrl: _authService.normalizedUrl,
+          userId: loginName);
 
       // 2. 获取所有日历记录
+      final db = await DatabaseHelper.instance.database;
       final List<Map<String, dynamic>> calendarMaps = await db.query(
         'calendar_map',
         where: 'account_name = ?',
@@ -191,7 +196,7 @@ class CalendarPageController extends GetxController {
             print("🌐 [静默拉取] 正在为日历 ${cal['display_name']} 获取云端事件数...");
             try {
               // 仅拉取快照，不涉及复杂的系统日历写入，速度非常快
-              final remoteItems = await _nc.fetchRemoteEvents(calendarPath: remotePath);
+              final remoteItems = await _nc.fetchUnifiedEvents(calendarPath: remotePath,isSubscription: false);
 
               // 将云端 UID 存入 sync_map（ local_id 设为 v_ 前缀的影子 ID）
               // 这一步是让 Dashboard 统计生效的关键
@@ -204,7 +209,6 @@ class CalendarPageController extends GetxController {
                     'local_id': 'v_$uid', // 影子 ID，表示未洗白到系统
                     'calendar_local_id': localId,
                     'last_etag': item['etag'] ?? '',
-                    'is_enabled': 0,
                   }, conflictAlgorithm: ConflictAlgorithm.ignore);
                 }
               });
