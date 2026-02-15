@@ -1,10 +1,8 @@
 import 'package:caleesync/common/app_constant.dart';
 import 'package:caleesync/common/utils/mmkv_utils.dart';
-import 'package:device_calendar/device_calendar.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:get/get.dart';
-import 'package:sqflite/sqflite.dart';
-import 'dart:ui';
+import 'dart:async';
 
 import '../services/nextcloud_auth_service.dart';
 import '../sync/SyncEngine.dart';
@@ -78,6 +76,7 @@ class CalendarPageController extends GetxController {
   var isLoading = false.obs;
   /// 选中的日历 ID 集合（用于 UI 绑定）
   var selectedCalendarIds = <String>{}.obs;
+  Future<void>? _refreshFuture;
 
   @override
   void onInit() {
@@ -150,7 +149,20 @@ class CalendarPageController extends GetxController {
   }
 
   /// 核心方法：刷新并重新构建 UI 模型
-  Future<void> refreshDashboard() async {
+  Future<void> refreshDashboard({bool includeEventCounts = true}) async {
+    if (_refreshFuture != null) {
+      return _refreshFuture!;
+    }
+
+    _refreshFuture = _refreshDashboardImpl(includeEventCounts: includeEventCounts);
+    try {
+      await _refreshFuture;
+    } finally {
+      _refreshFuture = null;
+    }
+  }
+
+  Future<void> _refreshDashboardImpl({required bool includeEventCounts}) async {
     try {
       isLoading.value = true;
       final String? loginName = MMKVUtils.instance.getString(AppConstant.loginName);
@@ -171,7 +183,18 @@ class CalendarPageController extends GetxController {
         where: 'account_name = ?',
         whereArgs: [loginName],
       );
-      final deviceCalendarPlugin = DeviceCalendarPlugin();
+      final Map<String, int> cachedCountByCalendarId = {};
+      if (includeEventCounts) {
+        final countRows = await db.rawQuery(
+          'SELECT calendar_local_id, COUNT(*) AS count FROM sync_map GROUP BY calendar_local_id',
+        );
+        for (final row in countRows) {
+          final String key = (row['calendar_local_id'] ?? '').toString();
+          if (key.isEmpty) continue;
+          cachedCountByCalendarId[key] = (row['count'] as int?) ?? 0;
+        }
+      }
+
       Map<String, List<CalendarDisplayItem>> tempMap = {};
 
       for (var cal in calendarMaps) {
@@ -182,56 +205,11 @@ class CalendarPageController extends GetxController {
         final int origin = cal['origin'];
 
         int realCount = 0;
-
-        // --- 🌟 核心修改：针对云端日历的实时计数 ---
-        if (remotePath != null && remotePath.isNotEmpty) {
-          // A. 先查本地数据库 sync_map
-          final localCountResult = await db.rawQuery(
-              'SELECT COUNT(*) as count FROM sync_map WHERE calendar_local_id = ?',
-              [localId ?? '']);
-          realCount = (localCountResult.first['count'] as int?) ?? 0;
-
-          // B. 如果本地计数为 0，说明还没同步过，触发一次“静默拉取”
-          if (realCount == 0) {
-            print("🌐 [静默拉取] 正在为日历 ${cal['display_name']} 获取云端事件数...");
-            try {
-              // 仅拉取快照，不涉及复杂的系统日历写入，速度非常快
-              final remoteItems = await _nc.fetchUnifiedEvents(calendarPath: remotePath,isSubscription: false);
-
-              // 将云端 UID 存入 sync_map（ local_id 设为 v_ 前缀的影子 ID）
-              // 这一步是让 Dashboard 统计生效的关键
-              await db.transaction((txn) async {
-                for (var item in remoteItems) {
-                  String uid = item['uid'] ?? item['href'].split('/').last;
-                  // 使用 insert ignore 或 replace 防止重复
-                  await txn.insert('sync_map', {
-                    'uid': uid,
-                    'local_id': 'v_$uid', // 影子 ID，表示未洗白到系统
-                    'calendar_local_id': localId ?? remotePath ?? '',
-                    'last_etag': item['etag'] ?? '',
-                  }, conflictAlgorithm: ConflictAlgorithm.ignore);
-                }
-              });
-
-              // 重新计算数量
-              realCount = remoteItems.length;
-            } catch (e) {
-              print("❌ 静默拉取失败: $e");
-            }
-          }
-        } else if (localId != null && localId.isNotEmpty) {
-          // --- C. 普通本地系统日历统计 ---
-          try {
-            final now = DateTime.now();
-            final eventsResult = await deviceCalendarPlugin.retrieveEvents(
-                localId ?? '',
-                RetrieveEventsParams(
-                    startDate: now.subtract(const Duration(days: 365)),
-                    endDate: now.add(const Duration(days: 365))
-                )
-            );
-            if (eventsResult.isSuccess) realCount = eventsResult.data?.length ?? 0;
-          } catch (_) {}
+        if (includeEventCounts) {
+          final String countKey = (localId != null && localId.isNotEmpty)
+              ? localId
+              : (remotePath ?? '');
+          realCount = cachedCountByCalendarId[countKey] ?? 0;
         }
 
         // 组装 UI 模型
@@ -283,7 +261,8 @@ class CalendarPageController extends GetxController {
 
       isLoading.value = true;
       await _repo.performAbsoluteDelete(localId: resolvedLocalId, remotePath: resolvedRemotePath);
-      await refreshDashboard();
+      await refreshDashboard(includeEventCounts: false);
+      unawaited(refreshDashboard());
     } catch (e) {
       print('❌ Dashboard 删除日历失败: $e');
       Get.snackbar('错误', '删除日历失败');
@@ -298,7 +277,8 @@ class CalendarPageController extends GetxController {
       if ((localId == null || localId.isEmpty) && (remotePath == null || remotePath.isEmpty)) return;
       isLoading.value = true;
       await _repo.renameCalendar(localId: localId, remotePath: remotePath, newName: newName);
-      await refreshDashboard();
+      await refreshDashboard(includeEventCounts: false);
+      unawaited(refreshDashboard());
     } catch (e) {
       print('❌ Dashboard 重命名失败: $e');
       Get.snackbar('错误', '重命名失败');
@@ -320,7 +300,8 @@ class CalendarPageController extends GetxController {
       isLoading.value = true;
       final ok = await _repo.createNewLocalCalendar(displayName.trim());
       if (ok) {
-        await refreshDashboard();
+        await refreshDashboard(includeEventCounts: false);
+        unawaited(refreshDashboard());
         return true;
       } else {
         Get.snackbar('错误', '创建日历失败');
@@ -347,7 +328,8 @@ class CalendarPageController extends GetxController {
       isLoading.value = true;
       final ok = await _repo.handlePublicSubscription(icsUrl.trim());
       if (ok) {
-        await refreshDashboard();
+        await refreshDashboard(includeEventCounts: false);
+        unawaited(refreshDashboard());
         // 刷新已订阅列表（如果 probe controller 已注册）
         if (Get.isRegistered<CalendarProbeController>()) {
           await Get.find<CalendarProbeController>().fetchSubscribedCalendars();
