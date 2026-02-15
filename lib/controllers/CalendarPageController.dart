@@ -173,12 +173,10 @@ class CalendarPageController extends GetxController {
           serverUrl: _authService.normalizedUrl,
           userId: loginName);
 
-      // 2. 仅展示 NextCloud 账号下与远端一致的日历列表
+      // 2. 查询本地 calendar_map 的所有日历记录
       final db = await DatabaseHelper.instance.database;
       final List<Map<String, dynamic>> calendarMaps = await db.query(
         'calendar_map',
-        where: 'account_name = ? AND account_type = ? AND origin = 1 AND is_provisioned != 2',
-        whereArgs: [loginName, 'NextCloud'],
       );
       final Map<String, int> cachedCountByCalendarId = {};
       final List<CalendarDisplayItem> nextCloudCalendars = [];
