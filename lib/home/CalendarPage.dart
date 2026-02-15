@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:caleesync/common/widget/calendar_options_dialog.dart';
+import 'package:caleesync/feature/public_subscriptions_page.dart';
 
 import '../controllers/CalendarPageController.dart';
 import '../data/database_helper.dart';
@@ -450,6 +451,23 @@ class _AccountCard extends StatelessWidget {
                   ),
                 ),
               ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: () {
+                    Get.to(() => const PublicSubscriptionsGetxPage());
+                  },
+                  icon: const Icon(Icons.add, size: 16),
+                  label: const Text('Subscribe to Calee Calendar'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF2563EB),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                ),
+              ),
             ],
             const SizedBox(height: 12),
             Column(
@@ -553,4 +571,3 @@ class _CalendarRow extends StatelessWidget {
     );
   }
 }
-
