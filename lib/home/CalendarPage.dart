@@ -316,8 +316,7 @@ class _AccountCard extends StatelessWidget {
                                     child: const Text('Confirm', style: TextStyle(color: Colors.white)),
                                     onPressed: () async {
                                       final nm = _newCalCtrl.text.trim();
-                                      if (nm.isEmpty) return;
-                                      // 调用 controller 的方法创建新日历
+                                      // 调用 controller 的方法创建新日历（含输入校验）
                                       final ok = await Get.find<CalendarPageController>().createNewLocalCalendar(nm);
                                       if (ok) {
                                         Navigator.of(context).pop(true);
@@ -412,8 +411,7 @@ class _AccountCard extends StatelessWidget {
                                     child: const Text('Confirm', style: TextStyle(color: Colors.white)),
                                     onPressed: () async {
                                       final url = _urlCtrl.text.trim();
-                                      if (url.isEmpty) return;
-                                      // 调用 controller 的订阅方法
+                                      // 调用 controller 的订阅方法（含输入校验）
                                       final ok = await Get.find<CalendarPageController>().subscribePublicIcs(url);
                                       if (ok) {
                                         Navigator.of(context).pop(true);
