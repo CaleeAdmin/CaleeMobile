@@ -277,7 +277,7 @@ class CalendarPageController extends GetxController {
   /// 彻底删除一个日历（包含云端、系统日历与本地 DB 清理）
   Future<void> deleteCalendarTotally(String? localId) async {
     try {
-      if(localId == null) return;
+      if (localId == null || localId.isEmpty) return;
       isLoading.value = true;
       await _repo.performAbsoluteDelete(localId);
       await refreshDashboard();
@@ -290,11 +290,11 @@ class CalendarPageController extends GetxController {
   }
 
   /// 重命名日历（委托给仓库并刷新）
-  Future<void> renameCalendar(String? localId, String newName) async {
+  Future<void> renameCalendar(String? localId, String? remotePath, String newName) async {
     try {
-      if(localId == null) return;
+      if ((localId == null || localId.isEmpty) && (remotePath == null || remotePath.isEmpty)) return;
       isLoading.value = true;
-      await _repo.renameCalendar(localId, newName);
+      await _repo.renameCalendar(localId: localId, remotePath: remotePath, newName: newName);
       await refreshDashboard();
     } catch (e) {
       print('❌ Dashboard 重命名失败: $e');
