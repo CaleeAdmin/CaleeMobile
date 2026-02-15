@@ -180,8 +180,8 @@ class CalendarPageController extends GetxController {
       final db = await DatabaseHelper.instance.database;
       final List<Map<String, dynamic>> calendarMaps = await db.query(
         'calendar_map',
-        where: 'account_name = ?',
-        whereArgs: [loginName],
+        where: 'account_name = ? AND account_type = ? AND origin = 1 AND is_provisioned != 2',
+        whereArgs: [loginName, 'NextCloud'],
       );
       final Map<String, int> cachedCountByCalendarId = {};
       if (includeEventCounts) {
@@ -195,10 +195,9 @@ class CalendarPageController extends GetxController {
         }
       }
 
-      Map<String, List<CalendarDisplayItem>> tempMap = {};
+      final List<CalendarDisplayItem> nextCloudCalendars = [];
 
       for (var cal in calendarMaps) {
-        final String account = cal['account_type'] ?? 'Unknown';
         final String? localId = cal['local_id']?.toString();
         final String? remotePath = cal['remote_path'];
         final int? syncMode = cal['sync_mode'];
@@ -224,18 +223,13 @@ class CalendarPageController extends GetxController {
           origin: origin,
         );
 
-        tempMap.putIfAbsent(account, () => []).add(displayItem);
+        nextCloudCalendars.add(displayItem);
       }
 
-      // 排序并更新 UI
-      final entries = tempMap.entries.toList();
-      entries.sort((a, b) {
-        final la = a.key.toLowerCase();
-        if (la == 'nextcloud') return -1;
-        return 1;
-      });
-
-      calendarGroups.assignAll(entries.map((e) => CalendarGroup(accountName: e.key, calendars: e.value)).toList());
+      nextCloudCalendars.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+      calendarGroups.assignAll([
+        CalendarGroup(accountName: 'NextCloud', calendars: nextCloudCalendars),
+      ]);
 
     } catch (e) {
       print("❌ Dashboard 刷新异常: $e");
