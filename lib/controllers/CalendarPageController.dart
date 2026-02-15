@@ -275,11 +275,14 @@ class CalendarPageController extends GetxController {
   }
 
   /// 彻底删除一个日历（包含云端、系统日历与本地 DB 清理）
-  Future<void> deleteCalendarTotally(String? localId) async {
+  Future<void> deleteCalendarTotally({String? localId, String? remotePath}) async {
     try {
-      if (localId == null || localId.isEmpty) return;
+      final String? resolvedLocalId = (localId != null && localId.isNotEmpty) ? localId : null;
+      final String? resolvedRemotePath = (remotePath != null && remotePath.isNotEmpty) ? remotePath : null;
+      if (resolvedLocalId == null && resolvedRemotePath == null) return;
+
       isLoading.value = true;
-      await _repo.performAbsoluteDelete(localId);
+      await _repo.performAbsoluteDelete(localId: resolvedLocalId, remotePath: resolvedRemotePath);
       await refreshDashboard();
     } catch (e) {
       print('❌ Dashboard 删除日历失败: $e');
