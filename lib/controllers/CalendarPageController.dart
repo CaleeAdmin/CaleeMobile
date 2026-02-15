@@ -265,6 +265,16 @@ class CalendarPageController extends GetxController {
       isLoading.value = false;
     }
   }
+  Future<void> _syncAndRefreshCalendars() async {
+    if (Get.isRegistered<CalendarProbeController>()) {
+      await Get.find<CalendarProbeController>().syncNow();
+      await Get.find<CalendarProbeController>().fetchSubscribedCalendars();
+      return;
+    }
+
+    await refreshDashboard();
+  }
+
   /// 供外部调用的同步接口
   Future<void> syncAll() async {
     // 1. 执行全量同步服务 (处理合并、上传、下载、删除 status 2)
@@ -280,7 +290,7 @@ class CalendarPageController extends GetxController {
       if(localId == null) return;
       isLoading.value = true;
       await _repo.performAbsoluteDelete(localId);
-      await refreshDashboard();
+      await _syncAndRefreshCalendars();
     } catch (e) {
       print('❌ Dashboard 删除日历失败: $e');
       Get.snackbar('错误', '删除日历失败');
@@ -295,7 +305,7 @@ class CalendarPageController extends GetxController {
       if(localId == null) return;
       isLoading.value = true;
       await _repo.renameCalendar(localId, newName);
-      await refreshDashboard();
+      await _syncAndRefreshCalendars();
     } catch (e) {
       print('❌ Dashboard 重命名失败: $e');
       Get.snackbar('错误', '重命名失败');
@@ -317,7 +327,7 @@ class CalendarPageController extends GetxController {
       isLoading.value = true;
       final ok = await _repo.createNewLocalCalendar(displayName.trim());
       if (ok) {
-        await refreshDashboard();
+        await _syncAndRefreshCalendars();
         return true;
       } else {
         Get.snackbar('错误', '创建日历失败');
@@ -344,11 +354,7 @@ class CalendarPageController extends GetxController {
       isLoading.value = true;
       final ok = await _repo.handlePublicSubscription(icsUrl.trim());
       if (ok) {
-        await refreshDashboard();
-        // 刷新已订阅列表（如果 probe controller 已注册）
-        if (Get.isRegistered<CalendarProbeController>()) {
-          await Get.find<CalendarProbeController>().fetchSubscribedCalendars();
-        }
+        await _syncAndRefreshCalendars();
         Get.snackbar('Success', 'Subscribed to calendar');
         return true;
       } else {

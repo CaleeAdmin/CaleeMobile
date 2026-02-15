@@ -701,33 +701,42 @@ class SyncRepository {
     final cal = maps.first;
     final String accountName = cal['account_name'] ?? '';
     final String? remotePath = cal['remote_path'];
-    final int? syncMode = cal['sync_mode'];
+    final bool hasRemotePath = remotePath != null && remotePath.isNotEmpty;
 
     debugPrint("🚀 启动彻底删除流程: ID $localId, Path: $remotePath");
+
+    bool shouldCleanupLocal = false;
 
     try {
       // --- Step A: 云端删除 ---
       // 逻辑：只有当它是 Nextcloud 类型且有路径时才调接口
-      if (remotePath != null && remotePath.isNotEmpty && syncMode == 0) {
+      if (hasRemotePath) {
           bool cloudOk = await NextcloudService().deleteRemoteCalendar(
               userId: userId,
               calendarPath: remotePath
           );
           debugPrint(cloudOk ? "✅ 云端销毁成功" : "❌ 云端销毁失败 (状态码不符)");
+          if (!cloudOk) {
+            throw Exception('remote_delete_failed');
+          }
       }
 
       // --- Step B: 本地系统层删除 (你反馈这步已成功) ---
-      if (!localId.startsWith('rc_') && syncMode == 0) {
+      if (!localId.startsWith('rc_')) {
         await _nativeApi.deleteCalendar(localId, accountName);
         debugPrint("✅ 手机系统日历已移除");
       }
 
+      shouldCleanupLocal = true;
     } catch (e) {
-      // 即使 Step A 或 B 出错（比如断网），也要捕获它，防止程序中断
-      debugPrint("⚠️ 物理层删除报错 (但这不影响清理本地库): $e");
+      // 远端删除失败时不要清理本地，保持一致性并等待下次同步/重试
+      debugPrint("⚠️ 物理层删除报错: $e");
+      rethrow;
     } finally {
-      // --- Step C: 核心保底 - 本地数据库清理 ---
-      // 无论前面是成功还是失败，必须抹掉本地记录，防止“死而复生”
+      if (!shouldCleanupLocal) {
+        return;
+      }
+      // --- Step C: 本地数据库清理（仅在远端/系统删除成功后执行） ---
       await db.transaction((txn) async {
         // 1. 删除关联的事件追踪 (sync_map)
         int sCount = await txn.delete(
@@ -761,7 +770,7 @@ class SyncRepository {
 
     try {
       // 2. 先改云端 (如果失败，建议直接抛异常，不改本地)
-      if (path != null) {
+      if (path != null && path.isNotEmpty) {
         bool isCloudOk = await NextcloudService().renameRemoteCalendar(
             userId: userId,
             calendarPath: path,
@@ -772,12 +781,14 @@ class SyncRepository {
 
       // 3. 修改手机系统日历 (Android 系统层)
       // 这一步确保在手机自带日历 App 里看到的也是新名字
-      await _nativeApi.modifyCalendarTitle(
-          localId,
-          newName,
-          userId,
-          "NextCloud"
-      );
+      if (!localId.startsWith('rc_')) {
+        await _nativeApi.modifyCalendarTitle(
+            localId,
+            newName,
+            userId,
+            "NextCloud"
+        );
+      }
 
       // 4. 修改本地数据库记录
       await db.update(
@@ -791,6 +802,7 @@ class SyncRepository {
 
     } catch (e) {
       print("❌ 改名流程中断: $e");
+      rethrow;
     }
   }
 
