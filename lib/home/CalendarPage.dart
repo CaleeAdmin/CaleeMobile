@@ -367,7 +367,7 @@ class _AccountCard extends StatelessWidget {
                     showDialog<bool>(
                       context: context,
                       builder: (context) {
-                        final TextEditingController _urlCtrl = TextEditingController(text: 'https://example.com/calendar.ics');
+                        final TextEditingController _urlCtrl = TextEditingController();
                         return Dialog(
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                           child: Padding(
@@ -398,6 +398,7 @@ class _AccountCard extends StatelessWidget {
                                   decoration: InputDecoration(
                                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                                     isDense: true,
+                                    hintText: 'https://example.com/calendar.ics',
                                   ),
                                 ),
                                 const SizedBox(height: 14),
