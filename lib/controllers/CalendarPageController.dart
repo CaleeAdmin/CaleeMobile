@@ -11,14 +11,6 @@ import '../data/sync_repository.dart';
 import '../services/nextcloud_service.dart';
 import 'calendar_probe_controller.dart';
 
-// 1. 数据模型定义
-class CalendarGroup {
-  final String accountName;
-  final List<CalendarDisplayItem> calendars;
-
-  CalendarGroup({required this.accountName, required this.calendars});
-}
-
 class CalendarDisplayItem {
   // 1. 标识符
   final String? localId;     // Android/iOS 系统日历 ID (对应数据库 local_id)，可能为 null
@@ -72,7 +64,7 @@ class CalendarPageController extends GetxController {
   final NextcloudAuthService _authService = NextcloudAuthService(serverBaseUrl: AppConstant.nextcloudServer);
 
   // 响应式变量
-  var calendarGroups = <CalendarGroup>[].obs;
+  var calendars = <CalendarDisplayItem>[].obs;
   var isLoading = false.obs;
   /// 选中的日历 ID 集合（用于 UI 绑定）
   var selectedCalendarIds = <String>{}.obs;
@@ -106,7 +98,7 @@ class CalendarPageController extends GetxController {
       }
 
       // 通知 observers 局部刷新
-      calendarGroups.refresh();
+      calendars.refresh();
 
       // 持久化到数据库
       await updateEnabledStatus(item, newValue);
@@ -116,7 +108,7 @@ class CalendarPageController extends GetxController {
       Get.snackbar("错误", "无法更新日历同步状态");
       // 回滚本地模型并刷新 UI
       item.isEnabled = !newValue;
-      calendarGroups.refresh();
+      calendars.refresh();
     }
   }
 
@@ -220,9 +212,7 @@ class CalendarPageController extends GetxController {
         nextCloudCalendars.add(displayItem);
       }
 
-      calendarGroups.assignAll([
-        CalendarGroup(accountName: 'NextCloud', calendars: nextCloudCalendars),
-      ]);
+      calendars.assignAll(nextCloudCalendars);
 
     } catch (e) {
       print("❌ Dashboard 刷新异常: $e");
