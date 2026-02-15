@@ -30,9 +30,7 @@ class LocalCalendarsPage extends StatelessWidget {
           return const Center(child: CircularProgressIndicator());
         }
 
-        final groups = ctrl.calendarGroups
-            .where((group) => group.accountName != 'NextCloud')
-            .toList();
+        final groups = ctrl.calendarGroups.toList();
         if (groups.isEmpty) {
           return const Center(child: Text('No local calendars found'));
         }
