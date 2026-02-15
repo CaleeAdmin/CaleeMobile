@@ -1,16 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
-import '../controllers/CalendarPageController.dart';
+import '../controllers/local_calendar_page_controller.dart';
 
 class LocalCalendarsPage extends StatelessWidget {
   const LocalCalendarsPage({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final CalendarPageController ctrl = Get.isRegistered<CalendarPageController>()
-        ? Get.find<CalendarPageController>()
-        : Get.put(CalendarPageController());
+    final LocalCalendarPageController ctrl = Get.isRegistered<LocalCalendarPageController>()
+        ? Get.find<LocalCalendarPageController>()
+        : Get.put(LocalCalendarPageController());
 
     return Scaffold(
       appBar: AppBar(
@@ -30,9 +30,7 @@ class LocalCalendarsPage extends StatelessWidget {
           return const Center(child: CircularProgressIndicator());
         }
 
-        final groups = ctrl.calendarGroups
-            .where((group) => group.accountName != 'NextCloud')
-            .toList();
+        final groups = ctrl.calendarGroups.toList();
         if (groups.isEmpty) {
           return const Center(child: Text('No local calendars found'));
         }
@@ -50,7 +48,7 @@ class LocalCalendarsPage extends StatelessWidget {
 }
 
 class _AccountSection extends StatelessWidget {
-  final CalendarGroup group;
+  final LocalCalendarGroup group;
 
   const _AccountSection({required this.group});
 
@@ -98,7 +96,7 @@ class _AccountSection extends StatelessWidget {
 }
 
 class _LocalCalendarCard extends StatelessWidget {
-  final CalendarDisplayItem calendar;
+  final LocalCalendarItem calendar;
 
   const _LocalCalendarCard({required this.calendar});
 
@@ -114,7 +112,7 @@ class _LocalCalendarCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final controller = Get.find<CalendarPageController>();
+    final controller = Get.find<LocalCalendarPageController>();
 
     return Card(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
