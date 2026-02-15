@@ -90,7 +90,7 @@ class FullSyncPullStrategy extends SyncStrategy {
 
       // 5. 更新日历 CTAG
       await db.update('calendar_map',
-          {'last_ctag': newCtag, 'is_provisioned': 1},
+          {'last_ctag': newCtag},
           where: 'remote_path = ? AND account_name = ?',
           whereArgs: [remotePath, accountName]);
 

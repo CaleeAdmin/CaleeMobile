@@ -2,7 +2,7 @@
 import '../sync/SyncEnum.dart';
 
 class SyncContext {
-  final String calendarId;    // 本地数据库中的 ID (可能是 "rc_..." 或数字 "6")
+  final String calendarId;    // 本地数据库中的 ID
   final String remotePath;    // 云端路径
   final String accountName;   // 账户名
   final String accountType;   // 账户类型
