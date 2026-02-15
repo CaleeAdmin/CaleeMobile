@@ -498,16 +498,36 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
                 put(CalendarContract.Calendars.NAME, newTitle)
             }
 
-            // 2. 构建带账户信息的 URI (作为同步适配器修改需要权限)
-            val updateUri = ContentUris.withAppendedId(CalendarContract.Calendars.CONTENT_URI, idLong)
-                .buildUpon()
-                .appendQueryParameter(CalendarContract.CALLER_IS_SYNCADAPTER, "true")
-                .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_NAME, accountName)
-                .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_TYPE, accountType)
-                .build()
+            // 2. 先尝试通过 sync-adapter URI 更新（兼容不同 account_type）
+            val candidateAccountTypes = linkedSetOf(
+                accountType,
+                "com.nextcloud.caleesync",
+                "NextCloud",
+                "com.android.calendar",
+            ).filter { it.isNotBlank() }
 
-            // 3. 执行更新
-            val rows = cr.update(updateUri, values, null, null)
+            var rows = 0
+            val baseUri = ContentUris.withAppendedId(CalendarContract.Calendars.CONTENT_URI, idLong)
+            for (type in candidateAccountTypes) {
+                val updateUri = baseUri
+                    .buildUpon()
+                    .appendQueryParameter(CalendarContract.CALLER_IS_SYNCADAPTER, "true")
+                    .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_NAME, accountName)
+                    .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_TYPE, type)
+                    .build()
+                rows = cr.update(updateUri, values, null, null)
+                if (rows > 0) break
+            }
+
+            // 3. 兜底：直接按 ID 更新，处理本地/非 sync-adapter 日历
+            if (rows <= 0) {
+                rows = cr.update(
+                    baseUri,
+                    values,
+                    "${CalendarContract.Calendars._ID} = ?",
+                    arrayOf(idLong.toString())
+                )
+            }
 
             Log.d("CalendarSync", "Rename result: $rows rows affected for ID $calendarId")
             callback(Result.success(rows > 0))

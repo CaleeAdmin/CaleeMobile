@@ -608,27 +608,42 @@ class NextcloudService {
   }) async {
     final server = _normalizeServer(AppConstant.nextcloudServer);
     final password = MMKVUtils.instance.getString(AppConstant.password);
-    final uri = Uri.parse('$server$calendarPath');
+    if (password == null || password.isEmpty) return false;
 
-    // 使用 PROPPATCH 修改 displayname
+    final String fullUrl = "${server.replaceAll(RegExp(r'/+$'), '')}/${calendarPath.replaceAll(RegExp(r'^/+'), '')}";
+    final uri = Uri.parse(fullUrl);
+
+    // 使用 PROPPATCH 修改 displayname（必须做 XML 转义，避免特殊字符导致 4xx）
+    final escapedName = const XmlEscape().convert(newName);
     final xmlBody = '''<?xml version="1.0" encoding="utf-8" ?>
 <d:propertyupdate xmlns:d="DAV:">
   <d:set>
     <d:prop>
-      <d:displayname>$newName</d:displayname>
+      <d:displayname>$escapedName</d:displayname>
     </d:prop>
   </d:set>
 </d:propertyupdate>''';
 
     final req = http.Request('PROPPATCH', uri)
       ..headers.addAll({
-        'Authorization': _getAuthString(userId, password!),
+        'Authorization': _getAuthString(userId, password),
         'Content-Type': 'application/xml; charset=utf-8',
       })
       ..body = xmlBody;
 
-    final res = await _client.send(req);
-    return res.statusCode == 207; // Multi-Status
+    try {
+      final res = await _client.send(req).timeout(const Duration(seconds: 15));
+      final body = await res.stream.bytesToString();
+      // 某些服务端会返回 200/204；WebDAV 标准通常是 207
+      final ok = res.statusCode == 207 || res.statusCode == 200 || res.statusCode == 204;
+      if (!ok) {
+        debugPrint('[Nextcloud] PROPPATCH rename failed: ${res.statusCode} - $body');
+      }
+      return ok;
+    } catch (e) {
+      debugPrint('[Nextcloud] PROPPATCH rename exception: $e');
+      return false;
+    }
   }
 
   /// 从 ICS 文本中提取日历名称
