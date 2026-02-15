@@ -217,21 +217,29 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
         // 建议在子线程执行
         Thread {
             try {
-                val accountType = "com.nextcloud.caleesync"
                 val cr = context.contentResolver
                 val idLong = calendarId.toLongOrNull() ?: throw IllegalArgumentException("Invalid ID")
 
                 // 1. 构建 URI
                 val baseUri = ContentUris.withAppendedId(CalendarContract.Calendars.CONTENT_URI, idLong)
 
-                // 2. 优先尝试同步删除（彻底抹除数据，不留残余）
-                val syncUri = baseUri.buildUpon()
-                    .appendQueryParameter(CalendarContract.CALLER_IS_SYNCADAPTER, "true")
-                    .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_NAME, accountName)
-                    .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_TYPE, accountType)
-                    .build()
+                // 2. 优先尝试同步删除（兼容不同 account_type）
+                val candidateAccountTypes = listOf(
+                    "com.nextcloud.caleesync",
+                    "NextCloud",
+                    "com.android.calendar",
+                )
 
-                var rows = cr.delete(syncUri, null, null)
+                var rows = 0
+                for (accountType in candidateAccountTypes) {
+                    val syncUri = baseUri.buildUpon()
+                        .appendQueryParameter(CalendarContract.CALLER_IS_SYNCADAPTER, "true")
+                        .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_NAME, accountName)
+                        .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_TYPE, accountType)
+                        .build()
+                    rows = cr.delete(syncUri, null, null)
+                    if (rows > 0) break
+                }
 
                 // 3. 兜底方案
                 if (rows <= 0) {

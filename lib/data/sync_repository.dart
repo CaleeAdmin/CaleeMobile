@@ -755,15 +755,14 @@ class SyncRepository {
     final cal = maps.first;
 // 如果字段可能为空，用 String?
     final String? path = cal['remote_path'] as String?;
-
-// 如果你确定 account_name 绝对有值，用 String
-    final String userId = cal['account_name'] as String;
+    final String accountName = (cal['account_name'] ?? '').toString();
+    final String accountType = (cal['account_type'] ?? 'com.nextcloud.caleesync').toString();
 
     try {
       // 2. 先改云端 (如果失败，建议直接抛异常，不改本地)
-      if (path != null) {
+      if (path != null && path.isNotEmpty) {
         bool isCloudOk = await NextcloudService().renameRemoteCalendar(
-            userId: userId,
+            userId: accountName,
             calendarPath: path,
             newName: newName
         );
@@ -772,12 +771,16 @@ class SyncRepository {
 
       // 3. 修改手机系统日历 (Android 系统层)
       // 这一步确保在手机自带日历 App 里看到的也是新名字
-      await _nativeApi.modifyCalendarTitle(
+      final bool localOk = await _nativeApi.modifyCalendarTitle(
           localId,
           newName,
-          userId,
-          "NextCloud"
+          accountName,
+          accountType,
       );
+
+      if (!localOk) {
+        throw Exception("系统日历改名失败");
+      }
 
       // 4. 修改本地数据库记录
       await db.update(
@@ -791,6 +794,7 @@ class SyncRepository {
 
     } catch (e) {
       print("❌ 改名流程中断: $e");
+      rethrow;
     }
   }
 
