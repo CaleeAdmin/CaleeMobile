@@ -46,7 +46,7 @@ class _CalendarPageState extends State<CalendarPage> {
         // } catch (_) {}
 
         // 仅在尚未加载数据时才触发一次刷新，避免每次切换 tab 重复刷新
-        if (controller.calendarGroups.isEmpty && !controller.isLoading.value) {
+        if (controller.calendars.isEmpty && !controller.isLoading.value) {
           await controller.refreshDashboard();
         }
       } else {
@@ -66,8 +66,8 @@ class _CalendarPageState extends State<CalendarPage> {
           return const Center(child: CircularProgressIndicator());
         }
 
-        final groups = controller.calendarGroups;
-        if (groups.isEmpty) {
+        final calendars = controller.calendars;
+        if (calendars.isEmpty) {
           return RefreshIndicator(
             onRefresh: controller.refreshDashboard,
             child: ListView(
@@ -81,13 +81,11 @@ class _CalendarPageState extends State<CalendarPage> {
 
         return RefreshIndicator(
           onRefresh: controller.refreshDashboard,
-          child: ListView.builder(
+          child: ListView(
             padding: const EdgeInsets.all(16),
-            itemCount: groups.length,
-            itemBuilder: (context, gi) {
-              final group = groups[gi];
-              return _AccountCard(group: group);
-            },
+            children: [
+              _CalendarCard(calendars: calendars),
+            ],
           ),
         );
       }),
@@ -226,9 +224,9 @@ extension on _CalendarRow {
     );
   }
 }
-class _AccountCard extends StatelessWidget {
-  final CalendarGroup group;
-  const _AccountCard({required this.group});
+class _CalendarCard extends StatelessWidget {
+  final List<CalendarDisplayItem> calendars;
+  const _CalendarCard({required this.calendars});
 
   @override
   Widget build(BuildContext context) {
@@ -240,31 +238,20 @@ class _AccountCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Row(
-                  children: [
-                    Text(
-                      group.accountName,
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(width: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade100,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Text('${group.calendars.length} calendars',
-                          style: const TextStyle(fontSize: 12, color: Colors.black54)),
-                    ),
-                  ],
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(12),
                 ),
-              ],
+                child: Text('${calendars.length} calendars',
+                    style: const TextStyle(fontSize: 12, color: Colors.black54)),
+              ),
             ),
             // Nextcloud specific quick actions
-            if (group.accountName == 'NextCloud') ...[
+            ...[
               const SizedBox(height: 12),
               SizedBox(
                 width: double.infinity,
@@ -489,7 +476,7 @@ class _AccountCard extends StatelessWidget {
             ],
             const SizedBox(height: 12),
             Column(
-              children: group.calendars
+              children: calendars
                   .map(
                     (c) => _CalendarRow(
                       key: ValueKey(c.remotePath ?? c.localId ?? c.name),
