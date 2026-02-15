@@ -758,6 +758,9 @@ class SyncRepository {
 
 // 如果你确定 account_name 绝对有值，用 String
     final String userId = cal['account_name'] as String;
+    final String accountType = (cal['account_type'] as String?)?.trim().isNotEmpty == true
+        ? (cal['account_type'] as String)
+        : 'com.nextcloud.caleesync';
 
     try {
       // 2. 先改云端 (如果失败，建议直接抛异常，不改本地)
@@ -772,12 +775,15 @@ class SyncRepository {
 
       // 3. 修改手机系统日历 (Android 系统层)
       // 这一步确保在手机自带日历 App 里看到的也是新名字
-      await _nativeApi.modifyCalendarTitle(
+      final bool localRenameOk = await _nativeApi.modifyCalendarTitle(
           localId,
           newName,
           userId,
-          "NextCloud"
+          accountType == 'NextCloud' ? 'com.nextcloud.caleesync' : accountType,
       );
+      if (!localRenameOk) {
+        throw Exception('系统日历改名失败');
+      }
 
       // 4. 修改本地数据库记录
       await db.update(
@@ -791,6 +797,7 @@ class SyncRepository {
 
     } catch (e) {
       print("❌ 改名流程中断: $e");
+      rethrow;
     }
   }
 
