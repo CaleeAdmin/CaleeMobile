@@ -797,45 +797,31 @@ class SyncRepository {
   /// 创建一个全新的本地日历条目
   /// 此时只在【系统日历】和【本地数据库】占位，暂不推送到云端
   Future<bool> createNewLocalCalendar(String displayName) async {
-    final db = await _dbHelper.database;
     final String userId = MMKVUtils.instance.getString(AppConstant.loginName) ?? "";
-    const String accountType = "com.nextcloud.caleesync";
+    if (userId.isEmpty) {
+      print("❌ [Repository] 当前未登录，无法创建日历");
+      return false;
+    }
 
     try {
-      // 1. 🌟 优先：在云端创建日历 (Nextcloud)
-      // 生成一个唯一的云端 ID，例如: cal_1712345678
-      // final String cloudId = "cal_${DateTime.now().millisecondsSinceEpoch}";
-      //
-      // print("🚀 [Repository] 正在云端创建日历: $displayName (ID: $cloudId)");
-      // final String? remotePath = await NextcloudService().createRemoteCalendar(
-      //   userId: userId,
-      //   calendarName: displayName,
-      //   calendarId: cloudId,
-      //
-      // );
-      //
-      // if (remotePath == null) {
-      //   print("❌ [Repository] 云端创建失败，放弃本地入库");
-      //   return false;
-      // }
+      // 1. 优先在云端创建，逻辑与订阅功能保持一致。
+      final String cloudId = "cal_${DateTime.now().millisecondsSinceEpoch}";
+      final String? remotePath = await NextcloudService().createRemoteCalendar(
+        userId: userId,
+        calendarName: displayName,
+        calendarId: cloudId,
+        color: '#4CAF50',
+      );
 
-      // 2. 🌟 生成本地虚拟 ID (rc_ 开头)
-      // 因为现在还没同步到手机系统，所以没有 system_id (1, 2, 3...)
-      // 我们先用虚拟 ID 占位
-      final String virtualId = "rc_${DateTime.now().millisecondsSinceEpoch}";
+      if (remotePath == null) {
+        print("❌ [Repository] 云端创建失败，放弃本地入库");
+        return false;
+      }
 
-      // 3. 🌟 将数据缓存到本地数据库
-      await db.insert(
-        'calendar_map',
-        {
-          'local_id': virtualId,        // 虚拟 ID
-          'account_name': userId,
-          'account_type': accountType,
-          'display_name': displayName,
-          // 'remote_path': remotePath,    // 存入刚刚拿到的云端路径
-          'sync_status': 0,             // 🌟 默认不勾选同步
-        },
-        conflictAlgorithm: ConflictAlgorithm.replace,
+      // 2. 创建成功后立即重扫远端列表，由统一流程落库。
+      await NextcloudService().scanRemoteCalendars(
+        serverUrl: AppConstant.nextcloudServer,
+        userId: userId,
       );
 
       return true;
