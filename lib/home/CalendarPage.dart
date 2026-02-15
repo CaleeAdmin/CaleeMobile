@@ -316,8 +316,7 @@ class _AccountCard extends StatelessWidget {
                                     child: const Text('Confirm', style: TextStyle(color: Colors.white)),
                                     onPressed: () async {
                                       final nm = _newCalCtrl.text.trim();
-                                      if (nm.isEmpty) return;
-                                      // 调用 controller 的方法创建新日历
+                                      // 调用 controller 的方法创建新日历（含输入校验）
                                       final ok = await Get.find<CalendarPageController>().createNewLocalCalendar(nm);
                                       if (ok) {
                                         Navigator.of(context).pop(true);
@@ -368,7 +367,7 @@ class _AccountCard extends StatelessWidget {
                     showDialog<bool>(
                       context: context,
                       builder: (context) {
-                        final TextEditingController _urlCtrl = TextEditingController(text: 'https://example.com/calendar.ics');
+                        final TextEditingController _urlCtrl = TextEditingController();
                         return Dialog(
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                           child: Padding(
@@ -399,6 +398,7 @@ class _AccountCard extends StatelessWidget {
                                   decoration: InputDecoration(
                                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                                     isDense: true,
+                                    hintText: 'https://example.com/calendar.ics',
                                   ),
                                 ),
                                 const SizedBox(height: 14),
@@ -412,8 +412,7 @@ class _AccountCard extends StatelessWidget {
                                     child: const Text('Confirm', style: TextStyle(color: Colors.white)),
                                     onPressed: () async {
                                       final url = _urlCtrl.text.trim();
-                                      if (url.isEmpty) return;
-                                      // 调用 controller 的订阅方法
+                                      // 调用 controller 的订阅方法（含输入校验）
                                       final ok = await Get.find<CalendarPageController>().subscribePublicIcs(url);
                                       if (ok) {
                                         Navigator.of(context).pop(true);

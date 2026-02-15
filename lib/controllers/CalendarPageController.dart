@@ -307,9 +307,15 @@ class CalendarPageController extends GetxController {
 
   /// 创建新的本地日历（委托给 SyncRepository），并刷新界面
   Future<bool> createNewLocalCalendar(String displayName) async {
+    final String? invalidReason = validateNewCalendarName(displayName);
+    if (invalidReason != null) {
+      Get.snackbar('Invalid calendar name', invalidReason);
+      return false;
+    }
+
     try {
       isLoading.value = true;
-      final ok = await _repo.createNewLocalCalendar(displayName);
+      final ok = await _repo.createNewLocalCalendar(displayName.trim());
       if (ok) {
         await refreshDashboard();
         return true;
@@ -328,9 +334,15 @@ class CalendarPageController extends GetxController {
 
   /// 订阅一个公开的 ICS 链接（委托给仓库），并在成功后刷新界面
   Future<bool> subscribePublicIcs(String icsUrl) async {
+    final String? invalidReason = validateSubscriptionUrl(icsUrl);
+    if (invalidReason != null) {
+      Get.snackbar('Invalid subscription URL', invalidReason);
+      return false;
+    }
+
     try {
       isLoading.value = true;
-      final ok = await _repo.handlePublicSubscription(icsUrl);
+      final ok = await _repo.handlePublicSubscription(icsUrl.trim());
       if (ok) {
         await refreshDashboard();
         // 刷新已订阅列表（如果 probe controller 已注册）
@@ -350,6 +362,38 @@ class CalendarPageController extends GetxController {
     } finally {
       isLoading.value = false;
     }
+  }
+
+  String? validateNewCalendarName(String displayName) {
+    final String normalized = displayName.trim();
+    if (normalized.isEmpty) {
+      return 'Calendar name is required.';
+    }
+    if (normalized.length > 64) {
+      return 'Calendar name must be 64 characters or fewer.';
+    }
+    if (RegExp(r'[\\/:*?"<>|]').hasMatch(normalized)) {
+      return 'Calendar name contains unsupported characters.';
+    }
+    return null;
+  }
+
+  String? validateSubscriptionUrl(String icsUrl) {
+    final String normalized = icsUrl.trim();
+    if (normalized.isEmpty) {
+      return 'Subscription URL is required.';
+    }
+
+    final Uri? parsed = Uri.tryParse(normalized);
+    if (parsed == null || parsed.host.isEmpty) {
+      return 'Enter a valid URL.';
+    }
+
+    if (parsed.scheme != 'http' && parsed.scheme != 'https' && parsed.scheme != 'webcal') {
+      return 'Only http, https, or webcal URLs are supported.';
+    }
+
+    return null;
   }
 
 }
