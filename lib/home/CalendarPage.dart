@@ -66,16 +66,14 @@ class _CalendarPageState extends State<CalendarPage> {
           return const Center(child: CircularProgressIndicator());
         }
 
-        final groups = controller.calendarGroups
-            .where((group) => group.accountName == 'NextCloud')
-            .toList();
+        final groups = controller.calendarGroups;
         if (groups.isEmpty) {
           return RefreshIndicator(
             onRefresh: controller.refreshDashboard,
             child: ListView(
               children: const [
                 SizedBox(height: 120),
-                Center(child: Text('No NextCloud calendars found')),
+                Center(child: Text('No calendars found')),
               ],
             ),
           );
