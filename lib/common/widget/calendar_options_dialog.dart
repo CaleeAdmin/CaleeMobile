@@ -1,6 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:caleesync/core/platform/pigeon/calendar_api.g.dart';
-
 import '../../controllers/CalendarPageController.dart';
 
 class CalendarOptionsDialog extends StatefulWidget {
@@ -13,11 +11,17 @@ class CalendarOptionsDialog extends StatefulWidget {
 
 class _CalendarOptionsDialogState extends State<CalendarOptionsDialog> {
   late bool isTwoWay;
+  late bool isRenameDisabled;
+  late bool isTwoWayDisabled;
 
   @override
   void initState() {
     super.initState();
-    isTwoWay = widget.item.isReadOnly;
+    isTwoWay = !widget.item.isReadOnly;
+    isTwoWayDisabled = widget.item.isReadOnly || widget.item.isSubscription || widget.item.isLocalReadOnly;
+    // origin: 0 = 本地初始化, 1 = 云端同步
+    // 本地初始化的映射不允许在主日历页重命名
+    isRenameDisabled = widget.item.origin == 0;
   }
 
   @override
@@ -38,7 +42,7 @@ class _CalendarOptionsDialogState extends State<CalendarOptionsDialog> {
                   CheckboxListTile(
                     contentPadding: EdgeInsets.zero,
                     value: isTwoWay,
-                    onChanged: (v) {
+                    onChanged: isTwoWayDisabled ? null : (v) {
                       setState(() {
                         isTwoWay = v ?? false;
                       });
@@ -57,8 +61,14 @@ class _CalendarOptionsDialogState extends State<CalendarOptionsDialog> {
               onTap: () => Navigator.of(context).pop('properties'),
             ),
             ListTile(
-              title: const Text('Rename'),
-              onTap: () => Navigator.of(context).pop('rename'),
+              title: Text(
+                'Rename',
+                style: TextStyle(
+                  color: isRenameDisabled ? Colors.black38 : Colors.black,
+                ),
+              ),
+              enabled: !isRenameDisabled,
+              onTap: isRenameDisabled ? null : () => Navigator.of(context).pop('rename'),
             ),
             ListTile(
               title: const Text('Delete', style: TextStyle(color: Colors.red)),
@@ -70,5 +80,3 @@ class _CalendarOptionsDialogState extends State<CalendarOptionsDialog> {
     );
   }
 }
-
-

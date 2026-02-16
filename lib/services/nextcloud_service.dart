@@ -19,7 +19,10 @@ class NextcloudService {
     required String serverUrl,
     required String userId,
   }) async {
-    final uri = Uri.parse('$serverUrl/remote.php/dav/calendars/${Uri.encodeComponent(userId)}/');
+    final normalizedServer = _normalizeServer(serverUrl);
+    final uri = Uri.parse(
+      '$normalizedServer/remote.php/dav/calendars/${Uri.encodeComponent(userId)}/',
+    );
     final String password = MMKVUtils.instance.getString(AppConstant.password) ?? "";
 
     // 1. 增加 cs 命名空间定义，并请求该属性
@@ -102,8 +105,8 @@ class NextcloudService {
       final privileges = prop.findElements('d:current-user-privilege-set').firstOrNull;
       bool hasWritePrivilege = privileges?.findAllElements('d:write').isNotEmpty ?? false;
 
-      // 3. 设定同步模式：订阅日历或无写权限均设为只读 (1)
-      int syncMode = (isSubscribed || !hasWritePrivilege) ? 1 : 0;
+      // 3. 设定同步模式：订阅日历或无写权限均设为只读 (0)
+      int syncMode = (isSubscribed || !hasWritePrivilege) ? 0 : 1;
 
       results.add({
         'remote_path': href,
@@ -144,6 +147,8 @@ class NextcloudService {
 
       // 2. 遍历远端列表：执行“增”或“改”
       for (var map in remoteMaps) {
+        // 新创建的映射统一默认只读，后续由用户在 UI 中手动切换同步模式。
+        const int defaultSyncMode = 0;
         await txn.rawInsert('''
         INSERT INTO calendar_map (
           remote_path, 
@@ -154,13 +159,12 @@ class NextcloudService {
           account_name, 
           account_type, -- 新增字段
           origin, 
-          is_enabled, 
-          is_provisioned
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) -- 增加一个占位符
+          is_enabled
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) -- 增加一个占位符
         ON CONFLICT(remote_path) DO UPDATE SET
           display_name = excluded.display_name,
           last_ctag = excluded.last_ctag,
-          sync_mode = excluded.sync_mode,
+          -- 仅在插入时使用默认值；更新时保留用户已选择的同步模式。
           -- 只有当远端提供了新颜色且不为空时才更新本地颜色
           color = CASE WHEN excluded.color IS NOT NULL AND excluded.color != "" 
                        THEN excluded.color 
@@ -171,29 +175,26 @@ class NextcloudService {
               map['remote_path'],
               map['display_name'],
               map['last_ctag'],
-              map['sync_mode'],
+              defaultSyncMode,
               map['color'],
               accountName,
               "NextCloud", // 对应 account_type，仅在首次插入时生效
               1, // origin = 1 (远端起源)
               0, // is_enabled
-              0 // is_provisioned
             ]);
       }
 
-      // 3. 【标记删除逻辑】
+      // 3. 删除云端已不存在的远端起源记录
       if (currentRemotePaths.isNotEmpty) {
         final placeholders = List.filled(currentRemotePaths.length, '?').join(',');
-        await txn.update(
+        await txn.delete(
           'calendar_map',
-          {'is_provisioned': 2}, // 标记为待删除
-          where: 'account_name = ? AND origin = 1 AND remote_path NOT IN ($placeholders) AND is_provisioned != 2',
+          where: 'account_name = ? AND origin = 1 AND remote_path NOT IN ($placeholders)',
           whereArgs: [accountName, ...currentRemotePaths],
         );
       } else {
-        await txn.update(
+        await txn.delete(
           'calendar_map',
-          {'is_provisioned': 2},
           where: 'account_name = ? AND origin = 1',
           whereArgs: [accountName],
         );
@@ -656,7 +657,7 @@ class NextcloudService {
     return null;
   }
 
-  /// [MKCALENDAR] 在云端订阅一个外部公共 ICS 日历
+  /// [MKCOL] 在云端创建一个「订阅日历集合」
   Future<String?> subscribeRemotePublicIcs({
     required String userId,
     required String calendarName,
@@ -670,22 +671,34 @@ class NextcloudService {
     final calendarPath = '/remote.php/dav/calendars/$userId/$calendarId/';
     final uri = Uri.parse('$server$calendarPath');
 
-    // 2. 构建带 source 的 XML 负载
-    // 注意：Nextcloud 识别 <c:source> 来实现远程挂载
+    // 2. 使用 MKCOL 创建订阅集合
+    // 关键点：
+    // - resourcetype 包含 cs:subscribed
+    // - 远程链接写入 cs:source
+    // 这样在 Nextcloud Web UI 中会被识别为订阅日历（只读但允许重命名）
     final xmlBody = '''<?xml version="1.0" encoding="utf-8" ?>
-<c:mkcalendar xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+<d:mkcol xmlns:d="DAV:" 
+         xmlns:c="urn:ietf:params:xml:ns:caldav"
+         xmlns:cs="http://calendarserver.org/ns/">
   <d:set>
     <d:prop>
+      <d:resourcetype>
+        <d:collection />
+        <c:calendar />
+        <cs:subscribed />
+      </d:resourcetype>
       <d:displayname>$calendarName</d:displayname>
-      <c:source><d:href>$icsUrl</d:href></c:source>
+      <cs:source>
+        <d:href>$icsUrl</d:href>
+      </cs:source>
       <c:supported-calendar-component-set>
         <c:comp name="VEVENT" />
       </c:supported-calendar-component-set>
     </d:prop>
   </d:set>
-</c:mkcalendar>''';
+</d:mkcol>''';
 
-    final req = http.Request('MKCALENDAR', uri)
+    final req = http.Request('MKCOL', uri)
       ..headers.addAll({
         'Authorization': _getAuthString(userId, password!),
         'Content-Type': 'application/xml; charset=utf-8',

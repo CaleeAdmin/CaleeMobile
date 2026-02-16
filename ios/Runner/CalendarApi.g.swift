@@ -51,6 +51,8 @@ struct PlatformCalendar {
   var isReadOnly: Bool? = nil
   var supportsEvents: Bool? = nil
   var supportsTasks: Bool? = nil
+  var isSubscription: Bool? = nil
+  var subscriptionUrl: String? = nil
 
   // swift-format-ignore: AlwaysUseLowerCamelCase
   static func fromList(_ __pigeon_list: [Any?]) -> PlatformCalendar? {
@@ -62,6 +64,8 @@ struct PlatformCalendar {
     let isReadOnly: Bool? = nilOrValue(__pigeon_list[5])
     let supportsEvents: Bool? = nilOrValue(__pigeon_list[6])
     let supportsTasks: Bool? = nilOrValue(__pigeon_list[7])
+    let isSubscription: Bool? = nilOrValue(__pigeon_list[8])
+    let subscriptionUrl: String? = nilOrValue(__pigeon_list[9])
 
     return PlatformCalendar(
       id: id,
@@ -71,7 +75,9 @@ struct PlatformCalendar {
       color: color,
       isReadOnly: isReadOnly,
       supportsEvents: supportsEvents,
-      supportsTasks: supportsTasks
+      supportsTasks: supportsTasks,
+      isSubscription: isSubscription,
+      subscriptionUrl: subscriptionUrl
     )
   }
   func toList() -> [Any?] {
@@ -84,6 +90,8 @@ struct PlatformCalendar {
       isReadOnly,
       supportsEvents,
       supportsTasks,
+      isSubscription,
+      subscriptionUrl,
     ]
   }
 }

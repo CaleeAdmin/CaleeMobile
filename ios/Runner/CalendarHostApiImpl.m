@@ -60,6 +60,10 @@
             pc.isReadOnly = @(!ekCalendar.allowsContentModifications);
             pc.supportsEvents = @YES;
             pc.supportsTasks = @NO;
+            pc.isSubscription = @(ekCalendar.type == EKCalendarTypeSubscription);
+            if (ekCalendar.type == EKCalendarTypeSubscription) {
+                pc.subscriptionUrl = ekCalendar.subscribedCalendarURL.absoluteString;
+            }
 
             [calendars addObject:pc];
         }

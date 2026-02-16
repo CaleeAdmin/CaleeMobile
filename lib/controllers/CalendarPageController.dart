@@ -1,5 +1,6 @@
 import 'package:caleesync/common/app_constant.dart';
 import 'package:caleesync/common/utils/mmkv_utils.dart';
+import 'package:caleesync/core/platform/pigeon/calendar_api.g.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:get/get.dart';
 import 'dart:async';
@@ -10,14 +11,6 @@ import '../data/database_helper.dart';
 import '../data/sync_repository.dart';
 import '../services/nextcloud_service.dart';
 import 'calendar_probe_controller.dart';
-
-// 1. 数据模型定义
-class CalendarGroup {
-  final String accountName;
-  final List<CalendarDisplayItem> calendars;
-
-  CalendarGroup({required this.accountName, required this.calendars});
-}
 
 class CalendarDisplayItem {
   // 1. 标识符
@@ -31,6 +24,8 @@ class CalendarDisplayItem {
 
   // 3. 状态控制
   final bool isReadOnly;
+  final bool isSubscription;
+  final bool isLocalReadOnly;
   bool isEnabled;            // 对应数据库 is_enabled
   final int origin;          // 0: 本地创建, 1: 云端同步
 
@@ -41,6 +36,8 @@ class CalendarDisplayItem {
     required this.color,
     required this.eventCount,
     required this.isReadOnly,
+    required this.isSubscription,
+    required this.isLocalReadOnly,
     required this.isEnabled,
     required this.origin,
   });
@@ -54,6 +51,8 @@ class CalendarDisplayItem {
       color: map['color'] ?? '#000000',
       eventCount: 0, // 可以在外部查询后再填入
       isReadOnly: false,
+      isSubscription: false,
+      isLocalReadOnly: false,
       isEnabled: (map['is_enabled'] ?? 0) == 1,
       origin: map['origin'] ?? 0,
     );
@@ -68,11 +67,12 @@ class CalendarPageController extends GetxController {
   // 依赖注入：Repo 必须在 InitialBinding 或 main 中已 put
   final SyncRepository _repo = Get.find<SyncRepository>();
   final NextcloudService _nc = NextcloudService();
+  final NativeCalendarApi _nativeApi = NativeCalendarApi();
   final engine = SyncEngine();
   final NextcloudAuthService _authService = NextcloudAuthService(serverBaseUrl: AppConstant.nextcloudServer);
 
   // 响应式变量
-  var calendarGroups = <CalendarGroup>[].obs;
+  var calendars = <CalendarDisplayItem>[].obs;
   var isLoading = false.obs;
   /// 选中的日历 ID 集合（用于 UI 绑定）
   var selectedCalendarIds = <String>{}.obs;
@@ -106,7 +106,7 @@ class CalendarPageController extends GetxController {
       }
 
       // 通知 observers 局部刷新
-      calendarGroups.refresh();
+      calendars.refresh();
 
       // 持久化到数据库
       await updateEnabledStatus(item, newValue);
@@ -116,7 +116,7 @@ class CalendarPageController extends GetxController {
       Get.snackbar("错误", "无法更新日历同步状态");
       // 回滚本地模型并刷新 UI
       item.isEnabled = !newValue;
-      calendarGroups.refresh();
+      calendars.refresh();
     }
   }
 
@@ -173,15 +173,26 @@ class CalendarPageController extends GetxController {
           serverUrl: _authService.normalizedUrl,
           userId: loginName);
 
-      // 2. 仅展示 NextCloud 账号下与远端一致的日历列表
+      // 2. 查询本地 calendar_map 的所有日历记录
       final db = await DatabaseHelper.instance.database;
       final List<Map<String, dynamic>> calendarMaps = await db.query(
         'calendar_map',
-        where: 'account_name = ? AND account_type = ? AND origin = 1 AND is_provisioned != 2',
-        whereArgs: [loginName, 'NextCloud'],
       );
       final Map<String, int> cachedCountByCalendarId = {};
+      final Map<String, bool> localReadOnlyById = {};
       final List<CalendarDisplayItem> nextCloudCalendars = [];
+
+      try {
+        final List<PlatformCalendar?> platformCalendars = await _nativeApi.getCalendars();
+        for (final PlatformCalendar calendar in platformCalendars.whereType<PlatformCalendar>()) {
+          final String id = calendar.id ?? '';
+          if (id.isEmpty) continue;
+          localReadOnlyById[id] = calendar.isReadOnly ?? false;
+        }
+      } catch (e) {
+        debugPrint('⚠️ 无法读取本地日历只读信息: $e');
+      }
+
       if (includeEventCounts) {
         final countRows = await db.rawQuery(
           'SELECT calendar_local_id, COUNT(*) AS count FROM sync_map GROUP BY calendar_local_id',
@@ -197,6 +208,7 @@ class CalendarPageController extends GetxController {
         final String? localId = cal['local_id']?.toString();
         final String? remotePath = cal['remote_path'];
         final int? syncMode = cal['sync_mode'];
+        final bool isSubscription = (cal['is_subscription'] == 1 || cal['is_subscription'] == true);
         final int origin = cal['origin'];
 
         int realCount = 0;
@@ -213,7 +225,9 @@ class CalendarPageController extends GetxController {
           name: cal['display_name'] ?? 'Unknown',
           color: cal['color'] ?? '#808080',
           eventCount: realCount,
-          isReadOnly: syncMode == 1,
+          isReadOnly: syncMode == 0,
+          isSubscription: isSubscription,
+          isLocalReadOnly: localReadOnlyById[localId] ?? false,
           isEnabled: cal['is_enabled'] == 1,
           remotePath: remotePath,
           origin: origin,
@@ -222,9 +236,7 @@ class CalendarPageController extends GetxController {
         nextCloudCalendars.add(displayItem);
       }
 
-      calendarGroups.assignAll([
-        CalendarGroup(accountName: 'NextCloud', calendars: nextCloudCalendars),
-      ]);
+      calendars.assignAll(nextCloudCalendars);
 
     } catch (e) {
       print("❌ Dashboard 刷新异常: $e");

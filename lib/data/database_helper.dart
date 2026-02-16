@@ -43,9 +43,8 @@ class DatabaseHelper {
         display_name TEXT,
         color TEXT,                  -- 存储 #AARRGGBB
         last_ctag TEXT,
-        sync_mode INTEGER DEFAULT 0,    -- 0:双向, 1:只读
+        sync_mode INTEGER DEFAULT 0,    -- 0:只读, 1:双向
         is_enabled INTEGER DEFAULT 0,   -- 0:暂停, 1:正常
-        is_provisioned INTEGER DEFAULT 0, -- 0:初始, 1:就绪 ,2:待删除
         origin INTEGER DEFAULT 0        -- 0:本地创建 (Local), 1:远端同步 (Remote)
       )
     ''');
