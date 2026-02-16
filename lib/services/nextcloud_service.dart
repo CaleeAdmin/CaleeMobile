@@ -147,6 +147,8 @@ class NextcloudService {
 
       // 2. 遍历远端列表：执行“增”或“改”
       for (var map in remoteMaps) {
+        // 新创建的映射统一默认只读，后续由用户在 UI 中手动切换同步模式。
+        const int defaultSyncMode = 0;
         await txn.rawInsert('''
         INSERT INTO calendar_map (
           remote_path, 
@@ -162,7 +164,7 @@ class NextcloudService {
         ON CONFLICT(remote_path) DO UPDATE SET
           display_name = excluded.display_name,
           last_ctag = excluded.last_ctag,
-          sync_mode = excluded.sync_mode,
+          -- 仅在插入时使用默认值；更新时保留用户已选择的同步模式。
           -- 只有当远端提供了新颜色且不为空时才更新本地颜色
           color = CASE WHEN excluded.color IS NOT NULL AND excluded.color != "" 
                        THEN excluded.color 
@@ -173,7 +175,7 @@ class NextcloudService {
               map['remote_path'],
               map['display_name'],
               map['last_ctag'],
-              map['sync_mode'],
+              defaultSyncMode,
               map['color'],
               accountName,
               "NextCloud", // 对应 account_type，仅在首次插入时生效
