@@ -20,6 +20,7 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
             CalendarContract.Calendars.ACCOUNT_TYPE, // 对应 accountType
             CalendarContract.Calendars.CALENDAR_COLOR,
             CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL,
+            CalendarContract.Calendars.CALENDAR_LOCATION,
             CalendarContract.Calendars.VISIBLE
         )
 
@@ -78,6 +79,7 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
                 val accountTypeIndex = cursor.getColumnIndex(CalendarContract.Calendars.ACCOUNT_TYPE)
                 val colorIndex = cursor.getColumnIndex(CalendarContract.Calendars.CALENDAR_COLOR)
                 val accessLevelIndex = cursor.getColumnIndex(CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL)
+                val calendarLocationIndex = cursor.getColumnIndex(CalendarContract.Calendars.CALENDAR_LOCATION)
 
                 // _ID 是必需字段，如果不存在则无法继续
                 if (idIndex < 0) {
@@ -119,6 +121,16 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
                             true // 字段不存在时默认视为只读
                         }
 
+                        val calendarLocation = if (calendarLocationIndex >= 0) cursor.getString(calendarLocationIndex) else null
+                        val normalizedLocation = calendarLocation?.trim()?.lowercase()
+                        val normalizedAccountType = accountType?.trim()?.lowercase()
+                        val isSubscription = (normalizedLocation?.startsWith("webcal://") == true) ||
+                                (normalizedLocation?.startsWith("http://") == true) ||
+                                (normalizedLocation?.startsWith("https://") == true) ||
+                                (normalizedLocation?.contains(".ics") == true) ||
+                                (normalizedAccountType?.contains("subscribed") == true) ||
+                                (normalizedAccountType?.contains("subscription") == true)
+
                         calendars.add(
                             PlatformCalendar(
                                 id = id,
@@ -128,7 +140,8 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
                                 color = colorHex,
                                 isReadOnly = isReadOnly,
                                 supportsEvents = true,
-                                supportsTasks = false // 原生 Android 日历不支持任务
+                                supportsTasks = false, // 原生 Android 日历不支持任务
+                                isSubscription = isSubscription,
                             )
                         )
                     } catch (e: Exception) {

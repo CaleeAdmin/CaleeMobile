@@ -25,6 +25,7 @@ class LocalCalendarItem {
   final String color;
   final bool isReadOnly;
   final int eventCount;
+  final bool isSubscription;
   bool isConnected;
 
   LocalCalendarItem({
@@ -35,6 +36,7 @@ class LocalCalendarItem {
     required this.color,
     required this.isReadOnly,
     required this.eventCount,
+    required this.isSubscription,
     required this.isConnected,
   });
 }
@@ -118,6 +120,7 @@ class LocalCalendarPageController extends GetxController {
           color: calendar.color ?? '#808080',
           isReadOnly: calendar.isReadOnly ?? false,
           eventCount: eventCount,
+          isSubscription: calendar.isSubscription ?? false,
           isConnected: connectedLocalIds.contains(id),
         );
 
@@ -174,7 +177,7 @@ class LocalCalendarPageController extends GetxController {
             throw Exception('Not logged in to Nextcloud');
           }
 
-          if (_isLocalSubscription(item)) {
+          if (item.isSubscription) {
             final String? subscriptionSource = _resolveSubscriptionSourceUrl(item);
             if (subscriptionSource == null) {
               throw Exception('Unable to determine subscription URL for local subscription calendar');
@@ -248,18 +251,6 @@ class LocalCalendarPageController extends GetxController {
       debugPrint('❌ Failed to update local calendar switch: $e');
       Get.snackbar('Error', 'Unable to update calendar state');
     }
-  }
-
-  bool _isLocalSubscription(LocalCalendarItem item) {
-    final String accountType = (item.accountType ?? '').toLowerCase();
-    final String accountName = item.accountName.toLowerCase();
-    final String calendarName = item.name.toLowerCase();
-
-    return accountType.contains('subscribed') ||
-        accountType.contains('subscription') ||
-        accountName.contains('webcal://') ||
-        accountName.contains('.ics') ||
-        calendarName.contains('subscription');
   }
 
   String? _resolveSubscriptionSourceUrl(LocalCalendarItem item) {

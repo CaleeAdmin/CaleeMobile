@@ -26,6 +26,7 @@ class PlatformCalendar {
     this.isReadOnly,
     this.supportsEvents,
     this.supportsTasks,
+    this.isSubscription,
   });
 
   String? id;
@@ -43,6 +44,7 @@ class PlatformCalendar {
   bool? supportsEvents;
 
   bool? supportsTasks;
+  bool? isSubscription;
 
   Object encode() {
     return <Object?>[
@@ -54,6 +56,7 @@ class PlatformCalendar {
       isReadOnly,
       supportsEvents,
       supportsTasks,
+      isSubscription,
     ];
   }
 
@@ -68,6 +71,7 @@ class PlatformCalendar {
       isReadOnly: result[5] as bool?,
       supportsEvents: result[6] as bool?,
       supportsTasks: result[7] as bool?,
+      isSubscription: result[8] as bool?,
     );
   }
 }
