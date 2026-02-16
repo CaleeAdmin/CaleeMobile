@@ -105,8 +105,8 @@ class NextcloudService {
       final privileges = prop.findElements('d:current-user-privilege-set').firstOrNull;
       bool hasWritePrivilege = privileges?.findAllElements('d:write').isNotEmpty ?? false;
 
-      // 3. 设定同步模式：订阅日历或无写权限均设为只读 (1)
-      int syncMode = (isSubscribed || !hasWritePrivilege) ? 1 : 0;
+      // 3. 设定同步模式：订阅日历或无写权限均设为只读 (0)
+      int syncMode = (isSubscribed || !hasWritePrivilege) ? 0 : 1;
 
       results.add({
         'remote_path': href,

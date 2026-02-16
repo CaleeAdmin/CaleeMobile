@@ -79,7 +79,7 @@ class SyncEngine {
           continue;
         }
 
-        final SyncAction action = (mode == 0)
+        final SyncAction action = (mode == 1)
             ? SyncAction.fullSyncBidi
             : ((origin == 1) ? SyncAction.fullSyncPull : SyncAction.fullSyncPush);
 
@@ -99,7 +99,7 @@ class SyncEngine {
       }
 
       final bool remoteExists = remoteMap.containsKey(path);
-      if (!remoteExists && (origin == 1 || (origin == 0 && mode == 0))) {
+      if (!remoteExists && (origin == 1 || (origin == 0 && mode == 1))) {
         contexts.add(_buildContext({}, local, SyncAction.deleteLocal));
       }
     }
@@ -318,7 +318,7 @@ class SyncEngine {
             'account_type': 'com.nextcloud.caleesync',
             'display_name': displayName,
             'remote_path': path,
-            'sync_mode': rc['sync_mode'] ?? 1,
+            'sync_mode': rc['sync_mode'] ?? 0,
           });
         }
       }

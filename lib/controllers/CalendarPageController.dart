@@ -225,7 +225,7 @@ class CalendarPageController extends GetxController {
           name: cal['display_name'] ?? 'Unknown',
           color: cal['color'] ?? '#808080',
           eventCount: realCount,
-          isReadOnly: syncMode == 1,
+          isReadOnly: syncMode == 0,
           isSubscription: isSubscription,
           isLocalReadOnly: localReadOnlyById[localId] ?? false,
           isEnabled: cal['is_enabled'] == 1,
