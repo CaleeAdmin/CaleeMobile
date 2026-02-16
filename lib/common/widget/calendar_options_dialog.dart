@@ -1,6 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:caleesync/core/platform/pigeon/calendar_api.g.dart';
-
 import '../../controllers/CalendarPageController.dart';
 
 class CalendarOptionsDialog extends StatefulWidget {
@@ -19,7 +17,7 @@ class _CalendarOptionsDialogState extends State<CalendarOptionsDialog> {
   @override
   void initState() {
     super.initState();
-    isTwoWay = widget.item.isReadOnly;
+    isTwoWay = !widget.item.isReadOnly;
     isTwoWayDisabled = widget.item.isReadOnly || widget.item.isSubscription || widget.item.isLocalReadOnly;
     // origin: 0 = 本地初始化, 1 = 云端同步
     // 本地初始化的映射不允许在主日历页重命名

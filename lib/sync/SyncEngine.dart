@@ -318,6 +318,7 @@ class SyncEngine {
             'account_type': 'com.nextcloud.caleesync',
             'display_name': displayName,
             'remote_path': path,
+            'sync_mode': rc['sync_mode'] ?? 1,
           });
         }
       }

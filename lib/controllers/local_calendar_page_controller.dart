@@ -198,6 +198,7 @@ class LocalCalendarPageController extends GetxController {
           'account_type': item.accountType,
           'color': item.color,
           'origin': 0,
+          'sync_mode': 1,
           if (enabled && remotePath != null) 'remote_path': remotePath,
         },
         where: 'local_id = ?',
@@ -213,6 +214,7 @@ class LocalCalendarPageController extends GetxController {
           'color': item.color,
           'is_enabled': enabled ? 1 : 0,
           'origin': 0,
+          'sync_mode': 1,
           if (enabled && remotePath != null) 'remote_path': remotePath,
         });
       }
