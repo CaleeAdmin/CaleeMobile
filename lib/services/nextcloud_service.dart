@@ -676,7 +676,8 @@ class NextcloudService {
     final String escapedSourceUrl = _xmlEscape(sourceUrl);
 
     // 2. 构建带 source 的 XML 负载
-    // 注意：Nextcloud 识别 <c:source> 来实现远程挂载
+    // 注意：订阅源必须使用 CalendarServer 命名空间 cs:source，
+    // 否则 Nextcloud 会按普通可写日历创建（可分享/可编辑）。
     final xmlBody = '''<?xml version="1.0" encoding="utf-8" ?>
 <c:mkcalendar xmlns:d="DAV:" 
               xmlns:c="urn:ietf:params:xml:ns:caldav"
@@ -685,7 +686,7 @@ class NextcloudService {
   <d:set>
     <d:prop>
       <d:displayname>$escapedDisplayName</d:displayname>
-      <c:source><d:href>$escapedSourceUrl</d:href></c:source>
+      <cs:source><d:href>$escapedSourceUrl</d:href></cs:source>
       <cs:subscribed-strip-todos>1</cs:subscribed-strip-todos>
       <cs:subscribed-strip-alarms>0</cs:subscribed-strip-alarms>
       <o:calendar-enabled>1</o:calendar-enabled>
