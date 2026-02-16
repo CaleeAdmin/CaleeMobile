@@ -19,7 +19,10 @@ class NextcloudService {
     required String serverUrl,
     required String userId,
   }) async {
-    final uri = Uri.parse('$serverUrl/remote.php/dav/calendars/${Uri.encodeComponent(userId)}/');
+    final normalizedServer = _normalizeServer(serverUrl);
+    final uri = Uri.parse(
+      '$normalizedServer/remote.php/dav/calendars/${Uri.encodeComponent(userId)}/',
+    );
     final String password = MMKVUtils.instance.getString(AppConstant.password) ?? "";
 
     // 1. 增加 cs 命名空间定义，并请求该属性
