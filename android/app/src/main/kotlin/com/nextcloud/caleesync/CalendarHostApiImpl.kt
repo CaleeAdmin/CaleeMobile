@@ -142,6 +142,7 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
                                 supportsEvents = true,
                                 supportsTasks = false, // 原生 Android 日历不支持任务
                                 isSubscription = isSubscription,
+                                subscriptionUrl = if (isSubscription) calendarLocation?.trim() else null,
                             )
                         )
                     } catch (e: Exception) {

@@ -26,6 +26,7 @@ class LocalCalendarItem {
   final bool isReadOnly;
   final int eventCount;
   final bool isSubscription;
+  final String? subscriptionUrl;
   bool isConnected;
 
   LocalCalendarItem({
@@ -37,6 +38,7 @@ class LocalCalendarItem {
     required this.isReadOnly,
     required this.eventCount,
     required this.isSubscription,
+    required this.subscriptionUrl,
     required this.isConnected,
   });
 }
@@ -121,6 +123,7 @@ class LocalCalendarPageController extends GetxController {
           isReadOnly: calendar.isReadOnly ?? false,
           eventCount: eventCount,
           isSubscription: calendar.isSubscription ?? false,
+          subscriptionUrl: calendar.subscriptionUrl,
           isConnected: connectedLocalIds.contains(id),
         );
 
@@ -254,24 +257,28 @@ class LocalCalendarPageController extends GetxController {
   }
 
   String? _resolveSubscriptionSourceUrl(LocalCalendarItem item) {
-    final String rawAccountName = item.accountName.trim();
-    if (rawAccountName.isEmpty) {
+    String? normalizeUrl(String? value) {
+      final String raw = (value ?? '').trim();
+      if (raw.isEmpty) {
+        return null;
+      }
+
+      final Uri? parsed = Uri.tryParse(raw);
+      if (parsed == null || !parsed.hasScheme) {
+        return null;
+      }
+
+      final String scheme = parsed.scheme.toLowerCase();
+      if (scheme == 'http' || scheme == 'https') {
+        return raw;
+      }
+      if (scheme == 'webcal') {
+        return parsed.replace(scheme: 'https').toString();
+      }
       return null;
     }
 
-    final Uri? parsed = Uri.tryParse(rawAccountName);
-    if (parsed == null || !parsed.hasScheme) {
-      return null;
-    }
-
-    final String scheme = parsed.scheme.toLowerCase();
-    if (scheme == 'http' || scheme == 'https') {
-      return rawAccountName;
-    }
-    if (scheme == 'webcal') {
-      return parsed.replace(scheme: 'https').toString();
-    }
-    return null;
+    return normalizeUrl(item.subscriptionUrl) ?? normalizeUrl(item.accountName);
   }
 
   Future<void> _refreshMainCalendarList() async {

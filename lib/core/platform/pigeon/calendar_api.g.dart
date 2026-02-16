@@ -27,6 +27,7 @@ class PlatformCalendar {
     this.supportsEvents,
     this.supportsTasks,
     this.isSubscription,
+    this.subscriptionUrl,
   });
 
   String? id;
@@ -46,6 +47,8 @@ class PlatformCalendar {
   bool? supportsTasks;
   bool? isSubscription;
 
+  String? subscriptionUrl;
+
   Object encode() {
     return <Object?>[
       id,
@@ -57,6 +60,7 @@ class PlatformCalendar {
       supportsEvents,
       supportsTasks,
       isSubscription,
+      subscriptionUrl,
     ];
   }
 
@@ -72,6 +76,7 @@ class PlatformCalendar {
       supportsEvents: result[6] as bool?,
       supportsTasks: result[7] as bool?,
       isSubscription: result[8] as bool?,
+      subscriptionUrl: result[9] as String?,
     );
   }
 }

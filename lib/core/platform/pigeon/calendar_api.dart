@@ -21,6 +21,7 @@ class PlatformCalendar {
   bool? supportsEvents;    // 是否支持活动 (VEVENT)
   bool? supportsTasks;     // 是否支持任务 (VTODO)
   bool? isSubscription;    // 是否为订阅型日历（由原生侧判定）
+  String? subscriptionUrl; // 订阅源 URL（由原生侧提供，如 webcal/http/https）
 }
 
 class PlatformItem {
