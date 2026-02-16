@@ -74,14 +74,27 @@ class SyncEngine {
         final bool metaChanged = remote['displayname'] != local['display_name'] ||
             remote['color'] != local['color'];
 
-        if (!remoteChanged && !localChanged && !metaChanged) {
-          debugPrint("💤 日历无任何变动，跳过任务生成: ${remote['displayname']}");
-          continue;
+        final bool shouldSync;
+        final SyncAction action;
+
+        if (mode == 1) {
+          // 双向同步：任意一端变化都应触发
+          shouldSync = remoteChanged || localChanged || metaChanged;
+          action = SyncAction.fullSyncBidi;
+        } else if (origin == 1) {
+          // 只读映射（远端起源）：仅允许远端 -> 本地
+          shouldSync = remoteChanged || metaChanged;
+          action = SyncAction.fullSyncPull;
+        } else {
+          // 只读映射（本地起源）：仅允许本地 -> 远端
+          shouldSync = localChanged;
+          action = SyncAction.fullSyncPush;
         }
 
-        final SyncAction action = (mode == 1)
-            ? SyncAction.fullSyncBidi
-            : ((origin == 1) ? SyncAction.fullSyncPull : SyncAction.fullSyncPush);
+        if (!shouldSync) {
+          debugPrint("💤 日历无可同步变动，跳过任务生成: ${remote['displayname']}");
+          continue;
+        }
 
         contexts.add(_buildContext(remote, local, action));
       }
