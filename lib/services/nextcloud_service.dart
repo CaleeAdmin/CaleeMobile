@@ -667,17 +667,29 @@ class NextcloudService {
     final password = MMKVUtils.instance.getString(AppConstant.password);
 
     // 1. 构建云端路径
-    final calendarPath = '/remote.php/dav/calendars/$userId/$calendarId/';
+    final encodedCalendarId = Uri.encodeComponent(calendarId);
+    final calendarPath = '/remote.php/dav/calendars/$userId/$encodedCalendarId/';
     final uri = Uri.parse('$server$calendarPath');
 
+    // Nextcloud Web 行为：订阅使用 calendarserver 命名空间的 source 属性。
+    // 使用 webcal 时转换为 https，以便服务器能够正常拉取源。
+    final String sourceUrl = _normalizeSubscriptionSourceUrl(icsUrl);
+    final String escapedCalendarName = _escapeXmlText(calendarName);
+    final String escapedSourceUrl = _escapeXmlText(sourceUrl);
+
     // 2. 构建带 source 的 XML 负载
-    // 注意：Nextcloud 识别 <c:source> 来实现远程挂载
+    // 注意：必须使用 <cs:source>（calendarserver namespace）来实现远程挂载。
+    // 使用 <c:source> 会退化为“空普通日历”，导出时只有 VCALENDAR 头没有 VEVENT。
     final xmlBody = '''<?xml version="1.0" encoding="utf-8" ?>
-<c:mkcalendar xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+<c:mkcalendar xmlns:d="DAV:" 
+              xmlns:c="urn:ietf:params:xml:ns:caldav"
+              xmlns:cs="http://calendarserver.org/ns/"
+              xmlns:ic="http://apple.com/ns/ical/">
   <d:set>
     <d:prop>
-      <d:displayname>$calendarName</d:displayname>
-      <c:source><d:href>$icsUrl</d:href></c:source>
+      <d:displayname>$escapedCalendarName</d:displayname>
+      <cs:source><d:href>$escapedSourceUrl</d:href></cs:source>
+      <ic:calendar-color>#248EB5</ic:calendar-color>
       <c:supported-calendar-component-set>
         <c:comp name="VEVENT" />
       </c:supported-calendar-component-set>
@@ -718,5 +730,24 @@ class NextcloudService {
 
   String _getAuthString(String user, String pass) =>
       'Basic ${base64Encode(utf8.encode('$user:$pass'))}';
+
+  String _normalizeSubscriptionSourceUrl(String rawUrl) {
+    final uri = Uri.tryParse(rawUrl.trim());
+    if (uri == null) return rawUrl.trim();
+
+    if (uri.scheme.toLowerCase() == 'webcal') {
+      return uri.replace(scheme: 'https').toString();
+    }
+    return uri.toString();
+  }
+
+  String _escapeXmlText(String value) {
+    return value
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&apos;');
+  }
 
 }
