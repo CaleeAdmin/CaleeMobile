@@ -164,8 +164,12 @@ class _LocalCalendarCard extends StatelessWidget {
                               ),
                             )
                           : TextButton(
-                              onPressed: () {
-                                controller.toggleCalendarSelection(calendar, true);
+                              onPressed: () async {
+                                await controller.toggleCalendarSelection(
+                                  calendar,
+                                  true,
+                                  returnToCalendarListAfterConnect: true,
+                                );
                               },
                               style: TextButton.styleFrom(
                                 backgroundColor: const Color(0xFF111827),
