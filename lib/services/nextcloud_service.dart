@@ -655,7 +655,7 @@ class NextcloudService {
     return null;
   }
 
-  /// [MKCALENDAR] 在云端订阅一个外部公共 ICS 日历
+  /// [MKCOL] 在云端创建一个「订阅日历集合」
   Future<String?> subscribeRemotePublicIcs({
     required String userId,
     required String calendarName,
@@ -669,22 +669,34 @@ class NextcloudService {
     final calendarPath = '/remote.php/dav/calendars/$userId/$calendarId/';
     final uri = Uri.parse('$server$calendarPath');
 
-    // 2. 构建带 source 的 XML 负载
-    // 注意：Nextcloud 识别 <c:source> 来实现远程挂载
+    // 2. 使用 MKCOL 创建订阅集合
+    // 关键点：
+    // - resourcetype 包含 cs:subscribed
+    // - 远程链接写入 cs:source
+    // 这样在 Nextcloud Web UI 中会被识别为订阅日历（只读但允许重命名）
     final xmlBody = '''<?xml version="1.0" encoding="utf-8" ?>
-<c:mkcalendar xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+<d:mkcol xmlns:d="DAV:" 
+         xmlns:c="urn:ietf:params:xml:ns:caldav"
+         xmlns:cs="http://calendarserver.org/ns/">
   <d:set>
     <d:prop>
+      <d:resourcetype>
+        <d:collection />
+        <c:calendar />
+        <cs:subscribed />
+      </d:resourcetype>
       <d:displayname>$calendarName</d:displayname>
-      <c:source><d:href>$icsUrl</d:href></c:source>
+      <cs:source>
+        <d:href>$icsUrl</d:href>
+      </cs:source>
       <c:supported-calendar-component-set>
         <c:comp name="VEVENT" />
       </c:supported-calendar-component-set>
     </d:prop>
   </d:set>
-</c:mkcalendar>''';
+</d:mkcol>''';
 
-    final req = http.Request('MKCALENDAR', uri)
+    final req = http.Request('MKCOL', uri)
       ..headers.addAll({
         'Authorization': _getAuthString(userId, password!),
         'Content-Type': 'application/xml; charset=utf-8',
