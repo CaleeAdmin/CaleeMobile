@@ -57,7 +57,9 @@ data class PlatformCalendar (
   val color: String? = null,
   val isReadOnly: Boolean? = null,
   val supportsEvents: Boolean? = null,
-  val supportsTasks: Boolean? = null
+  val supportsTasks: Boolean? = null,
+  val isSubscription: Boolean? = null,
+  val subscriptionUrl: String? = null
 
 ) {
   companion object {
@@ -71,7 +73,9 @@ data class PlatformCalendar (
       val isReadOnly = __pigeon_list[5] as Boolean?
       val supportsEvents = __pigeon_list[6] as Boolean?
       val supportsTasks = __pigeon_list[7] as Boolean?
-      return PlatformCalendar(id, name, accountName, accountType, color, isReadOnly, supportsEvents, supportsTasks)
+      val isSubscription = __pigeon_list[8] as Boolean?
+      val subscriptionUrl = __pigeon_list[9] as String?
+      return PlatformCalendar(id, name, accountName, accountType, color, isReadOnly, supportsEvents, supportsTasks, isSubscription, subscriptionUrl)
     }
   }
   fun toList(): List<Any?> {
@@ -84,6 +88,8 @@ data class PlatformCalendar (
       isReadOnly,
       supportsEvents,
       supportsTasks,
+      isSubscription,
+      subscriptionUrl,
     )
   }
 }

@@ -20,7 +20,8 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
             CalendarContract.Calendars.ACCOUNT_TYPE, // 对应 accountType
             CalendarContract.Calendars.CALENDAR_COLOR,
             CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL,
-            CalendarContract.Calendars.VISIBLE
+            CalendarContract.Calendars.VISIBLE,
+            CalendarContract.Calendars.CALENDAR_LOCATION
         )
 
         private val EVENT_PROJECTION = arrayOf(
@@ -78,6 +79,7 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
                 val accountTypeIndex = cursor.getColumnIndex(CalendarContract.Calendars.ACCOUNT_TYPE)
                 val colorIndex = cursor.getColumnIndex(CalendarContract.Calendars.CALENDAR_COLOR)
                 val accessLevelIndex = cursor.getColumnIndex(CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL)
+                val locationIndex = cursor.getColumnIndex(CalendarContract.Calendars.CALENDAR_LOCATION)
 
                 // _ID 是必需字段，如果不存在则无法继续
                 if (idIndex < 0) {
@@ -119,6 +121,14 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
                             true // 字段不存在时默认视为只读
                         }
 
+                        val calendarLocation = if (locationIndex >= 0) cursor.getString(locationIndex) else null
+                        val normalizedLocation = calendarLocation?.trim()?.takeIf { it.isNotEmpty() }
+                        val isSubscription = normalizedLocation?.let {
+                            it.startsWith("http://", ignoreCase = true) ||
+                                it.startsWith("https://", ignoreCase = true) ||
+                                it.startsWith("webcal://", ignoreCase = true)
+                        } ?: false
+
                         calendars.add(
                             PlatformCalendar(
                                 id = id,
@@ -128,7 +138,9 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
                                 color = colorHex,
                                 isReadOnly = isReadOnly,
                                 supportsEvents = true,
-                                supportsTasks = false // 原生 Android 日历不支持任务
+                                supportsTasks = false, // 原生 Android 日历不支持任务
+                                isSubscription = isSubscription,
+                                subscriptionUrl = if (isSubscription) normalizedLocation else null
                             )
                         )
                     } catch (e: Exception) {
