@@ -25,6 +25,8 @@ class LocalCalendarItem {
   final String color;
   final bool isReadOnly;
   final int eventCount;
+  final bool isSubscription;
+  final String? subscriptionUrl;
   bool isConnected;
 
   LocalCalendarItem({
@@ -35,6 +37,8 @@ class LocalCalendarItem {
     required this.color,
     required this.isReadOnly,
     required this.eventCount,
+    required this.isSubscription,
+    required this.subscriptionUrl,
     required this.isConnected,
   });
 }
@@ -118,6 +122,8 @@ class LocalCalendarPageController extends GetxController {
           color: calendar.color ?? '#808080',
           isReadOnly: calendar.isReadOnly ?? false,
           eventCount: eventCount,
+          isSubscription: calendar.isSubscription ?? false,
+          subscriptionUrl: calendar.subscriptionUrl,
           isConnected: connectedLocalIds.contains(id),
         );
 
@@ -174,17 +180,37 @@ class LocalCalendarPageController extends GetxController {
             throw Exception('Not logged in to Nextcloud');
           }
 
-          final String cloudCalendarId =
-              'local_${item.id}_${DateTime.now().millisecondsSinceEpoch}';
-          remotePath = await _nextcloudService.createRemoteCalendar(
-            userId: loginName,
-            calendarName: item.name,
-            calendarId: cloudCalendarId,
-            color: item.color,
-          );
+          if (item.isSubscription) {
+            final String? sourceUrl = item.subscriptionUrl?.trim();
+            if (sourceUrl == null || sourceUrl.isEmpty) {
+              throw Exception('Subscription URL is unavailable for this local calendar');
+            }
+
+            final String subscriptionCalendarId =
+                'sub_${item.id}_${DateTime.now().millisecondsSinceEpoch}';
+            remotePath = await _nextcloudService.subscribeRemotePublicIcs(
+              userId: loginName,
+              calendarName: item.name,
+              calendarId: subscriptionCalendarId,
+              icsUrl: sourceUrl,
+            );
+          } else {
+            final String cloudCalendarId =
+                'local_${item.id}_${DateTime.now().millisecondsSinceEpoch}';
+            remotePath = await _nextcloudService.createRemoteCalendar(
+              userId: loginName,
+              calendarName: item.name,
+              calendarId: cloudCalendarId,
+              color: item.color,
+            );
+          }
 
           if (remotePath == null || remotePath.isEmpty) {
-            throw Exception('Failed to create remote calendar');
+            throw Exception(
+              item.isSubscription
+                  ? 'Failed to create remote subscription'
+                  : 'Failed to create remote calendar',
+            );
           }
         }
       }

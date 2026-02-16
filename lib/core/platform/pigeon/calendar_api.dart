@@ -20,6 +20,8 @@ class PlatformCalendar {
   bool? isReadOnly;        // 是否只读（如节假日日历）
   bool? supportsEvents;    // 是否支持活动 (VEVENT)
   bool? supportsTasks;     // 是否支持任务 (VTODO)
+  bool? isSubscription;    // 是否为订阅日历
+  String? subscriptionUrl; // 订阅源地址（若系统可提供）
 }
 
 class PlatformItem {
