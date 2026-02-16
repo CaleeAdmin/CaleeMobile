@@ -676,8 +676,10 @@ class NextcloudService {
     final String escapedSourceUrl = _xmlEscape(sourceUrl);
 
     // 2. 构建带 source 的 XML 负载
-    // 注意：订阅源必须使用 CalendarServer 命名空间 cs:source，
-    // 否则 Nextcloud 会按普通可写日历创建（可分享/可编辑）。
+    // 为尽可能对齐 Nextcloud Web 的“订阅集合”语义：
+    // - resourcetype 显式包含 cs:subscribed
+    // - 同时提供 cs:source 与 d:source（d:source 使用 DAV 标准 link/href 结构）
+    // 否则服务端可能退化为普通可写日历（可分享/可编辑）。
     final xmlBody = '''<?xml version="1.0" encoding="utf-8" ?>
 <c:mkcalendar xmlns:d="DAV:" 
               xmlns:c="urn:ietf:params:xml:ns:caldav"
@@ -685,14 +687,21 @@ class NextcloudService {
               xmlns:o="http://owncloud.org/ns">
   <d:set>
     <d:prop>
+      <d:resourcetype>
+        <d:collection/>
+        <c:calendar/>
+        <cs:subscribed/>
+      </d:resourcetype>
       <d:displayname>$escapedDisplayName</d:displayname>
       <cs:source><d:href>$escapedSourceUrl</d:href></cs:source>
+      <d:source>
+        <d:link>
+          <d:href>$escapedSourceUrl</d:href>
+        </d:link>
+      </d:source>
       <cs:subscribed-strip-todos>1</cs:subscribed-strip-todos>
       <cs:subscribed-strip-alarms>0</cs:subscribed-strip-alarms>
       <o:calendar-enabled>1</o:calendar-enabled>
-      <c:supported-calendar-component-set>
-        <c:comp name="VEVENT" />
-      </c:supported-calendar-component-set>
     </d:prop>
   </d:set>
 </c:mkcalendar>''';
