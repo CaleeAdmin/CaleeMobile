@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:caleesync/core/platform/pigeon/calendar_api.g.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
 import '../data/database_helper.dart';
+import 'CalendarPageController.dart';
 
 class LocalCalendarGroup {
   final String accountName;
@@ -132,7 +135,11 @@ class LocalCalendarPageController extends GetxController {
     }
   }
 
-  Future<void> toggleCalendarSelection(LocalCalendarItem item, bool enabled) async {
+  Future<void> toggleCalendarSelection(
+    LocalCalendarItem item,
+    bool enabled, {
+    bool returnToCalendarListAfterConnect = false,
+  }) async {
     item.isEnabled = enabled;
     calendarGroups.refresh();
 
@@ -163,11 +170,31 @@ class LocalCalendarPageController extends GetxController {
           'origin': 0,
         });
       }
+
+      if (enabled && returnToCalendarListAfterConnect) {
+        await _refreshMainCalendarList();
+        if (Get.isOverlaysOpen == true) {
+          Get.closeAllSnackbars();
+        }
+        if (Get.key.currentState?.canPop() == true) {
+          Get.back<void>();
+        }
+      }
     } catch (e) {
       item.isEnabled = !enabled;
       calendarGroups.refresh();
       debugPrint('❌ Failed to update local calendar switch: $e');
       Get.snackbar('Error', 'Unable to update calendar state');
     }
+  }
+
+  Future<void> _refreshMainCalendarList() async {
+    if (!Get.isRegistered<CalendarPageController>()) {
+      return;
+    }
+
+    final CalendarPageController dashboardController = Get.find<CalendarPageController>();
+    await dashboardController.refreshDashboard(includeEventCounts: false);
+    unawaited(dashboardController.refreshDashboard());
   }
 }

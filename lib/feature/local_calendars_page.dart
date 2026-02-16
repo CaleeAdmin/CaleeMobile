@@ -154,12 +154,36 @@ class _LocalCalendarCard extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(width: 8),
-                      Switch(
-                        value: calendar.isEnabled,
-                        onChanged: (value) {
-                          controller.toggleCalendarSelection(calendar, value);
-                        },
-                      ),
+                      calendar.isEnabled
+                          ? const Text(
+                              'Connected',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF16A34A),
+                              ),
+                            )
+                          : TextButton(
+                              onPressed: () async {
+                                await controller.toggleCalendarSelection(
+                                  calendar,
+                                  true,
+                                  returnToCalendarListAfterConnect: true,
+                                );
+                              },
+                              style: TextButton.styleFrom(
+                                backgroundColor: const Color(0xFF111827),
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                textStyle: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                                minimumSize: Size.zero,
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              ),
+                              child: const Text('Connect'),
+                            ),
                     ],
                   ),
                   const SizedBox(height: 8),
