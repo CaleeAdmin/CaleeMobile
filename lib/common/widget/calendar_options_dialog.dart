@@ -14,11 +14,13 @@ class CalendarOptionsDialog extends StatefulWidget {
 class _CalendarOptionsDialogState extends State<CalendarOptionsDialog> {
   late bool isTwoWay;
   late bool isRenameDisabled;
+  late bool isTwoWayDisabled;
 
   @override
   void initState() {
     super.initState();
     isTwoWay = widget.item.isReadOnly;
+    isTwoWayDisabled = widget.item.isReadOnly || widget.item.isSubscription || widget.item.isLocalReadOnly;
     // origin: 0 = 本地初始化, 1 = 云端同步
     // 本地初始化的映射不允许在主日历页重命名
     isRenameDisabled = widget.item.origin == 0;
@@ -42,7 +44,7 @@ class _CalendarOptionsDialogState extends State<CalendarOptionsDialog> {
                   CheckboxListTile(
                     contentPadding: EdgeInsets.zero,
                     value: isTwoWay,
-                    onChanged: (v) {
+                    onChanged: isTwoWayDisabled ? null : (v) {
                       setState(() {
                         isTwoWay = v ?? false;
                       });
@@ -80,4 +82,3 @@ class _CalendarOptionsDialogState extends State<CalendarOptionsDialog> {
     );
   }
 }
-
