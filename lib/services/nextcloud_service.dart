@@ -633,7 +633,8 @@ class NextcloudService {
   /// 从 ICS 文本中提取日历名称
   Future<String?> getIcsNameFromUrl(String url) async {
     try {
-      final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 10));
+      final String normalizedUrl = _normalizeSubscriptionSource(url);
+      final response = await http.get(Uri.parse(normalizedUrl)).timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 200) {
         final text = response.body;
@@ -666,17 +667,28 @@ class NextcloudService {
     final password = MMKVUtils.instance.getString(AppConstant.password);
 
     // 1. 构建云端路径
-    final calendarPath = '/remote.php/dav/calendars/$userId/$calendarId/';
+    final encodedId = Uri.encodeComponent(calendarId);
+    final calendarPath = '/remote.php/dav/calendars/$userId/$encodedId/';
     final uri = Uri.parse('$server$calendarPath');
+
+    final String sourceUrl = _normalizeSubscriptionSource(icsUrl);
+    final String escapedDisplayName = _xmlEscape(calendarName);
+    final String escapedSourceUrl = _xmlEscape(sourceUrl);
 
     // 2. 构建带 source 的 XML 负载
     // 注意：Nextcloud 识别 <c:source> 来实现远程挂载
     final xmlBody = '''<?xml version="1.0" encoding="utf-8" ?>
-<c:mkcalendar xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+<c:mkcalendar xmlns:d="DAV:" 
+              xmlns:c="urn:ietf:params:xml:ns:caldav"
+              xmlns:cs="http://calendarserver.org/ns/"
+              xmlns:o="http://owncloud.org/ns">
   <d:set>
     <d:prop>
-      <d:displayname>$calendarName</d:displayname>
-      <c:source><d:href>$icsUrl</d:href></c:source>
+      <d:displayname>$escapedDisplayName</d:displayname>
+      <c:source><d:href>$escapedSourceUrl</d:href></c:source>
+      <cs:subscribed-strip-todos>1</cs:subscribed-strip-todos>
+      <cs:subscribed-strip-alarms>0</cs:subscribed-strip-alarms>
+      <o:calendar-enabled>1</o:calendar-enabled>
       <c:supported-calendar-component-set>
         <c:comp name="VEVENT" />
       </c:supported-calendar-component-set>
@@ -695,7 +707,7 @@ class NextcloudService {
       final res = await _client.send(req);
       debugPrint('[Nextcloud] Subscription Status: ${res.statusCode}');
 
-      if (res.statusCode == 201) {
+      if (res.statusCode == 200 || res.statusCode == 201 || res.statusCode == 204 || res.statusCode == 207) {
         return calendarPath;
       } else {
         final body = await res.stream.bytesToString();
@@ -713,6 +725,29 @@ class NextcloudService {
     if (base.endsWith('/')) base = base.substring(0, base.length - 1);
     if (base.startsWith('http://') || base.startsWith('https://')) return base;
     return 'https://$base';
+  }
+
+  String _normalizeSubscriptionSource(String rawUrl) {
+    final Uri? parsed = Uri.tryParse(rawUrl.trim());
+    if (parsed == null) return rawUrl.trim();
+
+    // Nextcloud Web accepts webcal sources and stores them as http(s).
+    if (parsed.scheme == 'webcal') {
+      return parsed.replace(scheme: 'http').toString();
+    }
+    if (parsed.scheme == 'webcals') {
+      return parsed.replace(scheme: 'https').toString();
+    }
+    return parsed.toString();
+  }
+
+  String _xmlEscape(String value) {
+    return value
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&apos;');
   }
 
   String _getAuthString(String user, String pass) =>
