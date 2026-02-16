@@ -22,7 +22,7 @@ class LocalCalendarItem {
   final String color;
   final bool isReadOnly;
   final int eventCount;
-  bool isEnabled;
+  bool isConnected;
 
   LocalCalendarItem({
     required this.id,
@@ -32,7 +32,7 @@ class LocalCalendarItem {
     required this.color,
     required this.isReadOnly,
     required this.eventCount,
-    required this.isEnabled,
+    required this.isConnected,
   });
 }
 
@@ -62,12 +62,11 @@ class LocalCalendarPageController extends GetxController {
       final db = await DatabaseHelper.instance.database;
       final List<Map<String, dynamic>> rows = await db.query(
         'calendar_map',
-        columns: ['local_id', 'is_enabled'],
-        where: 'local_id IS NOT NULL',
+        columns: ['local_id'],
+        where: 'origin = 0 AND local_id IS NOT NULL AND local_id != ""',
       );
-      final Map<String, bool> enabledMap = {
-        for (final row in rows)
-          row['local_id'].toString(): (row['is_enabled'] ?? 0) == 1,
+      final Set<String> connectedLocalIds = {
+        for (final row in rows) row['local_id'].toString(),
       };
 
       final List<Map<String, dynamic>> remoteProvisionedRows = await db.query(
@@ -115,7 +114,7 @@ class LocalCalendarPageController extends GetxController {
           color: calendar.color ?? '#808080',
           isReadOnly: calendar.isReadOnly ?? false,
           eventCount: eventCount,
-          isEnabled: enabledMap[id] ?? false,
+          isConnected: connectedLocalIds.contains(id),
         );
 
         grouped.putIfAbsent(accountName, () => []).add(item);
@@ -140,7 +139,10 @@ class LocalCalendarPageController extends GetxController {
     bool enabled, {
     bool returnToCalendarListAfterConnect = false,
   }) async {
-    item.isEnabled = enabled;
+    final bool previousConnectionState = item.isConnected;
+    if (enabled) {
+      item.isConnected = true;
+    }
     calendarGroups.refresh();
 
     try {
@@ -181,7 +183,7 @@ class LocalCalendarPageController extends GetxController {
         }
       }
     } catch (e) {
-      item.isEnabled = !enabled;
+      item.isConnected = previousConnectionState;
       calendarGroups.refresh();
       debugPrint('❌ Failed to update local calendar switch: $e');
       Get.snackbar('Error', 'Unable to update calendar state');
