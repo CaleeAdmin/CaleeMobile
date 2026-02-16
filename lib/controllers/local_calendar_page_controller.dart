@@ -1,10 +1,13 @@
 import 'dart:async';
 
+import 'package:caleesync/common/app_constant.dart';
+import 'package:caleesync/common/utils/mmkv_utils.dart';
 import 'package:caleesync/core/platform/pigeon/calendar_api.g.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
 import '../data/database_helper.dart';
+import '../services/nextcloud_service.dart';
 import 'CalendarPageController.dart';
 
 class LocalCalendarGroup {
@@ -38,6 +41,7 @@ class LocalCalendarItem {
 
 class LocalCalendarPageController extends GetxController {
   final NativeCalendarApi _nativeApi = NativeCalendarApi();
+  final NextcloudService _nextcloudService = NextcloudService();
 
   final calendarGroups = <LocalCalendarGroup>[].obs;
   final isLoading = false.obs;
@@ -147,15 +151,54 @@ class LocalCalendarPageController extends GetxController {
 
     try {
       final db = await DatabaseHelper.instance.database;
+
+      String? remotePath;
+      if (enabled) {
+        final List<Map<String, dynamic>> existingRows = await db.query(
+          'calendar_map',
+          columns: ['remote_path'],
+          where: 'local_id = ?',
+          whereArgs: [item.id],
+          limit: 1,
+        );
+
+        final String existingRemotePath = existingRows.isNotEmpty
+            ? (existingRows.first['remote_path']?.toString() ?? '')
+            : '';
+
+        if (existingRemotePath.isNotEmpty) {
+          remotePath = existingRemotePath;
+        } else {
+          final String? loginName = MMKVUtils.instance.getString(AppConstant.loginName);
+          if (loginName == null || loginName.isEmpty) {
+            throw Exception('Not logged in to Nextcloud');
+          }
+
+          final String cloudCalendarId =
+              'local_${item.id}_${DateTime.now().millisecondsSinceEpoch}';
+          remotePath = await _nextcloudService.createRemoteCalendar(
+            userId: loginName,
+            calendarName: item.name,
+            calendarId: cloudCalendarId,
+            color: item.color,
+          );
+
+          if (remotePath == null || remotePath.isEmpty) {
+            throw Exception('Failed to create remote calendar');
+          }
+        }
+      }
+
       final int updated = await db.update(
         'calendar_map',
         {
           'is_enabled': enabled ? 1 : 0,
           'display_name': item.name,
-          'account_name': item.accountName,
+          'account_name': MMKVUtils.instance.getString(AppConstant.loginName) ?? item.accountName,
           'account_type': item.accountType,
           'color': item.color,
           'origin': 0,
+          if (enabled && remotePath != null) 'remote_path': remotePath,
         },
         where: 'local_id = ?',
         whereArgs: [item.id],
@@ -164,12 +207,13 @@ class LocalCalendarPageController extends GetxController {
       if (updated == 0) {
         await db.insert('calendar_map', {
           'local_id': item.id,
-          'account_name': item.accountName,
+          'account_name': MMKVUtils.instance.getString(AppConstant.loginName) ?? item.accountName,
           'account_type': item.accountType,
           'display_name': item.name,
           'color': item.color,
           'is_enabled': enabled ? 1 : 0,
           'origin': 0,
+          if (enabled && remotePath != null) 'remote_path': remotePath,
         });
       }
 
