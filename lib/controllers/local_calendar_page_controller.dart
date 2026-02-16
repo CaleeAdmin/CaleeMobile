@@ -174,17 +174,33 @@ class LocalCalendarPageController extends GetxController {
             throw Exception('Not logged in to Nextcloud');
           }
 
-          final String cloudCalendarId =
-              'local_${item.id}_${DateTime.now().millisecondsSinceEpoch}';
-          remotePath = await _nextcloudService.createRemoteCalendar(
-            userId: loginName,
-            calendarName: item.name,
-            calendarId: cloudCalendarId,
-            color: item.color,
-          );
+          if (_isLocalSubscription(item)) {
+            final String? subscriptionSource = _resolveSubscriptionSourceUrl(item);
+            if (subscriptionSource == null) {
+              throw Exception('Unable to determine subscription URL for local subscription calendar');
+            }
+
+            final String cloudSubscriptionId =
+                'sub_local_${item.id}_${DateTime.now().millisecondsSinceEpoch}';
+            remotePath = await _nextcloudService.subscribeRemotePublicIcs(
+              userId: loginName,
+              calendarName: item.name,
+              calendarId: cloudSubscriptionId,
+              icsUrl: subscriptionSource,
+            );
+          } else {
+            final String cloudCalendarId =
+                'local_${item.id}_${DateTime.now().millisecondsSinceEpoch}';
+            remotePath = await _nextcloudService.createRemoteCalendar(
+              userId: loginName,
+              calendarName: item.name,
+              calendarId: cloudCalendarId,
+              color: item.color,
+            );
+          }
 
           if (remotePath == null || remotePath.isEmpty) {
-            throw Exception('Failed to create remote calendar');
+            throw Exception('Failed to create remote calendar or subscription');
           }
         }
       }
@@ -232,6 +248,39 @@ class LocalCalendarPageController extends GetxController {
       debugPrint('❌ Failed to update local calendar switch: $e');
       Get.snackbar('Error', 'Unable to update calendar state');
     }
+  }
+
+  bool _isLocalSubscription(LocalCalendarItem item) {
+    final String accountType = (item.accountType ?? '').toLowerCase();
+    final String accountName = item.accountName.toLowerCase();
+    final String calendarName = item.name.toLowerCase();
+
+    return accountType.contains('subscribed') ||
+        accountType.contains('subscription') ||
+        accountName.contains('webcal://') ||
+        accountName.contains('.ics') ||
+        calendarName.contains('subscription');
+  }
+
+  String? _resolveSubscriptionSourceUrl(LocalCalendarItem item) {
+    final String rawAccountName = item.accountName.trim();
+    if (rawAccountName.isEmpty) {
+      return null;
+    }
+
+    final Uri? parsed = Uri.tryParse(rawAccountName);
+    if (parsed == null || !parsed.hasScheme) {
+      return null;
+    }
+
+    final String scheme = parsed.scheme.toLowerCase();
+    if (scheme == 'http' || scheme == 'https') {
+      return rawAccountName;
+    }
+    if (scheme == 'webcal') {
+      return parsed.replace(scheme: 'https').toString();
+    }
+    return null;
   }
 
   Future<void> _refreshMainCalendarList() async {
