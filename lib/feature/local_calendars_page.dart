@@ -154,7 +154,7 @@ class _LocalCalendarCard extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(width: 8),
-                      calendar.isEnabled
+                      calendar.isConnected
                           ? const Text(
                               'Connected',
                               style: TextStyle(
