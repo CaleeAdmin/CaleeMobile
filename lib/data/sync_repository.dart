@@ -661,34 +661,40 @@ class SyncRepository {
     final String accountName = cal['account_name'] ?? '';
     final String resolvedLocalId = cal['local_id']?.toString() ?? sanitizedLocalId ?? '';
     final String? resolvedRemotePath = cal['remote_path']?.toString() ?? sanitizedRemotePath;
-    final int? syncMode = cal['sync_mode'];
+    final int origin = cal['origin'] ?? 0;
+    final bool shouldDeleteLocalCalendar = origin == 1;
 
     debugPrint("🚀 启动彻底删除流程: ID $resolvedLocalId, Path: $resolvedRemotePath");
 
     try {
-      // --- Step A: 云端删除 ---
-      // 逻辑：有远端路径且非只读时才尝试
-      if (resolvedRemotePath != null && resolvedRemotePath.isNotEmpty && syncMode == 0) {
-        bool cloudOk = await NextcloudService().deleteRemoteCalendar(
-          userId: userId,
-          calendarPath: resolvedRemotePath,
-        );
-        debugPrint(cloudOk ? "✅ 云端销毁成功" : "❌ 云端销毁失败 (状态码不符)");
-      }
-
-      // --- Step B: 本地系统层删除 ---
-      if (resolvedLocalId.isNotEmpty && syncMode == 0) {
-        await _nativeApi.deleteCalendar(resolvedLocalId, accountName);
-        debugPrint("✅ 手机系统日历已移除");
-      }
-    } catch (e) {
-      // 即使 Step A 或 B 出错（比如断网），也要捕获它，防止程序中断
-      debugPrint("⚠️ 物理层删除报错 (但这不影响清理本地库): $e");
-    } finally {
-      // --- Step C: 核心保底 - 本地数据库清理 ---
-      // 无论前面是成功还是失败，必须抹掉本地记录，防止“死而复生”
       await db.transaction((txn) async {
-        // 1. 删除关联的事件追踪 (sync_map)
+        // --- Step A: 云端删除 ---
+        // 逻辑：只要有远端路径就先尝试删除云端；失败则回滚事务，不删本地映射
+        if (resolvedRemotePath != null && resolvedRemotePath.isNotEmpty) {
+          final bool cloudOk = await NextcloudService().deleteRemoteCalendar(
+            userId: userId,
+            calendarPath: resolvedRemotePath,
+          );
+          if (!cloudOk) {
+            throw Exception('云端日历删除失败，终止本地映射删除');
+          }
+          debugPrint("✅ 云端销毁成功");
+        }
+
+        // --- Step B: 本地系统层删除 ---
+        // origin == 0: 日历由本地初始化，只清理云端；保留本地系统日历
+        // origin == 1: 日历由云端初始化，按顺序先删云端，再删本地系统日历
+        if (shouldDeleteLocalCalendar && resolvedLocalId.isNotEmpty) {
+          final bool localOk = await _nativeApi.deleteCalendar(resolvedLocalId, accountName);
+          if (!localOk) {
+            throw Exception('本地系统日历删除失败，终止本地映射删除');
+          }
+          debugPrint("✅ 手机系统日历已移除");
+        } else if (!shouldDeleteLocalCalendar) {
+          debugPrint("ℹ️ 日历来源为本地初始化，跳过本地系统日历删除");
+        }
+
+        // --- Step C: 物理删除成功后，清理数据库 ---
         int sCount = 0;
         if (resolvedLocalId.isNotEmpty) {
           sCount = await txn.delete(
@@ -698,7 +704,6 @@ class SyncRepository {
           );
         }
 
-        // 2. 删除日历自身的配置 (calendar_map)
         final int cCount = resolvedLocalId.isNotEmpty
             ? await txn.delete(
                 'calendar_map',
@@ -713,6 +718,9 @@ class SyncRepository {
 
         debugPrint("🗑️ 数据库清理完毕: 删除了 $sCount 条事件, $cCount 条日历记录");
       });
+    } catch (e) {
+      debugPrint("⚠️ 日历删除未完成，已保留 calendar_map/sync_map: $e");
+      rethrow;
     }
   }
 
