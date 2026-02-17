@@ -563,12 +563,12 @@ class SyncRepository {
 
     // 3. 逻辑判定：纯靠 account_type 区分
     final String accType = cal['account_type'] ?? '';
-    // 如果是 Nextcloud 说明是云端发现的，否则视为系统日历
-    final bool isNextcloudNative = (accType == 'Nextcloud');
+    // 如果是 Calee 说明是云端发现的，否则视为系统日历
+    final bool isCaleeNative = (accType == 'Calee');
 
     return {
       'title': cal['display_name'] ?? 'Primary Calendar',
-      'source': isNextcloudNative ? 'Nextcloud' : 'System',
+      'source': isCaleeNative ? 'Calee' : 'System',
       'url': cal['remote_path'] ?? 'Not linked',
       'owner': cal['account_name'] ?? 'Unknown',
       'eventCount': countResult.first['count'] ?? 0,
@@ -796,7 +796,7 @@ class SyncRepository {
           resolvedLocalId,
           newName,
           userId,
-          accountType == 'NextCloud' ? 'com.viso.caleesync' : accountType,
+          accountType == 'Calee' ? 'com.viso.caleesync' : accountType,
         );
         if (!localRenameOk) {
           throw Exception('系统日历改名失败');

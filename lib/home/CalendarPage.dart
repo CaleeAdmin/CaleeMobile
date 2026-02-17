@@ -463,7 +463,7 @@ class _CalendarCard extends StatelessWidget {
                 Row(
                   children: [
                     Text(
-                      'NextCloud',
+                      'Calee',
                       style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                     ),
                     const SizedBox(width: 8),
