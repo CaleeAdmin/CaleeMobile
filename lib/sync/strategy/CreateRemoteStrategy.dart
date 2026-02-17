@@ -67,17 +67,17 @@ class CreateRemoteStrategy extends SyncStrategy {
         );
 
         if (etag != null) {
-          // 3. 写入 sync_map
-          await db.insert('sync_map', {
+          // 3. 写入 sync_items
+          await db.insert('sync_items', {
             'uid': uid,
             'local_id': event.localId,
-            'calendar_local_id': ctx.calendarId,
+            'remote_collection_id': ctx.calendarId,
             'summary': title,
             'description': event.notes,
             'dtstart': startTime,
             'dtend': endTime,
-            'last_etag': etag,
-            'last_mtime': event.lastModified ?? 0,
+            'remote_etag': etag,
+            'remote_mtime': event.lastModified ?? 0,
             'remote_href':
                 "${resultPath.endsWith('/') ? resultPath : '$resultPath/'}$uid.ics",
             'sync_status': 0,
@@ -86,7 +86,7 @@ class CreateRemoteStrategy extends SyncStrategy {
       }
 
       await db.update(
-        'calendar_map',
+        'remote_collections',
         {
           'remote_path': resultPath, // 核心：存入刚开好的云端坑位路径
         },

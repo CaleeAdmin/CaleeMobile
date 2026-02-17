@@ -24,10 +24,10 @@ class FullSyncPullStrategy extends SyncStrategy {
       );
       final db = await dbHelper.database;
 
-      // 2. 获取本地 sync_map 缓存
+      // 2. 获取本地 sync_items 缓存
       final List<Map<String, dynamic>> localSyncRecords = await db.query(
-        'sync_map',
-        where: 'calendar_local_id = ?',
+        'sync_items',
+        where: 'remote_collection_id = ?',
         whereArgs: [localCalendarId],
       );
       final Map<String, Map<String, dynamic>> localSyncMap = {
@@ -45,7 +45,7 @@ class FullSyncPullStrategy extends SyncStrategy {
         final localRecord = localSyncMap[uid];
 
         // 只有 ETag 不一致时才触发原生操作
-        if (localRecord == null || localRecord['last_etag'] != etag) {
+        if (localRecord == null || localRecord['remote_etag'] != etag) {
           // 调用新增的 createOrUpdateEvent 接口
           // 如果 localRecord 为 null，eventId 传 null 触发原生 Insert
           final request = CalendarEventRequest(
@@ -64,12 +64,12 @@ class FullSyncPullStrategy extends SyncStrategy {
           );
 
           if (systemEventId != null) {
-            await db.insert('sync_map', {
+            await db.insert('sync_items', {
               'uid': uid,
               'local_id': systemEventId,
-              'calendar_local_id': localCalendarId,
+              'remote_collection_id': localCalendarId,
               'summary': remoteEvent['summary'],
-              'last_etag': etag,
+              'remote_etag': etag,
               'remote_href': remoteEvent['href'],
               'sync_status': 0,
             }, conflictAlgorithm: ConflictAlgorithm.replace);
@@ -83,14 +83,14 @@ class FullSyncPullStrategy extends SyncStrategy {
           final recordToDelete = localSyncMap[uid]!;
           final bool isDeleted = await nativeApi.deleteEvent(recordToDelete['local_id']);
           if (isDeleted) {
-            await db.delete('sync_map', where: 'uid = ?', whereArgs: [uid]);
+            await db.delete('sync_items', where: 'uid = ?', whereArgs: [uid]);
           }
         }
       }
 
       // 5. 更新日历 CTAG
-      await db.update('calendar_map',
-          {'synced_ctag': newCtag},
+      await db.update('remote_collections',
+          {'ctag': newCtag},
           where: 'remote_path = ? AND account_name = ?',
           whereArgs: [remotePath, accountName]);
 

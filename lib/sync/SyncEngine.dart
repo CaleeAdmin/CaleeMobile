@@ -29,7 +29,7 @@ class SyncEngine {
     // 1. 获取该用户下的所有本地数据库记录（包含状态为 2 的记录）
     final db = await _dbHelper.database;
     final List<Map<String, dynamic>> localRecords = await db.query(
-      'calendar_map',
+      'remote_collections',
       where: 'account_name = ? AND remote_path IS NOT NULL AND remote_path != ""',
       whereArgs: [userId],
     );
@@ -67,7 +67,7 @@ class SyncEngine {
       }
 
       if (isEnabled == 1) {
-        final String? dbCtag = local['synced_ctag'];
+        final String? dbCtag = local['ctag'];
         final String? remoteCtag = remote['ctag'];
         final bool remoteChanged = (remoteCtag != null && remoteCtag != dbCtag);
         final bool localChanged = await _isCalendarDirty(db, localId);
@@ -123,8 +123,8 @@ class SyncEngine {
   Future<bool> _isCalendarDirty(Database db, String localId) async {
     // 这里的状态码对应：1 (Dirty/Modified), 2 (Deleted)
     final List<Map<String, dynamic>> dirtyCheck = await db.rawQuery('''
-    SELECT 1 FROM sync_map 
-    WHERE calendar_local_id = ? AND sync_status IN (1, 2) 
+    SELECT 1 FROM sync_items
+    WHERE remote_collection_id = ? AND sync_status IN (1, 2)
     LIMIT 1
   ''', [localId]);
     return dirtyCheck.isNotEmpty;
@@ -140,7 +140,7 @@ class SyncEngine {
       color: remote['color'] ?? local?['color'] ?? "#AARRGGBB",
       syncMode: local?['sync_mode'] ?? remote['sync_mode'] ?? 0,
       action: action,
-      ctag: remote['ctag'] ?? local?['synced_ctag'],
+      ctag: remote['ctag'] ?? local?['ctag'],
       isSubscription: remote['is_subscription'] ?? false,
       extra: {
         'origin': local?['origin'] ?? 0,
@@ -264,7 +264,7 @@ class SyncEngine {
       // 2. 获取本地数据库中该用户已有的所有日历记录
       final db = await DatabaseHelper.instance.database;
       final List<Map<String, dynamic>> localRecords = await db.query(
-        'calendar_map',
+        'remote_collections',
         where: 'account_name = ? AND remote_path IS NOT NULL AND remote_path != ""',
         whereArgs: [userId],
       );
@@ -292,7 +292,7 @@ class SyncEngine {
 
           // B. 从数据库映射表中彻底抹除
           await db.delete(
-            'calendar_map',
+            'remote_collections',
             where: localId.isNotEmpty ? 'local_id = ?' : 'remote_path = ?',
             whereArgs: [localId.isNotEmpty ? localId : localRemotePath],
           );
@@ -305,7 +305,7 @@ class SyncEngine {
         final String displayName = rc['display_name'] ?? '未命名';
 
         final List<Map<String, dynamic>> existing = await db.query(
-          'calendar_map',
+          'remote_collections',
           where: 'remote_path = ?',
           whereArgs: [path],
         );
@@ -314,7 +314,7 @@ class SyncEngine {
           // ✅ 场景 A: 路径已存在 -> 更新元数据
           print("🔗 [同步] 路径 $path 已匹配，更新元数据: $displayName");
           await db.update(
-            'calendar_map',
+            'remote_collections',
             {
               'display_name': displayName,
               'account_name': userId,
@@ -328,7 +328,7 @@ class SyncEngine {
         } else {
           // ✅ 场景 B: 全新云端日历 -> 插入新记录
           print("🆕 [云端发现] 创建新映射: $displayName");
-          await db.insert('calendar_map', {
+          await db.insert('remote_collections', {
             'account_name': userId,
             'account_type': 'com.viso.caleesync',
             'display_name': displayName,
@@ -353,8 +353,8 @@ class SyncEngine {
 
     // 1. 获取本地数据库中该日历下的所有同步记录
     final List<Map<String, dynamic>> locals = await db.query(
-        'sync_map',
-        where: 'calendar_local_id = ?',
+        'sync_items',
+        where: 'remote_collection_id = ?',
         whereArgs: [ctx.calendarId]
     );
 
@@ -380,7 +380,7 @@ class SyncEngine {
         try {
           bool success = await _nc.deleteEvent(eventPath: deletePath);
           if (success) {
-            await db.delete('sync_map', where: 'uid = ?', whereArgs: [uid]);
+            await db.delete('sync_items', where: 'uid = ?', whereArgs: [uid]);
             print("   -> ✅ 云端删除成功，本地映射已移除");
           }
         } catch (e) {
@@ -402,7 +402,7 @@ class SyncEngine {
           await _uploadToCloud(local, currentRemotePath);
         }
         // 1. 云端 ETag 变更，需要拉取更新
-        else if (local['last_etag'] != remote['etag']) {
+        else if (local['remote_etag'] != remote['etag']) {
           print("   -> 📥 判定动作: 云端 ETag 变更，执行下载更新 (Pull)");
           await _downloadFromCloud(remote, ctx);
         }
@@ -428,7 +428,7 @@ class SyncEngine {
               print("      ! 系统事件删除失败 (可能已手动删除): $e");
             }
           }
-          await db.delete('sync_map', where: 'uid = ?', whereArgs: [uid]);
+          await db.delete('sync_items', where: 'uid = ?', whereArgs: [uid]);
         } else if (status == 1) {
           print("   -> 🚀 判定动作: 本地新增，准备同步至云端");
           await _uploadToCloud(local, currentRemotePath);
@@ -505,11 +505,11 @@ class SyncEngine {
     //
     // // 更新数据库（无论原生是否成功，都要更新数据库里的信息，确保 Dashboard 正确）
     // final db = await DatabaseHelper.instance.database;
-    // await db.insert('sync_map', {
+    // await db.insert('sync_items', {
     //   'uid': remote['uid'],
     //   'local_id': systemEventId ?? 'v_${remote['uid']}', // 有系统 ID 用系统 ID，没有用虚拟
-    //   'calendar_local_id': ctx.calendarId,
-    //   'last_etag': remote['etag'],
+    //   'remote_collection_id': ctx.calendarId,
+    //   'remote_etag': remote['etag'],
     //   'summary': parsed['summary'],
     //   'dtstart': parsed['dtstart'],
     //   'dtend': parsed['dtend'],

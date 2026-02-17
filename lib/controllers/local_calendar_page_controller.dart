@@ -5,6 +5,7 @@ import 'package:caleesync/common/utils/mmkv_utils.dart';
 import 'package:caleesync/core/platform/pigeon/calendar_api.g.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:sqflite/sqflite.dart';
 
 import '../data/database_helper.dart';
 import '../services/calee_server_service.dart';
@@ -70,7 +71,7 @@ class LocalCalendarPageController extends GetxController {
 
       final db = await DatabaseHelper.instance.database;
       final List<Map<String, dynamic>> rows = await db.query(
-        'calendar_map',
+        'remote_collections',
         columns: ['local_id'],
         where: 'origin = 0 AND local_id IS NOT NULL AND local_id != ""',
       );
@@ -79,7 +80,7 @@ class LocalCalendarPageController extends GetxController {
       };
 
       final List<Map<String, dynamic>> remoteProvisionedRows = await db.query(
-        'calendar_map',
+        'remote_collections',
         columns: ['local_id'],
         where: 'origin = 1 AND local_id IS NOT NULL AND local_id != ""',
       );
@@ -167,7 +168,7 @@ class LocalCalendarPageController extends GetxController {
       String? remotePath;
       if (enabled) {
         final List<Map<String, dynamic>> existingRows = await db.query(
-          'calendar_map',
+          'remote_collections',
           columns: ['remote_path'],
           where: 'local_id = ?',
           whereArgs: [item.id],
@@ -222,7 +223,7 @@ class LocalCalendarPageController extends GetxController {
       }
 
       final int updated = await db.update(
-        'calendar_map',
+        'remote_collections',
         {
           'is_enabled': enabled ? 1 : 0,
           'display_name': item.name,
@@ -240,8 +241,10 @@ class LocalCalendarPageController extends GetxController {
       );
 
       if (updated == 0) {
-        await db.insert('calendar_map', {
+        await db.insert('remote_collections', {
           'local_id': item.id,
+          'server_id': item.accountType,
+          'kind': 'calendar',
           'account_name': MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? item.accountName,
           'account_type': item.accountType,
           'display_name': item.name,
@@ -253,6 +256,28 @@ class LocalCalendarPageController extends GetxController {
           'subscription_url': item.subscriptionUrl,
           if (enabled && remotePath != null) 'remote_path': remotePath,
         });
+      }
+
+      final mapped = await db.query(
+        'remote_collections',
+        columns: ['id'],
+        where: 'local_id = ?',
+        whereArgs: [item.id],
+        limit: 1,
+      );
+      if (mapped.isNotEmpty) {
+        await db.insert(
+          'local_bindings',
+          {
+            'remote_collection_id': mapped.first['id'],
+            'local_provider': 'android_calendar',
+            'local_container_id': item.id,
+            'sync_mode': 0,
+            'is_enabled': enabled ? 1 : 0,
+            'origin': 0,
+          },
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
       }
 
       if (enabled && returnToCalendarListAfterConnect) {

@@ -14,7 +14,7 @@ class CaleeServerService {
   final http.Client _client = http.Client();
   final DatabaseHelper _dbHelper = DatabaseHelper.instance;
 
-  /// 1. 获取并解析云端日历 (对应 calendar_map)
+  /// 1. 获取并解析云端日历 (对应 remote_collections)
   Future<List<Map<String, dynamic>>> scanRemoteCalendars({
     required String serverUrl,
     required String userId,
@@ -152,32 +152,36 @@ class CaleeServerService {
         // 新创建的映射统一默认只读，后续由用户在 UI 中手动切换同步模式。
         const int defaultSyncMode = 0;
         await txn.rawInsert('''
-        INSERT INTO calendar_map (
-          remote_path, 
-          display_name, 
-          synced_ctag, 
-          sync_mode, 
-          color, 
-          account_name, 
-          account_type, -- 新增字段
-          origin, 
+        INSERT INTO remote_collections (
+          server_id,
+          kind,
+          remote_path,
+          display_name,
+          ctag,
+          sync_mode,
+          color,
+          account_name,
+          account_type,
+          origin,
           is_enabled,
           is_subscription,
           subscription_url
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) -- 增加订阅字段
-        ON CONFLICT(remote_path) DO UPDATE SET
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(server_id, account_name, kind, remote_path) DO UPDATE SET
           display_name = excluded.display_name,
-          synced_ctag = excluded.synced_ctag,
+          ctag = excluded.ctag,
           -- 仅在插入时使用默认值；更新时保留用户已选择的同步模式。
           -- 只有当远端提供了新颜色且不为空时才更新本地颜色
           color = CASE WHEN excluded.color IS NOT NULL AND excluded.color != "" 
                        THEN excluded.color 
-                       ELSE calendar_map.color END,
+                       ELSE remote_collections.color END,
           is_subscription = excluded.is_subscription,
           subscription_url = excluded.subscription_url
           -- 注意：这里没有写 account_type = excluded.account_type，
           -- 所以如果是更新旧记录，account_type 会维持原样。
       ''', [
+              baseUrl,
+              'calendar',
               map['remote_path'],
               map['display_name'],
               map['ctag'],
@@ -196,13 +200,13 @@ class CaleeServerService {
       if (currentRemotePaths.isNotEmpty) {
         final placeholders = List.filled(currentRemotePaths.length, '?').join(',');
         await txn.delete(
-          'calendar_map',
+          'remote_collections',
           where: 'account_name = ? AND origin = 1 AND remote_path NOT IN ($placeholders)',
           whereArgs: [accountName, ...currentRemotePaths],
         );
       } else {
         await txn.delete(
-          'calendar_map',
+          'remote_collections',
           where: 'account_name = ? AND origin = 1',
           whereArgs: [accountName],
         );
@@ -210,7 +214,7 @@ class CaleeServerService {
     });
   }
 
-  /// 2. 获取并解析云端条目 (对应 sync_map)
+  /// 2. 获取并解析云端条目 (对应 sync_items)
   final String baseUrl = "https://nc-dev.ywpl.com.au";
 
   /// 核心方法：统一获取事件（适配普通与订阅日历）
