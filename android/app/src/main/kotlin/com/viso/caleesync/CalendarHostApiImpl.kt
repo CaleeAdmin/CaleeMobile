@@ -1,4 +1,4 @@
-package com.nextcloud.caleesync
+package com.viso.caleesync
 
 import android.Manifest
 import android.content.ContentUris
@@ -169,7 +169,7 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
         color: Long,
         callback: (Result<String?>) -> Unit
     ) {
-        val accountType = "com.nextcloud.caleesync"
+        val accountType = "com.viso.caleesync"
         val cr = context.contentResolver
 
         // 1. 构建带有 SyncAdapter 标识的 URI
@@ -229,7 +229,7 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
         // 建议在子线程执行
         Thread {
             try {
-                val accountType = "com.nextcloud.caleesync"
+                val accountType = "com.viso.caleesync"
                 val cr = context.contentResolver
                 val idLong = calendarId.toLongOrNull() ?: throw IllegalArgumentException("Invalid ID")
 
@@ -375,11 +375,11 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
             }
 
             // 2. 构建带有同步权限的 URI
-            // 注意：ACCOUNT_TYPE 必须与你创建日历时写死的一致 (建议统一用 com.nextcloud.caleesync)
+            // 注意：ACCOUNT_TYPE 必须与你创建日历时写死的一致 (建议统一用 com.viso.caleesync)
             val syncUri = CalendarContract.Events.CONTENT_URI.buildUpon()
                 .appendQueryParameter(CalendarContract.CALLER_IS_SYNCADAPTER, "true")
                 .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_NAME, foundAccountName)
-                .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_TYPE, "com.nextcloud.caleesync")
+                .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_TYPE, "com.viso.caleesync")
                 .build()
 
             val values = ContentValues().apply {

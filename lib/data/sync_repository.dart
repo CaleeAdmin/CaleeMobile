@@ -775,7 +775,7 @@ class SyncRepository {
     final String userId = cal['account_name'] as String;
     final String accountType = (cal['account_type'] as String?)?.trim().isNotEmpty == true
         ? (cal['account_type'] as String)
-        : 'com.nextcloud.caleesync';
+        : 'com.viso.caleesync';
 
     try {
       // 2. 先改云端 (如果失败，建议直接抛异常，不改本地)
@@ -796,7 +796,7 @@ class SyncRepository {
           resolvedLocalId,
           newName,
           userId,
-          accountType == 'NextCloud' ? 'com.nextcloud.caleesync' : accountType,
+          accountType == 'NextCloud' ? 'com.viso.caleesync' : accountType,
         );
         if (!localRenameOk) {
           throw Exception('系统日历改名失败');

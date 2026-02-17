@@ -1,9 +1,9 @@
-package com.nextcloud.caleesync
+package com.viso.caleesync
 
 import android.util.Log
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
-import com.nextcloud.caleesync.NativeCalendarApi
+import com.viso.caleesync.NativeCalendarApi
 
 class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
