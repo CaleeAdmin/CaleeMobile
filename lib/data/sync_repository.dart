@@ -36,7 +36,7 @@ class SyncRepository {
         await txn.update(
           'sync_items',
           {'sync_status': 2}, // 标记为待同步删除
-          where: 'remote_collection_id = ? AND sync_status = 0 AND local_id NOT IN ($placeholders)',
+          where: 'remote_collection_id = ? AND sync_status = 0 AND local_item_id NOT IN ($placeholders)',
           whereArgs: [ctx.calendarId, ...currentLocalIds],
         );
       } else {
@@ -49,13 +49,13 @@ class SyncRepository {
       // --- 步骤 2: 处理新增或修改 ---
       for (var event in currentEvents) {
         // 💡 核心改动：通过 local_id（系统唯一标识）来查找映射表
-        final localRows = await txn.query('sync_items', where: 'local_id = ?', whereArgs: [event.localId]);
+        final localRows = await txn.query('sync_items', where: 'local_item_id = ?', whereArgs: [event.localId]);
 
         if (localRows.isEmpty) {
           // A. 系统里有，但映射表没有 -> 用户手动在手机上新建的
           await txn.insert('sync_items', {
             'uid': event.uid, // 使用原生生成的 system_event_$id
-            'local_id': event.localId,
+            'local_item_id': event.localId,
             'remote_collection_id': ctx.calendarId,
             'summary': event.title,
             'dtstart': event.startTime,
@@ -77,7 +77,7 @@ class SyncRepository {
               'dtstart': event.startTime,
               'dtend': event.endTime,
               'sync_status': 1,
-            }, where: 'local_id = ?', whereArgs: [event.localId]);
+            }, where: 'local_item_id = ?', whereArgs: [event.localId]);
             print("🔍 发现手机端修改日程: ${event.title}");
           }
         }
@@ -137,7 +137,7 @@ class SyncRepository {
         whereArgs: [remoteCollectionId],
       );
       final Map<String, Map<String, dynamic>> dbMap = {
-        for (var r in dbRecords) r['local_id'].toString(): r
+        for (var r in dbRecords) r['local_item_id'].toString(): r
       };
 
       await db.transaction((txn) async {
@@ -152,7 +152,7 @@ class SyncRepository {
             debugPrint("🆕 发现本地物理新增: ${systemEvent.title}");
             await txn.insert('sync_items', {
               'uid': systemEvent.uid ?? 'local_${DateTime.now().microsecondsSinceEpoch}',
-              'local_id': sid,
+              'local_item_id': sid,
               'remote_collection_id': remoteCollectionId,
               'summary': systemEvent.title,
               'remote_mtime': systemEvent.lastModified,
@@ -173,7 +173,7 @@ class SyncRepository {
                   'remote_mtime': systemMtime,
                   'sync_status': 1, // 标记为 Dirty，待 Push
                 },
-                where: 'local_id = ?',
+                where: 'local_item_id = ?',
                 whereArgs: [sid],
               );
             }
@@ -182,14 +182,14 @@ class SyncRepository {
 
         // --- 环节二：处理【删除】 ---
         for (var record in dbRecords) {
-          final String mappedId = record['local_id'].toString();
+          final String mappedId = record['local_item_id'].toString();
           if (!systemSnap.containsKey(mappedId)) {
             // 💡 情况 C：数据库有，系统没了。说明用户在系统日历删了。
             debugPrint("🗑️ 发现本地物理删除: ${record['summary']}");
             await txn.update(
               'sync_items',
               {'sync_status': 2}, // 标记为 Deleted，待通知云端
-              where: 'local_id = ?',
+              where: 'local_item_id = ?',
               whereArgs: [mappedId],
             );
           }
@@ -271,7 +271,7 @@ class SyncRepository {
           // 新增逻辑... (保持你原来的代码)
           await txn.insert('sync_items', {
             'uid': eventUid,
-            'local_id': event.localId,
+            'local_item_id': event.localId,
             'remote_collection_id': remoteCollectionId,
             'summary': event.title ?? '无标题',
             'description': event.notes,
@@ -342,7 +342,7 @@ class SyncRepository {
 
     for (var local in localEntries) {
       final String uid = local['uid'] as String;
-      final String? localId = local['local_id'] as String?;
+      final String? localId = local['local_item_id'] as String?;
       final String summary = (local['summary'] ?? "无标题") as String;
 
       // 如果本地标记为已同步(0)但云端没了，说明云端删除了
@@ -397,7 +397,7 @@ class SyncRepository {
         if (newLocalId != null) {
           await db.insert('sync_items', {
             'uid': uid,
-            'local_id': newLocalId,
+            'local_item_id': newLocalId,
             'remote_collection_id': calendarLocalId,
             'summary': parsed['summary'],
             'remote_etag': etag,
@@ -424,7 +424,7 @@ class SyncRepository {
     );
 
     for (var entry in trackedEvents) {
-      final String localId = entry['local_id'];
+      final String localId = entry['local_item_id'];
       final String uid = entry['uid'];
 
       if (!systemEventIds.contains(localId)) {
@@ -506,7 +506,7 @@ class SyncRepository {
       'sync_items',
       {
         'uid': uid,
-        'local_id': localId,
+        'local_item_id': localId,
         'remote_collection_id': remote['remote_collection_id'], // 确保这个字段被传入
         'remote_etag': etag,
         'sync_status': 0,    // 0 表示已同步状态
@@ -528,7 +528,7 @@ class SyncRepository {
       'sync_items',
       {
         'uid': item.uid,
-        'local_id': item.localId,
+        'local_item_id': item.localId,
         'calendar_id': calendarId, // 修正错误 2：由于 PlatformItem 可能没存 calendarId，我们作为参数传入
         'remote_href': href,
         'remote_etag': etag,
@@ -996,8 +996,8 @@ class SyncRepository {
       // 确保属于这个日历的所有事件记录都能关联到新的系统 ID
       await txn.update(
         'sync_items',
-        {'local_id': newSystemId},
-        where: 'local_id = ?',
+        {'local_item_id': newSystemId},
+        where: 'local_item_id = ?',
         whereArgs: [oldLocalId],
       );
     });

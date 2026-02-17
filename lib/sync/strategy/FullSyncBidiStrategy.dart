@@ -65,11 +65,11 @@ class FullSyncBidiStrategy extends SyncStrategy {
         if (cloudChanged && localChanged) {
           // 💡 场景：冲突！双方都改了。策略：以云端为准（或你可以根据 mtime 判定谁更晚）
           debugPrint("⚠️ 冲突检测: $uid, 采用云端覆盖本地");
-          await _pullFromRemote(remote, localCalendarId, localBase?['local_id']?.toString(), remoteEtag, db);
+          await _pullFromRemote(remote, localCalendarId, localBase?['local_item_id']?.toString(), remoteEtag, db);
           changeCount++;
         } else if (cloudChanged) {
           // 💡 场景：仅云端更新或新增 -> 下拉
-          await _pullFromRemote(remote, localCalendarId, localBase?['local_id']?.toString(), remoteEtag, db);
+          await _pullFromRemote(remote, localCalendarId, localBase?['local_item_id']?.toString(), remoteEtag, db);
           changeCount++;
         } else if (localChanged) {
           // 💡 场景：仅本地更新 -> 上传
@@ -81,7 +81,7 @@ class FullSyncBidiStrategy extends SyncStrategy {
       // --- 阶段 B: 处理删除与本地新增 ---
       for (var uid in syncMap.keys) {
         final record = syncMap[uid]!;
-        final String? localId = record['local_id']?.toString();
+        final String? localId = record['local_item_id']?.toString();
         final String? href = record['remote_href'];
         final String? etag = record['remote_etag'];
 
@@ -160,7 +160,7 @@ class FullSyncBidiStrategy extends SyncStrategy {
     if (newSystemId != null) {
       await db.insert('sync_items', {
         'uid': eventData.uid,
-        'local_id': newSystemId,
+        'local_item_id': newSystemId,
         'remote_collection_id': calendarId,
         'remote_etag': etag,
         'remote_mtime': DateTime.now().millisecondsSinceEpoch, // 更新基准时间，避免刚拉下来又推上去
@@ -185,7 +185,7 @@ class FullSyncBidiStrategy extends SyncStrategy {
     if (newEtag != null) {
       await db.insert('sync_items', {
         'uid': uid,
-        'local_id': local.localId,
+        'local_item_id': local.localId,
         'remote_collection_id': calendarId,
         'remote_etag': newEtag.replaceAll('"', ''),
         'remote_mtime': local.lastModified,

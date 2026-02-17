@@ -68,7 +68,7 @@ class CreateLocalStrategy extends SyncStrategy {
         // 5. 差异比对：ETag 没变且本地已有系统 ID 则跳过
         if (localSyncMap.containsKey(remoteUid)) {
           final localEtag = localSyncMap[remoteUid]!['remote_etag'];
-          final localSystemId = localSyncMap[remoteUid]!['local_id'];
+          final localSystemId = localSyncMap[remoteUid]!['local_item_id'];
           if (localEtag == remoteEtag && localSystemId != null) {
             eventSuccessCount++;
             continue;
@@ -91,8 +91,8 @@ class CreateLocalStrategy extends SyncStrategy {
           end: eventData.dtend,
           notes: eventData.description,
           uid: eventData.uid,
-          // 关键：传入已有的 local_id 则触发原生 Update
-          eventId: localSyncMap[eventData.uid]?['local_id']?.toString(),
+          // 关键：传入已有的 local_item_id 则触发原生 Update
+          eventId: localSyncMap[eventData.uid]?['local_item_id']?.toString(),
         );
 
         try {
@@ -103,7 +103,7 @@ class CreateLocalStrategy extends SyncStrategy {
             // 9. 更新 sync_items 映射
             await db.insert('sync_items', {
               'uid': eventData.uid,
-              'local_id': systemEventId,
+              'local_item_id': systemEventId,
               'remote_collection_id': newLocalId,
               'summary': eventData.summary,
               'remote_etag': remoteEtag,

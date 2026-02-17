@@ -34,9 +34,9 @@ class FullSyncPushStrategy extends SyncStrategy {
         whereArgs: [ctx.calendarId],
       );
 
-      // 转换为 Map 方便快速查找: {local_id: record}
+      // 转换为 Map 方便快速查找: {local_item_id: record}
       final Map<String, Map<String, dynamic>> localSyncMap = {
-        for (var r in mappedRecords) r['local_id'].toString(): r
+        for (var r in mappedRecords) r['local_item_id'].toString(): r
       };
 
       int changeCount = 0;
@@ -75,7 +75,7 @@ class FullSyncPushStrategy extends SyncStrategy {
             // 更新映射表记录最新的 ETag 和修改时间
             await db.insert('sync_items', {
               'uid': uid,
-              'local_id': localId,
+              'local_item_id': localId,
               'remote_collection_id': ctx.calendarId,
               'summary': local.title,
               'remote_etag': newEtag.replaceAll('"', ''),
@@ -100,7 +100,7 @@ class FullSyncPushStrategy extends SyncStrategy {
           if (href != null) {
             final bool isDeletedOnRemote = await nc.deleteEvent(eventPath: href);
             if (isDeletedOnRemote) {
-              await db.delete('sync_items', where: 'local_id = ?', whereArgs: [localId]);
+              await db.delete('sync_items', where: 'local_item_id = ?', whereArgs: [localId]);
               changeCount++;
             }
           }

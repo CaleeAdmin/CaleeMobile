@@ -81,7 +81,6 @@ class DatabaseHelper {
         uid TEXT NOT NULL,
         recurrence_id TEXT,
         local_item_id TEXT,
-        local_id TEXT,
         remote_href TEXT,
         remote_etag TEXT,
         remote_mtime INTEGER,
