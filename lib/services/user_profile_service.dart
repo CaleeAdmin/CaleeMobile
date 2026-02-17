@@ -11,7 +11,7 @@ class UserProfileService {
 
   Uri _buildUri(String path) {
     final rawServer =
-        MMKVUtils.instance.getString(AppConstant.serverKey) ?? AppConstant.nextcloudServer;
+        MMKVUtils.instance.getString(AppConstant.serverKey) ?? AppConstant.caleeServer;
     var server = rawServer.trim();
     if (!server.startsWith('http://') && !server.startsWith('https://')) {
       server = 'https://$server';
@@ -53,7 +53,7 @@ class UserProfileService {
     final password = MMKVUtils.instance.getString(AppConstant.appPasswordKey) ?? '';
 
     if (userId.isEmpty || password.isEmpty) {
-      throw Exception('Missing Nextcloud credentials');
+      throw Exception('Missing Calee credentials');
     }
 
     final uri = _buildUri('/ocs/v2.php/cloud/user?format=json');
@@ -103,7 +103,7 @@ class UserProfileService {
     final password = MMKVUtils.instance.getString(AppConstant.appPasswordKey) ?? '';
 
     if (userId.isEmpty || password.isEmpty) {
-      throw Exception('Missing Nextcloud credentials');
+      throw Exception('Missing Calee credentials');
     }
 
     final uri = _buildUri('/ocs/v2.php/cloud/users/${Uri.encodeComponent(userId)}?format=json');
@@ -157,7 +157,7 @@ class UserProfileService {
     final userId = MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? '';
 
     if (userId.isEmpty) {
-      throw Exception('Missing Nextcloud credentials');
+      throw Exception('Missing Calee credentials');
     }
 
     final validateUri = _buildUri('/ocs/v2.php/cloud/user?format=json');

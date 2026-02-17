@@ -141,7 +141,7 @@ class _LoginPageState extends State<LoginPage> {
 
   Future<void> _openForgotPasswordPage() async {
     final resetPasswordUri = Uri.https(
-      AppConstant.nextcloudServer,
+      AppConstant.caleeServer,
       '/index.php/login',
     );
 

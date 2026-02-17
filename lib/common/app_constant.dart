@@ -2,8 +2,8 @@
 class AppConstant {
   AppConstant._();
 
-  /// Nextcloud 服务器地址
-  static const String nextcloudServer = 'nc-dev.ywpl.com.au';
+  /// Calee 服务器地址
+  static const String caleeServer = 'nc-dev.ywpl.com.au';
 
   /// MMKV 存储 Key
   static const String serverKey = 'calee_server';

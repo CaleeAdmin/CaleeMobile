@@ -47,7 +47,7 @@ class PublicSubscriptionsService {
         cookieMap[name] = value;
       }
       if (cookieMap.isNotEmpty) {
-        // Prefer the common Nextcloud session cookies order: oc_sessionPassphrase, ocrpwmt1k7ny
+        // Prefer the common Calee session cookies order: oc_sessionPassphrase, ocrpwmt1k7ny
         final preferred = <String>['oc_sessionPassphrase', 'ocrpwmt1k7ny'];
         final parts = <String>[];
         for (final key in preferred) {

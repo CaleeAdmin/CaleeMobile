@@ -20,7 +20,7 @@ class DashboardPage extends StatefulWidget {
 class _DashboardPageState extends State<DashboardPage> {
   final SyncRepository _repo = SyncRepository();
   final CaleeServerService _nc = CaleeServerService();
-  final CaleeAuthService _authService = CaleeAuthService(serverBaseUrl: AppConstant.nextcloudServer);
+  final CaleeAuthService _authService = CaleeAuthService(serverBaseUrl: AppConstant.caleeServer);
 
   @override
   void initState() {

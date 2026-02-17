@@ -32,7 +32,7 @@ class _ProfilePageState extends State<ProfilePage> {
     super.initState();
     // Load account name from stored credentials
     _loadAccountName();
-    _loadProfileFromNextcloud();
+    _loadProfileFromCalee();
   }
 
   void _loadAccountName() {
@@ -52,7 +52,7 @@ class _ProfilePageState extends State<ProfilePage> {
 
 
 
-  Future<void> _loadProfileFromNextcloud() async {
+  Future<void> _loadProfileFromCalee() async {
     try {
       final profile = await _profileService.fetchCurrentProfile();
       if (!mounted) return;

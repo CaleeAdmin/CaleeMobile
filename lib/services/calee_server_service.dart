@@ -343,7 +343,7 @@ class CaleeServerService {
     required String calendarId,
     required String color, // 格式应为 #RRGGBB 或 #RRGGBBAA
   }) async {
-    final server = _normalizeServer(AppConstant.nextcloudServer);
+    final server = _normalizeServer(AppConstant.caleeServer);
     final password = MMKVUtils.instance.getString(AppConstant.appPasswordKey);
 
     final encodedId = Uri.encodeComponent(calendarId);
@@ -381,11 +381,11 @@ class CaleeServerService {
         return calendarPath;
       } else {
         final body = await res.stream.bytesToString();
-        debugPrint('[Nextcloud] MKCALENDAR Failed: ${res.statusCode} - $body');
+        debugPrint('[Calee] MKCALENDAR Failed: ${res.statusCode} - $body');
         return null;
       }
     } catch (e) {
-      debugPrint('[Nextcloud] MKCALENDAR Exception: $e');
+      debugPrint('[Calee] MKCALENDAR Exception: $e');
       return null;
     }
   }
@@ -453,14 +453,14 @@ class CaleeServerService {
         return etag ?? "pending_etag";
       } else if (response.statusCode == 412) {
         // 冲突：云端已存在。对于场景 1，这通常意味着该日程之前已经上传成功了
-        print("[Nextcloud] Event already exists, skipping upload.");
+        print("[Calee] Event already exists, skipping upload.");
         return "exists";
       } else {
-        print("[Nextcloud] PUT Failed: ${response.statusCode} - ${response.body}");
+        print("[Calee] PUT Failed: ${response.statusCode} - ${response.body}");
         return null;
       }
     } catch (e) {
-      print("[Nextcloud] Network Error during PUT: $e");
+      print("[Calee] Network Error during PUT: $e");
       return null;
     }
   }
@@ -505,7 +505,7 @@ class CaleeServerService {
     final baseUrl = "https://nc-dev.ywpl.com.au";
     final url = "$baseUrl${path.startsWith('/') ? path : '/$path'}";
 
-    print("[Nextcloud] 准备上传事件至: $url");
+    print("[Calee] 准备上传事件至: $url");
 
     try {
       final response = await http.put(
@@ -521,14 +521,14 @@ class CaleeServerService {
       if (response.statusCode == 201 || response.statusCode == 204) {
         // 🚀 核心：成功后，云端通常会在 Header 中返回 ETag
         String? etag = response.headers['etag']?.replaceAll('"', '');
-        print("[Nextcloud] 上传成功，新 ETag: $etag");
+        print("[Calee] 上传成功，新 ETag: $etag");
         return etag;
       } else {
-        print("[Nextcloud] 上传失败，状态码: ${response.statusCode}, 响应: ${response.body}");
+        print("[Calee] 上传失败，状态码: ${response.statusCode}, 响应: ${response.body}");
         return null;
       }
     } catch (e) {
-      print("[Nextcloud] 上传异常: $e");
+      print("[Calee] 上传异常: $e");
       return null;
     }
   }
@@ -573,7 +573,7 @@ class CaleeServerService {
     required String userId,
     required String calendarPath,
   }) async {
-    final server = _normalizeServer(AppConstant.nextcloudServer);
+    final server = _normalizeServer(AppConstant.caleeServer);
     final password = MMKVUtils.instance.getString(AppConstant.appPasswordKey);
 
     if (password == null) return false;
@@ -582,7 +582,7 @@ class CaleeServerService {
     final String fullUrl = "${server.replaceAll(RegExp(r'/+$'), '')}/${calendarPath.replaceAll(RegExp(r'^/+'), '')}/";
     final uri = Uri.parse(fullUrl);
 
-    debugPrint('[Nextcloud] 🚀 DELETE Calendar: $fullUrl');
+    debugPrint('[Calee] 🚀 DELETE Calendar: $fullUrl');
 
     try {
       final response = await _client.delete(
@@ -593,7 +593,7 @@ class CaleeServerService {
         },
       ).timeout(const Duration(seconds: 15));
 
-      debugPrint('[Nextcloud] DELETE Status: ${response.statusCode}');
+      debugPrint('[Calee] DELETE Status: ${response.statusCode}');
 
       // 204 No Content 是标准成功响应
       // 200 OK 有时也会返回
@@ -602,10 +602,10 @@ class CaleeServerService {
         return true;
       }
 
-      debugPrint('[Nextcloud] DELETE 失败响应体: ${response.body}');
+      debugPrint('[Calee] DELETE 失败响应体: ${response.body}');
       return false;
     } catch (e) {
-      debugPrint('[Nextcloud] DELETE 异常: $e');
+      debugPrint('[Calee] DELETE 异常: $e');
       return false;
     }
   }
@@ -615,7 +615,7 @@ class CaleeServerService {
     required String calendarPath,
     required String newName,
   }) async {
-    final server = _normalizeServer(AppConstant.nextcloudServer);
+    final server = _normalizeServer(AppConstant.caleeServer);
     final password = MMKVUtils.instance.getString(AppConstant.appPasswordKey);
     final uri = Uri.parse('$server$calendarPath');
 
@@ -672,7 +672,7 @@ class CaleeServerService {
     required String calendarId, // 这里的 ID 建议用 sub_时间戳
     required String icsUrl,     // 外部公共 ICS 链接
   }) async {
-    final server = _normalizeServer(AppConstant.nextcloudServer);
+    final server = _normalizeServer(AppConstant.caleeServer);
     final password = MMKVUtils.instance.getString(AppConstant.appPasswordKey);
 
     // 1. 构建云端路径
@@ -683,7 +683,7 @@ class CaleeServerService {
     // 关键点：
     // - resourcetype 包含 cs:subscribed
     // - 远程链接写入 cs:source
-    // 这样在 Nextcloud Web UI 中会被识别为订阅日历（只读但允许重命名）
+    // 这样在 Calee Web UI 中会被识别为订阅日历（只读但允许重命名）
     final xmlBody = '''<?xml version="1.0" encoding="utf-8" ?>
 <d:mkcol xmlns:d="DAV:" 
          xmlns:c="urn:ietf:params:xml:ns:caldav"
@@ -715,17 +715,17 @@ class CaleeServerService {
 
     try {
       final res = await _client.send(req);
-      debugPrint('[Nextcloud] Subscription Status: ${res.statusCode}');
+      debugPrint('[Calee] Subscription Status: ${res.statusCode}');
 
       if (res.statusCode == 201) {
         return calendarPath;
       } else {
         final body = await res.stream.bytesToString();
-        debugPrint('[Nextcloud] Subscription Failed Body: $body');
+        debugPrint('[Calee] Subscription Failed Body: $body');
         return null;
       }
     } catch (e) {
-      debugPrint('[Nextcloud] Subscription Exception: $e');
+      debugPrint('[Calee] Subscription Exception: $e');
       return null;
     }
   }

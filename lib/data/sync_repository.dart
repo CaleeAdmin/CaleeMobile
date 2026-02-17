@@ -608,7 +608,7 @@ class SyncRepository {
         {
           'local_id': newId,
           'remote_path': remotePath, // 确保路径被继承
-          // 这里不改 account_type，它依然是最初定义的 Nextcloud 或 com.google
+          // 这里不改 account_type，它依然是最初定义的 Calee 或 com.google
         },
         where: 'local_id = ?',
         whereArgs: [oldId],
@@ -854,7 +854,7 @@ class SyncRepository {
 
       // 2. 创建成功后立即重扫远端列表，由统一流程落库。
       await CaleeServerService().scanRemoteCalendars(
-        serverUrl: AppConstant.nextcloudServer,
+        serverUrl: AppConstant.caleeServer,
         userId: userId,
       );
 
@@ -888,7 +888,7 @@ class SyncRepository {
     if (remotePath != null) {
       // 通过统一远端扫描流程落库，再补充来源 URL。
       await CaleeServerService().scanRemoteCalendars(
-        serverUrl: AppConstant.nextcloudServer,
+        serverUrl: AppConstant.caleeServer,
         userId: userId,
       );
 
@@ -983,7 +983,7 @@ class SyncRepository {
   // 4. 数据提取 (For Sync Engine)
   // ==========================================
 
-  /// 获取所有需要上传到 Nextcloud 的记录
+  /// 获取所有需要上传到 Calee 的记录
   Future<List<Map<String, dynamic>>> getPendingUploads() async {
     final db = await _dbHelper.database;
     return await db.query(

@@ -45,7 +45,7 @@ class LocalCalendarItem {
 
 class LocalCalendarPageController extends GetxController {
   final NativeCalendarApi _nativeApi = NativeCalendarApi();
-  final CaleeServerService _nextcloudService = CaleeServerService();
+  final CaleeServerService _caleeService = CaleeServerService();
 
   final calendarGroups = <LocalCalendarGroup>[].obs;
   final isLoading = false.obs;
@@ -183,7 +183,7 @@ class LocalCalendarPageController extends GetxController {
         } else {
           final String? loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey);
           if (loginName == null || loginName.isEmpty) {
-            throw Exception('Not logged in to Nextcloud');
+            throw Exception('Not logged in to Calee');
           }
 
           if (item.isSubscription) {
@@ -194,7 +194,7 @@ class LocalCalendarPageController extends GetxController {
 
             final String subscriptionCalendarId =
                 'sub_${item.id}_${DateTime.now().millisecondsSinceEpoch}';
-            remotePath = await _nextcloudService.subscribeRemotePublicIcs(
+            remotePath = await _caleeService.subscribeRemotePublicIcs(
               userId: loginName,
               calendarName: item.name,
               calendarId: subscriptionCalendarId,
@@ -203,7 +203,7 @@ class LocalCalendarPageController extends GetxController {
           } else {
             final String cloudCalendarId =
                 'local_${item.id}_${DateTime.now().millisecondsSinceEpoch}';
-            remotePath = await _nextcloudService.createRemoteCalendar(
+            remotePath = await _caleeService.createRemoteCalendar(
               userId: loginName,
               calendarName: item.name,
               calendarId: cloudCalendarId,

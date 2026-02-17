@@ -15,7 +15,7 @@ class PublicSubscriptionsController extends GetxController {
   @override
   void onInit() {
     super.onInit();
-    final base = AppConstant.nextcloudServer;
+    final base = AppConstant.caleeServer;
     _service = PublicSubscriptionsService(baseUrl: "https://portal.calee.com.au");
     load();
   }

@@ -4,19 +4,19 @@ import 'package:caleesync/common/app_constant.dart';
 import 'package:caleesync/models/auth_state.dart';
 import 'package:caleesync/services/calee_auth_service.dart';
 
-/// Nextcloud 认证服务 Provider（使用常量中的服务器地址）
+/// Calee 认证服务 Provider（使用常量中的服务器地址）
 final caleeAuthServiceProvider = Provider<CaleeAuthService>((ref) {
-  return CaleeAuthService(serverBaseUrl: AppConstant.nextcloudServer);
+  return CaleeAuthService(serverBaseUrl: AppConstant.caleeServer);
 });
 
-/// Nextcloud 登录状态 Provider
+/// Calee 登录状态 Provider
 final authStateProvider =
     StateNotifierProvider<AuthNotifier, AuthState>((ref) {
   final service = ref.watch(caleeAuthServiceProvider);
   return AuthNotifier(service);
 });
 
-/// Nextcloud 登录状态管理器
+/// Calee 登录状态管理器
 class AuthNotifier extends StateNotifier<AuthState> {
   final CaleeAuthService _service;
   Timer? _pollTimer;
