@@ -3,9 +3,7 @@ import 'package:caleesync/home/sync_settings_page.dart';
 import 'package:caleesync/home/task_lists_page.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import '../sync/SyncEngine.dart';
 import '../controllers/calendar_probe_controller.dart';
-import '../data/sync_repository.dart';
 import 'DashboardPage.dart';
 import 'CalendarPage.dart';
 import '../feature/link_device_page.dart';
@@ -109,18 +107,37 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
         ],
         centerTitle: true,
       ),
-      body: Column(
-        children: [
-          // Top navigation icons row
-          _buildBottomNavigation(),
-          // Main content area - use IndexedStack to preserve state of pages and avoid re-initialization
-          Expanded(
-            child: Obx(() => IndexedStack(
-                  index: _ctrl.selectedIndex.value,
-                  children: _pages,
-                )),
-          ),
-        ],
+      body: Obx(() => IndexedStack(
+            index: _ctrl.selectedIndex.value,
+            children: _pages,
+          )),
+      bottomNavigationBar: Obx(
+        () => NavigationBar(
+          selectedIndex: _ctrl.selectedIndex.value,
+          onDestinationSelected: _ctrl.setSelectedIndex,
+          destinations: const [
+            NavigationDestination(
+              icon: Icon(Icons.dashboard_outlined),
+              selectedIcon: Icon(Icons.dashboard),
+              label: 'Dashboard',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.calendar_today_outlined),
+              selectedIcon: Icon(Icons.calendar_today),
+              label: 'Calendars',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.checklist_outlined),
+              selectedIcon: Icon(Icons.checklist),
+              label: 'Task Lists',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.settings_outlined),
+              selectedIcon: Icon(Icons.settings),
+              label: 'Sync Settings',
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -236,52 +253,4 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
     );
   }
 
-  Widget _buildBottomNavigation() {
-    return Obx(() {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
-      decoration: const BoxDecoration(
-        color: Colors.white,
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
-        children: [
-          _buildNavItem(Icons.dashboard_outlined, 'Dashboard', 0),
-          _buildNavItem(Icons.calendar_today_outlined, 'Calendars', 1),
-          _buildNavItem(Icons.checklist_outlined, 'Task Lists', 2),
-          _buildNavItem(Icons.settings, 'Sync Settings', 3),
-        ],
-      ),
-    );
-    });
-  }
-
-  Widget _buildNavItem(IconData icon, String label, int index) {
-    final isSelected = _ctrl.selectedIndex.value == index;
-    // Last item (Sync Settings) should have dark background when selected
-    final isLastItem = index == 3;
-    
-    return GestureDetector(
-      onTap: () {
-        _ctrl.setSelectedIndex(index);
-      },
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-        decoration: BoxDecoration(
-          color: isSelected 
-              ? (isLastItem ? const Color(0xFF1A1A1C) : Colors.black87)
-              : Colors.transparent,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Icon(
-          icon,
-          color: isSelected 
-              ? Colors.white 
-              : (isLastItem && !isSelected ? Colors.black54 : Colors.black54),
-          size: 24,
-        ),
-      ),
-    );
-  }
 }

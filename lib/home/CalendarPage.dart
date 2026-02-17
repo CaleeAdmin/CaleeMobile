@@ -1,4 +1,3 @@
-import 'package:caleesync/core/platform/pigeon/calendar_api.g.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -7,7 +6,6 @@ import 'package:caleesync/feature/local_calendars_page.dart';
 import 'package:caleesync/feature/public_subscriptions_page.dart';
 
 import '../controllers/CalendarPageController.dart';
-import '../data/database_helper.dart';
 
 class CalendarPage extends StatefulWidget {
   const CalendarPage({super.key});
@@ -58,39 +56,260 @@ class _CalendarPageState extends State<CalendarPage> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      child: Obx(() {
-        if (controller.isLoading.value) {
-          return const Center(child: CircularProgressIndicator());
-        }
-
-        final calendars = controller.calendars;
-        if (calendars.isEmpty) {
-          return RefreshIndicator(
-            onRefresh: controller.refreshDashboard,
-            child: ListView(
-              children: const [
-                SizedBox(height: 120),
-                Center(child: Text('No calendars found')),
-              ],
-            ),
-          );
-        }
-
-        return RefreshIndicator(
-          onRefresh: controller.refreshDashboard,
-          child: ListView(
-            padding: const EdgeInsets.all(16),
+  Future<void> _showQuickActionsSheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Wrap(
             children: [
-              _CalendarCard(calendars: calendars),
+              ListTile(
+                leading: const Icon(Icons.add),
+                title: const Text('New Calendar'),
+                onTap: () async {
+                  Navigator.of(sheetContext).pop();
+                  final TextEditingController newCalCtrl = TextEditingController();
+                  final res = await showDialog<bool>(
+                    context: context,
+                    builder: (dialogContext) {
+                      return Dialog(
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  const Text('New Calendar', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+                                  IconButton(
+                                    icon: const Icon(Icons.close),
+                                    onPressed: () => Navigator.of(dialogContext).pop(false),
+                                  )
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              const Text('Create a new calendar in your Calee account', style: TextStyle(color: Colors.black54)),
+                              const SizedBox(height: 12),
+                              const Align(
+                                alignment: Alignment.centerLeft,
+                                child: Text('Calendar Name', style: TextStyle(fontSize: 13, color: Colors.black54)),
+                              ),
+                              const SizedBox(height: 6),
+                              TextField(
+                                controller: newCalCtrl,
+                                decoration: InputDecoration(
+                                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                                  isDense: true,
+                                  hintText: 'Enter calendar name',
+                                ),
+                              ),
+                              const SizedBox(height: 14),
+                              SizedBox(
+                                width: double.infinity,
+                                child: ElevatedButton(
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.black,
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                  ),
+                                  child: const Text('Confirm', style: TextStyle(color: Colors.white)),
+                                  onPressed: () async {
+                                    final nm = newCalCtrl.text.trim();
+                                    final ok = await Get.find<CalendarPageController>().createNewLocalCalendar(nm);
+                                    if (ok) {
+                                      Navigator.of(dialogContext).pop(true);
+                                    } else {
+                                      Navigator.of(dialogContext).pop(false);
+                                    }
+                                  },
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              SizedBox(
+                                width: double.infinity,
+                                child: OutlinedButton(
+                                  style: OutlinedButton.styleFrom(
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                  ),
+                                  child: const Text('Cancel', style: TextStyle(color: Colors.black)),
+                                  onPressed: () => Navigator.of(dialogContext).pop(false),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  );
+                  if (res == true) {
+                    Get.snackbar('Created', 'New calendar created (placeholder)');
+                  }
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.add_link),
+                title: const Text('New subscription'),
+                onTap: () {
+                  Navigator.of(sheetContext).pop();
+                  showDialog<bool>(
+                    context: context,
+                    builder: (dialogContext) {
+                      final TextEditingController urlCtrl = TextEditingController();
+                      final ValueNotifier<bool> isSubmitting = ValueNotifier<bool>(false);
+                      return Dialog(
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  const Text('New Subscription from Link', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+                                  IconButton(
+                                    icon: const Icon(Icons.close),
+                                    onPressed: () => Navigator.of(dialogContext).pop(false),
+                                  )
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              const Text('Subscribe to a read-only calendar using a URL', style: TextStyle(color: Colors.black54)),
+                              const SizedBox(height: 12),
+                              const Align(
+                                alignment: Alignment.centerLeft,
+                                child: Text('Calendar URL', style: TextStyle(fontSize: 13, color: Colors.black54)),
+                              ),
+                              const SizedBox(height: 6),
+                              TextField(
+                                controller: urlCtrl,
+                                decoration: InputDecoration(
+                                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                                  isDense: true,
+                                  hintText: 'https://example.com/calendar.ics',
+                                ),
+                              ),
+                              const SizedBox(height: 14),
+                              SizedBox(
+                                width: double.infinity,
+                                child: ValueListenableBuilder<bool>(
+                                  valueListenable: isSubmitting,
+                                  builder: (context, submitting, _) {
+                                    return ElevatedButton(
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.black,
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                      ),
+                                      onPressed: submitting
+                                          ? null
+                                          : () async {
+                                              isSubmitting.value = true;
+                                              final url = urlCtrl.text.trim();
+                                              final ok = await Get.find<CalendarPageController>().subscribePublicIcs(url);
+                                              isSubmitting.value = false;
+                                              if (ok) {
+                                                Navigator.of(dialogContext).pop(true);
+                                              } else {
+                                                Navigator.of(dialogContext).pop(false);
+                                              }
+                                            },
+                                      child: submitting
+                                          ? const SizedBox(
+                                              width: 18,
+                                              height: 18,
+                                              child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                              ),
+                                            )
+                                          : const Text('Confirm', style: TextStyle(color: Colors.white)),
+                                    );
+                                  },
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              SizedBox(
+                                width: double.infinity,
+                                child: OutlinedButton(
+                                  style: OutlinedButton.styleFrom(
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                  ),
+                                  child: const Text('Cancel', style: TextStyle(color: Colors.black)),
+                                  onPressed: () => Navigator.of(dialogContext).pop(false),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  );
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.public),
+                title: const Text('Subscribe to Calee Calendar'),
+                onTap: () {
+                  Navigator.of(sheetContext).pop();
+                  Get.to(() => const PublicSubscriptionsGetxPage());
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.link),
+                title: const Text('Connect to local Calendar'),
+                onTap: () {
+                  Navigator.of(sheetContext).pop();
+                  Get.to(() => const LocalCalendarsPage());
+                },
+              ),
             ],
           ),
         );
-      }),
+      },
     );
   }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      floatingActionButton: FloatingActionButton(
+        onPressed: _showQuickActionsSheet,
+        child: const Icon(Icons.add),
+      ),
+      body: SafeArea(
+        child: Obx(() {
+          if (controller.isLoading.value) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          final calendars = controller.calendars;
+          if (calendars.isEmpty) {
+            return RefreshIndicator(
+              onRefresh: controller.refreshDashboard,
+              child: ListView(
+                children: const [
+                  SizedBox(height: 120),
+                  Center(child: Text('No calendars found')),
+                ],
+              ),
+            );
+          }
+
+          return RefreshIndicator(
+            onRefresh: controller.refreshDashboard,
+            child: ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                _CalendarCard(calendars: calendars),
+              ],
+            ),
+          );
+        }),
+      ),
+    );
+  }
+
 }
 
 extension on _CalendarRow {
@@ -261,248 +480,6 @@ class _CalendarCard extends StatelessWidget {
                 ),
               ],
             ),
-            // Nextcloud specific quick actions
-            ...[
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: () async {
-                    final TextEditingController _newCalCtrl = TextEditingController();
-                    final res = await showDialog<bool>(
-                      context: context,
-                      builder: (context) {
-                        return Dialog(
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                          child: Padding(
-                            padding: const EdgeInsets.all(16),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    const Text('New Calendar', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
-                                    IconButton(
-                                      icon: const Icon(Icons.close),
-                                      onPressed: () => Navigator.of(context).pop(false),
-                                    )
-                                  ],
-                                ),
-                                const SizedBox(height: 8),
-                                const Text('Create a new calendar in your Calee account', style: TextStyle(color: Colors.black54)),
-                                const SizedBox(height: 12),
-                                Align(
-                                  alignment: Alignment.centerLeft,
-                                  child: Text('Calendar Name', style: TextStyle(fontSize: 13, color: Colors.black54)),
-                                ),
-                                const SizedBox(height: 6),
-                                TextField(
-                                  controller: _newCalCtrl,
-                                  decoration: InputDecoration(
-                                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                                    isDense: true,
-                                    hintText: 'Enter calendar name',
-                                  ),
-                                ),
-                                const SizedBox(height: 14),
-                                SizedBox(
-                                  width: double.infinity,
-                                  child: ElevatedButton(
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.black,
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                    ),
-                                    child: const Text('Confirm', style: TextStyle(color: Colors.white)),
-                                    onPressed: () async {
-                                      final nm = _newCalCtrl.text.trim();
-                                      // 调用 controller 的方法创建新日历（含输入校验）
-                                      final ok = await Get.find<CalendarPageController>().createNewLocalCalendar(nm);
-                                      if (ok) {
-                                        Navigator.of(context).pop(true);
-                                      } else {
-                                        Navigator.of(context).pop(false);
-                                      }
-                                    },
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                SizedBox(
-                                  width: double.infinity,
-                                  child: OutlinedButton(
-                                    style: OutlinedButton.styleFrom(
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                    ),
-                                    child: const Text('Cancel', style: TextStyle(color: Colors.black)),
-                                    onPressed: () => Navigator.of(context).pop(false),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        );
-                      },
-                    );
-                    if (res == true) {
-                      Get.snackbar('Created', 'New calendar created (placeholder)');
-                      // TODO: actually create calendar via repository
-                    }
-                  },
-                  icon: const Icon(Icons.add, size: 16),
-                  label: const Text('New Calendar'),
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    side: BorderSide(color: Colors.grey.shade300),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    foregroundColor: Colors.black87,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: () {
-                    // 弹出订阅链接对话框
-                    showDialog<bool>(
-                      context: context,
-                      builder: (context) {
-                        final TextEditingController _urlCtrl = TextEditingController();
-                        final ValueNotifier<bool> isSubmitting = ValueNotifier<bool>(false);
-                        return Dialog(
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                          child: Padding(
-                            padding: const EdgeInsets.all(16),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    const Text('New Subscription from Link', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
-                                    IconButton(
-                                      icon: const Icon(Icons.close),
-                                      onPressed: () => Navigator.of(context).pop(false),
-                                    )
-                                  ],
-                                ),
-                                const SizedBox(height: 8),
-                                const Text('Subscribe to a read-only calendar using a URL', style: TextStyle(color: Colors.black54)),
-                                const SizedBox(height: 12),
-                                Align(
-                                  alignment: Alignment.centerLeft,
-                                  child: Text('Calendar URL', style: TextStyle(fontSize: 13, color: Colors.black54)),
-                                ),
-                                const SizedBox(height: 6),
-                                TextField(
-                                  controller: _urlCtrl,
-                                  decoration: InputDecoration(
-                                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                                    isDense: true,
-                                    hintText: 'https://example.com/calendar.ics',
-                                  ),
-                                ),
-                                const SizedBox(height: 14),
-                                SizedBox(
-                                  width: double.infinity,
-                                  child: ValueListenableBuilder<bool>(
-                                    valueListenable: isSubmitting,
-                                    builder: (context, submitting, _) {
-                                      return ElevatedButton(
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: Colors.black,
-                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                        ),
-                                        onPressed: submitting
-                                            ? null
-                                            : () async {
-                                                isSubmitting.value = true;
-                                                final url = _urlCtrl.text.trim();
-                                                final ok = await Get.find<CalendarPageController>().subscribePublicIcs(url);
-                                                isSubmitting.value = false;
-                                                if (ok) {
-                                                  Navigator.of(context).pop(true);
-                                                } else {
-                                                  Navigator.of(context).pop(false);
-                                                }
-                                              },
-                                        child: submitting
-                                            ? const SizedBox(
-                                                width: 18,
-                                                height: 18,
-                                                child: CircularProgressIndicator(
-                                                  strokeWidth: 2,
-                                                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                                                ),
-                                              )
-                                            : const Text('Confirm', style: TextStyle(color: Colors.white)),
-                                      );
-                                    },
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                SizedBox(
-                                  width: double.infinity,
-                                  child: OutlinedButton(
-                                    style: OutlinedButton.styleFrom(
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                    ),
-                                    child: const Text('Cancel', style: TextStyle(color: Colors.black)),
-                                    onPressed: () => Navigator.of(context).pop(false),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        );
-                      },
-                    );
-                  },
-                  icon: const Icon(Icons.add, size: 16),
-                  label: const Text('New subscription'),
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    side: BorderSide(color: Colors.grey.shade300),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    foregroundColor: Colors.black87,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  onPressed: () {
-                    Get.to(() => const PublicSubscriptionsGetxPage());
-                  },
-                  icon: const Icon(Icons.add, size: 16),
-                  label: const Text('Subscribe to Calee Calendar'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF43A047),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: () {
-                    Get.to(() => const LocalCalendarsPage());
-                  },
-                  icon: const Icon(Icons.link, size: 16),
-                  label: const Text('Connect to local Calendar'),
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    side: BorderSide(color: Colors.grey.shade300),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    foregroundColor: Colors.black87,
-                  ),
-                ),
-              ),
-            ],
             const SizedBox(height: 12),
             Column(
               children: calendars
