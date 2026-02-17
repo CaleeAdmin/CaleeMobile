@@ -580,7 +580,7 @@ class SyncRepository {
     final db = await DatabaseHelper.instance.database;
 
     await db.transaction((txn) async {
-      // 1. 查找老记录（带有虚拟 ID 和可能已存在的 remote_path 的记录）
+      // 1. 查找旧记录，并保留关键字段
       final List<Map<String, dynamic>> oldRecords = await txn.query(
         'calendar_map',
         where: 'local_id = ?',
@@ -588,7 +588,7 @@ class SyncRepository {
       );
 
       if (oldRecords.isEmpty) {
-        print("⚠️ [ID 洗白] 未找到旧 ID: $oldId，可能已处理过。");
+        print("⚠️ [ID 迁移] 未找到旧 ID: $oldId，可能已处理过。");
         return;
       }
 
@@ -597,18 +597,16 @@ class SyncRepository {
       final String? remotePath = oldRecord['remote_path'];
       final String? accountType = oldRecord['account_type'];
 
-      // 2. 🌟 预清理冲突：如果新 ID (比如 '7') 已经存在记录（例如 scanLocalCalendars 扫出来的）
-      // 我们先删除它，因为我们要把“带路径”的老记录合并过去
+      // 2. 预清理冲突：若新 ID 已存在记录，先清理后再迁移
       await txn.delete('calendar_map', where: 'local_id = ?', whereArgs: [newId]);
 
-      // 3. 执行核心洗白：将虚拟 ID 改为真实系统 ID
-      // 注意：我们这里不显式 update account_type，它会随着整行保留下来
+      // 3. 执行核心迁移：将旧 local_id 更新为新 local_id
+      // 注意：不显式更新 account_type，保留原值
       final calendarUpdateCount = await txn.update(
         'calendar_map',
         {
           'local_id': newId,
-          'remote_path': remotePath, // 确保路径被继承
-          // 这里不改 account_type，它依然是最初定义的 Calee 或 com.google
+          'remote_path': remotePath,
         },
         where: 'local_id = ?',
         whereArgs: [oldId],
@@ -622,7 +620,7 @@ class SyncRepository {
         whereArgs: [oldId],
       );
 
-      print("✅ [ID 洗白成功] $oldId -> $newId");
+      print("✅ [ID 迁移成功] $oldId -> $newId");
       print("📌 属性保留: AccountType=$accountType, RemotePath=$remotePath");
       print("📊 统计: 日历更新($calendarUpdateCount), 事件外键关联($eventUpdateCount)");
     });

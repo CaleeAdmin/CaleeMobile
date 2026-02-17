@@ -196,7 +196,7 @@ class SyncEngine {
 
 
       // try {
-      //   // --- 💡 ID 洗白逻辑 ---
+      //   // --- 💡 ID 迁移逻辑 ---
       //   // --- 💡 路径处理逻辑重构：针对回流场景的“先认亲，后新建” ---
       //   // 1. 获取当前远程路径
       //   String? currentRemotePath = ctx.remotePath;
@@ -224,7 +224,7 @@ class SyncEngine {
       //   }
       //
       //   // 6. 双向合并逻辑
-      //   // 在这里，_processMerging 会通过补建逻辑 (v_ 判断) 把数据写入新创建的系统日历中
+      //   // 在这里，_processMerging 会通过补建逻辑 把数据写入新创建的系统日历中
       //   await _processMerging(ctx, currentRemotePath, remoteMap);
       //
       //   // 标记为成功并记录展示名
@@ -282,7 +282,7 @@ class SyncEngine {
         if (localRemotePath != null && !remotePaths.contains(localRemotePath)) {
           print("🗑️ [清理] 云端已不存在路径 $localRemotePath，同步删除本地: $displayName");
 
-          // A. 如果已经洗白成系统日历，调用原生接口从系统日历 App 中删除
+          // A. 如果本地有系统日历 ID，调用原生接口从系统日历 App 中删除
           if (localId.isNotEmpty) {
             try {
               await _native.deleteCalendar(localId,accountName);
@@ -409,12 +409,6 @@ class SyncEngine {
           print("   -> 📥 判定动作: 云端 ETag 变更，执行下载更新 (Pull)");
           await _downloadFromCloud(remote, ctx);
         }
-        // 2. 🌟 关键补救：ETag 没变，但本地 local_id 还是 'v_' 开头（影子数据）
-        // 且此时 ctx.syncStatus 为 1，说明用户刚开启同步，需要补建系统事件
-        else if (ctx.syncStatus == 1 && localId.startsWith('v_')) {
-          print("   -> 🏗️ 补救动作: 影子数据转系统事件 (补建)");
-          await _downloadFromCloud(remote, ctx);
-        }
         else {
           print("   -> ✅ 判定动作: 双端完全一致");
         }
@@ -423,8 +417,7 @@ class SyncEngine {
         // --- 场景 C：本地有但云端没有 ---
         if (status == 0) {
           print("   -> 🗑️ 判定动作: 云端已删，清理本地记录");
-          // 只有真实的系统 ID 才调用系统删除，虚拟 ID 只删本地库
-          if (localId.isNotEmpty && !localId.startsWith('v_')) {
+          if (localId.isNotEmpty) {
             try {
               await _native.deleteEvent(localId);
             } catch (e) {
@@ -488,8 +481,7 @@ class SyncEngine {
     //
     // String? systemEventId;
     //
-    // // 💡 只有当：1. 用户勾选了同步  且 2. 日历 ID 已经洗白成数字
-    // // 我们才真正调用原生 API 在手机系统里创建事件
+    // // 💡 只有当用户勾选了同步，我们才调用原生 API 在手机系统里创建事件
     // if (ctx.syncStatus == 1) {
     //   try {
     //     systemEventId = await _native.createEvent(
@@ -510,7 +502,7 @@ class SyncEngine {
     // final db = await DatabaseHelper.instance.database;
     // await db.insert('sync_map', {
     //   'uid': remote['uid'],
-    //   'local_id': systemEventId ?? 'v_${remote['uid']}', // 有系统 ID 用系统 ID，没有用虚拟
+    //   'local_id': systemEventId,
     //   'calendar_id': ctx.calendarId,
     //   'last_etag': remote['etag'],
     //   'summary': parsed['summary'],

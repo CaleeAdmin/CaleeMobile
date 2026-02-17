@@ -19,6 +19,6 @@ enum SyncAction {
 
 class CalendarStatus {
   static const int pending = 0;   // 初始状态：只有映射记录，还没去两端创建/同步数据
-  static const int provisioned = 1; // 已洗白：本地系统日历 ID 已绑定，可以正常同步日程
+  static const int provisioned = 1; // 已绑定：本地系统日历 ID 已关联，可以正常同步日程
   static const int deletedLocal = 2; // 墓碑状态：本地已删，等待下一次同步时清理云端
 }
