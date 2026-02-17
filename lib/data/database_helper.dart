@@ -32,6 +32,7 @@ class DatabaseHelper {
     );
   }
 
+
   Future _createDB(Database db, int version) async {
     // 1. 日历映射表：增加账号维度和同步模式
     await db.execute('''
@@ -45,7 +46,9 @@ class DatabaseHelper {
         synced_ctag TEXT,
         sync_mode INTEGER DEFAULT 0,    -- 0:只读, 1:双向
         is_enabled INTEGER DEFAULT 0,   -- 0:暂停, 1:正常
-        origin INTEGER DEFAULT 0        -- 0:本地创建 (Local), 1:远端同步 (Remote)
+        origin INTEGER DEFAULT 0,       -- 0:本地创建 (Local), 1:远端同步 (Remote)
+        is_subscription INTEGER DEFAULT 0, -- 0:普通日历, 1:订阅日历
+        subscription_url TEXT         -- 订阅来源 URL (仅订阅日历)
       )
     ''');
 

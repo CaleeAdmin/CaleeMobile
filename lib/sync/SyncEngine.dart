@@ -319,6 +319,8 @@ class SyncEngine {
               'display_name': displayName,
               'account_name': userId,
               'account_type': 'com.nextcloud.caleesync',
+              'is_subscription': (rc['is_subscription'] == true || rc['is_subscription'] == 1) ? 1 : 0,
+              'subscription_url': rc['subscription_url'],
             },
             where: 'remote_path = ?',
             whereArgs: [path],
@@ -332,6 +334,8 @@ class SyncEngine {
             'display_name': displayName,
             'remote_path': path,
             'sync_mode': rc['sync_mode'] ?? 0,
+            'is_subscription': (rc['is_subscription'] == true || rc['is_subscription'] == 1) ? 1 : 0,
+            'subscription_url': rc['subscription_url'],
           });
         }
       }
