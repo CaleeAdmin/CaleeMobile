@@ -390,8 +390,8 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
                 put(CalendarContract.Events.CALENDAR_ID, calendarId.toLong())
                 put(CalendarContract.Events.EVENT_TIMEZONE, TimeZone.getDefault().id)
 
-                // 将稳定 UID 存入 SYNC_DATA1，并与读取逻辑保持一致
-                uid?.let { put(CalendarContract.Events.SYNC_DATA1, it) }
+                // 将 Calee 的 UID 存入系统事件的 _SYNC_ID，这对防止重复同步非常重要
+                uid?.let { put(CalendarContract.Events._SYNC_ID, it) }
 
                 // 设置状态和忙闲，确保在系统日历 App 中可见
                 put(CalendarContract.Events.STATUS, CalendarContract.Events.STATUS_CONFIRMED)
@@ -428,8 +428,8 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
                 put(CalendarContract.Events.DESCRIPTION, request.notes)
                 put(CalendarContract.Events.CALENDAR_ID, request.calendarId.toLong())
                 put(CalendarContract.Events.EVENT_TIMEZONE, TimeZone.getDefault().id)
-                // 存入稳定 UID 到 SYNC_DATA1，确保读写同源
-                put(CalendarContract.Events.SYNC_DATA1, request.uid)
+                // 存入 UID 以便原生层也可以通过 UID 检索
+                put(CalendarContract.Events.UID_2445, request.uid)
             }
 
             if (request.eventId != null && request.eventId.isNotEmpty()) {
