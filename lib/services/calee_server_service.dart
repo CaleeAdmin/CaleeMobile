@@ -10,7 +10,7 @@ import '../common/utils/IcsSerializer.dart';
 import '../common/utils/mmkv_utils.dart';
 import '../data/database_helper.dart';
 
-class NextcloudService {
+class CaleeServerService {
   final http.Client _client = http.Client();
   final DatabaseHelper _dbHelper = DatabaseHelper.instance;
 
@@ -391,7 +391,7 @@ class NextcloudService {
   }
 
 
-  // 在 NextcloudService 类中
+  // 在 CaleeServerService 类中
   Future<String?> uploadEventData({
     required String userId,
     required String calendarPath,
@@ -418,7 +418,7 @@ class NextcloudService {
   }
 
   /// [PUT] 上传单个事件到云端
-// 在 NextcloudService.dart 中
+// 在 CaleeServerService.dart 中
   Future<String?> putEvent({
     required String calendarPath,
     required String uid,
@@ -465,7 +465,7 @@ class NextcloudService {
     }
   }
 
-  // 在 NextcloudService 中检查 getEventDetail 方法
+  // 在 CaleeServerService 中检查 getEventDetail 方法
   /// 建议在同步引擎开始时创建一个 client，结束后 close
   Future<String?> getEventDetail({
     required http.Client client,
@@ -533,7 +533,7 @@ class NextcloudService {
     }
   }
 
-  // 在 NextcloudService 类中添加
+  // 在 CaleeServerService 类中添加
   Future<bool> deleteEvent({
     required String eventPath,
   }) async {

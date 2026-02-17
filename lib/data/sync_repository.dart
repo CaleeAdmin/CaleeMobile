@@ -7,7 +7,7 @@ import 'package:sqflite/sqflite.dart';
 import '../common/utils/IcsParser.dart';
 import '../common/utils/UidGenerator.dart';
 import '../entity/SyncContext.dart';
-import '../services/nextcloud_service.dart';
+import '../services/calee_server_service.dart';
 import 'database_helper.dart';
 
 class SyncRepository {
@@ -297,7 +297,7 @@ class SyncRepository {
     print("📡 准备从分组 [${calConfig['account_name']}] 拉取路径: $remotePath");
 
     // 2. 获取云端所有事件
-    final remoteEvents = await NextcloudService().fetchUnifiedEvents(
+    final remoteEvents = await CaleeServerService().fetchUnifiedEvents(
       calendarPath: remotePath,
       isSubscription: isSubscription,
     );
@@ -350,7 +350,7 @@ class SyncRepository {
 
       // 4. 📥 下载详情并写入系统日历
       print('📥 正在更新事件详情: $uid');
-      final icsData = "";// await NextcloudService().getEventDetail(
+      final icsData = "";// await CaleeServerService().getEventDetail(
       //     eventPath: href,
       // );
 
@@ -407,7 +407,7 @@ class SyncRepository {
         // 拼接云端路径 (如果是标准结构，通常是 calendarPath + uid + .ics)
         final String eventPath = "/remote.php/dav/calendars/$userId/cal_sync_6/$uid.ics";
 
-        final bool ok = await NextcloudService().deleteEvent(
+        final bool ok = await CaleeServerService().deleteEvent(
           eventPath: eventPath,
         );
 
@@ -673,7 +673,7 @@ class SyncRepository {
         // --- Step A: 云端删除 ---
         // 逻辑：只要有远端路径就先尝试删除云端；失败则回滚事务，不删本地映射
         if (resolvedRemotePath != null && resolvedRemotePath.isNotEmpty) {
-          final bool cloudOk = await NextcloudService().deleteRemoteCalendar(
+          final bool cloudOk = await CaleeServerService().deleteRemoteCalendar(
             userId: userId,
             calendarPath: resolvedRemotePath,
           );
@@ -780,7 +780,7 @@ class SyncRepository {
     try {
       // 2. 先改云端 (如果失败，建议直接抛异常，不改本地)
       if (path != null) {
-        bool isCloudOk = await NextcloudService().renameRemoteCalendar(
+        bool isCloudOk = await CaleeServerService().renameRemoteCalendar(
             userId: userId,
             calendarPath: path,
             newName: newName
@@ -840,7 +840,7 @@ class SyncRepository {
     try {
       // 1. 优先在云端创建，逻辑与订阅功能保持一致。
       final String cloudId = "cal_${DateTime.now().millisecondsSinceEpoch}";
-      final String? remotePath = await NextcloudService().createRemoteCalendar(
+      final String? remotePath = await CaleeServerService().createRemoteCalendar(
         userId: userId,
         calendarName: displayName,
         calendarId: cloudId,
@@ -853,7 +853,7 @@ class SyncRepository {
       }
 
       // 2. 创建成功后立即重扫远端列表，由统一流程落库。
-      await NextcloudService().scanRemoteCalendars(
+      await CaleeServerService().scanRemoteCalendars(
         serverUrl: AppConstant.nextcloudServer,
         userId: userId,
       );
@@ -867,7 +867,7 @@ class SyncRepository {
 
   Future<bool> handlePublicSubscription(String icsUrl) async {
     // 1. 使用你提供的方法获取原始名称
-    String? originalName = await NextcloudService().getIcsNameFromUrl(icsUrl);
+    String? originalName = await CaleeServerService().getIcsNameFromUrl(icsUrl);
 
     // 确定用于显示的名称
     final String displayName = originalName ?? "公共订阅_${DateTime.now().millisecond}";
@@ -878,7 +878,7 @@ class SyncRepository {
     final String safeCalendarId = "sub_${DateTime.now().millisecondsSinceEpoch}";
 
     // 3. 提交给云端
-    final String? remotePath = await NextcloudService().subscribeRemotePublicIcs(
+    final String? remotePath = await CaleeServerService().subscribeRemotePublicIcs(
       userId: userId,
       calendarName: displayName,  // 🌟 这里用你抓取到的原始中文名
       calendarId: safeCalendarId, // 🌟 这里用纯数字/字母的 ID
@@ -887,7 +887,7 @@ class SyncRepository {
 
     if (remotePath != null) {
       // 通过统一远端扫描流程落库，再补充来源 URL。
-      await NextcloudService().scanRemoteCalendars(
+      await CaleeServerService().scanRemoteCalendars(
         serverUrl: AppConstant.nextcloudServer,
         userId: userId,
       );

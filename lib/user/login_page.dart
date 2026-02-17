@@ -3,7 +3,7 @@ import 'package:caleesync/common/route_constant.dart';
 import 'package:caleesync/common/utils/mmkv_utils.dart';
 import 'package:caleesync/controllers/app_controller.dart';
 import 'package:caleesync/controllers/auth_controller.dart';
-import 'package:caleesync/models/nextcloud_auth_state.dart';
+import 'package:caleesync/models/auth_state.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
@@ -42,7 +42,7 @@ class _LoginPageState extends State<LoginPage> {
     final authController = Get.find<AuthController>();
 
     // 监听认证状态变化
-    _authStateWorker = ever(authController.authStateRx, (NextcloudAuthState state) {
+    _authStateWorker = ever(authController.authStateRx, (AuthState state) {
       // 检查页面是否还挂载
       if (!mounted) return;
 
@@ -63,7 +63,7 @@ class _LoginPageState extends State<LoginPage> {
         _saveCredentialsAndNavigate(state);
       }
 
-      if (state.hasError && state.status == NextcloudAuthStatus.error) {
+      if (state.hasError && state.status == AuthStatus.error) {
         if (_isSubmittingLogin) {
           setState(() {
             _isSubmittingLogin = false;
@@ -82,7 +82,7 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   /// 保存登录凭据并跳转到主页
-  Future<void> _saveCredentialsAndNavigate(NextcloudAuthState state) async {
+  Future<void> _saveCredentialsAndNavigate(AuthState state) async {
     if (state.serverUrl == null ||
         state.loginName == null ||
         state.appPassword == null) {

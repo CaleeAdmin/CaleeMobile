@@ -7,7 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
 import '../data/database_helper.dart';
-import '../services/nextcloud_service.dart';
+import '../services/calee_server_service.dart';
 import 'CalendarPageController.dart';
 
 class LocalCalendarGroup {
@@ -45,7 +45,7 @@ class LocalCalendarItem {
 
 class LocalCalendarPageController extends GetxController {
   final NativeCalendarApi _nativeApi = NativeCalendarApi();
-  final NextcloudService _nextcloudService = NextcloudService();
+  final CaleeServerService _nextcloudService = CaleeServerService();
 
   final calendarGroups = <LocalCalendarGroup>[].obs;
   final isLoading = false.obs;

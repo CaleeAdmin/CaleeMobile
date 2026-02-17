@@ -5,11 +5,11 @@ import 'package:flutter/cupertino.dart';
 import 'package:get/get.dart';
 import 'dart:async';
 
-import '../services/nextcloud_auth_service.dart';
+import '../services/calee_auth_service.dart';
 import '../sync/SyncEngine.dart';
 import '../data/database_helper.dart';
 import '../data/sync_repository.dart';
-import '../services/nextcloud_service.dart';
+import '../services/calee_server_service.dart';
 import 'calendar_probe_controller.dart';
 
 class CalendarDisplayItem {
@@ -66,10 +66,10 @@ class CalendarPageController extends GetxController {
 
   // 依赖注入：Repo 必须在 InitialBinding 或 main 中已 put
   final SyncRepository _repo = Get.find<SyncRepository>();
-  final NextcloudService _nc = NextcloudService();
+  final CaleeServerService _nc = CaleeServerService();
   final NativeCalendarApi _nativeApi = NativeCalendarApi();
   final engine = SyncEngine();
-  final NextcloudAuthService _authService = NextcloudAuthService(serverBaseUrl: AppConstant.nextcloudServer);
+  final CaleeAuthService _authService = CaleeAuthService(serverBaseUrl: AppConstant.nextcloudServer);
 
   // 响应式变量
   var calendars = <CalendarDisplayItem>[].obs;

@@ -4,10 +4,10 @@ import 'package:http/http.dart' as http;
 /// Nextcloud Login Flow v2 认证服务
 /// 
 /// 参考文档: https://docs.nextcloud.com/server/latest/developer_manual/client_apis/LoginFlow/index.html#login-flow-v2
-class NextcloudAuthService {
+class CaleeAuthService {
   final String serverBaseUrl;
 
-  NextcloudAuthService({required this.serverBaseUrl});
+  CaleeAuthService({required this.serverBaseUrl});
 
   /// 确保服务器 URL 格式正确（添加 https:// 和 /）
   String get normalizedUrl {

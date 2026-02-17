@@ -5,15 +5,15 @@ import '../../data/database_helper.dart';
 import '../../data/sync_repository.dart';
 import '../../entity/SyncContext.dart';
 import '../../entity/SyncSummary.dart';
-import '../../services/nextcloud_auth_service.dart';
-import '../../services/nextcloud_service.dart';
+import '../../services/calee_auth_service.dart';
+import '../../services/calee_server_service.dart';
 
 abstract class SyncStrategy {
   // 共用服务组件
   final SyncRepository repo = SyncRepository();
-  final NextcloudService nc = NextcloudService();
+  final CaleeServerService nc = CaleeServerService();
   final NativeCalendarApi nativeApi = NativeCalendarApi();
-  final NextcloudAuthService authService = NextcloudAuthService(serverBaseUrl: AppConstant.nextcloudServer);
+  final CaleeAuthService authService = CaleeAuthService(serverBaseUrl: AppConstant.nextcloudServer);
   final DatabaseHelper dbHelper = DatabaseHelper.instance;
   final String? loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey);
   final String? password = MMKVUtils.instance.getString(AppConstant.appPasswordKey);
