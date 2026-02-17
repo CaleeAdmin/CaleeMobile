@@ -272,7 +272,7 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
             CalendarContract.Events.DTEND,
             CalendarContract.Events.DURATION,
             CalendarContract.Events.ALL_DAY,
-            CalendarContract.Events.SYNC_DATA1, // 💡 通常 Nextcloud/Google 的 UID 存在这里
+            CalendarContract.Events.SYNC_DATA1, // 💡 通常 Calee/Google 的 UID 存在这里
             CalendarContract.Events.EVENT_TIMEZONE
         )
 
@@ -360,7 +360,7 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
         try {
             // 1. 自动寻找这个 calendarId 对应的 accountName
             // 这样可以避免 "accountName" 变量未定义的错误
-            var foundAccountName = "Nextcloud" // 默认兜底
+            var foundAccountName = "Calee" // 默认兜底
             val calendarCursor = context.contentResolver.query(
                 CalendarContract.Calendars.CONTENT_URI,
                 arrayOf(CalendarContract.Calendars.ACCOUNT_NAME),
@@ -390,7 +390,7 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
                 put(CalendarContract.Events.CALENDAR_ID, calendarId.toLong())
                 put(CalendarContract.Events.EVENT_TIMEZONE, TimeZone.getDefault().id)
 
-                // 将 Nextcloud 的 UID 存入系统事件的 _SYNC_ID，这对防止重复同步非常重要
+                // 将 Calee 的 UID 存入系统事件的 _SYNC_ID，这对防止重复同步非常重要
                 uid?.let { put(CalendarContract.Events._SYNC_ID, it) }
 
                 // 设置状态和忙闲，确保在系统日历 App 中可见

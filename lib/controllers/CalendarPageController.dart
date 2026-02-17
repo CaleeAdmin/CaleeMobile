@@ -69,7 +69,7 @@ class CalendarPageController extends GetxController {
   final CaleeServerService _nc = CaleeServerService();
   final NativeCalendarApi _nativeApi = NativeCalendarApi();
   final engine = SyncEngine();
-  final CaleeAuthService _authService = CaleeAuthService(serverBaseUrl: AppConstant.nextcloudServer);
+  final CaleeAuthService _authService = CaleeAuthService(serverBaseUrl: AppConstant.caleeServer);
 
   // 响应式变量
   var calendars = <CalendarDisplayItem>[].obs;
@@ -169,7 +169,7 @@ class CalendarPageController extends GetxController {
       final String? loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey);
       if (loginName == null) return;
 
-      // 1. 拉取远端 NextCloud 日历并更新本地映射
+      // 1. 拉取远端 Calee 日历并更新本地映射
       await _nc.scanRemoteCalendars(
           serverUrl: _authService.normalizedUrl,
           userId: loginName);

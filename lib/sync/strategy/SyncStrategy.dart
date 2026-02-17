@@ -13,7 +13,7 @@ abstract class SyncStrategy {
   final SyncRepository repo = SyncRepository();
   final CaleeServerService nc = CaleeServerService();
   final NativeCalendarApi nativeApi = NativeCalendarApi();
-  final CaleeAuthService authService = CaleeAuthService(serverBaseUrl: AppConstant.nextcloudServer);
+  final CaleeAuthService authService = CaleeAuthService(serverBaseUrl: AppConstant.caleeServer);
   final DatabaseHelper dbHelper = DatabaseHelper.instance;
   final String? loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey);
   final String? password = MMKVUtils.instance.getString(AppConstant.appPasswordKey);

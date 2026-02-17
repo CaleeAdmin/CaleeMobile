@@ -4,7 +4,7 @@ import 'package:caleesync/services/calee_auth_service.dart';
 import 'package:get/get.dart';
 
 class AuthController extends GetxController {
-  final CaleeAuthService _authService = CaleeAuthService(serverBaseUrl: AppConstant.nextcloudServer);
+  final CaleeAuthService _authService = CaleeAuthService(serverBaseUrl: AppConstant.caleeServer);
 
   // 认证状态
   final Rx<AuthState> authStateRx = const AuthState().obs;

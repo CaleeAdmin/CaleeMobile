@@ -36,7 +36,7 @@ flutter pub run pigeon --input pigeons/calendar_api.dart
 
 # Check if files were generated
 DART_OUTPUT="$PROJECT_ROOT/lib/core/platform/pigeon/calendar_api.g.dart"
-KOTLIN_OUTPUT="$PROJECT_ROOT/android/app/src/main/kotlin/com/nextcloud/caleesync/CalendarApi.g.kt"
+KOTLIN_OUTPUT="$PROJECT_ROOT/android/app/src/main/kotlin/com/viso/caleesync/CalendarApi.g.kt"
 SWIFT_OUTPUT="$PROJECT_ROOT/ios/Runner/CalendarApi.g.swift"
 
 echo -e "\n${GREEN}✅ Pigeon code generation completed!${NC}\n"

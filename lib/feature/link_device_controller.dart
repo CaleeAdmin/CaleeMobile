@@ -122,7 +122,7 @@ class LinkDeviceController {
     final loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey)?.trim() ?? '';
     final appPassword = MMKVUtils.instance.getString(AppConstant.appPasswordKey)?.trim() ?? '';
     if (loginName.isEmpty || appPassword.isEmpty) {
-      throw const FormatException('Missing saved Nextcloud credentials (loginName/appPassword)');
+      throw const FormatException('Missing saved Calee credentials (loginName/appPassword)');
     }
 
     return _ApprovalRequest(

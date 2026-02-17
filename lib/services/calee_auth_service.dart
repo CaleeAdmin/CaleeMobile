@@ -143,7 +143,7 @@ class CaleeAuthService {
     }
   }
 
-  /// 使用登录凭据换取 Nextcloud App Password，后续 API 调用应使用该密码。
+  /// 使用登录凭据换取 Calee App Password，后续 API 调用应使用该密码。
   ///
   /// Nextcloud 文档接口：GET /ocs/v2.php/core/getapppassword
   Future<String> getAppPassword({

@@ -1,4 +1,4 @@
-/// Nextcloud 登录状态
+/// Calee 登录状态
 enum AuthStatus {
   initial,      // 初始状态
   initiating,   // 正在初始化登录流程
@@ -7,7 +7,7 @@ enum AuthStatus {
   error,        // 登录失败
 }
 
-/// Nextcloud 登录状态模型
+/// Calee 登录状态模型
 class AuthState {
   final AuthStatus status;
   final String? loginUrl;           // 需要打开的登录 URL
