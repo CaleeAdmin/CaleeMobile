@@ -137,7 +137,7 @@ class _SecurityPageState extends State<SecurityPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF7F9FB),
+      backgroundColor: const Color(0xFFF3FAF3),
       appBar: AppBar(
         title: const Text(
           'Security',
@@ -362,7 +362,7 @@ class _SecurityPageState extends State<SecurityPage> {
         suffixIcon: suffixIcon,
         hintStyle: TextStyle(color: Colors.grey.shade500),
         filled: true,
-        fillColor: const Color(0xFFF4F3F7),
+        fillColor: const Color(0xFFEEF7EE),
         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
@@ -370,7 +370,7 @@ class _SecurityPageState extends State<SecurityPage> {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: Color(0xFF2E7AFE), width: 1.2),
+          borderSide: const BorderSide(color: Color(0xFF66BB6A), width: 1.2),
         ),
       ),
     );

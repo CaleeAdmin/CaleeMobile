@@ -133,8 +133,8 @@ class _QRScannerPageState extends State<QRScannerPage> {
         child: DecoratedBox(
           decoration: BoxDecoration(
             border: Border(
-              top: BorderSide(color: Colors.greenAccent, width: 3),
-              left: BorderSide(color: Colors.greenAccent, width: 3),
+              top: BorderSide(color: Colors.lightGreenAccent, width: 3),
+              left: BorderSide(color: Colors.lightGreenAccent, width: 3),
             ),
           ),
         ),

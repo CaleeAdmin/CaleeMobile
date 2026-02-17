@@ -52,7 +52,7 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
                 width: 40,
                 height: 40,
                 decoration: BoxDecoration(
-                  color: const Color(0xFF2E7AFE),
+                  color: const Color(0xFF66BB6A),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 clipBehavior: Clip.antiAlias,
@@ -93,7 +93,7 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
                   icon: const Icon(Icons.sync, size: 18),
                   label: Text(ctrl.isSyncing.value ? 'Syncing...' : 'Sync'),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blue,
+                    backgroundColor: Colors.lightGreen,
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     shape: RoundedRectangleBorder(
@@ -149,7 +149,7 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
                       width: 44,
                       height: 44,
                       decoration: BoxDecoration(
-                        color: const Color(0xFF2E7AFE),
+                        color: const Color(0xFF66BB6A),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       clipBehavior: Clip.antiAlias,

@@ -129,7 +129,7 @@ class _ProfilePageState extends State<ProfilePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF7F9FB),
+      backgroundColor: const Color(0xFFF3FAF3),
       appBar: AppBar(
         title: const Text(
           'Profile',
@@ -313,7 +313,7 @@ class _ProfilePageState extends State<ProfilePage> {
       isExpanded: true,
       decoration: InputDecoration(
         filled: true,
-        fillColor: const Color(0xFFF4F3F7),
+        fillColor: const Color(0xFFEEF7EE),
         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
@@ -321,7 +321,7 @@ class _ProfilePageState extends State<ProfilePage> {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: Color(0xFF2E7AFE), width: 1.2),
+          borderSide: const BorderSide(color: Color(0xFF66BB6A), width: 1.2),
         ),
       ),
       items: kNextcloudTimezones
@@ -392,7 +392,7 @@ class _ProfilePageState extends State<ProfilePage> {
       decoration: InputDecoration(
         hintText: hint,
         filled: true,
-        fillColor: const Color(0xFFF4F3F7),
+        fillColor: const Color(0xFFEEF7EE),
         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
@@ -400,7 +400,7 @@ class _ProfilePageState extends State<ProfilePage> {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: Color(0xFF2E7AFE), width: 1.2),
+          borderSide: const BorderSide(color: Color(0xFF66BB6A), width: 1.2),
         ),
       ),
     );
@@ -410,7 +410,7 @@ class _ProfilePageState extends State<ProfilePage> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
       decoration: BoxDecoration(
-        color: const Color(0xFFF4F3F7),
+        color: const Color(0xFFEEF7EE),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: Colors.grey.shade300, width: 0.8),
       ),
