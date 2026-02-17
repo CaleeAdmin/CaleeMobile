@@ -36,13 +36,13 @@ class SyncRepository {
         await txn.update(
           'sync_map',
           {'sync_status': 2}, // 标记为待同步删除
-          where: 'calendar_local_id = ? AND sync_status = 0 AND local_id NOT IN ($placeholders)',
+          where: 'calendar_id = ? AND sync_status = 0 AND local_id NOT IN ($placeholders)',
           whereArgs: [ctx.calendarId, ...currentLocalIds],
         );
       } else {
         // 如果系统里一个日程都没有了，该日历下所有已同步的都标记为删除
         await txn.update('sync_map', {'sync_status': 2},
-            where: 'calendar_local_id = ? AND sync_status = 0',
+            where: 'calendar_id = ? AND sync_status = 0',
             whereArgs: [ctx.calendarId]);
       }
 
@@ -56,7 +56,7 @@ class SyncRepository {
           await txn.insert('sync_map', {
             'uid': event.uid, // 使用原生生成的 system_event_$id
             'local_id': event.localId,
-            'calendar_local_id': ctx.calendarId,
+            'calendar_id': ctx.calendarId,
             'summary': event.title,
             'dtstart': event.startTime,
             'dtend': event.endTime,
@@ -120,7 +120,7 @@ class SyncRepository {
       // 3. 获取该日历在数据库里的“旧记录”
       final List<Map<String, dynamic>> dbRecords = await db.query(
         'sync_map',
-        where: 'calendar_local_id = ?',
+        where: 'calendar_id = ?',
         whereArgs: [localCalId],
       );
       final Map<String, Map<String, dynamic>> dbMap = {
@@ -140,7 +140,7 @@ class SyncRepository {
             await txn.insert('sync_map', {
               'uid': systemEvent.uid ?? 'local_${DateTime.now().microsecondsSinceEpoch}',
               'local_id': sid,
-              'calendar_local_id': localCalId,
+              'calendar_id': localCalId,
               'summary': systemEvent.title,
               'last_mtime': systemEvent.lastModified,
               'sync_status': 1, // 标记为 Dirty，待 Push
@@ -186,7 +186,7 @@ class SyncRepository {
   }
 
   // ==========================================
-  // 2. 事件扫描 (已修正字段名为 calendar_local_id)
+  // 2. 事件扫描 (已修正字段名为 calendar_id)
   // ==========================================
   Future<Map<String, int>> scanLocalEvents(String calendarLocalId) async {
     final db = await _dbHelper.database;
@@ -209,7 +209,7 @@ class SyncRepository {
       // 注意：只处理状态不为 2 的，避免重复处理
       final List<Map<String, dynamic>> dbRows = await txn.query(
         'sync_map',
-        where: 'calendar_local_id = ? AND sync_status != ?',
+        where: 'calendar_id = ? AND sync_status != ?',
         whereArgs: [calendarLocalId, 2],
       );
 
@@ -246,7 +246,7 @@ class SyncRepository {
           await txn.insert('sync_map', {
             'uid': eventUid,
             'local_id': event.localId,
-            'calendar_local_id': calendarLocalId,
+            'calendar_id': calendarLocalId,
             'summary': event.title ?? '无标题',
             'description': event.notes,
             'dtstart': event.startTime,
@@ -310,7 +310,7 @@ class SyncRepository {
 
     final localEntries = await db.query(
         'sync_map',
-        where: 'calendar_local_id = ?',
+        where: 'calendar_id = ?',
         whereArgs: [calendarLocalId]
     );
 
@@ -372,7 +372,7 @@ class SyncRepository {
           await db.insert('sync_map', {
             'uid': uid,
             'local_id': newLocalId,
-            'calendar_local_id': calendarLocalId,
+            'calendar_id': calendarLocalId,
             'summary': parsed['summary'],
             'last_etag': etag,
             'sync_status': 0,
@@ -393,7 +393,7 @@ class SyncRepository {
     // 2. 找出那些在 sync_map 里有记录，但系统里已经没了的
     final List<Map<String, dynamic>> trackedEvents = await db.query(
         'sync_map',
-        where: 'calendar_local_id = ?',
+        where: 'calendar_id = ?',
         whereArgs: [calendarLocalId]
     );
 
@@ -481,7 +481,7 @@ class SyncRepository {
       {
         'uid': uid,
         'local_id': localId,
-        'calendar_local_id': remote['calendar_local_id'], // 确保这个字段被传入
+        'calendar_id': remote['calendar_id'], // 确保这个字段被传入
         'last_etag': etag,
         'sync_status': 0,    // 0 表示已同步状态
         'item_type': 'event',
@@ -557,7 +557,7 @@ class SyncRepository {
 
     // 2. 统计该日历下的本地有效事件数（过滤 status 2）
     final countResult = await db.rawQuery(
-        'SELECT COUNT(*) as count FROM sync_map WHERE calendar_local_id = ? AND sync_status != 2',
+        'SELECT COUNT(*) as count FROM sync_map WHERE calendar_id = ? AND sync_status != 2',
         [localId]
     );
 
@@ -617,8 +617,8 @@ class SyncRepository {
       // 4. 更新事件关联的外键
       final eventUpdateCount = await txn.update(
         'sync_map',
-        {'calendar_local_id': newId},
-        where: 'calendar_local_id = ?',
+        {'calendar_id': newId},
+        where: 'calendar_id = ?',
         whereArgs: [oldId],
       );
 
@@ -701,7 +701,7 @@ class SyncRepository {
         if (resolvedLocalId.isNotEmpty) {
           sCount = await txn.delete(
             'sync_map',
-            where: 'calendar_local_id = ?',
+            where: 'calendar_id = ?',
             whereArgs: [resolvedLocalId],
           );
         }
@@ -923,7 +923,7 @@ class SyncRepository {
         c.*, 
         COUNT(s.uid) as event_count 
       FROM calendar_map c
-      LEFT JOIN sync_map s ON c.local_id = s.calendar_local_id
+      LEFT JOIN sync_map s ON c.id = s.calendar_id
       WHERE c.is_subscription = 1
       GROUP BY c.local_id
       ORDER BY c.local_id DESC

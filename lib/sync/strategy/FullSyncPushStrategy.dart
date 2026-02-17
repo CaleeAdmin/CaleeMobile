@@ -24,13 +24,15 @@ class FullSyncPushStrategy extends SyncStrategy {
       final start = DateTime.now().subtract(const Duration(days: 365)).millisecondsSinceEpoch;
       final end = DateTime.now().add(const Duration(days: 730)).millisecondsSinceEpoch;
 
-      final List<PlatformItem?> items = await nativeApi.getEvents(ctx.calendarId, start, end);
+      final String localCalendarProviderId = ctx.extra['local_id']?.toString() ?? '';
+      if (localCalendarProviderId.isEmpty) return;
+      final List<PlatformItem?> items = await nativeApi.getEvents(localCalendarProviderId, start, end);
       final List<PlatformItem> localEvents = items.whereType<PlatformItem>().toList();
 
       // 2. 获取本地已有的同步映射表
       final List<Map<String, dynamic>> mappedRecords = await db.query(
         'sync_map',
-        where: 'calendar_local_id = ?',
+        where: 'calendar_id = ?',
         whereArgs: [ctx.calendarId],
       );
 
@@ -76,7 +78,7 @@ class FullSyncPushStrategy extends SyncStrategy {
             await db.insert('sync_map', {
               'uid': uid,
               'local_id': localId,
-              'calendar_local_id': ctx.calendarId,
+              'calendar_id': ctx.calendarId,
               'summary': local.title,
               'last_etag': newEtag.replaceAll('"', ''),
               'last_mtime': lastModified,

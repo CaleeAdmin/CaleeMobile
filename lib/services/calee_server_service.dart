@@ -7,6 +7,7 @@ import 'package:xml/xml.dart' as xml;
 import '../common/app_constant.dart';
 import '../common/utils/IcsParser.dart';
 import '../common/utils/IcsSerializer.dart';
+import '../common/utils/UidGenerator.dart';
 import '../common/utils/mmkv_utils.dart';
 import '../data/database_helper.dart';
 
@@ -153,6 +154,7 @@ class CaleeServerService {
         const int defaultSyncMode = 0;
         await txn.rawInsert('''
         INSERT INTO calendar_map (
+          id,
           remote_path, 
           display_name, 
           synced_ctag, 
@@ -164,7 +166,7 @@ class CaleeServerService {
           is_enabled,
           is_subscription,
           subscription_url
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) -- 增加订阅字段
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) -- 增加订阅字段
         ON CONFLICT(remote_path) DO UPDATE SET
           display_name = excluded.display_name,
           synced_ctag = excluded.synced_ctag,
@@ -178,6 +180,7 @@ class CaleeServerService {
           -- 注意：这里没有写 account_type = excluded.account_type，
           -- 所以如果是更新旧记录，account_type 会维持原样。
       ''', [
+              CaleeUid.generate(),
               map['remote_path'],
               map['display_name'],
               map['ctag'],

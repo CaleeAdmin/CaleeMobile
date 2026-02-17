@@ -36,8 +36,11 @@ class CreateRemoteStrategy extends SyncStrategy {
           .millisecondsSinceEpoch;
 
       // 3. 抓取本地系统日程
+      final String localCalendarProviderId = ctx.extra['local_id']?.toString() ?? '';
+      if (localCalendarProviderId.isEmpty) return;
+
       final List<PlatformItem?> items = await nativeApi.getEvents(
-        ctx.calendarId,
+        localCalendarProviderId,
         start,
         end,
       );
@@ -71,7 +74,7 @@ class CreateRemoteStrategy extends SyncStrategy {
           await db.insert('sync_map', {
             'uid': uid,
             'local_id': event.localId,
-            'calendar_local_id': ctx.calendarId,
+            'calendar_id': ctx.calendarId,
             'summary': title,
             'description': event.notes,
             'dtstart': startTime,
@@ -90,7 +93,7 @@ class CreateRemoteStrategy extends SyncStrategy {
         {
           'remote_path': resultPath, // 核心：存入刚开好的云端坑位路径
         },
-        where: 'local_id = ?',
+        where: 'id = ?',
         whereArgs: [ctx.calendarId],
       );
       summary.success++;

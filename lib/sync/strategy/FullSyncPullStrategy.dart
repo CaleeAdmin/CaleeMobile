@@ -10,12 +10,14 @@ import '../../utils/TimeUtils.dart';
 class FullSyncPullStrategy extends SyncStrategy {
   @override
   Future<void> execute(SyncContext ctx, SyncSummary summary) async{
-    final String localCalendarId = ctx.calendarId;
+    final String calendarId = ctx.calendarId;
+    final String localCalendarProviderId = ctx.extra['local_id']?.toString() ?? '';
+
     final String remotePath = ctx.remotePath;
     final String? newCtag = ctx.ctag;
     final String accountName = ctx.accountName;
 
-    if (localCalendarId.isEmpty) return;
+    if (calendarId.isEmpty || localCalendarProviderId.isEmpty) return;
 
     try {
       // 1. 获取远端最新全量数据
@@ -27,8 +29,8 @@ class FullSyncPullStrategy extends SyncStrategy {
       // 2. 获取本地 sync_map 缓存
       final List<Map<String, dynamic>> localSyncRecords = await db.query(
         'sync_map',
-        where: 'calendar_local_id = ?',
-        whereArgs: [localCalendarId],
+        where: 'calendar_id = ?',
+        whereArgs: [calendarId],
       );
       final Map<String, Map<String, dynamic>> localSyncMap = {
         for (var row in localSyncRecords) row['uid'] as String: row
@@ -49,7 +51,7 @@ class FullSyncPullStrategy extends SyncStrategy {
           // 调用新增的 createOrUpdateEvent 接口
           // 如果 localRecord 为 null，eventId 传 null 触发原生 Insert
           final request = CalendarEventRequest(
-            calendarId: localCalendarId.toString(),
+            calendarId: localCalendarProviderId,
             title: remoteEvent['summary'] ?? '无标题',
             start: Timeutils.parseToMillis(remoteEvent['start']),
             end: Timeutils.parseToMillis(remoteEvent['end']),
@@ -67,7 +69,7 @@ class FullSyncPullStrategy extends SyncStrategy {
             await db.insert('sync_map', {
               'uid': uid,
               'local_id': systemEventId,
-              'calendar_local_id': localCalendarId,
+              'calendar_id': calendarId,
               'summary': remoteEvent['summary'],
               'last_etag': etag,
               'remote_href': remoteEvent['href'],

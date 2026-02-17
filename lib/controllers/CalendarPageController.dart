@@ -196,16 +196,17 @@ class CalendarPageController extends GetxController {
 
       if (includeEventCounts) {
         final countRows = await db.rawQuery(
-          'SELECT calendar_local_id, COUNT(*) AS count FROM sync_map GROUP BY calendar_local_id',
+          'SELECT calendar_id, COUNT(*) AS count FROM sync_map GROUP BY calendar_id',
         );
         for (final row in countRows) {
-          final String key = (row['calendar_local_id'] ?? '').toString();
+          final String key = (row['calendar_id'] ?? '').toString();
           if (key.isEmpty) continue;
           cachedCountByCalendarId[key] = (row['count'] as int?) ?? 0;
         }
       }
 
       for (var cal in calendarMaps) {
+        final String? stableId = cal['id']?.toString();
         final String? localId = cal['local_id']?.toString();
         final String? remotePath = cal['remote_path'];
         final int? syncMode = cal['sync_mode'];
@@ -214,8 +215,8 @@ class CalendarPageController extends GetxController {
 
         int realCount = 0;
         if (includeEventCounts) {
-          final String countKey = (localId != null && localId.isNotEmpty)
-              ? localId
+          final String countKey = (stableId != null && stableId.isNotEmpty)
+              ? stableId
               : (remotePath ?? '');
           realCount = cachedCountByCalendarId[countKey] ?? 0;
         }
