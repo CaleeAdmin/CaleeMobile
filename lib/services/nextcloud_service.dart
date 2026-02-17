@@ -91,6 +91,7 @@ class NextcloudService {
       // 订阅日历可能没有 ctag，使用空字符串兜底
       final ctag = prop.findAllElements('cs:getctag').firstOrNull?.innerText;
       final color = prop.findElements('nc:calendar-color').firstOrNull?.innerText;
+      final subscriptionUrl = prop.findElements('cs:source').firstOrNull?.innerText;
 
       // --- 权限与模式逻辑 ---
 
@@ -115,6 +116,7 @@ class NextcloudService {
         'sync_mode': syncMode,
         'color': color,
         'is_subscription': isSubscribed, // 建议增加此字段方便 UI 展示
+        'subscription_url': subscriptionUrl,
       });
     }
     return results;
@@ -159,8 +161,10 @@ class NextcloudService {
           account_name, 
           account_type, -- 新增字段
           origin, 
-          is_enabled
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) -- 增加一个占位符
+          is_enabled,
+          is_subscription,
+          subscription_url
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) -- 增加订阅字段
         ON CONFLICT(remote_path) DO UPDATE SET
           display_name = excluded.display_name,
           synced_ctag = excluded.synced_ctag,
@@ -168,7 +172,9 @@ class NextcloudService {
           -- 只有当远端提供了新颜色且不为空时才更新本地颜色
           color = CASE WHEN excluded.color IS NOT NULL AND excluded.color != "" 
                        THEN excluded.color 
-                       ELSE calendar_map.color END
+                       ELSE calendar_map.color END,
+          is_subscription = excluded.is_subscription,
+          subscription_url = excluded.subscription_url
           -- 注意：这里没有写 account_type = excluded.account_type，
           -- 所以如果是更新旧记录，account_type 会维持原样。
       ''', [
@@ -181,6 +187,8 @@ class NextcloudService {
               "NextCloud", // 对应 account_type，仅在首次插入时生效
               1, // origin = 1 (远端起源)
               0, // is_enabled
+              (map['is_subscription'] == true || map['is_subscription'] == 1) ? 1 : 0,
+              map['subscription_url'],
             ]);
       }
 

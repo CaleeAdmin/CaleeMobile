@@ -284,6 +284,8 @@ class SyncRepository {
 
     final calConfig = calMaps.first;
     final String remotePath = calConfig['remote_path'] ?? "";
+    final bool isSubscription =
+        (calConfig['is_subscription'] == 1 || calConfig['is_subscription'] == true);
     // 这里的 userId 和 password 建议以后从账号管理模块获取，目前先沿用你的 MMKV
 
 
@@ -297,7 +299,7 @@ class SyncRepository {
     // 2. 获取云端所有事件
     final remoteEvents = await NextcloudService().fetchUnifiedEvents(
       calendarPath: remotePath,
-      isSubscription: false
+      isSubscription: isSubscription,
     );
 
     // --- 【删除逻辑】对比云端与本地 UID 集合 ---
@@ -884,7 +886,22 @@ class SyncRepository {
     );
 
     if (remotePath != null) {
-      // 插入本地数据库...
+      // 通过统一远端扫描流程落库，再补充来源 URL。
+      await NextcloudService().scanRemoteCalendars(
+        serverUrl: AppConstant.nextcloudServer,
+        userId: userId,
+      );
+
+      final db = await _dbHelper.database;
+      await db.update(
+        'calendar_map',
+        {
+          'is_subscription': 1,
+          'subscription_url': icsUrl,
+        },
+        where: 'remote_path = ?',
+        whereArgs: [remotePath],
+      );
       return true;
     }
     return false;
@@ -907,15 +924,12 @@ class SyncRepository {
         COUNT(s.uid) as event_count 
       FROM calendar_map c
       LEFT JOIN sync_map s ON c.local_id = s.calendar_local_id
-      WHERE c.local_id LIKE ? OR c.remote_path LIKE ? OR c.remote_path LIKE ?
+      WHERE c.is_subscription = 1
       GROUP BY c.local_id
       ORDER BY c.local_id DESC
     ''';
 
-      final List<Map<String, dynamic>> results = await db.rawQuery(
-          sql,
-          ['%sub%', '%sub_%', '%?export%']
-      );
+      final List<Map<String, dynamic>> results = await db.rawQuery(sql);
 
       print("📊 [Repository] 查询完成，共找到 ${results.length} 条订阅记录");
 
