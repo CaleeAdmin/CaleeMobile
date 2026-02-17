@@ -1,31 +1,31 @@
 import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:caleesync/common/app_constant.dart';
-import 'package:caleesync/models/nextcloud_auth_state.dart';
-import 'package:caleesync/services/nextcloud_auth_service.dart';
+import 'package:caleesync/models/auth_state.dart';
+import 'package:caleesync/services/calee_auth_service.dart';
 
 /// Nextcloud 认证服务 Provider（使用常量中的服务器地址）
-final nextcloudAuthServiceProvider = Provider<NextcloudAuthService>((ref) {
-  return NextcloudAuthService(serverBaseUrl: AppConstant.nextcloudServer);
+final caleeAuthServiceProvider = Provider<CaleeAuthService>((ref) {
+  return CaleeAuthService(serverBaseUrl: AppConstant.nextcloudServer);
 });
 
 /// Nextcloud 登录状态 Provider
-final nextcloudAuthStateProvider =
-    StateNotifierProvider<NextcloudAuthNotifier, NextcloudAuthState>((ref) {
-  final service = ref.watch(nextcloudAuthServiceProvider);
-  return NextcloudAuthNotifier(service);
+final authStateProvider =
+    StateNotifierProvider<AuthNotifier, AuthState>((ref) {
+  final service = ref.watch(caleeAuthServiceProvider);
+  return AuthNotifier(service);
 });
 
 /// Nextcloud 登录状态管理器
-class NextcloudAuthNotifier extends StateNotifier<NextcloudAuthState> {
-  final NextcloudAuthService _service;
+class AuthNotifier extends StateNotifier<AuthState> {
+  final CaleeAuthService _service;
   Timer? _pollTimer;
   int _pollAttempts = 0;
   static const int _maxPollAttempts = 60; // 最多轮询 60 次（约 5 分钟）
   static const Duration _pollInterval = Duration(seconds: 5);
 
-  NextcloudAuthNotifier(this._service)
-      : super(const NextcloudAuthState());
+  AuthNotifier(this._service)
+      : super(const AuthState());
 
   /// 使用用户名密码登录
   /// 
@@ -38,7 +38,7 @@ class NextcloudAuthNotifier extends StateNotifier<NextcloudAuthState> {
     if (state.isLoading) return;
 
     state = state.copyWith(
-      status: NextcloudAuthStatus.initiating,
+      status: AuthStatus.initiating,
       clearError: true,
     );
 
@@ -55,7 +55,7 @@ class NextcloudAuthNotifier extends StateNotifier<NextcloudAuthState> {
         );
 
         state = state.copyWith(
-          status: NextcloudAuthStatus.success,
+          status: AuthStatus.success,
           serverUrl: _service.normalizedUrl,
           loginName: loginName,
           appPassword: appPassword,
@@ -65,7 +65,7 @@ class NextcloudAuthNotifier extends StateNotifier<NextcloudAuthState> {
       }
     } catch (e) {
       state = state.copyWith(
-        status: NextcloudAuthStatus.error,
+        status: AuthStatus.error,
         errorMessage: e.toString().replaceFirst('Exception: ', ''),
       );
     }
@@ -79,11 +79,11 @@ class NextcloudAuthNotifier extends StateNotifier<NextcloudAuthState> {
 
     // 如果提供了新的服务器地址，创建新的服务实例
     final service = serverUrl != null
-        ? NextcloudAuthService(serverBaseUrl: serverUrl)
+        ? CaleeAuthService(serverBaseUrl: serverUrl)
         : _service;
 
     state = state.copyWith(
-      status: NextcloudAuthStatus.initiating,
+      status: AuthStatus.initiating,
       clearError: true,
     );
 
@@ -100,7 +100,7 @@ class NextcloudAuthNotifier extends StateNotifier<NextcloudAuthState> {
       }
 
       state = state.copyWith(
-        status: NextcloudAuthStatus.polling,
+        status: AuthStatus.polling,
         loginUrl: loginUrl,
         pollToken: pollToken,
         pollEndpoint: pollEndpoint,
@@ -110,14 +110,14 @@ class NextcloudAuthNotifier extends StateNotifier<NextcloudAuthState> {
       _startPolling(service);
     } catch (e) {
       state = state.copyWith(
-        status: NextcloudAuthStatus.error,
+        status: AuthStatus.error,
         errorMessage: e.toString().replaceFirst('Exception: ', ''),
       );
     }
   }
 
   /// 开始轮询登录状态
-  void _startPolling([NextcloudAuthService? service]) {
+  void _startPolling([CaleeAuthService? service]) {
     final authService = service ?? _service;
     _pollAttempts = 0;
     _pollTimer?.cancel();
@@ -126,7 +126,7 @@ class NextcloudAuthNotifier extends StateNotifier<NextcloudAuthState> {
       if (_pollAttempts >= _maxPollAttempts) {
         _stopPolling();
         state = state.copyWith(
-          status: NextcloudAuthStatus.error,
+          status: AuthStatus.error,
           errorMessage: 'Login timeout. Please try again.',
         );
         return;
@@ -147,7 +147,7 @@ class NextcloudAuthNotifier extends StateNotifier<NextcloudAuthState> {
           _stopPolling();
           
           state = state.copyWith(
-            status: NextcloudAuthStatus.success,
+            status: AuthStatus.success,
             serverUrl: result['server'] as String?,
             loginName: result['loginName'] as String?,
             appPassword: result['appPassword'] as String?,
@@ -160,7 +160,7 @@ class NextcloudAuthNotifier extends StateNotifier<NextcloudAuthState> {
           // 其他情况，可能出错
           _stopPolling();
           state = state.copyWith(
-            status: NextcloudAuthStatus.error,
+            status: AuthStatus.error,
             errorMessage: 'Unexpected response from server',
           );
         }
@@ -181,13 +181,13 @@ class NextcloudAuthNotifier extends StateNotifier<NextcloudAuthState> {
   /// 取消登录流程
   void cancelLogin() {
     _stopPolling();
-    state = const NextcloudAuthState();
+    state = const AuthState();
   }
 
   /// 重置状态
   void reset() {
     _stopPolling();
-    state = const NextcloudAuthState();
+    state = const AuthState();
   }
 
   @override
