@@ -49,6 +49,7 @@ class LocalCalendarPageController extends GetxController {
 
   final calendarGroups = <LocalCalendarGroup>[].obs;
   final isLoading = false.obs;
+  final connectingCalendarIds = <String>{}.obs;
 
   @override
   void onInit() {
@@ -149,6 +150,11 @@ class LocalCalendarPageController extends GetxController {
     bool enabled, {
     bool returnToCalendarListAfterConnect = false,
   }) async {
+    if (connectingCalendarIds.contains(item.id)) {
+      return;
+    }
+
+    connectingCalendarIds.add(item.id);
     final bool previousConnectionState = item.isConnected;
     if (enabled) {
       item.isConnected = true;
@@ -263,6 +269,8 @@ class LocalCalendarPageController extends GetxController {
       calendarGroups.refresh();
       debugPrint('❌ Failed to update local calendar switch: $e');
       Get.snackbar('Error', 'Unable to update calendar state');
+    } finally {
+      connectingCalendarIds.remove(item.id);
     }
   }
 

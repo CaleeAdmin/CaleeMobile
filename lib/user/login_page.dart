@@ -23,6 +23,7 @@ class _LoginPageState extends State<LoginPage> {
   final _passwordController = TextEditingController();
   bool _obscurePassword = true;
   bool _agree = false;
+  bool _isSubmittingLogin = false;
   Worker? _authStateWorker;
 
   @override
@@ -46,6 +47,11 @@ class _LoginPageState extends State<LoginPage> {
       if (!mounted) return;
 
       if (state.isAuthenticated) {
+        if (_isSubmittingLogin) {
+          setState(() {
+            _isSubmittingLogin = false;
+          });
+        }
         // 登录成功
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -58,6 +64,11 @@ class _LoginPageState extends State<LoginPage> {
       }
 
       if (state.hasError && state.status == NextcloudAuthStatus.error) {
+        if (_isSubmittingLogin) {
+          setState(() {
+            _isSubmittingLogin = false;
+          });
+        }
         // 显示登录失败错误信息
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -110,11 +121,18 @@ class _LoginPageState extends State<LoginPage> {
       return;
     }
 
+    if (_isSubmittingLogin) {
+      return;
+    }
+
     // 使用用户名密码登录
     final loginName = _accountController.text.trim();
     final password = _passwordController.text.trim();
 
     final authController = Get.find<AuthController>();
+    setState(() {
+      _isSubmittingLogin = true;
+    });
     authController.loginWithCredentials(
       loginName: loginName,
       password: password,
@@ -144,10 +162,11 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
-    final authController = Get.find<AuthController>();
-    final isLoading = authController.authState.isLoading;
+    return Obx(() {
+      final authController = Get.find<AuthController>();
+      final isLoading = authController.authState.isLoading || _isSubmittingLogin;
 
-    return Scaffold(
+      return Scaffold(
       backgroundColor: const Color(0xFFF3FAF3),
       body: SafeArea(
         child: Center(
@@ -320,7 +339,8 @@ class _LoginPageState extends State<LoginPage> {
           ),
         ),
       ),
-    );
+      );
+    });
   }
 
   Widget _buildLabel(String text) {

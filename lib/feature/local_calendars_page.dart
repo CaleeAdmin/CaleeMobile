@@ -114,94 +114,109 @@ class _LocalCalendarCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final controller = Get.find<LocalCalendarPageController>();
 
-    return Card(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      elevation: 0,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              width: 56,
-              height: 56,
-              decoration: BoxDecoration(
-                color: _parseColor(calendar.color),
-                borderRadius: BorderRadius.circular(12),
+    return Obx(() {
+      final isConnecting = controller.connectingCalendarIds.contains(calendar.id);
+
+      return Card(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        elevation: 0,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  color: _parseColor(calendar.color),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Center(
+                  child: Icon(Icons.calendar_today, color: Colors.white),
+                ),
               ),
-              child: const Center(
-                child: Icon(Icons.calendar_today, color: Colors.white),
-              ),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          calendar.name,
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.black87,
-                          ),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      calendar.isConnected
-                          ? const Text(
-                              'Connected',
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                color: Color(0xFF16A34A),
-                              ),
-                            )
-                          : TextButton(
-                              onPressed: () async {
-                                await controller.toggleCalendarSelection(
-                                  calendar,
-                                  true,
-                                  returnToCalendarListAfterConnect: true,
-                                );
-                              },
-                              style: TextButton.styleFrom(
-                                backgroundColor: const Color(0xFF111827),
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                                textStyle: const TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                                minimumSize: Size.zero,
-                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                              ),
-                              child: const Text('Connect'),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            calendar.name,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.black87,
                             ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    calendar.isReadOnly ? 'Read-only in Calee' : 'Two-way sync',
-                    style: const TextStyle(fontSize: 14, color: Color(0xFF4B5563)),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    'Events: ${calendar.eventCount}',
-                    style: const TextStyle(fontSize: 12, color: Color(0xFF4B5563)),
-                  ),
-                ],
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        calendar.isConnected
+                            ? const Text(
+                                'Connected',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFF16A34A),
+                                ),
+                              )
+                            : TextButton(
+                                onPressed: isConnecting
+                                    ? null
+                                    : () async {
+                                        await controller.toggleCalendarSelection(
+                                          calendar,
+                                          true,
+                                          returnToCalendarListAfterConnect: true,
+                                        );
+                                      },
+                                style: TextButton.styleFrom(
+                                  backgroundColor: const Color(0xFF111827),
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                  textStyle: const TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                  minimumSize: Size.zero,
+                                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                ),
+                                child: isConnecting
+                                    ? const SizedBox(
+                                        width: 14,
+                                        height: 14,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                        ),
+                                      )
+                                    : const Text('Connect'),
+                              ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      calendar.isReadOnly ? 'Read-only in Calee' : 'Two-way sync',
+                      style: const TextStyle(fontSize: 14, color: Color(0xFF4B5563)),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'Events: ${calendar.eventCount}',
+                      style: const TextStyle(fontSize: 12, color: Color(0xFF4B5563)),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
-      ),
-    );
+      );
+    });
   }
 }
