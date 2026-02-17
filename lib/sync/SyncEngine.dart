@@ -406,12 +406,6 @@ class SyncEngine {
           print("   -> 📥 判定动作: 云端 ETag 变更，执行下载更新 (Pull)");
           await _downloadFromCloud(remote, ctx);
         }
-        // 2. 🌟 关键补救：ETag 没变，但本地 local_item_id 还是 'v_' 开头（影子数据）
-        // 且此时 ctx.syncStatus 为 1，说明用户刚开启同步，需要补建系统事件
-        else if (ctx.syncStatus == 1 && localId.startsWith('v_')) {
-          print("   -> 🏗️ 补救动作: 影子数据转系统事件 (补建)");
-          await _downloadFromCloud(remote, ctx);
-        }
         else {
           print("   -> ✅ 判定动作: 双端完全一致");
         }
@@ -420,8 +414,7 @@ class SyncEngine {
         // --- 场景 C：本地有但云端没有 ---
         if (status == 0) {
           print("   -> 🗑️ 判定动作: 云端已删，清理本地记录");
-          // 只有真实的系统 ID 才调用系统删除，虚拟 ID 只删本地库
-          if (localId.isNotEmpty && !localId.startsWith('v_')) {
+          if (localId.isNotEmpty) {
             try {
               await _native.deleteEvent(localId);
             } catch (e) {
