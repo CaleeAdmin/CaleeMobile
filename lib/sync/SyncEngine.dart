@@ -368,7 +368,7 @@ class SyncEngine {
       final String uid = local['uid']?.toString() ?? "";
       final int status = local['sync_status'] as int? ?? 0;
       final String title = local['summary'] ?? "无标题";
-      final String localId = local['local_id']?.toString() ?? "";
+      final String localId = local['local_item_id']?.toString() ?? "";
       final String? remoteHref = local['remote_href']?.toString();
 
       // --- 场景 A：本地标记为已删除 (Status 2) ---
@@ -406,7 +406,7 @@ class SyncEngine {
           print("   -> 📥 判定动作: 云端 ETag 变更，执行下载更新 (Pull)");
           await _downloadFromCloud(remote, ctx);
         }
-        // 2. 🌟 关键补救：ETag 没变，但本地 local_id 还是 'v_' 开头（影子数据）
+        // 2. 🌟 关键补救：ETag 没变，但本地 local_item_id 还是 'v_' 开头（影子数据）
         // 且此时 ctx.syncStatus 为 1，说明用户刚开启同步，需要补建系统事件
         else if (ctx.syncStatus == 1 && localId.startsWith('v_')) {
           print("   -> 🏗️ 补救动作: 影子数据转系统事件 (补建)");
@@ -507,7 +507,7 @@ class SyncEngine {
     // final db = await DatabaseHelper.instance.database;
     // await db.insert('sync_items', {
     //   'uid': remote['uid'],
-    //   'local_id': systemEventId ?? 'v_${remote['uid']}', // 有系统 ID 用系统 ID，没有用虚拟
+    //   'local_item_id': systemEventId ?? 'v_${remote['uid']}', // 有系统 ID 用系统 ID，没有用虚拟
     //   'remote_collection_id': ctx.calendarId,
     //   'remote_etag': remote['etag'],
     //   'summary': parsed['summary'],

@@ -55,8 +55,8 @@ class FullSyncPullStrategy extends SyncStrategy {
             end: Timeutils.parseToMillis(remoteEvent['end']),
             notes: remoteEvent['description'] ?? "UID: $uid",
             uid: uid,
-            // 关键：如果 localRecord 存在，则传入其 local_id 告诉原生端执行 Update
-            eventId: localRecord?['local_id']?.toString(),
+            // 关键：如果 localRecord 存在，则传入其 local_item_id 告诉原生端执行 Update
+            eventId: localRecord?['local_item_id']?.toString(),
           );
 
           final String? systemEventId = await nativeApi.createOrUpdateEvent(
@@ -66,7 +66,7 @@ class FullSyncPullStrategy extends SyncStrategy {
           if (systemEventId != null) {
             await db.insert('sync_items', {
               'uid': uid,
-              'local_id': systemEventId,
+              'local_item_id': systemEventId,
               'remote_collection_id': localCalendarId,
               'summary': remoteEvent['summary'],
               'remote_etag': etag,
@@ -81,7 +81,7 @@ class FullSyncPullStrategy extends SyncStrategy {
       for (var uid in localSyncMap.keys) {
         if (!remoteUids.contains(uid)) {
           final recordToDelete = localSyncMap[uid]!;
-          final bool isDeleted = await nativeApi.deleteEvent(recordToDelete['local_id']);
+          final bool isDeleted = await nativeApi.deleteEvent(recordToDelete['local_item_id']);
           if (isDeleted) {
             await db.delete('sync_items', where: 'uid = ?', whereArgs: [uid]);
           }

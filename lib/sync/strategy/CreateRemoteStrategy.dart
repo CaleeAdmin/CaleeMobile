@@ -70,7 +70,7 @@ class CreateRemoteStrategy extends SyncStrategy {
           // 3. 写入 sync_items
           await db.insert('sync_items', {
             'uid': uid,
-            'local_id': event.localId,
+            'local_item_id': event.localId,
             'remote_collection_id': ctx.calendarId,
             'summary': title,
             'description': event.notes,
