@@ -29,8 +29,8 @@ class FullSyncPushStrategy extends SyncStrategy {
 
       // 2. 获取本地已有的同步映射表
       final List<Map<String, dynamic>> mappedRecords = await db.query(
-        'sync_map',
-        where: 'calendar_local_id = ?',
+        'sync_items',
+        where: 'remote_collection_id = ?',
         whereArgs: [ctx.calendarId],
       );
 
@@ -56,7 +56,7 @@ class FullSyncPushStrategy extends SyncStrategy {
           // B. 场景：本地有，映射表也有 -> 比对修改时间
           final record = localSyncMap[localId]!;
           // 如果系统最后的修改时间大于上次同步存的时间戳，则需要推送
-          if (lastModified > (record['last_mtime'] ?? 0)) {
+          if (lastModified > (record['remote_mtime'] ?? 0)) {
             needsPush = true;
           }
         }
@@ -73,13 +73,13 @@ class FullSyncPushStrategy extends SyncStrategy {
 
           if (newEtag != null) {
             // 更新映射表记录最新的 ETag 和修改时间
-            await db.insert('sync_map', {
+            await db.insert('sync_items', {
               'uid': uid,
               'local_id': localId,
-              'calendar_local_id': ctx.calendarId,
+              'remote_collection_id': ctx.calendarId,
               'summary': local.title,
-              'last_etag': newEtag.replaceAll('"', ''),
-              'last_mtime': lastModified,
+              'remote_etag': newEtag.replaceAll('"', ''),
+              'remote_mtime': lastModified,
               'remote_href': "${remotePath.endsWith('/') ? remotePath : '$remotePath/'}$uid.ics",
               'sync_status': 0,
             }, conflictAlgorithm: ConflictAlgorithm.replace);
@@ -100,7 +100,7 @@ class FullSyncPushStrategy extends SyncStrategy {
           if (href != null) {
             final bool isDeletedOnRemote = await nc.deleteEvent(eventPath: href);
             if (isDeletedOnRemote) {
-              await db.delete('sync_map', where: 'local_id = ?', whereArgs: [localId]);
+              await db.delete('sync_items', where: 'local_id = ?', whereArgs: [localId]);
               changeCount++;
             }
           }

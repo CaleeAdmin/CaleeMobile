@@ -12,15 +12,15 @@ class Deletelocalstrategy extends SyncStrategy {
       if(result){
         final db = await dbHelper.database;
         await db.transaction((txn) async {
-          // 1. 删除关联的事件追踪 (sync_map)
+          // 1. 删除关联的事件追踪 (sync_items)
           int sCount = await txn.delete(
-              'sync_map',
-              where: 'calendar_local_id = ?',
+              'sync_items',
+              where: 'remote_collection_id = ?',
               whereArgs: [ctx.calendarId]
           );
-          // 2. 删除日历自身的配置 (calendar_map)
+          // 2. 删除日历自身的配置 (remote_collections)
           int cCount = await txn.delete(
-              'calendar_map',
+              'remote_collections',
               where: 'local_id = ?',
               whereArgs: [ctx.calendarId]
           );

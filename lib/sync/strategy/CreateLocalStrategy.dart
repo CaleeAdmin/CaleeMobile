@@ -36,7 +36,7 @@ class CreateLocalStrategy extends SyncStrategy {
     final db = await dbHelper.database;
 
     // 2. 关联本地 ID 并预设状态
-    await db.update('calendar_map', {
+    await db.update('remote_collections', {
       'local_id': newLocalId,
       'is_enabled': 1,
     }, where: 'remote_path = ?', whereArgs: [ctx.remotePath]);
@@ -48,10 +48,10 @@ class CreateLocalStrategy extends SyncStrategy {
         isSubscription: ctx.isSubscription ?? false,
       );
 
-      // 4. 加载本地 sync_map 缓存用于 Diff 比对
+      // 4. 加载本地 sync_items 缓存用于 Diff 比对
       final List<Map<String, dynamic>> localEntries = await db.query(
-        'sync_map',
-        where: 'calendar_local_id = ?',
+        'sync_items',
+        where: 'remote_collection_id = ?',
         whereArgs: [newLocalId],
       );
       final Map<String, Map<String, dynamic>> localSyncMap = {
@@ -67,7 +67,7 @@ class CreateLocalStrategy extends SyncStrategy {
 
         // 5. 差异比对：ETag 没变且本地已有系统 ID 则跳过
         if (localSyncMap.containsKey(remoteUid)) {
-          final localEtag = localSyncMap[remoteUid]!['last_etag'];
+          final localEtag = localSyncMap[remoteUid]!['remote_etag'];
           final localSystemId = localSyncMap[remoteUid]!['local_id'];
           if (localEtag == remoteEtag && localSystemId != null) {
             eventSuccessCount++;
@@ -100,13 +100,13 @@ class CreateLocalStrategy extends SyncStrategy {
           final String? systemEventId = await _api.createOrUpdateEvent(request);
 
           if (systemEventId != null) {
-            // 9. 更新 sync_map 映射
-            await db.insert('sync_map', {
+            // 9. 更新 sync_items 映射
+            await db.insert('sync_items', {
               'uid': eventData.uid,
               'local_id': systemEventId,
-              'calendar_local_id': newLocalId,
+              'remote_collection_id': newLocalId,
               'summary': eventData.summary,
-              'last_etag': remoteEtag,
+              'remote_etag': remoteEtag,
               'remote_href': eventData.href,
               'sync_status': 0,
               'dtstart': eventData.dtstart,

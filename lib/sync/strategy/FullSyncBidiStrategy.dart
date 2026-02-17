@@ -28,8 +28,8 @@ class FullSyncBidiStrategy extends SyncStrategy {
       );
 
       final List<Map<String, dynamic>> mappedRecords = await db.query(
-        'sync_map',
-        where: 'calendar_local_id = ?',
+        'sync_items',
+        where: 'remote_collection_id = ?',
         whereArgs: [localCalendarId],
       );
       final Map<String, Map<String, dynamic>> syncMap = {
@@ -58,9 +58,9 @@ class FullSyncBidiStrategy extends SyncStrategy {
         final localReal = localItemsMap[uid];
 
         // 核心冲突判定逻辑
-        bool cloudChanged = localBase == null || localBase['last_etag'] != remoteEtag;
+        bool cloudChanged = localBase == null || localBase['remote_etag'] != remoteEtag;
         bool localChanged = localReal != null &&
-            (localBase == null || (localReal.lastModified ?? 0) > (localBase['last_mtime'] ?? 0));
+            (localBase == null || (localReal.lastModified ?? 0) > (localBase['remote_mtime'] ?? 0));
 
         if (cloudChanged && localChanged) {
           // 💡 场景：冲突！双方都改了。策略：以云端为准（或你可以根据 mtime 判定谁更晚）
@@ -83,7 +83,7 @@ class FullSyncBidiStrategy extends SyncStrategy {
         final record = syncMap[uid]!;
         final String? localId = record['local_id']?.toString();
         final String? href = record['remote_href'];
-        final String? etag = record['last_etag'];
+        final String? etag = record['remote_etag'];
 
         final bool existsInRemote = processedUids.contains(uid);
         final bool existsInLocal = localItemsMap.containsKey(uid);
@@ -97,7 +97,7 @@ class FullSyncBidiStrategy extends SyncStrategy {
               debugPrint("🗑️ 检测到本地物理删除，同步清理云端: ${record['summary']}");
               final bool ok = await nc.deleteEvent(eventPath: href);
               if (ok) {
-                await db.delete('sync_map', where: 'uid = ?', whereArgs: [uid]);
+                await db.delete('sync_items', where: 'uid = ?', whereArgs: [uid]);
                 changeCount++;
               }
             }
@@ -115,12 +115,12 @@ class FullSyncBidiStrategy extends SyncStrategy {
               // B. 账本里有 Etag，说明以前同步过，但现在云端没了 -> 判定为云端删了
               debugPrint("🧹 云端已删，同步清理本地实物: ${record['summary']}");
               await nativeApi.deleteEvent(localId!);
-              await db.delete('sync_map', where: 'uid = ?', whereArgs: [uid]);
+              await db.delete('sync_items', where: 'uid = ?', whereArgs: [uid]);
               changeCount++;
             }
           } else {
             // C. 场景：两边都没了，只有账本残留
-            await db.delete('sync_map', where: 'uid = ?', whereArgs: [uid]);
+            await db.delete('sync_items', where: 'uid = ?', whereArgs: [uid]);
           }
         }
       }
@@ -158,12 +158,12 @@ class FullSyncBidiStrategy extends SyncStrategy {
     ));
 
     if (newSystemId != null) {
-      await db.insert('sync_map', {
+      await db.insert('sync_items', {
         'uid': eventData.uid,
         'local_id': newSystemId,
-        'calendar_local_id': calendarId,
-        'last_etag': etag,
-        'last_mtime': DateTime.now().millisecondsSinceEpoch, // 更新基准时间，避免刚拉下来又推上去
+        'remote_collection_id': calendarId,
+        'remote_etag': etag,
+        'remote_mtime': DateTime.now().millisecondsSinceEpoch, // 更新基准时间，避免刚拉下来又推上去
         'remote_href': remote['href'],
         'sync_status': 0,
       }, conflictAlgorithm: ConflictAlgorithm.replace);
@@ -183,12 +183,12 @@ class FullSyncBidiStrategy extends SyncStrategy {
     );
 
     if (newEtag != null) {
-      await db.insert('sync_map', {
+      await db.insert('sync_items', {
         'uid': uid,
         'local_id': local.localId,
-        'calendar_local_id': calendarId,
-        'last_etag': newEtag.replaceAll('"', ''),
-        'last_mtime': local.lastModified,
+        'remote_collection_id': calendarId,
+        'remote_etag': newEtag.replaceAll('"', ''),
+        'remote_mtime': local.lastModified,
         'remote_href': "${remotePath.endsWith('/') ? remotePath : '$remotePath/'}$uid.ics",
         'sync_status': 0,
       }, conflictAlgorithm: ConflictAlgorithm.replace);

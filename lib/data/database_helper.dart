@@ -27,58 +27,87 @@ class DatabaseHelper {
       path,
       version: 1,
       onCreate: _createDB,
-      // 开启外键支持
       onConfigure: (db) async => await db.execute('PRAGMA foreign_keys = ON'),
     );
   }
 
-
   Future _createDB(Database db, int version) async {
-    // 1. 日历映射表：增加账号维度和同步模式
     await db.execute('''
-      CREATE TABLE IF NOT EXISTS calendar_map (
-        local_id TEXT PRIMARY KEY,
-        account_name TEXT,           -- 账号标识 (e.g. gmail_user)
-        account_type TEXT,           -- 账号来源 (e.g. com.google / iCloud)
-        remote_path TEXT UNIQUE,     -- 远端路径，允许 NULL (但必须唯一)
+      CREATE TABLE IF NOT EXISTS remote_collections (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        server_id TEXT,
+        account_name TEXT,
+        account_type TEXT,
+        kind TEXT,
+        remote_path TEXT,
         display_name TEXT,
-        color TEXT,                  -- 存储 #AARRGGBB
-        synced_ctag TEXT,
-        sync_mode INTEGER DEFAULT 0,    -- 0:只读, 1:双向
-        is_enabled INTEGER DEFAULT 0,   -- 0:暂停, 1:正常
-        origin INTEGER DEFAULT 0,       -- 0:本地创建 (Local), 1:远端同步 (Remote)
-        is_subscription INTEGER DEFAULT 0, -- 0:普通日历, 1:订阅日历
-        subscription_url TEXT         -- 订阅来源 URL (仅订阅日历)
+        color TEXT,
+        ctag TEXT,
+        sync_token TEXT,
+        is_subscription INTEGER DEFAULT 0,
+        subscription_url TEXT,
+        is_read_only INTEGER DEFAULT 0,
+        updated_at INTEGER,
+        local_id TEXT,
+        sync_mode INTEGER DEFAULT 0,
+        is_enabled INTEGER DEFAULT 1,
+        origin INTEGER DEFAULT 1,
+        UNIQUE(server_id, account_name, kind, remote_path),
+        UNIQUE(local_id)
       )
     ''');
 
-    // 2. 事件映射表：保持 UID 核心，增加索引优化查询
-    // 彻底补全后的 sync_map
     await db.execute('''
-     CREATE TABLE IF NOT EXISTS sync_map (
-        uid TEXT PRIMARY KEY,
-        local_id TEXT,                  -- 系统日历 _ID
-        calendar_local_id TEXT,         -- 关联 calendar_map.local_id
+      CREATE TABLE IF NOT EXISTS local_bindings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        remote_collection_id INTEGER NOT NULL,
+        local_provider TEXT NOT NULL,
+        local_container_id TEXT,
+        sync_mode INTEGER DEFAULT 0,
+        is_enabled INTEGER DEFAULT 1,
+        origin INTEGER DEFAULT 1,
+        created_at INTEGER,
+        updated_at INTEGER,
+        FOREIGN KEY(remote_collection_id) REFERENCES remote_collections(id) ON DELETE CASCADE,
+        UNIQUE(remote_collection_id)
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS sync_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        remote_collection_id INTEGER NOT NULL,
+        item_type TEXT NOT NULL DEFAULT 'event',
+        uid TEXT NOT NULL,
+        recurrence_id TEXT,
+        local_item_id TEXT,
+        local_id TEXT,
+        remote_href TEXT,
+        remote_etag TEXT,
+        remote_mtime INTEGER,
         summary TEXT,
         description TEXT,
-        dtstart INTEGER,                -- 毫秒时间戳
-        dtend INTEGER,                  -- 毫秒时间戳
-        last_etag TEXT,
-        last_mtime INTEGER,             -- 系统日历的最后修改时间
-        item_type TEXT DEFAULT 'event', -- event / task
-        remote_href TEXT,
-        sync_status INTEGER DEFAULT 3   -- 0:Synced, 1:Dirty, 2:Deleted, 3:Pending
-    );
-''');
+        dtstart INTEGER,
+        dtend INTEGER,
+        due INTEGER,
+        completed_at INTEGER,
+        sync_status INTEGER DEFAULT 3,
+        updated_at INTEGER,
+        FOREIGN KEY(remote_collection_id) REFERENCES remote_collections(id) ON DELETE CASCADE,
+        UNIQUE(remote_collection_id, item_type, uid, recurrence_id)
+      )
+    ''');
 
-    // 建议增加索引，提高同步扫描时的查询速度
     await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_sync_local_event ON sync_map (local_id)');
+        'CREATE INDEX IF NOT EXISTS idx_remote_collections_scope ON remote_collections (server_id, account_name, kind)');
     await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_sync_calendar_group ON sync_map (calendar_local_id, sync_status)');
+        'CREATE INDEX IF NOT EXISTS idx_bindings_local_container ON local_bindings (local_provider, local_container_id)');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_sync_items_local ON sync_items (local_item_id)');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_sync_items_status ON sync_items (remote_collection_id, sync_status)');
   }
 
-  // 物理删除数据库（调试用：调用后需重启 App）
   Future<void> deleteMyDatabase() async {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, 'caleesync.db');

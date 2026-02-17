@@ -140,7 +140,7 @@ class CalendarPageController extends GetxController {
 
     // 2. 执行更新
     int count = await db.update(
-      'calendar_map',
+      'remote_collections',
       {'is_enabled': newValue ? 1 : 0},
       where: whereClause,
       whereArgs: whereArgs,
@@ -174,10 +174,10 @@ class CalendarPageController extends GetxController {
           serverUrl: _authService.normalizedUrl,
           userId: loginName);
 
-      // 2. 查询本地 calendar_map 的所有日历记录
+      // 2. 查询本地 remote_collections 的所有日历记录
       final db = await DatabaseHelper.instance.database;
       final List<Map<String, dynamic>> calendarMaps = await db.query(
-        'calendar_map',
+        'remote_collections',
       );
       final Map<String, int> cachedCountByCalendarId = {};
       final Map<String, bool> localReadOnlyById = {};
@@ -196,10 +196,10 @@ class CalendarPageController extends GetxController {
 
       if (includeEventCounts) {
         final countRows = await db.rawQuery(
-          'SELECT calendar_local_id, COUNT(*) AS count FROM sync_map GROUP BY calendar_local_id',
+          'SELECT remote_collection_id, COUNT(*) AS count FROM sync_items GROUP BY remote_collection_id',
         );
         for (final row in countRows) {
-          final String key = (row['calendar_local_id'] ?? '').toString();
+          final String key = (row['remote_collection_id'] ?? '').toString();
           if (key.isEmpty) continue;
           cachedCountByCalendarId[key] = (row['count'] as int?) ?? 0;
         }
