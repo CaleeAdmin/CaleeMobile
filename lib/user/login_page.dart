@@ -23,6 +23,7 @@ class _LoginPageState extends State<LoginPage> {
   final _passwordController = TextEditingController();
   bool _obscurePassword = true;
   bool _agree = false;
+  bool _isSubmittingLogin = false;
   Worker? _authStateWorker;
 
   @override
@@ -46,6 +47,11 @@ class _LoginPageState extends State<LoginPage> {
       if (!mounted) return;
 
       if (state.isAuthenticated) {
+        if (_isSubmittingLogin) {
+          setState(() {
+            _isSubmittingLogin = false;
+          });
+        }
         // 登录成功
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -58,6 +64,11 @@ class _LoginPageState extends State<LoginPage> {
       }
 
       if (state.hasError && state.status == NextcloudAuthStatus.error) {
+        if (_isSubmittingLogin) {
+          setState(() {
+            _isSubmittingLogin = false;
+          });
+        }
         // 显示登录失败错误信息
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -102,6 +113,8 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   void _onLogin() {
+    if (_isSubmittingLogin) return;
+
     if (!_formKey.currentState!.validate()) return;
     if (!_agree) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -109,6 +122,10 @@ class _LoginPageState extends State<LoginPage> {
       );
       return;
     }
+
+    setState(() {
+      _isSubmittingLogin = true;
+    });
 
     // 使用用户名密码登录
     final loginName = _accountController.text.trim();
@@ -118,7 +135,12 @@ class _LoginPageState extends State<LoginPage> {
     authController.loginWithCredentials(
       loginName: loginName,
       password: password,
-    );
+    ).catchError((_) {
+      if (!mounted) return;
+      setState(() {
+        _isSubmittingLogin = false;
+      });
+    });
   }
 
   Future<void> _openForgotPasswordPage() async {
@@ -145,19 +167,21 @@ class _LoginPageState extends State<LoginPage> {
   @override
   Widget build(BuildContext context) {
     final authController = Get.find<AuthController>();
-    final isLoading = authController.authState.isLoading;
+    return Obx(() {
+      final isLoading = authController.authState.isLoading;
+      final isLoginActionDisabled = isLoading || _isSubmittingLogin;
 
-    return Scaffold(
-      backgroundColor: const Color(0xFFF3FAF3),
-      body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
+      return Scaffold(
+        backgroundColor: const Color(0xFFF3FAF3),
+        body: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
                   const SizedBox(height: 32),
                   Container(
                     width: 72,
@@ -200,7 +224,7 @@ class _LoginPageState extends State<LoginPage> {
                     hint: 'Enter your account name',
                     validator: (v) =>
                         (v == null || v.trim().isEmpty) ? 'Account required' : null,
-                    enabled: !isLoading,
+                    enabled: !isLoginActionDisabled,
                   ),
                   const SizedBox(height: 16),
                   _buildLabel('Password'),
@@ -210,7 +234,7 @@ class _LoginPageState extends State<LoginPage> {
                     hint: 'Enter your password',
                     obscure: _obscurePassword,
                     suffixIcon: IconButton(
-                      onPressed: isLoading
+                      onPressed: isLoginActionDisabled
                           ? null
                           : () {
                               setState(() {
@@ -224,7 +248,7 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                     validator: (v) =>
                         (v == null || v.length < 6) ? 'Password must be at least 6 characters' : null,
-                    enabled: !isLoading,
+                    enabled: !isLoginActionDisabled,
                   ),
                   const SizedBox(height: 16),
                   Row(
@@ -234,7 +258,7 @@ class _LoginPageState extends State<LoginPage> {
                         visualDensity: VisualDensity.compact,
                         materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         value: _agree,
-                        onChanged: isLoading
+                        onChanged: isLoginActionDisabled
                             ? null
                             : (v) {
                                 setState(() {
@@ -271,7 +295,7 @@ class _LoginPageState extends State<LoginPage> {
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
-                      onPressed: isLoading ? null : _onLogin,
+                      onPressed: isLoginActionDisabled ? null : _onLogin,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF0D0C14),
                         foregroundColor: Colors.white,
@@ -282,7 +306,7 @@ class _LoginPageState extends State<LoginPage> {
                           borderRadius: BorderRadius.circular(8),
                         ),
                       ),
-                      child: isLoading
+                      child: isLoginActionDisabled
                           ? const SizedBox(
                               width: 20,
                               height: 20,
@@ -302,7 +326,7 @@ class _LoginPageState extends State<LoginPage> {
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       TextButton(
-                        onPressed: isLoading ? null : _openForgotPasswordPage,
+                        onPressed: isLoginActionDisabled ? null : _openForgotPasswordPage,
                         child: const Text(
                           'Forgot password?',
                           style: TextStyle(
@@ -319,8 +343,8 @@ class _LoginPageState extends State<LoginPage> {
             ),
           ),
         ),
-      ),
-    );
+      );
+    });
   }
 
   Widget _buildLabel(String text) {
