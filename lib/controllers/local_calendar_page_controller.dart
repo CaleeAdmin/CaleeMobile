@@ -222,11 +222,14 @@ class LocalCalendarPageController extends GetxController {
         }
       }
 
+      final String caleeServerId = _caleeService.baseUrl;
+
       final int updated = await db.update(
         'remote_collections',
         {
           'is_enabled': enabled ? 1 : 0,
           'display_name': item.name,
+          'server_id': caleeServerId,
           'account_name': MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? item.accountName,
           'account_type': item.accountType,
           'color': item.color,
@@ -243,7 +246,7 @@ class LocalCalendarPageController extends GetxController {
       if (updated == 0) {
         await db.insert('remote_collections', {
           'local_id': item.id,
-          'server_id': item.accountType,
+          'server_id': caleeServerId,
           'kind': 'calendar',
           'account_name': MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? item.accountName,
           'account_type': item.accountType,
