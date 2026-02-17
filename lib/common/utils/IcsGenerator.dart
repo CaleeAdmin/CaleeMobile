@@ -16,7 +16,7 @@ class IcsGenerator {
     final buffer = StringBuffer();
     buffer.writeln('BEGIN:VCALENDAR');
     buffer.writeln('VERSION:2.0');
-    buffer.writeln('PRODID:-//CaleeSync//Nextcloud Sync//EN');
+    buffer.writeln('PRODID:-//My Calee Pty Ltd//CaleeSync//EN');
     buffer.writeln('BEGIN:VEVENT');
     buffer.writeln('UID:$uid');
     buffer.writeln('DTSTAMP:$stamp');
