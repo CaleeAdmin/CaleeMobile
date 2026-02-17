@@ -15,8 +15,8 @@ abstract class SyncStrategy {
   final NativeCalendarApi nativeApi = NativeCalendarApi();
   final NextcloudAuthService authService = NextcloudAuthService(serverBaseUrl: AppConstant.nextcloudServer);
   final DatabaseHelper dbHelper = DatabaseHelper.instance;
-  final String? loginName = MMKVUtils.instance.getString(AppConstant.loginName);
-  final String? password = MMKVUtils.instance.getString(AppConstant.password);
+  final String? loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey);
+  final String? password = MMKVUtils.instance.getString(AppConstant.appPasswordKey);
 
   // 核心执行接口
   Future<void> execute(SyncContext ctx, SyncSummary summary);

@@ -6,7 +6,7 @@ class AppConstant {
   static const String nextcloudServer = 'nc-dev.ywpl.com.au';
 
   /// MMKV 存储 Key
-  static const String Server = 'nextcloud_server';
-  static const String loginName = 'nextcloud_login_name';
-  static const String password = 'nextcloud_app_password';
+  static const String serverKey = 'calee_server';
+  static const String loginNameKey = 'calee_login_name';
+  static const String appPasswordKey = 'calee_app_password';
 }

@@ -11,7 +11,7 @@ class UserProfileService {
 
   Uri _buildUri(String path) {
     final rawServer =
-        MMKVUtils.instance.getString(AppConstant.Server) ?? AppConstant.nextcloudServer;
+        MMKVUtils.instance.getString(AppConstant.serverKey) ?? AppConstant.nextcloudServer;
     var server = rawServer.trim();
     if (!server.startsWith('http://') && !server.startsWith('https://')) {
       server = 'https://$server';
@@ -49,8 +49,8 @@ class UserProfileService {
   }
 
   Future<Map<String, String>> fetchCurrentProfile() async {
-    final userId = MMKVUtils.instance.getString(AppConstant.loginName) ?? '';
-    final password = MMKVUtils.instance.getString(AppConstant.password) ?? '';
+    final userId = MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? '';
+    final password = MMKVUtils.instance.getString(AppConstant.appPasswordKey) ?? '';
 
     if (userId.isEmpty || password.isEmpty) {
       throw Exception('Missing Nextcloud credentials');
@@ -99,8 +99,8 @@ class UserProfileService {
     required String address,
     required String timezone,
   }) async {
-    final userId = MMKVUtils.instance.getString(AppConstant.loginName) ?? '';
-    final password = MMKVUtils.instance.getString(AppConstant.password) ?? '';
+    final userId = MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? '';
+    final password = MMKVUtils.instance.getString(AppConstant.appPasswordKey) ?? '';
 
     if (userId.isEmpty || password.isEmpty) {
       throw Exception('Missing Nextcloud credentials');
@@ -154,7 +154,7 @@ class UserProfileService {
     required String currentPassword,
     required String newPassword,
   }) async {
-    final userId = MMKVUtils.instance.getString(AppConstant.loginName) ?? '';
+    final userId = MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? '';
 
     if (userId.isEmpty) {
       throw Exception('Missing Nextcloud credentials');

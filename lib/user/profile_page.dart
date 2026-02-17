@@ -36,7 +36,7 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   void _loadAccountName() {
-    final loginName = MMKVUtils.instance.getString(AppConstant.loginName);
+    final loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey);
     setState(() {
       _accountName = loginName;
     });
