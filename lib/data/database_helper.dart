@@ -42,7 +42,7 @@ class DatabaseHelper {
         remote_path TEXT UNIQUE,     -- 远端路径，允许 NULL (但必须唯一)
         display_name TEXT,
         color TEXT,                  -- 存储 #AARRGGBB
-        last_ctag TEXT,
+        synced_ctag TEXT,
         sync_mode INTEGER DEFAULT 0,    -- 0:只读, 1:双向
         is_enabled INTEGER DEFAULT 0,   -- 0:暂停, 1:正常
         origin INTEGER DEFAULT 0        -- 0:本地创建 (Local), 1:远端同步 (Remote)
@@ -74,6 +74,7 @@ class DatabaseHelper {
     await db.execute(
         'CREATE INDEX IF NOT EXISTS idx_sync_calendar_group ON sync_map (calendar_local_id, sync_status)');
   }
+
   // 物理删除数据库（调试用：调用后需重启 App）
   Future<void> deleteMyDatabase() async {
     final dbPath = await getDatabasesPath();

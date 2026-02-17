@@ -67,7 +67,7 @@ class SyncEngine {
       }
 
       if (isEnabled == 1) {
-        final String? dbCtag = local['last_ctag'];
+        final String? dbCtag = local['synced_ctag'];
         final String? remoteCtag = remote['ctag'];
         final bool remoteChanged = (remoteCtag != null && remoteCtag != dbCtag);
         final bool localChanged = await _isCalendarDirty(db, localId);
@@ -140,7 +140,7 @@ class SyncEngine {
       color: remote['color'] ?? local?['color'] ?? "#AARRGGBB",
       syncMode: local?['sync_mode'] ?? remote['sync_mode'] ?? 0,
       action: action,
-      ctag: remote['last_ctag'] ?? local?['last_ctag'],
+      ctag: remote['ctag'] ?? local?['synced_ctag'],
       isSubscription: remote['is_subscription'] ?? false,
       extra: {
         'origin': local?['origin'] ?? 0,

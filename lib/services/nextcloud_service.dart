@@ -111,7 +111,7 @@ class NextcloudService {
       results.add({
         'remote_path': href,
         'display_name': displayName ?? (isSubscribed ? "订阅日历" : "未命名日历"),
-        'last_ctag': ctag ?? "",
+        'ctag': ctag ?? "",
         'sync_mode': syncMode,
         'color': color,
         'is_subscription': isSubscribed, // 建议增加此字段方便 UI 展示
@@ -153,7 +153,7 @@ class NextcloudService {
         INSERT INTO calendar_map (
           remote_path, 
           display_name, 
-          last_ctag, 
+          synced_ctag, 
           sync_mode, 
           color, 
           account_name, 
@@ -163,7 +163,7 @@ class NextcloudService {
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) -- 增加一个占位符
         ON CONFLICT(remote_path) DO UPDATE SET
           display_name = excluded.display_name,
-          last_ctag = excluded.last_ctag,
+          synced_ctag = excluded.synced_ctag,
           -- 仅在插入时使用默认值；更新时保留用户已选择的同步模式。
           -- 只有当远端提供了新颜色且不为空时才更新本地颜色
           color = CASE WHEN excluded.color IS NOT NULL AND excluded.color != "" 
@@ -174,7 +174,7 @@ class NextcloudService {
       ''', [
               map['remote_path'],
               map['display_name'],
-              map['last_ctag'],
+              map['ctag'],
               defaultSyncMode,
               map['color'],
               accountName,
