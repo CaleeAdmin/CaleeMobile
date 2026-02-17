@@ -105,7 +105,20 @@ class SyncRepository {
     );
 
     for (var cal in activeCalendars) {
+      final int remoteCollectionId = cal['id'] as int;
       final String localCalId = cal['local_id'].toString();
+
+      final stillExists = await db.query(
+        'remote_collections',
+        columns: ['id'],
+        where: 'id = ?',
+        whereArgs: [remoteCollectionId],
+        limit: 1,
+      );
+      if (stillExists.isEmpty) {
+        debugPrint('⚠️ 跳过已失效日历映射: remote_collection_id=$remoteCollectionId local_id=$localCalId');
+        continue;
+      }
 
       // 2. 拍一张系统日历的“物理快照”
       final start = DateTime.now().subtract(const Duration(days: 365)).millisecondsSinceEpoch;
@@ -121,7 +134,7 @@ class SyncRepository {
       final List<Map<String, dynamic>> dbRecords = await db.query(
         'sync_items',
         where: 'remote_collection_id = ?',
-        whereArgs: [localCalId],
+        whereArgs: [remoteCollectionId],
       );
       final Map<String, Map<String, dynamic>> dbMap = {
         for (var r in dbRecords) r['local_id'].toString(): r
@@ -140,7 +153,7 @@ class SyncRepository {
             await txn.insert('sync_items', {
               'uid': systemEvent.uid ?? 'local_${DateTime.now().microsecondsSinceEpoch}',
               'local_id': sid,
-              'remote_collection_id': localCalId,
+              'remote_collection_id': remoteCollectionId,
               'summary': systemEvent.title,
               'remote_mtime': systemEvent.lastModified,
               'sync_status': 1, // 标记为 Dirty，待 Push
@@ -204,13 +217,26 @@ class SyncRepository {
     // 提取系统当前的 UID 集合
     final currentUids = currentEvents.map((e) => e.uid).toSet();
 
+    final List<Map<String, dynamic>> calMaps = await db.query(
+      'remote_collections',
+      columns: ['id'],
+      where: 'local_id = ?',
+      whereArgs: [calendarLocalId],
+      limit: 1,
+    );
+    if (calMaps.isEmpty) {
+      debugPrint('❌ scanLocalEvents 未找到 remote_collections 映射: $calendarLocalId');
+      return {'added': 0, 'modified': 0, 'deleted': 0};
+    }
+    final int remoteCollectionId = calMaps.first['id'] as int;
+
     await db.transaction((txn) async {
       // 2. 【核心逻辑】处理删除：找出数据库里有，但系统里没了的记录
       // 注意：只处理状态不为 2 的，避免重复处理
       final List<Map<String, dynamic>> dbRows = await txn.query(
         'sync_items',
         where: 'remote_collection_id = ? AND sync_status != ?',
-        whereArgs: [calendarLocalId, 2],
+        whereArgs: [remoteCollectionId, 2],
       );
 
       for (var row in dbRows) {
@@ -246,7 +272,7 @@ class SyncRepository {
           await txn.insert('sync_items', {
             'uid': eventUid,
             'local_id': event.localId,
-            'remote_collection_id': calendarLocalId,
+            'remote_collection_id': remoteCollectionId,
             'summary': event.title ?? '无标题',
             'description': event.notes,
             'dtstart': event.startTime,
