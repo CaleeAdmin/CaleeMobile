@@ -151,7 +151,7 @@ class SyncEngine {
   /// 引入一个回调函数，让 UI 能实时拿到 summary 对象
   Future<SyncSummary> executeFullSync({Function(SyncSummary)? onProgress}) async {
     final summary = SyncSummary();
-    final String? loginName = MMKVUtils.instance.getString(AppConstant.loginName);
+    final String? loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey);
     if (loginName == null) return summary;
 
     // 1. 扫描本地系统日历

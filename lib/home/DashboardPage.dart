@@ -41,7 +41,7 @@ class _DashboardPageState extends State<DashboardPage> {
     status = await calendarPermission.request();
     if (status.isGranted) {
       // refresh local calendars and dashboard
-      final loginName = MMKVUtils.instance.getString(AppConstant.loginName) ?? 'current_user_id';
+      final loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? 'current_user_id';
       await _repo.scanLocalCalendars(loginName);
       await _nc.scanRemoteCalendars(
           serverUrl: _authService.normalizedUrl,

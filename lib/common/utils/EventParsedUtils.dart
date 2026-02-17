@@ -35,9 +35,9 @@ class Eventparsedutils {
     // 1. 内部配置与资源准备
     const String baseUrl = "https://nc-dev.ywpl.com.au";
     final String loginName = MMKVUtils.instance.getString(
-        AppConstant.loginName) ?? '';
+        AppConstant.loginNameKey) ?? '';
     final String password = MMKVUtils.instance.getString(
-        AppConstant.password) ?? '';
+        AppConstant.appPasswordKey) ?? '';
 
     // 内部生成 Auth Header
     final String authHeader = 'Basic ${base64Encode(

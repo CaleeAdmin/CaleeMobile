@@ -385,7 +385,7 @@ class SyncRepository {
 
   Future<void> pushDeletesToRemote(String calendarLocalId) async {
     final db = await _dbHelper.database;
-    final String userId = MMKVUtils.instance.getString(AppConstant.loginName) ?? "";
+    final String userId = MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? "";
 
     // 1. 获取手机系统日历目前所有的 Event ID
     final List<String?> systemEventIds = await _nativeApi.getSystemEventIds(calendarLocalId);
@@ -631,7 +631,7 @@ class SyncRepository {
   /// 🗑️ 核心合并删除逻辑：物理销毁或解除绑定
   Future<void> performAbsoluteDelete({String? localId, String? remotePath}) async {
     final db = await _dbHelper.database;
-    final String userId = MMKVUtils.instance.getString(AppConstant.loginName) ?? "";
+    final String userId = MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? "";
 
     final String? sanitizedLocalId = (localId != null && localId.isNotEmpty) ? localId : null;
     final String? sanitizedRemotePath = (remotePath != null && remotePath.isNotEmpty) ? remotePath : null;
@@ -831,7 +831,7 @@ class SyncRepository {
   /// 创建一个全新的本地日历条目
   /// 此时只在【系统日历】和【本地数据库】占位，暂不推送到云端
   Future<bool> createNewLocalCalendar(String displayName) async {
-    final String userId = MMKVUtils.instance.getString(AppConstant.loginName) ?? "";
+    final String userId = MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? "";
     if (userId.isEmpty) {
       print("❌ [Repository] 当前未登录，无法创建日历");
       return false;
@@ -871,7 +871,7 @@ class SyncRepository {
 
     // 确定用于显示的名称
     final String displayName = originalName ?? "公共订阅_${DateTime.now().millisecond}";
-    final String userId = MMKVUtils.instance.getString(AppConstant.loginName)!;
+    final String userId = MMKVUtils.instance.getString(AppConstant.loginNameKey)!;
 
     // 2. 生成一个“干净”的 ID 用于 URL 路径
     // 比如将 "公司 2024" 转换为 "sub_1712345678"

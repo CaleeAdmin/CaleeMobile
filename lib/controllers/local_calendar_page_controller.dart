@@ -181,7 +181,7 @@ class LocalCalendarPageController extends GetxController {
         if (existingRemotePath.isNotEmpty) {
           remotePath = existingRemotePath;
         } else {
-          final String? loginName = MMKVUtils.instance.getString(AppConstant.loginName);
+          final String? loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey);
           if (loginName == null || loginName.isEmpty) {
             throw Exception('Not logged in to Nextcloud');
           }
@@ -226,7 +226,7 @@ class LocalCalendarPageController extends GetxController {
         {
           'is_enabled': enabled ? 1 : 0,
           'display_name': item.name,
-          'account_name': MMKVUtils.instance.getString(AppConstant.loginName) ?? item.accountName,
+          'account_name': MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? item.accountName,
           'account_type': item.accountType,
           'color': item.color,
           'origin': 0,
@@ -242,7 +242,7 @@ class LocalCalendarPageController extends GetxController {
       if (updated == 0) {
         await db.insert('calendar_map', {
           'local_id': item.id,
-          'account_name': MMKVUtils.instance.getString(AppConstant.loginName) ?? item.accountName,
+          'account_name': MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? item.accountName,
           'account_type': item.accountType,
           'display_name': item.name,
           'color': item.color,

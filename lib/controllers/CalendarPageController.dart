@@ -166,7 +166,7 @@ class CalendarPageController extends GetxController {
   Future<void> _refreshDashboardImpl({required bool includeEventCounts}) async {
     try {
       isLoading.value = true;
-      final String? loginName = MMKVUtils.instance.getString(AppConstant.loginName);
+      final String? loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey);
       if (loginName == null) return;
 
       // 1. 拉取远端 NextCloud 日历并更新本地映射

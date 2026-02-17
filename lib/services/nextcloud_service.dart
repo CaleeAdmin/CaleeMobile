@@ -23,7 +23,7 @@ class NextcloudService {
     final uri = Uri.parse(
       '$normalizedServer/remote.php/dav/calendars/${Uri.encodeComponent(userId)}/',
     );
-    final String password = MMKVUtils.instance.getString(AppConstant.password) ?? "";
+    final String password = MMKVUtils.instance.getString(AppConstant.appPasswordKey) ?? "";
 
     // 1. 增加 cs 命名空间定义，并请求该属性
     final xmlBody = '''<?xml version="1.0" encoding="utf-8" ?>
@@ -323,8 +323,8 @@ class NextcloudService {
   }
 
   Map<String, String> _getAuthHeaders() {
-    final String userId = MMKVUtils.instance.getString(AppConstant.loginName) ?? "";
-    final String password = MMKVUtils.instance.getString(AppConstant.password) ?? "";
+    final String userId = MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? "";
+    final String password = MMKVUtils.instance.getString(AppConstant.appPasswordKey) ?? "";
 
     // 核心：生成 Base64 字符串
     String basicAuth = 'Basic ' + base64Encode(utf8.encode('$userId:$password'));
@@ -344,7 +344,7 @@ class NextcloudService {
     required String color, // 格式应为 #RRGGBB 或 #RRGGBBAA
   }) async {
     final server = _normalizeServer(AppConstant.nextcloudServer);
-    final password = MMKVUtils.instance.getString(AppConstant.password);
+    final password = MMKVUtils.instance.getString(AppConstant.appPasswordKey);
 
     final encodedId = Uri.encodeComponent(calendarId);
     final calendarPath = '/remote.php/dav/calendars/$userId/$encodedId/';
@@ -426,7 +426,7 @@ class NextcloudService {
     required String userId,
   }) async {
     final baseUrl = "https://nc-dev.ywpl.com.au";
-    final password = MMKVUtils.instance.getString(AppConstant.password);
+    final password = MMKVUtils.instance.getString(AppConstant.appPasswordKey);
 
     // 严谨拼接 URL
     final String cleanPath = calendarPath.endsWith('/')
@@ -500,8 +500,8 @@ class NextcloudService {
     required String path,      // 这里的 path 应该是完整的文件路径，如 /remote.php/.../uid.ics
     required String content,   // ics 文本内容
   }) async {
-    final String userId = MMKVUtils.instance.getString(AppConstant.loginName) ?? "";
-    final String password = MMKVUtils.instance.getString(AppConstant.password) ?? "";
+    final String userId = MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? "";
+    final String password = MMKVUtils.instance.getString(AppConstant.appPasswordKey) ?? "";
     final baseUrl = "https://nc-dev.ywpl.com.au";
     final url = "$baseUrl${path.startsWith('/') ? path : '/$path'}";
 
@@ -537,8 +537,8 @@ class NextcloudService {
   Future<bool> deleteEvent({
     required String eventPath,
   }) async {
-    final String userId = MMKVUtils.instance.getString(AppConstant.loginName) ?? "";
-    final String password = MMKVUtils.instance.getString(AppConstant.password) ?? "";
+    final String userId = MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? "";
+    final String password = MMKVUtils.instance.getString(AppConstant.appPasswordKey) ?? "";
 
     // 建议：确保 eventPath 以 / 开头，避免 URL 拼接错误
     final String cleanPath = eventPath.startsWith('/') ? eventPath : '/$eventPath';
@@ -574,7 +574,7 @@ class NextcloudService {
     required String calendarPath,
   }) async {
     final server = _normalizeServer(AppConstant.nextcloudServer);
-    final password = MMKVUtils.instance.getString(AppConstant.password);
+    final password = MMKVUtils.instance.getString(AppConstant.appPasswordKey);
 
     if (password == null) return false;
 
@@ -616,7 +616,7 @@ class NextcloudService {
     required String newName,
   }) async {
     final server = _normalizeServer(AppConstant.nextcloudServer);
-    final password = MMKVUtils.instance.getString(AppConstant.password);
+    final password = MMKVUtils.instance.getString(AppConstant.appPasswordKey);
     final uri = Uri.parse('$server$calendarPath');
 
     // 使用 PROPPATCH 修改 displayname
@@ -673,7 +673,7 @@ class NextcloudService {
     required String icsUrl,     // 外部公共 ICS 链接
   }) async {
     final server = _normalizeServer(AppConstant.nextcloudServer);
-    final password = MMKVUtils.instance.getString(AppConstant.password);
+    final password = MMKVUtils.instance.getString(AppConstant.appPasswordKey);
 
     // 1. 构建云端路径
     final calendarPath = '/remote.php/dav/calendars/$userId/$calendarId/';

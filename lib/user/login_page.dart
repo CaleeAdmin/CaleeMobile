@@ -91,9 +91,9 @@ class _LoginPageState extends State<LoginPage> {
 
     try {
       // 保存登录凭据到 MMKV
-      MMKVUtils.instance.setString(AppConstant.Server, state.serverUrl!);
-      MMKVUtils.instance.setString(AppConstant.loginName, state.loginName!);
-      MMKVUtils.instance.setString(AppConstant.password, state.appPassword!);
+      MMKVUtils.instance.setString(AppConstant.serverKey, state.serverUrl!);
+      MMKVUtils.instance.setString(AppConstant.loginNameKey, state.loginName!);
+      MMKVUtils.instance.setString(AppConstant.appPasswordKey, state.appPassword!);
 
       // 使用GetX的AppController处理登录成功
       final appController = Get.find<AppController>();

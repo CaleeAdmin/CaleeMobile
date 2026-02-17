@@ -113,14 +113,14 @@ class LinkDeviceController {
     }
 
     final serverFromQr = (payload['server'] as String?)?.trim() ?? '';
-    final savedServer = MMKVUtils.instance.getString(AppConstant.Server)?.trim() ?? '';
+    final savedServer = MMKVUtils.instance.getString(AppConstant.serverKey)?.trim() ?? '';
     final serverBase = _normalizeServerBase(serverFromQr.isNotEmpty ? serverFromQr : savedServer);
     if (serverBase == null) {
       throw const FormatException('Server is missing in QR payload and local settings');
     }
 
-    final loginName = MMKVUtils.instance.getString(AppConstant.loginName)?.trim() ?? '';
-    final appPassword = MMKVUtils.instance.getString(AppConstant.password)?.trim() ?? '';
+    final loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey)?.trim() ?? '';
+    final appPassword = MMKVUtils.instance.getString(AppConstant.appPasswordKey)?.trim() ?? '';
     if (loginName.isEmpty || appPassword.isEmpty) {
       throw const FormatException('Missing saved Nextcloud credentials (loginName/appPassword)');
     }
