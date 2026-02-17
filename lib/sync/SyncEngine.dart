@@ -318,7 +318,7 @@ class SyncEngine {
             {
               'display_name': displayName,
               'account_name': userId,
-              'account_type': 'com.nextcloud.caleesync',
+              'account_type': 'com.viso.caleesync',
               'is_subscription': (rc['is_subscription'] == true || rc['is_subscription'] == 1) ? 1 : 0,
               'subscription_url': rc['subscription_url'],
             },
@@ -330,7 +330,7 @@ class SyncEngine {
           print("🆕 [云端发现] 创建新映射: $displayName");
           await db.insert('calendar_map', {
             'account_name': userId,
-            'account_type': 'com.nextcloud.caleesync',
+            'account_type': 'com.viso.caleesync',
             'display_name': displayName,
             'remote_path': path,
             'sync_mode': rc['sync_mode'] ?? 0,

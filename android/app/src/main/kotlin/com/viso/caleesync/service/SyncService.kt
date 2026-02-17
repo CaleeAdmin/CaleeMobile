@@ -1,4 +1,4 @@
-package com.nextcloud.caleesync.service
+package com.viso.caleesync.service
 
 import android.app.Service
 import android.content.AbstractThreadedSyncAdapter
