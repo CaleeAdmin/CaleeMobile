@@ -7,6 +7,7 @@ import 'package:sqflite/sqflite.dart';
 
 import 'SyncEnum.dart';
 import '../common/utils/IcsGenerator.dart';
+import '../common/utils/UidGenerator.dart';
 import '../data/database_helper.dart';
 import '../entity/SyncContext.dart';
 import '../entity/SyncSummary.dart';
@@ -57,9 +58,9 @@ class SyncEngine {
       final int isEnabled = local['is_enabled'] ?? 0;
       final int origin = local['origin'] ?? 0;
       final int mode = local['sync_mode'] ?? 0;
-      final String localId = local['local_id'] ?? '';
+      final String stableId = local['id']?.toString() ?? '';
 
-      if (localId.isEmpty) {
+      if (stableId.isEmpty) {
         if (isEnabled == 1) {
           contexts.add(_buildContext(remote, local, SyncAction.createLocal));
         }
@@ -70,7 +71,7 @@ class SyncEngine {
         final String? dbCtag = local['synced_ctag'];
         final String? remoteCtag = remote['ctag'];
         final bool remoteChanged = (remoteCtag != null && remoteCtag != dbCtag);
-        final bool localChanged = await _isCalendarDirty(db, localId);
+        final bool localChanged = await _isCalendarDirty(db, stableId);
         final bool metaChanged = remote['displayname'] != local['display_name'] ||
             remote['color'] != local['color'];
 
@@ -124,7 +125,7 @@ class SyncEngine {
     // 这里的状态码对应：1 (Dirty/Modified), 2 (Deleted)
     final List<Map<String, dynamic>> dirtyCheck = await db.rawQuery('''
     SELECT 1 FROM sync_map 
-    WHERE calendar_local_id = ? AND sync_status IN (1, 2) 
+    WHERE calendar_id = ? AND sync_status IN (1, 2)
     LIMIT 1
   ''', [localId]);
     return dirtyCheck.isNotEmpty;
@@ -132,7 +133,7 @@ class SyncEngine {
 
   SyncContext _buildContext(Map remote, Map? local, SyncAction action) {
     return SyncContext(
-      calendarId: local?['local_id'] ?? "",
+      calendarId: local?['id']?.toString() ?? "",
       remotePath: remote['remote_path'] ?? local?['remote_path'] ?? "",
       accountName: local?['account_name'] ?? "",
       accountType: local?['account_type'] ?? "", // 从数据库字段读取，不再从参数传
@@ -144,6 +145,7 @@ class SyncEngine {
       isSubscription: remote['is_subscription'] ?? false,
       extra: {
         'origin': local?['origin'] ?? 0,
+        'local_id': local?['local_id']?.toString(),
       },
     );
   }
@@ -329,6 +331,7 @@ class SyncEngine {
           // ✅ 场景 B: 全新云端日历 -> 插入新记录
           print("🆕 [云端发现] 创建新映射: $displayName");
           await db.insert('calendar_map', {
+            'id': CaleeUid.generate(),
             'account_name': userId,
             'account_type': 'com.viso.caleesync',
             'display_name': displayName,
@@ -354,7 +357,7 @@ class SyncEngine {
     // 1. 获取本地数据库中该日历下的所有同步记录
     final List<Map<String, dynamic>> locals = await db.query(
         'sync_map',
-        where: 'calendar_local_id = ?',
+        where: 'calendar_id = ?',
         whereArgs: [ctx.calendarId]
     );
 
@@ -508,7 +511,7 @@ class SyncEngine {
     // await db.insert('sync_map', {
     //   'uid': remote['uid'],
     //   'local_id': systemEventId ?? 'v_${remote['uid']}', // 有系统 ID 用系统 ID，没有用虚拟
-    //   'calendar_local_id': ctx.calendarId,
+    //   'calendar_id': ctx.calendarId,
     //   'last_etag': remote['etag'],
     //   'summary': parsed['summary'],
     //   'dtstart': parsed['dtstart'],

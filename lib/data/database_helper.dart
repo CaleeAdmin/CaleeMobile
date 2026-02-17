@@ -37,7 +37,8 @@ class DatabaseHelper {
     // 1. 日历映射表：增加账号维度和同步模式
     await db.execute('''
       CREATE TABLE IF NOT EXISTS calendar_map (
-        local_id TEXT PRIMARY KEY,
+        id TEXT PRIMARY KEY,
+        local_id TEXT,
         account_name TEXT,           -- 账号标识 (e.g. gmail_user)
         account_type TEXT,           -- 账号来源 (e.g. com.google / iCloud)
         remote_path TEXT UNIQUE,     -- 远端路径，允许 NULL (但必须唯一)
@@ -58,7 +59,7 @@ class DatabaseHelper {
      CREATE TABLE IF NOT EXISTS sync_map (
         uid TEXT PRIMARY KEY,
         local_id TEXT,                  -- 系统日历 _ID
-        calendar_local_id TEXT,         -- 关联 calendar_map.local_id
+        calendar_id TEXT,               -- 关联 calendar_map.id (稳定主键)
         summary TEXT,
         description TEXT,
         dtstart INTEGER,                -- 毫秒时间戳
@@ -75,7 +76,7 @@ class DatabaseHelper {
     await db.execute(
         'CREATE INDEX IF NOT EXISTS idx_sync_local_event ON sync_map (local_id)');
     await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_sync_calendar_group ON sync_map (calendar_local_id, sync_status)');
+        'CREATE INDEX IF NOT EXISTS idx_sync_calendar_group ON sync_map (calendar_id, sync_status)');
   }
 
   // 物理删除数据库（调试用：调用后需重启 App）

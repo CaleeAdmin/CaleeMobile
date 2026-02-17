@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:caleesync/common/app_constant.dart';
 import 'package:caleesync/common/utils/mmkv_utils.dart';
+import 'package:caleesync/common/utils/UidGenerator.dart';
 import 'package:caleesync/core/platform/pigeon/calendar_api.g.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
@@ -241,6 +242,7 @@ class LocalCalendarPageController extends GetxController {
 
       if (updated == 0) {
         await db.insert('calendar_map', {
+          'id': CaleeUid.generate(),
           'local_id': item.id,
           'account_name': MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? item.accountName,
           'account_type': item.accountType,

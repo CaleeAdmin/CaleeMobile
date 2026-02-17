@@ -8,20 +8,22 @@ class Deletelocalstrategy extends SyncStrategy {
   @override
   Future<void> execute(SyncContext ctx, SyncSummary summary) async {
     try {
-      bool result = await nativeApi.deleteCalendar(ctx.calendarId, ctx.accountName);
+      final String localCalendarProviderId = ctx.extra['local_id']?.toString() ?? '';
+      if (localCalendarProviderId.isEmpty) return;
+      bool result = await nativeApi.deleteCalendar(localCalendarProviderId, ctx.accountName);
       if(result){
         final db = await dbHelper.database;
         await db.transaction((txn) async {
           // 1. 删除关联的事件追踪 (sync_map)
           int sCount = await txn.delete(
               'sync_map',
-              where: 'calendar_local_id = ?',
+              where: 'calendar_id = ?',
               whereArgs: [ctx.calendarId]
           );
           // 2. 删除日历自身的配置 (calendar_map)
           int cCount = await txn.delete(
               'calendar_map',
-              where: 'local_id = ?',
+              where: 'id = ?',
               whereArgs: [ctx.calendarId]
           );
           debugPrint("🗑️ 数据库清理完毕: 删除了 $sCount 条事件, $cCount 条日历记录");

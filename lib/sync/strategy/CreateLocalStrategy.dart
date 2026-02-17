@@ -51,8 +51,8 @@ class CreateLocalStrategy extends SyncStrategy {
       // 4. 加载本地 sync_map 缓存用于 Diff 比对
       final List<Map<String, dynamic>> localEntries = await db.query(
         'sync_map',
-        where: 'calendar_local_id = ?',
-        whereArgs: [newLocalId],
+        where: 'calendar_id = ?',
+        whereArgs: [ctx.calendarId],
       );
       final Map<String, Map<String, dynamic>> localSyncMap = {
         for (var entry in localEntries) entry['uid'] as String: entry
@@ -104,7 +104,7 @@ class CreateLocalStrategy extends SyncStrategy {
             await db.insert('sync_map', {
               'uid': eventData.uid,
               'local_id': systemEventId,
-              'calendar_local_id': newLocalId,
+              'calendar_id': ctx.calendarId,
               'summary': eventData.summary,
               'last_etag': remoteEtag,
               'remote_href': eventData.href,

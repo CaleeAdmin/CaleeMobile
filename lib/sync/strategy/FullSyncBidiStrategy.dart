@@ -18,7 +18,9 @@ class FullSyncBidiStrategy extends SyncStrategy {
         return;
       }
       final db = await dbHelper.database;
-      final String localCalendarId = ctx.calendarId;
+      final String calendarId = ctx.calendarId;
+      final String localCalendarProviderId = ctx.extra['local_id']?.toString() ?? '';
+      if (calendarId.isEmpty || localCalendarProviderId.isEmpty) return;
       final String remotePath = ctx.remotePath;
 
       // 1. 准备数据：获取云端列表与本地映射缓存
@@ -29,8 +31,8 @@ class FullSyncBidiStrategy extends SyncStrategy {
 
       final List<Map<String, dynamic>> mappedRecords = await db.query(
         'sync_map',
-        where: 'calendar_local_id = ?',
-        whereArgs: [localCalendarId],
+        where: 'calendar_id = ?',
+        whereArgs: [calendarId],
       );
       final Map<String, Map<String, dynamic>> syncMap = {
         for (var r in mappedRecords) r['uid'].toString(): r
@@ -39,7 +41,7 @@ class FullSyncBidiStrategy extends SyncStrategy {
       // 2. 准备数据：获取本地系统实时日程
       final start = DateTime.now().subtract(const Duration(days: 365)).millisecondsSinceEpoch;
       final end = DateTime.now().add(const Duration(days: 730)).millisecondsSinceEpoch;
-      final items = await nativeApi.getEvents(localCalendarId, start, end);
+      final items = await nativeApi.getEvents(localCalendarProviderId, start, end);
       final Map<String, PlatformItem> localItemsMap = {
         for (var e in items.whereType<PlatformItem>()) e.uid ?? '': e
       };
@@ -65,15 +67,15 @@ class FullSyncBidiStrategy extends SyncStrategy {
         if (cloudChanged && localChanged) {
           // 💡 场景：冲突！双方都改了。策略：以云端为准（或你可以根据 mtime 判定谁更晚）
           debugPrint("⚠️ 冲突检测: $uid, 采用云端覆盖本地");
-          await _pullFromRemote(remote, localCalendarId, localBase?['local_id']?.toString(), remoteEtag, db);
+          await _pullFromRemote(remote, localCalendarProviderId, calendarId, localBase?['local_id']?.toString(), remoteEtag, db);
           changeCount++;
         } else if (cloudChanged) {
           // 💡 场景：仅云端更新或新增 -> 下拉
-          await _pullFromRemote(remote, localCalendarId, localBase?['local_id']?.toString(), remoteEtag, db);
+          await _pullFromRemote(remote, localCalendarProviderId, calendarId, localBase?['local_id']?.toString(), remoteEtag, db);
           changeCount++;
         } else if (localChanged) {
           // 💡 场景：仅本地更新 -> 上传
-          await _pushToRemote(localReal, remotePath, db, localCalendarId);
+          await _pushToRemote(localReal, remotePath, db, calendarId);
           changeCount++;
         }
       }
@@ -109,7 +111,7 @@ class FullSyncBidiStrategy extends SyncStrategy {
             if (etag == null || etag.isEmpty || record['sync_status'] == 1) {
               // A. 账本里没 Etag，说明是新来的 -> 上传
               debugPrint("🚀 发现本地新增事件，准备上传: ${record['summary']}");
-              await _pushToRemote(localItemsMap[uid]!, remotePath, db, localCalendarId);
+              await _pushToRemote(localItemsMap[uid]!, remotePath, db, calendarId);
               changeCount++;
             } else {
               // B. 账本里有 Etag，说明以前同步过，但现在云端没了 -> 判定为云端删了
@@ -129,7 +131,7 @@ class FullSyncBidiStrategy extends SyncStrategy {
       for (var uid in localItemsMap.keys) {
         if (!processedUids.contains(uid) && !syncMap.containsKey(uid)) {
           debugPrint("🆕 发现纯本地新增(未记录)，准备上传: ${localItemsMap[uid]!.title}");
-          await _pushToRemote(localItemsMap[uid]!, remotePath, db, localCalendarId);
+          await _pushToRemote(localItemsMap[uid]!, remotePath, db, calendarId);
           changeCount++;
         }
       }
@@ -143,12 +145,12 @@ class FullSyncBidiStrategy extends SyncStrategy {
   }
 
   /// 辅助方法：从云端拉取并更新本地
-  Future<void> _pullFromRemote(Map<String, dynamic> remote, String calendarId, String? localId, String etag, dynamic db) async {
+  Future<void> _pullFromRemote(Map<String, dynamic> remote, String localCalendarProviderId, String calendarId, String? localId, String etag, dynamic db) async {
     final eventData = await Eventparsedutils.resolveEventData(remote: remote, isSubscription: false);
     if (eventData == null) return;
 
     final String? newSystemId = await nativeApi.createOrUpdateEvent(CalendarEventRequest(
-      calendarId: calendarId,
+      calendarId: localCalendarProviderId,
       title: eventData.summary,
       start: eventData.dtstart,
       end: eventData.dtend,
@@ -161,7 +163,7 @@ class FullSyncBidiStrategy extends SyncStrategy {
       await db.insert('sync_map', {
         'uid': eventData.uid,
         'local_id': newSystemId,
-        'calendar_local_id': calendarId,
+        'calendar_id': calendarId,
         'last_etag': etag,
         'last_mtime': DateTime.now().millisecondsSinceEpoch, // 更新基准时间，避免刚拉下来又推上去
         'remote_href': remote['href'],
@@ -186,7 +188,7 @@ class FullSyncBidiStrategy extends SyncStrategy {
       await db.insert('sync_map', {
         'uid': uid,
         'local_id': local.localId,
-        'calendar_local_id': calendarId,
+        'calendar_id': calendarId,
         'last_etag': newEtag.replaceAll('"', ''),
         'last_mtime': local.lastModified,
         'remote_href': "${remotePath.endsWith('/') ? remotePath : '$remotePath/'}$uid.ics",
