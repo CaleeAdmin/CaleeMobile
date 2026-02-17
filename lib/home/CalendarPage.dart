@@ -483,14 +483,10 @@ class _CalendarCard extends StatelessWidget {
             const SizedBox(height: 12),
             Column(
               children: calendars
-                  .asMap()
-                  .entries
                   .map(
-                    (entry) => _CalendarRow(
-                      key: ValueKey(
-                        '${entry.value.remotePath ?? entry.value.localId ?? entry.value.name}_${entry.key}',
-                      ),
-                      item: entry.value,
+                    (c) => _CalendarRow(
+                      key: ValueKey(c.remotePath ?? c.localId ?? c.name),
+                      item: c,
                     ),
                   )
                   .toList(),

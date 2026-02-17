@@ -176,9 +176,38 @@ class CalendarPageController extends GetxController {
 
       // 2. 查询本地 remote_collections 的所有日历记录
       final db = await DatabaseHelper.instance.database;
-      final List<Map<String, dynamic>> calendarMaps = await db.query(
-        'remote_collections',
-      );
+      final List<Map<String, dynamic>> calendarMaps = await db.query('remote_collections');
+      final Map<String, Map<String, dynamic>> uniqueCalendarMaps = {};
+
+      for (final map in calendarMaps) {
+        final String remotePath = (map['remote_path'] ?? '').toString();
+        final String localId = (map['local_id'] ?? '').toString();
+        final String dedupeKey = remotePath.isNotEmpty
+            ? 'remote:$remotePath'
+            : 'local:$localId';
+
+        if (dedupeKey == 'local:') continue;
+
+        final existing = uniqueCalendarMaps[dedupeKey];
+        if (existing == null) {
+          uniqueCalendarMaps[dedupeKey] = map;
+          continue;
+        }
+
+        final int existingOrigin = (existing['origin'] ?? 0) as int;
+        final int incomingOrigin = (map['origin'] ?? 0) as int;
+        final bool existingEnabled = (existing['is_enabled'] == 1 || existing['is_enabled'] == true);
+        final bool incomingEnabled = (map['is_enabled'] == 1 || map['is_enabled'] == true);
+
+        // 优先保留云端主记录(origin=1)，其次保留启用中的记录。
+        final bool shouldReplace =
+            (incomingOrigin == 1 && existingOrigin != 1) ||
+            (incomingOrigin == existingOrigin && incomingEnabled && !existingEnabled);
+
+        if (shouldReplace) {
+          uniqueCalendarMaps[dedupeKey] = map;
+        }
+      }
       final Map<String, int> cachedCountByCalendarId = {};
       final Map<String, bool> localReadOnlyById = {};
       final List<CalendarDisplayItem> nextCloudCalendars = [];
@@ -205,7 +234,7 @@ class CalendarPageController extends GetxController {
         }
       }
 
-      for (var cal in calendarMaps) {
+      for (final cal in uniqueCalendarMaps.values) {
         final String? localId = cal['local_id']?.toString();
         final String? remotePath = cal['remote_path'];
         final int? syncMode = cal['sync_mode'];
