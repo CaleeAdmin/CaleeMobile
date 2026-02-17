@@ -184,7 +184,7 @@ class CaleeServerService {
               defaultSyncMode,
               map['color'],
               accountName,
-              "NextCloud", // 对应 account_type，仅在首次插入时生效
+              "Calee", // account_type
               1, // origin = 1 (远端起源)
               0, // is_enabled
               (map['is_subscription'] == true || map['is_subscription'] == 1) ? 1 : 0,

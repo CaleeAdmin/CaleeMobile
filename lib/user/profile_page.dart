@@ -104,7 +104,7 @@ class _ProfilePageState extends State<ProfilePage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Personal information synced to Nextcloud'),
+          content: Text('Personal information synced to Calee'),
           backgroundColor: Colors.green,
           duration: Duration(seconds: 2),
         ),
