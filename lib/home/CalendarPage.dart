@@ -368,6 +368,7 @@ class _CalendarCard extends StatelessWidget {
                       context: context,
                       builder: (context) {
                         final TextEditingController _urlCtrl = TextEditingController();
+                        final ValueNotifier<bool> isSubmitting = ValueNotifier<bool>(false);
                         return Dialog(
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                           child: Padding(
@@ -404,21 +405,38 @@ class _CalendarCard extends StatelessWidget {
                                 const SizedBox(height: 14),
                                 SizedBox(
                                   width: double.infinity,
-                                  child: ElevatedButton(
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.black,
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                    ),
-                                    child: const Text('Confirm', style: TextStyle(color: Colors.white)),
-                                    onPressed: () async {
-                                      final url = _urlCtrl.text.trim();
-                                      // 调用 controller 的订阅方法（含输入校验）
-                                      final ok = await Get.find<CalendarPageController>().subscribePublicIcs(url);
-                                      if (ok) {
-                                        Navigator.of(context).pop(true);
-                                      } else {
-                                        Navigator.of(context).pop(false);
-                                      }
+                                  child: ValueListenableBuilder<bool>(
+                                    valueListenable: isSubmitting,
+                                    builder: (context, submitting, _) {
+                                      return ElevatedButton(
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: Colors.black,
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                        ),
+                                        onPressed: submitting
+                                            ? null
+                                            : () async {
+                                                isSubmitting.value = true;
+                                                final url = _urlCtrl.text.trim();
+                                                final ok = await Get.find<CalendarPageController>().subscribePublicIcs(url);
+                                                isSubmitting.value = false;
+                                                if (ok) {
+                                                  Navigator.of(context).pop(true);
+                                                } else {
+                                                  Navigator.of(context).pop(false);
+                                                }
+                                              },
+                                        child: submitting
+                                            ? const SizedBox(
+                                                width: 18,
+                                                height: 18,
+                                                child: CircularProgressIndicator(
+                                                  strokeWidth: 2,
+                                                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                                ),
+                                              )
+                                            : const Text('Confirm', style: TextStyle(color: Colors.white)),
+                                      );
                                     },
                                   ),
                                 ),

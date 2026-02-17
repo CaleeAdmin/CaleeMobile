@@ -76,6 +76,7 @@ class CalendarPageController extends GetxController {
   var isLoading = false.obs;
   /// 选中的日历 ID 集合（用于 UI 绑定）
   var selectedCalendarIds = <String>{}.obs;
+  var subscribingUrls = <String>{}.obs;
   Future<void>? _refreshFuture;
 
   @override
@@ -319,15 +320,22 @@ class CalendarPageController extends GetxController {
 
   /// 订阅一个公开的 ICS 链接（委托给仓库），并在成功后刷新界面
   Future<bool> subscribePublicIcs(String icsUrl) async {
-    final String? invalidReason = validateSubscriptionUrl(icsUrl);
+    final String normalizedUrl = icsUrl.trim();
+    final String? invalidReason = validateSubscriptionUrl(normalizedUrl);
     if (invalidReason != null) {
       Get.snackbar('Invalid subscription URL', invalidReason);
       return false;
     }
 
+    if (subscribingUrls.contains(normalizedUrl)) {
+      return false;
+    }
+
+    subscribingUrls.add(normalizedUrl);
+
     try {
       isLoading.value = true;
-      final ok = await _repo.handlePublicSubscription(icsUrl.trim());
+      final ok = await _repo.handlePublicSubscription(normalizedUrl);
       if (ok) {
         await refreshDashboard(includeEventCounts: false);
         unawaited(refreshDashboard());
@@ -346,6 +354,7 @@ class CalendarPageController extends GetxController {
       Get.snackbar('错误', '订阅失败');
       return false;
     } finally {
+      subscribingUrls.remove(normalizedUrl);
       isLoading.value = false;
     }
   }
