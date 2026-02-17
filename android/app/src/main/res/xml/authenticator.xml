@@ -2,5 +2,5 @@
 <account-authenticator xmlns:android="http://schemas.android.com/apk/res/android"
     android:accountType="com.nextcloud.caleesync"
     android:icon="@mipmap/ic_launcher"
-    android:label="Nextcloud Sync"
+    android:label="CaleeSync"
     android:smallIcon="@mipmap/ic_launcher" />
