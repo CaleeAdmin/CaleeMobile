@@ -25,7 +25,7 @@ class PublicSubscriptionCalendar {
     final owner = (json['owner_uid'] ?? json['owner'] ?? json['by'] ?? '').toString();
     final subscribers = (json['subscribers']?.toString() ?? json['subscriber_count']?.toString() ?? '').toString();
 
-    Color color = Colors.blue;
+    Color color = Colors.lightGreen;
     // color: optional parsing (hex or int) - keep default if absent
     try {
       if (json.containsKey('color') && json['color'] != null) {

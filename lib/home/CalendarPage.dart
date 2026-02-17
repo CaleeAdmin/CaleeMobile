@@ -460,7 +460,7 @@ class _CalendarCard extends StatelessWidget {
                   icon: const Icon(Icons.add, size: 16),
                   label: const Text('Subscribe to Calee Calendar'),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF2563EB),
+                    backgroundColor: const Color(0xFF43A047),
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),

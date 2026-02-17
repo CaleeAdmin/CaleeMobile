@@ -45,7 +45,16 @@ class CaleeApp extends StatelessWidget {
     return GetMaterialApp(
       title: 'Calee',
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: Colors.lightGreen,
+          brightness: Brightness.light,
+        ),
+        scaffoldBackgroundColor: const Color(0xFFF3FAF3),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Color(0xFFF3FAF3),
+          foregroundColor: Color(0xFF1B5E20),
+        ),
+        cardColor: const Color(0xFFFFFFFF),
         useMaterial3: true,
       ),
       initialRoute: Get.find<AppController>().getInitialRoute(),

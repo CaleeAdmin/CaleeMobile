@@ -52,7 +52,7 @@ class SyncStatusDetailsPage extends StatelessWidget {
                             label: const Text('Refresh All'),
                             style: FilledButton.styleFrom(
                               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                              backgroundColor: const Color(0xFF2F6AA6),
+                              backgroundColor: const Color(0xFF4F8A52),
                               foregroundColor: Colors.white,
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                               textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
@@ -109,12 +109,12 @@ Widget _sourceCard({
       );
       break;
     case _Status.syncing:
-      borderColor = Colors.blue.shade100;
-      bgColor = Colors.blue.shade50;
+      borderColor = Colors.lightGreen.shade100;
+      bgColor = Colors.lightGreen.shade50;
       statusWidget = Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        decoration: BoxDecoration(color: Colors.blue.shade100, borderRadius: BorderRadius.circular(8)),
-        child: const Text('Syncing', style: TextStyle(color: Colors.blue, fontSize: 12)),
+        decoration: BoxDecoration(color: Colors.lightGreen.shade100, borderRadius: BorderRadius.circular(8)),
+        child: const Text('Syncing', style: TextStyle(color: Colors.lightGreen, fontSize: 12)),
       );
       break;
     case _Status.error:

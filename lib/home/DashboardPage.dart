@@ -150,9 +150,9 @@ class _DashboardPageState extends State<DashboardPage> {
                           padding: const EdgeInsets.all(12),
                           margin: const EdgeInsets.only(bottom: 8),
                           decoration: BoxDecoration(
-                            color: Colors.blue.shade50,
+                            color: Colors.lightGreen.shade50,
                             borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.blue.shade100),
+                            border: Border.all(color: Colors.lightGreen.shade100),
                           ),
                           child: Row(
                             children: [
@@ -160,10 +160,10 @@ class _DashboardPageState extends State<DashboardPage> {
                                 width: 36,
                                 height: 36,
                                 decoration: BoxDecoration(
-                                  color: Colors.blue.shade100,
+                                  color: Colors.lightGreen.shade100,
                                   borderRadius: BorderRadius.circular(8),
                                 ),
-                                child: const Icon(Icons.sync, color: Colors.blue),
+                                child: const Icon(Icons.sync, color: Colors.lightGreen),
                               ),
                               const SizedBox(width: 12),
                               Column(

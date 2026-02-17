@@ -148,7 +148,7 @@ class _LoginPageState extends State<LoginPage> {
     final isLoading = authController.authState.isLoading;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF7F9FB),
+      backgroundColor: const Color(0xFFF3FAF3),
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
@@ -163,7 +163,7 @@ class _LoginPageState extends State<LoginPage> {
                     width: 72,
                     height: 72,
                     decoration: BoxDecoration(
-                      color: const Color(0xFF2E7AFE),
+                      color: const Color(0xFF66BB6A),
                       borderRadius: BorderRadius.circular(16),
                     ),
                     clipBehavior: Clip.antiAlias,
@@ -253,7 +253,7 @@ class _LoginPageState extends State<LoginPage> {
                               TextSpan(
                                 text: 'terms and conditions',
                                 style: const TextStyle(
-                                  color: Color(0xFF2E7AFE),
+                                  color: Color(0xFF66BB6A),
                                   decoration: TextDecoration.underline,
                                 ),
                                 recognizer: TapGestureRecognizer()
@@ -307,7 +307,7 @@ class _LoginPageState extends State<LoginPage> {
                           'Forgot password?',
                           style: TextStyle(
                             fontSize: 14,
-                            color: Color(0xFF2E7AFE),
+                            color: Color(0xFF66BB6A),
                           ),
                         ),
                       ),
@@ -353,7 +353,7 @@ class _LoginPageState extends State<LoginPage> {
       decoration: InputDecoration(
         hintText: hint,
         filled: true,
-        fillColor: enabled ? const Color(0xFFF4F3F7) : Colors.grey.shade200,
+        fillColor: enabled ? const Color(0xFFEEF7EE) : Colors.grey.shade200,
         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
         suffixIcon: suffixIcon,
         enabledBorder: OutlineInputBorder(
@@ -362,7 +362,7 @@ class _LoginPageState extends State<LoginPage> {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: Color(0xFF2E7AFE), width: 1.2),
+          borderSide: const BorderSide(color: Color(0xFF66BB6A), width: 1.2),
         ),
         disabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
