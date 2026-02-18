@@ -45,7 +45,7 @@ class CalendarDisplayItem {
   // 方便从数据库 Map 转换
   factory CalendarDisplayItem.fromMap(Map<String, dynamic> map) {
     return CalendarDisplayItem(
-      localId: map['local_id']?.toString(), // 转为 String 处理
+      localId: map['local_collection_id']?.toString(), // 转为 String 处理
       remotePath: map['remote_path'] ?? '',
       name: map['display_name'] ?? '未命名',
       color: map['color'] ?? '#000000',
@@ -54,7 +54,7 @@ class CalendarDisplayItem {
       isSubscription: false,
       isLocalReadOnly: false,
       isEnabled: (map['is_enabled'] ?? 0) == 1,
-      origin: map['origin'] ?? 0,
+      origin: map['binding_origin'] ?? 0,
     );
   }
 }
@@ -134,13 +134,13 @@ class CalendarPageController extends GetxController {
       whereArgs = [item.remotePath];
     } else {
       // 它是纯本地日历（一定有系统分配的 ID）
-      whereClause = 'local_id = ?';
+      whereClause = 'id IN (SELECT remote_collection_id FROM local_bindings WHERE local_collection_id = ?)';
       whereArgs = [item.localId];
     }
 
     // 2. 执行更新
     int count = await db.update(
-      'calendar_map',
+      'remote_collections',
       {'is_enabled': newValue ? 1 : 0},
       where: whereClause,
       whereArgs: whereArgs,
@@ -174,11 +174,13 @@ class CalendarPageController extends GetxController {
           serverUrl: _authService.normalizedUrl,
           userId: loginName);
 
-      // 2. 查询本地 calendar_map 的所有日历记录
+      // 2. 查询本地 remote_collections 的所有日历记录
       final db = await DatabaseHelper.instance.database;
-      final List<Map<String, dynamic>> calendarMaps = await db.query(
-        'calendar_map',
-      );
+      final List<Map<String, dynamic>> calendarMaps = await db.rawQuery('''
+        SELECT rc.*, lb.local_collection_id, lb.binding_origin
+        FROM remote_collections rc
+        LEFT JOIN local_bindings lb ON lb.remote_collection_id = rc.id
+      ''');
       final Map<String, int> cachedCountByCalendarId = {};
       final Map<String, bool> localReadOnlyById = {};
       final List<CalendarDisplayItem> nextCloudCalendars = [];
@@ -196,27 +198,25 @@ class CalendarPageController extends GetxController {
 
       if (includeEventCounts) {
         final countRows = await db.rawQuery(
-          'SELECT calendar_local_id, COUNT(*) AS count FROM sync_map GROUP BY calendar_local_id',
+          'SELECT remote_collection_id, COUNT(*) AS count FROM sync_items GROUP BY remote_collection_id',
         );
         for (final row in countRows) {
-          final String key = (row['calendar_local_id'] ?? '').toString();
+          final String key = (row['remote_collection_id'] ?? '').toString();
           if (key.isEmpty) continue;
           cachedCountByCalendarId[key] = (row['count'] as int?) ?? 0;
         }
       }
 
       for (var cal in calendarMaps) {
-        final String? localId = cal['local_id']?.toString();
+        final String? localId = cal['local_collection_id']?.toString();
         final String? remotePath = cal['remote_path'];
         final int? syncMode = cal['sync_mode'];
         final bool isSubscription = (cal['is_subscription'] == 1 || cal['is_subscription'] == true);
-        final int origin = cal['origin'];
+        final int origin = (cal['binding_origin'] as int?) ?? 0;
 
         int realCount = 0;
         if (includeEventCounts) {
-          final String countKey = (localId != null && localId.isNotEmpty)
-              ? localId
-              : (remotePath ?? '');
+          final String countKey = (cal['id'] ?? '').toString();
           realCount = cachedCountByCalendarId[countKey] ?? 0;
         }
 

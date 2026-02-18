@@ -68,10 +68,10 @@ class CreateRemoteStrategy extends SyncStrategy {
 
         if (etag != null) {
           // 3. 写入 sync_map
-          await db.insert('sync_map', {
-            'uid': uid,
-            'local_id': event.localId,
-            'calendar_local_id': ctx.calendarId,
+          await db.insert('sync_items', {
+            'remote_uid': uid,
+            'local_item_id': event.localId,
+            'remote_collection_id': ctx.calendarId,
             'summary': title,
             'description': event.notes,
             'dtstart': startTime,
@@ -85,14 +85,13 @@ class CreateRemoteStrategy extends SyncStrategy {
         }
       }
 
-      await db.update(
-        'calendar_map',
-        {
-          'remote_path': resultPath, // 核心：存入刚开好的云端坑位路径
-        },
-        where: 'local_id = ?',
-        whereArgs: [ctx.calendarId],
-      );
+      await db.rawUpdate('''
+        UPDATE remote_collections
+        SET remote_path = ?
+        WHERE id IN (
+          SELECT remote_collection_id FROM local_bindings WHERE local_collection_id = ?
+        )
+      ''', [resultPath, ctx.calendarId]);
       summary.success++;
     }
   }
