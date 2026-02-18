@@ -26,92 +26,112 @@ class SyncEngine {
       String userId,
       List<Map<String, dynamic>> remoteResults,
       ) async {
-    // 1. 获取该用户下的所有本地数据库记录（包含状态为 2 的记录）
     final db = await _dbHelper.database;
-    final List<Map<String, dynamic>> localRecords = await db.query(
-      'remote_collections',
-      where: 'account_name = ? AND remote_path IS NOT NULL AND remote_path != ""',
-      whereArgs: [userId],
-    );
 
-    List<SyncContext> contexts = [];
+    final List<Map<String, dynamic>> collectionRows = await db.rawQuery('''
+      SELECT
+        rc.id,
+        rc.account_name,
+        rc.remote_path,
+        rc.display_name,
+        rc.color,
+        rc.synced_ctag,
+        rc.sync_mode,
+        rc.is_enabled,
+        rc.is_subscription,
+        lb.local_collection_id,
+        lb.local_account_type,
+        lb.binding_origin
+      FROM remote_collections rc
+      LEFT JOIN local_bindings lb ON lb.remote_collection_id = rc.id
+      WHERE rc.account_name = ?
+        AND rc.remote_path IS NOT NULL
+        AND rc.remote_path != ""
+    ''', [userId]);
 
-    // 2. 建立索引
-    final remoteMap = {for (var r in remoteResults) r['remote_path'] as String: r};
+    final bool allowAutoCreateLocalFromRemote =
+        MMKVUtils.instance.getBool(AppConstant.autoCreateLocalFromRemoteKey) ?? false;
+
+    final List<SyncContext> contexts = [];
+    final remoteMap = {
+      for (final r in remoteResults)
+        if ((r['remote_path']?.toString() ?? '').isNotEmpty) r['remote_path'] as String: r
+    };
     final localMapByPath = {
-      for (var l in localRecords)
-        if (l['remote_path'] != null && (l['remote_path'] as String).isNotEmpty)
-          l['remote_path'] as String: l
+      for (final row in collectionRows)
+        if ((row['remote_path']?.toString() ?? '').isNotEmpty) row['remote_path'] as String: row
     };
 
-    // --- 策略 A：处理远端发现的日历 (针对：同步、初始化) ---
-    for (var remote in remoteResults) {
-      final path = remote['remote_path'];
-      final local = localMapByPath[path];
+    for (final remote in remoteResults) {
+      final String path = remote['remote_path']?.toString() ?? '';
+      if (path.isEmpty) continue;
+
+      final Map<String, dynamic>? local = localMapByPath[path];
 
       if (local == null) {
-        contexts.add(_buildContext(remote, null, SyncAction.createLocal));
+        if (allowAutoCreateLocalFromRemote) {
+          contexts.add(_buildContext(remote, null, SyncAction.createLocal));
+        }
         continue;
       }
 
-      final int isEnabled = local['is_enabled'] ?? 0;
-      final int origin = local['binding_origin'] ?? 0;
-      final int mode = local['sync_mode'] ?? 0;
-      final String localId = local['local_item_id'] ?? '';
+      final int isEnabled = (local['is_enabled'] as int?) ?? 0;
+      if (isEnabled != 1) {
+        continue;
+      }
+
+      final int origin = (local['binding_origin'] as int?) ?? 1;
+      final int mode = (local['sync_mode'] as int?) ?? 0;
+      final String localId = local['local_collection_id']?.toString() ?? '';
 
       if (localId.isEmpty) {
-        if (isEnabled == 1) {
+        if (allowAutoCreateLocalFromRemote && origin == 1) {
           contexts.add(_buildContext(remote, local, SyncAction.createLocal));
         }
         continue;
       }
 
-      if (isEnabled == 1) {
-        final String? dbCtag = local['synced_ctag'];
-        final String? remoteCtag = remote['ctag'];
-        final bool remoteChanged = (remoteCtag != null && remoteCtag != dbCtag);
-        final bool localChanged = await _isCalendarDirty(db, localId);
-        final bool metaChanged = remote['displayname'] != local['display_name'] ||
-            remote['color'] != local['color'];
+      final String? dbCtag = local['synced_ctag']?.toString();
+      final String? remoteCtag = remote['ctag']?.toString();
+      final bool remoteChanged = (remoteCtag != null && remoteCtag != dbCtag);
+      final bool localChanged = await _isCalendarDirty(db, local['id']);
+      final bool metaChanged =
+          (remote['display_name']?.toString() ?? '') != (local['display_name']?.toString() ?? '') ||
+          (remote['color']?.toString() ?? '') != (local['color']?.toString() ?? '');
 
-        final bool shouldSync;
-        final SyncAction action;
+      final bool shouldSync;
+      final SyncAction action;
 
-        if (mode == 1) {
-          // 双向同步：任意一端变化都应触发
-          shouldSync = remoteChanged || localChanged || metaChanged;
-          action = SyncAction.fullSyncBidi;
-        } else if (origin == 1) {
-          // 只读映射（远端起源）：仅允许远端 -> 本地
-          shouldSync = remoteChanged || metaChanged;
-          action = SyncAction.fullSyncPull;
-        } else {
-          // 只读映射（本地起源）：仅允许本地 -> 远端
-          shouldSync = localChanged;
-          action = SyncAction.fullSyncPush;
-        }
-
-        if (!shouldSync) {
-          debugPrint("💤 日历无可同步变动，跳过任务生成: ${remote['displayname']}");
-          continue;
-        }
-
-        contexts.add(_buildContext(remote, local, action));
+      if (mode == 1) {
+        shouldSync = remoteChanged || localChanged || metaChanged;
+        action = SyncAction.fullSyncBidi;
+      } else if (origin == 1) {
+        shouldSync = remoteChanged || metaChanged;
+        action = SyncAction.fullSyncPull;
+      } else {
+        shouldSync = localChanged;
+        action = SyncAction.fullSyncPush;
       }
-    }
 
-    // --- 策略 B：以本地数据库记录为准 (针对：远端删除兜底) ---
-    for (var local in localRecords) {
-      final String? path = local['remote_path'];
-      final int origin = local['binding_origin'] ?? 0;
-      final int mode = local['sync_mode'] ?? 0;
-
-      if (path == null || path.isEmpty) {
-        debugPrint('⏭️ 跳过无远端路径记录: ${local['local_item_id']}');
+      if (!shouldSync) {
+        debugPrint("💤 日历无可同步变动，跳过任务生成: ${(remote['display_name'] ?? local['display_name'])}");
         continue;
       }
 
+      contexts.add(_buildContext(remote, local, action));
+    }
+
+    for (final local in collectionRows) {
+      final String path = local['remote_path']?.toString() ?? '';
+      if (path.isEmpty) {
+        debugPrint('⏭️ 跳过无远端路径记录: ${local['id']}');
+        continue;
+      }
+
+      final int origin = (local['binding_origin'] as int?) ?? 1;
+      final int mode = (local['sync_mode'] as int?) ?? 0;
       final bool remoteExists = remoteMap.containsKey(path);
+
       if (!remoteExists && (origin == 1 || (origin == 0 && mode == 1))) {
         contexts.add(_buildContext({}, local, SyncAction.deleteLocal));
       }
@@ -120,19 +140,20 @@ class SyncEngine {
     return contexts;
   }
 
-  Future<bool> _isCalendarDirty(Database db, String localId) async {
+  Future<bool> _isCalendarDirty(Database db, Object? remoteCollectionId) async {
+    if (remoteCollectionId == null) return false;
     // 这里的状态码对应：1 (Dirty/Modified), 2 (Deleted)
     final List<Map<String, dynamic>> dirtyCheck = await db.rawQuery('''
-    SELECT 1 FROM sync_items 
-    WHERE remote_collection_id = ? AND sync_status IN (1, 2) 
+    SELECT 1 FROM sync_items
+    WHERE remote_collection_id = ? AND sync_status IN (1, 2)
     LIMIT 1
-  ''', [localId]);
+  ''', [remoteCollectionId]);
     return dirtyCheck.isNotEmpty;
   }
 
   SyncContext _buildContext(Map remote, Map? local, SyncAction action) {
     return SyncContext(
-      calendarId: local?['local_item_id'] ?? "",
+      calendarId: local?['local_collection_id']?.toString() ?? "",
       remotePath: remote['remote_path'] ?? local?['remote_path'] ?? "",
       accountName: local?['account_name'] ?? "",
       displayName: remote['display_name'] ?? local?['display_name'] ?? "未命名日历",
@@ -140,7 +161,7 @@ class SyncEngine {
       syncMode: local?['sync_mode'] ?? remote['sync_mode'] ?? 0,
       action: action,
       ctag: remote['ctag'] ?? local?['synced_ctag'],
-      isSubscription: remote['is_subscription'] ?? false,
+      isSubscription: remote['is_subscription'] ?? local?['is_subscription'] ?? false,
       extra: {
         'binding_origin': local?['binding_origin'] ?? 0,
       },

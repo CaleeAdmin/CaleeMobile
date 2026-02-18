@@ -1,4 +1,6 @@
 import 'package:caleesync/entity/SyncContext.dart';
+import 'package:caleesync/common/app_constant.dart';
+import 'package:caleesync/common/utils/mmkv_utils.dart';
 
 import 'package:caleesync/entity/SyncSummary.dart';
 import 'package:flutter/cupertino.dart';
@@ -18,6 +20,14 @@ class CreateLocalStrategy extends SyncStrategy {
       return;
     }
     print('🚀 开始执行 createLocal: ${ctx.displayName}');
+    final bool allowAutoCreateLocalFromRemote =
+        MMKVUtils.instance.getBool(AppConstant.autoCreateLocalFromRemoteKey) ?? false;
+    final int bindingOrigin = (ctx.extra['binding_origin'] as int?) ?? 1;
+    if (!allowAutoCreateLocalFromRemote && bindingOrigin == 1) {
+      debugPrint('⏭️ createLocal 已禁用（remote-origin）: ${ctx.displayName}');
+      return;
+    }
+
 
     // 1. 在 Android 系统侧创建日历
     final int colorValue = int.tryParse(ctx.color.replaceAll('#', '0x')) ?? 0xFF2196F3;
@@ -54,6 +64,10 @@ class CreateLocalStrategy extends SyncStrategy {
         'created_at': DateTime.now().millisecondsSinceEpoch,
         'updated_at': DateTime.now().millisecondsSinceEpoch,
       }, conflictAlgorithm: ConflictAlgorithm.replace);
+    } else {
+      debugPrint('❌ createLocal 找不到 remote_collections 记录: ${ctx.remotePath}');
+      summary.failed++;
+      return;
     }
 
     try {
@@ -119,7 +133,7 @@ class CreateLocalStrategy extends SyncStrategy {
             await db.insert('sync_items', {
               'remote_uid': eventData.uid,
               'local_item_id': systemEventId,
-              'remote_collection_id': newLocalId,
+              'remote_collection_id': remoteCollectionId,
               'summary': eventData.summary,
               'last_etag': remoteEtag,
               'remote_href': eventData.href,
