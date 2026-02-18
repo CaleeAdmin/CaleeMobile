@@ -69,6 +69,7 @@ class _CalendarPageState extends State<CalendarPage> {
                 onTap: () async {
                   Navigator.of(sheetContext).pop();
                   final TextEditingController newCalCtrl = TextEditingController();
+                  final ValueNotifier<bool> isSubmitting = ValueNotifier<bool>(false);
                   final res = await showDialog<bool>(
                     context: context,
                     builder: (dialogContext) {
@@ -108,20 +109,38 @@ class _CalendarPageState extends State<CalendarPage> {
                               const SizedBox(height: 14),
                               SizedBox(
                                 width: double.infinity,
-                                child: ElevatedButton(
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.black,
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                  ),
-                                  child: const Text('Confirm', style: TextStyle(color: Colors.white)),
-                                  onPressed: () async {
-                                    final nm = newCalCtrl.text.trim();
-                                    final ok = await Get.find<CalendarPageController>().createNewLocalCalendar(nm);
-                                    if (ok) {
-                                      Navigator.of(dialogContext).pop(true);
-                                    } else {
-                                      Navigator.of(dialogContext).pop(false);
-                                    }
+                                child: ValueListenableBuilder<bool>(
+                                  valueListenable: isSubmitting,
+                                  builder: (context, submitting, _) {
+                                    return ElevatedButton(
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.black,
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                      ),
+                                      onPressed: submitting
+                                          ? null
+                                          : () async {
+                                              isSubmitting.value = true;
+                                              final nm = newCalCtrl.text.trim();
+                                              final ok = await Get.find<CalendarPageController>().createNewLocalCalendar(nm);
+                                              isSubmitting.value = false;
+                                              if (ok) {
+                                                Navigator.of(dialogContext).pop(true);
+                                              } else {
+                                                Navigator.of(dialogContext).pop(false);
+                                              }
+                                            },
+                                      child: submitting
+                                          ? const SizedBox(
+                                              width: 18,
+                                              height: 18,
+                                              child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                              ),
+                                            )
+                                          : const Text('Confirm', style: TextStyle(color: Colors.white)),
+                                    );
                                   },
                                 ),
                               ),
