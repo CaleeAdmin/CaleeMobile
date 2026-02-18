@@ -102,14 +102,13 @@ class SyncEngine {
       final SyncAction action;
 
       if (mode == 1) {
+        // 1 = 双向同步
         shouldSync = remoteChanged || localChanged || metaChanged;
         action = SyncAction.fullSyncBidi;
-      } else if (origin == 1) {
+      } else {
+        // 0 = 只读（仅云端 -> 本地）
         shouldSync = remoteChanged || metaChanged;
         action = SyncAction.fullSyncPull;
-      } else {
-        shouldSync = localChanged;
-        action = SyncAction.fullSyncPush;
       }
 
       if (!shouldSync) {
@@ -127,11 +126,11 @@ class SyncEngine {
         continue;
       }
 
-      final int origin = (local['binding_origin'] as int?) ?? 1;
       final int mode = (local['sync_mode'] as int?) ?? 0;
       final bool remoteExists = remoteMap.containsKey(path);
 
-      if (!remoteExists && (origin == 1 || (origin == 0 && mode == 1))) {
+      // read-only(0) 和 two-way(1) 均以远端为准：远端集合消失时清理本地绑定
+      if (!remoteExists && (mode == 0 || mode == 1)) {
         contexts.add(_buildContext({}, local, SyncAction.deleteLocal));
       }
     }

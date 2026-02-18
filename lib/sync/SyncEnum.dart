@@ -5,7 +5,7 @@ enum SyncAction {
   createLocal,    // 物理动作：DB Insert (仅记录，不含数据)
 
   // --- 同步阶段 (数据交换) ---
-  // 我们根据 sync_mode 和 origin 将 fullSync 扩展为三种具体的执行指令
+  // sync_mode 约定：0 = 只读（仅 Pull），1 = 双向同步（Pull + Push）
   fullSyncBidi,   // 双向流：允许 Pull 和 Push (个人日历)
   fullSyncPull,   // 单向流：仅允许从云端 Pull (订阅 A)
   fullSyncPush,   // 单向流：仅允许向云端 Push (发布 B)
