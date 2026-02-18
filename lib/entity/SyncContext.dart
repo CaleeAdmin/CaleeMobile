@@ -2,7 +2,8 @@
 import '../sync/SyncEnum.dart';
 
 class SyncContext {
-  final String calendarId;    // 本地数据库中的 ID
+  final String calendarId;    // Android 本地日历 ID（仅用于原生日历接口）
+  final int remoteCollectionId; // remote_collections.id（sync_items 外键）
   final String remotePath;    // 云端路径
   final String accountName;   // 账户名
   final String accountType;   // 账户类型
@@ -18,6 +19,7 @@ class SyncContext {
 
   SyncContext({
     required this.calendarId,
+    required this.remoteCollectionId,
     required this.remotePath,
     required this.accountName,
     required this.accountType,
@@ -34,6 +36,7 @@ class SyncContext {
   /// 💡 新增 copyWith：用于在同步过程中动态更新 ID 或状态
   SyncContext copyWith({
     String? calendarId,
+    int? remoteCollectionId,
     String? remotePath,
     String? accountName,
     String? accountType,
@@ -48,6 +51,7 @@ class SyncContext {
   }) {
     return SyncContext(
       calendarId: calendarId ?? this.calendarId,
+      remoteCollectionId: remoteCollectionId ?? this.remoteCollectionId,
       remotePath: remotePath ?? this.remotePath,
       accountName: accountName ?? this.accountName,
       accountType: accountType ?? this.accountType,
@@ -64,7 +68,7 @@ class SyncContext {
 
   @override
   String toString() {
-    return 'SyncContext{calendarId: $calendarId, remotePath: $remotePath, accountName: $accountName, accountType: $accountType, displayName: $displayName, color: $color, syncStatus: $syncStatus, syncMode: $syncMode, action: $action, ctag: $ctag, isSubscription: $isSubscription, extra: $extra}';
+    return 'SyncContext{calendarId: $calendarId, remoteCollectionId: $remoteCollectionId, remotePath: $remotePath, accountName: $accountName, accountType: $accountType, displayName: $displayName, color: $color, syncStatus: $syncStatus, syncMode: $syncMode, action: $action, ctag: $ctag, isSubscription: $isSubscription, extra: $extra}';
   }
 
 

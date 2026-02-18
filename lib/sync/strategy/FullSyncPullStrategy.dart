@@ -28,7 +28,7 @@ class FullSyncPullStrategy extends SyncStrategy {
       final List<Map<String, dynamic>> localSyncRecords = await db.query(
         'sync_items',
         where: 'remote_collection_id = ?',
-        whereArgs: [localCalendarId],
+        whereArgs: [ctx.remoteCollectionId],
       );
       final Map<String, Map<String, dynamic>> localSyncMap = {
         for (var row in localSyncRecords) row['uid'] as String: row
@@ -67,7 +67,7 @@ class FullSyncPullStrategy extends SyncStrategy {
             await db.insert('sync_items', {
               'uid': uid,
               'local_item_id': systemEventId,
-              'remote_collection_id': localCalendarId,
+              'remote_collection_id': ctx.remoteCollectionId,
               'summary': remoteEvent['summary'],
               'remote_etag': etag,
               'remote_href': remoteEvent['href'],

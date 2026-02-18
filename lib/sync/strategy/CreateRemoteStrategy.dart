@@ -71,7 +71,7 @@ class CreateRemoteStrategy extends SyncStrategy {
           await db.insert('sync_items', {
             'uid': uid,
             'local_item_id': event.localId,
-            'remote_collection_id': ctx.calendarId,
+            'remote_collection_id': ctx.remoteCollectionId,
             'summary': title,
             'description': event.notes,
             'dtstart': startTime,
@@ -90,8 +90,8 @@ class CreateRemoteStrategy extends SyncStrategy {
         {
           'remote_path': resultPath, // 核心：存入刚开好的云端坑位路径
         },
-        where: 'local_id = ?',
-        whereArgs: [ctx.calendarId],
+        where: 'id = ?',
+        whereArgs: [ctx.remoteCollectionId],
       );
       summary.success++;
     }

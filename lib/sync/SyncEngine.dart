@@ -70,7 +70,7 @@ class SyncEngine {
         final String? dbCtag = local['ctag'];
         final String? remoteCtag = remote['ctag'];
         final bool remoteChanged = (remoteCtag != null && remoteCtag != dbCtag);
-        final bool localChanged = await _isCalendarDirty(db, localId);
+        final bool localChanged = await _isCalendarDirty(db, local['id'] as int);
         final bool metaChanged = remote['displayname'] != local['display_name'] ||
             remote['color'] != local['color'];
 
@@ -120,19 +120,20 @@ class SyncEngine {
     return contexts;
   }
 
-  Future<bool> _isCalendarDirty(Database db, String localId) async {
+  Future<bool> _isCalendarDirty(Database db, int remoteCollectionId) async {
     // 这里的状态码对应：1 (Dirty/Modified), 2 (Deleted)
     final List<Map<String, dynamic>> dirtyCheck = await db.rawQuery('''
     SELECT 1 FROM sync_items
     WHERE remote_collection_id = ? AND sync_status IN (1, 2)
     LIMIT 1
-  ''', [localId]);
+  ''', [remoteCollectionId]);
     return dirtyCheck.isNotEmpty;
   }
 
   SyncContext _buildContext(Map remote, Map? local, SyncAction action) {
     return SyncContext(
-      calendarId: local?['local_id'] ?? "",
+      calendarId: local?['local_id']?.toString() ?? "",
+      remoteCollectionId: (local?['id'] as int?) ?? (remote['id'] as int? ?? -1),
       remotePath: remote['remote_path'] ?? local?['remote_path'] ?? "",
       accountName: local?['account_name'] ?? "",
       accountType: local?['account_type'] ?? "", // 从数据库字段读取，不再从参数传
@@ -355,7 +356,7 @@ class SyncEngine {
     final List<Map<String, dynamic>> locals = await db.query(
         'sync_items',
         where: 'remote_collection_id = ?',
-        whereArgs: [ctx.calendarId]
+        whereArgs: [ctx.remoteCollectionId]
     );
 
     print("--------------------------------------------------");
@@ -501,7 +502,7 @@ class SyncEngine {
     // await db.insert('sync_items', {
     //   'uid': remote['uid'],
     //   'local_item_id': systemEventId ?? 'v_${remote['uid']}', // 有系统 ID 用系统 ID，没有用虚拟
-    //   'remote_collection_id': ctx.calendarId,
+    //   'remote_collection_id': ctx.remoteCollectionId,
     //   'remote_etag': remote['etag'],
     //   'summary': parsed['summary'],
     //   'dtstart': parsed['dtstart'],

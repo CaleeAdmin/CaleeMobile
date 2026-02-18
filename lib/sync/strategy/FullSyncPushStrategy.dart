@@ -31,7 +31,7 @@ class FullSyncPushStrategy extends SyncStrategy {
       final List<Map<String, dynamic>> mappedRecords = await db.query(
         'sync_items',
         where: 'remote_collection_id = ?',
-        whereArgs: [ctx.calendarId],
+        whereArgs: [ctx.remoteCollectionId],
       );
 
       // 转换为 Map 方便快速查找: {local_item_id: record}
@@ -76,7 +76,7 @@ class FullSyncPushStrategy extends SyncStrategy {
             await db.insert('sync_items', {
               'uid': uid,
               'local_item_id': localId,
-              'remote_collection_id': ctx.calendarId,
+              'remote_collection_id': ctx.remoteCollectionId,
               'summary': local.title,
               'remote_etag': newEtag.replaceAll('"', ''),
               'remote_mtime': lastModified,
