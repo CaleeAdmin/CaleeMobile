@@ -67,7 +67,7 @@ class CreateRemoteStrategy extends SyncStrategy {
         );
 
         if (etag != null) {
-          // 3. 写入 sync_map
+          // 3. 写入 sync_items（事件映射表）
           await db.insert('sync_items', {
             'remote_uid': uid,
             'local_item_id': event.localId,
