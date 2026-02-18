@@ -586,7 +586,7 @@ class _CalendarRow extends StatelessWidget {
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
-                        item.isReadOnly ? 'Read-only in Calee' : 'Two-way sync',
+                        item.isReadOnly ? 'Read-only' : 'Two-way sync',
                         style: const TextStyle(fontSize: 12, color: Colors.black54),
                       ),
                     ),
