@@ -202,7 +202,7 @@ class _LocalCalendarCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      calendar.isReadOnly ? 'Read-only in Calee' : 'Two-way sync',
+                      calendar.isReadOnly ? 'Read-only' : 'Two-way sync',
                       style: const TextStyle(fontSize: 14, color: Color(0xFF4B5563)),
                     ),
                     const SizedBox(height: 12),
