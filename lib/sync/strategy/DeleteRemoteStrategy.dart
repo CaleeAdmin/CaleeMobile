@@ -26,15 +26,15 @@ class DeleteRemoteStrategy extends SyncStrategy {
         // 理由：日历都没了，它下面所有 ics 文件的 ETag 记录必须清空
         int sCount = await txn.delete(
           'sync_items',
-          where: 'remote_collection_id = ? OR remote_path LIKE ?',
-          whereArgs: [ctx.calendarId, '${ctx.remotePath}%'],
+          where: 'remote_collection_id = ?',
+          whereArgs: [ctx.remoteCollectionId],
         );
 
         // B. 清理 remote_collections (日历自身配置)
         int cCount = await txn.delete(
           'remote_collections',
-          where: 'local_id = ?',
-          whereArgs: [ctx.calendarId],
+          where: 'id = ?',
+          whereArgs: [ctx.remoteCollectionId],
         );
         debugPrint("🧹 云端删除成功，本地清理完成: 删除了 $cCount 个日历配置, $sCount 条同步映射");
       });

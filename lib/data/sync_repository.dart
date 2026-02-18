@@ -37,13 +37,13 @@ class SyncRepository {
           'sync_items',
           {'sync_status': 2}, // 标记为待同步删除
           where: 'remote_collection_id = ? AND sync_status = 0 AND local_item_id NOT IN ($placeholders)',
-          whereArgs: [ctx.calendarId, ...currentLocalIds],
+          whereArgs: [ctx.remoteCollectionId, ...currentLocalIds],
         );
       } else {
         // 如果系统里一个日程都没有了，该日历下所有已同步的都标记为删除
         await txn.update('sync_items', {'sync_status': 2},
             where: 'remote_collection_id = ? AND sync_status = 0',
-            whereArgs: [ctx.calendarId]);
+            whereArgs: [ctx.remoteCollectionId]);
       }
 
       // --- 步骤 2: 处理新增或修改 ---
@@ -56,7 +56,7 @@ class SyncRepository {
           await txn.insert('sync_items', {
             'uid': event.uid, // 使用原生生成的 system_event_$id
             'local_item_id': event.localId,
-            'remote_collection_id': ctx.calendarId,
+            'remote_collection_id': ctx.remoteCollectionId,
             'summary': event.title,
             'dtstart': event.startTime,
             'dtend': event.endTime,
@@ -337,7 +337,7 @@ class SyncRepository {
     final localEntries = await db.query(
         'sync_items',
         where: 'remote_collection_id = ?',
-        whereArgs: [calendarLocalId]
+        whereArgs: [calConfig['id']]
     );
 
     for (var local in localEntries) {
@@ -398,7 +398,7 @@ class SyncRepository {
           await db.insert('sync_items', {
             'uid': uid,
             'local_item_id': newLocalId,
-            'remote_collection_id': calendarLocalId,
+            'remote_collection_id': calConfig['id'],
             'summary': parsed['summary'],
             'remote_etag': etag,
             'sync_status': 0,
@@ -413,6 +413,18 @@ class SyncRepository {
     final db = await _dbHelper.database;
     final String userId = MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? "";
 
+    final calMaps = await db.query(
+      'remote_collections',
+      columns: ['id'],
+      where: 'local_id = ?',
+      whereArgs: [calendarLocalId],
+      limit: 1,
+    );
+    if (calMaps.isEmpty) {
+      return;
+    }
+    final int remoteCollectionId = calMaps.first['id'] as int;
+
     // 1. 获取手机系统日历目前所有的 Event ID
     final List<String?> systemEventIds = await _nativeApi.getSystemEventIds(calendarLocalId);
 
@@ -420,7 +432,7 @@ class SyncRepository {
     final List<Map<String, dynamic>> trackedEvents = await db.query(
         'sync_items',
         where: 'remote_collection_id = ?',
-        whereArgs: [calendarLocalId]
+        whereArgs: [remoteCollectionId]
     );
 
     for (var entry in trackedEvents) {
@@ -584,7 +596,7 @@ class SyncRepository {
     // 2. 统计该日历下的本地有效事件数（过滤 status 2）
     final countResult = await db.rawQuery(
         'SELECT COUNT(*) as count FROM sync_items WHERE remote_collection_id = ? AND sync_status != 2',
-        [localId]
+        [cal['id']]
     );
 
     // 3. 逻辑判定：纯靠 account_type 区分
@@ -640,17 +652,9 @@ class SyncRepository {
         whereArgs: [oldId],
       );
 
-      // 4. 更新事件关联的外键
-      final eventUpdateCount = await txn.update(
-        'sync_items',
-        {'remote_collection_id': newId},
-        where: 'remote_collection_id = ?',
-        whereArgs: [oldId],
-      );
-
       print("✅ [ID 洗白成功] $oldId -> $newId");
       print("📌 属性保留: AccountType=$accountType, RemotePath=$remotePath");
-      print("📊 统计: 日历更新($calendarUpdateCount), 事件外键关联($eventUpdateCount)");
+      print("📊 统计: 日历更新($calendarUpdateCount)");
     });
   }
 
@@ -686,6 +690,7 @@ class SyncRepository {
     }
 
     final cal = maps.first;
+    final int resolvedRemoteCollectionId = cal['id'] as int;
     final String accountName = cal['account_name'] ?? '';
     final String resolvedLocalId = cal['local_id']?.toString() ?? sanitizedLocalId ?? '';
     final String? resolvedRemotePath = cal['remote_path']?.toString() ?? sanitizedRemotePath;
@@ -728,15 +733,15 @@ class SyncRepository {
           sCount = await txn.delete(
             'sync_items',
             where: 'remote_collection_id = ?',
-            whereArgs: [resolvedLocalId],
+            whereArgs: [resolvedRemoteCollectionId],
           );
         }
 
         final int cCount = resolvedLocalId.isNotEmpty
             ? await txn.delete(
                 'remote_collections',
-                where: 'local_id = ?',
-                whereArgs: [resolvedLocalId],
+                where: 'id = ?',
+                whereArgs: [resolvedRemoteCollectionId],
               )
             : await txn.delete(
                 'remote_collections',
@@ -949,10 +954,10 @@ class SyncRepository {
         c.*, 
         COUNT(s.uid) as event_count 
       FROM remote_collections c
-      LEFT JOIN sync_items s ON c.local_id = s.remote_collection_id
+      LEFT JOIN sync_items s ON c.id = s.remote_collection_id
       WHERE c.is_subscription = 1
-      GROUP BY c.local_id
-      ORDER BY c.local_id DESC
+      GROUP BY c.id
+      ORDER BY c.id DESC
     ''';
 
       final List<Map<String, dynamic>> results = await db.rawQuery(sql);

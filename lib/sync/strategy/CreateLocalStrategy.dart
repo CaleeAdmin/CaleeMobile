@@ -52,7 +52,7 @@ class CreateLocalStrategy extends SyncStrategy {
       final List<Map<String, dynamic>> localEntries = await db.query(
         'sync_items',
         where: 'remote_collection_id = ?',
-        whereArgs: [newLocalId],
+        whereArgs: [ctx.remoteCollectionId],
       );
       final Map<String, Map<String, dynamic>> localSyncMap = {
         for (var entry in localEntries) entry['uid'] as String: entry
@@ -104,7 +104,7 @@ class CreateLocalStrategy extends SyncStrategy {
             await db.insert('sync_items', {
               'uid': eventData.uid,
               'local_item_id': systemEventId,
-              'remote_collection_id': newLocalId,
+              'remote_collection_id': ctx.remoteCollectionId,
               'summary': eventData.summary,
               'remote_etag': remoteEtag,
               'remote_href': eventData.href,
