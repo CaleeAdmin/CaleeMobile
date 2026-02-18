@@ -40,7 +40,6 @@ class SyncEngine {
         rc.is_enabled,
         rc.is_subscription,
         lb.local_collection_id,
-        lb.local_account_type,
         lb.binding_origin
       FROM remote_collections rc
       LEFT JOIN local_bindings lb ON lb.remote_collection_id = rc.id
