@@ -135,7 +135,6 @@ class SyncEngine {
       calendarId: local?['local_item_id'] ?? "",
       remotePath: remote['remote_path'] ?? local?['remote_path'] ?? "",
       accountName: local?['account_name'] ?? "",
-      accountType: local?['local_account_type'] ?? "", // 从数据库字段读取，不再从参数传
       displayName: remote['display_name'] ?? local?['display_name'] ?? "未命名日历",
       color: remote['color'] ?? local?['color'] ?? "#AARRGGBB",
       syncMode: local?['sync_mode'] ?? remote['sync_mode'] ?? 0,
@@ -318,7 +317,6 @@ class SyncEngine {
             {
               'display_name': displayName,
               'account_name': userId,
-              'local_account_type': 'com.viso.caleesync',
               'is_subscription': (rc['is_subscription'] == true || rc['is_subscription'] == 1) ? 1 : 0,
               'subscription_url': rc['subscription_url'],
             },
@@ -330,7 +328,6 @@ class SyncEngine {
           print("🆕 [云端发现] 创建新映射: $displayName");
           await db.insert('remote_collections', {
             'account_name': userId,
-            'local_account_type': 'com.viso.caleesync',
             'display_name': displayName,
             'remote_path': path,
             'sync_mode': rc['sync_mode'] ?? 0,

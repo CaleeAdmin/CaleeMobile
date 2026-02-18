@@ -67,7 +67,6 @@ class DatabaseHelper {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         remote_collection_id INTEGER NOT NULL,
         local_collection_id TEXT NOT NULL,
-        local_account_type TEXT,
         binding_origin INTEGER DEFAULT 1,
         created_at INTEGER,
         updated_at INTEGER,
@@ -83,11 +82,6 @@ class DatabaseHelper {
     await db.execute('''
       CREATE UNIQUE INDEX IF NOT EXISTS uq_lb_local
       ON local_bindings(local_collection_id)
-    ''');
-
-    await db.execute('''
-      CREATE INDEX IF NOT EXISTS idx_lb_local_type
-      ON local_bindings(local_account_type)
     ''');
 
     // 3. 同步条目映射（事件/任务）
