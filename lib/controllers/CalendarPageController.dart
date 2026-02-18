@@ -44,17 +44,19 @@ class CalendarDisplayItem {
 
   // 方便从数据库 Map 转换
   factory CalendarDisplayItem.fromMap(Map<String, dynamic> map) {
+    bool toBool(dynamic value) => value == true || value == 1 || value == '1';
+
     return CalendarDisplayItem(
       localId: map['local_collection_id']?.toString(), // 转为 String 处理
       remotePath: map['remote_path'] ?? '',
       name: map['display_name'] ?? '未命名',
       color: map['color'] ?? '#000000',
-      eventCount: 0, // 可以在外部查询后再填入
-      isReadOnly: false,
-      isSubscription: false,
-      isLocalReadOnly: false,
-      isEnabled: (map['is_enabled'] ?? 0) == 1,
-      origin: map['binding_origin'] ?? 0,
+      eventCount: (map['event_count'] as int?) ?? 0, // 可由查询结果直接带入
+      isReadOnly: (map['sync_mode'] as int?) == 0,
+      isSubscription: toBool(map['is_subscription']),
+      isLocalReadOnly: toBool(map['is_local_read_only']),
+      isEnabled: toBool(map['is_enabled']),
+      origin: (map['binding_origin'] as int?) ?? 0,
     );
   }
 }
