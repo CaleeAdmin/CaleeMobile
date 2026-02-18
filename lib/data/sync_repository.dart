@@ -97,15 +97,22 @@ class SyncRepository {
   Future<void> refreshAllLocalEvents(String accountId) async {
     final db = await _dbHelper.database;
 
-    // 1. 获取所有当前已就绪的本地日历
-    final List<Map<String, dynamic>> activeCalendars = await db.query(
-      'remote_collections',
-      where: 'account_name = ? AND local_id IS NOT NULL',
-      whereArgs: [accountId],
+    // 1. 获取所有已绑定本地系统日历的远端集合
+    final List<Map<String, dynamic>> activeCalendars = await db.rawQuery(
+      '''
+      SELECT rc.id AS remote_collection_id, lb.local_collection_id
+      FROM remote_collections rc
+      INNER JOIN local_bindings lb ON lb.remote_collection_id = rc.id
+      WHERE rc.account_name = ?
+        AND lb.local_collection_id IS NOT NULL
+        AND lb.local_collection_id != ''
+      ''',
+      [accountId],
     );
 
     for (var cal in activeCalendars) {
-      final String localCalId = cal['local_item_id'].toString();
+      final int remoteCollectionId = cal['remote_collection_id'] as int;
+      final String localCalId = cal['local_collection_id'].toString();
 
       // 2. 拍一张系统日历的“物理快照”
       final start = DateTime.now().subtract(const Duration(days: 365)).millisecondsSinceEpoch;
@@ -121,7 +128,7 @@ class SyncRepository {
       final List<Map<String, dynamic>> dbRecords = await db.query(
         'sync_items',
         where: 'remote_collection_id = ?',
-        whereArgs: [localCalId],
+        whereArgs: [remoteCollectionId],
       );
       final Map<String, Map<String, dynamic>> dbMap = {
         for (var r in dbRecords) r['local_item_id'].toString(): r
@@ -140,7 +147,7 @@ class SyncRepository {
             await txn.insert('sync_items', {
               'remote_uid': systemEvent.uid ?? 'local_${DateTime.now().microsecondsSinceEpoch}',
               'local_item_id': sid,
-              'remote_collection_id': localCalId,
+              'remote_collection_id': remoteCollectionId,
               'summary': systemEvent.title,
               'last_mtime': systemEvent.lastModified,
               'sync_status': 1, // 标记为 Dirty，待 Push
