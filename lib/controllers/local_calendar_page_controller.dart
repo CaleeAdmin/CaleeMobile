@@ -5,6 +5,7 @@ import 'package:caleesync/common/utils/mmkv_utils.dart';
 import 'package:caleesync/core/platform/pigeon/calendar_api.g.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:sqflite/sqflite.dart';
 
 import '../data/database_helper.dart';
 import '../services/calee_server_service.dart';
@@ -231,42 +232,80 @@ class LocalCalendarPageController extends GetxController {
         }
       }
 
-      final int updated = await db.update(
-        'remote_collections',
-        {
-          'is_enabled': enabled ? 1 : 0,
-          'display_name': item.name,
-          'account_name': MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? item.accountName,
-          'color': item.color,
-          'sync_mode': 0,
-          'is_subscription': item.isSubscription ? 1 : 0,
-          'subscription_url': item.subscriptionUrl,
-          if (enabled && remotePath != null) 'remote_path': remotePath,
-        },
-        where: 'id IN (SELECT remote_collection_id FROM local_bindings WHERE local_collection_id = ?)',
-        whereArgs: [item.id],
-      );
+      final String accountName =
+          MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? item.accountName;
+      int? remoteCollectionId;
 
-      if (updated == 0) {
-        final int remoteCollectionId = await db.insert('remote_collections', {
-          'account_name': MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? item.accountName,
-          'collection_type': 'calendar',
-          'display_name': item.name,
-          'color': item.color,
-          'is_enabled': enabled ? 1 : 0,
-          'sync_mode': 0,
-          'is_subscription': item.isSubscription ? 1 : 0,
-          'subscription_url': item.subscriptionUrl,
-          if (enabled && remotePath != null) 'remote_path': remotePath,
-        });
+      if (enabled) {
+        if (remotePath == null || remotePath.isEmpty) {
+          throw Exception('Missing remote path while enabling calendar');
+        }
 
-        await db.insert('local_bindings', {
-          'remote_collection_id': remoteCollectionId,
-          'local_collection_id': item.id,
-          'binding_origin': 0,
-          'created_at': DateTime.now().millisecondsSinceEpoch,
-          'updated_at': DateTime.now().millisecondsSinceEpoch,
-        });
+        final List<Map<String, dynamic>> remoteRows = await db.query(
+          'remote_collections',
+          columns: ['id'],
+          where: 'account_name = ? AND collection_type = ? AND remote_path = ?',
+          whereArgs: [accountName, 'calendar', remotePath],
+          limit: 1,
+        );
+
+        if (remoteRows.isNotEmpty) {
+          remoteCollectionId = remoteRows.first['id'] as int;
+          await db.update(
+            'remote_collections',
+            {
+              'is_enabled': 1,
+              'display_name': item.name,
+              'account_name': accountName,
+              'color': item.color,
+              'sync_mode': 0,
+              'is_subscription': item.isSubscription ? 1 : 0,
+              'subscription_url': item.subscriptionUrl,
+              'remote_path': remotePath,
+            },
+            where: 'id = ?',
+            whereArgs: [remoteCollectionId],
+          );
+        } else {
+          remoteCollectionId = await db.insert('remote_collections', {
+            'account_name': accountName,
+            'collection_type': 'calendar',
+            'display_name': item.name,
+            'color': item.color,
+            'is_enabled': 1,
+            'sync_mode': 0,
+            'is_subscription': item.isSubscription ? 1 : 0,
+            'subscription_url': item.subscriptionUrl,
+            'remote_path': remotePath,
+          });
+        }
+
+        await db.insert(
+          'local_bindings',
+          {
+            'remote_collection_id': remoteCollectionId,
+            'local_collection_id': item.id,
+            'binding_origin': 0,
+            'created_at': DateTime.now().millisecondsSinceEpoch,
+            'updated_at': DateTime.now().millisecondsSinceEpoch,
+          },
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+      } else {
+        await db.update(
+          'remote_collections',
+          {
+            'is_enabled': 0,
+            'display_name': item.name,
+            'account_name': accountName,
+            'color': item.color,
+            'sync_mode': 0,
+            'is_subscription': item.isSubscription ? 1 : 0,
+            'subscription_url': item.subscriptionUrl,
+          },
+          where: 'id IN (SELECT remote_collection_id FROM local_bindings WHERE local_collection_id = ?)',
+          whereArgs: [item.id],
+        );
       }
 
       if (enabled && returnToCalendarListAfterConnect) {

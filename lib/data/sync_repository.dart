@@ -871,6 +871,19 @@ class SyncRepository {
         userId: userId,
       );
 
+      final db = await _dbHelper.database;
+      final int updated = await db.update(
+        'remote_collections',
+        {'is_enabled': 1},
+        where: 'account_name = ? AND collection_type = ? AND remote_path = ?',
+        whereArgs: [userId, 'calendar', remotePath],
+      );
+
+      if (updated == 0) {
+        print("❌ [Repository] 远端记录未落库，无法自动启用: $remotePath");
+        return false;
+      }
+
       return true;
     } catch (e) {
       print("❌ [Repository] 创建逻辑发生异常: $e");
