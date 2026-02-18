@@ -35,11 +35,27 @@ class CreateLocalStrategy extends SyncStrategy {
 
     final db = await dbHelper.database;
 
-    // 2. 关联本地 ID 并预设状态
-    await db.update('calendar_map', {
-      'local_id': newLocalId,
-      'is_enabled': 1,
-    }, where: 'remote_path = ?', whereArgs: [ctx.remotePath]);
+    // 2. 建立绑定关系并预设状态
+    final rcRows = await db.query(
+      'remote_collections',
+      columns: ['id'],
+      where: 'remote_path = ?',
+      whereArgs: [ctx.remotePath],
+      limit: 1,
+    );
+    final int? remoteCollectionId = rcRows.isNotEmpty ? rcRows.first['id'] as int? : null;
+
+    if (remoteCollectionId != null) {
+      await db.update('remote_collections', {'is_enabled': 1}, where: 'id = ?', whereArgs: [remoteCollectionId]);
+      await db.insert('local_bindings', {
+        'remote_collection_id': remoteCollectionId,
+        'local_collection_id': newLocalId,
+        'local_account_type': ctx.accountType,
+        'binding_origin': 1,
+        'created_at': DateTime.now().millisecondsSinceEpoch,
+        'updated_at': DateTime.now().millisecondsSinceEpoch,
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+    }
 
     try {
       // 3. 统一获取远端事件元数据
@@ -50,25 +66,25 @@ class CreateLocalStrategy extends SyncStrategy {
 
       // 4. 加载本地 sync_map 缓存用于 Diff 比对
       final List<Map<String, dynamic>> localEntries = await db.query(
-        'sync_map',
-        where: 'calendar_local_id = ?',
-        whereArgs: [newLocalId],
+        'sync_items',
+        where: 'remote_collection_id = ?',
+        whereArgs: [remoteCollectionId],
       );
       final Map<String, Map<String, dynamic>> localSyncMap = {
-        for (var entry in localEntries) entry['uid'] as String: entry
+        for (var entry in localEntries) entry['remote_uid'] as String: entry
       };
 
       int eventSuccessCount = 0;
       final _api = NativeCalendarApi(); // Pigeon API
 
       for (var remote in remoteEvents) {
-        final String remoteUid = remote['uid'] ?? '';
+        final String remoteUid = remote['remote_uid'] ?? '';
         final String remoteEtag = (remote['etag'] ?? '').replaceAll('"', '');
 
         // 5. 差异比对：ETag 没变且本地已有系统 ID 则跳过
         if (localSyncMap.containsKey(remoteUid)) {
           final localEtag = localSyncMap[remoteUid]!['last_etag'];
-          final localSystemId = localSyncMap[remoteUid]!['local_id'];
+          final localSystemId = localSyncMap[remoteUid]!['local_item_id'];
           if (localEtag == remoteEtag && localSystemId != null) {
             eventSuccessCount++;
             continue;
@@ -92,7 +108,7 @@ class CreateLocalStrategy extends SyncStrategy {
           notes: eventData.description,
           uid: eventData.uid,
           // 关键：传入已有的 local_id 则触发原生 Update
-          eventId: localSyncMap[eventData.uid]?['local_id']?.toString(),
+          eventId: localSyncMap[eventData.uid]?['local_item_id']?.toString(),
         );
 
         try {
@@ -101,10 +117,10 @@ class CreateLocalStrategy extends SyncStrategy {
 
           if (systemEventId != null) {
             // 9. 更新 sync_map 映射
-            await db.insert('sync_map', {
-              'uid': eventData.uid,
-              'local_id': systemEventId,
-              'calendar_local_id': newLocalId,
+            await db.insert('sync_items', {
+              'remote_uid': eventData.uid,
+              'local_item_id': systemEventId,
+              'remote_collection_id': newLocalId,
               'summary': eventData.summary,
               'last_etag': remoteEtag,
               'remote_href': eventData.href,

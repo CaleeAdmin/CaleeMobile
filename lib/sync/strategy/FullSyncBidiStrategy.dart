@@ -28,12 +28,12 @@ class FullSyncBidiStrategy extends SyncStrategy {
       );
 
       final List<Map<String, dynamic>> mappedRecords = await db.query(
-        'sync_map',
-        where: 'calendar_local_id = ?',
+        'sync_items',
+        where: 'remote_collection_id = ?',
         whereArgs: [localCalendarId],
       );
       final Map<String, Map<String, dynamic>> syncMap = {
-        for (var r in mappedRecords) r['uid'].toString(): r
+        for (var r in mappedRecords) r['remote_uid'].toString(): r
       };
 
       // 2. 准备数据：获取本地系统实时日程
@@ -49,7 +49,7 @@ class FullSyncBidiStrategy extends SyncStrategy {
 
       // --- 阶段 A: 以云端列表为基准进行比对 ---
       for (var remote in remoteEvents) {
-        final String uid = remote['uid'] ?? '';
+        final String uid = remote['remote_uid'] ?? '';
         if (uid.isEmpty) continue;
         processedUids.add(uid);
 
@@ -65,11 +65,11 @@ class FullSyncBidiStrategy extends SyncStrategy {
         if (cloudChanged && localChanged) {
           // 💡 场景：冲突！双方都改了。策略：以云端为准（或你可以根据 mtime 判定谁更晚）
           debugPrint("⚠️ 冲突检测: $uid, 采用云端覆盖本地");
-          await _pullFromRemote(remote, localCalendarId, localBase?['local_id']?.toString(), remoteEtag, db);
+          await _pullFromRemote(remote, localCalendarId, localBase?['local_item_id']?.toString(), remoteEtag, db);
           changeCount++;
         } else if (cloudChanged) {
           // 💡 场景：仅云端更新或新增 -> 下拉
-          await _pullFromRemote(remote, localCalendarId, localBase?['local_id']?.toString(), remoteEtag, db);
+          await _pullFromRemote(remote, localCalendarId, localBase?['local_item_id']?.toString(), remoteEtag, db);
           changeCount++;
         } else if (localChanged) {
           // 💡 场景：仅本地更新 -> 上传
@@ -81,7 +81,7 @@ class FullSyncBidiStrategy extends SyncStrategy {
       // --- 阶段 B: 处理删除与本地新增 ---
       for (var uid in syncMap.keys) {
         final record = syncMap[uid]!;
-        final String? localId = record['local_id']?.toString();
+        final String? localId = record['local_item_id']?.toString();
         final String? href = record['remote_href'];
         final String? etag = record['last_etag'];
 
@@ -97,7 +97,7 @@ class FullSyncBidiStrategy extends SyncStrategy {
               debugPrint("🗑️ 检测到本地物理删除，同步清理云端: ${record['summary']}");
               final bool ok = await nc.deleteEvent(eventPath: href);
               if (ok) {
-                await db.delete('sync_map', where: 'uid = ?', whereArgs: [uid]);
+                await db.delete('sync_items', where: 'remote_uid = ?', whereArgs: [uid]);
                 changeCount++;
               }
             }
@@ -115,12 +115,12 @@ class FullSyncBidiStrategy extends SyncStrategy {
               // B. 账本里有 Etag，说明以前同步过，但现在云端没了 -> 判定为云端删了
               debugPrint("🧹 云端已删，同步清理本地实物: ${record['summary']}");
               await nativeApi.deleteEvent(localId!);
-              await db.delete('sync_map', where: 'uid = ?', whereArgs: [uid]);
+              await db.delete('sync_items', where: 'remote_uid = ?', whereArgs: [uid]);
               changeCount++;
             }
           } else {
             // C. 场景：两边都没了，只有账本残留
-            await db.delete('sync_map', where: 'uid = ?', whereArgs: [uid]);
+            await db.delete('sync_items', where: 'remote_uid = ?', whereArgs: [uid]);
           }
         }
       }
@@ -158,10 +158,10 @@ class FullSyncBidiStrategy extends SyncStrategy {
     ));
 
     if (newSystemId != null) {
-      await db.insert('sync_map', {
-        'uid': eventData.uid,
-        'local_id': newSystemId,
-        'calendar_local_id': calendarId,
+      await db.insert('sync_items', {
+        'remote_uid': eventData.uid,
+        'local_item_id': newSystemId,
+        'remote_collection_id': calendarId,
         'last_etag': etag,
         'last_mtime': DateTime.now().millisecondsSinceEpoch, // 更新基准时间，避免刚拉下来又推上去
         'remote_href': remote['href'],
@@ -183,10 +183,10 @@ class FullSyncBidiStrategy extends SyncStrategy {
     );
 
     if (newEtag != null) {
-      await db.insert('sync_map', {
-        'uid': uid,
-        'local_id': local.localId,
-        'calendar_local_id': calendarId,
+      await db.insert('sync_items', {
+        'remote_uid': uid,
+        'local_item_id': local.localId,
+        'remote_collection_id': calendarId,
         'last_etag': newEtag.replaceAll('"', ''),
         'last_mtime': local.lastModified,
         'remote_href': "${remotePath.endsWith('/') ? remotePath : '$remotePath/'}$uid.ics",

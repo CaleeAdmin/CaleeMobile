@@ -10,7 +10,7 @@ class Deletedatabaseonlystrategy extends SyncStrategy {
     // 无需原生操作，直接从数据库抹除映射关系
     final db = await dbHelper.database;
     await db.delete(
-      'calendar_map',
+      'remote_collections',
       where: 'remote_path = ? AND account_name = ?',
       whereArgs: [ctx.remotePath, ctx.accountName],
     );

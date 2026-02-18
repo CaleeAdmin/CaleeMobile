@@ -29,7 +29,7 @@ class SyncEngine {
     // 1. 获取该用户下的所有本地数据库记录（包含状态为 2 的记录）
     final db = await _dbHelper.database;
     final List<Map<String, dynamic>> localRecords = await db.query(
-      'calendar_map',
+      'remote_collections',
       where: 'account_name = ? AND remote_path IS NOT NULL AND remote_path != ""',
       whereArgs: [userId],
     );
@@ -55,9 +55,9 @@ class SyncEngine {
       }
 
       final int isEnabled = local['is_enabled'] ?? 0;
-      final int origin = local['origin'] ?? 0;
+      final int origin = local['binding_origin'] ?? 0;
       final int mode = local['sync_mode'] ?? 0;
-      final String localId = local['local_id'] ?? '';
+      final String localId = local['local_item_id'] ?? '';
 
       if (localId.isEmpty) {
         if (isEnabled == 1) {
@@ -103,11 +103,11 @@ class SyncEngine {
     // --- 策略 B：以本地数据库记录为准 (针对：远端删除兜底) ---
     for (var local in localRecords) {
       final String? path = local['remote_path'];
-      final int origin = local['origin'] ?? 0;
+      final int origin = local['binding_origin'] ?? 0;
       final int mode = local['sync_mode'] ?? 0;
 
       if (path == null || path.isEmpty) {
-        debugPrint('⏭️ 跳过无远端路径记录: ${local['local_id']}');
+        debugPrint('⏭️ 跳过无远端路径记录: ${local['local_item_id']}');
         continue;
       }
 
@@ -123,8 +123,8 @@ class SyncEngine {
   Future<bool> _isCalendarDirty(Database db, String localId) async {
     // 这里的状态码对应：1 (Dirty/Modified), 2 (Deleted)
     final List<Map<String, dynamic>> dirtyCheck = await db.rawQuery('''
-    SELECT 1 FROM sync_map 
-    WHERE calendar_local_id = ? AND sync_status IN (1, 2) 
+    SELECT 1 FROM sync_items 
+    WHERE remote_collection_id = ? AND sync_status IN (1, 2) 
     LIMIT 1
   ''', [localId]);
     return dirtyCheck.isNotEmpty;
@@ -132,10 +132,10 @@ class SyncEngine {
 
   SyncContext _buildContext(Map remote, Map? local, SyncAction action) {
     return SyncContext(
-      calendarId: local?['local_id'] ?? "",
+      calendarId: local?['local_item_id'] ?? "",
       remotePath: remote['remote_path'] ?? local?['remote_path'] ?? "",
       accountName: local?['account_name'] ?? "",
-      accountType: local?['account_type'] ?? "", // 从数据库字段读取，不再从参数传
+      accountType: local?['local_account_type'] ?? "", // 从数据库字段读取，不再从参数传
       displayName: remote['display_name'] ?? local?['display_name'] ?? "未命名日历",
       color: remote['color'] ?? local?['color'] ?? "#AARRGGBB",
       syncMode: local?['sync_mode'] ?? remote['sync_mode'] ?? 0,
@@ -143,7 +143,7 @@ class SyncEngine {
       ctag: remote['ctag'] ?? local?['synced_ctag'],
       isSubscription: remote['is_subscription'] ?? false,
       extra: {
-        'origin': local?['origin'] ?? 0,
+        'binding_origin': local?['binding_origin'] ?? 0,
       },
     );
   }
@@ -212,11 +212,11 @@ class SyncEngine {
       //   for (var item in remoteItems) {
       //     final href = item['href']?.toString() ?? "";
       //     if (href.endsWith('.ics')) {
-      //       String extractedUid = item['uid']?.toString() ?? "";
+      //       String extractedUid = item['remote_uid']?.toString() ?? "";
       //       if (extractedUid.isEmpty) {
       //         extractedUid = href.split('/').last.replaceAll('.ics', '');
       //       }
-      //       item['uid'] = extractedUid;
+      //       item['remote_uid'] = extractedUid;
       //       remoteMap[extractedUid] = item;
       //     }
       //   }
@@ -264,7 +264,7 @@ class SyncEngine {
       // 2. 获取本地数据库中该用户已有的所有日历记录
       final db = await DatabaseHelper.instance.database;
       final List<Map<String, dynamic>> localRecords = await db.query(
-        'calendar_map',
+        'remote_collections',
         where: 'account_name = ? AND remote_path IS NOT NULL AND remote_path != ""',
         whereArgs: [userId],
       );
@@ -273,7 +273,7 @@ class SyncEngine {
       for (var local in localRecords) {
         final String accountName = local['account_name'] ?? '';
         final String? localRemotePath = local['remote_path'];
-        final String localId = local['local_id']?.toString() ?? '';
+        final String localId = local['local_item_id']?.toString() ?? '';
         final String displayName = local['display_name'];
 
         // 如果本地记录有远程路径，且该路径不在这次云端获取的列表中
@@ -292,8 +292,8 @@ class SyncEngine {
 
           // B. 从数据库映射表中彻底抹除
           await db.delete(
-            'calendar_map',
-            where: localId.isNotEmpty ? 'local_id = ?' : 'remote_path = ?',
+            'remote_collections',
+            where: localId.isNotEmpty ? 'local_item_id = ?' : 'remote_path = ?',
             whereArgs: [localId.isNotEmpty ? localId : localRemotePath],
           );
         }
@@ -305,7 +305,7 @@ class SyncEngine {
         final String displayName = rc['display_name'] ?? '未命名';
 
         final List<Map<String, dynamic>> existing = await db.query(
-          'calendar_map',
+          'remote_collections',
           where: 'remote_path = ?',
           whereArgs: [path],
         );
@@ -314,11 +314,11 @@ class SyncEngine {
           // ✅ 场景 A: 路径已存在 -> 更新元数据
           print("🔗 [同步] 路径 $path 已匹配，更新元数据: $displayName");
           await db.update(
-            'calendar_map',
+            'remote_collections',
             {
               'display_name': displayName,
               'account_name': userId,
-              'account_type': 'com.viso.caleesync',
+              'local_account_type': 'com.viso.caleesync',
               'is_subscription': (rc['is_subscription'] == true || rc['is_subscription'] == 1) ? 1 : 0,
               'subscription_url': rc['subscription_url'],
             },
@@ -328,9 +328,9 @@ class SyncEngine {
         } else {
           // ✅ 场景 B: 全新云端日历 -> 插入新记录
           print("🆕 [云端发现] 创建新映射: $displayName");
-          await db.insert('calendar_map', {
+          await db.insert('remote_collections', {
             'account_name': userId,
-            'account_type': 'com.viso.caleesync',
+            'local_account_type': 'com.viso.caleesync',
             'display_name': displayName,
             'remote_path': path,
             'sync_mode': rc['sync_mode'] ?? 0,
@@ -353,8 +353,8 @@ class SyncEngine {
 
     // 1. 获取本地数据库中该日历下的所有同步记录
     final List<Map<String, dynamic>> locals = await db.query(
-        'sync_map',
-        where: 'calendar_local_id = ?',
+        'sync_items',
+        where: 'remote_collection_id = ?',
         whereArgs: [ctx.calendarId]
     );
 
@@ -365,10 +365,10 @@ class SyncEngine {
 
     for (var local in locals) {
       // 💡 容错处理：确保所有 ID 都是字符串，且状态有默认值
-      final String uid = local['uid']?.toString() ?? "";
+      final String uid = local['remote_uid']?.toString() ?? "";
       final int status = local['sync_status'] as int? ?? 0;
       final String title = local['summary'] ?? "无标题";
-      final String localId = local['local_id']?.toString() ?? "";
+      final String localId = local['local_item_id']?.toString() ?? "";
       final String? remoteHref = local['remote_href']?.toString();
 
       // --- 场景 A：本地标记为已删除 (Status 2) ---
@@ -380,7 +380,7 @@ class SyncEngine {
         try {
           bool success = await _nc.deleteEvent(eventPath: deletePath);
           if (success) {
-            await db.delete('sync_map', where: 'uid = ?', whereArgs: [uid]);
+            await db.delete('sync_items', where: 'remote_uid = ?', whereArgs: [uid]);
             print("   -> ✅ 云端删除成功，本地映射已移除");
           }
         } catch (e) {
@@ -428,7 +428,7 @@ class SyncEngine {
               print("      ! 系统事件删除失败 (可能已手动删除): $e");
             }
           }
-          await db.delete('sync_map', where: 'uid = ?', whereArgs: [uid]);
+          await db.delete('sync_items', where: 'remote_uid = ?', whereArgs: [uid]);
         } else if (status == 1) {
           print("   -> 🚀 判定动作: 本地新增，准备同步至云端");
           await _uploadToCloud(local, currentRemotePath);
@@ -441,10 +441,10 @@ class SyncEngine {
       print("\n🚚 发现云端新增 ${remoteMap.length} 条数据，准备拉取...");
       for (var remote in remoteMap.values) {
         try {
-          print("   -> 📥 拉取新事件: ${remote['uid']}");
+          print("   -> 📥 拉取新事件: ${remote['remote_uid']}");
           await _downloadFromCloud(remote, ctx);
         } catch (e) {
-          print("❌ 拉取事件 [${remote['uid']}] 失败: $e");
+          print("❌ 拉取事件 [${remote['remote_uid']}] 失败: $e");
         }
       }
     } else {
@@ -459,7 +459,7 @@ class SyncEngine {
 
     // 💡 安全拼接路径：确保 remotePath 结尾有 /
     final String folderPath = remotePath.endsWith('/') ? remotePath : '$remotePath/';
-    final String fullFilePath = "$folderPath${local['uid']}.ics";
+    final String fullFilePath = "$folderPath${local['remote_uid']}.ics";
 
     print("🚀 准备上传至: $fullFilePath");
 
@@ -470,7 +470,7 @@ class SyncEngine {
 
     if (etag != null) {
       await _repo.updateAfterSuccessfulPush(
-        local['uid'] as String,
+        local['remote_uid'] as String,
         etag,
         remoteHref: fullFilePath, // 记录完整路径，方便后续维护
       );
@@ -481,7 +481,7 @@ class SyncEngine {
   Future<void> _downloadFromCloud(dynamic remote, SyncContext ctx) async {
     // final icsData = await _nc.getEventDetail(eventPath: remote['href']);
     // if (icsData == null) return;
-    // final parsed = IcsParser.parse(icsData, remote['uid']);
+    // final parsed = IcsParser.parse(icsData, remote['remote_uid']);
     //
     // String? systemEventId;
     //
@@ -495,7 +495,7 @@ class SyncEngine {
     //       parsed['dtstart'],
     //       parsed['dtend'],
     //       parsed['description'],
-    //       remote['uid'],
+    //       remote['remote_uid'],
     //     );
     //     print("✅ 原生事件创建成功: $systemEventId");
     //   } catch (e) {
@@ -505,10 +505,10 @@ class SyncEngine {
     //
     // // 更新数据库（无论原生是否成功，都要更新数据库里的信息，确保 Dashboard 正确）
     // final db = await DatabaseHelper.instance.database;
-    // await db.insert('sync_map', {
-    //   'uid': remote['uid'],
-    //   'local_id': systemEventId ?? 'v_${remote['uid']}', // 有系统 ID 用系统 ID，没有用虚拟
-    //   'calendar_local_id': ctx.calendarId,
+    // await db.insert('sync_items', {
+    //   'remote_uid': remote['remote_uid'],
+    //   'local_item_id': systemEventId ?? 'v_${remote['remote_uid']}', // 有系统 ID 用系统 ID，没有用虚拟
+    //   'remote_collection_id': ctx.calendarId,
     //   'last_etag': remote['etag'],
     //   'summary': parsed['summary'],
     //   'dtstart': parsed['dtstart'],

@@ -26,19 +26,19 @@ class FullSyncPullStrategy extends SyncStrategy {
 
       // 2. 获取本地 sync_map 缓存
       final List<Map<String, dynamic>> localSyncRecords = await db.query(
-        'sync_map',
-        where: 'calendar_local_id = ?',
+        'sync_items',
+        where: 'remote_collection_id = ?',
         whereArgs: [localCalendarId],
       );
       final Map<String, Map<String, dynamic>> localSyncMap = {
-        for (var row in localSyncRecords) row['uid'] as String: row
+        for (var row in localSyncRecords) row['remote_uid'] as String: row
       };
 
       final Set<String> remoteUids = {};
 
       // 3. 遍历远端，处理 新增/更新
       for (var remoteEvent in remoteEvents) {
-        final String uid = remoteEvent['uid'];
+        final String uid = remoteEvent['remote_uid'];
         final String etag = remoteEvent['etag'];
         remoteUids.add(uid);
 
@@ -56,7 +56,7 @@ class FullSyncPullStrategy extends SyncStrategy {
             notes: remoteEvent['description'] ?? "UID: $uid",
             uid: uid,
             // 关键：如果 localRecord 存在，则传入其 local_id 告诉原生端执行 Update
-            eventId: localRecord?['local_id']?.toString(),
+            eventId: localRecord?['local_item_id']?.toString(),
           );
 
           final String? systemEventId = await nativeApi.createOrUpdateEvent(
@@ -64,10 +64,10 @@ class FullSyncPullStrategy extends SyncStrategy {
           );
 
           if (systemEventId != null) {
-            await db.insert('sync_map', {
-              'uid': uid,
-              'local_id': systemEventId,
-              'calendar_local_id': localCalendarId,
+            await db.insert('sync_items', {
+              'remote_uid': uid,
+              'local_item_id': systemEventId,
+              'remote_collection_id': localCalendarId,
               'summary': remoteEvent['summary'],
               'last_etag': etag,
               'remote_href': remoteEvent['href'],
@@ -81,15 +81,15 @@ class FullSyncPullStrategy extends SyncStrategy {
       for (var uid in localSyncMap.keys) {
         if (!remoteUids.contains(uid)) {
           final recordToDelete = localSyncMap[uid]!;
-          final bool isDeleted = await nativeApi.deleteEvent(recordToDelete['local_id']);
+          final bool isDeleted = await nativeApi.deleteEvent(recordToDelete['local_item_id']);
           if (isDeleted) {
-            await db.delete('sync_map', where: 'uid = ?', whereArgs: [uid]);
+            await db.delete('sync_items', where: 'remote_uid = ?', whereArgs: [uid]);
           }
         }
       }
 
       // 5. 更新日历 CTAG
-      await db.update('calendar_map',
+      await db.update('remote_collections',
           {'synced_ctag': newCtag},
           where: 'remote_path = ? AND account_name = ?',
           whereArgs: [remotePath, accountName]);

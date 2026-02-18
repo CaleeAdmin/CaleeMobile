@@ -14,15 +14,15 @@ class Deletelocalstrategy extends SyncStrategy {
         await db.transaction((txn) async {
           // 1. 删除关联的事件追踪 (sync_map)
           int sCount = await txn.delete(
-              'sync_map',
-              where: 'calendar_local_id = ?',
+              'sync_items',
+              where: 'remote_collection_id IN (SELECT remote_collection_id FROM local_bindings WHERE local_collection_id = ?)',
               whereArgs: [ctx.calendarId]
           );
           // 2. 删除日历自身的配置 (calendar_map)
+          await txn.delete('local_bindings', where: 'local_collection_id = ?', whereArgs: [ctx.calendarId]);
           int cCount = await txn.delete(
-              'calendar_map',
-              where: 'local_id = ?',
-              whereArgs: [ctx.calendarId]
+              'remote_collections',
+              where: 'id NOT IN (SELECT remote_collection_id FROM local_bindings)'
           );
           debugPrint("🗑️ 数据库清理完毕: 删除了 $sCount 条事件, $cCount 条日历记录");
         });
