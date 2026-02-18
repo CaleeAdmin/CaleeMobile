@@ -93,20 +93,18 @@ class SyncRepository {
     // 本地扫描仅用于触发原生侧读取，不再向 remote_collections 写入任何本地日历。
     final List<PlatformCalendar?> calendars = await _nativeApi.getCalendars();
 
-    // 维护本地绑定表中 remote-origin 记录的账号类型，避免后续任务构建时缺失 accountType。
+    // 扫描本地日历，保持 remote-origin 绑定记录的更新时间。
     final db = await _dbHelper.database;
     await db.transaction((txn) async {
       for (final PlatformCalendar calendar in calendars.whereType<PlatformCalendar>()) {
         final String localId = calendar.id ?? '';
-        final String? accountType = calendar.accountType;
-        if (localId.isEmpty || accountType == null || accountType.isEmpty) {
+        if (localId.isEmpty) {
           continue;
         }
 
         await txn.update(
           'local_bindings',
           {
-            'local_account_type': accountType,
             'updated_at': DateTime.now().millisecondsSinceEpoch,
           },
           where: 'local_collection_id = ? AND binding_origin = 1',
