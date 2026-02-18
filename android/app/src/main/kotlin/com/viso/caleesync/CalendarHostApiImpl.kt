@@ -272,7 +272,9 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
             CalendarContract.Events.DTEND,
             CalendarContract.Events.DURATION,
             CalendarContract.Events.ALL_DAY,
-            CalendarContract.Events.SYNC_DATA1, // 💡 通常 Calee/Google 的 UID 存在这里
+            CalendarContract.Events._SYNC_ID,
+            CalendarContract.Events.UID_2445,
+            CalendarContract.Events.SYNC_DATA1,
             CalendarContract.Events.EVENT_TIMEZONE
         )
 
@@ -286,8 +288,8 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
             while (cursor.moveToNext()) {
                 val id = cursor.getLong(cursor.getColumnIndexOrThrow(CalendarContract.Events._ID)).toString()
 
-                // 💡 优先获取系统存储的原始 UID，如果没有（本地新建），则暂时用 ID 或 生成新的
-                var uid = cursor.getString(cursor.getColumnIndexOrThrow(CalendarContract.Events.SYNC_DATA1))
+                // UID 读取要和写入字段保持一致，优先读取 _SYNC_ID，再回退到其他兼容字段。
+                var uid = readEventUid(cursor)
                 if (uid.isNullOrEmpty()) {
                     uid = "local_$id" // 或者是你生成的 UUID
                 }
@@ -314,6 +316,26 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
             }
         }
         return eventList
+    }
+
+    private fun readEventUid(cursor: android.database.Cursor): String? {
+        val columns = arrayOf(
+            CalendarContract.Events._SYNC_ID,
+            CalendarContract.Events.UID_2445,
+            CalendarContract.Events.SYNC_DATA1
+        )
+
+        for (column in columns) {
+            val index = cursor.getColumnIndex(column)
+            if (index >= 0) {
+                val value = cursor.getString(index)
+                if (!value.isNullOrEmpty()) {
+                    return value
+                }
+            }
+        }
+
+        return null
     }
 
     // 2. 实现计算结束时间的工具函数
@@ -391,7 +413,11 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
                 put(CalendarContract.Events.EVENT_TIMEZONE, TimeZone.getDefault().id)
 
                 // 将 Calee 的 UID 存入系统事件的 _SYNC_ID，这对防止重复同步非常重要
-                uid?.let { put(CalendarContract.Events._SYNC_ID, it) }
+                uid?.let {
+                    put(CalendarContract.Events._SYNC_ID, it)
+                    put(CalendarContract.Events.UID_2445, it)
+                    put(CalendarContract.Events.SYNC_DATA1, it)
+                }
 
                 // 设置状态和忙闲，确保在系统日历 App 中可见
                 put(CalendarContract.Events.STATUS, CalendarContract.Events.STATUS_CONFIRMED)
@@ -430,6 +456,8 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
                 put(CalendarContract.Events.EVENT_TIMEZONE, TimeZone.getDefault().id)
                 // 存入 UID 以便原生层也可以通过 UID 检索
                 put(CalendarContract.Events.UID_2445, request.uid)
+                put(CalendarContract.Events._SYNC_ID, request.uid)
+                put(CalendarContract.Events.SYNC_DATA1, request.uid)
             }
 
             if (request.eventId != null && request.eventId.isNotEmpty()) {
