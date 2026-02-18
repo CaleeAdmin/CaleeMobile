@@ -513,13 +513,20 @@ class SyncRepository {
     final String uid = remote['uid'] as String;
     // 去掉 ETag 的引号
     final String etag = (remote['etag'] as String).replaceAll('"', '');
+    final int? remoteCollectionId = _parseRemoteCollectionId(remote['remote_collection_id']);
+
+    if (remoteCollectionId == null ||
+        !await _hasRemoteCollection(db, remoteCollectionId)) {
+      print('⚠️ 跳过写入 sync_items，remote_collection_id 无效: ${remote['remote_collection_id']}');
+      return;
+    }
 
     await db.insert(
       'sync_items',
       {
         'uid': uid,
         'local_item_id': localId,
-        'remote_collection_id': remote['remote_collection_id'], // 确保这个字段被传入
+        'remote_collection_id': remoteCollectionId,
         'remote_etag': etag,
         'sync_status': 0,    // 0 表示已同步状态
         'item_type': 'event',
@@ -534,14 +541,20 @@ class SyncRepository {
   // 3. 云端反馈更新
   // ==========================================
 
-  Future<void> updateFromCloud(PlatformItem item, String etag, String href, String calendarId) async {
+  Future<void> updateFromCloud(PlatformItem item, String etag, String href, int remoteCollectionId) async {
     final db = await _dbHelper.database;
+
+    if (!await _hasRemoteCollection(db, remoteCollectionId)) {
+      print('⚠️ 跳过写入 sync_items，remote_collection_id 不存在: $remoteCollectionId');
+      return;
+    }
+
     await db.insert(
       'sync_items',
       {
         'uid': item.uid,
         'local_item_id': item.localId,
-        'calendar_id': calendarId, // 修正错误 2：由于 PlatformItem 可能没存 calendarId，我们作为参数传入
+        'remote_collection_id': remoteCollectionId,
         'remote_href': href,
         'remote_etag': etag,
         'remote_mtime': item.lastModified ?? DateTime.now().millisecondsSinceEpoch,
@@ -550,6 +563,23 @@ class SyncRepository {
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
+  }
+
+  int? _parseRemoteCollectionId(dynamic raw) {
+    if (raw is int) return raw;
+    if (raw is String) return int.tryParse(raw);
+    return null;
+  }
+
+  Future<bool> _hasRemoteCollection(Database db, int remoteCollectionId) async {
+    final rows = await db.query(
+      'remote_collections',
+      columns: ['id'],
+      where: 'id = ?',
+      whereArgs: [remoteCollectionId],
+      limit: 1,
+    );
+    return rows.isNotEmpty;
   }
 
   // SyncRepository.dart
