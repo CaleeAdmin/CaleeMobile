@@ -568,10 +568,8 @@ class SyncRepository {
         [localId]
     );
 
-    // 3. 逻辑判定：纯靠 account_type 区分
-    final String accType = cal['local_account_type'] ?? '';
-    // 如果是 Calee 说明是云端发现的，否则视为系统日历
-    final bool isCaleeNative = (accType == 'Calee');
+    // 3. 逻辑判定：有远端路径视为云端来源
+    final bool isCaleeNative = (cal['remote_path'] ?? '').toString().isNotEmpty;
 
     return {
       'title': cal['display_name'] ?? 'Primary Calendar',
@@ -602,14 +600,12 @@ class SyncRepository {
       final oldRecord = oldRecords.first;
       // 提取关键属性，确保它们能带到新 ID 身上
       final int? remoteCollectionId = oldRecord['remote_collection_id'] as int?;
-      final String? accountType = oldRecord['local_account_type'];
 
       // 2. 🌟 预清理冲突：如果新 ID (比如 '7') 已经存在记录（例如 scanLocalCalendars 扫出来的）
       // 我们先删除它，因为我们要把“带路径”的老记录合并过去
       await txn.delete('local_bindings', where: 'local_collection_id = ?', whereArgs: [newId]);
 
       // 3. 执行核心洗白：将虚拟 ID 改为真实系统 ID
-      // 注意：我们这里不显式 update account_type，它会随着整行保留下来
       final calendarUpdateCount = await txn.update(
         'local_bindings',
         {
@@ -624,7 +620,7 @@ class SyncRepository {
       final eventUpdateCount = 0;
 
       print("✅ [ID 洗白成功] $oldId -> $newId");
-      print("📌 属性保留: AccountType=$accountType, RemoteCollectionId=$remoteCollectionId");
+      print("📌 属性保留: RemoteCollectionId=$remoteCollectionId");
       print("📊 统计: 日历更新($calendarUpdateCount), 事件外键关联($eventUpdateCount)");
     });
   }
@@ -774,10 +770,6 @@ class SyncRepository {
 
 // 如果你确定 account_name 绝对有值，用 String
     final String userId = cal['account_name'] as String;
-    final String accountType = (cal['local_account_type'] as String?)?.trim().isNotEmpty == true
-        ? (cal['local_account_type'] as String)
-        : 'com.viso.caleesync';
-
     try {
       // 2. 先改云端 (如果失败，建议直接抛异常，不改本地)
       if (path != null) {
@@ -797,7 +789,7 @@ class SyncRepository {
           resolvedLocalId,
           newName,
           userId,
-          accountType == 'Calee' ? 'com.viso.caleesync' : accountType,
+          'com.viso.caleesync',
         );
         if (!localRenameOk) {
           throw Exception('系统日历改名失败');

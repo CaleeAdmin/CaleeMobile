@@ -253,7 +253,6 @@ class LocalCalendarPageController extends GetxController {
         await db.insert('local_bindings', {
           'remote_collection_id': remoteCollectionId,
           'local_collection_id': item.id,
-          'local_account_type': item.accountType,
           'binding_origin': 0,
           'created_at': DateTime.now().millisecondsSinceEpoch,
           'updated_at': DateTime.now().millisecondsSinceEpoch,

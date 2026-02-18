@@ -5,7 +5,6 @@ class SyncContext {
   final String calendarId;    // 本地数据库中的 ID
   final String remotePath;    // 云端路径
   final String accountName;   // 账户名
-  final String accountType;   // 账户类型
   final String displayName;   // 日历显示名称
   final String color;   // 日历显示名称
   final int syncStatus;       // ⚠️ 新增：同步状态 (0: 仅本地库, 1: 同步至系统)
@@ -20,7 +19,6 @@ class SyncContext {
     required this.calendarId,
     required this.remotePath,
     required this.accountName,
-    required this.accountType,
     required this.displayName,
     required this.color,
     required this.syncMode,
@@ -36,7 +34,6 @@ class SyncContext {
     String? calendarId,
     String? remotePath,
     String? accountName,
-    String? accountType,
     String? displayName,
     String? color,
     int? syncMode,
@@ -50,7 +47,6 @@ class SyncContext {
       calendarId: calendarId ?? this.calendarId,
       remotePath: remotePath ?? this.remotePath,
       accountName: accountName ?? this.accountName,
-      accountType: accountType ?? this.accountType,
       displayName: displayName ?? this.displayName,
       color: color ?? this.color,
       syncMode: syncMode ?? this.syncMode,
@@ -64,7 +60,7 @@ class SyncContext {
 
   @override
   String toString() {
-    return 'SyncContext{calendarId: $calendarId, remotePath: $remotePath, accountName: $accountName, accountType: $accountType, displayName: $displayName, color: $color, syncStatus: $syncStatus, syncMode: $syncMode, action: $action, ctag: $ctag, isSubscription: $isSubscription, extra: $extra}';
+    return 'SyncContext{calendarId: $calendarId, remotePath: $remotePath, accountName: $accountName, displayName: $displayName, color: $color, syncStatus: $syncStatus, syncMode: $syncMode, action: $action, ctag: $ctag, isSubscription: $isSubscription, extra: $extra}';
   }
 
 

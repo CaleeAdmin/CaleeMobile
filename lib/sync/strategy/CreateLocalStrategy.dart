@@ -50,7 +50,6 @@ class CreateLocalStrategy extends SyncStrategy {
       await db.insert('local_bindings', {
         'remote_collection_id': remoteCollectionId,
         'local_collection_id': newLocalId,
-        'local_account_type': ctx.accountType,
         'binding_origin': 1,
         'created_at': DateTime.now().millisecondsSinceEpoch,
         'updated_at': DateTime.now().millisecondsSinceEpoch,
