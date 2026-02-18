@@ -24,7 +24,7 @@ class FullSyncPullStrategy extends SyncStrategy {
       );
       final db = await dbHelper.database;
 
-      // 2. 获取本地 sync_map 缓存
+      // 2. 获取本地 sync_items 缓存
       final List<Map<String, dynamic>> localSyncRecords = await db.query(
         'sync_items',
         where: 'remote_collection_id = ?',

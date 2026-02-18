@@ -64,7 +64,7 @@ class CreateLocalStrategy extends SyncStrategy {
         isSubscription: ctx.isSubscription ?? false,
       );
 
-      // 4. 加载本地 sync_map 缓存用于 Diff 比对
+      // 4. 加载本地 sync_items 缓存用于 Diff 比对
       final List<Map<String, dynamic>> localEntries = await db.query(
         'sync_items',
         where: 'remote_collection_id = ?',
@@ -116,7 +116,7 @@ class CreateLocalStrategy extends SyncStrategy {
           final String? systemEventId = await _api.createOrUpdateEvent(request);
 
           if (systemEventId != null) {
-            // 9. 更新 sync_map 映射
+            // 9. 更新 sync_items 映射
             await db.insert('sync_items', {
               'remote_uid': eventData.uid,
               'local_item_id': systemEventId,

@@ -22,7 +22,7 @@ class DeleteRemoteStrategy extends SyncStrategy {
 
       // 2. 开启事务进行本地“斩草除根”
       await db.transaction((txn) async {
-        // A. 清理 sync_map (关联的事件映射)
+        // A. 清理 sync_items（关联的事件映射）
         // 理由：日历都没了，它下面所有 ics 文件的 ETag 记录必须清空
         int sCount = await txn.delete(
           'sync_items',
@@ -30,7 +30,7 @@ class DeleteRemoteStrategy extends SyncStrategy {
           whereArgs: [ctx.calendarId],
         );
 
-        // B. 清理 calendar_map (日历自身配置)
+        // B. 清理 local_bindings/remote_collections（日历自身配置）
         await txn.delete('local_bindings', where: 'local_collection_id = ?', whereArgs: [ctx.calendarId]);
         int cCount = await txn.delete(
           'remote_collections',
