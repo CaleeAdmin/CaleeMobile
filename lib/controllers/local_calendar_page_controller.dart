@@ -69,20 +69,30 @@ class LocalCalendarPageController extends GetxController {
       }
 
       final db = await DatabaseHelper.instance.database;
-      final List<Map<String, dynamic>> rows = await db.query(
-        'local_bindings',
-        columns: ['local_collection_id'],
-        where: 'binding_origin = 0 AND local_collection_id IS NOT NULL AND local_collection_id != ""',
-      );
+      final String? loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey);
+
+      final List<Map<String, dynamic>> rows = await db.rawQuery('''
+        SELECT lb.local_collection_id
+        FROM local_bindings lb
+        INNER JOIN remote_collections rc ON rc.id = lb.remote_collection_id
+        WHERE lb.binding_origin = 0
+          AND lb.local_collection_id IS NOT NULL
+          AND lb.local_collection_id != ''
+          AND rc.account_name = ?
+      ''', [loginName ?? '']);
       final Set<String> connectedLocalIds = {
         for (final row in rows) row['local_collection_id'].toString(),
       };
 
-      final List<Map<String, dynamic>> remoteProvisionedRows = await db.query(
-        'local_bindings',
-        columns: ['local_collection_id'],
-        where: 'binding_origin = 1 AND local_collection_id IS NOT NULL AND local_collection_id != ""',
-      );
+      final List<Map<String, dynamic>> remoteProvisionedRows = await db.rawQuery('''
+        SELECT lb.local_collection_id
+        FROM local_bindings lb
+        INNER JOIN remote_collections rc ON rc.id = lb.remote_collection_id
+        WHERE lb.binding_origin = 1
+          AND lb.local_collection_id IS NOT NULL
+          AND lb.local_collection_id != ''
+          AND rc.account_name = ?
+      ''', [loginName ?? '']);
       final Set<String> remoteProvisionedLocalIds = {
         for (final row in remoteProvisionedRows) row['local_collection_id'].toString(),
       };

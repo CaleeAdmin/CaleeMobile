@@ -91,7 +91,29 @@ class SyncRepository {
   Future<void> scanLocalCalendars(String accountId) async {
     // remote_collections 现在作为“远端中心”注册表使用：
     // 本地扫描仅用于触发原生侧读取，不再向 remote_collections 写入任何本地日历。
-    await _nativeApi.getCalendars();
+    final List<PlatformCalendar?> calendars = await _nativeApi.getCalendars();
+
+    // 维护本地绑定表中 remote-origin 记录的账号类型，避免后续任务构建时缺失 accountType。
+    final db = await _dbHelper.database;
+    await db.transaction((txn) async {
+      for (final PlatformCalendar calendar in calendars.whereType<PlatformCalendar>()) {
+        final String localId = calendar.id ?? '';
+        final String? accountType = calendar.accountType;
+        if (localId.isEmpty || accountType == null || accountType.isEmpty) {
+          continue;
+        }
+
+        await txn.update(
+          'local_bindings',
+          {
+            'local_account_type': accountType,
+            'updated_at': DateTime.now().millisecondsSinceEpoch,
+          },
+          where: 'local_collection_id = ? AND binding_origin = 1',
+          whereArgs: [localId],
+        );
+      }
+    });
   }
 
   Future<void> refreshAllLocalEvents(String accountId) async {

@@ -180,7 +180,10 @@ class CalendarPageController extends GetxController {
         SELECT rc.*, lb.local_collection_id, lb.binding_origin
         FROM remote_collections rc
         LEFT JOIN local_bindings lb ON lb.remote_collection_id = rc.id
-      ''');
+        WHERE rc.account_name = ?
+          AND rc.remote_path IS NOT NULL
+          AND rc.remote_path != ''
+      ''', [loginName]);
       final Map<String, int> cachedCountByCalendarId = {};
       final Map<String, bool> localReadOnlyById = {};
       final List<CalendarDisplayItem> nextCloudCalendars = [];
