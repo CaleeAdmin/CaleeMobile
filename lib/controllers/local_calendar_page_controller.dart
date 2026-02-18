@@ -71,21 +71,21 @@ class LocalCalendarPageController extends GetxController {
 
       final db = await DatabaseHelper.instance.database;
       final List<Map<String, dynamic>> rows = await db.query(
-        'remote_collections',
-        columns: ['local_id'],
-        where: 'origin = 0 AND local_id IS NOT NULL AND local_id != ""',
+        'local_bindings',
+        columns: ['local_container_id'],
+        where: 'origin = 0 AND local_container_id IS NOT NULL AND local_container_id != ""',
       );
       final Set<String> connectedLocalIds = {
-        for (final row in rows) row['local_id'].toString(),
+        for (final row in rows) row['local_container_id'].toString(),
       };
 
       final List<Map<String, dynamic>> remoteProvisionedRows = await db.query(
-        'remote_collections',
-        columns: ['local_id'],
-        where: 'origin = 1 AND local_id IS NOT NULL AND local_id != ""',
+        'local_bindings',
+        columns: ['local_container_id'],
+        where: 'origin = 1 AND local_container_id IS NOT NULL AND local_container_id != ""',
       );
       final Set<String> remoteProvisionedLocalIds = {
-        for (final row in remoteProvisionedRows) row['local_id'].toString(),
+        for (final row in remoteProvisionedRows) row['local_container_id'].toString(),
       };
 
       final List<PlatformCalendar?> rawCalendars = await _nativeApi.getCalendars();
@@ -167,12 +167,15 @@ class LocalCalendarPageController extends GetxController {
 
       String? remotePath;
       if (enabled) {
-        final List<Map<String, dynamic>> existingRows = await db.query(
-          'remote_collections',
-          columns: ['remote_path'],
-          where: 'local_id = ?',
-          whereArgs: [item.id],
-          limit: 1,
+        final List<Map<String, dynamic>> existingRows = await db.rawQuery(
+          '''
+          SELECT c.remote_path
+          FROM remote_collections c
+          JOIN local_bindings b ON b.remote_collection_id = c.id
+          WHERE b.local_container_id = ?
+          LIMIT 1
+          ''',
+          [item.id],
         );
 
         final String existingRemotePath = existingRows.isNotEmpty
@@ -224,37 +227,43 @@ class LocalCalendarPageController extends GetxController {
 
       final String caleeServerId = _caleeService.baseUrl;
 
-      final int updated = await db.update(
-        'remote_collections',
-        {
-          'is_enabled': enabled ? 1 : 0,
-          'display_name': item.name,
-          'server_id': caleeServerId,
-          'account_name': MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? item.accountName,
-          'account_type': item.accountType,
-          'color': item.color,
-          'origin': 0,
-          'sync_mode': 0,
-          'is_subscription': item.isSubscription ? 1 : 0,
-          'subscription_url': item.subscriptionUrl,
-          if (enabled && remotePath != null) 'remote_path': remotePath,
-        },
-        where: 'local_id = ?',
-        whereArgs: [item.id],
+      final List<Map<String, dynamic>> boundRows = await db.rawQuery(
+        '''
+        SELECT c.id
+        FROM remote_collections c
+        JOIN local_bindings b ON b.remote_collection_id = c.id
+        WHERE b.local_container_id = ?
+        LIMIT 1
+        ''',
+        [item.id],
       );
 
-      if (updated == 0) {
-        await db.insert('remote_collections', {
-          'local_id': item.id,
+      int remoteCollectionId;
+      if (boundRows.isNotEmpty) {
+        remoteCollectionId = boundRows.first['id'] as int;
+        await db.update(
+          'remote_collections',
+          {
+            'display_name': item.name,
+            'server_id': caleeServerId,
+            'account_name': MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? item.accountName,
+            'account_type': item.accountType,
+            'color': item.color,
+            'is_subscription': item.isSubscription ? 1 : 0,
+            'subscription_url': item.subscriptionUrl,
+            if (enabled && remotePath != null) 'remote_path': remotePath,
+          },
+          where: 'id = ?',
+          whereArgs: [remoteCollectionId],
+        );
+      } else {
+        remoteCollectionId = await db.insert('remote_collections', {
           'server_id': caleeServerId,
           'kind': 'calendar',
           'account_name': MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? item.accountName,
           'account_type': item.accountType,
           'display_name': item.name,
           'color': item.color,
-          'is_enabled': enabled ? 1 : 0,
-          'origin': 0,
-          'sync_mode': 0,
           'is_subscription': item.isSubscription ? 1 : 0,
           'subscription_url': item.subscriptionUrl,
           if (enabled && remotePath != null) 'remote_path': remotePath,
@@ -264,8 +273,8 @@ class LocalCalendarPageController extends GetxController {
       final mapped = await db.query(
         'remote_collections',
         columns: ['id'],
-        where: 'local_id = ?',
-        whereArgs: [item.id],
+        where: 'id = ?',
+        whereArgs: [remoteCollectionId],
         limit: 1,
       );
       if (mapped.isNotEmpty) {
@@ -278,6 +287,8 @@ class LocalCalendarPageController extends GetxController {
             'sync_mode': 0,
             'is_enabled': enabled ? 1 : 0,
             'origin': 0,
+            'created_at': DateTime.now().millisecondsSinceEpoch,
+            'updated_at': DateTime.now().millisecondsSinceEpoch,
           },
           conflictAlgorithm: ConflictAlgorithm.replace,
         );

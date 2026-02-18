@@ -35,11 +35,31 @@ class CreateLocalStrategy extends SyncStrategy {
 
     final db = await dbHelper.database;
 
-    // 2. 关联本地 ID 并预设状态
-    await db.update('remote_collections', {
-      'local_id': newLocalId,
+    // 2. 关联本地绑定并预设状态
+    final List<Map<String, dynamic>> targetRows = await db.query(
+      'remote_collections',
+      columns: ['id'],
+      where: 'remote_path = ?',
+      whereArgs: [ctx.remotePath],
+      limit: 1,
+    );
+    if (targetRows.isEmpty) {
+      print('❌ 未找到 remote_collections 记录: ${ctx.remotePath}');
+      summary.failed++;
+      return;
+    }
+    final int remoteCollectionId = targetRows.first['id'] as int;
+
+    await db.insert('local_bindings', {
+      'remote_collection_id': remoteCollectionId,
+      'local_provider': 'android_calendar',
+      'local_container_id': newLocalId,
+      'sync_mode': 0,
       'is_enabled': 1,
-    }, where: 'remote_path = ?', whereArgs: [ctx.remotePath]);
+      'origin': 1,
+      'created_at': DateTime.now().millisecondsSinceEpoch,
+      'updated_at': DateTime.now().millisecondsSinceEpoch,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
 
     try {
       // 3. 统一获取远端事件元数据
@@ -52,7 +72,7 @@ class CreateLocalStrategy extends SyncStrategy {
       final List<Map<String, dynamic>> localEntries = await db.query(
         'sync_items',
         where: 'remote_collection_id = ?',
-        whereArgs: [newLocalId],
+        whereArgs: [remoteCollectionId],
       );
       final Map<String, Map<String, dynamic>> localSyncMap = {
         for (var entry in localEntries) entry['uid'] as String: entry
@@ -104,7 +124,7 @@ class CreateLocalStrategy extends SyncStrategy {
             await db.insert('sync_items', {
               'uid': eventData.uid,
               'local_item_id': systemEventId,
-              'remote_collection_id': newLocalId,
+              'remote_collection_id': remoteCollectionId,
               'summary': eventData.summary,
               'remote_etag': remoteEtag,
               'remote_href': eventData.href,

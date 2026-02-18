@@ -28,10 +28,18 @@ class SyncEngine {
       ) async {
     // 1. 获取该用户下的所有本地数据库记录（包含状态为 2 的记录）
     final db = await _dbHelper.database;
-    final List<Map<String, dynamic>> localRecords = await db.query(
-      'remote_collections',
-      where: 'account_name = ? AND remote_path IS NOT NULL AND remote_path != ""',
-      whereArgs: [userId],
+    final List<Map<String, dynamic>> localRecords = await db.rawQuery(
+      '''
+      SELECT c.*,
+             b.local_container_id AS local_id,
+             b.sync_mode AS binding_sync_mode,
+             b.is_enabled AS binding_is_enabled,
+             b.origin AS binding_origin
+      FROM remote_collections c
+      LEFT JOIN local_bindings b ON b.remote_collection_id = c.id
+      WHERE c.account_name = ? AND c.remote_path IS NOT NULL AND c.remote_path != ''
+      ''',
+      [userId],
     );
 
     List<SyncContext> contexts = [];
@@ -54,9 +62,9 @@ class SyncEngine {
         continue;
       }
 
-      final int isEnabled = local['is_enabled'] ?? 0;
-      final int origin = local['origin'] ?? 0;
-      final int mode = local['sync_mode'] ?? 0;
+      final int isEnabled = local['binding_is_enabled'] ?? 0;
+      final int origin = local['binding_origin'] ?? 1;
+      final int mode = local['binding_sync_mode'] ?? 0;
       final String localId = local['local_id'] ?? '';
 
       if (localId.isEmpty) {
@@ -103,8 +111,8 @@ class SyncEngine {
     // --- 策略 B：以本地数据库记录为准 (针对：远端删除兜底) ---
     for (var local in localRecords) {
       final String? path = local['remote_path'];
-      final int origin = local['origin'] ?? 0;
-      final int mode = local['sync_mode'] ?? 0;
+      final int origin = local['binding_origin'] ?? 1;
+      final int mode = local['binding_sync_mode'] ?? 0;
 
       if (path == null || path.isEmpty) {
         debugPrint('⏭️ 跳过无远端路径记录: ${local['local_id']}');
@@ -138,12 +146,12 @@ class SyncEngine {
       accountType: local?['account_type'] ?? "", // 从数据库字段读取，不再从参数传
       displayName: remote['display_name'] ?? local?['display_name'] ?? "未命名日历",
       color: remote['color'] ?? local?['color'] ?? "#AARRGGBB",
-      syncMode: local?['sync_mode'] ?? remote['sync_mode'] ?? 0,
+      syncMode: local?['binding_sync_mode'] ?? remote['sync_mode'] ?? 0,
       action: action,
       ctag: remote['ctag'] ?? local?['ctag'],
       isSubscription: remote['is_subscription'] ?? false,
       extra: {
-        'origin': local?['origin'] ?? 0,
+        'origin': local?['binding_origin'] ?? 1,
       },
     );
   }
@@ -263,10 +271,14 @@ class SyncEngine {
 
       // 2. 获取本地数据库中该用户已有的所有日历记录
       final db = await DatabaseHelper.instance.database;
-      final List<Map<String, dynamic>> localRecords = await db.query(
-        'remote_collections',
-        where: 'account_name = ? AND remote_path IS NOT NULL AND remote_path != ""',
-        whereArgs: [userId],
+      final List<Map<String, dynamic>> localRecords = await db.rawQuery(
+        '''
+        SELECT c.*, b.local_container_id AS local_id
+        FROM remote_collections c
+        LEFT JOIN local_bindings b ON b.remote_collection_id = c.id
+        WHERE c.account_name = ? AND c.remote_path IS NOT NULL AND c.remote_path != ''
+        ''',
+        [userId],
       );
 
       // --- 💡 核心修复：同步删除逻辑 (本地有但云端没了) ---
@@ -293,8 +305,8 @@ class SyncEngine {
           // B. 从数据库映射表中彻底抹除
           await db.delete(
             'remote_collections',
-            where: localId.isNotEmpty ? 'local_id = ?' : 'remote_path = ?',
-            whereArgs: [localId.isNotEmpty ? localId : localRemotePath],
+            where: 'id = ?',
+            whereArgs: [local['id']],
           );
         }
       }
@@ -328,15 +340,27 @@ class SyncEngine {
         } else {
           // ✅ 场景 B: 全新云端日历 -> 插入新记录
           print("🆕 [云端发现] 创建新映射: $displayName");
-          await db.insert('remote_collections', {
+          final int newId = await db.insert('remote_collections', {
             'account_name': userId,
             'account_type': 'com.viso.caleesync',
             'display_name': displayName,
             'remote_path': path,
-            'sync_mode': rc['sync_mode'] ?? 0,
             'is_subscription': (rc['is_subscription'] == true || rc['is_subscription'] == 1) ? 1 : 0,
             'subscription_url': rc['subscription_url'],
           });
+          await db.insert(
+            'local_bindings',
+            {
+              'remote_collection_id': newId,
+              'local_provider': 'android_calendar',
+              'sync_mode': rc['sync_mode'] ?? 0,
+              'is_enabled': 0,
+              'origin': 1,
+              'created_at': DateTime.now().millisecondsSinceEpoch,
+              'updated_at': DateTime.now().millisecondsSinceEpoch,
+            },
+            conflictAlgorithm: ConflictAlgorithm.ignore,
+          );
         }
       }
 

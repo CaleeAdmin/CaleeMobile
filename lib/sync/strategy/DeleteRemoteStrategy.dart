@@ -33,7 +33,7 @@ class DeleteRemoteStrategy extends SyncStrategy {
         // B. 清理 remote_collections (日历自身配置)
         int cCount = await txn.delete(
           'remote_collections',
-          where: 'local_id = ?',
+          where: 'id IN (SELECT remote_collection_id FROM local_bindings WHERE local_container_id = ?)',
           whereArgs: [ctx.calendarId],
         );
         debugPrint("🧹 云端删除成功，本地清理完成: 删除了 $cCount 个日历配置, $sCount 条同步映射");

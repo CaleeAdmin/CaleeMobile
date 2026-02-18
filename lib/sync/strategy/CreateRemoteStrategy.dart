@@ -90,7 +90,7 @@ class CreateRemoteStrategy extends SyncStrategy {
         {
           'remote_path': resultPath, // 核心：存入刚开好的云端坑位路径
         },
-        where: 'local_id = ?',
+        where: 'id IN (SELECT remote_collection_id FROM local_bindings WHERE local_container_id = ?)',
         whereArgs: [ctx.calendarId],
       );
       summary.success++;

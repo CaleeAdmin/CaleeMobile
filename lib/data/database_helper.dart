@@ -48,12 +48,7 @@ class DatabaseHelper {
         subscription_url TEXT,
         is_read_only INTEGER DEFAULT 0,
         updated_at INTEGER,
-        local_id TEXT,
-        sync_mode INTEGER DEFAULT 0,
-        is_enabled INTEGER DEFAULT 1,
-        origin INTEGER DEFAULT 1,
-        UNIQUE(server_id, account_name, kind, remote_path),
-        UNIQUE(local_id)
+        UNIQUE(server_id, account_name, kind, remote_path)
       )
     ''');
 

@@ -4,6 +4,7 @@ import 'package:caleesync/core/platform/pigeon/calendar_api.g.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:get/get.dart';
 import 'dart:async';
+import 'package:sqflite/sqflite.dart';
 
 import '../services/calee_auth_service.dart';
 import '../sync/SyncEngine.dart';
@@ -45,7 +46,7 @@ class CalendarDisplayItem {
   // 方便从数据库 Map 转换
   factory CalendarDisplayItem.fromMap(Map<String, dynamic> map) {
     return CalendarDisplayItem(
-      localId: map['local_id']?.toString(), // 转为 String 处理
+      localId: map['local_container_id']?.toString(), // 转为 String 处理
       remotePath: map['remote_path'] ?? '',
       name: map['display_name'] ?? '未命名',
       color: map['color'] ?? '#000000',
@@ -53,8 +54,8 @@ class CalendarDisplayItem {
       isReadOnly: false,
       isSubscription: false,
       isLocalReadOnly: false,
-      isEnabled: (map['is_enabled'] ?? 0) == 1,
-      origin: map['origin'] ?? 0,
+      isEnabled: (map['binding_is_enabled'] ?? 0) == 1,
+      origin: map['binding_origin'] ?? 1,
     );
   }
 }
@@ -134,17 +135,47 @@ class CalendarPageController extends GetxController {
       whereArgs = [item.remotePath];
     } else {
       // 它是纯本地日历（一定有系统分配的 ID）
-      whereClause = 'local_id = ?';
+      whereClause = 'id IN (SELECT remote_collection_id FROM local_bindings WHERE local_container_id = ?)';
       whereArgs = [item.localId];
     }
 
-    // 2. 执行更新
-    int count = await db.update(
+    // 2. 执行更新（写入 local_bindings）
+    final List<Map<String, dynamic>> target = await db.query(
       'remote_collections',
-      {'is_enabled': newValue ? 1 : 0},
+      columns: ['id'],
       where: whereClause,
       whereArgs: whereArgs,
+      limit: 1,
     );
+    if (target.isEmpty) return;
+    final int rcId = target.first['id'] as int;
+
+    int count = await db.update(
+      'local_bindings',
+      {
+        'is_enabled': newValue ? 1 : 0,
+        'updated_at': DateTime.now().millisecondsSinceEpoch,
+      },
+      where: 'remote_collection_id = ?',
+      whereArgs: [rcId],
+    );
+
+    if (count == 0) {
+      count = await db.insert(
+        'local_bindings',
+        {
+          'remote_collection_id': rcId,
+          'local_provider': 'android_calendar',
+          if (item.localId != null && item.localId!.isNotEmpty) 'local_container_id': item.localId,
+          'sync_mode': 0,
+          'is_enabled': newValue ? 1 : 0,
+          'origin': 1,
+          'created_at': DateTime.now().millisecondsSinceEpoch,
+          'updated_at': DateTime.now().millisecondsSinceEpoch,
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
 
     debugPrint("✅ 更新成功，影响行数: $count (条件: $whereClause = ${whereArgs[0]})");
   }
@@ -176,9 +207,15 @@ class CalendarPageController extends GetxController {
 
       // 2. 查询本地 remote_collections 的所有日历记录
       final db = await DatabaseHelper.instance.database;
-      final List<Map<String, dynamic>> calendarMaps = await db.query(
-        'remote_collections',
-      );
+      final List<Map<String, dynamic>> calendarMaps = await db.rawQuery('''
+        SELECT c.*,
+               b.local_container_id AS local_container_id,
+               b.sync_mode AS binding_sync_mode,
+               b.is_enabled AS binding_is_enabled,
+               b.origin AS binding_origin
+        FROM remote_collections c
+        LEFT JOIN local_bindings b ON b.remote_collection_id = c.id
+      ''');
       final Map<String, int> cachedCountByCalendarId = {};
       final Map<String, bool> localReadOnlyById = {};
       final List<CalendarDisplayItem> nextCloudCalendars = [];
@@ -206,11 +243,11 @@ class CalendarPageController extends GetxController {
       }
 
       for (var cal in calendarMaps) {
-        final String? localId = cal['local_id']?.toString();
+        final String? localId = cal['local_container_id']?.toString();
         final String? remotePath = cal['remote_path'];
-        final int? syncMode = cal['sync_mode'];
+        final int? syncMode = cal['binding_sync_mode'];
         final bool isSubscription = (cal['is_subscription'] == 1 || cal['is_subscription'] == true);
-        final int origin = cal['origin'];
+        final int origin = cal['binding_origin'] ?? 1;
 
         int realCount = 0;
         if (includeEventCounts) {
@@ -229,7 +266,7 @@ class CalendarPageController extends GetxController {
           isReadOnly: syncMode == 0,
           isSubscription: isSubscription,
           isLocalReadOnly: localReadOnlyById[localId] ?? false,
-          isEnabled: cal['is_enabled'] == 1,
+          isEnabled: (cal['binding_is_enabled'] ?? 0) == 1,
           remotePath: remotePath,
           origin: origin,
         );

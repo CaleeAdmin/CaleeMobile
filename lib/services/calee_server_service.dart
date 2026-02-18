@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/cupertino.dart';
 import 'package:http/http.dart' as http;
 import 'package:xml/xml.dart' as xml;
+import 'package:sqflite/sqflite.dart';
 
 import '../common/app_constant.dart';
 import '../common/utils/IcsParser.dart';
@@ -149,8 +150,6 @@ class CaleeServerService {
 
       // 2. 遍历远端列表：执行“增”或“改”
       for (var map in remoteMaps) {
-        // 新创建的映射统一默认只读，后续由用户在 UI 中手动切换同步模式。
-        const int defaultSyncMode = 0;
         await txn.rawInsert('''
         INSERT INTO remote_collections (
           server_id,
@@ -158,15 +157,12 @@ class CaleeServerService {
           remote_path,
           display_name,
           ctag,
-          sync_mode,
           color,
           account_name,
           account_type,
-          origin,
-          is_enabled,
           is_subscription,
           subscription_url
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(server_id, account_name, kind, remote_path) DO UPDATE SET
           display_name = excluded.display_name,
           ctag = excluded.ctag,
@@ -185,15 +181,35 @@ class CaleeServerService {
               map['remote_path'],
               map['display_name'],
               map['ctag'],
-              defaultSyncMode,
               map['color'],
               accountName,
               "Calee", // account_type
-              1, // origin = 1 (远端起源)
-              0, // is_enabled
               (map['is_subscription'] == true || map['is_subscription'] == 1) ? 1 : 0,
               map['subscription_url'],
             ]);
+
+        final List<Map<String, dynamic>> inserted = await txn.query(
+          'remote_collections',
+          columns: ['id'],
+          where: 'server_id = ? AND account_name = ? AND kind = ? AND remote_path = ?',
+          whereArgs: [baseUrl, accountName, 'calendar', map['remote_path']],
+          limit: 1,
+        );
+        if (inserted.isNotEmpty) {
+          await txn.insert(
+            'local_bindings',
+            {
+              'remote_collection_id': inserted.first['id'],
+              'local_provider': 'android_calendar',
+              'sync_mode': 0,
+              'is_enabled': 0,
+              'origin': 1,
+              'created_at': DateTime.now().millisecondsSinceEpoch,
+              'updated_at': DateTime.now().millisecondsSinceEpoch,
+            },
+            conflictAlgorithm: ConflictAlgorithm.ignore,
+          );
+        }
       }
 
       // 3. 删除云端已不存在的远端起源记录
@@ -201,13 +217,13 @@ class CaleeServerService {
         final placeholders = List.filled(currentRemotePaths.length, '?').join(',');
         await txn.delete(
           'remote_collections',
-          where: 'account_name = ? AND origin = 1 AND remote_path NOT IN ($placeholders)',
+          where: 'account_name = ? AND id IN (SELECT remote_collection_id FROM local_bindings WHERE origin = 1) AND remote_path NOT IN ($placeholders)',
           whereArgs: [accountName, ...currentRemotePaths],
         );
       } else {
         await txn.delete(
           'remote_collections',
-          where: 'account_name = ? AND origin = 1',
+          where: 'account_name = ? AND id IN (SELECT remote_collection_id FROM local_bindings WHERE origin = 1)',
           whereArgs: [accountName],
         );
       }
