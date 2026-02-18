@@ -76,6 +76,103 @@ class DatabaseHelper {
         'CREATE INDEX IF NOT EXISTS idx_sync_local_event ON sync_map (local_id)');
     await db.execute(
         'CREATE INDEX IF NOT EXISTS idx_sync_calendar_group ON sync_map (calendar_local_id, sync_status)');
+
+
+    // 3. 远端集合注册表（按账号+类型+路径唯一）
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS remote_collections (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_name TEXT NOT NULL,
+        collection_type TEXT NOT NULL,
+        remote_path TEXT NOT NULL,
+        display_name TEXT,
+        color TEXT,
+        synced_ctag TEXT,
+        sync_mode INTEGER DEFAULT 0,
+        is_enabled INTEGER DEFAULT 0,
+        is_subscription INTEGER DEFAULT 0,
+        subscription_url TEXT
+      )
+    ''');
+
+    await db.execute('''
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_rc_account_type_path
+      ON remote_collections(account_name, collection_type, remote_path)
+    ''');
+
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_rc_account_type_enabled
+      ON remote_collections(account_name, collection_type, is_enabled)
+    ''');
+
+    // 4. 远端集合与本地集合绑定关系
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS local_bindings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        remote_collection_id INTEGER NOT NULL,
+        local_collection_id TEXT NOT NULL,
+        local_account_type TEXT,
+        binding_origin INTEGER DEFAULT 1,
+        created_at INTEGER,
+        updated_at INTEGER,
+        FOREIGN KEY (remote_collection_id) REFERENCES remote_collections(id) ON DELETE CASCADE
+      )
+    ''');
+
+    await db.execute('''
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_lb_remote
+      ON local_bindings(remote_collection_id)
+    ''');
+
+    await db.execute('''
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_lb_local
+      ON local_bindings(local_collection_id)
+    ''');
+
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_lb_local_type
+      ON local_bindings(local_account_type)
+    ''');
+
+    // 5. 同步条目映射（事件/任务）
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS sync_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        remote_collection_id INTEGER NOT NULL,
+        item_type TEXT DEFAULT 'event',
+        remote_href TEXT,
+        remote_uid TEXT,
+        local_item_id TEXT,
+        summary TEXT,
+        description TEXT,
+        dtstart INTEGER,
+        dtend INTEGER,
+        last_etag TEXT,
+        last_mtime INTEGER,
+        sync_status INTEGER DEFAULT 3,
+        FOREIGN KEY (remote_collection_id) REFERENCES remote_collections(id) ON DELETE CASCADE
+      )
+    ''');
+
+    await db.execute('''
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_si_coll_href
+      ON sync_items(remote_collection_id, remote_href)
+    ''');
+
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_si_local_item
+      ON sync_items(local_item_id)
+    ''');
+
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_si_coll_status
+      ON sync_items(remote_collection_id, sync_status)
+    ''');
+
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_si_coll_uid
+      ON sync_items(remote_collection_id, remote_uid)
+    ''');
   }
 
   // 物理删除数据库（调试用：调用后需重启 App）
