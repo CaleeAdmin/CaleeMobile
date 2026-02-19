@@ -3,6 +3,7 @@ import 'package:caleesync/common/app_constant.dart';
 import 'package:caleesync/common/utils/mmkv_utils.dart';
 
 import 'package:caleesync/entity/SyncSummary.dart';
+import 'package:caleesync/sync/SyncEnum.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:sqflite/sqflite.dart';
 
@@ -137,7 +138,7 @@ class CreateLocalStrategy extends SyncStrategy {
               'summary': eventData.summary,
               'last_etag': remoteEtag,
               'remote_href': eventData.href,
-              'sync_status': 0,
+              'sync_status': SyncItemStatus.synced,
               'dtstart': eventData.dtstart,
               'dtend': eventData.dtend,
             }, conflictAlgorithm: ConflictAlgorithm.replace);

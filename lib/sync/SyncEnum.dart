@@ -20,3 +20,10 @@ class CalendarStatus {
   static const int provisioned = 1; // 已洗白：本地系统日历 ID 已绑定，可以正常同步日程
   static const int deletedLocal = 2; // 墓碑状态：本地已删，等待下一次同步时清理云端
 }
+
+class SyncItemStatus {
+  static const int pendingPush = 0; // local changed/new -> push required
+  static const int pendingPull = 1; // remote changed -> pull required
+  static const int pendingDelete = 2; // local/remote deleted -> needs delete sync
+  static const int synced = 3; // clean
+}
