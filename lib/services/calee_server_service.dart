@@ -106,8 +106,9 @@ class CaleeServerService {
       // 双向同步由 UI 的 "Two-way sync" 开关显式开启。
       const int syncMode = 0;
 
+      final String normalizedPath = normalizeRemotePath(href);
       results.add({
-        'remote_path': href,
+        'remote_path': normalizedPath,
         'display_name': displayName ?? (isSubscribed ? "订阅日历" : "未命名日历"),
         'ctag': ctag ?? "",
         'sync_mode': syncMode,
@@ -139,7 +140,8 @@ class CaleeServerService {
     await db.transaction((txn) async {
       // 1. 提取本次远端扫描到的所有合法路径，作为“白名单”
       final List<String> currentRemotePaths = remoteMaps
-          .map((m) => m['remote_path'] as String)
+          .map((m) => normalizeRemotePath((m['remote_path'] ?? '').toString()))
+          .where((path) => path.isNotEmpty)
           .toList();
 
       debugPrint("开始持久化远端日历列表，当前有效路径数量: ${currentRemotePaths.length}");
@@ -148,6 +150,8 @@ class CaleeServerService {
       for (var map in remoteMaps) {
         // 新日历默认只读；已存在日历保留本地用户已选择的同步模式。
         final int syncMode = (map['sync_mode'] as int?) ?? 0;
+        final String remotePath = normalizeRemotePath((map['remote_path'] ?? '').toString());
+        if (remotePath.isEmpty) continue;
         await txn.rawInsert('''
         INSERT INTO remote_collections (
           account_name,
@@ -175,7 +179,7 @@ class CaleeServerService {
       ''', [
               accountName,
               'calendar',
-              map['remote_path'],
+              remotePath,
               map['display_name'],
               map['ctag'],
               syncMode,
@@ -737,5 +741,19 @@ class CaleeServerService {
 
   String _getAuthString(String user, String pass) =>
       'Basic ${base64Encode(utf8.encode('$user:$pass'))}';
+  static String normalizeRemotePath(String input) {
+    final String trimmed = input.trim();
+    if (trimmed.isEmpty) return '';
+    final Uri? uri = Uri.tryParse(trimmed);
+    if (uri == null) return _ensureTrailingSlash(trimmed);
+    final String path = uri.path.isNotEmpty ? uri.path : trimmed;
+    return _ensureTrailingSlash(path);
+  }
+
+  static String _ensureTrailingSlash(String path) {
+    if (path.isEmpty) return '';
+    return path.endsWith('/') ? path : '$path/';
+  }
+
 
 }

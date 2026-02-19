@@ -8,7 +8,9 @@ import 'package:sqflite/sqflite.dart';
 import '../common/utils/IcsParser.dart';
 import '../common/utils/UidGenerator.dart';
 import '../entity/SyncContext.dart';
+import '../entity/SyncSummary.dart';
 import '../sync/SyncEnum.dart';
+import '../sync/SyncEngine.dart';
 import '../services/calee_server_service.dart';
 import 'database_helper.dart';
 
@@ -932,7 +934,7 @@ class SyncRepository {
 
 
   Future<bool> connectAndEnableRemoteCalendarByPath(String remotePath) async {
-    final String trimmedRemotePath = remotePath.trim();
+    final String trimmedRemotePath = CaleeServerService.normalizeRemotePath(remotePath);
     if (trimmedRemotePath.isEmpty) {
       _lastConnectError = '远端路径无效，请刷新后重试。';
       return false;
@@ -954,6 +956,7 @@ class SyncRepository {
 
   Future<bool> _provisionAndEnableRemoteCalendarByPath(String remotePath) async {
     _lastConnectError = null;
+    remotePath = CaleeServerService.normalizeRemotePath(remotePath);
     final String loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? '';
     if (loginName.isEmpty) {
       _lastConnectError = '登录状态已失效，请重新登录后再试。';
@@ -1007,6 +1010,7 @@ class SyncRepository {
             where: 'id = ?',
             whereArgs: [remoteCollectionId],
           );
+          await _triggerOneShotForceSync(remoteCollectionId);
           return true;
         }
 
@@ -1074,6 +1078,7 @@ class SyncRepository {
         return false;
       }
 
+      await _triggerOneShotForceSync(remoteCollectionId);
       return true;
     } on PlatformException catch (e) {
       final String msg = '${e.code} ${e.message ?? ''}'.toLowerCase();
@@ -1093,6 +1098,51 @@ class SyncRepository {
       debugPrint('❌ connectAndEnableRemoteCalendarByPath 失败: $e');
       return false;
     }
+  }
+
+  Future<void> _triggerOneShotForceSync(int remoteCollectionId) async {
+    if (remoteCollectionId <= 0) return;
+    SyncEngine.requestForceSyncForCollection(remoteCollectionId);
+    final SyncSummary summary = await SyncEngine().executeFullSync();
+    if (summary.failed > 0) {
+      final String detail = summary.errorLog.isNotEmpty ? summary.errorLog.join('; ') : 'Sync failed';
+      _lastConnectError = 'Sync failed: $detail';
+      return;
+    }
+    if (summary.total == 0) {
+      final String? hint = await _deriveEligibilityHint(remoteCollectionId);
+      if (hint != null) {
+        _lastConnectError = hint;
+      }
+    }
+  }
+
+  Future<String?> _deriveEligibilityHint(int remoteCollectionId) async {
+    final db = await _dbHelper.database;
+    final rows = await db.rawQuery('''
+      SELECT rc.remote_path, rc.is_enabled, lb.local_collection_id
+      FROM remote_collections rc
+      LEFT JOIN local_bindings lb ON lb.remote_collection_id = rc.id
+      WHERE rc.id = ?
+      LIMIT 1
+    ''', [remoteCollectionId]);
+    if (rows.isEmpty) return 'Remote path mismatch';
+    final row = rows.first;
+    if ((row['is_enabled'] as int? ?? 0) != 1) return 'Bind to a local calendar to sync';
+    final String remotePath = (row['remote_path']?.toString() ?? '').trim();
+    if (remotePath.isEmpty) return 'Remote path mismatch';
+    final String localId = row['local_collection_id']?.toString() ?? '';
+    if (localId.isEmpty) return 'Bind to a local calendar to sync';
+
+    final Set<String> nativeCalendarIds = (await _nativeApi.getCalendars())
+        .whereType<PlatformCalendar>()
+        .map((calendar) => calendar.id ?? '')
+        .where((id) => id.isNotEmpty)
+        .toSet();
+    if (!nativeCalendarIds.contains(localId)) {
+      return 'Local calendar not found';
+    }
+    return 'Remote path mismatch';
   }
 
   /// 创建一个全新的本地日历条目
