@@ -146,8 +146,7 @@ class CaleeServerService {
 
       // 2. 遍历远端列表：执行“增”或“改”
       for (var map in remoteMaps) {
-        // 同步模式必须来源于服务端权限解析结果。
-        // 之前这里固定写入 0，会导致所有远端日历都被错误展示为只读。
+        // 新日历默认只读；已存在日历保留本地用户已选择的同步模式。
         final int syncMode = (map['sync_mode'] as int?) ?? 0;
         await txn.rawInsert('''
         INSERT INTO remote_collections (
@@ -165,7 +164,7 @@ class CaleeServerService {
         ON CONFLICT(account_name, collection_type, remote_path) DO UPDATE SET
           display_name = excluded.display_name,
           synced_ctag = excluded.synced_ctag,
-          sync_mode = excluded.sync_mode,
+          sync_mode = remote_collections.sync_mode,
           -- 只有当远端提供了新颜色且不为空时才更新本地颜色
           color = CASE WHEN excluded.color IS NOT NULL AND excluded.color != "" 
                        THEN excluded.color 
