@@ -359,9 +359,71 @@ extension on _CalendarRow {
         }
         break;
       case 'properties':
-        Get.snackbar('Action', 'Properties ${item.name}');
+        await _showPropertiesPanel(context, item);
         break;
     }
+  }
+
+  Future<void> _showPropertiesPanel(BuildContext context, CalendarDisplayItem item) {
+    return showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (panelContext) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  item.name,
+                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 16),
+                _propertyRow('Events', '${item.eventCount}'),
+                _propertyRow('Sync Mode', item.isReadOnly ? 'Read-only' : 'Two-way sync'),
+                _propertyRow('Enabled', item.isEnabled ? 'Yes' : 'No'),
+                _propertyRow('Color', item.color),
+                if ((item.remotePath ?? '').isNotEmpty)
+                  _propertyRow('Remote Path', item.remotePath!),
+                if ((item.localId ?? '').isNotEmpty)
+                  _propertyRow('Local ID', item.localId!),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _propertyRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 110,
+            child: Text(
+              label,
+              style: const TextStyle(
+                fontSize: 13,
+                color: Colors.black54,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(fontSize: 14, color: Colors.black87),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<bool?> _showDeleteConfirm(BuildContext context) {
