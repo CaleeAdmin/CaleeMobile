@@ -1,19 +1,18 @@
-// 1. 定义动作类型
+// 仅用于 SyncEngine worker 的动作类型（项目级别同步，不含日历创建/删除）
 enum SyncAction {
-  // --- 创建阶段 (物理开坑) ---
-  createRemote,   // 物理动作：WebDAV MKCALENDAR
-
   // --- 同步阶段 (数据交换) ---
   // sync_mode 约定：0 = 只读（仅 Pull），1 = 双向同步（Pull + Push）
   fullSyncBidi,   // 双向流：允许 Pull 和 Push (个人日历)
   fullSyncPull,   // 单向流：仅允许从云端 Pull (订阅 A)
   fullSyncPush,   // 单向流：仅允许向云端 Push (发布 B)
+}
 
-  // --- 销毁阶段 (清理门户) ---
-  deleteLocal,    // 物理动作：DB Delete
-  deleteRemote,   // 物理动作：WebDAV DELETE
-  deleteDatabaseOnly,
-  ignore          // 物理动作：静默 (保护 B)
+// 仅用于显式 UI 工作流（非 SyncEngine worker）
+enum ProvisioningAction {
+  uiCreateRemoteCalendar,
+  uiDeleteLocalCalendar,
+  uiDeleteRemoteCalendar,
+  uiDeleteDatabaseOnly,
 }
 
 class CalendarStatus {
