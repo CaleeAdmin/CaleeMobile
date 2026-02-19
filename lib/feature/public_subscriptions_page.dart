@@ -132,8 +132,7 @@ class _CalendarCard extends StatelessWidget {
       final isSubscribed = calendarController.isPublicIcsSubscribed(calendar.icsUrl);
       final shouldDisableSubscribe = calendar.icsUrl == null ||
           calendar.icsUrl?.isEmpty == true ||
-          isSubscribing ||
-          isSubscribed;
+          isSubscribing;
 
       return Card(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -169,49 +168,67 @@ class _CalendarCard extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(width: 8),
-                        ElevatedButton(
-                          onPressed: shouldDisableSubscribe
-                              ? null
-                              : () async {
-                                  final ok = await calendarController.subscribePublicIcs(calendar.icsUrl!);
-                                  if (ok) {
-                                    Get.snackbar(
-                                      'Subscribed',
-                                      'Subscribed to "${calendar.title}"',
-                                      snackPosition: SnackPosition.BOTTOM,
-                                    );
-                                    Navigator.of(context).pop(true);
-                                  } else {
-                                    Get.snackbar(
-                                      'Subscribe failed',
-                                      'Failed to subscribe to "${calendar.title}"',
-                                      snackPosition: SnackPosition.BOTTOM,
-                                      backgroundColor: Colors.red.shade50,
-                                    );
-                                    Navigator.of(context).pop(false);
-                                  }
-                                },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.black87,
-                            foregroundColor: Colors.white,
+                        if (isSubscribed)
+                          Container(
                             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                            elevation: 2,
-                          ),
-                          child: isSubscribing
-                              ? const SizedBox(
-                                  width: 14,
-                                  height: 14,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFE8F5E9),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(color: const Color(0xFFA5D6A7)),
+                            ),
+                            child: const Text(
+                              'Subscribed',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF2E7D32),
+                              ),
+                            ),
+                          )
+                        else
+                          ElevatedButton(
+                            onPressed: shouldDisableSubscribe
+                                ? null
+                                : () async {
+                                    final ok = await calendarController.subscribePublicIcs(calendar.icsUrl!);
+                                    if (ok) {
+                                      Get.snackbar(
+                                        'Subscribed',
+                                        'Subscribed to "${calendar.title}"',
+                                        snackPosition: SnackPosition.BOTTOM,
+                                      );
+                                      Navigator.of(context).pop(true);
+                                    } else {
+                                      Get.snackbar(
+                                        'Subscribe failed',
+                                        'Failed to subscribe to "${calendar.title}"',
+                                        snackPosition: SnackPosition.BOTTOM,
+                                        backgroundColor: Colors.red.shade50,
+                                      );
+                                      Navigator.of(context).pop(false);
+                                    }
+                                  },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.black87,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                              elevation: 2,
+                            ),
+                            child: isSubscribing
+                                ? const SizedBox(
+                                    width: 14,
+                                    height: 14,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                    ),
+                                  )
+                                : const Text(
+                                    'Subscribe',
+                                    style: TextStyle(fontSize: 13),
                                   ),
-                                )
-                              : Text(
-                                  isSubscribed ? 'Subscribed' : 'Subscribe',
-                                  style: const TextStyle(fontSize: 13),
-                                ),
-                        ),
+                          ),
                       ],
                     ),
                     const SizedBox(height: 8),
