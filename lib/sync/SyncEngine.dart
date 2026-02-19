@@ -104,9 +104,11 @@ class SyncEngine {
       if (!(gate['eligible'] as bool)) {
         final String reason = gate['reason']?.toString() ?? 'unknown';
         final String uiHint = gate['ui_hint']?.toString() ?? '';
-        debugPrint('[SYNC_GATE][binding=$remoteCollectionId][path=$path] skipped reason=$reason hint=$uiHint');
+        final int bindingId = (local['binding_id'] as int?) ?? 0;
+        final int bindingOrigin = (local['binding_origin'] as int?) ?? SyncBindingOrigin.remote;
+        debugPrint('[SYNC_GATE][binding_id=$bindingId][path=$path][origin=$bindingOrigin] skipped reason=$reason hint=$uiHint');
         if (forceRequested) {
-          debugPrint('[SYNC_FORCE][binding=$remoteCollectionId][path=$path] force=true consumed_but_ineligible reason=$reason');
+          debugPrint('[SYNC_FORCE][binding_id=$bindingId][path=$path][origin=$bindingOrigin] force=true consumed_but_ineligible reason=$reason');
         }
         if (reason == 'local_calendar_missing' && remoteCollectionId > 0) {
           await db.update(
@@ -115,12 +117,14 @@ class SyncEngine {
             where: 'id = ?',
             whereArgs: [remoteCollectionId],
           );
-          debugPrint('[SYNC_GATE][binding=$remoteCollectionId] disabled_due_to_missing_local_calendar');
+          debugPrint('[SYNC_GATE][binding_id=$bindingId][origin=$bindingOrigin] disabled_due_to_missing_local_calendar');
         }
         continue;
       }
 
       final int mode = (local['sync_mode'] as int?) ?? SyncBindingMode.readOnly;
+      final int bindingId = (local['binding_id'] as int?) ?? 0;
+      final int bindingOrigin = (local['binding_origin'] as int?) ?? SyncBindingOrigin.remote;
       final String? dbCtag = local['synced_ctag']?.toString();
       final String? remoteCtag = remote?['ctag']?.toString();
       final bool remoteChanged = (remoteCtag != null && remoteCtag != dbCtag);
@@ -129,22 +133,45 @@ class SyncEngine {
           (remote?['display_name']?.toString() ?? '') != (local['display_name']?.toString() ?? '') ||
           (remote?['color']?.toString() ?? '') != (local['color']?.toString() ?? '');
 
-      final bool shouldSync = mode == SyncBindingMode.twoWay
+      final bool isTwoWay = mode == SyncBindingMode.twoWay;
+      final bool isOneWayRemoteOrigin = !isTwoWay && bindingOrigin == SyncBindingOrigin.remote;
+      final bool isOneWayLocalOrigin = !isTwoWay && bindingOrigin == SyncBindingOrigin.local;
+
+      final bool shouldSync = isTwoWay
           ? (remoteChanged || localChanged || metaChanged)
-          : (remoteChanged || metaChanged);
+          : isOneWayRemoteOrigin
+              ? (remoteChanged || metaChanged)
+              : (localChanged || metaChanged);
       final bool bootstrapRequired = await _isBootstrapRequired(db, remoteCollectionId);
       final bool forceMode = forceRequested || bootstrapRequired;
 
       if (!shouldSync && !forceMode) {
-        debugPrint('[SYNC_GATE][binding=$remoteCollectionId][path=$path] skipped reason=no_detected_change');
+        debugPrint('[SYNC_GATE][binding_id=$bindingId][path=$path][origin=$bindingOrigin] skipped reason=no_detected_change');
         continue;
       }
 
       if (forceMode) {
         final String localCollectionId = local['local_collection_id']?.toString() ?? '';
-        final String modeName = mode == SyncBindingMode.twoWay ? 'bidi' : 'pull';
-        debugPrint('[SYNC_FORCE][binding=$remoteCollectionId][path=$path][local=$localCollectionId][mode=$modeName] force=true requested=$forceRequested bootstrap=$bootstrapRequired');
+        final String modeName = isTwoWay
+            ? 'bidi'
+            : isOneWayLocalOrigin
+                ? 'push'
+                : 'pull';
+        debugPrint('[SYNC_FORCE][binding_id=$bindingId][path=$path][local=$localCollectionId][origin=$bindingOrigin][mode=$modeName] force=true requested=$forceRequested bootstrap=$bootstrapRequired');
       }
+
+      final SyncAction action = isTwoWay
+          ? SyncAction.fullSyncBidi
+          : isOneWayLocalOrigin
+              ? SyncAction.fullSyncPush
+              : SyncAction.fullSyncPull;
+
+      final String modeName = action == SyncAction.fullSyncBidi
+          ? 'bidi'
+          : action == SyncAction.fullSyncPush
+              ? 'push'
+              : 'pull';
+      debugPrint('[SYNC_PLAN][binding_id=$bindingId][path=$path][origin=$bindingOrigin][mode=$modeName] changed(remote=$remoteChanged local=$localChanged meta=$metaChanged)');
 
       // Strategy selection is where push capability is enabled:
       // - fullSyncPull: remote -> local only
@@ -152,7 +179,7 @@ class SyncEngine {
       contexts.add(_buildContext(
         remote ?? {},
         local,
-        mode == SyncBindingMode.twoWay ? SyncAction.fullSyncBidi : SyncAction.fullSyncPull,
+        action,
       ));
     }
 
@@ -236,6 +263,7 @@ class SyncEngine {
       ctag: remote['ctag'] ?? local?['synced_ctag'],
       isSubscription: remote['is_subscription'] ?? local?['is_subscription'] ?? false,
       extra: {
+        'binding_id': local?['binding_id'] ?? 0,
         'binding_origin': local?['binding_origin'] ?? 0,
       },
     );

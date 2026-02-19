@@ -1,10 +1,10 @@
 // 仅用于 SyncEngine worker 的动作类型（项目级别同步，不含日历创建/删除）
 enum SyncAction {
   // --- 同步阶段 (数据交换) ---
-  // sync_mode 约定：0 = 只读（仅 Pull），1 = 双向同步（Pull + Push）
+  // sync_mode 约定：0 = 单向（由 binding_origin 决定 Pull/Push），1 = 双向同步（Pull + Push）
   fullSyncBidi,   // 双向流：允许 Pull 和 Push (个人日历)
-  fullSyncPull,   // 单向流：仅允许从云端 Pull (订阅 A)
-  fullSyncPush,   // 单向流：仅允许向云端 Push (发布 B)
+  fullSyncPull,   // 单向流：远端 -> 本地
+  fullSyncPush,   // 单向流：本地 -> 远端
 }
 
 class SyncBindingMode {
