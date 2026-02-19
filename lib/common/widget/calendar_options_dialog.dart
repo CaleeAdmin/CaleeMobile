@@ -3,7 +3,13 @@ import '../../controllers/CalendarPageController.dart';
 
 class CalendarOptionsDialog extends StatefulWidget {
   final CalendarDisplayItem item;
-  const CalendarOptionsDialog({required this.item, super.key});
+  final Future<void> Function(bool isTwoWay)? onTwoWayChanged;
+
+  const CalendarOptionsDialog({
+    required this.item,
+    this.onTwoWayChanged,
+    super.key,
+  });
 
   @override
   State<CalendarOptionsDialog> createState() => _CalendarOptionsDialogState();
@@ -42,10 +48,15 @@ class _CalendarOptionsDialogState extends State<CalendarOptionsDialog> {
                   CheckboxListTile(
                     contentPadding: EdgeInsets.zero,
                     value: isTwoWay,
-                    onChanged: isTwoWayDisabled ? null : (v) {
+                    onChanged: isTwoWayDisabled ? null : (v) async {
+                      final bool nextValue = v ?? false;
                       setState(() {
-                        isTwoWay = v ?? false;
+                        isTwoWay = nextValue;
                       });
+
+                      if (widget.onTwoWayChanged != null) {
+                        await widget.onTwoWayChanged!(nextValue);
+                      }
                     },
                     title: const Text('Two-way sync', style: TextStyle(fontWeight: FontWeight.w600)),
                     subtitle: const Text('Sync bidirectionally between Calee Online and Local device', style: TextStyle(fontSize: 12)),
