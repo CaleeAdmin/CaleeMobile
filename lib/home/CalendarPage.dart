@@ -332,6 +332,10 @@ class _CalendarPageState extends State<CalendarPage> {
 }
 
 extension on _CalendarRow {
+  String _formatError(Object error) {
+    return error.toString().replaceFirst('Exception: ', '');
+  }
+
   Future<void> _handleOptionResult(String result, BuildContext context, CalendarDisplayItem item, CalendarPageController controller) async {
     switch (result) {
       case 'rename':
@@ -346,7 +350,12 @@ extension on _CalendarRow {
         if (confirm == true) {
           try {
             await controller.deleteCalendarTotally(localId: item.localId, remotePath: item.remotePath);
-          } catch (_) {}
+          } catch (e) {
+            if (!context.mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Delete failed: ${_formatError(e)}')),
+            );
+          }
         }
         break;
       case 'properties':
@@ -438,6 +447,11 @@ extension on _CalendarRow {
                         await Get.find<CalendarPageController>().renameCalendar(item.localId, item.remotePath, newName);
                         Navigator.of(context).pop(true);
                       } catch (e) {
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Rename failed: ${_formatError(e)}')),
+                          );
+                        }
                         Navigator.of(context).pop(false);
                       }
                     },
