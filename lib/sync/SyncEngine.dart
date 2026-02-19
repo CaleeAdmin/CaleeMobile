@@ -44,12 +44,11 @@ class SyncEngine {
       FROM remote_collections rc
       LEFT JOIN local_bindings lb ON lb.remote_collection_id = rc.id
       WHERE rc.account_name = ?
+        AND rc.collection_type = 'calendar'
         AND rc.remote_path IS NOT NULL
         AND rc.remote_path != ""
     ''', [userId]);
 
-    final bool allowAutoCreateLocalFromRemote =
-        MMKVUtils.instance.getBool(AppConstant.autoCreateLocalFromRemoteKey) ?? false;
 
     final List<SyncContext> contexts = [];
     final remoteMap = {
@@ -61,6 +60,13 @@ class SyncEngine {
         if ((row['remote_path']?.toString() ?? '').isNotEmpty) row['remote_path'] as String: row
     };
 
+    final List<PlatformCalendar?> nativeCalendars = await _native.getCalendars();
+    final Set<String> nativeIds = nativeCalendars
+        .whereType<PlatformCalendar>()
+        .map((calendar) => calendar.id ?? '')
+        .where((id) => id.isNotEmpty)
+        .toSet();
+
     for (final remote in remoteResults) {
       final String path = remote['remote_path']?.toString() ?? '';
       if (path.isEmpty) continue;
@@ -68,9 +74,6 @@ class SyncEngine {
       final Map<String, dynamic>? local = localMapByPath[path];
 
       if (local == null) {
-        if (allowAutoCreateLocalFromRemote) {
-          contexts.add(_buildContext(remote, null, SyncAction.createLocal));
-        }
         continue;
       }
 
@@ -79,16 +82,22 @@ class SyncEngine {
         continue;
       }
 
-      final int origin = (local['binding_origin'] as int?) ?? 1;
-      final int mode = (local['sync_mode'] as int?) ?? 0;
+      final Object? remoteCollectionId = local['id'];
       final String localId = local['local_collection_id']?.toString() ?? '';
-
-      if (localId.isEmpty) {
-        if (allowAutoCreateLocalFromRemote && origin == 1) {
-          contexts.add(_buildContext(remote, local, SyncAction.createLocal));
+      if (localId.isEmpty || !nativeIds.contains(localId)) {
+        if (remoteCollectionId != null) {
+          await db.update(
+            'remote_collections',
+            {'is_enabled': 0},
+            where: 'id = ?',
+            whereArgs: [remoteCollectionId],
+          );
+          debugPrint('⚠️ 日历连接已失效（缺少绑定或本地日历不存在），已自动关闭。请重新启用连接。');
         }
         continue;
       }
+
+      final int mode = (local['sync_mode'] as int?) ?? 0;
 
       final String? dbCtag = local['synced_ctag']?.toString();
       final String? remoteCtag = remote['ctag']?.toString();

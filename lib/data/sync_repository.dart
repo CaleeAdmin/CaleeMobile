@@ -2,6 +2,7 @@ import 'package:caleesync/common/app_constant.dart';
 import 'package:caleesync/common/utils/mmkv_utils.dart';
 import 'package:caleesync/core/platform/pigeon/calendar_api.g.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/services.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../common/utils/IcsParser.dart';
@@ -13,6 +14,16 @@ import 'database_helper.dart';
 class SyncRepository {
   final NativeCalendarApi _nativeApi = NativeCalendarApi();
   final DatabaseHelper _dbHelper = DatabaseHelper.instance;
+
+  static final Map<String, Future<bool>> _connectFlights = <String, Future<bool>>{};
+  String? _lastConnectError;
+
+  String? takeLastConnectErrorMessage() {
+    final String? message = _lastConnectError;
+    _lastConnectError = null;
+    return message;
+  }
+
 
   /// 步骤 A: 扫描系统变更（新增/修改/删除）
   Future<void> scanSystemChanges(SyncContext ctx) async {
@@ -841,6 +852,171 @@ class SyncRepository {
     }
   }
 
+
+  Future<bool> connectAndEnableRemoteCalendarByPath(String remotePath) async {
+    final String trimmedRemotePath = remotePath.trim();
+    if (trimmedRemotePath.isEmpty) {
+      _lastConnectError = '远端路径无效，请刷新后重试。';
+      return false;
+    }
+
+    final Future<bool>? inFlight = _connectFlights[trimmedRemotePath];
+    if (inFlight != null) {
+      return inFlight;
+    }
+
+    final Future<bool> task = _provisionAndEnableRemoteCalendarByPath(trimmedRemotePath);
+    _connectFlights[trimmedRemotePath] = task;
+    try {
+      return await task;
+    } finally {
+      _connectFlights.remove(trimmedRemotePath);
+    }
+  }
+
+  Future<bool> _provisionAndEnableRemoteCalendarByPath(String remotePath) async {
+    _lastConnectError = null;
+    final String loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? '';
+    if (loginName.isEmpty) {
+      _lastConnectError = '登录状态已失效，请重新登录后再试。';
+      return false;
+    }
+
+    final db = await _dbHelper.database;
+    try {
+      final List<Map<String, dynamic>> remoteRows = await db.query(
+        'remote_collections',
+        columns: ['id', 'display_name', 'color'],
+        where: 'account_name = ? AND collection_type = ? AND remote_path = ?',
+        whereArgs: [loginName, 'calendar', remotePath],
+        limit: 1,
+      );
+
+      if (remoteRows.isEmpty) {
+        _lastConnectError = '未找到该远端日历，请先下拉刷新后重试。';
+        return false;
+      }
+
+      final Map<String, dynamic> remote = remoteRows.first;
+      final int remoteCollectionId = remote['id'] as int;
+      final String displayName = (remote['display_name']?.toString().isNotEmpty ?? false)
+          ? remote['display_name'].toString()
+          : '未命名日历';
+
+      final List<Map<String, dynamic>> bindingRows = await db.query(
+        'local_bindings',
+        columns: ['local_collection_id'],
+        where: 'remote_collection_id = ?',
+        whereArgs: [remoteCollectionId],
+        limit: 1,
+      );
+
+      final String existingLocalId = bindingRows.isNotEmpty
+          ? (bindingRows.first['local_collection_id']?.toString() ?? '')
+          : '';
+
+      if (existingLocalId.isNotEmpty) {
+        final Set<String> nativeCalendarIds = (await _nativeApi.getCalendars())
+            .whereType<PlatformCalendar>()
+            .map((calendar) => calendar.id ?? '')
+            .where((id) => id.isNotEmpty)
+            .toSet();
+
+        if (nativeCalendarIds.contains(existingLocalId)) {
+          await db.update(
+            'remote_collections',
+            {'is_enabled': 1},
+            where: 'id = ?',
+            whereArgs: [remoteCollectionId],
+          );
+          return true;
+        }
+
+        await db.delete(
+          'local_bindings',
+          where: 'remote_collection_id = ?',
+          whereArgs: [remoteCollectionId],
+        );
+      }
+
+      int colorInt = 0xFF4CAF50;
+      final String colorHex = remote['color']?.toString() ?? '';
+      if (colorHex.isNotEmpty) {
+        final String normalized = colorHex.replaceAll('#', '');
+        final String argb = normalized.length == 6 ? 'FF$normalized' : normalized;
+        final int? parsed = int.tryParse(argb, radix: 16);
+        if (parsed != null) {
+          colorInt = parsed;
+        }
+      }
+
+      final String? newLocalId = await _nativeApi.createCalendar(displayName, loginName, colorInt);
+      if (newLocalId == null || newLocalId.isEmpty) {
+        _lastConnectError = '创建本地日历失败，请检查日历权限后重试。';
+        return false;
+      }
+
+      try {
+        await db.transaction((txn) async {
+          final int now = DateTime.now().millisecondsSinceEpoch;
+          await txn.insert(
+            'local_bindings',
+            {
+              'remote_collection_id': remoteCollectionId,
+              'local_collection_id': newLocalId,
+              'binding_origin': 1,
+              'created_at': now,
+              'updated_at': now,
+            },
+            conflictAlgorithm: ConflictAlgorithm.replace,
+          );
+
+          await txn.update(
+            'remote_collections',
+            {'is_enabled': 1},
+            where: 'id = ?',
+            whereArgs: [remoteCollectionId],
+          );
+        });
+      } on DatabaseException catch (e) {
+        try {
+          await _nativeApi.deleteCalendar(newLocalId, loginName);
+        } catch (_) {}
+
+        final String msg = e.toString().toLowerCase();
+        if (msg.contains('database is locked') || msg.contains('locked')) {
+          _lastConnectError = '本地数据库繁忙，请稍后重试。';
+        } else if (msg.contains('full') || msg.contains('disk i/o')) {
+          _lastConnectError = '存储空间不足，请清理后重试。';
+        } else if (msg.contains('unique constraint') || msg.contains('uq_lb_local')) {
+          _lastConnectError = '该本地日历已绑定到其他远端，请先解除旧绑定后重试。';
+        } else {
+          _lastConnectError = '保存本地绑定失败，请稍后重试。';
+        }
+        return false;
+      }
+
+      return true;
+    } on PlatformException catch (e) {
+      final String msg = '${e.code} ${e.message ?? ''}'.toLowerCase();
+      if (msg.contains('permission')) {
+        _lastConnectError = '日历权限缺失，请在系统设置中授予权限后重试。';
+      } else if (msg.contains('provider')) {
+        _lastConnectError = '系统日历提供方异常，请重启日历应用后重试。';
+      } else if (msg.contains('already')) {
+        _lastConnectError = '该日历已在其他位置连接，请检查绑定状态。';
+      } else {
+        _lastConnectError = '系统日历接口异常，请稍后重试。';
+      }
+      debugPrint('❌ connectAndEnableRemoteCalendarByPath 平台异常: $e');
+      return false;
+    } catch (e) {
+      _lastConnectError = '连接失败，请稍后重试。';
+      debugPrint('❌ connectAndEnableRemoteCalendarByPath 失败: $e');
+      return false;
+    }
+  }
+
   /// 创建一个全新的本地日历条目
   /// 此时只在【系统日历】和【本地数据库】占位，暂不推送到云端
   Future<bool> createNewLocalCalendar(String displayName) async {
@@ -871,20 +1047,7 @@ class SyncRepository {
         userId: userId,
       );
 
-      final db = await _dbHelper.database;
-      final int updated = await db.update(
-        'remote_collections',
-        {'is_enabled': 1},
-        where: 'account_name = ? AND collection_type = ? AND remote_path = ?',
-        whereArgs: [userId, 'calendar', remotePath],
-      );
-
-      if (updated == 0) {
-        print("❌ [Repository] 远端记录未落库，无法自动启用: $remotePath");
-        return false;
-      }
-
-      return true;
+      return await connectAndEnableRemoteCalendarByPath(remotePath);
     } catch (e) {
       print("❌ [Repository] 创建逻辑发生异常: $e");
       return false;

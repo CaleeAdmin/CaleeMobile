@@ -89,41 +89,63 @@ class CalendarPageController extends GetxController {
   }
 
   /// 处理 Checkbox 点击事件
-  Future<void> toggleCalendarSelection(CalendarDisplayItem item, bool? newValue) async {
+  Future<void> handleCalendarEnableToggle(CalendarDisplayItem item, bool? newValue) async {
     if (newValue == null) return;
 
-    try {
-      // 直接更新当前 item，避免通过 ID 再次查找导致错位
-      item.isEnabled = newValue;
+    final String key = (item.remotePath != null && item.remotePath!.isNotEmpty)
+        ? item.remotePath!
+        : (item.localId ?? '');
 
-      // 如果后面有地方要用到 selectedCalendarIds，这里也同步一下
-      final key = (item.remotePath != null && item.remotePath!.isNotEmpty)
-          ? item.remotePath!
-          : (item.localId ?? '');
+    if (newValue == false) {
+      try {
+        item.isEnabled = false;
+        if (key.isNotEmpty) {
+          selectedCalendarIds.remove(key);
+        }
+        calendars.refresh();
+        await setCalendarEnabledStatus(item, false);
+      } catch (e) {
+        print("❌ 切换日历状态失败: $e");
+        Get.snackbar("错误", "无法更新日历同步状态");
+        item.isEnabled = true;
+        calendars.refresh();
+      }
+      return;
+    }
+
+    final String remotePath = item.remotePath?.trim() ?? '';
+    if (remotePath.isEmpty) {
+      Get.snackbar('连接失败', '该远端日历路径无效，请刷新后重试');
+      item.isEnabled = false;
+      calendars.refresh();
+      return;
+    }
+
+    try {
+      final bool ok = await _repo.connectAndEnableRemoteCalendarByPath(remotePath);
+      item.isEnabled = ok;
       if (key.isNotEmpty) {
-        if (newValue) {
+        if (ok) {
           selectedCalendarIds.add(key);
         } else {
           selectedCalendarIds.remove(key);
         }
       }
 
-      // 通知 observers 局部刷新
-      calendars.refresh();
-
-      // 持久化到数据库
-      await updateEnabledStatus(item, newValue);
-
+      if (!ok) {
+        final String err = _repo.takeLastConnectErrorMessage() ?? '连接失败，请重试。';
+        Get.snackbar('连接失败', err);
+      }
+      await refreshDashboard(includeEventCounts: false);
     } catch (e) {
       print("❌ 切换日历状态失败: $e");
-      Get.snackbar("错误", "无法更新日历同步状态");
-      // 回滚本地模型并刷新 UI
-      item.isEnabled = !newValue;
+      Get.snackbar('连接失败', '连接日历时发生异常，请稍后重试');
+      item.isEnabled = false;
       calendars.refresh();
     }
   }
 
-  Future<void> updateEnabledStatus(CalendarDisplayItem item, bool newValue) async {
+  Future<void> setCalendarEnabledStatus(CalendarDisplayItem item, bool newValue) async {
     final db = await DatabaseHelper.instance.database;
 
     String whereClause;

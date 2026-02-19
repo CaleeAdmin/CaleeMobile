@@ -543,7 +543,7 @@ class _CalendarRow extends StatelessWidget {
           Checkbox(
             value: item.isEnabled,
             onChanged: (bool? newValue) {
-              controller.toggleCalendarSelection(item, newValue);
+              controller.handleCalendarEnableToggle(item, newValue);
             },
           ),
           Container(
