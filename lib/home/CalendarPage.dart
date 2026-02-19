@@ -458,79 +458,92 @@ extension on _CalendarRow {
 
   Future<bool?> _showRenameDialog(BuildContext context, CalendarDisplayItem item) {
     final TextEditingController _nameCtrl = TextEditingController(text: item.name);
+    bool isRenaming = false;
     return showDialog<bool>(
       context: context,
       builder: (context) {
-        return Dialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text('Rename Calendar', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
-                    IconButton(
-                      icon: const Icon(Icons.close),
-                      onPressed: () => Navigator.of(context).pop(false),
-                    )
-                  ],
-                ),
-                const SizedBox(height: 8),
-                const Text('Enter a new name for this calendar', style: TextStyle(color: Colors.black54)),
-                const SizedBox(height: 12),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text('Calendar Name', style: TextStyle(fontSize: 13, color: Colors.black54)),
-                ),
-                const SizedBox(height: 6),
-                TextField(
-                  controller: _nameCtrl,
-                  decoration: InputDecoration(
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                    isDense: true,
+        return StatefulBuilder(
+          builder: (context, setState) => Dialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Rename Calendar', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: isRenaming ? null : () => Navigator.of(context).pop(false),
+                      )
+                    ],
                   ),
-                ),
-                const SizedBox(height: 14),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.black,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  const SizedBox(height: 8),
+                  const Text('Enter a new name for this calendar', style: TextStyle(color: Colors.black54)),
+                  const SizedBox(height: 12),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text('Calendar Name', style: TextStyle(fontSize: 13, color: Colors.black54)),
+                  ),
+                  const SizedBox(height: 6),
+                  TextField(
+                    controller: _nameCtrl,
+                    enabled: !isRenaming,
+                    decoration: InputDecoration(
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                      isDense: true,
                     ),
-                    child: const Text('Rename',style: TextStyle(color: Colors.white),),
-                    onPressed: () async {
-                      final newName = _nameCtrl.text.trim();
-                      if (newName.isEmpty) return;
-                      try {
-                        await Get.find<CalendarPageController>().renameCalendar(item.localId, item.remotePath, newName);
-                        Navigator.of(context).pop(true);
-                      } catch (e) {
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Rename failed: ${_formatError(e)}')),
-                          );
-                        }
-                        Navigator.of(context).pop(false);
-                      }
-                    },
                   ),
-                ),
-                const SizedBox(height: 8),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton(
-                    style: OutlinedButton.styleFrom(
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  const SizedBox(height: 14),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.black,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      onPressed: isRenaming
+                          ? null
+                          : () async {
+                              final newName = _nameCtrl.text.trim();
+                              if (newName.isEmpty) return;
+                              setState(() => isRenaming = true);
+                              try {
+                                await Get.find<CalendarPageController>().renameCalendar(item.localId, item.remotePath, newName);
+                                Navigator.of(context).pop(true);
+                              } catch (e) {
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text('Rename failed: ${_formatError(e)}')),
+                                  );
+                                }
+                                Navigator.of(context).pop(false);
+                              }
+                            },
+                      child: isRenaming
+                          ? const SizedBox(
+                              height: 16,
+                              width: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                            )
+                          : const Text('Rename', style: TextStyle(color: Colors.white)),
                     ),
-                    child: const Text('Cancel',style: TextStyle(color: Colors.black)),
-                    onPressed: () => Navigator.of(context).pop(false),
                   ),
-                ),
-              ],
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton(
+                      style: OutlinedButton.styleFrom(
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      onPressed: isRenaming ? null : () => Navigator.of(context).pop(false),
+                      child: const Text('Cancel', style: TextStyle(color: Colors.black)),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         );
