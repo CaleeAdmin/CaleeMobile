@@ -116,7 +116,7 @@ class CalendarPageController extends GetxController {
       return;
     }
 
-    final String remotePath = item.remotePath?.trim() ?? '';
+    final String remotePath = CaleeServerService.normalizeRemotePath(item.remotePath ?? '');
     if (remotePath.isEmpty) {
       Get.snackbar('连接失败', '该远端日历路径无效，请刷新后重试');
       item.isEnabled = false;
@@ -135,9 +135,12 @@ class CalendarPageController extends GetxController {
         }
       }
 
+      final String? syncMessage = _repo.takeLastConnectErrorMessage();
       if (!ok) {
-        final String err = _repo.takeLastConnectErrorMessage() ?? '连接失败，请重试。';
+        final String err = syncMessage ?? '连接失败，请重试。';
         Get.snackbar('连接失败', err);
+      } else if (syncMessage != null && syncMessage.isNotEmpty) {
+        Get.snackbar('Sync failed', syncMessage);
       }
       await refreshDashboard(includeEventCounts: false);
     } catch (e) {

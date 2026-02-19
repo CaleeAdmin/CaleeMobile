@@ -12,6 +12,7 @@ import '../entity/SyncContext.dart';
 import '../entity/SyncSummary.dart';
 import '../services/calee_auth_service.dart';
 import '../services/calee_server_service.dart';
+import 'dart:collection';
 import 'factory/SyncStrategyFactory.dart';
 
 class SyncEngine {
@@ -20,6 +21,19 @@ class SyncEngine {
   final NativeCalendarApi _native = NativeCalendarApi();
   final CaleeAuthService _authService = CaleeAuthService(serverBaseUrl: AppConstant.caleeServer);
   final DatabaseHelper _dbHelper = DatabaseHelper.instance;
+
+  static final Set<int> _pendingForceSyncCollectionIds = HashSet<int>();
+
+  static void requestForceSyncForCollection(int remoteCollectionId) {
+    if (remoteCollectionId > 0) {
+      _pendingForceSyncCollectionIds.add(remoteCollectionId);
+    }
+  }
+
+  static bool consumeForceSyncForCollection(int remoteCollectionId) {
+    if (remoteCollectionId <= 0) return false;
+    return _pendingForceSyncCollectionIds.remove(remoteCollectionId);
+  }
 
   //依赖表格 https://docs.google.com/spreadsheets/d/1QG-OfRUdYpY5G-_rrLWNYgUVUaAKNnHNQDPPexwckHE/edit?gid=975224459#gid=975224459
 
@@ -64,7 +78,7 @@ class SyncEngine {
     final List<SyncContext> contexts = [];
     final remoteMap = {
       for (final r in remoteResults)
-        if ((r['remote_path']?.toString() ?? '').isNotEmpty) r['remote_path'] as String: r
+        if ((r['remote_path']?.toString() ?? '').isNotEmpty) CaleeServerService.normalizeRemotePath(r['remote_path'].toString()): r
     };
 
     final List<PlatformCalendar?> nativeCalendars = await _native.getCalendars();
@@ -75,9 +89,11 @@ class SyncEngine {
         .toSet();
 
     for (final local in collectionRows) {
-      final String path = local['remote_path']?.toString() ?? '';
+      final String path = CaleeServerService.normalizeRemotePath(local['remote_path']?.toString() ?? '');
       final Map<String, dynamic>? remote = remoteMap[path];
       final int remoteCollectionId = (local['id'] as int?) ?? 0;
+
+      final bool forceRequested = consumeForceSyncForCollection(remoteCollectionId);
 
       final Map<String, dynamic> gate = _evaluateBindingEligibility(
         row: local,
@@ -87,7 +103,11 @@ class SyncEngine {
 
       if (!(gate['eligible'] as bool)) {
         final String reason = gate['reason']?.toString() ?? 'unknown';
-        debugPrint('[SYNC_GATE][binding=$remoteCollectionId][path=$path] skipped reason=$reason');
+        final String uiHint = gate['ui_hint']?.toString() ?? '';
+        debugPrint('[SYNC_GATE][binding=$remoteCollectionId][path=$path] skipped reason=$reason hint=$uiHint');
+        if (forceRequested) {
+          debugPrint('[SYNC_FORCE][binding=$remoteCollectionId][path=$path] force=true consumed_but_ineligible reason=$reason');
+        }
         if (reason == 'local_calendar_missing' && remoteCollectionId > 0) {
           await db.update(
             'remote_collections',
@@ -112,10 +132,18 @@ class SyncEngine {
       final bool shouldSync = mode == SyncBindingMode.twoWay
           ? (remoteChanged || localChanged || metaChanged)
           : (remoteChanged || metaChanged);
+      final bool bootstrapRequired = await _isBootstrapRequired(db, remoteCollectionId);
+      final bool forceMode = forceRequested || bootstrapRequired;
 
-      if (!shouldSync) {
+      if (!shouldSync && !forceMode) {
         debugPrint('[SYNC_GATE][binding=$remoteCollectionId][path=$path] skipped reason=no_detected_change');
         continue;
+      }
+
+      if (forceMode) {
+        final String localCollectionId = local['local_collection_id']?.toString() ?? '';
+        final String modeName = mode == SyncBindingMode.twoWay ? 'bidi' : 'pull';
+        debugPrint('[SYNC_FORCE][binding=$remoteCollectionId][path=$path][local=$localCollectionId][mode=$modeName] force=true requested=$forceRequested bootstrap=$bootstrapRequired');
       }
 
       // Strategy selection is where push capability is enabled:
@@ -150,20 +178,20 @@ class SyncEngine {
 
     final int bindingId = (row['binding_id'] as int?) ?? 0;
     if (bindingId <= 0) {
-      return {'eligible': false, 'reason': 'missing_binding_id'};
+      return {'eligible': false, 'reason': 'missing_binding_id', 'ui_hint': 'Bind to a local calendar to sync'};
     }
 
     final String localCollectionId = row['local_collection_id']?.toString() ?? '';
     if (localCollectionId.isEmpty) {
-      return {'eligible': false, 'reason': 'missing_local_collection_id'};
+      return {'eligible': false, 'reason': 'missing_local_collection_id', 'ui_hint': 'Bind to a local calendar to sync'};
     }
 
     if (!nativeCalendarIds.contains(localCollectionId)) {
-      return {'eligible': false, 'reason': 'local_calendar_missing'};
+      return {'eligible': false, 'reason': 'local_calendar_missing', 'ui_hint': 'Local calendar not found'};
     }
 
     if (!remoteExists) {
-      return {'eligible': false, 'reason': 'remote_collection_missing'};
+      return {'eligible': false, 'reason': 'remote_collection_missing', 'ui_hint': 'Remote path mismatch'};
     }
 
     return {'eligible': true, 'reason': 'ok'};
@@ -181,6 +209,18 @@ class SyncEngine {
     LIMIT 1
   ''', [remoteCollectionId]);
     return dirtyCheck.isNotEmpty;
+  }
+
+
+  Future<bool> _isBootstrapRequired(Database db, int remoteCollectionId) async {
+    if (remoteCollectionId <= 0) return false;
+    final List<Map<String, dynamic>> rows = await db.rawQuery('''
+      SELECT COUNT(1) AS count
+      FROM sync_items
+      WHERE remote_collection_id = ?
+    ''', [remoteCollectionId]);
+    final int count = (rows.firstOrNull?['count'] as int?) ?? 0;
+    return count == 0;
   }
 
   SyncContext _buildContext(Map remote, Map? local, SyncAction action) {
@@ -363,7 +403,8 @@ class SyncEngine {
 
       // --- 4. 现有的更新与插入逻辑 ---
       for (var rc in remoteCalendars) {
-        final String path = rc['remote_path'];
+        final String path = CaleeServerService.normalizeRemotePath((rc['remote_path'] ?? '').toString());
+        if (path.isEmpty) continue;
         final String displayName = rc['display_name'] ?? '未命名';
 
         final List<Map<String, dynamic>> existing = await db.query(
@@ -394,6 +435,7 @@ class SyncEngine {
             'display_name': displayName,
             'remote_path': path,
             'sync_mode': rc['sync_mode'] ?? 0,
+            'is_enabled': 0,
             'is_subscription': (rc['is_subscription'] == true || rc['is_subscription'] == 1) ? 1 : 0,
             'subscription_url': rc['subscription_url'],
           });
