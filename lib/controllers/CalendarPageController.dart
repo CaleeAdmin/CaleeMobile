@@ -26,6 +26,7 @@ class CalendarDisplayItem {
   final bool isReadOnly;
   final bool isSubscription;
   final bool isLocalReadOnly;
+  final String? subscriptionUrl;
   bool isEnabled;            // 对应数据库 is_enabled
   final int origin;          // 0: 本地创建, 1: 云端同步
 
@@ -38,6 +39,7 @@ class CalendarDisplayItem {
     required this.isReadOnly,
     required this.isSubscription,
     required this.isLocalReadOnly,
+    this.subscriptionUrl,
     required this.isEnabled,
     required this.origin,
   });
@@ -55,6 +57,7 @@ class CalendarDisplayItem {
       isReadOnly: (map['sync_mode'] as int?) == 0,
       isSubscription: toBool(map['is_subscription']),
       isLocalReadOnly: toBool(map['is_local_read_only']),
+      subscriptionUrl: map['subscription_url']?.toString(),
       isEnabled: toBool(map['is_enabled']),
       origin: (map['binding_origin'] as int?) ?? 0,
     );
@@ -283,6 +286,7 @@ class CalendarPageController extends GetxController {
           isReadOnly: syncMode == 0,
           isSubscription: isSubscription,
           isLocalReadOnly: localReadOnlyById[localId] ?? false,
+          subscriptionUrl: cal['subscription_url']?.toString(),
           isEnabled: cal['is_enabled'] == 1,
           remotePath: remotePath,
           origin: origin,
@@ -411,6 +415,16 @@ class CalendarPageController extends GetxController {
       subscribingUrls.remove(normalizedUrl);
       isLoading.value = false;
     }
+  }
+
+  bool isPublicIcsSubscribed(String? icsUrl) {
+    final String normalizedUrl = (icsUrl ?? '').trim();
+    if (normalizedUrl.isEmpty) return false;
+
+    return calendars.any((calendar) {
+      if (!calendar.isSubscription) return false;
+      return (calendar.subscriptionUrl ?? '').trim() == normalizedUrl;
+    });
   }
 
   String? validateNewCalendarName(String displayName) {
