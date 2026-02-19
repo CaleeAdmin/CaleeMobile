@@ -506,11 +506,17 @@ class SyncRepository {
     final db = await _dbHelper.database;
 
     // 确保路径不为 null
+    final int? remoteCollectionId = await _resolveRemoteCollectionIdByLocalCalendarId(db, localId);
+    if (remoteCollectionId == null) {
+      print('⚠️ [Repository] 路径绑定失败: 未找到 ID 为 $localId 的本地日历绑定');
+      return;
+    }
+
     int count = await db.update(
       'remote_collections',
       {'remote_path': path},
-      where: 'local_item_id = ?',
-      whereArgs: [localId],
+      where: 'id = ?',
+      whereArgs: [remoteCollectionId],
     );
 
     if (count > 0) {
@@ -629,10 +635,15 @@ class SyncRepository {
     final db = await DatabaseHelper.instance.database;
 
     // 1. 查询基础配置
-    final List<Map<String, dynamic>> maps = await db.query(
-      'remote_collections',
-      where: 'local_item_id = ?',
-      whereArgs: [localId],
+    final List<Map<String, dynamic>> maps = await db.rawQuery(
+      '''
+      SELECT rc.*, lb.local_collection_id
+      FROM remote_collections rc
+      INNER JOIN local_bindings lb ON lb.remote_collection_id = rc.id
+      WHERE lb.local_collection_id = ?
+      LIMIT 1
+      ''',
+      [localId],
     );
 
     if (maps.isEmpty) return {};
@@ -717,15 +728,25 @@ class SyncRepository {
 
     // 1. 提取元数据（优先 local_id，兜底 remote_path）
     final List<Map<String, dynamic>> maps = sanitizedLocalId != null
-        ? await db.query(
-            'remote_collections',
-            where: 'local_item_id = ?',
-            whereArgs: [sanitizedLocalId],
+        ? await db.rawQuery(
+            '''
+            SELECT rc.*, lb.local_collection_id, lb.binding_origin
+            FROM remote_collections rc
+            INNER JOIN local_bindings lb ON lb.remote_collection_id = rc.id
+            WHERE lb.local_collection_id = ?
+            LIMIT 1
+            ''',
+            [sanitizedLocalId],
           )
-        : await db.query(
-            'remote_collections',
-            where: 'remote_path = ?',
-            whereArgs: [sanitizedRemotePath],
+        : await db.rawQuery(
+            '''
+            SELECT rc.*, lb.local_collection_id, lb.binding_origin
+            FROM remote_collections rc
+            LEFT JOIN local_bindings lb ON lb.remote_collection_id = rc.id
+            WHERE rc.remote_path = ?
+            LIMIT 1
+            ''',
+            [sanitizedRemotePath],
           );
 
     if (maps.isEmpty) {
@@ -735,7 +756,7 @@ class SyncRepository {
 
     final cal = maps.first;
     final String accountName = cal['account_name'] ?? '';
-    final String resolvedLocalId = cal['local_item_id']?.toString() ?? sanitizedLocalId ?? '';
+    final String resolvedLocalId = cal['local_collection_id']?.toString() ?? sanitizedLocalId ?? '';
     final String? resolvedRemotePath = cal['remote_path']?.toString() ?? sanitizedRemotePath;
     final int origin = cal['binding_origin'] ?? 0;
     final bool shouldDeleteLocalCalendar = origin == 1;
@@ -781,17 +802,19 @@ class SyncRepository {
           );
         }
 
-        final int cCount = resolvedLocalId.isNotEmpty
-            ? await txn.delete(
-                'remote_collections',
-                where: 'local_item_id = ?',
-                whereArgs: [resolvedLocalId],
-              )
-            : await txn.delete(
-                'remote_collections',
-                where: 'remote_path = ?',
-                whereArgs: [resolvedRemotePath],
-              );
+        if (resolvedLocalId.isNotEmpty) {
+          await txn.delete(
+            'local_bindings',
+            where: 'local_collection_id = ?',
+            whereArgs: [resolvedLocalId],
+          );
+        }
+
+        final int cCount = await txn.delete(
+          'remote_collections',
+          where: 'id = ?',
+          whereArgs: [resolvedRemoteCollectionId],
+        );
 
         debugPrint("🗑️ 数据库清理完毕: 删除了 $sCount 条事件, $cCount 条日历记录");
       });
@@ -822,20 +845,28 @@ class SyncRepository {
     // 1. 获取当前日历元数据（优先 local_id，兜底 remote_path）
     List<Map<String, dynamic>> maps = [];
     if (sanitizedLocalId != null) {
-      maps = await db.query(
-        'remote_collections',
-        where: 'local_item_id = ?',
-        whereArgs: [sanitizedLocalId],
-        limit: 1,
+      maps = await db.rawQuery(
+        '''
+        SELECT rc.*, lb.local_collection_id
+        FROM remote_collections rc
+        INNER JOIN local_bindings lb ON lb.remote_collection_id = rc.id
+        WHERE lb.local_collection_id = ?
+        LIMIT 1
+        ''',
+        [sanitizedLocalId],
       );
     }
 
     if (maps.isEmpty && sanitizedRemotePath != null) {
-      maps = await db.query(
-        'remote_collections',
-        where: 'remote_path = ?',
-        whereArgs: [sanitizedRemotePath],
-        limit: 1,
+      maps = await db.rawQuery(
+        '''
+        SELECT rc.*, lb.local_collection_id
+        FROM remote_collections rc
+        LEFT JOIN local_bindings lb ON lb.remote_collection_id = rc.id
+        WHERE rc.remote_path = ?
+        LIMIT 1
+        ''',
+        [sanitizedRemotePath],
       );
     }
 
@@ -861,7 +892,7 @@ class SyncRepository {
 
       // 3. 修改手机系统日历 (Android/iOS 系统层)
       // 仅当存在 local_id 时尝试系统改名
-      final String? resolvedLocalId = cal['local_item_id']?.toString();
+      final String? resolvedLocalId = cal['local_collection_id']?.toString();
       if (resolvedLocalId != null && resolvedLocalId.isNotEmpty) {
         final bool localRenameOk = await _nativeApi.modifyCalendarTitle(
           resolvedLocalId,
@@ -879,8 +910,8 @@ class SyncRepository {
         await db.update(
           'remote_collections',
           {'display_name': newName},
-          where: 'local_item_id = ?',
-          whereArgs: [resolvedLocalId],
+          where: 'id = ?',
+          whereArgs: [cal['id']],
         );
       } else {
         await db.update(

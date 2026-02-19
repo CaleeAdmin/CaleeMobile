@@ -316,38 +316,47 @@ class SyncEngine {
 
       // 2. 获取本地数据库中该用户已有的所有日历记录
       final db = await DatabaseHelper.instance.database;
-      final List<Map<String, dynamic>> localRecords = await db.query(
-        'remote_collections',
-        where: 'account_name = ? AND remote_path IS NOT NULL AND remote_path != ""',
-        whereArgs: [userId],
+      final List<Map<String, dynamic>> localRecords = await db.rawQuery(
+        '''
+        SELECT rc.*, lb.local_collection_id, lb.binding_origin
+        FROM remote_collections rc
+        LEFT JOIN local_bindings lb ON lb.remote_collection_id = rc.id
+        WHERE rc.account_name = ?
+          AND rc.remote_path IS NOT NULL
+          AND rc.remote_path != ''
+        ''',
+        [userId],
       );
 
       // --- 💡 核心修复：同步删除逻辑 (本地有但云端没了) ---
       for (var local in localRecords) {
         final String accountName = local['account_name'] ?? '';
         final String? localRemotePath = local['remote_path'];
-        final String localId = local['local_item_id']?.toString() ?? '';
+        final String localId = local['local_collection_id']?.toString() ?? '';
+        final int bindingOrigin = (local['binding_origin'] as int?) ?? 0;
         final String displayName = local['display_name'];
 
         // 如果本地记录有远程路径，且该路径不在这次云端获取的列表中
         if (localRemotePath != null && !remotePaths.contains(localRemotePath)) {
           print("🗑️ [清理] 云端已不存在路径 $localRemotePath，同步删除本地: $displayName");
 
-          // A. 如果已经洗白成系统日历，调用原生接口从系统日历 App 中删除
-          if (localId.isNotEmpty) {
+          // A. 仅删除“远端初始化”的本地系统日历；本地初始化(origin=0)保留
+          if (bindingOrigin == 1 && localId.isNotEmpty) {
             try {
               await _native.deleteCalendar(localId,accountName);
               print("  ✅ 系统日历实体已移除: $localId");
             } catch (e) {
               print("  ⚠️ 系统日历移除失败 (可能已被手动删除): $e");
             }
+          } else if (bindingOrigin != 1) {
+            print("  ℹ️ 跳过系统日历删除: 本地初始化日历 (origin=$bindingOrigin)");
           }
 
           // B. 从数据库映射表中彻底抹除
           await db.delete(
             'remote_collections',
-            where: localId.isNotEmpty ? 'local_item_id = ?' : 'remote_path = ?',
-            whereArgs: [localId.isNotEmpty ? localId : localRemotePath],
+            where: 'id = ?',
+            whereArgs: [local['id']],
           );
         }
       }
