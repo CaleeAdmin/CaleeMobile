@@ -24,7 +24,7 @@ class _CalendarOptionsDialogState extends State<CalendarOptionsDialog> {
   void initState() {
     super.initState();
     isTwoWay = !widget.item.isReadOnly;
-    isTwoWayDisabled = widget.item.isReadOnly || widget.item.isSubscription || widget.item.isLocalReadOnly;
+    isTwoWayDisabled = widget.item.isSubscription || widget.item.isLocalReadOnly;
     // origin: 0 = 本地初始化, 1 = 云端同步
     // 本地初始化的映射不允许在主日历页重命名
     isRenameDisabled = widget.item.origin == 0;
