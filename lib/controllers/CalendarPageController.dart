@@ -81,6 +81,7 @@ class CalendarPageController extends GetxController {
   var isLoading = false.obs;
   /// 选中的日历 ID 集合（用于 UI 绑定）
   var selectedCalendarIds = <String>{}.obs;
+  var togglingCalendarIds = <String>{}.obs;
   var subscribingUrls = <String>{}.obs;
   Future<void>? _refreshFuture;
 
@@ -99,32 +100,41 @@ class CalendarPageController extends GetxController {
         ? item.remotePath!
         : (item.localId ?? '');
 
-    if (newValue == false) {
-      try {
-        item.isEnabled = false;
-        if (key.isNotEmpty) {
-          selectedCalendarIds.remove(key);
-        }
-        calendars.refresh();
-        await setCalendarEnabledStatus(item, false);
-      } catch (e) {
-        print("❌ 切换日历状态失败: $e");
-        Get.snackbar("错误", "无法更新日历同步状态");
-        item.isEnabled = true;
-        calendars.refresh();
-      }
+    if (key.isNotEmpty && togglingCalendarIds.contains(key)) {
       return;
     }
 
-    final String remotePath = CaleeServerService.normalizeRemotePath(item.remotePath ?? '');
-    if (remotePath.isEmpty) {
-      Get.snackbar('连接失败', '该远端日历路径无效，请刷新后重试');
-      item.isEnabled = false;
+    if (key.isNotEmpty) {
+      togglingCalendarIds.add(key);
       calendars.refresh();
-      return;
     }
 
     try {
+      if (newValue == false) {
+        try {
+          item.isEnabled = false;
+          if (key.isNotEmpty) {
+            selectedCalendarIds.remove(key);
+          }
+          calendars.refresh();
+          await setCalendarEnabledStatus(item, false);
+        } catch (e) {
+          print("❌ 切换日历状态失败: $e");
+          Get.snackbar("错误", "无法更新日历同步状态");
+          item.isEnabled = true;
+          calendars.refresh();
+        }
+        return;
+      }
+
+      final String remotePath = CaleeServerService.normalizeRemotePath(item.remotePath ?? '');
+      if (remotePath.isEmpty) {
+        Get.snackbar('连接失败', '该远端日历路径无效，请刷新后重试');
+        item.isEnabled = false;
+        calendars.refresh();
+        return;
+      }
+
       final bool ok = await _repo.connectAndEnableRemoteCalendarByPath(remotePath);
       item.isEnabled = ok;
       if (key.isNotEmpty) {
@@ -148,6 +158,11 @@ class CalendarPageController extends GetxController {
       Get.snackbar('连接失败', '连接日历时发生异常，请稍后重试');
       item.isEnabled = false;
       calendars.refresh();
+    } finally {
+      if (key.isNotEmpty) {
+        togglingCalendarIds.remove(key);
+        calendars.refresh();
+      }
     }
   }
 

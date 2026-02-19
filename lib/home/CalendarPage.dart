@@ -624,6 +624,10 @@ class _CalendarRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final color = _parseColor(item.color);
     final controller = Get.find<CalendarPageController>();
+    final String key = (item.remotePath != null && item.remotePath!.isNotEmpty)
+        ? item.remotePath!
+        : (item.localId ?? '');
+    final bool isToggling = key.isNotEmpty && controller.togglingCalendarIds.contains(key);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
@@ -631,9 +635,11 @@ class _CalendarRow extends StatelessWidget {
           // 使用 item.isSelected（非响应式），由外层列表刷新驱动 UI 更新
           Checkbox(
             value: item.isEnabled,
-            onChanged: (bool? newValue) {
-              controller.handleCalendarEnableToggle(item, newValue);
-            },
+            onChanged: isToggling
+                ? null
+                : (bool? newValue) {
+                    controller.handleCalendarEnableToggle(item, newValue);
+                  },
           ),
           Container(
             width: 12,
