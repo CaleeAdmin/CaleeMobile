@@ -26,6 +26,38 @@ class SyncRepository {
   }
 
 
+
+  Future<int?> _resolveRemoteCollectionIdByLocalCalendarId(DatabaseExecutor db, String localCalendarId) async {
+    final rows = await db.rawQuery(
+      """
+      SELECT remote_collection_id
+      FROM local_bindings
+      WHERE local_collection_id = ?
+      LIMIT 1
+      """,
+      [localCalendarId],
+    );
+    final Object? value = rows.isNotEmpty ? rows.first['remote_collection_id'] : null;
+    if (value is int) return value;
+    if (value is String) return int.tryParse(value);
+    return null;
+  }
+
+  Future<Map<String, dynamic>?> _resolveCollectionConfigByLocalCalendarId(Database db, String localCalendarId) async {
+    final rows = await db.rawQuery(
+      """
+      SELECT rc.id, rc.account_name, rc.remote_path, rc.is_subscription
+      FROM remote_collections rc
+      INNER JOIN local_bindings lb ON lb.remote_collection_id = rc.id
+      WHERE lb.local_collection_id = ?
+      LIMIT 1
+      """,
+      [localCalendarId],
+    );
+    if (rows.isEmpty) return null;
+    return rows.first;
+  }
+
   /// DEPRECATED: uses old calendarId-as-remote_collection_id. Do not call.
   /// 步骤 A: 扫描系统变更（新增/修改/删除）
   Future<void> scanSystemChanges(SyncContext ctx) async {
@@ -234,6 +266,12 @@ class SyncRepository {
     int modified = 0;
     int deleted = 0;
 
+    final int? remoteCollectionId = await _resolveRemoteCollectionIdByLocalCalendarId(db, calendarLocalId);
+    if (remoteCollectionId == null) {
+      debugPrint('⚠️ 未找到本地日历绑定，跳过 scanLocalEvents: $calendarLocalId');
+      return {'added': 0, 'modified': 0, 'deleted': 0};
+    }
+
     final start = DateTime.now().subtract(const Duration(days: 45)).millisecondsSinceEpoch;
     final end = DateTime.now().add(const Duration(days: 45)).millisecondsSinceEpoch;
 
@@ -250,7 +288,7 @@ class SyncRepository {
       final List<Map<String, dynamic>> dbRows = await txn.query(
         'sync_items',
         where: 'remote_collection_id = ? AND sync_status != ?',
-        whereArgs: [calendarLocalId, SyncItemStatus.pendingDelete],
+        whereArgs: [remoteCollectionId, SyncItemStatus.pendingDelete],
       );
 
       for (var row in dbRows) {
@@ -260,8 +298,8 @@ class SyncRepository {
           await txn.update(
             'sync_items',
             {'sync_status': SyncItemStatus.pendingDelete}, // 标记为“待同步删除”
-            where: 'remote_uid = ?',
-            whereArgs: [dbUid],
+            where: 'remote_collection_id = ? AND remote_uid = ?',
+            whereArgs: [remoteCollectionId, dbUid],
           );
           deleted++;
           print('🗑️ 标记待删除 (软删除): $dbUid');
@@ -277,8 +315,8 @@ class SyncRepository {
 
         final List<Map<String, dynamic>> maps = await txn.query(
           'sync_items',
-          where: 'remote_uid = ?',
-          whereArgs: [event.uid],
+          where: 'remote_collection_id = ? AND remote_uid = ?',
+          whereArgs: [remoteCollectionId, event.uid],
         );
 
         if (maps.isEmpty) {
@@ -286,7 +324,7 @@ class SyncRepository {
           await txn.insert('sync_items', {
             'remote_uid': eventUid,
             'local_item_id': event.localId,
-            'remote_collection_id': calendarLocalId,
+            'remote_collection_id': remoteCollectionId,
             'summary': event.title ?? '无标题',
             'description': event.notes,
             'dtstart': event.startTime,
@@ -311,18 +349,18 @@ class SyncRepository {
     final db = await _dbHelper.database;
 
     // 1. 🚀 动态获取日历配置（账号信息、远程路径等）
-    final List<Map<String, dynamic>> calMaps = await db.query(
-      'remote_collections',
-      where: 'local_item_id = ?',
-      whereArgs: [calendarLocalId],
-    );
+    final Map<String, dynamic>? calConfig = await _resolveCollectionConfigByLocalCalendarId(db, calendarLocalId);
 
-    if (calMaps.isEmpty) {
+    if (calConfig == null) {
       print("❌ 未找到日历映射配置: $calendarLocalId");
       return;
     }
 
-    final calConfig = calMaps.first;
+    final int? remoteCollectionId = calConfig['id'] as int?;
+    if (remoteCollectionId == null) {
+      print("❌ 日历映射缺少 remote_collection_id: $calendarLocalId");
+      return;
+    }
     final String remotePath = calConfig['remote_path'] ?? "";
     final bool isSubscription =
         (calConfig['is_subscription'] == 1 || calConfig['is_subscription'] == true);
@@ -351,7 +389,7 @@ class SyncRepository {
     final localEntries = await db.query(
         'sync_items',
         where: 'remote_collection_id = ?',
-        whereArgs: [calendarLocalId]
+        whereArgs: [remoteCollectionId]
     );
 
     for (var local in localEntries) {
@@ -364,7 +402,7 @@ class SyncRepository {
         if (local['sync_status'] == SyncItemStatus.synced) {
           print('🗑️ 云端已删除，同步移除本地: $summary');
           if (localId != null) await _nativeApi.deleteEvent(localId);
-          await db.delete('sync_items', where: 'remote_uid = ?', whereArgs: [uid]);
+          await db.delete('sync_items', where: 'remote_collection_id = ? AND remote_uid = ?', whereArgs: [remoteCollectionId, uid]);
         }
       }
     }
@@ -375,13 +413,13 @@ class SyncRepository {
       final String uid = Uri.decodeComponent(href.split('/').last).replaceAll('.ics', '');
       final String etag = (remoteEvent['etag'] as String? ?? "").replaceAll('"', '');
 
-      final local = await db.query('sync_items', where: 'remote_uid = ?', whereArgs: [uid]);
+      final local = await db.query('sync_items', where: 'remote_collection_id = ? AND remote_uid = ?', whereArgs: [remoteCollectionId, uid]);
 
       if (local.isNotEmpty) {
         final int currentStatus = local.first['sync_status'] as int;
         // 冲突处理：本地待删除但云端还在，以云端为准重置
-        if (currentStatus == 2) {
-          await db.delete('sync_items', where: 'remote_uid = ?', whereArgs: [uid]);
+        if (currentStatus == SyncItemStatus.pendingDelete) {
+          await db.delete('sync_items', where: 'remote_collection_id = ? AND remote_uid = ?', whereArgs: [remoteCollectionId, uid]);
         } else {
           final String localEtag = (local.first['last_etag'] as String?) ?? "";
           if (localEtag == etag) continue; // ETag 一致，跳过
@@ -412,7 +450,7 @@ class SyncRepository {
           await db.insert('sync_items', {
             'remote_uid': uid,
             'local_item_id': newLocalId,
-            'remote_collection_id': calendarLocalId,
+            'remote_collection_id': remoteCollectionId,
             'summary': parsed['summary'],
             'last_etag': etag,
             'sync_status': SyncItemStatus.synced,
@@ -426,6 +464,11 @@ class SyncRepository {
   Future<void> pushDeletesToRemote(String calendarLocalId) async {
     final db = await _dbHelper.database;
     final String userId = MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? "";
+    final int? remoteCollectionId = await _resolveRemoteCollectionIdByLocalCalendarId(db, calendarLocalId);
+    if (remoteCollectionId == null) {
+      debugPrint('⚠️ 未找到本地日历绑定，跳过 pushDeletesToRemote: $calendarLocalId');
+      return;
+    }
 
     // 1. 获取手机系统日历目前所有的 Event ID
     final List<String?> systemEventIds = await _nativeApi.getSystemEventIds(calendarLocalId);
@@ -434,7 +477,7 @@ class SyncRepository {
     final List<Map<String, dynamic>> trackedEvents = await db.query(
         'sync_items',
         where: 'remote_collection_id = ?',
-        whereArgs: [calendarLocalId]
+        whereArgs: [remoteCollectionId]
     );
 
     for (var entry in trackedEvents) {
@@ -452,7 +495,7 @@ class SyncRepository {
         );
 
         if (ok) {
-          await db.delete('sync_items', where: 'remote_uid = ?', whereArgs: [uid]);
+          await db.delete('sync_items', where: 'remote_collection_id = ? AND remote_uid = ?', whereArgs: [remoteCollectionId, uid]);
         }
       }
     }
@@ -596,9 +639,10 @@ class SyncRepository {
     final cal = maps.first;
 
     // 2. 统计该日历下的本地有效事件数（过滤 status 2）
+    final int? remoteCollectionId = cal['id'] as int?;
     final countResult = await db.rawQuery(
         'SELECT COUNT(*) as count FROM sync_items WHERE remote_collection_id = ? AND sync_status != ${SyncItemStatus.pendingDelete}',
-        [localId]
+        [remoteCollectionId ?? -1]
     );
 
     // 3. 逻辑判定：有远端路径视为云端来源
@@ -728,11 +772,12 @@ class SyncRepository {
 
         // --- Step C: 物理删除成功后，清理数据库 ---
         int sCount = 0;
-        if (resolvedLocalId.isNotEmpty) {
+        final int? resolvedRemoteCollectionId = cal['id'] as int?;
+        if (resolvedRemoteCollectionId != null) {
           sCount = await txn.delete(
             'sync_items',
             where: 'remote_collection_id = ?',
-            whereArgs: [resolvedLocalId],
+            whereArgs: [resolvedRemoteCollectionId],
           );
         }
 
