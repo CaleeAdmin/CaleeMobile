@@ -428,35 +428,35 @@ class SyncRepository {
 
       // 4. 📥 下载详情并写入系统日历
       print('📥 正在更新事件详情: $uid');
-      final icsData = "";// await CaleeServerService().getEventDetail(
-      //     eventPath: href,
-      // );
+      final String icsData = (remoteEvent['calendar_data'] as String?) ?? '';
+      if (icsData.trim().isEmpty) {
+        print('⚠️ 跳过空 ICS 数据: $uid');
+        continue;
+      }
 
-      if (icsData != null) {
-        final parsed = IcsParser.parse(icsData, uid);
+      final parsed = IcsParser.parse(icsData, uid);
 
         // 🚀 核心改动：调用 createEvent 时传入云端的 UID
         // 这会让 Android 的 _SYNC_ID 字段被填充，实现真正的 UUID 统一
-        final String? newLocalId = await _nativeApi.createEvent(
-          calendarLocalId,
-          parsed['summary'] ?? "无标题",
-          parsed['dtstart'],
-          parsed['dtend'],
-          parsed['description'],
-          uid, // <--- 关键参数：传入生成的/云端的 UID
-        );
+      final String? newLocalId = await _nativeApi.createEvent(
+        calendarLocalId,
+        parsed['summary'] ?? "无标题",
+        parsed['dtstart'],
+        parsed['dtend'],
+        parsed['description'],
+        uid, // <--- 关键参数：传入生成的/云端的 UID
+      );
 
-        if (newLocalId != null) {
-          await db.insert('sync_items', {
-            'remote_uid': uid,
-            'local_item_id': newLocalId,
-            'remote_collection_id': remoteCollectionId,
-            'summary': parsed['summary'],
-            'last_etag': etag,
-            'sync_status': SyncItemStatus.synced,
-            'item_type': 'event',
-          }, conflictAlgorithm: ConflictAlgorithm.replace);
-        }
+      if (newLocalId != null) {
+        await db.insert('sync_items', {
+          'remote_uid': uid,
+          'local_item_id': newLocalId,
+          'remote_collection_id': remoteCollectionId,
+          'summary': parsed['summary'],
+          'last_etag': etag,
+          'sync_status': SyncItemStatus.synced,
+          'item_type': 'event',
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
       }
     }
   }
