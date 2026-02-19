@@ -5,12 +5,51 @@ import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
 import android.content.pm.PackageManager
+import android.net.Uri
 import java.util.TimeZone
 import android.provider.CalendarContract
 import android.util.Log
 import androidx.core.content.ContextCompat
 
 class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
+
+    private data class CalendarAccount(val name: String, val type: String)
+
+    private fun getCalendarAccount(calendarId: String): CalendarAccount? {
+        val projection = arrayOf(
+            CalendarContract.Calendars.ACCOUNT_NAME,
+            CalendarContract.Calendars.ACCOUNT_TYPE
+        )
+
+        return context.contentResolver.query(
+            CalendarContract.Calendars.CONTENT_URI,
+            projection,
+            "${CalendarContract.Calendars._ID} = ?",
+            arrayOf(calendarId),
+            null
+        )?.use { cursor ->
+            if (!cursor.moveToFirst()) {
+                return null
+            }
+
+            val accountName = cursor.getString(0)
+            val accountType = cursor.getString(1)
+            if (accountName.isNullOrEmpty() || accountType.isNullOrEmpty()) {
+                null
+            } else {
+                CalendarAccount(accountName, accountType)
+            }
+        }
+    }
+
+    private fun buildSyncAdapterEventUri(baseUri: Uri, calendarId: String): Uri {
+        val account = getCalendarAccount(calendarId)
+        return baseUri.buildUpon()
+            .appendQueryParameter(CalendarContract.CALLER_IS_SYNCADAPTER, "true")
+            .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_NAME, account?.name ?: "")
+            .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_TYPE, account?.type ?: "")
+            .build()
+    }
 
     companion object {
         private val CALENDAR_PROJECTION = arrayOf(
@@ -443,13 +482,17 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
     ) {
         try {
             val contentResolver = context.contentResolver
-            val values = ContentValues().apply {
+            val baseValues = ContentValues().apply {
                 put(CalendarContract.Events.DTSTART, request.start)
                 put(CalendarContract.Events.DTEND, request.end)
                 put(CalendarContract.Events.TITLE, request.title)
                 put(CalendarContract.Events.DESCRIPTION, request.notes)
                 put(CalendarContract.Events.CALENDAR_ID, request.calendarId.toLong())
                 put(CalendarContract.Events.EVENT_TIMEZONE, TimeZone.getDefault().id)
+            }
+
+            val values = ContentValues().apply {
+                putAll(baseValues)
                 // UID 需要稳定写入，确保后续 getEvents 始终能返回同一 UID。
                 put(CalendarContract.Events.UID_2445, request.uid)
                 put(CalendarContract.Events._SYNC_ID, request.uid)
@@ -469,7 +512,19 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
                 }
             } else {
                 // --- 执行插入 INSERT ---
-                val uri = contentResolver.insert(CalendarContract.Events.CONTENT_URI, values)
+                val syncAdapterUri = buildSyncAdapterEventUri(CalendarContract.Events.CONTENT_URI, request.calendarId)
+                var uri = contentResolver.insert(syncAdapterUri, values)
+
+                if (uri == null) {
+                    // 部分 ROM/Provider 对 sync-adapter 参数支持不稳定，回退到普通写入。
+                    val fallbackValues = ContentValues().apply {
+                        putAll(baseValues)
+                        put(CalendarContract.Events.UID_2445, request.uid)
+                        put(CalendarContract.Events.SYNC_DATA1, request.uid)
+                    }
+                    uri = contentResolver.insert(CalendarContract.Events.CONTENT_URI, fallbackValues)
+                }
+
                 if (uri != null) {
                     val newId = uri.lastPathSegment
                     callback(Result.success(newId))
