@@ -129,6 +129,11 @@ class _CalendarCard extends StatelessWidget {
     return Obx(() {
       final calendarController = Get.find<CalendarPageController>();
       final isSubscribing = calendarController.subscribingUrls.contains(calendar.icsUrl ?? '');
+      final isSubscribed = calendarController.isPublicIcsSubscribed(calendar.icsUrl);
+      final shouldDisableSubscribe = calendar.icsUrl == null ||
+          calendar.icsUrl?.isEmpty == true ||
+          isSubscribing ||
+          isSubscribed;
 
       return Card(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -165,9 +170,7 @@ class _CalendarCard extends StatelessWidget {
                         ),
                         const SizedBox(width: 8),
                         ElevatedButton(
-                          onPressed: calendar.icsUrl == null ||
-                                  calendar.icsUrl?.isEmpty == true ||
-                                  isSubscribing
+                          onPressed: shouldDisableSubscribe
                               ? null
                               : () async {
                                   final ok = await calendarController.subscribePublicIcs(calendar.icsUrl!);
@@ -204,7 +207,10 @@ class _CalendarCard extends StatelessWidget {
                                     valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                                   ),
                                 )
-                              : const Text('Subscribe', style: TextStyle(fontSize: 13)),
+                              : Text(
+                                  isSubscribed ? 'Subscribed' : 'Subscribe',
+                                  style: const TextStyle(fontSize: 13),
+                                ),
                         ),
                       ],
                     ),
