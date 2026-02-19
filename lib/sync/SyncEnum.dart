@@ -2,7 +2,6 @@
 enum SyncAction {
   // --- 创建阶段 (物理开坑) ---
   createRemote,   // 物理动作：WebDAV MKCALENDAR
-  createLocal,    // 物理动作：DB Insert (仅记录，不含数据)
 
   // --- 同步阶段 (数据交换) ---
   // sync_mode 约定：0 = 只读（仅 Pull），1 = 双向同步（Pull + Push）
