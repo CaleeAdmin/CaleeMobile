@@ -249,7 +249,7 @@ class CaleeServerService {
             'start': parsed['dtstart'], // 确保 IcsParser 返回的 key 是这个
             'end': parsed['dtend'],
             'href': isSubscription ? '$calendarPath${parsed['remote_uid']}.ics' : item['href'],
-            'etag': parsed['dtstamp'] ?? 'no-etag',
+            'etag': (item['etag']?.isNotEmpty == true ? item['etag'] : parsed['dtstamp']) ?? 'no-etag',
             'calendar_data': icsString,
           };
         }).whereType<Map<String, dynamic>>().toList();
@@ -270,9 +270,10 @@ class CaleeServerService {
     for (var response in responses) {
       final href = response.findAllElements('href', namespace: '*').firstOrNull?.innerText;
       final data = response.findAllElements('calendar-data', namespace: '*').firstOrNull?.innerText;
+      final etag = response.findAllElements('getetag', namespace: '*').firstOrNull?.innerText;
 
       if (href != null && data != null && data.isNotEmpty) {
-        results.add({'href': href, 'ics': data});
+        results.add({'href': href, 'ics': data, 'etag': etag ?? ''});
       }
     }
     return results;

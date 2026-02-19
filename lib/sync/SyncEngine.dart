@@ -22,6 +22,19 @@ class SyncEngine {
   final DatabaseHelper _dbHelper = DatabaseHelper.instance;
 
   //依赖表格 https://docs.google.com/spreadsheets/d/1QG-OfRUdYpY5G-_rrLWNYgUVUaAKNnHNQDPPexwckHE/edit?gid=975224459#gid=975224459
+
+  /// Build sync tasks only for bindings that pass the hard eligibility gate.
+  ///
+  /// Flow:
+  /// 1) Load remote/local binding snapshots.
+  /// 2) Evaluate binding eligibility (enabled, path, binding row, local id, local exists, remote exists).
+  /// 3) Detect collection-level change signals.
+  /// 4) Emit a context only when this binding should run a strategy.
+  ///
+  /// Note on push behavior:
+  /// - READ_ONLY bindings schedule [SyncAction.fullSyncPull] (no push allowed).
+  /// - TWO_WAY bindings schedule [SyncAction.fullSyncBidi], whose matrix can both
+  ///   pull and push (including local-create -> remote create via push path).
   Future<List<SyncContext>> generateSyncTasks(
       String userId,
       List<Map<String, dynamic>> remoteResults,
@@ -39,25 +52,19 @@ class SyncEngine {
         rc.sync_mode,
         rc.is_enabled,
         rc.is_subscription,
+        lb.id AS binding_id,
         lb.local_collection_id,
         lb.binding_origin
       FROM remote_collections rc
       LEFT JOIN local_bindings lb ON lb.remote_collection_id = rc.id
       WHERE rc.account_name = ?
         AND rc.collection_type = 'calendar'
-        AND rc.remote_path IS NOT NULL
-        AND rc.remote_path != ""
     ''', [userId]);
-
 
     final List<SyncContext> contexts = [];
     final remoteMap = {
       for (final r in remoteResults)
         if ((r['remote_path']?.toString() ?? '').isNotEmpty) r['remote_path'] as String: r
-    };
-    final localMapByPath = {
-      for (final row in collectionRows)
-        if ((row['remote_path']?.toString() ?? '').isNotEmpty) row['remote_path'] as String: row
     };
 
     final List<PlatformCalendar?> nativeCalendars = await _native.getCalendars();
@@ -67,97 +74,104 @@ class SyncEngine {
         .where((id) => id.isNotEmpty)
         .toSet();
 
-    for (final remote in remoteResults) {
-      final String path = remote['remote_path']?.toString() ?? '';
-      if (path.isEmpty) continue;
+    for (final local in collectionRows) {
+      final String path = local['remote_path']?.toString() ?? '';
+      final Map<String, dynamic>? remote = remoteMap[path];
+      final int remoteCollectionId = (local['id'] as int?) ?? 0;
 
-      final Map<String, dynamic>? local = localMapByPath[path];
+      final Map<String, dynamic> gate = _evaluateBindingEligibility(
+        row: local,
+        nativeCalendarIds: nativeIds,
+        remoteExists: remote != null,
+      );
 
-      if (local == null) {
-        continue;
-      }
-
-      final int isEnabled = (local['is_enabled'] as int?) ?? 0;
-      if (isEnabled != 1) {
-        continue;
-      }
-
-      final Object? remoteCollectionId = local['id'];
-      final String localId = local['local_collection_id']?.toString() ?? '';
-      if (localId.isEmpty || !nativeIds.contains(localId)) {
-        if (remoteCollectionId != null) {
+      if (!(gate['eligible'] as bool)) {
+        final String reason = gate['reason']?.toString() ?? 'unknown';
+        debugPrint('[SYNC_GATE][binding=$remoteCollectionId][path=$path] skipped reason=$reason');
+        if (reason == 'local_calendar_missing' && remoteCollectionId > 0) {
           await db.update(
             'remote_collections',
             {'is_enabled': 0},
             where: 'id = ?',
             whereArgs: [remoteCollectionId],
           );
-          debugPrint('⚠️ 日历连接已失效（缺少绑定或本地日历不存在），已自动关闭。请重新启用连接。');
+          debugPrint('[SYNC_GATE][binding=$remoteCollectionId] disabled_due_to_missing_local_calendar');
         }
         continue;
       }
 
-      final int mode = (local['sync_mode'] as int?) ?? 0;
-
+      final int mode = (local['sync_mode'] as int?) ?? SyncBindingMode.readOnly;
       final String? dbCtag = local['synced_ctag']?.toString();
-      final String? remoteCtag = remote['ctag']?.toString();
+      final String? remoteCtag = remote?['ctag']?.toString();
       final bool remoteChanged = (remoteCtag != null && remoteCtag != dbCtag);
       final bool localChanged = await _isCalendarDirty(db, local['id']);
       final bool metaChanged =
-          (remote['display_name']?.toString() ?? '') != (local['display_name']?.toString() ?? '') ||
-          (remote['color']?.toString() ?? '') != (local['color']?.toString() ?? '');
+          (remote?['display_name']?.toString() ?? '') != (local['display_name']?.toString() ?? '') ||
+          (remote?['color']?.toString() ?? '') != (local['color']?.toString() ?? '');
 
-      final bool shouldSync;
-      final SyncAction action;
-
-      if (mode == 1) {
-        // 1 = 双向同步
-        shouldSync = remoteChanged || localChanged || metaChanged;
-        action = SyncAction.fullSyncBidi;
-      } else {
-        // 0 = 只读（仅云端 -> 本地）
-        shouldSync = remoteChanged || metaChanged;
-        action = SyncAction.fullSyncPull;
-      }
+      final bool shouldSync = mode == SyncBindingMode.twoWay
+          ? (remoteChanged || localChanged || metaChanged)
+          : (remoteChanged || metaChanged);
 
       if (!shouldSync) {
-        debugPrint("💤 日历无可同步变动，跳过任务生成: ${(remote['display_name'] ?? local['display_name'])}");
+        debugPrint('[SYNC_GATE][binding=$remoteCollectionId][path=$path] skipped reason=no_detected_change');
         continue;
       }
 
-      final int remoteCollectionId = (local['id'] as int?) ?? 0;
-      if (remoteCollectionId <= 0) {
-        debugPrint("⏭️ 远端集合缺少有效ID，跳过任务: ${local['display_name'] ?? path}");
-        continue;
-      }
-
-      contexts.add(_buildContext(remote, local, action));
-    }
-
-    for (final local in collectionRows) {
-      final String path = local['remote_path']?.toString() ?? '';
-      if (path.isEmpty) {
-        debugPrint('⏭️ 跳过无远端路径记录: ${local['id']}');
-        continue;
-      }
-
-      final bool remoteExists = remoteMap.containsKey(path);
-      final int isEnabled = (local['is_enabled'] as int?) ?? 0;
-
-      if (!remoteExists && isEnabled == 1) {
-        await db.update(
-          'remote_collections',
-          {'is_enabled': 0},
-          where: 'id = ?',
-          whereArgs: [local['id']],
-        );
-        debugPrint('⚠️ 远端日历已不存在，已自动关闭同步: ${local['display_name'] ?? path}');
-      }
+      // Strategy selection is where push capability is enabled:
+      // - fullSyncPull: remote -> local only
+      // - fullSyncBidi: remote <-> local (contains _pushToRemote path)
+      contexts.add(_buildContext(
+        remote ?? {},
+        local,
+        mode == SyncBindingMode.twoWay ? SyncAction.fullSyncBidi : SyncAction.fullSyncPull,
+      ));
     }
 
     return contexts;
   }
 
+  /// Centralized hard gate used before any per-binding strategy can run.
+  /// Return shape: {eligible: bool, reason: string}.
+  Map<String, dynamic> _evaluateBindingEligibility({
+    required Map<String, dynamic> row,
+    required Set<String> nativeCalendarIds,
+    required bool remoteExists,
+  }) {
+    final int isEnabled = (row['is_enabled'] as int?) ?? 0;
+    if (isEnabled != 1) {
+      return {'eligible': false, 'reason': 'remote_collection_disabled'};
+    }
+
+    final String remotePath = row['remote_path']?.toString() ?? '';
+    if (remotePath.isEmpty) {
+      return {'eligible': false, 'reason': 'missing_remote_path'};
+    }
+
+    final int bindingId = (row['binding_id'] as int?) ?? 0;
+    if (bindingId <= 0) {
+      return {'eligible': false, 'reason': 'missing_binding_id'};
+    }
+
+    final String localCollectionId = row['local_collection_id']?.toString() ?? '';
+    if (localCollectionId.isEmpty) {
+      return {'eligible': false, 'reason': 'missing_local_collection_id'};
+    }
+
+    if (!nativeCalendarIds.contains(localCollectionId)) {
+      return {'eligible': false, 'reason': 'local_calendar_missing'};
+    }
+
+    if (!remoteExists) {
+      return {'eligible': false, 'reason': 'remote_collection_missing'};
+    }
+
+    return {'eligible': true, 'reason': 'ok'};
+  }
+
+  /// Collection-level local dirty check for task scheduling only.
+  ///
+  /// Item-level conflict/change decisions are handled in strategy decision matrices.
   Future<bool> _isCalendarDirty(Database db, Object? remoteCollectionId) async {
     if (remoteCollectionId == null) return false;
     // 这里的状态码对应：pendingPush, pendingDelete
