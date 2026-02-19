@@ -645,7 +645,12 @@ class _CalendarRow extends StatelessWidget {
                       onPressed: () async {
                         final result = await showDialog<String>(
                           context: context,
-                          builder: (c) => CalendarOptionsDialog(item: item),
+                          builder: (c) => CalendarOptionsDialog(
+                            item: item,
+                            onTwoWayChanged: (isTwoWay) async {
+                              await controller.updateCalendarSyncMode(item, isTwoWay);
+                            },
+                          ),
                         );
 
                         if (result == null) return;

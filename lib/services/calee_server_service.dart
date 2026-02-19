@@ -102,12 +102,9 @@ class CaleeServerService {
       final ncSubscribe = prop.findElements('nc:subscribe').firstOrNull?.innerText;
       bool isSubscribed = isSubscribedResource || ncSubscribe == "1";
 
-      // 2. 检查写权限
-      final privileges = prop.findElements('d:current-user-privilege-set').firstOrNull;
-      bool hasWritePrivilege = privileges?.findAllElements('d:write').isNotEmpty ?? false;
-
-      // 3. 设定同步模式：订阅日历或无写权限均设为只读 (0)
-      int syncMode = (isSubscribed || !hasWritePrivilege) ? 0 : 1;
+      // 3. 设定同步模式：新抓取/新创建的远端日历统一默认只读 (0)
+      // 双向同步由 UI 的 "Two-way sync" 开关显式开启。
+      const int syncMode = 0;
 
       results.add({
         'remote_path': href,

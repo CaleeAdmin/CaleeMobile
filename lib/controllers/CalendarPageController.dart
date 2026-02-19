@@ -145,6 +145,33 @@ class CalendarPageController extends GetxController {
     }
   }
 
+
+
+  Future<void> updateCalendarSyncMode(CalendarDisplayItem item, bool isTwoWay) async {
+    final db = await DatabaseHelper.instance.database;
+    final int nextSyncMode = isTwoWay ? 1 : 0;
+
+    String whereClause;
+    List<dynamic> whereArgs;
+
+    if (item.remotePath != null && item.remotePath!.isNotEmpty) {
+      whereClause = 'remote_path = ?';
+      whereArgs = [item.remotePath];
+    } else {
+      whereClause = 'id IN (SELECT remote_collection_id FROM local_bindings WHERE local_collection_id = ?)';
+      whereArgs = [item.localId];
+    }
+
+    await db.update(
+      'remote_collections',
+      {'sync_mode': nextSyncMode},
+      where: whereClause,
+      whereArgs: whereArgs,
+    );
+
+    await refreshDashboard(includeEventCounts: false);
+  }
+
   Future<void> setCalendarEnabledStatus(CalendarDisplayItem item, bool newValue) async {
     final db = await DatabaseHelper.instance.database;
 
