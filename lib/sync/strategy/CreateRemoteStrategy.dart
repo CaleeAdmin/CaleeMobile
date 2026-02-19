@@ -1,6 +1,8 @@
 import 'package:caleesync/core/platform/pigeon/calendar_api.g.dart';
 import 'package:caleesync/entity/SyncContext.dart';
 import 'package:caleesync/entity/SyncSummary.dart';
+import 'package:caleesync/sync/SyncEnum.dart';
+import 'package:caleesync/common/utils/UidGenerator.dart';
 import 'package:sqflite/sqflite.dart';
 
 import 'SyncStrategy.dart';
@@ -37,7 +39,7 @@ class CreateRemoteStrategy extends SyncStrategy {
 
       // 3. 抓取本地系统日程
       final List<PlatformItem?> items = await nativeApi.getEvents(
-        ctx.calendarId,
+        ctx.localCalendarId,
         start,
         end,
       );
@@ -48,8 +50,20 @@ class CreateRemoteStrategy extends SyncStrategy {
       // 4. 遍历并执行 Initial Push (建议串行或限制并发)
       for (var event in currentEvents) {
         // 1. 提取并处理空值
-        final String uid = event.uid ?? "";
+        String uid = (event.uid ?? '').trim();
         final String title = event.title ?? "无标题";
+        if (uid.isEmpty) {
+          uid = CaleeUid.generate();
+          await nativeApi.createOrUpdateEvent(CalendarEventRequest(
+            calendarId: ctx.localCalendarId,
+            eventId: event.localId,
+            uid: uid,
+            title: title,
+            start: event.startTime ?? DateTime.now().millisecondsSinceEpoch,
+            end: event.endTime ?? (event.startTime ?? DateTime.now().millisecondsSinceEpoch) + 3600000,
+            notes: event.notes,
+          ));
+        }
         final int startTime =
             event.startTime ?? DateTime.now().millisecondsSinceEpoch;
         final int endTime = event.endTime ?? startTime + 3600000; // 默认 1 小时后
@@ -71,16 +85,16 @@ class CreateRemoteStrategy extends SyncStrategy {
           await db.insert('sync_items', {
             'remote_uid': uid,
             'local_item_id': event.localId,
-            'remote_collection_id': ctx.calendarId,
+            'remote_collection_id': ctx.remoteCollectionId,
             'summary': title,
             'description': event.notes,
             'dtstart': startTime,
             'dtend': endTime,
-            'last_etag': etag,
+            'last_etag': etag.replaceAll('\"', ''),
             'last_mtime': event.lastModified ?? 0,
             'remote_href':
                 "${resultPath.endsWith('/') ? resultPath : '$resultPath/'}$uid.ics",
-            'sync_status': 0,
+            'sync_status': SyncItemStatus.synced,
           }, conflictAlgorithm: ConflictAlgorithm.replace);
         }
       }
@@ -91,7 +105,7 @@ class CreateRemoteStrategy extends SyncStrategy {
         WHERE id IN (
           SELECT remote_collection_id FROM local_bindings WHERE local_collection_id = ?
         )
-      ''', [resultPath, ctx.calendarId]);
+      ''', [resultPath, ctx.localCalendarId]);
       summary.success++;
     }
   }

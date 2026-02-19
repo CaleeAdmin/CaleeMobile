@@ -27,11 +27,11 @@ class DeleteRemoteStrategy extends SyncStrategy {
         int sCount = await txn.delete(
           'sync_items',
           where: 'remote_collection_id IN (SELECT remote_collection_id FROM local_bindings WHERE local_collection_id = ?)',
-          whereArgs: [ctx.calendarId],
+          whereArgs: [ctx.localCalendarId],
         );
 
         // B. 清理 local_bindings/remote_collections（日历自身配置）
-        await txn.delete('local_bindings', where: 'local_collection_id = ?', whereArgs: [ctx.calendarId]);
+        await txn.delete('local_bindings', where: 'local_collection_id = ?', whereArgs: [ctx.localCalendarId]);
         int cCount = await txn.delete(
           'remote_collections',
           where: 'id NOT IN (SELECT remote_collection_id FROM local_bindings)',
@@ -39,7 +39,7 @@ class DeleteRemoteStrategy extends SyncStrategy {
         debugPrint("🧹 云端删除成功，本地清理完成: 删除了 $cCount 个日历配置, $sCount 条同步映射");
       });
       // 3. 通知 UI 刷新 (如果是使用 GetX 或 Provider)
-      // calendarController.removeItemFromUI(ctx.calendarId);
+      // calendarController.removeItemFromUI(ctx.localCalendarId);
     } else {
       debugPrint("❌ 云端删除失败，停止清理本地数据库以防状态不一致");
     }

@@ -125,6 +125,12 @@ class SyncEngine {
         continue;
       }
 
+      final int remoteCollectionId = (local['id'] as int?) ?? 0;
+      if (remoteCollectionId <= 0) {
+        debugPrint("⏭️ 远端集合缺少有效ID，跳过任务: ${local['display_name'] ?? path}");
+        continue;
+      }
+
       contexts.add(_buildContext(remote, local, action));
     }
 
@@ -154,10 +160,10 @@ class SyncEngine {
 
   Future<bool> _isCalendarDirty(Database db, Object? remoteCollectionId) async {
     if (remoteCollectionId == null) return false;
-    // 这里的状态码对应：1 (Dirty/Modified), 2 (Deleted)
+    // 这里的状态码对应：pendingPush, pendingDelete
     final List<Map<String, dynamic>> dirtyCheck = await db.rawQuery('''
     SELECT 1 FROM sync_items
-    WHERE remote_collection_id = ? AND sync_status IN (1, 2)
+    WHERE remote_collection_id = ? AND sync_status IN (${SyncItemStatus.pendingPush}, ${SyncItemStatus.pendingDelete})
     LIMIT 1
   ''', [remoteCollectionId]);
     return dirtyCheck.isNotEmpty;
@@ -165,7 +171,8 @@ class SyncEngine {
 
   SyncContext _buildContext(Map remote, Map? local, SyncAction action) {
     return SyncContext(
-      calendarId: local?['local_collection_id']?.toString() ?? "",
+      remoteCollectionId: (local?['id'] as int?) ?? 0,
+      localCalendarId: local?['local_collection_id']?.toString() ?? "",
       remotePath: remote['remote_path'] ?? local?['remote_path'] ?? "",
       accountName: local?['account_name'] ?? "",
       displayName: remote['display_name'] ?? local?['display_name'] ?? "未命名日历",
@@ -385,24 +392,24 @@ class SyncEngine {
     final List<Map<String, dynamic>> locals = await db.query(
         'sync_items',
         where: 'remote_collection_id = ?',
-        whereArgs: [ctx.calendarId]
+        whereArgs: [ctx.remoteCollectionId]
     );
 
     print("--------------------------------------------------");
-    print("🕵️ [同步监控] 开始对比日历: ${ctx.displayName} (ID: ${ctx.calendarId})");
+    print("🕵️ [同步监控] 开始对比日历: ${ctx.displayName} (remoteCollectionId: ${ctx.remoteCollectionId}, localCalendarId: ${ctx.localCalendarId})");
     print("🕵️ [同步状态] 账户同步开关 (syncStatus): ${ctx.syncStatus}");
     print("🕵️ [数据量] 本地库: ${locals.length} 条 | 云端返回: ${remoteMap.length} 条");
 
     for (var local in locals) {
       // 💡 容错处理：确保所有 ID 都是字符串，且状态有默认值
       final String uid = local['remote_uid']?.toString() ?? "";
-      final int status = local['sync_status'] as int? ?? 0;
+      final int status = local['sync_status'] as int? ?? SyncItemStatus.synced;
       final String title = local['summary'] ?? "无标题";
       final String localId = local['local_item_id']?.toString() ?? "";
       final String? remoteHref = local['remote_href']?.toString();
 
       // --- 场景 A：本地标记为已删除 (Status 2) ---
-      if (status == 2) {
+      if (status == SyncItemStatus.pendingDelete) {
         print("\n🗑️ [删除] 正在同步删除云端日程: [$title]");
         final String deletePath = remoteHref ??
             "${currentRemotePath.endsWith('/') ? currentRemotePath : '$currentRemotePath/'}$uid.ics";
@@ -410,7 +417,7 @@ class SyncEngine {
         try {
           bool success = await _nc.deleteEvent(eventPath: deletePath);
           if (success) {
-            await db.delete('sync_items', where: 'remote_uid = ?', whereArgs: [uid]);
+            await db.delete('sync_items', where: 'remote_collection_id = ? AND remote_uid = ?', whereArgs: [ctx.remoteCollectionId, uid]);
             print("   -> ✅ 云端删除成功，本地映射已移除");
           }
         } catch (e) {
@@ -427,7 +434,7 @@ class SyncEngine {
       if (existsInRemote) {
         final remote = remoteMap[uid];
 
-        if (status == 1) {
+        if (status == SyncItemStatus.pendingPush) {
           print("   -> 🚀 判定动作: 本地修改，执行上传 (Push)");
           await _uploadToCloud(local, currentRemotePath);
         }
@@ -448,7 +455,7 @@ class SyncEngine {
         remoteMap.remove(uid);
       } else {
         // --- 场景 C：本地有但云端没有 ---
-        if (status == 0) {
+        if (status == SyncItemStatus.synced) {
           print("   -> 🗑️ 判定动作: 云端已删，清理本地记录");
           // 只有真实的系统 ID 才调用系统删除，虚拟 ID 只删本地库
           if (localId.isNotEmpty && !localId.startsWith('v_')) {
@@ -458,8 +465,8 @@ class SyncEngine {
               print("      ! 系统事件删除失败 (可能已手动删除): $e");
             }
           }
-          await db.delete('sync_items', where: 'remote_uid = ?', whereArgs: [uid]);
-        } else if (status == 1) {
+          await db.delete('sync_items', where: 'remote_collection_id = ? AND remote_uid = ?', whereArgs: [ctx.remoteCollectionId, uid]);
+        } else if (status == SyncItemStatus.pendingPush) {
           print("   -> 🚀 判定动作: 本地新增，准备同步至云端");
           await _uploadToCloud(local, currentRemotePath);
         }
@@ -520,7 +527,7 @@ class SyncEngine {
     // if (ctx.syncStatus == 1) {
     //   try {
     //     systemEventId = await _native.createEvent(
-    //       ctx.calendarId, // 必须是数字字符串，如 "6"
+    //       ctx.localCalendarId, // 必须是数字字符串，如 "6"
     //       parsed['summary'],
     //       parsed['dtstart'],
     //       parsed['dtend'],
@@ -538,7 +545,7 @@ class SyncEngine {
     // await db.insert('sync_items', {
     //   'remote_uid': remote['remote_uid'],
     //   'local_item_id': systemEventId ?? 'v_${remote['remote_uid']}', // 有系统 ID 用系统 ID，没有用虚拟
-    //   'remote_collection_id': ctx.calendarId,
+    //   'remote_collection_id': ctx.localCalendarId,
     //   'last_etag': remote['etag'],
     //   'summary': parsed['summary'],
     //   'dtstart': parsed['dtstart'],

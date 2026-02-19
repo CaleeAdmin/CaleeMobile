@@ -2,7 +2,8 @@
 import '../sync/SyncEnum.dart';
 
 class SyncContext {
-  final String calendarId;    // 本地数据库中的 ID
+  final int remoteCollectionId; // remote_collections.id
+  final String localCalendarId; // Android Calendar provider calendarId
   final String remotePath;    // 云端路径
   final String accountName;   // 账户名
   final String displayName;   // 日历显示名称
@@ -16,7 +17,8 @@ class SyncContext {
   final Map<String, dynamic> extra; // 存放描述、报错信息等
 
   SyncContext({
-    required this.calendarId,
+    required this.remoteCollectionId,
+    required this.localCalendarId,
     required this.remotePath,
     required this.accountName,
     required this.displayName,
@@ -31,7 +33,8 @@ class SyncContext {
 
   /// 💡 新增 copyWith：用于在同步过程中动态更新 ID 或状态
   SyncContext copyWith({
-    String? calendarId,
+    int? remoteCollectionId,
+    String? localCalendarId,
     String? remotePath,
     String? accountName,
     String? displayName,
@@ -44,7 +47,8 @@ class SyncContext {
     Map<String, dynamic>? extra
   }) {
     return SyncContext(
-      calendarId: calendarId ?? this.calendarId,
+      remoteCollectionId: remoteCollectionId ?? this.remoteCollectionId,
+      localCalendarId: localCalendarId ?? this.localCalendarId,
       remotePath: remotePath ?? this.remotePath,
       accountName: accountName ?? this.accountName,
       displayName: displayName ?? this.displayName,
@@ -60,7 +64,7 @@ class SyncContext {
 
   @override
   String toString() {
-    return 'SyncContext{calendarId: $calendarId, remotePath: $remotePath, accountName: $accountName, displayName: $displayName, color: $color, syncStatus: $syncStatus, syncMode: $syncMode, action: $action, ctag: $ctag, isSubscription: $isSubscription, extra: $extra}';
+    return 'SyncContext{remoteCollectionId: $remoteCollectionId, localCalendarId: $localCalendarId, remotePath: $remotePath, accountName: $accountName, displayName: $displayName, color: $color, syncStatus: $syncStatus, syncMode: $syncMode, action: $action, ctag: $ctag, isSubscription: $isSubscription, extra: $extra}';
   }
 
 
