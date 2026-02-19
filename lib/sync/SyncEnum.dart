@@ -7,6 +7,33 @@ enum SyncAction {
   fullSyncPush,   // 单向流：仅允许向云端 Push (发布 B)
 }
 
+class SyncBindingMode {
+  static const int readOnly = 0;
+  static const int twoWay = 1;
+}
+
+class SyncBindingOrigin {
+  // 与 local_bindings.binding_origin 保持一致：0=本地发起，1=远端发起
+  static const int local = 0;
+  static const int remote = 1;
+}
+
+class SyncDeletionPolicy {
+  // TWO_WAY 默认策略：删除双向传播
+  static const int bidirectional = 0;
+  // 安全策略：仅远端删除生效，本地删除不会删远端
+  static const int remoteDeleteWins = 1;
+}
+
+enum SyncItemAction {
+  skip,
+  pull,
+  push,
+  createLocal,
+  deleteLocal,
+  deleteRemote,
+}
+
 // 仅用于显式 UI 工作流（非 SyncEngine worker）
 enum ProvisioningAction {
   uiCreateRemoteCalendar,
