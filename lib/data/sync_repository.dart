@@ -1119,6 +1119,12 @@ class SyncRepository {
         return false;
       }
 
+      await _ensureRemoteCalendarDraft(
+        accountName: userId,
+        displayName: displayName,
+        remotePath: remotePath,
+      );
+
       // 2. 创建成功后立即重扫远端列表，由统一流程落库。
       await CaleeServerService().scanRemoteCalendars(
         serverUrl: AppConstant.caleeServer,
@@ -1130,6 +1136,45 @@ class SyncRepository {
       print("❌ [Repository] 创建逻辑发生异常: $e");
       return false;
     }
+  }
+
+  Future<void> _ensureRemoteCalendarDraft({
+    required String accountName,
+    required String displayName,
+    required String remotePath,
+  }) async {
+    final db = await _dbHelper.database;
+    final List<Map<String, dynamic>> rows = await db.query(
+      'remote_collections',
+      columns: ['id'],
+      where: 'account_name = ? AND collection_type = ? AND remote_path = ?',
+      whereArgs: [accountName, 'calendar', remotePath],
+      limit: 1,
+    );
+
+    if (rows.isNotEmpty) {
+      final int id = rows.first['id'] as int;
+      await db.update(
+        'remote_collections',
+        {
+          'display_name': displayName,
+          'color': '#4CAF50',
+        },
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      return;
+    }
+
+    await db.insert('remote_collections', {
+      'account_name': accountName,
+      'collection_type': 'calendar',
+      'display_name': displayName,
+      'color': '#4CAF50',
+      'is_enabled': 0,
+      'sync_mode': 0,
+      'remote_path': remotePath,
+    });
   }
 
   Future<bool> handlePublicSubscription(String icsUrl) async {

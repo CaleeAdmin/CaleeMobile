@@ -162,7 +162,7 @@ class _CalendarPageState extends State<CalendarPage> {
                     },
                   );
                   if (res == true) {
-                    Get.snackbar('Created', 'New calendar created (placeholder)');
+                    Get.snackbar('Created', 'New calendar is connected and sync is enabled');
                   }
                 },
               ),
