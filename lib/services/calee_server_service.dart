@@ -240,12 +240,15 @@ class CaleeServerService {
           final parsed = IcsParser.parse(item['ics']!, item['href']!);
           if (parsed.isEmpty) return null;
 
+          final String parsedUid = (parsed['uid'] ?? '').toString();
+          if (parsedUid.isEmpty) return null;
+
           return {
-            'remote_uid': parsed['remote_uid'],
+            'remote_uid': parsedUid,
             'summary': parsed['summary'],
             'start': parsed['dtstart'], // 确保 IcsParser 返回的 key 是这个
             'end': parsed['dtend'],
-            'href': isSubscription ? '$calendarPath${parsed['remote_uid']}.ics' : item['href'],
+            'href': isSubscription ? '$calendarPath$parsedUid.ics' : item['href'],
             'etag': (item['etag']?.isNotEmpty == true ? item['etag'] : parsed['dtstamp']) ?? 'no-etag',
             'calendar_data': icsString,
           };
