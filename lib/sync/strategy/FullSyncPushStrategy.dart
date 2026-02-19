@@ -51,7 +51,9 @@ class FullSyncPushStrategy extends SyncStrategy {
           needsPush = true;
         } else {
           final record = localSyncMap[localId]!;
-          if (lastModified > (record['last_mtime'] ?? 0)) {
+          final int syncStatus = (record['sync_status'] as int?) ?? SyncItemStatus.synced;
+          if (syncStatus == SyncItemStatus.pendingPush ||
+              lastModified > (record['last_mtime'] ?? 0)) {
             needsPush = true;
           }
         }
