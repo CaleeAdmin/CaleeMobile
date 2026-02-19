@@ -257,10 +257,13 @@ class CaleeServerService {
           };
         }).whereType<Map<String, dynamic>>().toList();
       }
+
+      throw Exception(
+          'Failed to fetch unified events. status=${response.statusCode}, path=$calendarPath, isSubscription=$isSubscription');
     } catch (e) {
       debugPrint("❌ 同步异常: $e");
+      rethrow;
     }
-    return [];
   }
 
   List<Map<String, String>> _extractIcsAndHrefFromXml(String xmlBody) {
