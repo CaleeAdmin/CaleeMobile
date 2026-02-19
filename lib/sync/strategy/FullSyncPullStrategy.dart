@@ -23,6 +23,8 @@ class FullSyncPullStrategy extends SyncStrategy {
     final String remotePath = ctx.remotePath;
     final String? newCtag = ctx.ctag;
     final String accountName = ctx.accountName;
+    final int bindingId = (ctx.extra['binding_id'] as int?) ?? 0;
+    final int origin = (ctx.extra['binding_origin'] as int?) ?? SyncBindingOrigin.remote;
 
     if (localCalendarId.isEmpty || remoteCollectionId <= 0) return;
 
@@ -62,7 +64,7 @@ class FullSyncPullStrategy extends SyncStrategy {
 
       final Set<String> remoteUids = {};
 
-      debugPrint('[SYNC_BINDING][id=$remoteCollectionId] mode=READ_ONLY origin=${SyncBindingOrigin.remote} '
+      debugPrint('[SYNC_BINDING][binding_id=$bindingId] mode=pull origin=$origin '
           'deletionPolicy=delete_local counts(remote=${remoteEvents.length}, local=${localItemsByUid.length}, mapped=${localSyncMap.length})');
 
       // Evaluate per-item decision matrix for read-only bindings.
@@ -139,7 +141,17 @@ class FullSyncPullStrategy extends SyncStrategy {
         }
       }
 
+      final int localCount = localItemsByUid.length;
+      final int mappedCount = localSyncMap.length;
+      final bool suspiciousEmptyRemoteFetch = remoteEvents.isEmpty && localCount > 0 && mappedCount > 0;
+      if (suspiciousEmptyRemoteFetch) {
+        debugPrint('[SYNC_SAFETY][binding_id=$bindingId][origin=$origin] suspicious empty remote fetch, skip deletion (remote=${remoteEvents.length}, local=$localCount, mapped=$mappedCount)');
+      }
+
       for (var uid in localSyncMap.keys) {
+        if (suspiciousEmptyRemoteFetch) {
+          break;
+        }
         if (!remoteUids.contains(uid)) {
           final record = localSyncMap[uid]!;
           final bool deleted = await nativeApi.deleteEvent(record['local_item_id'].toString());
