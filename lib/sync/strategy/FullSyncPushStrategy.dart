@@ -51,7 +51,9 @@ class FullSyncPushStrategy extends SyncStrategy {
           needsPush = true;
         } else {
           final record = localSyncMap[localId]!;
-          if (lastModified > (record['last_mtime'] ?? 0)) {
+          final int syncStatus = (record['sync_status'] as int?) ?? SyncItemStatus.synced;
+          if (syncStatus == SyncItemStatus.pendingPush ||
+              lastModified > (record['last_mtime'] ?? 0)) {
             needsPush = true;
           }
         }
@@ -103,8 +105,9 @@ class FullSyncPushStrategy extends SyncStrategy {
           final record = localSyncMap[localId]!;
           final String? href = record['remote_href'];
           final String uid = (record['remote_uid'] ?? '').toString();
+          final int syncStatus = (record['sync_status'] as int?) ?? SyncItemStatus.synced;
 
-          if (href != null) {
+          if (href != null && syncStatus == SyncItemStatus.pendingDelete) {
             final bool isDeletedOnRemote = await nc.deleteEvent(eventPath: href);
             if (isDeletedOnRemote) {
               await db.delete(
