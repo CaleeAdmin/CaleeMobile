@@ -59,7 +59,7 @@ class CaleeServerService {
     }
 
     final List<Map<String, dynamic>> results = _parseCalendarXmlToMap(respBody);
-    persistRemoteCalendars(results, userId);
+    await persistRemoteCalendars(results, userId);
     return results;
   }
 
@@ -163,7 +163,7 @@ class CaleeServerService {
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) -- 增加订阅字段
         ON CONFLICT(account_name, collection_type, remote_path) DO UPDATE SET
           display_name = excluded.display_name,
-          synced_ctag = excluded.synced_ctag,
+          synced_ctag = remote_collections.synced_ctag,
           sync_mode = remote_collections.sync_mode,
           -- 只有当远端提供了新颜色且不为空时才更新本地颜色
           color = CASE WHEN excluded.color IS NOT NULL AND excluded.color != "" 
