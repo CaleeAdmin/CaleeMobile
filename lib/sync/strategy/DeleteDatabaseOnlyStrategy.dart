@@ -4,17 +4,48 @@ import 'package:flutter/cupertino.dart';
 
 import 'SyncStrategy.dart';
 
-class Deletedatabaseonlystrategy extends SyncStrategy {
+class DeleteDatabaseOnlyStrategy extends SyncStrategy {
   @override
   Future<void> execute(SyncContext ctx, SyncSummary summary) async {
-    // 无需原生操作，直接从数据库抹除映射关系
     final db = await dbHelper.database;
-    await db.delete(
-      'remote_collections',
-      where: 'remote_path = ? AND account_name = ?',
-      whereArgs: [ctx.remotePath, ctx.accountName],
-    );
-    debugPrint("🧹 已从数据库彻底移除未落地的日历记录");
-  }
+    await db.transaction((txn) async {
+      final List<Map<String, dynamic>> rows = await txn.query(
+        'remote_collections',
+        columns: ['id'],
+        where: 'remote_path = ? AND account_name = ?',
+        whereArgs: [ctx.remotePath, ctx.accountName],
+      );
 
+      if (rows.isEmpty) {
+        debugPrint('ℹ️ deleteDatabaseOnly: 无需处理，未找到对应远端集合记录。');
+        return;
+      }
+
+      final List<int> remoteCollectionIds = rows
+          .map((row) => row['id'])
+          .whereType<int>()
+          .toList();
+
+      for (final remoteCollectionId in remoteCollectionIds) {
+        await txn.delete(
+          'sync_items',
+          where: 'remote_collection_id = ?',
+          whereArgs: [remoteCollectionId],
+        );
+        await txn.delete(
+          'local_bindings',
+          where: 'remote_collection_id = ?',
+          whereArgs: [remoteCollectionId],
+        );
+      }
+
+      await txn.delete(
+        'remote_collections',
+        where: 'id IN (${List.filled(remoteCollectionIds.length, '?').join(',')})',
+        whereArgs: remoteCollectionIds,
+      );
+    });
+
+    debugPrint('🧹 deleteDatabaseOnly: 已仅清理数据库映射，不触发本地/远端删除。');
+  }
 }

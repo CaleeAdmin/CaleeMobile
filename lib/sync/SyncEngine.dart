@@ -135,12 +135,17 @@ class SyncEngine {
         continue;
       }
 
-      final int mode = (local['sync_mode'] as int?) ?? 0;
       final bool remoteExists = remoteMap.containsKey(path);
+      final int isEnabled = (local['is_enabled'] as int?) ?? 0;
 
-      // read-only(0) 和 two-way(1) 均以远端为准：远端集合消失时清理本地绑定
-      if (!remoteExists && (mode == 0 || mode == 1)) {
-        contexts.add(_buildContext({}, local, SyncAction.deleteLocal));
+      if (!remoteExists && isEnabled == 1) {
+        await db.update(
+          'remote_collections',
+          {'is_enabled': 0},
+          where: 'id = ?',
+          whereArgs: [local['id']],
+        );
+        debugPrint('⚠️ 远端日历已不存在，已自动关闭同步: ${local['display_name'] ?? path}');
       }
     }
 
@@ -204,7 +209,7 @@ class SyncEngine {
       SyncContext ctx = originalCtx;
 
       // 2. 根据任务类型获取策略类
-      final strategy = SyncStrategyFactory.getStrategy(ctx.action);
+      final strategy = SyncStrategyFactory.getSyncStrategy(ctx.action);
 
       if (strategy != null) {
         try {
