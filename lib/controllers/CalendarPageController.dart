@@ -274,7 +274,7 @@ class CalendarPageController extends GetxController {
       ''', [loginName]);
       final Map<String, int> cachedCountByCalendarId = {};
       final Map<String, bool> localReadOnlyById = {};
-      final List<CalendarDisplayItem> dashboardCalendars = [];
+      final List<CalendarDisplayItem> nextCloudCalendars = [];
 
       try {
         final List<PlatformCalendar?> platformCalendars = await _nativeApi.getCalendars();
@@ -297,12 +297,6 @@ class CalendarPageController extends GetxController {
           cachedCountByCalendarId[key] = (row['count'] as int?) ?? 0;
         }
       }
-
-      calendarMaps.sort((a, b) {
-        final int aId = (a['id'] as int?) ?? 0;
-        final int bId = (b['id'] as int?) ?? 0;
-        return aId.compareTo(bId);
-      });
 
       for (var cal in calendarMaps) {
         final String? localId = cal['local_collection_id']?.toString();
@@ -339,10 +333,10 @@ class CalendarPageController extends GetxController {
           allowMassDeletionDangerous: allowMassDeletionDangerous,
         );
 
-        dashboardCalendars.add(displayItem);
+        nextCloudCalendars.add(displayItem);
       }
 
-      calendars.assignAll(dashboardCalendars);
+      calendars.assignAll(nextCloudCalendars);
 
     } catch (e) {
       print("[ERROR] Dashboard refresh exception: $e");
