@@ -4,10 +4,12 @@ import '../../controllers/CalendarPageController.dart';
 class CalendarOptionsDialog extends StatefulWidget {
   final CalendarDisplayItem item;
   final Future<void> Function(bool isTwoWay)? onTwoWayChanged;
+  final Future<bool> Function(bool enabled)? onAllowMassDeletionChanged;
 
   const CalendarOptionsDialog({
     required this.item,
     this.onTwoWayChanged,
+    this.onAllowMassDeletionChanged,
     super.key,
   });
 
@@ -19,6 +21,7 @@ class _CalendarOptionsDialogState extends State<CalendarOptionsDialog> {
   late bool isTwoWay;
   late bool isRenameDisabled;
   late bool isTwoWayDisabled;
+  late bool allowMassDeletionDangerous;
 
   @override
   void initState() {
@@ -28,6 +31,7 @@ class _CalendarOptionsDialogState extends State<CalendarOptionsDialog> {
     // origin: 0 = 本地初始化, 1 = 云端同步
     // 本地初始化的映射不允许在主日历页重命名
     isRenameDisabled = widget.item.origin == 0;
+    allowMassDeletionDangerous = widget.item.allowMassDeletionDangerous;
   }
 
   @override
@@ -61,6 +65,23 @@ class _CalendarOptionsDialogState extends State<CalendarOptionsDialog> {
                     title: const Text('Two-way sync', style: TextStyle(fontWeight: FontWeight.w600)),
                     subtitle: const Text('Sync bidirectionally between Calee Online and Local device', style: TextStyle(fontSize: 12)),
                     controlAffinity: ListTileControlAffinity.leading,
+                  ),
+
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: allowMassDeletionDangerous,
+                    onChanged: (v) async {
+                      if (widget.onAllowMassDeletionChanged == null) return;
+                      final bool applied = await widget.onAllowMassDeletionChanged!(v);
+                      if (!mounted) return;
+                      if (applied) {
+                        setState(() {
+                          allowMassDeletionDangerous = v;
+                        });
+                      }
+                    },
+                    title: const Text('Allow mass deletion (dangerous)', style: TextStyle(fontWeight: FontWeight.w600)),
+                    subtitle: const Text('When off, large delete waves are blocked for both local and remote deletes.', style: TextStyle(fontSize: 12)),
                   ),
                 ],
               ),

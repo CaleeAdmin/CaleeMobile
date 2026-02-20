@@ -669,6 +669,38 @@ class _CalendarRow extends StatelessWidget {
                             onTwoWayChanged: (isTwoWay) async {
                               await controller.updateCalendarSyncMode(item, isTwoWay);
                             },
+                            onAllowMassDeletionChanged: (enabled) async {
+                              if (!enabled) {
+                                await controller.setAllowMassDeletionDangerous(item, false);
+                                return true;
+                              }
+
+                              final bool? confirmed = await showDialog<bool>(
+                                context: c,
+                                builder: (dialogContext) => AlertDialog(
+                                  title: const Text('Enable dangerous mode?'),
+                                  content: const Text(
+                                    'This can permanently delete large amounts of data on your phone and/or server if the snapshot is incomplete.',
+                                  ),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () => Navigator.of(dialogContext).pop(false),
+                                      child: const Text('Cancel'),
+                                    ),
+                                    FilledButton(
+                                      onPressed: () => Navigator.of(dialogContext).pop(true),
+                                      child: const Text('I understand, enable'),
+                                    ),
+                                  ],
+                                ),
+                              );
+
+                              if (confirmed == true) {
+                                await controller.setAllowMassDeletionDangerous(item, true);
+                                return true;
+                              }
+                              return false;
+                            },
                           ),
                         );
 

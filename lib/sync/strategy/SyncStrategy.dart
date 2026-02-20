@@ -9,6 +9,8 @@ import '../../services/calee_auth_service.dart';
 import '../../services/calee_server_service.dart';
 
 abstract class SyncStrategy {
+  static const int massDeletionAbsoluteThreshold = 10;
+
   // 共用服务组件
   final SyncRepository repo = SyncRepository();
   final CaleeServerService nc = CaleeServerService();
@@ -20,4 +22,12 @@ abstract class SyncStrategy {
 
   // 核心执行接口
   Future<void> execute(SyncContext ctx, SyncSummary summary);
+
+  String massDeletionKeyForBinding(int bindingId) =>
+      '${AppConstant.allowMassDeletionByBindingKeyPrefix}$bindingId';
+
+  bool isMassDeletionOverrideEnabled(int bindingId) {
+    if (bindingId <= 0) return false;
+    return MMKVUtils.instance.getBool(massDeletionKeyForBinding(bindingId), defaultValue: false) ?? false;
+  }
 }

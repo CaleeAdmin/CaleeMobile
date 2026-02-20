@@ -13,4 +13,9 @@ class AppConstant {
   /// 同步策略开关：是否允许远端日历自动落地到系统本地日历。
   /// 默认关闭，避免未授权的 remote -> local 初始化。
   static const String autoCreateLocalFromRemoteKey = 'auto_create_local_from_remote';
+
+  /// Per-binding dangerous override key prefix.
+  ///
+  /// Full key format: [allowMassDeletionByBindingKeyPrefix]{bindingId}
+  static const String allowMassDeletionByBindingKeyPrefix = 'allow_mass_deletion_binding_';
 }

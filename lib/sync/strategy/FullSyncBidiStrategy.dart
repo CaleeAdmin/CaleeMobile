@@ -34,6 +34,7 @@ class FullSyncBidiStrategy extends SyncStrategy {
       final String remotePath = ctx.remotePath;
       final String? newCtag = ctx.ctag;
       final int origin = (ctx.extra['binding_origin'] as int?) ?? SyncBindingOrigin.remote;
+      final int bindingId = (ctx.extra['binding_id'] as int?) ?? 0;
 
       final UnifiedEventsSnapshot snapshot = await nc.fetchUnifiedEventsSnapshot(
         calendarPath: remotePath,
@@ -74,22 +75,44 @@ class FullSyncBidiStrategy extends SyncStrategy {
       };
 
       final int mappedCount = mappingByRemoteUid.length;
-      final int remoteUidsMatchedCount = mappingByRemoteUid.keys.where((uid) => remoteByUid.containsKey(uid)).length;
-      final int deleteCandidates = mappedCount - remoteUidsMatchedCount;
       final bool suspiciousEmptyRemoteFetch = snapshot.parseProducedZeroEvents && mappedCount > 0;
-      final double deleteCandidateRatio = mappedCount <= 0 ? 0 : (deleteCandidates / mappedCount);
-      final bool massDeletionSafetyTripped = deleteCandidates >= 10 || deleteCandidateRatio >= 0.5;
+      final bool suspiciousEmptyLocalFetch = localItemsMap.isEmpty && mappedCount > 0;
       final bool remoteSnapshotTrusted =
           snapshot.fetchSucceeded &&
           (snapshot.statusCode == 200 || snapshot.statusCode == 207) &&
           (newCtag ?? '').isNotEmpty &&
-          !suspiciousEmptyRemoteFetch &&
-          !massDeletionSafetyTripped;
+          !suspiciousEmptyRemoteFetch;
+      final bool localSnapshotTrusted = !suspiciousEmptyLocalFetch;
 
-      if (!remoteSnapshotTrusted) {
-        debugPrint('[SYNC_SAFETY][binding=$remoteCollectionId] TWO_WAY untrusted snapshot; block second-phase deleteLocal '
-            '(status=${snapshot.statusCode}, fetchSucceeded=${snapshot.fetchSucceeded}, parseZero=${snapshot.parseProducedZeroEvents}, '
-            'deleteCandidates=$deleteCandidates, deleteCandidateRatio=$deleteCandidateRatio)');
+      int localDeleteCandidates = 0;
+      int remoteDeleteCandidates = 0;
+      for (final uid in allUids) {
+        final remoteExists = remoteByUid[uid] != null;
+        final localExists = localItemsMap[uid] != null;
+        if (!remoteExists && localExists) {
+          if (_defaultDeletionPolicy == SyncDeletionPolicy.remoteDeleteWins) {
+            localDeleteCandidates++;
+          } else {
+            remoteDeleteCandidates++;
+          }
+        }
+      }
+
+      final bool allowMassDeletion = isMassDeletionOverrideEnabled(bindingId);
+      final bool massDeletionSafetyTripped =
+          localDeleteCandidates >= SyncStrategy.massDeletionAbsoluteThreshold ||
+          remoteDeleteCandidates >= SyncStrategy.massDeletionAbsoluteThreshold;
+      final bool blockDeletesBySafetyGate = massDeletionSafetyTripped && !allowMassDeletion;
+
+      if (!remoteSnapshotTrusted || !localSnapshotTrusted) {
+        debugPrint('[SYNC_SAFETY][binding=$remoteCollectionId] TWO_WAY untrusted snapshot; block delete actions '
+            '(remoteTrusted=$remoteSnapshotTrusted, localTrusted=$localSnapshotTrusted, status=${snapshot.statusCode}, fetchSucceeded=${snapshot.fetchSucceeded})');
+      }
+      if (blockDeletesBySafetyGate) {
+        debugPrint('[SYNC_SAFETY][binding=$remoteCollectionId] aborted by safety gate '
+            '(localDeleteCandidates=$localDeleteCandidates, remoteDeleteCandidates=$remoteDeleteCandidates, mappedCount=$mappedCount, threshold=${SyncStrategy.massDeletionAbsoluteThreshold})');
+        summary.recordBindingOutcome(bindingId, SyncOutcomeStatus.safetyGateBlockedDeletions);
+        summary.errorLog.add('🛑 ${ctx.displayName} Safety gate blocked deletions (localDeleteCandidates=$localDeleteCandidates, remoteDeleteCandidates=$remoteDeleteCandidates, mappedCount=$mappedCount, threshold=${SyncStrategy.massDeletionAbsoluteThreshold})');
       }
 
       int createLocal = 0;
@@ -183,6 +206,10 @@ class FullSyncBidiStrategy extends SyncStrategy {
             }
             break;
           case SyncItemAction.deleteLocal:
+            if (blockDeletesBySafetyGate || !remoteSnapshotTrusted || !localSnapshotTrusted) {
+              break;
+            }
+
             if (mapping == null) {
               if (local != null && local.localId != null) {
                 await nativeApi.deleteEvent(local.localId!);
@@ -201,10 +228,6 @@ class FullSyncBidiStrategy extends SyncStrategy {
               break;
             }
 
-            if (!remoteSnapshotTrusted) {
-              break;
-            }
-
             if (mapping['local_item_id'] != null) {
               await nativeApi.deleteEvent(mapping['local_item_id'].toString());
             } else if (local != null && local.localId != null) {
@@ -214,6 +237,9 @@ class FullSyncBidiStrategy extends SyncStrategy {
             deleteLocal++;
             break;
           case SyncItemAction.deleteRemote:
+            if (blockDeletesBySafetyGate || !remoteSnapshotTrusted || !localSnapshotTrusted) {
+              break;
+            }
             final href = mapping?['remote_href']?.toString() ?? remote?['href']?.toString() ?? '';
             if (href.isNotEmpty) {
               await nc.deleteEvent(eventPath: href);
@@ -235,12 +261,20 @@ class FullSyncBidiStrategy extends SyncStrategy {
         }
       }
 
-      summary.success++;
-      summary.successLog.add('🔄 双向同步完成: ${ctx.displayName}');
+      if (!blockDeletesBySafetyGate) {
+        summary.success++;
+        if (allowMassDeletion) {
+          summary.recordBindingOutcome(bindingId, SyncOutcomeStatus.persistentOverrideEnabled);
+          summary.successLog.add('⚠️ ${ctx.displayName} Persistent override enabled (dangerous mode)');
+        } else {
+          summary.recordBindingOutcome(bindingId, SyncOutcomeStatus.completedNormally);
+          summary.successLog.add('🔄 ${ctx.displayName} Completed normally');
+        }
+      }
       debugPrint('[SYNC_SUMMARY][binding=$remoteCollectionId] createLocal=$createLocal createRemote=$createRemote '
           'pull=$pull push=$push deleteLocal=$deleteLocal stagedDeleteLocal=$stagedDeleteLocal deleteRemote=$deleteRemote skip=$skip '
-          'conflicts=$conflicts dedupRemoved=${dedup.removedCount} remoteSnapshotTrusted=$remoteSnapshotTrusted '
-          'deleteCandidates=$deleteCandidates deleteCandidateRatio=$deleteCandidateRatio status=${snapshot.statusCode}');
+          'conflicts=$conflicts dedupRemoved=${dedup.removedCount} remoteSnapshotTrusted=$remoteSnapshotTrusted localSnapshotTrusted=$localSnapshotTrusted '
+          'localDeleteCandidates=$localDeleteCandidates remoteDeleteCandidates=$remoteDeleteCandidates safetyAborted=$blockDeletesBySafetyGate allowMassDeletion=$allowMassDeletion status=${snapshot.statusCode}');
     } catch (e) {
       summary.failed++;
       summary.errorLog.add('❌ ${ctx.displayName} 双向同步异常: $e');

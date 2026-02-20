@@ -29,6 +29,8 @@ class CalendarDisplayItem {
   final String? subscriptionUrl;
   bool isEnabled;            // 对应数据库 is_enabled
   final int origin;          // 0: 本地创建, 1: 云端同步
+  final int bindingId;
+  bool allowMassDeletionDangerous;
 
   CalendarDisplayItem({
     this.localId,            // 允许为空
@@ -42,6 +44,8 @@ class CalendarDisplayItem {
     this.subscriptionUrl,
     required this.isEnabled,
     required this.origin,
+    required this.bindingId,
+    required this.allowMassDeletionDangerous,
   });
 
   // 方便从数据库 Map 转换
@@ -60,6 +64,8 @@ class CalendarDisplayItem {
       subscriptionUrl: map['subscription_url']?.toString(),
       isEnabled: toBool(map['is_enabled']),
       origin: (map['binding_origin'] as int?) ?? 0,
+      bindingId: (map['binding_id'] as int?) ?? 0,
+      allowMassDeletionDangerous: false,
     );
   }
 }
@@ -193,6 +199,16 @@ class CalendarPageController extends GetxController {
     await refreshDashboard(includeEventCounts: false);
   }
 
+  Future<void> setAllowMassDeletionDangerous(CalendarDisplayItem item, bool allow) async {
+    if (item.bindingId <= 0) return;
+    MMKVUtils.instance.setBool(
+      '${AppConstant.allowMassDeletionByBindingKeyPrefix}${item.bindingId}',
+      allow,
+    );
+    item.allowMassDeletionDangerous = allow;
+    calendars.refresh();
+  }
+
   Future<void> setCalendarEnabledStatus(CalendarDisplayItem item, bool newValue) async {
     final db = await DatabaseHelper.instance.database;
 
@@ -249,7 +265,7 @@ class CalendarPageController extends GetxController {
       // 2. 查询本地 remote_collections 的所有日历记录
       final db = await DatabaseHelper.instance.database;
       final List<Map<String, dynamic>> calendarMaps = await db.rawQuery('''
-        SELECT rc.*, lb.local_collection_id, lb.binding_origin
+        SELECT rc.*, lb.local_collection_id, lb.binding_origin, lb.id AS binding_id
         FROM remote_collections rc
         LEFT JOIN local_bindings lb ON lb.remote_collection_id = rc.id
         WHERE rc.account_name = ?
@@ -296,6 +312,11 @@ class CalendarPageController extends GetxController {
         }
 
         // 组装 UI 模型
+        final int bindingId = (cal['binding_id'] as int?) ?? 0;
+        final bool allowMassDeletionDangerous = bindingId > 0
+            ? (MMKVUtils.instance.getBool('${AppConstant.allowMassDeletionByBindingKeyPrefix}$bindingId', defaultValue: false) ?? false)
+            : false;
+
         var displayItem = CalendarDisplayItem(
           localId: localId,
           name: cal['display_name'] ?? 'Unknown',
@@ -308,6 +329,8 @@ class CalendarPageController extends GetxController {
           isEnabled: cal['is_enabled'] == 1,
           remotePath: remotePath,
           origin: origin,
+          bindingId: bindingId,
+          allowMassDeletionDangerous: allowMassDeletionDangerous,
         );
 
         nextCloudCalendars.add(displayItem);
