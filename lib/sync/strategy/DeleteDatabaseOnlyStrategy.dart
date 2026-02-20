@@ -17,7 +17,7 @@ class DeleteDatabaseOnlyStrategy extends SyncStrategy {
       );
 
       if (rows.isEmpty) {
-        debugPrint('ℹ️ deleteDatabaseOnly: 无需处理，未找到对应远端集合记录。');
+        debugPrint('[INFO] deleteDatabaseOnly: No action needed; matching remote collection record not found.');
         return;
       }
 
@@ -46,6 +46,6 @@ class DeleteDatabaseOnlyStrategy extends SyncStrategy {
       );
     });
 
-    debugPrint('🧹 deleteDatabaseOnly: 已仅清理数据库映射，不触发本地/远端删除。');
+    debugPrint('[INFO] deleteDatabaseOnly: Only DB mapping cleaned; no local/remote deletion triggered.');
   }
 }

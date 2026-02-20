@@ -113,7 +113,7 @@ class FullSyncBidiStrategy extends SyncStrategy {
             '(localDeleteCandidates=$localDeleteCandidates, remoteDeleteCandidates=$remoteDeleteCandidates, mappedCount=$mappedCount, threshold=${SyncStrategy.massDeletionAbsoluteThreshold})');
         summary.recordBindingOutcome(bindingId, SyncOutcomeStatus.safetyGateBlockedDeletions);
         summary.telemetry?.onSafetyTriggered(ctx: ctx, detail: 'localDeleteCandidates=$localDeleteCandidates remoteDeleteCandidates=$remoteDeleteCandidates');
-        summary.errorLog.add('🛑 ${ctx.displayName} Safety gate blocked deletions (localDeleteCandidates=$localDeleteCandidates, remoteDeleteCandidates=$remoteDeleteCandidates, mappedCount=$mappedCount, threshold=${SyncStrategy.massDeletionAbsoluteThreshold})');
+        summary.errorLog.add('[ERROR] ${ctx.displayName} Safety gate blocked deletions (localDeleteCandidates=$localDeleteCandidates, remoteDeleteCandidates=$remoteDeleteCandidates, mappedCount=$mappedCount, threshold=${SyncStrategy.massDeletionAbsoluteThreshold})');
       }
 
       int createLocal = 0;
@@ -272,10 +272,10 @@ class FullSyncBidiStrategy extends SyncStrategy {
         summary.success++;
         if (allowMassDeletion) {
           summary.recordBindingOutcome(bindingId, SyncOutcomeStatus.persistentOverrideEnabled);
-          summary.successLog.add('⚠️ ${ctx.displayName} Persistent override enabled (dangerous mode)');
+          summary.successLog.add('[WARN] ${ctx.displayName} Persistent override enabled (dangerous mode)');
         } else {
           summary.recordBindingOutcome(bindingId, SyncOutcomeStatus.completedNormally);
-          summary.successLog.add('🔄 ${ctx.displayName} Completed normally');
+          summary.successLog.add('[INFO] ${ctx.displayName} Completed normally');
         }
         final trust = (!remoteSnapshotTrusted || !localSnapshotTrusted)
             ? SnapshotTrustStatus.unknown
@@ -302,7 +302,7 @@ class FullSyncBidiStrategy extends SyncStrategy {
           'localDeleteCandidates=$localDeleteCandidates remoteDeleteCandidates=$remoteDeleteCandidates safetyAborted=$blockDeletesBySafetyGate allowMassDeletion=$allowMassDeletion status=${snapshot.statusCode}');
     } catch (e) {
       summary.failed++;
-      summary.errorLog.add('❌ ${ctx.displayName} 双向同步异常: $e');
+      summary.errorLog.add('[ERROR] ${ctx.displayName} Two-way sync exception: $e');
       final code = mapSyncErrorCode(e);
       summary.telemetry?.onError(ctx: ctx, code: code, message: 'Two-way sync failed', technicalDetail: e.toString());
       summary.telemetry?.onBindingEnd(

@@ -251,7 +251,7 @@ class SyncItemPlanner {
       localCalendarId: local['local_collection_id']?.toString() ?? '',
       remotePath: remote['remote_path'] ?? local['remote_path'] ?? '',
       accountName: local['account_name'] ?? '',
-      displayName: remote['display_name'] ?? local['display_name'] ?? '未命名日历',
+      displayName: remote['display_name'] ?? local['display_name'] ?? 'Untitled calendar',
       color: remote['color'] ?? local['color'] ?? '#AARRGGBB',
       syncMode: local['sync_mode'] ?? remote['sync_mode'] ?? 0,
       action: action,

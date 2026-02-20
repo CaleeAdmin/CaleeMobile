@@ -172,7 +172,7 @@ class FullSyncPullStrategy extends SyncStrategy {
             '(localDeleteCandidates=$localDeleteCandidates, remoteDeleteCandidates=$remoteDeleteCandidates, mappedCount=$mappedCount, threshold=${SyncStrategy.massDeletionAbsoluteThreshold})');
         summary.recordBindingOutcome(bindingId, SyncOutcomeStatus.safetyGateBlockedDeletions);
         summary.telemetry?.onSafetyTriggered(ctx: ctx, detail: 'localDeleteCandidates=$localDeleteCandidates remoteDeleteCandidates=$remoteDeleteCandidates');
-        summary.errorLog.add('🛑 ${ctx.displayName} Safety gate blocked deletions (localDeleteCandidates=$localDeleteCandidates, remoteDeleteCandidates=$remoteDeleteCandidates, mappedCount=$mappedCount, threshold=${SyncStrategy.massDeletionAbsoluteThreshold})');
+        summary.errorLog.add('[ERROR] ${ctx.displayName} Safety gate blocked deletions (localDeleteCandidates=$localDeleteCandidates, remoteDeleteCandidates=$remoteDeleteCandidates, mappedCount=$mappedCount, threshold=${SyncStrategy.massDeletionAbsoluteThreshold})');
       }
 
       if (!remoteSnapshotTrusted) {
@@ -241,10 +241,10 @@ class FullSyncPullStrategy extends SyncStrategy {
         summary.success++;
         if (allowMassDeletion) {
           summary.recordBindingOutcome(bindingId, SyncOutcomeStatus.persistentOverrideEnabled);
-          summary.successLog.add('⚠️ ${ctx.displayName} Persistent override enabled (dangerous mode)');
+          summary.successLog.add('[WARN] ${ctx.displayName} Persistent override enabled (dangerous mode)');
         } else {
           summary.recordBindingOutcome(bindingId, SyncOutcomeStatus.completedNormally);
-          summary.successLog.add('⬇️ ${ctx.displayName} Completed normally');
+          summary.successLog.add('[INFO] ${ctx.displayName} Completed normally');
         }
         summary.telemetry?.onBindingEnd(
           ctx: ctx,
@@ -263,9 +263,9 @@ class FullSyncPullStrategy extends SyncStrategy {
         );
       }
     } catch (e) {
-      debugPrint('❌ FullSyncPull 异常: $e');
+      debugPrint('[ERROR] FullSyncPull exception: $e');
       summary.failed++;
-      summary.errorLog.add('❌ ${ctx.displayName} 只读同步异常: $e');
+      summary.errorLog.add('[ERROR] ${ctx.displayName} Read-only sync exception: $e');
       final code = mapSyncErrorCode(e);
       summary.telemetry?.onError(ctx: ctx, code: code, message: 'Pull sync failed', technicalDetail: e.toString());
       summary.telemetry?.onBindingEnd(

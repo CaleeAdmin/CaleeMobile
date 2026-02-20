@@ -6,7 +6,7 @@ class IcsParser {
     final content = icsString.replaceAll(RegExp(r'\r?\n\s+'), '');
 
     String extract(String key) {
-      // 修正点：增加 ^ 匹配行首，以及 $ 匹配行尾，multiLine 设为 true
+      // 修正点：增加 ^ 匹配行首, 以及 $ 匹配行尾, multiLine 设为 true
       // 修正点：匹配 key 后面跟着 [冒号] 或 [分号...冒号]
       final reg = RegExp('^$key(?:;[^:]*)?:(.*)\$', multiLine: true, caseSensitive: false);
       final match = reg.firstMatch(content);
@@ -15,7 +15,7 @@ class IcsParser {
       return match.group(1)!.trim();
     }
 
-    // 优先取 ICS 内部的 UID，没有再用传进来的
+    // 优先取 ICS 内部的 UID, 没有再用传进来的
     final String internalUid = extract('UID');
     final String finalUid = internalUid.isNotEmpty ? internalUid : fallbackUid;
 
@@ -26,17 +26,17 @@ class IcsParser {
     final endMillis = _parseIcsDate(endValue);
 
     if (startMillis == null) {
-      debugPrint("⚠️ 解析失败: DTSTART 为空或格式错误 ($startValue)");
+      debugPrint("[WARN] Parse failed: DTSTART is empty or malformed ($startValue)");
       return {};
     }
 
     return {
       'uid': finalUid,
-      'summary': _decodeIcsText(extract('SUMMARY').isEmpty ? "无标题事件" : extract('SUMMARY')),
+      'summary': _decodeIcsText(extract('SUMMARY').isEmpty ? "Untitled event" : extract('SUMMARY')),
       'description': _decodeIcsText(extract('DESCRIPTION')),
       'dtstart': startMillis,
       'dtend': endMillis ?? (startMillis + 3600000),
-      'dtstamp': extract('DTSTAMP'), // 建议存一下这个，同步对比有用
+      'dtstamp': extract('DTSTAMP'), // 建议存一下这个, 同步对比有用
     };
   }
 
@@ -53,7 +53,7 @@ class IcsParser {
     try {
       if (dateStr.isEmpty) return null;
 
-      // 过滤掉非数字字符，只保留数字和 T
+      // 过滤掉非数字字符, 只保留数字和 T
       final compact = dateStr.replaceAll(RegExp(r'[^0-9T]'), '');
       if (compact.length < 8) return null;
 

@@ -20,12 +20,12 @@ class CreateLocalStrategy extends SyncStrategy {
         password?.isEmpty == true) {
       return;
     }
-    print('🚀 开始执行 createLocal: ${ctx.displayName}');
+    print('[INFO] Starting createLocal: ${ctx.displayName}');
     final bool allowAutoCreateLocalFromRemote =
         MMKVUtils.instance.getBool(AppConstant.autoCreateLocalFromRemoteKey) ?? false;
     final int bindingOrigin = (ctx.extra['binding_origin'] as int?) ?? 1;
     if (!allowAutoCreateLocalFromRemote && bindingOrigin == 1) {
-      debugPrint('⏭️ createLocal 已禁用（remote-origin）: ${ctx.displayName}');
+      debugPrint('[INFO] createLocal disabled (remote-origin): ${ctx.displayName}');
       return;
     }
 
@@ -39,7 +39,7 @@ class CreateLocalStrategy extends SyncStrategy {
     );
 
     if (newLocalId == null) {
-      print('❌ 原生创建日历失败');
+      print('[ERROR] Native calendar creation failed');
       summary.failed++;
       return;
     }
@@ -66,7 +66,7 @@ class CreateLocalStrategy extends SyncStrategy {
         'updated_at': DateTime.now().millisecondsSinceEpoch,
       }, conflictAlgorithm: ConflictAlgorithm.replace);
     } else {
-      debugPrint('❌ createLocal 找不到 remote_collections 记录: ${ctx.remotePath}');
+      debugPrint('[ERROR] createLocal cannot find remote_collections record: ${ctx.remotePath}');
       summary.failed++;
       return;
     }
@@ -105,7 +105,7 @@ class CreateLocalStrategy extends SyncStrategy {
           }
         }
 
-        // 6. 获取事件详情（内部兼容订阅/普通日历，解决 404 问题）
+        // 6. 获取事件详情（内部兼容订阅/普通日历, 解决 404 问题）
         final eventData = await Eventparsedutils.resolveEventData(
           remote: remote,
           isSubscription: ctx.isSubscription ?? false,
@@ -146,14 +146,14 @@ class CreateLocalStrategy extends SyncStrategy {
             eventSuccessCount++;
           }
         } catch (e) {
-          debugPrint("❌ 同步单条事件失败: $e");
+          debugPrint("[ERROR] Failed to sync single event: $e");
         }
       }
 
-      print('✅ createLocal 完成: 已处理 $eventSuccessCount 个事件');
+      print('[OK] createLocal complete: processed $eventSuccessCount events');
       summary.success++;
     } catch (e) {
-      print('❌ createLocal 过程发生异常: $e');
+      print('[ERROR] createLocal exception: $e');
       summary.failed++;
     }
   }

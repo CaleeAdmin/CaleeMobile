@@ -10,7 +10,7 @@ class SyncItemExecutor {
   Future<void> execute(SyncContext ctx, SyncSummary summary) async {
     final strategy = SyncStrategyFactory.getSyncStrategy(ctx.action);
     if (strategy == null) {
-      debugPrint("未定义的同步策略: ${ctx.action}");
+      debugPrint("Undefined sync strategy: ${ctx.action}");
       summary.telemetry?.onBindingEnd(
         ctx: ctx,
         status: SyncBindingResultStatus.failed,
@@ -26,7 +26,7 @@ class SyncItemExecutor {
       await strategy.execute(ctx, summary);
     } catch (e) {
       summary.failed++;
-      summary.errorLog.add("${ctx.displayName} 异常: $e");
+      summary.errorLog.add("${ctx.displayName} exception: $e");
       final code = mapSyncErrorCode(e);
       summary.telemetry?.onError(ctx: ctx, code: code, message: 'Sync failed', technicalDetail: e.toString());
       summary.telemetry?.onBindingEnd(

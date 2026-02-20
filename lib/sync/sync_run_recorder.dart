@@ -51,7 +51,7 @@ class SyncRunRecorder implements SyncRunTelemetry {
     _bindings.putIfAbsent(
       key,
       () => SyncBindingRunRecord(
-        bindingIdentifier: '${ctx.remotePath} ↔ ${ctx.localCalendarId}',
+        bindingIdentifier: '${ctx.remotePath} <-> ${ctx.localCalendarId}',
         accountIdentifier: _redact(ctx.accountName),
         startedAt: DateTime.now(),
       ),

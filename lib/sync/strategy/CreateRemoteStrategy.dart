@@ -28,7 +28,7 @@ class CreateRemoteStrategy extends SyncStrategy {
     if (resultPath != null) {
       final db = await dbHelper.database;
 
-      // 2. 扩大扫描窗口，确保存量数据全部覆盖
+      // 2. 扩大扫描窗口, 确保存量数据全部覆盖
       // 首次上云：取过去 2 年到未来 10 年
       final start = DateTime.now()
           .subtract(const Duration(days: 30))
@@ -45,13 +45,13 @@ class CreateRemoteStrategy extends SyncStrategy {
       );
       final currentEvents = items.whereType<PlatformItem>().toList();
 
-      print("[Sync] 正在为新日历推送 ${currentEvents.length} 条存量日程...");
+      print("[Sync] Pushing ${currentEvents.length} existing events for the new calendar...");
 
       // 4. 遍历并执行 Initial Push (建议串行或限制并发)
       for (var event in currentEvents) {
         // 1. 提取并处理空值
         String uid = (event.uid ?? '').trim();
-        final String title = event.title ?? "无标题";
+        final String title = event.title ?? "Untitled";
         if (uid.isEmpty) {
           uid = CaleeUid.generate();
           await nativeApi.createOrUpdateEvent(CalendarEventRequest(

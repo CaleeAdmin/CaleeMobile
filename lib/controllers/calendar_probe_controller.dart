@@ -22,7 +22,7 @@ class CalendarProbeController extends GetxController {
   final Rxn<DateTime> lastSyncAt = Rxn<DateTime>();
   /// 当前同步摘要
   final Rxn<SyncSummary> summary = Rxn<SyncSummary>();
-  /// 订阅日历列表（含 event_count 等字段），由仓库提供
+  /// Subscribed calendar列表（含 event_count 等字段），由仓库提供
   final RxList<Map<String, dynamic>> subscribedCalendars = <Map<String, dynamic>>[].obs;
 
   final SyncRepository _repo = SyncRepository();
@@ -41,14 +41,14 @@ class CalendarProbeController extends GetxController {
     syncRuns.assignAll(runs);
   }
 
-  /// 获取已订阅日历及对应事件数
+  /// 获取已Subscribed calendar及对应事件数
   Future<void> fetchSubscribedCalendars() async {
     try {
       isSyncing.value = true; // reuse flag as loading indicator
       final List<Map<String, dynamic>> rows = await _repo.getSubscribedCalendarsWithCount();
       subscribedCalendars.assignAll(rows);
     } catch (e) {
-      print('❌ fetchSubscribedCalendars failed: $e');
+      print('[ERROR] fetchSubscribedCalendars failed: $e');
     } finally {
       isSyncing.value = false;
     }
@@ -85,7 +85,7 @@ class CalendarProbeController extends GetxController {
       lastSyncAt.value = DateTime.now();
       await loadRecentRuns();
     } catch (e) {
-      // 可在此处记录错误或展示提示
+      // 可在此处记录Error或展示提示
       rethrow;
     } finally {
       isSyncing.value = false;
