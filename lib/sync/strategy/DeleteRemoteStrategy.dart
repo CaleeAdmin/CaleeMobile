@@ -23,7 +23,7 @@ class DeleteRemoteStrategy extends SyncStrategy {
       // 2. 开启事务进行本地“斩草除根”
       await db.transaction((txn) async {
         // A. 清理 sync_items（关联的事件映射）
-        // 理由：日历都没了，它下面所有 ics 文件的 ETag 记录必须清空
+        // 理由：日历都没了, 它下面所有 ics 文件的 ETag 记录必须清空
         int sCount = await txn.delete(
           'sync_items',
           where: 'remote_collection_id IN (SELECT remote_collection_id FROM local_bindings WHERE local_collection_id = ?)',
@@ -36,12 +36,12 @@ class DeleteRemoteStrategy extends SyncStrategy {
           'remote_collections',
           where: 'id NOT IN (SELECT remote_collection_id FROM local_bindings)',
         );
-        debugPrint("🧹 云端删除成功，本地清理完成: 删除了 $cCount 个日历配置, $sCount 条同步映射");
+        debugPrint("[INFO] Remote delete succeeded; local cleanup completed: deleted $cCount calendar configs, $sCount sync mappings");
       });
       // 3. 通知 UI 刷新 (如果是使用 GetX 或 Provider)
       // calendarController.removeItemFromUI(ctx.localCalendarId);
     } else {
-      debugPrint("❌ 云端删除失败，停止清理本地数据库以防状态不一致");
+      debugPrint("[ERROR] Remote delete failed; stopped local DB cleanup to avoid inconsistent state");
     }
   }
   

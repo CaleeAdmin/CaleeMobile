@@ -16,7 +16,7 @@ class AuthState {
   final String? serverUrl;          // 服务器 URL
   final String? loginName;          // 登录用户名
   final String? appPassword;        // 应用密码
-  final String? errorMessage;       // 错误信息
+  final String? errorMessage;       // Error信息
 
   const AuthState({
     this.status = AuthStatus.initial,
@@ -63,7 +63,7 @@ class AuthState {
   /// 是否已登录成功
   bool get isAuthenticated => status == AuthStatus.success;
 
-  /// 是否有错误
+  /// 是否有Error
   bool get hasError => status == AuthStatus.error && errorMessage != null;
 }
 

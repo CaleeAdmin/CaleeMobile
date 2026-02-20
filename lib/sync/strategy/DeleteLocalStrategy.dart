@@ -24,11 +24,11 @@ class Deletelocalstrategy extends SyncStrategy {
               'remote_collections',
               where: 'id NOT IN (SELECT remote_collection_id FROM local_bindings)'
           );
-          debugPrint("🗑️ 数据库清理完毕: 删除了 $sCount 条事件, $cCount 条日历记录");
+          debugPrint("[INFO] Database cleanup finished: deleted $sCount events, $cCount calendar records");
         });
       }
     }catch (e){
-      debugPrint("❌ 删除本地日历失败: $e");
+      debugPrint("[ERROR] Failed to delete local calendar: $e");
     }
   }
 

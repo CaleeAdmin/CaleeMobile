@@ -25,7 +25,7 @@ class CaleeServerService {
     );
     final String password = MMKVUtils.instance.getString(AppConstant.appPasswordKey) ?? "";
 
-    // 1. 增加 cs 命名空间定义，并请求该属性
+    // 1. 增加 cs 命名空间定义, 并请求该属性
     final xmlBody = '''<?xml version="1.0" encoding="utf-8" ?>
   <d:propfind xmlns:d="DAV:" 
               xmlns:cal="urn:ietf:params:xml:ns:caldav" 
@@ -80,15 +80,15 @@ class CaleeServerService {
 
       // a. 检查是否是标准日历
       final isStandardCalendar = resourceType?.findElements('cal:calendar').isNotEmpty ?? false;
-      // b. 检查是否是订阅日历 (你的 curl 结果显示订阅日历带这个标签)
+      // b. 检查是否是Subscribed calendar (你的 curl 结果显示Subscribed calendar带这个标签)
       final isSubscribedResource = resourceType?.findElements('cs:subscribed').isNotEmpty ?? false;
 
-      // 如果两者都不是，说明是普通文件夹或 inbox/outbox，跳过
+      // 如果两者都不是, 说明是普通文件夹或 inbox/outbox, 跳过
       if (!isStandardCalendar && !isSubscribedResource) continue;
 
       // --- 字段提取 ---
       final displayName = prop.findElements('d:displayname').firstOrNull?.innerText;
-      // 订阅日历可能没有 ctag，使用空字符串兜底
+      // Subscribed calendar可能没有 ctag, 使用空字符串兜底
       final ctag = prop.findAllElements('cs:getctag').firstOrNull?.innerText;
       final color = prop.findElements('nc:calendar-color').firstOrNull?.innerText;
       final subscriptionUrl = prop.findElements('cs:source').firstOrNull?.innerText;
@@ -96,7 +96,7 @@ class CaleeServerService {
       // --- 权限与模式逻辑 ---
 
       // 1. 订阅判定：
-      // 满足以下任一条件即视为订阅日历：
+      // 满足以下任一condition即视为Subscribed calendar：
       // - resourcetype 包含 cs:subscribed
       // - nc:subscribe 字段值为 "1"
       final ncSubscribe = prop.findElements('nc:subscribe').firstOrNull?.innerText;
@@ -109,7 +109,7 @@ class CaleeServerService {
       final String normalizedPath = normalizeRemotePath(href);
       results.add({
         'remote_path': normalizedPath,
-        'display_name': displayName ?? (isSubscribed ? "订阅日历" : "未命名日历"),
+        'display_name': displayName ?? (isSubscribed ? "Subscribed calendar" : "Untitled calendar"),
         'ctag': ctag ?? "",
         'sync_mode': syncMode,
         'color': color,
@@ -122,13 +122,13 @@ class CaleeServerService {
 
 // 辅助工具：确保不把根目录 /calendars/focus/ 当做日历处理
   bool _isSpecialFolder(String href) {
-    // 如果 href 刚好等于根路径，或者包含系统保留关键字
+    // 如果 href 刚好等于根路径, 或者包含系统保留关键字
     final path = href.toLowerCase();
     return path.endsWith('/inbox/') ||
         path.endsWith('/outbox/') ||
         path.endsWith('/trashbin/') ||
         // 这里的正则或判断逻辑应根据你的具体 userId 路径调整
-        // 如果 path 只有 4 层级且以用户名为结尾，通常是根目录
+        // 如果 path 只有 4 层级且以用户名为结尾, 通常是根目录
         RegExp(r'/dav/calendars/[^/]+/$').hasMatch(path);
   }
 
@@ -138,13 +138,13 @@ class CaleeServerService {
     final db = await _dbHelper.database;
 
     await db.transaction((txn) async {
-      // 1. 提取本次远端扫描到的所有合法路径，作为“白名单”
+      // 1. 提取本次远端扫描到的所有合法路径, 作为“白名单”
       final List<String> currentRemotePaths = remoteMaps
           .map((m) => normalizeRemotePath((m['remote_path'] ?? '').toString()))
           .where((path) => path.isNotEmpty)
           .toList();
 
-      debugPrint("开始持久化远端日历列表，当前有效路径数量: ${currentRemotePaths.length}");
+      debugPrint("Start persisting remote calendar list, active path count: ${currentRemotePaths.length}");
 
       // 2. 遍历远端列表：执行“增”或“改”
       for (var map in remoteMaps) {
@@ -175,7 +175,7 @@ class CaleeServerService {
                        ELSE remote_collections.color END,
           is_subscription = excluded.is_subscription,
           subscription_url = excluded.subscription_url
-          -- 注意：绑定信息由 local_bindings 管理，不在此处更新。
+          -- 注意：绑定信息由 local_bindings 管理, 不在此处更新。
       ''', [
               accountName,
               'calendar',
@@ -211,7 +211,7 @@ class CaleeServerService {
   /// 2. 获取并解析云端条目 (对应 sync_items)
   final String baseUrl = "https://nc-dev.ywpl.com.au";
 
-  /// 核心方法：统一获取事件（适配普通与订阅日历）
+  /// 核心方法：统一获取事件（适配普通与Subscribed calendar）
   Future<UnifiedEventsSnapshot> fetchUnifiedEventsSnapshot({
     required String calendarPath,
     required bool isSubscription,
@@ -268,7 +268,7 @@ class CaleeServerService {
         parseProducedZeroEvents: parsedEvents.isEmpty,
       );
     } catch (e) {
-      debugPrint("❌ 同步异常: $e");
+      debugPrint("[ERROR] Sync exception: $e");
       return UnifiedEventsSnapshot(
         events: const [],
         statusCode: null,
@@ -314,11 +314,11 @@ class CaleeServerService {
 
   /// 针对普通日历发送 REPORT 请求
   Future<http.Response> _sendReportRequest(String url, Map<String, String> headers) async {
-    // 1. 确保 URL 以斜杠结尾，否则某些 WebDAV 服务器会返回 501 或 405
+    // 1. 确保 URL 以斜杠结尾, 否则某些 WebDAV 服务器会返回 501 或 405
     final requestUrl = url.endsWith('/') ? url : '$url/';
 
     // 2. 构造 REPORT 请求体
-    // 注意：确保命名空间和标签没有拼写错误
+    // 注意：确保命名空间和标签没有拼写Error
     final body = '''<?xml version="1.0" encoding="utf-8" ?>
 <c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
   <d:prop>
@@ -337,7 +337,7 @@ class CaleeServerService {
     headers['Content-Type'] = 'application/xml; charset=utf-8';
     headers['Depth'] = '1';
 
-    print('DEBUG: 正在发起 REPORT 请求 -> $requestUrl');
+    print('DEBUG: Sending REPORT request -> $requestUrl');
 
     // 4. 使用 http.Request 显式指定 REPORT 方法
     final request = http.Request('REPORT', Uri.parse(requestUrl))
@@ -363,7 +363,7 @@ class CaleeServerService {
 
     return {
       'Authorization': basicAuth,
-      'Content-Type': 'application/xml; charset=utf-8', // 必须加，否则服务器可能无法解析 REPORT
+      'Content-Type': 'application/xml; charset=utf-8', // 必须加, 否则服务器可能无法解析 REPORT
     };
   }
 
@@ -408,7 +408,7 @@ class CaleeServerService {
     try {
       final res = await _client.send(req);
 
-      // 201 Created 是标准成功响应
+      // 201 Created 是标准成功response
       if (res.statusCode == 201 || res.statusCode == 204) {
         return calendarPath;
       } else {
@@ -449,7 +449,7 @@ class CaleeServerService {
     );
   }
 
-  /// [PUT] 上传单个事件到云端
+  /// [PUT] 上传单events到云端
 // 在 CaleeServerService.dart 中
   Future<String?> putEvent({
     required String calendarPath,
@@ -481,10 +481,10 @@ class CaleeServerService {
       if (response.statusCode == 201 || response.statusCode == 204) {
         String? etag = response.headers['etag']?.replaceAll('"', '');
 
-        // 容错：如果 header 没给 etag，则认为此时需要后续同步逻辑去补全，或者返回一个占位符
+        // 容错：如果 header 没给 etag, 则认为此时需要后续同步逻辑去补全, 或者返回一个占位符
         return etag ?? "pending_etag";
       } else if (response.statusCode == 412) {
-        // 冲突：云端已存在。对于场景 1，这通常意味着该日程之前已经上传成功了
+        // 冲突：云端已存在。对于场景 1, 这通常意味着该日程之前已经上传成功了
         print("[Calee] Event already exists, skipping upload.");
         return "exists";
       } else {
@@ -498,7 +498,7 @@ class CaleeServerService {
   }
 
   // 在 CaleeServerService 中检查 getEventDetail 方法
-  /// 建议在同步引擎开始时创建一个 client，结束后 close
+  /// 建议在同步引擎开始时创建一个 client, 结束后 close
   Future<String?> getEventDetail({
     required http.Client client,
     required String eventPath,
@@ -518,18 +518,18 @@ class CaleeServerService {
       if (response.statusCode == 200) {
         return response.body;
       } else {
-        print('⚠️ 下载失败 [$eventPath]: ${response.statusCode}');
+        print('[WARN] Download failed [$eventPath]: ${response.statusCode}');
         return null;
       }
     } catch (e) {
-      print('❌ 网络异常 [$eventPath]: $e');
+      print('[ERROR] Network exception [$eventPath]: $e');
       return null;
     }
   }
 
   /// [PUT] 上传事件并返回最新的 ETag
   Future<String?> uploadEvent({
-    required String path,      // 这里的 path 应该是完整的文件路径，如 /remote.php/.../uid.ics
+    required String path,      // 这里的 path 应该是完整的文件路径, 如 /remote.php/.../uid.ics
     required String content,   // ics 文本内容
   }) async {
     final String userId = MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? "";
@@ -537,7 +537,7 @@ class CaleeServerService {
     final baseUrl = "https://nc-dev.ywpl.com.au";
     final url = "$baseUrl${path.startsWith('/') ? path : '/$path'}";
 
-    print("[Calee] 准备上传事件至: $url");
+    print("[Calee] Preparing to upload event to: $url");
 
     try {
       final response = await http.put(
@@ -545,22 +545,22 @@ class CaleeServerService {
         headers: {
           'Content-Type': 'text/calendar; charset=utf-8',
           'Authorization': 'Basic ${base64Encode(utf8.encode('$userId:$password'))}',
-          // 不使用 'If-None-Match': '*'，因为我们需要支持“更新”现有事件
+          // 不使用 'If-None-Match': '*', 因为我们需要支持“更新”现有事件
         },
         body: utf8.encode(content),
       );
 
       if (response.statusCode == 201 || response.statusCode == 204) {
-        // 🚀 核心：成功后，云端通常会在 Header 中返回 ETag
+        // [INFO] 核心：成功后, 云端通常会在 Header 中返回 ETag
         String? etag = response.headers['etag']?.replaceAll('"', '');
-        print("[Calee] 上传成功，新 ETag: $etag");
+        print("[Calee] Upload succeeded, new ETag: $etag");
         return etag;
       } else {
-        print("[Calee] 上传失败，状态码: ${response.statusCode}, 响应: ${response.body}");
+        print("[Calee] Upload failed, status: ${response.statusCode}, response: ${response.body}");
         return null;
       }
     } catch (e) {
-      print("[Calee] 上传异常: $e");
+      print("[Calee] Upload exception: $e");
       return null;
     }
   }
@@ -572,7 +572,7 @@ class CaleeServerService {
     final String userId = MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? "";
     final String password = MMKVUtils.instance.getString(AppConstant.appPasswordKey) ?? "";
 
-    // 建议：确保 eventPath 以 / 开头，避免 URL 拼接错误
+    // 建议：确保 eventPath 以 / 开头, 避免 URL 拼接Error
     final String cleanPath = eventPath.startsWith('/') ? eventPath : '/$eventPath';
     final url = "https://nc-dev.ywpl.com.au$cleanPath";
 
@@ -584,19 +584,19 @@ class CaleeServerService {
         },
       );
 
-      print("🗑️ WebDAV Delete Request: $url | Status: ${response.statusCode}");
+      print("[INFO] WebDAV Delete Request: $url | Status: ${response.statusCode}");
 
       // 💡 关键修改：
       // 204: No Content (WebDAV 标准删除成功状态码)
       // 200: OK (某些服务器实现的成功码)
-      // 404: Not Found (云端已不存在，同步视为完成，允许本地清理)
+      // 404: Not Found (云端已不存在, 同步视为完成, 允许本地清理)
       return response.statusCode == 204 ||
           response.statusCode == 200 ||
           response.statusCode == 404;
 
     } catch (e) {
-      print("❌ WebDAV Delete Error: $e");
-      return false; // 网络异常或其他错误导致删除动作未确认，保持本地状态供下次重试
+      print("[ERROR] WebDAV Delete Error: $e");
+      return false; // Network exception或其他Error导致删除动作未确认, 保持本地状态供下次重试
     }
   }
 
@@ -614,7 +614,7 @@ class CaleeServerService {
     final String fullUrl = "${server.replaceAll(RegExp(r'/+$'), '')}/${calendarPath.replaceAll(RegExp(r'^/+'), '')}/";
     final uri = Uri.parse(fullUrl);
 
-    debugPrint('[Calee] 🚀 DELETE Calendar: $fullUrl');
+    debugPrint('[Calee] [INFO] DELETE Calendar: $fullUrl');
 
     try {
       final response = await _client.delete(
@@ -627,17 +627,17 @@ class CaleeServerService {
 
       debugPrint('[Calee] DELETE Status: ${response.statusCode}');
 
-      // 204 No Content 是标准成功响应
+      // 204 No Content 是标准成功response
       // 200 OK 有时也会返回
-      // 404 说明云端已无此路径，视为一致
+      // 404 说明云端已无此路径, 视为一致
       if (response.statusCode == 204 || response.statusCode == 200 || response.statusCode == 404) {
         return true;
       }
 
-      debugPrint('[Calee] DELETE 失败响应体: ${response.body}');
+      debugPrint('[Calee] DELETE failed response body: ${response.body}');
       return false;
     } catch (e) {
-      debugPrint('[Calee] DELETE 异常: $e');
+      debugPrint('[Calee] DELETE exception: $e');
       return false;
     }
   }
@@ -692,12 +692,12 @@ class CaleeServerService {
         }
       }
     } catch (e) {
-      print("⚠️ 抓取 ICS 名称失败: $e");
+      print("[WARN] Failed to fetch ICS name: $e");
     }
     return null;
   }
 
-  /// [MKCOL] 在云端创建一个「订阅日历集合」
+  /// [MKCOL] 在云端创建一个「Subscribed calendar集合」
   Future<String?> subscribeRemotePublicIcs({
     required String userId,
     required String calendarName,
@@ -715,7 +715,7 @@ class CaleeServerService {
     // 关键点：
     // - resourcetype 包含 cs:subscribed
     // - 远程链接写入 cs:source
-    // 这样在 Calee Web UI 中会被识别为订阅日历（只读但允许重命名）
+    // 这样在 Calee Web UI 中会被识别为Subscribed calendar（只读但允许重命名）
     final xmlBody = '''<?xml version="1.0" encoding="utf-8" ?>
 <d:mkcol xmlns:d="DAV:" 
          xmlns:c="urn:ietf:params:xml:ns:caldav"

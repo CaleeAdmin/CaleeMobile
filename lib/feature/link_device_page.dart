@@ -122,13 +122,13 @@ class LinkDevicePage extends StatelessWidget {
         children: [
           Text('How it works', style: textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700, color: Colors.lightGreen[800])),
           const SizedBox(height: 8),
-          Text('• The other device will display a QR code', style: textTheme.bodyMedium),
+          Text('- The other device will display a QR code', style: textTheme.bodyMedium),
           const SizedBox(height: 6),
-          Text('• Use this device to scan and authorize the new device', style: textTheme.bodyMedium),
+          Text('- Use this device to scan and authorize the new device', style: textTheme.bodyMedium),
           const SizedBox(height: 6),
-          Text('• You can revoke device access anytime from device management', style: textTheme.bodyMedium),
+          Text('- You can revoke device access anytime from device management', style: textTheme.bodyMedium),
           const SizedBox(height: 6),
-          Text('• Only scan QR codes from devices you trust', style: textTheme.bodyMedium),
+          Text('- Only scan QR codes from devices you trust', style: textTheme.bodyMedium),
         ],
       ),
     );

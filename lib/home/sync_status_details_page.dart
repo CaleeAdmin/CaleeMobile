@@ -31,8 +31,8 @@ class SyncStatusDetailsPage extends StatelessWidget {
             final run = runs[index];
             final counts = _aggregateCounts(run);
             return ListTile(
-              title: Text('${DateFormat('yyyy-MM-dd HH:mm').format(run.startTime)}  ·  ${_duration(run)}'),
-              subtitle: Text('${run.mode.name.toUpperCase()} · ${run.bindings.length} bindings\n'
+              title: Text('${DateFormat('yyyy-MM-dd HH:mm').format(run.startTime)} | ${_duration(run)}'),
+              subtitle: Text('${run.mode.name.toUpperCase()} | ${run.bindings.length} bindings\n'
                   'L +${counts.$1}/${counts.$2}/-${counts.$3}  R +${counts.$4}/${counts.$5}/-${counts.$6}'),
               isThreeLine: true,
               trailing: _resultChip(run.result, run.bindings.any((b) => b.safetyGateTriggered)),
@@ -67,7 +67,7 @@ Widget _resultChip(SyncRunResult result, bool safetyTriggered) {
     mainAxisAlignment: MainAxisAlignment.center,
     children: [
       Chip(label: Text(label), backgroundColor: color.withOpacity(0.15)),
-      if (safetyTriggered) const Text('🛑 Safety', style: TextStyle(fontSize: 11, color: Colors.deepOrange)),
+      if (safetyTriggered) const Text('Safety', style: TextStyle(fontSize: 11, color: Colors.deepOrange)),
     ],
   );
 }

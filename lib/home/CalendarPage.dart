@@ -43,15 +43,15 @@ class _CalendarPageState extends State<CalendarPage> {
         //   await nativeApi.requestPermission(false);
         // } catch (_) {}
 
-        // 仅在尚未加载数据时才触发一次刷新，避免每次切换 tab 重复刷新
+        // 仅在尚未加载数据时才触发一次刷新, 避免每次切换 tab 重复刷新
         if (controller.calendars.isEmpty && !controller.isLoading.value) {
           await controller.refreshDashboard();
         }
       } else {
-        // 未授权，暂不刷新
+        // 未授权, 暂不刷新
       }
     } catch (e) {
-      print('⚠️ 请求日历权限时出错: $e');
+      print('[WARN] Error while requesting calendar permission: $e');
       await controller.refreshDashboard();
     }
   }
@@ -632,7 +632,7 @@ class _CalendarRow extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
         children: [
-          // 使用 item.isSelected（非响应式），由外层列表刷新驱动 UI 更新
+          // 使用 item.isSelected（非response式）, 由外层列表刷新驱动 UI 更新
           Checkbox(
             value: item.isEnabled,
             onChanged: isToggling

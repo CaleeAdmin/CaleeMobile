@@ -149,7 +149,7 @@ class LocalCalendarPageController extends GetxController {
 
       calendarGroups.assignAll(nextGroups);
     } catch (e) {
-      debugPrint('❌ Failed to load local calendars: $e');
+      debugPrint('[ERROR] Failed to load local calendars: $e');
       Get.snackbar('Error', 'Failed to load local calendars');
     } finally {
       isLoading.value = false;
@@ -320,7 +320,7 @@ class LocalCalendarPageController extends GetxController {
     } catch (e) {
       item.isConnected = previousConnectionState;
       calendarGroups.refresh();
-      debugPrint('❌ Failed to update local calendar switch: $e');
+      debugPrint('[ERROR] Failed to update local calendar switch: $e');
       Get.snackbar('Error', 'Unable to update calendar state');
     } finally {
       connectingCalendarIds.remove(item.id);

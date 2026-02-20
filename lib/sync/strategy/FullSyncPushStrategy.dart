@@ -100,7 +100,7 @@ class FullSyncPushStrategy extends SyncStrategy {
             '(localDeleteCandidates=$localDeleteCandidates, remoteDeleteCandidates=$remoteDeleteCandidates, mappedCount=$mappedCount, threshold=${SyncStrategy.massDeletionAbsoluteThreshold})');
         summary.recordBindingOutcome(bindingId, SyncOutcomeStatus.safetyGateBlockedDeletions);
         summary.telemetry?.onSafetyTriggered(ctx: ctx, detail: 'remoteDeleteCandidates=$remoteDeleteCandidates');
-        summary.errorLog.add('🛑 ${ctx.displayName} Safety gate blocked deletions (localDeleteCandidates=$localDeleteCandidates, remoteDeleteCandidates=$remoteDeleteCandidates, mappedCount=$mappedCount, threshold=${SyncStrategy.massDeletionAbsoluteThreshold})');
+        summary.errorLog.add('[ERROR] ${ctx.displayName} Safety gate blocked deletions (localDeleteCandidates=$localDeleteCandidates, remoteDeleteCandidates=$remoteDeleteCandidates, mappedCount=$mappedCount, threshold=${SyncStrategy.massDeletionAbsoluteThreshold})');
       }
 
       for (final localId in localSyncMap.keys) {
@@ -136,10 +136,10 @@ class FullSyncPushStrategy extends SyncStrategy {
         summary.success++;
         if (allowMassDeletion) {
           summary.recordBindingOutcome(bindingId, SyncOutcomeStatus.persistentOverrideEnabled);
-          summary.successLog.add('⚠️ ${ctx.displayName} Persistent override enabled (dangerous mode)');
+          summary.successLog.add('[WARN] ${ctx.displayName} Persistent override enabled (dangerous mode)');
         } else {
           summary.recordBindingOutcome(bindingId, SyncOutcomeStatus.completedNormally);
-          summary.successLog.add('📤 ${ctx.displayName} Completed normally (processed $changeCount changes)');
+          summary.successLog.add('[INFO] ${ctx.displayName} Completed normally (processed $changeCount changes)');
         }
         summary.telemetry?.onBindingEnd(
           ctx: ctx,
@@ -159,7 +159,7 @@ class FullSyncPushStrategy extends SyncStrategy {
       }
     } catch (e) {
       summary.failed++;
-      summary.errorLog.add('❌ ${ctx.displayName} 发布失败: $e');
+      summary.errorLog.add('[ERROR] ${ctx.displayName} Publish failed: $e');
       final code = mapSyncErrorCode(e);
       summary.telemetry?.onError(ctx: ctx, code: code, message: 'Push sync failed', technicalDetail: e.toString());
       summary.telemetry?.onBindingEnd(

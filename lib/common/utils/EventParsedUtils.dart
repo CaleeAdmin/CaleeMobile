@@ -27,7 +27,7 @@ class ParsedEvent {
 }
 
 class Eventparsedutils {
-  /// 兼容处理普通与订阅日历的详情获取
+  /// 兼容处理普通与Subscribed calendar的详情获取
   static Future<ParsedEvent?> resolveEventData({
     required Map<String, dynamic> remote,
     required bool isSubscription,
@@ -46,12 +46,12 @@ class Eventparsedutils {
     final http.Client client = http.Client();
 
     try {
-      // --- 场景 1：订阅日历 (直接从内存读取，不走网络) ---
+      // --- 场景 1：Subscribed calendar (直接从内存读取, 不走网络) ---
       if (isSubscription) {
         if (remote['dtstart'] != null) {
           return ParsedEvent(
             uid: remote['uid'],
-            summary: remote['summary'] ?? '无标题',
+            summary: remote['summary'] ?? 'Untitled',
             // 确保类型安全
             dtstart: remote['dtstart'] is int ? remote['dtstart'] : int.parse(
                 remote['dtstart'].toString()),
@@ -86,18 +86,18 @@ class Eventparsedutils {
         final parsedMap = IcsParser.parse(response.body, remote['uid'] ?? href);
         return ParsedEvent(
           uid: parsedMap['uid'] ?? remote['uid'] ?? href,
-          summary: parsedMap['summary'] ?? '未命名事件',
+          summary: parsedMap['summary'] ?? 'Untitled event',
           dtstart: parsedMap['dtstart'],
           dtend: parsedMap['dtend'],
           description: parsedMap['description'],
           href: href,
         );
       } else {
-        debugPrint('⚠️ 事件详情获取失败 [$href]: ${response.statusCode}');
+        debugPrint('[WARN] Failed to fetch event details [$href]: ${response.statusCode}');
         return null;
       }
     } catch (e) {
-      debugPrint('❌ resolveEventData 异常: $e');
+      debugPrint('[ERROR] resolveEventData exception: $e');
       return null;
     } finally {
       client.close(); // 释放连接资源

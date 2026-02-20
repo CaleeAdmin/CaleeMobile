@@ -14,13 +14,13 @@ import 'package:pigeon/pigeon.dart'; // 必须是这个路径
 class PlatformCalendar {
   String? id;              // 系统原生 ID
   String? name;            // 名称
-  String? accountName;     // 账号名 (如 "test@gmail.com" 或 "iCloud")
-  String? accountType;     // 账号类型 (如 "com.google" 或 "com.apple.account.icloud")
+  String? accountName;     // Account name (e.g. "test@gmail.com" or "iCloud")
+  String? accountType;     // Account type (e.g. "com.google" or "com.apple.account.icloud")
   String? color;           // ARGB 格式颜色: 0xAARRGGBB
   bool? isReadOnly;        // 是否只读（如节假日日历）
   bool? supportsEvents;    // 是否支持活动 (VEVENT)
   bool? supportsTasks;     // 是否支持任务 (VTODO)
-  bool? isSubscription;    // 是否为订阅日历
+  bool? isSubscription;    // 是否为Subscribed calendar
   String? subscriptionUrl; // 订阅源地址（若系统可提供）
 }
 

@@ -110,7 +110,7 @@ abstract class SyncStrategy {
           calendarId: localCalendarId,
           eventId: local.localId,
           uid: uid,
-          title: local.title ?? '无标题',
+          title: local.title ?? 'Untitled',
           start: local.startTime ?? 0,
           end: local.endTime ?? 0,
           notes: local.notes,
@@ -122,7 +122,7 @@ abstract class SyncStrategy {
       userId: loginName!,
       calendarPath: remotePath,
       uid: uid,
-      title: local.title ?? '无标题',
+      title: local.title ?? 'Untitled',
       start: DateTime.fromMillisecondsSinceEpoch(local.startTime ?? 0),
       end: DateTime.fromMillisecondsSinceEpoch(local.endTime ?? 0),
     );

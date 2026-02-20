@@ -69,7 +69,7 @@ class _LoginPageState extends State<LoginPage> {
             _isSubmittingLogin = false;
           });
         }
-        // 显示登录失败错误信息
+        // 显示登录失败Error信息
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(state.errorMessage ?? 'Login failed'),
@@ -99,11 +99,11 @@ class _LoginPageState extends State<LoginPage> {
       final appController = Get.find<AppController>();
       appController.onLoginSuccess();
     } catch (e) {
-      // 如果保存失败，显示错误信息
+      // 如果保存失败，显示Error信息
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('保存用户数据失败: $e'),
+            content: Text('Failed to save user data: $e'),
             backgroundColor: Colors.red,
             duration: const Duration(seconds: 3),
           ),

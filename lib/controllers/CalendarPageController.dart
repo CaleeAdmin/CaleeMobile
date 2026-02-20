@@ -14,8 +14,8 @@ import 'calendar_probe_controller.dart';
 
 class CalendarDisplayItem {
   // 1. 标识符
-  final String? localId;     // Android/iOS 系统日历 ID (对应数据库 local_id)，可能为 null
-  final String? remotePath;   // 远程 WebDAV 路径 (作为数据库更新的绝对 Key)，不应为 null
+  final String? localId;     // Android/iOS 系统日历 ID (对应数据库 local_id), 可能为 null
+  final String? remotePath;   // 远程 WebDAV 路径 (作为数据库更新的绝对 Key), 不应为 null
 
   // 2. 显示内容
   final String name;
@@ -34,7 +34,7 @@ class CalendarDisplayItem {
 
   CalendarDisplayItem({
     this.localId,            // 允许为空
-    required this.remotePath, // 必须有，否则无法同步
+    required this.remotePath, // 必须有, 否则无法同步
     required this.name,
     required this.color,
     required this.eventCount,
@@ -55,7 +55,7 @@ class CalendarDisplayItem {
     return CalendarDisplayItem(
       localId: map['local_collection_id']?.toString(), // 转为 String 处理
       remotePath: map['remote_path'] ?? '',
-      name: map['display_name'] ?? '未命名',
+      name: map['display_name'] ?? 'Untitled',
       color: map['color'] ?? '#000000',
       eventCount: (map['event_count'] as int?) ?? 0, // 可由查询结果直接带入
       isReadOnly: (map['sync_mode'] as int?) == 0,
@@ -82,7 +82,7 @@ class CalendarPageController extends GetxController {
   final engine = SyncEngine();
   final CaleeAuthService _authService = CaleeAuthService(serverBaseUrl: AppConstant.caleeServer);
 
-  // 响应式变量
+  // response式变量
   var calendars = <CalendarDisplayItem>[].obs;
   var isLoading = false.obs;
   /// 选中的日历 ID 集合（用于 UI 绑定）
@@ -125,8 +125,8 @@ class CalendarPageController extends GetxController {
           calendars.refresh();
           await setCalendarEnabledStatus(item, false);
         } catch (e) {
-          print("❌ 切换日历状态失败: $e");
-          Get.snackbar("错误", "无法更新日历同步状态");
+          print("[ERROR] Failed to toggle calendar state: $e");
+          Get.snackbar("Error", "Unable to update calendar sync status");
           item.isEnabled = true;
           calendars.refresh();
         }
@@ -135,7 +135,7 @@ class CalendarPageController extends GetxController {
 
       final String remotePath = CaleeServerService.normalizeRemotePath(item.remotePath ?? '');
       if (remotePath.isEmpty) {
-        Get.snackbar('连接失败', '该远端日历路径无效，请刷新后重试');
+        Get.snackbar('Connection failed', 'Invalid remote calendar path. Please refresh and try again');
         item.isEnabled = false;
         calendars.refresh();
         return;
@@ -153,15 +153,15 @@ class CalendarPageController extends GetxController {
 
       final String? syncMessage = _repo.takeLastConnectErrorMessage();
       if (!ok) {
-        final String err = syncMessage ?? '连接失败，请重试。';
-        Get.snackbar('连接失败', err);
+        final String err = syncMessage ?? 'Connection failed. Please retry.';
+        Get.snackbar('Connection failed', err);
       } else if (syncMessage != null && syncMessage.isNotEmpty) {
         Get.snackbar('Sync failed', syncMessage);
       }
       await refreshDashboard(includeEventCounts: false);
     } catch (e) {
-      print("❌ 切换日历状态失败: $e");
-      Get.snackbar('连接失败', '连接日历时发生异常，请稍后重试');
+      print("[ERROR] Failed to toggle calendar state: $e");
+      Get.snackbar('Connection failed', 'An exception occurred while connecting the calendar. Please try again later');
       item.isEnabled = false;
       calendars.refresh();
     } finally {
@@ -217,7 +217,7 @@ class CalendarPageController extends GetxController {
 
     // 1. 优先判断身份：谁有值就用谁查
     if (item.remotePath != null && item.remotePath!.isNotEmpty) {
-      // 它是远端日历（即使 localId 为空，路径也是唯一的）
+      // 它是远端日历（即使 localId 为空, 路径也是唯一的）
       whereClause = 'remote_path = ?';
       whereArgs = [item.remotePath];
     } else {
@@ -234,7 +234,7 @@ class CalendarPageController extends GetxController {
       whereArgs: whereArgs,
     );
 
-    debugPrint("✅ 更新成功，影响行数: $count (条件: $whereClause = ${whereArgs[0]})");
+    debugPrint("[OK] Update succeeded, affected rows: $count (condition: $whereClause = ${whereArgs[0]})");
   }
 
   /// 核心方法：刷新并重新构建 UI 模型
@@ -284,7 +284,7 @@ class CalendarPageController extends GetxController {
           localReadOnlyById[id] = calendar.isReadOnly ?? false;
         }
       } catch (e) {
-        debugPrint('⚠️ 无法读取本地日历只读信息: $e');
+        debugPrint('[WARN] Failed to read local calendar read-only status: $e');
       }
 
       if (includeEventCounts) {
@@ -339,7 +339,7 @@ class CalendarPageController extends GetxController {
       calendars.assignAll(nextCloudCalendars);
 
     } catch (e) {
-      print("❌ Dashboard 刷新异常: $e");
+      print("[ERROR] Dashboard refresh exception: $e");
     } finally {
       isLoading.value = false;
     }
@@ -365,8 +365,8 @@ class CalendarPageController extends GetxController {
       await refreshDashboard(includeEventCounts: false);
       unawaited(refreshDashboard());
     } catch (e) {
-      print('❌ Dashboard 删除日历失败: $e');
-      Get.snackbar('错误', '删除日历失败');
+      print('[ERROR] Dashboard failed to delete calendar: $e');
+      Get.snackbar('Error', 'Failed to delete calendar');
     } finally {
       isLoading.value = false;
     }
@@ -381,15 +381,15 @@ class CalendarPageController extends GetxController {
       await refreshDashboard(includeEventCounts: false);
       unawaited(refreshDashboard());
     } catch (e) {
-      print('❌ Dashboard 重命名失败: $e');
-      Get.snackbar('错误', '重命名失败');
+      print('[ERROR] Dashboard rename failed: $e');
+      Get.snackbar('Error', 'Rename failed');
       rethrow;
     } finally {
       isLoading.value = false;
     }
   }
 
-  /// 创建新的本地日历（委托给 SyncRepository），并刷新界面
+  /// 创建新的本地日历（委托给 SyncRepository）, 并刷新界面
   Future<bool> createNewLocalCalendar(String displayName) async {
     final String? invalidReason = validateNewCalendarName(displayName);
     if (invalidReason != null) {
@@ -405,19 +405,19 @@ class CalendarPageController extends GetxController {
         unawaited(refreshDashboard());
         return true;
       } else {
-        Get.snackbar('错误', '创建日历失败');
+        Get.snackbar('Error', 'Failed to create calendar');
         return false;
       }
     } catch (e) {
-      print('❌ 创建本地日历失败: $e');
-      Get.snackbar('错误', '创建日历失败');
+      print('[ERROR] Failed to create local calendar: $e');
+      Get.snackbar('Error', 'Failed to create calendar');
       return false;
     } finally {
       isLoading.value = false;
     }
   }
 
-  /// 订阅一个公开的 ICS 链接（委托给仓库），并在成功后刷新界面
+  /// 订阅一个公开的 ICS 链接（委托给仓库）, 并在成功后刷新界面
   Future<bool> subscribePublicIcs(String icsUrl) async {
     final String normalizedUrl = icsUrl.trim();
     final String? invalidReason = validateSubscriptionUrl(normalizedUrl);
@@ -445,12 +445,12 @@ class CalendarPageController extends GetxController {
         Get.snackbar('Success', 'Subscribed to calendar');
         return true;
       } else {
-        Get.snackbar('错误', '订阅失败');
+        Get.snackbar('Error', 'Subscription failed');
         return false;
       }
     } catch (e) {
-      print('❌ 订阅失败: $e');
-      Get.snackbar('错误', '订阅失败');
+      print('[ERROR] Subscription failed: $e');
+      Get.snackbar('Error', 'Subscription failed');
       return false;
     } finally {
       subscribingUrls.remove(normalizedUrl);
