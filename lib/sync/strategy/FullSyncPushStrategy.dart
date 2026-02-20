@@ -47,9 +47,26 @@ class FullSyncPushStrategy extends SyncStrategy {
         final Map<String, dynamic>? record = localSyncMap[localId];
         final int syncStatus = (record?['sync_status'] as int?) ?? SyncItemStatus.synced;
         final int recordMtime = (record?['last_mtime'] as int?) ?? 0;
+        final String recordSummary = (record?['summary'] ?? '').toString();
+        final String recordDescription = (record?['description'] ?? '').toString();
+        final int recordStart = (record?['dtstart'] as int?) ?? 0;
+        final int recordEnd = (record?['dtend'] as int?) ?? 0;
+
+        final String localSummary = (local.title ?? '').trim();
+        final String localDescription = (local.notes ?? '').trim();
+        final int localStart = local.startTime ?? 0;
+        final int localEnd = local.endTime ?? 0;
+        final bool contentChanged = record != null &&
+            (localSummary != recordSummary ||
+                localDescription != recordDescription ||
+                localStart != recordStart ||
+                localEnd != recordEnd);
 
         final bool needsPush =
-            record == null || syncStatus == SyncItemStatus.pendingPush || lastModified > recordMtime;
+            record == null ||
+                syncStatus == SyncItemStatus.pendingPush ||
+                lastModified > recordMtime ||
+                contentChanged;
         if (!needsPush) {
           continue;
         }
@@ -72,6 +89,9 @@ class FullSyncPushStrategy extends SyncStrategy {
           lastMtime: pushed.lastMtime,
           remoteHref: pushed.remoteHref,
           summary: local.title,
+          description: local.notes,
+          dtstart: local.startTime,
+          dtend: local.endTime,
         );
         changeCount++;
         summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.remote, type: SyncOperationType.updated);

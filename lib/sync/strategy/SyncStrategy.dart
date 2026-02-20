@@ -149,12 +149,18 @@ abstract class SyncStrategy {
     required int lastMtime,
     required String remoteHref,
     String? summary,
+    String? description,
+    int? dtstart,
+    int? dtend,
   }) async {
     final payload = {
       'remote_uid': uid,
       'local_item_id': localItemId,
       'remote_collection_id': remoteCollectionId,
       'summary': summary,
+      'description': description,
+      'dtstart': dtstart,
+      'dtend': dtend,
       'last_etag': normalizeRemoteToken(etag),
       'last_mtime': lastMtime,
       'remote_href': remoteHref,
