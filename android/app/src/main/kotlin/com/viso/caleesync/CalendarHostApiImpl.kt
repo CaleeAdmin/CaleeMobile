@@ -501,8 +501,22 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
 
             if (request.eventId != null && request.eventId.isNotEmpty()) {
                 // --- 执行更新 UPDATE ---
-                val updateUri = ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, request.eventId.toLong())
-                val rows = contentResolver.update(updateUri, values, null, null)
+                val eventBaseUri = ContentUris.withAppendedId(
+                    CalendarContract.Events.CONTENT_URI,
+                    request.eventId.toLong()
+                )
+                val syncAdapterUpdateUri = buildSyncAdapterEventUri(eventBaseUri, request.calendarId)
+                val rows = try {
+                    contentResolver.update(syncAdapterUpdateUri, values, null, null)
+                } catch (iae: IllegalArgumentException) {
+                    // 非 sync-adapter URI 上写入 _SYNC_ID 会被 Provider 拒绝，回退到普通更新。
+                    val fallbackValues = ContentValues().apply {
+                        putAll(baseValues)
+                        put(CalendarContract.Events.UID_2445, request.uid)
+                        put(CalendarContract.Events.SYNC_DATA1, request.uid)
+                    }
+                    contentResolver.update(eventBaseUri, fallbackValues, null, null)
+                }
 
                 if (rows > 0) {
                     callback(Result.success(request.eventId))
