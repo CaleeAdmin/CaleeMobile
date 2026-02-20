@@ -7,7 +7,6 @@ import 'package:sqflite/sqflite.dart';
 
 import '../common/utils/IcsParser.dart';
 import '../common/utils/UidGenerator.dart';
-import '../entity/SyncContext.dart';
 import '../entity/SyncSummary.dart';
 import '../sync/SyncEnum.dart';
 import '../sync/SyncEngine.dart';
@@ -58,78 +57,6 @@ class SyncRepository {
     );
     if (rows.isEmpty) return null;
     return rows.first;
-  }
-
-  /// DEPRECATED: uses old calendarId-as-remote_collection_id. Do not call.
-  /// 步骤 A: 扫描系统变更（新增/修改/删除）
-  Future<void> scanSystemChanges(SyncContext ctx) async {
-    final db = await _dbHelper.database;
-    // 获取最近 30 天的数据
-    final start = DateTime.now().subtract(const Duration(days: 30)).millisecondsSinceEpoch;
-    final end = DateTime.now().add(const Duration(days: 30)).millisecondsSinceEpoch;
-
-    // 1. 从原生获取系统当前的日程列表
-    final List<PlatformItem?> items = await _nativeApi.getEvents(ctx.localCalendarId, start, end);
-    final currentEvents = items.whereType<PlatformItem>().toList();
-
-    // 记录本次扫描到的所有系统 ID，用于后续判断哪些被删除了
-    final currentLocalIds = currentEvents.map((e) => e.localId).toList();
-
-    await db.transaction((txn) async {
-      // --- 步骤 1: 处理删除 (本地库有映射，但系统日历里找不到了) ---
-      // 注意：只针对已同步(status=0)的记录，且 local_id 不在当前系统列表里的
-      if (currentLocalIds.isNotEmpty) {
-        final placeholders = currentLocalIds.map((_) => '?').join(',');
-        await txn.update(
-          'sync_items',
-          {'sync_status': SyncItemStatus.pendingDelete}, // 标记为待同步删除
-          where: 'remote_collection_id = ? AND sync_status = ${SyncItemStatus.synced} AND local_item_id NOT IN ($placeholders)',
-          whereArgs: [ctx.remoteCollectionId, ...currentLocalIds],
-        );
-      } else {
-        // 如果系统里一个日程都没有了，该日历下所有已同步的都标记为删除
-        await txn.update('sync_items', {'sync_status': SyncItemStatus.pendingDelete},
-            where: 'remote_collection_id = ? AND sync_status = ${SyncItemStatus.synced}',
-            whereArgs: [ctx.remoteCollectionId]);
-      }
-
-      // --- 步骤 2: 处理新增或修改 ---
-      for (var event in currentEvents) {
-        // 💡 核心改动：通过 local_id（系统唯一标识）来查找映射表
-        final localRows = await txn.query('sync_items', where: 'local_item_id = ?', whereArgs: [event.localId]);
-
-        if (localRows.isEmpty) {
-          // A. 系统里有，但映射表没有 -> 用户手动在手机上新建的
-          await txn.insert('sync_items', {
-            'remote_uid': (event.uid?.trim().isNotEmpty == true) ? event.uid!.trim() : 'local_${event.localId}', // 使用原生生成的 system_event_$id
-            'local_item_id': event.localId,
-            'remote_collection_id': ctx.remoteCollectionId,
-            'summary': event.title,
-            'dtstart': event.startTime,
-            'dtend': event.endTime,
-            'sync_status': SyncItemStatus.pendingPush, // 标记为待推送至云端
-          });
-          print("🔍 发现手机端新建日程: ${event.title}");
-        } else {
-          // B. 映射表存在 -> 检查是否有内容变更
-          final local = localRows.first;
-          bool isChanged = local['summary'] != event.title ||
-              local['dtstart'] != event.startTime ||
-              local['dtend'] != event.endTime;
-
-          if (isChanged && local['sync_status'] == SyncItemStatus.synced) {
-            // 如果内容变了且当前是已同步状态，则标记为待更新推送
-            await txn.update('sync_items', {
-              'summary': event.title,
-              'dtstart': event.startTime,
-              'dtend': event.endTime,
-              'sync_status': SyncItemStatus.pendingPush,
-            }, where: 'local_item_id = ?', whereArgs: [event.localId]);
-            print("🔍 发现手机端修改日程: ${event.title}");
-          }
-        }
-      }
-    });
   }
 
 // ==========================================
@@ -583,30 +510,6 @@ class SyncRepository {
     print('✅ 云端事件已保存到本地数据库: UID $uid');
   }
 
-// ==========================================
-  // 3. 云端反馈更新
-  // ==========================================
-
-  Future<void> updateFromCloud(PlatformItem item, String etag, String href, String calendarId) async {
-    final db = await _dbHelper.database;
-    await db.insert(
-      'sync_items',
-      {
-        'remote_uid': item.uid,
-        'local_item_id': item.localId,
-        'calendar_id': calendarId, // 修正错误 2：由于 PlatformItem 可能没存 calendarId，我们作为参数传入
-        'remote_href': href,
-        'last_etag': etag,
-        'last_mtime': item.lastModified ?? DateTime.now().millisecondsSinceEpoch,
-        'item_type': 'event',
-        'sync_status': SyncItemStatus.synced,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
-  }
-
-  // SyncRepository.dart
-
   /// 彻底删除一个事件：包括系统日历格子和本地数据库追踪记录
   Future<bool> deleteEventTotally(String localId, String uid) async {
     try {
@@ -618,8 +521,8 @@ class SyncRepository {
         final db = await _dbHelper.database;
         await db.delete(
           'sync_items',
-          // where: 'remote_uid = ?',
-          // whereArgs: [uid],
+          where: 'remote_uid = ?',
+          whereArgs: [uid],
         );
         print('✅ 彻底删除成功: UID $uid');
         return true;

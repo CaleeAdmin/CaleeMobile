@@ -1,4 +1,3 @@
-import 'package:caleesync/common/utils/UidGenerator.dart';
 import 'package:caleesync/entity/SyncContext.dart';
 import 'package:caleesync/entity/SyncSummary.dart';
 import 'package:caleesync/services/calee_server_service.dart';
@@ -7,7 +6,6 @@ import 'package:caleesync/sync/strategy/SyncStrategy.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:sqflite/sqflite.dart';
 
-import '../../common/utils/EventParsedUtils.dart';
 import '../../core/platform/pigeon/calendar_api.g.dart';
 
 /// TWO_WAY strategy using a deterministic per-item decision matrix.
@@ -51,11 +49,9 @@ class FullSyncBidiStrategy extends SyncStrategy {
       final _RepairResult dedup = await _repairDuplicateMappings(db, remoteCollectionId, mappedRecords);
       final List<Map<String, dynamic>> records = dedup.records;
 
-      final start = DateTime.now().subtract(const Duration(days: 365)).millisecondsSinceEpoch;
-      final end = DateTime.now().add(const Duration(days: 730)).millisecondsSinceEpoch;
-      final items = await nativeApi.getEvents(localCalendarId, start, end);
+      final localEvents = await loadLocalEvents(localCalendarId);
       final Map<String, PlatformItem> localItemsMap = {
-        for (var e in items.whereType<PlatformItem>()) _keyUid(e): e
+        for (final e in localEvents) _keyUid(e): e,
       };
 
       final Map<String, Map<String, dynamic>> mappingByRemoteUid = {
@@ -137,8 +133,8 @@ class FullSyncBidiStrategy extends SyncStrategy {
         final bool remoteExists = remote != null;
         final bool localExists = local != null;
 
-        final String remoteToken = _normalizeRemoteToken(remote?['etag']);
-        final String storedRemoteToken = _normalizeRemoteToken(mapping?['last_etag']);
+        final String remoteToken = normalizeRemoteToken(remote?['etag']);
+        final String storedRemoteToken = normalizeRemoteToken(mapping?['last_etag']);
         final int localLastModified = local?.lastModified ?? 0;
         final int storedLocalLastModified = (mapping?['last_mtime'] as int?) ?? 0;
 
@@ -352,89 +348,61 @@ class FullSyncBidiStrategy extends SyncStrategy {
     return _RepairResult(records: refreshed, removedCount: toDeleteIds.length);
   }
 
-  String _normalizeRemoteToken(dynamic token) => (token ?? '').toString().replaceAll('"', '');
-
   Future<void> _pullFromRemote(
     Map<String, dynamic> remote,
     String localCalendarId,
     int remoteCollectionId,
     String? localId,
     String remoteToken,
-    dynamic db,
+    Database db,
   ) async {
-    final eventData = await Eventparsedutils.resolveEventData(remote: remote, isSubscription: false);
-    if (eventData == null) return;
-
-    final String? newSystemId = await nativeApi.createOrUpdateEvent(CalendarEventRequest(
-      calendarId: localCalendarId,
-      title: eventData.summary,
-      start: eventData.dtstart,
-      end: eventData.dtend,
-      uid: eventData.uid,
-      notes: eventData.description,
-      eventId: localId,
-    ));
-
-    if (newSystemId != null) {
-      await db.insert('sync_items', {
-        'remote_uid': eventData.uid,
-        'local_item_id': newSystemId,
-        'remote_collection_id': remoteCollectionId,
-        'last_etag': remoteToken,
-        'last_mtime': DateTime.now().millisecondsSinceEpoch,
-        'remote_href': remote['href'],
-        'sync_status': SyncItemStatus.synced,
-      }, conflictAlgorithm: ConflictAlgorithm.replace);
+    final RemotePullResult? pulled = await pullRemoteEventToLocal(
+      remote: remote,
+      localCalendarId: localCalendarId,
+      existingLocalId: localId,
+      isSubscription: false,
+    );
+    if (pulled == null) {
+      return;
     }
+
+    await upsertSyncedItem(
+      db: db,
+      remoteCollectionId: remoteCollectionId,
+      uid: pulled.uid,
+      localItemId: pulled.localEventId,
+      etag: remoteToken,
+      lastMtime: DateTime.now().millisecondsSinceEpoch,
+      remoteHref: (remote['href'] ?? '').toString(),
+      summary: pulled.summary,
+    );
   }
 
-  /// Push local event state to remote CalDAV and persist returned remote token.
-  ///
-  /// This method is invoked when decision matrix emits PUSH:
-  /// - localChanged only
-  /// - conflict with origin=LOCAL
-  /// - local-only item in TWO_WAY mode (remote create through push)
   Future<void> _pushToRemote(
     PlatformItem local,
     String remotePath,
-    dynamic db,
+    Database db,
     String localCalendarId,
     int remoteCollectionId,
   ) async {
-    var uid = (local.uid ?? '').trim();
-    if (uid.isEmpty) {
-      uid = CaleeUid.generate();
-      await nativeApi.createOrUpdateEvent(CalendarEventRequest(
-        calendarId: localCalendarId,
-        eventId: local.localId,
-        uid: uid,
-        title: local.title ?? '无标题',
-        start: local.startTime ?? 0,
-        end: local.endTime ?? 0,
-        notes: local.notes,
-      ));
-    }
-
-    final String? newEtag = await nc.uploadEventData(
-      userId: loginName!,
-      calendarPath: remotePath,
-      uid: uid,
-      title: local.title ?? '无标题',
-      start: DateTime.fromMillisecondsSinceEpoch(local.startTime ?? 0),
-      end: DateTime.fromMillisecondsSinceEpoch(local.endTime ?? 0),
+    final RemotePushResult? pushed = await pushLocalEventToRemote(
+      local: local,
+      remotePath: remotePath,
+      localCalendarId: localCalendarId,
     );
-
-    if (newEtag != null) {
-      await db.insert('sync_items', {
-        'remote_uid': uid,
-        'local_item_id': local.localId,
-        'remote_collection_id': remoteCollectionId,
-        'last_etag': _normalizeRemoteToken(newEtag),
-        'last_mtime': local.lastModified ?? DateTime.now().millisecondsSinceEpoch,
-        'remote_href': "${remotePath.endsWith('/') ? remotePath : '$remotePath/'}$uid.ics",
-        'sync_status': SyncItemStatus.synced,
-      }, conflictAlgorithm: ConflictAlgorithm.replace);
+    if (pushed == null) {
+      return;
     }
+
+    await upsertSyncedItem(
+      db: db,
+      remoteCollectionId: remoteCollectionId,
+      uid: pushed.uid,
+      localItemId: local.localId,
+      etag: pushed.etag,
+      lastMtime: pushed.lastMtime,
+      remoteHref: pushed.remoteHref,
+    );
   }
 }
 
