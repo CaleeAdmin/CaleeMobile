@@ -3,7 +3,6 @@ import 'package:caleesync/entity/SyncContext.dart';
 import 'package:caleesync/entity/SyncSummary.dart';
 import 'package:caleesync/sync/SyncEnum.dart';
 import 'package:caleesync/common/utils/UidGenerator.dart';
-import 'package:sqflite/sqflite.dart';
 
 import 'SyncStrategy.dart';
 
@@ -80,23 +79,25 @@ class CreateRemoteStrategy extends SyncStrategy {
           end: DateTime.fromMillisecondsSinceEpoch(endTime),
         );
 
-        if (etag != null) {
-          // 3. 写入 sync_items（事件映射表）
-          await db.insert('sync_items', {
-            'remote_uid': uid,
-            'local_item_id': event.localId,
-            'remote_collection_id': ctx.remoteCollectionId,
-            'summary': title,
-            'description': event.notes,
-            'dtstart': startTime,
-            'dtend': endTime,
-            'last_etag': etag.replaceAll('\"', ''),
-            'last_mtime': event.lastModified ?? 0,
-            'remote_href':
-                "${resultPath.endsWith('/') ? resultPath : '$resultPath/'}$uid.ics",
-            'sync_status': SyncItemStatus.synced,
-          }, conflictAlgorithm: ConflictAlgorithm.replace);
+        if (etag == null) {
+          continue;
         }
+
+        final String? localItemId = event.localId;
+        if (localItemId == null || localItemId.isEmpty) {
+          continue;
+        }
+
+        await upsertSyncedItem(
+          db: db,
+          remoteCollectionId: ctx.remoteCollectionId,
+          uid: uid,
+          localItemId: localItemId,
+          etag: etag,
+          lastMtime: event.lastModified ?? 0,
+          remoteHref: "${resultPath.endsWith('/') ? resultPath : '$resultPath/'}$uid.ics",
+          summary: title,
+        );
       }
 
       await db.rawUpdate('''
