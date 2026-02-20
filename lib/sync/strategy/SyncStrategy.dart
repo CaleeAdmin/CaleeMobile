@@ -25,6 +25,101 @@ abstract class SyncStrategy {
 
   Future<void> execute(SyncContext ctx, SyncSummary summary);
 
+  SyncItemDecision resolveItemDecision({
+    required SyncAction mode,
+    required int bindingOrigin,
+    required int deletionPolicy,
+    required bool hasMapping,
+    required bool remoteExists,
+    required bool localExists,
+    required bool remoteChanged,
+    required bool localChanged,
+  }) {
+    final bool allowPull = mode == SyncAction.fullSyncPull || mode == SyncAction.fullSyncBidi;
+    final bool allowPush = mode == SyncAction.fullSyncPush || mode == SyncAction.fullSyncBidi;
+
+    if (remoteExists && !localExists) {
+      if (!allowPull) return const SyncItemDecision.noOp(reason: 'pull_not_allowed_for_mode');
+      return const SyncItemDecision(intent: SyncItemIntent.create, action: SyncItemAction.createLocal, reason: 'remote_exists_local_missing');
+    }
+
+    if (!remoteExists && localExists) {
+      final bool preferDeleteLocal = mode == SyncAction.fullSyncPull ||
+          (mode == SyncAction.fullSyncBidi && deletionPolicy == SyncDeletionPolicy.remoteDeleteWins);
+      if (preferDeleteLocal) {
+        return const SyncItemDecision(intent: SyncItemIntent.delete, action: SyncItemAction.deleteLocal, reason: 'remote_missing_local_exists_delete_local');
+      }
+      if (allowPush) {
+        return const SyncItemDecision(intent: SyncItemIntent.delete, action: SyncItemAction.deleteRemote, reason: 'remote_missing_local_exists_delete_remote');
+      }
+      return const SyncItemDecision.noOp(reason: 'delete_remote_not_allowed_for_mode');
+    }
+
+    if (!remoteExists && !localExists) {
+      return const SyncItemDecision.noOp(reason: 'neither_exists');
+    }
+
+    if (!remoteChanged && !localChanged) {
+      return const SyncItemDecision.noOp(reason: 'no_change');
+    }
+
+    if (remoteChanged && !localChanged) {
+      if (!allowPull) return const SyncItemDecision.noOp(reason: 'pull_not_allowed_for_mode');
+      return const SyncItemDecision(intent: SyncItemIntent.update, action: SyncItemAction.pull, reason: 'remote_changed');
+    }
+
+    if (!remoteChanged && localChanged) {
+      if (!allowPush) return const SyncItemDecision.noOp(reason: 'push_not_allowed_for_mode');
+      return SyncItemDecision(
+        intent: hasMapping ? SyncItemIntent.update : SyncItemIntent.create,
+        action: SyncItemAction.push,
+        reason: 'local_changed',
+      );
+    }
+
+    if (bindingOrigin == SyncBindingOrigin.local && allowPush) {
+      return SyncItemDecision(
+        intent: hasMapping ? SyncItemIntent.update : SyncItemIntent.create,
+        action: SyncItemAction.push,
+        reason: 'conflict_origin_local',
+      );
+    }
+    if (allowPull) {
+      return const SyncItemDecision(intent: SyncItemIntent.update, action: SyncItemAction.pull, reason: 'conflict_origin_remote');
+    }
+    return const SyncItemDecision.noOp(reason: 'conflict_no_allowed_write_path');
+  }
+
+  Future<List<Map<String, dynamic>>> repairDuplicateMappings(
+    Database db,
+    int remoteCollectionId,
+    List<Map<String, dynamic>> mappedRecords,
+  ) async {
+    final Map<String, List<Map<String, dynamic>>> byRemoteUid = {};
+    for (final row in mappedRecords) {
+      final String key = row['remote_uid']?.toString() ?? '';
+      if (key.isEmpty) continue;
+      byRemoteUid.putIfAbsent(key, () => []).add(row);
+    }
+
+    for (final rows in byRemoteUid.values) {
+      if (rows.length <= 1) continue;
+      rows.sort((a, b) => ((a['id'] as int?) ?? 0).compareTo((b['id'] as int?) ?? 0));
+      for (final duplicate in rows.skip(1)) {
+        final int? id = duplicate['id'] as int?;
+        if (id != null) {
+          await db.delete('sync_items', where: 'id = ?', whereArgs: [id]);
+        }
+      }
+    }
+
+    return db.query(
+      'sync_items',
+      where: 'remote_collection_id = ?',
+      whereArgs: [remoteCollectionId],
+    );
+  }
+
   String massDeletionKeyForBinding(int bindingId) =>
       '${AppConstant.allowMassDeletionByBindingKeyPrefix}$bindingId';
 
@@ -207,6 +302,24 @@ abstract class SyncStrategy {
       }
     }
   }
+}
+
+enum SyncItemIntent { create, update, delete, noOp }
+
+class SyncItemDecision {
+  final SyncItemIntent intent;
+  final SyncItemAction action;
+  final String reason;
+
+  const SyncItemDecision({
+    required this.intent,
+    required this.action,
+    required this.reason,
+  });
+
+  const SyncItemDecision.noOp({required this.reason})
+      : intent = SyncItemIntent.noOp,
+        action = SyncItemAction.skip;
 }
 
 class RemotePullResult {
