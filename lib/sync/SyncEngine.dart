@@ -63,10 +63,15 @@ class SyncEngine {
       summary.processing++;
       onProgress?.call(summary);
 
-      _runRecorder.onBindingStart(syncItem);
-      await _executor.execute(syncItem, summary);
-
-      onProgress?.call(summary);
+      try {
+        _runRecorder.onBindingStart(syncItem);
+        await _executor.execute(syncItem, summary);
+      } finally {
+        if (summary.processing > 0) {
+          summary.processing--;
+        }
+        onProgress?.call(summary);
+      }
     }
 
     final hasSafetyAbort = _runRecorder.hasSafetyAbort;
