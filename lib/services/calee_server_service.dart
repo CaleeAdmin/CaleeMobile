@@ -267,10 +267,17 @@ class CaleeServerService {
         if (parsedUid.isEmpty) return null;
 
         return {
+          // Canonical event keys shared by subscription and normal remote events.
+          'uid': parsedUid,
+          'dtstart': parsed['dtstart'],
+          'dtend': parsed['dtend'],
+
+          // Backward-compatible aliases for existing sync pipeline consumers.
           'remote_uid': parsedUid,
-          'summary': parsed['summary'],
           'start': parsed['dtstart'],
           'end': parsed['dtend'],
+
+          'summary': parsed['summary'],
           'href': isSubscription ? '$calendarPath$parsedUid.ics' : item['href'],
           'etag': (item['etag']?.isNotEmpty == true ? item['etag'] : parsed['dtstamp']) ?? 'no-etag',
           'calendar_data': icsString,

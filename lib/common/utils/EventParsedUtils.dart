@@ -27,6 +27,12 @@ class ParsedEvent {
 }
 
 class Eventparsedutils {
+  static int? _toInt(dynamic value) {
+    if (value is int) return value;
+    if (value == null) return null;
+    return int.tryParse(value.toString());
+  }
+
   /// 兼容处理普通与Subscribed calendar的详情获取
   static Future<ParsedEvent?> resolveEventData({
     required Map<String, dynamic> remote,
@@ -48,20 +54,23 @@ class Eventparsedutils {
     try {
       // --- 场景 1：Subscribed calendar (直接从内存读取, 不走网络) ---
       if (isSubscription) {
-        if (remote['dtstart'] != null) {
-          return ParsedEvent(
-            uid: remote['uid'],
-            summary: remote['summary'] ?? 'Untitled',
-            // 确保类型安全
-            dtstart: remote['dtstart'] is int ? remote['dtstart'] : int.parse(
-                remote['dtstart'].toString()),
-            dtend: remote['dtend'] is int ? remote['dtend'] : int.parse(
-                remote['dtend'].toString()),
-            description: remote['description'],
-            href: remote['href'],
-          );
+        final String uid =
+            ((remote['uid'] ?? remote['remote_uid']) ?? '').toString().trim();
+        final int? dtstart = _toInt(remote['dtstart'] ?? remote['start']);
+        final int? dtend = _toInt(remote['dtend'] ?? remote['end']);
+
+        if (uid.isEmpty || dtstart == null || dtend == null) {
+          return null;
         }
-        return null;
+
+        return ParsedEvent(
+          uid: uid,
+          summary: remote['summary'] ?? 'Untitled',
+          dtstart: dtstart,
+          dtend: dtend,
+          description: remote['description'],
+          href: remote['href'],
+        );
       }
 
       // --- 场景 2：普通日历 (内部发起请求) ---
