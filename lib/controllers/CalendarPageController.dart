@@ -419,7 +419,7 @@ class CalendarPageController extends GetxController {
 
   /// 订阅一个公开的 ICS 链接（委托给仓库）, 并在成功后刷新界面
   Future<bool> subscribePublicIcs(String icsUrl) async {
-    final String normalizedUrl = icsUrl.trim();
+    final String normalizedUrl = canonicalizeSubscriptionUrl(icsUrl);
     final String? invalidReason = validateSubscriptionUrl(normalizedUrl);
     if (invalidReason != null) {
       Get.snackbar('Invalid subscription URL', invalidReason);
@@ -459,13 +459,47 @@ class CalendarPageController extends GetxController {
   }
 
   bool isPublicIcsSubscribed(String? icsUrl) {
-    final String normalizedUrl = (icsUrl ?? '').trim();
+    final String normalizedUrl = canonicalizeSubscriptionUrl(icsUrl);
     if (normalizedUrl.isEmpty) return false;
 
     return calendars.any((calendar) {
       if (!calendar.isSubscription) return false;
-      return (calendar.subscriptionUrl ?? '').trim() == normalizedUrl;
+      return canonicalizeSubscriptionUrl(calendar.subscriptionUrl) == normalizedUrl;
     });
+  }
+
+
+  String canonicalizeSubscriptionUrl(String? rawUrl) {
+    final String trimmed = (rawUrl ?? '').trim();
+    if (trimmed.isEmpty) return '';
+
+    final Uri? parsed = Uri.tryParse(trimmed);
+    if (parsed == null || parsed.host.isEmpty) {
+      return trimmed;
+    }
+
+    final String normalizedScheme = parsed.scheme.toLowerCase() == 'webcal'
+        ? 'https'
+        : parsed.scheme.toLowerCase();
+    final int? normalizedPort = (parsed.hasPort &&
+            !((normalizedScheme == 'http' && parsed.port == 80) ||
+                (normalizedScheme == 'https' && parsed.port == 443)))
+        ? parsed.port
+        : null;
+
+    final String normalizedPath = (parsed.path.length > 1 && parsed.path.endsWith('/'))
+        ? parsed.path.substring(0, parsed.path.length - 1)
+        : parsed.path;
+
+    return parsed
+        .replace(
+          scheme: normalizedScheme,
+          host: parsed.host.toLowerCase(),
+          port: normalizedPort,
+          path: normalizedPath,
+          fragment: null,
+        )
+        .toString();
   }
 
   String? validateNewCalendarName(String displayName) {
