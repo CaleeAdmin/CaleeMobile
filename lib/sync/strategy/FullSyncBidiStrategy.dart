@@ -425,6 +425,12 @@ class FullSyncBidiStrategy extends SyncStrategy {
     String localCalendarId,
     int remoteCollectionId,
   ) async {
+    final String? localId = local.localId;
+    if (localId == null || localId.isEmpty) {
+      debugPrint('[SYNC_ITEM][binding=$remoteCollectionId] skip push: local item id is missing');
+      return;
+    }
+
     final RemotePushResult? pushed = await pushLocalEventToRemote(
       local: local,
       remotePath: remotePath,
@@ -438,7 +444,7 @@ class FullSyncBidiStrategy extends SyncStrategy {
       db: db,
       remoteCollectionId: remoteCollectionId,
       uid: pushed.uid,
-      localItemId: local.localId,
+      localItemId: localId,
       etag: pushed.etag,
       lastMtime: pushed.lastMtime,
       remoteHref: pushed.remoteHref,
