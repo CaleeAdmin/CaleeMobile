@@ -14,7 +14,7 @@ import '../../utils/TimeUtils.dart';
 /// - remote exists + local missing => create local
 /// - both exist + localChanged => overwrite local from remote
 /// - both exist + remoteChanged => pull update
-/// - remote missing + local mapped exists => delete local (read-only deletion policy)
+/// - remote missing + local mapped exists => two-phase local delete via pendingDelete tombstone
 class FullSyncPullStrategy extends SyncStrategy {
   @override
   Future<void> execute(SyncContext ctx, SyncSummary summary) async {
@@ -65,7 +65,7 @@ class FullSyncPullStrategy extends SyncStrategy {
       final Set<String> remoteUids = {};
 
       debugPrint('[SYNC_BINDING][binding_id=$bindingId] mode=pull origin=$origin '
-          'deletionPolicy=delete_local counts(remote=${remoteEvents.length}, local=${localItemsByUid.length}, mapped=${localSyncMap.length})');
+          'deletionPolicy=two_phase_delete_local counts(remote=${remoteEvents.length}, local=${localItemsByUid.length}, mapped=${localSyncMap.length})');
 
       // Evaluate per-item decision matrix for read-only bindings.
       for (var remoteEvent in remoteEvents) {
@@ -106,6 +106,8 @@ class FullSyncPullStrategy extends SyncStrategy {
         debugPrint('[SYNC_ITEM][binding=$remoteCollectionId][uid=$uid] action=$action '
             'flags(remoteExists=true localExists=${localItem != null} remoteChanged=$remoteChanged localChanged=$localChanged reason=$reason)');
 
+        final int status = (localRecord?['sync_status'] as int?) ?? SyncItemStatus.synced;
+
         if (action == SyncItemAction.createLocal || action == SyncItemAction.pull) {
           final request = CalendarEventRequest(
             calendarId: localCalendarId,
@@ -137,6 +139,14 @@ class FullSyncPullStrategy extends SyncStrategy {
             pull++;
           }
         } else {
+          if (localRecord != null && status != SyncItemStatus.synced) {
+            await db.update(
+              'sync_items',
+              {'sync_status': SyncItemStatus.synced},
+              where: 'remote_collection_id = ? AND remote_uid = ?',
+              whereArgs: [remoteCollectionId, uid],
+            );
+          }
           skip++;
         }
       }
@@ -147,6 +157,8 @@ class FullSyncPullStrategy extends SyncStrategy {
       final int deleteCandidates = mappedCount - remoteUidsMatchedCount;
       final bool massDeletionSafetyTripped = deleteCandidates >= 10;
       final bool suspiciousEmptyRemoteFetch = remoteEvents.isEmpty && localCount > 0 && mappedCount > 0;
+      final bool remoteSnapshotTrusted = (newCtag ?? '').isNotEmpty && !suspiciousEmptyRemoteFetch;
+      final bool canFinalizeDeletes = remoteSnapshotTrusted && !massDeletionSafetyTripped;
       if (suspiciousEmptyRemoteFetch) {
         debugPrint('[SYNC_SAFETY][binding_id=$bindingId][origin=$origin] suspicious empty remote fetch, skip deletion (remote=${remoteEvents.length}, local=$localCount, mapped=$mappedCount)');
       }
@@ -159,12 +171,32 @@ class FullSyncPullStrategy extends SyncStrategy {
       }
 
       for (var uid in localSyncMap.keys) {
-        if (suspiciousEmptyRemoteFetch || massDeletionSafetyTripped) {
-          break;
-        }
         if (!remoteUids.contains(uid)) {
           final record = localSyncMap[uid]!;
-          final bool deleted = await nativeApi.deleteEvent(record['local_item_id'].toString());
+          final int status = (record['sync_status'] as int?) ?? SyncItemStatus.synced;
+
+          if (status != SyncItemStatus.pendingDelete) {
+            await db.update(
+              'sync_items',
+              {'sync_status': SyncItemStatus.pendingDelete},
+              where: 'remote_collection_id = ? AND remote_uid = ?',
+              whereArgs: [remoteCollectionId, uid],
+            );
+            continue;
+          }
+
+          if (!canFinalizeDeletes) {
+            continue;
+          }
+
+          final String localItemId = record['local_item_id']?.toString() ?? '';
+          if (localItemId.isEmpty) {
+            await db.delete('sync_items', where: 'remote_collection_id = ? AND remote_uid = ?', whereArgs: [remoteCollectionId, uid]);
+            deleteLocal++;
+            continue;
+          }
+
+          final bool deleted = await nativeApi.deleteEvent(localItemId);
           if (deleted) {
             await db.delete('sync_items', where: 'remote_collection_id = ? AND remote_uid = ?', whereArgs: [remoteCollectionId, uid]);
             deleteLocal++;
@@ -180,7 +212,7 @@ class FullSyncPullStrategy extends SyncStrategy {
       );
 
       debugPrint('[SYNC_SUMMARY][binding=$remoteCollectionId] createLocal=$createLocal pull=$pull deleteLocal=$deleteLocal skip=$skip '
-          'deleteCandidates=$deleteCandidates safetyAborted=$massDeletionSafetyTripped');
+          'deleteCandidates=$deleteCandidates safetyAborted=$massDeletionSafetyTripped remoteSnapshotTrusted=$remoteSnapshotTrusted');
       if (!massDeletionSafetyTripped) {
         summary.success++;
         summary.successLog.add('⬇️ 只读同步完成: ${ctx.displayName}');
