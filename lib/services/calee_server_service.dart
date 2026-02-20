@@ -212,7 +212,7 @@ class CaleeServerService {
   final String baseUrl = "https://nc-dev.ywpl.com.au";
 
   /// 核心方法：统一获取事件（适配普通与订阅日历）
-  Future<List<Map<String, dynamic>>> fetchUnifiedEvents({
+  Future<UnifiedEventsSnapshot> fetchUnifiedEventsSnapshot({
     required String calendarPath,
     required bool isSubscription,
   }) async {
@@ -224,46 +224,73 @@ class CaleeServerService {
           ? await http.get(Uri.parse(fullUrl), headers: headers)
           : await _sendReportRequest(fullUrl, headers);
 
-      if (response.statusCode == 200 || response.statusCode == 207) {
-        // --- 关键修正：区分提取逻辑 ---
-        List<Map<String, String>> eventRawData = [];
-
-        if (isSubscription) {
-          // 订阅日历：切分全量文本
-          final blocks = _splitVevents(response.body);
-          eventRawData = blocks.map((b) => {'ics': b, 'href': ''}).toList();
-        } else {
-          // 普通日历：从 XML 提取 ics 内容和对应的 href
-          eventRawData = _extractIcsAndHrefFromXml(response.body);
-        }
-
-        return eventRawData.map((item) {
-          final icsString = item['ics']!;
-          // 这里才调用你的 IcsParser
-          final parsed = IcsParser.parse(item['ics']!, item['href']!);
-          if (parsed.isEmpty) return null;
-
-          final String parsedUid = (parsed['uid'] ?? '').toString();
-          if (parsedUid.isEmpty) return null;
-
-          return {
-            'remote_uid': parsedUid,
-            'summary': parsed['summary'],
-            'start': parsed['dtstart'], // 确保 IcsParser 返回的 key 是这个
-            'end': parsed['dtend'],
-            'href': isSubscription ? '$calendarPath$parsedUid.ics' : item['href'],
-            'etag': (item['etag']?.isNotEmpty == true ? item['etag'] : parsed['dtstamp']) ?? 'no-etag',
-            'calendar_data': icsString,
-          };
-        }).whereType<Map<String, dynamic>>().toList();
+      final int statusCode = response.statusCode;
+      if (statusCode != 200 && statusCode != 207) {
+        return UnifiedEventsSnapshot(
+          events: const [],
+          statusCode: statusCode,
+          fetchSucceeded: false,
+          parseProducedZeroEvents: false,
+        );
       }
 
-      throw Exception(
-          'Failed to fetch unified events. status=${response.statusCode}, path=$calendarPath, isSubscription=$isSubscription');
+      List<Map<String, String>> eventRawData = [];
+      if (isSubscription) {
+        final blocks = _splitVevents(response.body);
+        eventRawData = blocks.map((b) => {'ics': b, 'href': ''}).toList();
+      } else {
+        eventRawData = _extractIcsAndHrefFromXml(response.body);
+      }
+
+      final List<Map<String, dynamic>> parsedEvents = eventRawData.map((item) {
+        final icsString = item['ics']!;
+        final parsed = IcsParser.parse(item['ics']!, item['href']!);
+        if (parsed.isEmpty) return null;
+
+        final String parsedUid = (parsed['uid'] ?? '').toString();
+        if (parsedUid.isEmpty) return null;
+
+        return {
+          'remote_uid': parsedUid,
+          'summary': parsed['summary'],
+          'start': parsed['dtstart'],
+          'end': parsed['dtend'],
+          'href': isSubscription ? '$calendarPath$parsedUid.ics' : item['href'],
+          'etag': (item['etag']?.isNotEmpty == true ? item['etag'] : parsed['dtstamp']) ?? 'no-etag',
+          'calendar_data': icsString,
+        };
+      }).whereType<Map<String, dynamic>>().toList();
+
+      return UnifiedEventsSnapshot(
+        events: parsedEvents,
+        statusCode: statusCode,
+        fetchSucceeded: true,
+        parseProducedZeroEvents: parsedEvents.isEmpty,
+      );
     } catch (e) {
       debugPrint("❌ 同步异常: $e");
-      rethrow;
+      return UnifiedEventsSnapshot(
+        events: const [],
+        statusCode: null,
+        fetchSucceeded: false,
+        parseProducedZeroEvents: false,
+      );
     }
+  }
+
+  Future<List<Map<String, dynamic>>> fetchUnifiedEvents({
+    required String calendarPath,
+    required bool isSubscription,
+  }) async {
+    final snapshot = await fetchUnifiedEventsSnapshot(
+      calendarPath: calendarPath,
+      isSubscription: isSubscription,
+    );
+    if (snapshot.fetchSucceeded && (snapshot.statusCode == 200 || snapshot.statusCode == 207)) {
+      return snapshot.events;
+    }
+    throw Exception(
+        'Failed to fetch unified events. status=${snapshot.statusCode ?? 'null'}, path=$calendarPath, isSubscription=$isSubscription');
   }
 
   List<Map<String, String>> _extractIcsAndHrefFromXml(String xmlBody) {
@@ -759,4 +786,18 @@ class CaleeServerService {
   }
 
 
+}
+
+class UnifiedEventsSnapshot {
+  final List<Map<String, dynamic>> events;
+  final int? statusCode;
+  final bool fetchSucceeded;
+  final bool parseProducedZeroEvents;
+
+  const UnifiedEventsSnapshot({
+    required this.events,
+    required this.statusCode,
+    required this.fetchSucceeded,
+    required this.parseProducedZeroEvents,
+  });
 }

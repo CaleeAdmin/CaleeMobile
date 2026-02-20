@@ -1,6 +1,7 @@
 import 'package:caleesync/common/utils/UidGenerator.dart';
 import 'package:caleesync/entity/SyncContext.dart';
 import 'package:caleesync/entity/SyncSummary.dart';
+import 'package:caleesync/services/calee_server_service.dart';
 import 'package:caleesync/sync/SyncEnum.dart';
 import 'package:caleesync/sync/strategy/SyncStrategy.dart';
 import 'package:flutter/cupertino.dart';
@@ -31,12 +32,14 @@ class FullSyncBidiStrategy extends SyncStrategy {
       final String localCalendarId = ctx.localCalendarId;
       final int remoteCollectionId = ctx.remoteCollectionId;
       final String remotePath = ctx.remotePath;
+      final String? newCtag = ctx.ctag;
       final int origin = (ctx.extra['binding_origin'] as int?) ?? SyncBindingOrigin.remote;
 
-      final List<Map<String, dynamic>> remoteEvents = await nc.fetchUnifiedEvents(
+      final UnifiedEventsSnapshot snapshot = await nc.fetchUnifiedEventsSnapshot(
         calendarPath: remotePath,
         isSubscription: ctx.isSubscription ?? false,
       );
+      final List<Map<String, dynamic>> remoteEvents = snapshot.events;
 
       final List<Map<String, dynamic>> mappedRecords = await db.query(
         'sync_items',
@@ -69,6 +72,25 @@ class FullSyncBidiStrategy extends SyncStrategy {
         ...mappingByRemoteUid.keys,
         ...localItemsMap.keys,
       };
+
+      final int mappedCount = mappingByRemoteUid.length;
+      final int remoteUidsMatchedCount = mappingByRemoteUid.keys.where((uid) => remoteByUid.containsKey(uid)).length;
+      final int deleteCandidates = mappedCount - remoteUidsMatchedCount;
+      final bool suspiciousEmptyRemoteFetch = snapshot.parseProducedZeroEvents && mappedCount > 0;
+      final double deleteCandidateRatio = mappedCount <= 0 ? 0 : (deleteCandidates / mappedCount);
+      final bool massDeletionSafetyTripped = deleteCandidates >= 10 || deleteCandidateRatio >= 0.5;
+      final bool remoteSnapshotTrusted =
+          snapshot.fetchSucceeded &&
+          (snapshot.statusCode == 200 || snapshot.statusCode == 207) &&
+          (newCtag ?? '').isNotEmpty &&
+          !suspiciousEmptyRemoteFetch &&
+          !massDeletionSafetyTripped;
+
+      if (!remoteSnapshotTrusted) {
+        debugPrint('[SYNC_SAFETY][binding=$remoteCollectionId] TWO_WAY untrusted snapshot; block second-phase deleteLocal '
+            '(status=${snapshot.statusCode}, fetchSucceeded=${snapshot.fetchSucceeded}, parseZero=${snapshot.parseProducedZeroEvents}, '
+            'deleteCandidates=$deleteCandidates, deleteCandidateRatio=$deleteCandidateRatio)');
+      }
 
       int createLocal = 0;
       int createRemote = 0;
@@ -179,6 +201,10 @@ class FullSyncBidiStrategy extends SyncStrategy {
               break;
             }
 
+            if (!remoteSnapshotTrusted) {
+              break;
+            }
+
             if (mapping['local_item_id'] != null) {
               await nativeApi.deleteEvent(mapping['local_item_id'].toString());
             } else if (local != null && local.localId != null) {
@@ -212,7 +238,9 @@ class FullSyncBidiStrategy extends SyncStrategy {
       summary.success++;
       summary.successLog.add('🔄 双向同步完成: ${ctx.displayName}');
       debugPrint('[SYNC_SUMMARY][binding=$remoteCollectionId] createLocal=$createLocal createRemote=$createRemote '
-          'pull=$pull push=$push deleteLocal=$deleteLocal stagedDeleteLocal=$stagedDeleteLocal deleteRemote=$deleteRemote skip=$skip conflicts=$conflicts dedupRemoved=${dedup.removedCount}');
+          'pull=$pull push=$push deleteLocal=$deleteLocal stagedDeleteLocal=$stagedDeleteLocal deleteRemote=$deleteRemote skip=$skip '
+          'conflicts=$conflicts dedupRemoved=${dedup.removedCount} remoteSnapshotTrusted=$remoteSnapshotTrusted '
+          'deleteCandidates=$deleteCandidates deleteCandidateRatio=$deleteCandidateRatio status=${snapshot.statusCode}');
     } catch (e) {
       summary.failed++;
       summary.errorLog.add('❌ ${ctx.displayName} 双向同步异常: $e');
