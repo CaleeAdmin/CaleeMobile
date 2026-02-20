@@ -1079,7 +1079,10 @@ class SyncRepository {
     return 'Remote path mismatch';
   }
 
-  /// 创建一个全新的本地起源日历：创建远端记录 + 本地日历 + binding（默认禁用）
+  /// 创建一个新的远端日历草稿（默认禁用）。
+  ///
+  /// 注意：本地系统日历只允许在“启用同步”流程中创建，
+  /// 这里不再创建本地日历，也不再预建 local_bindings。
   Future<bool> createNewLocalCalendar(String displayName) async {
     final String userId = MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? "";
     if (userId.isEmpty) {
@@ -1087,16 +1090,8 @@ class SyncRepository {
       return false;
     }
 
-    String? createdLocalId;
     try {
-      // 1) 先创建本地日历（本地起源），后续即使远端失败也可回滚此新建本地壳。
-      createdLocalId = await _nativeApi.createCalendar(displayName, userId, 0xFF4CAF50);
-      if (createdLocalId == null || createdLocalId.isEmpty) {
-        print("[ERROR] [Repository] Local calendar creation failed");
-        return false;
-      }
-
-      // 2) 创建云端日历。
+      // 1) 创建云端日历。
       final String cloudId = "cal_${DateTime.now().millisecondsSinceEpoch}";
       final String? remotePath = await CaleeServerService().createRemoteCalendar(
         userId: userId,
@@ -1106,67 +1101,25 @@ class SyncRepository {
       );
 
       if (remotePath == null) {
-        print("[ERROR] [Repository] Remote creation failed, aborting local insert");
-        await _nativeApi.deleteCalendar(createdLocalId!, userId);
+        print("[ERROR] [Repository] Remote creation failed");
         return false;
       }
 
-      // 3) 确保 remote_collections 记录存在，且保持 disabled。
+      // 2) 确保 remote_collections 记录存在，且保持 disabled。
       await _ensureRemoteCalendarDraft(
         accountName: userId,
         displayName: displayName,
         remotePath: remotePath,
       );
 
-      // 4) 重扫远端并落库，拿到远端主键后立即建立 local-origin binding（不启用，不触发同步）。
+      // 3) 重扫远端并落库（不创建本地日历，不创建 binding）。
       await CaleeServerService().scanRemoteCalendars(
         serverUrl: AppConstant.caleeServer,
         userId: userId,
       );
 
-      final db = await _dbHelper.database;
-      final List<Map<String, dynamic>> remoteRows = await db.query(
-        'remote_collections',
-        columns: ['id'],
-        where: 'account_name = ? AND collection_type = ? AND remote_path = ?',
-        whereArgs: [userId, 'calendar', CaleeServerService.normalizeRemotePath(remotePath)],
-        limit: 1,
-      );
-      if (remoteRows.isEmpty) {
-        await _nativeApi.deleteCalendar(createdLocalId!, userId);
-        print('[ERROR] [Repository] Remote record not found after scan: $remotePath');
-        return false;
-      }
-
-      final int remoteCollectionId = remoteRows.first['id'] as int;
-      await db.transaction((txn) async {
-        final int now = DateTime.now().millisecondsSinceEpoch;
-        await txn.insert(
-          'local_bindings',
-          {
-            'remote_collection_id': remoteCollectionId,
-            'local_collection_id': createdLocalId,
-            'binding_origin': SyncBindingOrigin.local,
-            'created_at': now,
-            'updated_at': now,
-          },
-          conflictAlgorithm: ConflictAlgorithm.replace,
-        );
-        await txn.update(
-          'remote_collections',
-          {'is_enabled': 0},
-          where: 'id = ?',
-          whereArgs: [remoteCollectionId],
-        );
-      });
-
       return true;
     } catch (e) {
-      if (createdLocalId != null && createdLocalId.isNotEmpty) {
-        try {
-          await _nativeApi.deleteCalendar(createdLocalId!, userId);
-        } catch (_) {}
-      }
       print("[ERROR] [Repository] Create workflow exception: $e");
       return false;
     }
