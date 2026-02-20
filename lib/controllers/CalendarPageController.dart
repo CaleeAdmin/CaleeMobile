@@ -271,6 +271,7 @@ class CalendarPageController extends GetxController {
         WHERE rc.account_name = ?
           AND rc.remote_path IS NOT NULL
           AND rc.remote_path != ''
+        ORDER BY rc.id ASC
       ''', [loginName]);
       final Map<String, int> cachedCountByCalendarId = {};
       final Map<String, bool> localReadOnlyById = {};
