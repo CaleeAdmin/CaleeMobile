@@ -7,6 +7,9 @@ import 'package:flutter/cupertino.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../../entity/sync_run_record.dart';
+import '../operation/sync_operation.dart';
+import '../operation/sync_operation_executor.dart';
+import '../operation/sync_reconciler.dart';
 import '../sync_run_telemetry.dart';
 import '../sync_run_recorder.dart';
 
@@ -18,6 +21,8 @@ import '../../core/platform/pigeon/calendar_api.g.dart';
 /// Conflict resolution: binding origin decides winner (remote pull vs local push).
 class FullSyncBidiStrategy extends SyncStrategy {
   static const int _defaultDeletionPolicy = SyncDeletionPolicy.bidirectional;
+  final SyncReconciler _reconciler = const SyncReconciler();
+  final SyncOperationExecutor _executor = const SyncOperationExecutor();
 
   String _keyUid(PlatformItem e) {
     final u = (e.uid ?? '').trim();
@@ -146,105 +151,91 @@ class FullSyncBidiStrategy extends SyncStrategy {
         final bool localChanged = localExists && (mapping == null || localLastModified > storedLocalLastModified);
         final int status = (mapping?['sync_status'] as int?) ?? SyncItemStatus.synced;
 
-        SyncItemAction action;
-        String reason;
+        final plan = _reconciler.plan(
+          uid: uid,
+          mode: SyncReconcileMode.bidi,
+          remoteExists: remoteExists,
+          localExists: localExists,
+          remoteChanged: remoteChanged,
+          localChanged: localChanged,
+          hasMapping: mapping != null,
+          bindingOrigin: origin,
+          deletionPolicy: _defaultDeletionPolicy,
+        );
 
-        if (remoteExists && !localExists) {
-          action = SyncItemAction.createLocal;
-          reason = 'remote_exists_local_missing';
-        } else if (!remoteExists && localExists) {
-          if (_defaultDeletionPolicy == SyncDeletionPolicy.remoteDeleteWins) {
-            action = SyncItemAction.deleteLocal;
-            reason = 'remote_missing_local_exists_remote_delete_wins';
-          } else {
-            action = SyncItemAction.deleteRemote;
-            reason = 'remote_missing_local_exists_bidirectional_delete';
-          }
-        } else if (!remoteExists && !localExists) {
-          action = SyncItemAction.skip;
-          reason = 'neither_exists';
-        } else {
-          if (!remoteChanged && !localChanged) {
-            action = SyncItemAction.skip;
-            reason = 'no_change';
-          } else if (remoteChanged && !localChanged) {
-            action = SyncItemAction.pull;
-            reason = 'remote_changed_only';
-          } else if (!remoteChanged && localChanged) {
-            action = SyncItemAction.push;
-            reason = 'local_changed_only';
-          } else {
-            conflicts++;
-            if (origin == SyncBindingOrigin.local) {
-              action = SyncItemAction.push;
-              reason = 'conflict_origin_local';
-            } else {
-              action = SyncItemAction.pull;
-              reason = 'conflict_origin_remote';
-            }
-          }
+        if (remoteChanged && localChanged && remoteExists && localExists) {
+          conflicts++;
         }
 
-        debugPrint('[SYNC_ITEM][binding=$remoteCollectionId][uid=$uid] action=$action '
-            'flags(remoteExists=$remoteExists localExists=$localExists remoteChanged=$remoteChanged localChanged=$localChanged origin=$origin reason=$reason)');
+        debugPrint('[SYNC_ITEM][binding=$remoteCollectionId][uid=$uid] operation=${plan.operation} '
+            'flags(remoteExists=$remoteExists localExists=$localExists remoteChanged=$remoteChanged localChanged=$localChanged origin=$origin reason=${plan.reason})');
 
-        switch (action) {
-          case SyncItemAction.createLocal:
-            await _pullFromRemote(remote!, localCalendarId, remoteCollectionId, mapping?['local_item_id']?.toString(), remoteToken, db);
-            createLocal++;
-            summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.local, type: SyncOperationType.created);
-            break;
-          case SyncItemAction.pull:
-            await _pullFromRemote(remote!, localCalendarId, remoteCollectionId, mapping?['local_item_id']?.toString(), remoteToken, db);
-            pull++;
-            summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.local, type: SyncOperationType.updated);
-            break;
-          case SyncItemAction.push:
-            await _pushToRemote(local!, remotePath, db, localCalendarId, remoteCollectionId);
-            if (mapping == null) {
-              createRemote++;
-              summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.remote, type: SyncOperationType.created);
-            } else {
-              push++;
-              summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.remote, type: SyncOperationType.updated);
-            }
-            break;
-          case SyncItemAction.deleteLocal:
+        final bool completed = await _executor.execute(
+          plan: plan,
+          onLocalCreate: remote == null
+              ? null
+              : () async {
+                  await _pullFromRemote(remote, localCalendarId, remoteCollectionId, mapping?['local_item_id']?.toString(), remoteToken, db);
+                  createLocal++;
+                  summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.local, type: SyncOperationType.created);
+                  return true;
+                },
+          onLocalUpdate: remote == null
+              ? null
+              : () async {
+                  await _pullFromRemote(remote, localCalendarId, remoteCollectionId, mapping?['local_item_id']?.toString(), remoteToken, db);
+                  pull++;
+                  summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.local, type: SyncOperationType.updated);
+                  return true;
+                },
+          onRemoteCreate: local == null
+              ? null
+              : () async {
+                  await _pushToRemote(local, remotePath, db, localCalendarId, remoteCollectionId);
+                  createRemote++;
+                  summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.remote, type: SyncOperationType.created);
+                  return true;
+                },
+          onRemoteUpdate: local == null
+              ? null
+              : () async {
+                  await _pushToRemote(local, remotePath, db, localCalendarId, remoteCollectionId);
+                  if (mapping == null) {
+                    createRemote++;
+                    summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.remote, type: SyncOperationType.created);
+                  } else {
+                    push++;
+                    summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.remote, type: SyncOperationType.updated);
+                  }
+                  return true;
+                },
+          onLocalDelete: () async {
             if (blockDeletesBySafetyGate || !remoteSnapshotTrusted || !localSnapshotTrusted) {
-              break;
+              return false;
             }
-
-            if (mapping == null) {
-              if (local != null && local.localId != null) {
-                await nativeApi.deleteEvent(local.localId!);
-              }
-              break;
-            }
-
-            if (mapping['local_item_id'] != null) {
-              await nativeApi.deleteEvent(mapping['local_item_id'].toString());
-            } else if (local != null && local.localId != null) {
-              await nativeApi.deleteEvent(local.localId!);
+            final String localId = mapping?['local_item_id']?.toString() ?? local?.localId?.toString() ?? '';
+            if (localId.isNotEmpty) {
+              await nativeApi.deleteEvent(localId);
             }
             await db.delete('sync_items', where: 'remote_collection_id = ? AND remote_uid = ?', whereArgs: [remoteCollectionId, uid]);
-            debugPrint('[SYNC_DELETE][binding=$remoteCollectionId][uid=$uid] local_deleted_immediately_reason=remote_missing');
             deleteLocal++;
             summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.local, type: SyncOperationType.deleted);
-            break;
-          case SyncItemAction.deleteRemote:
+            return true;
+          },
+          onRemoteDelete: () async {
             if (blockDeletesBySafetyGate || !remoteSnapshotTrusted || !localSnapshotTrusted) {
-              break;
+              return false;
             }
             final href = mapping?['remote_href']?.toString() ?? remote?['href']?.toString() ?? '';
             if (href.isNotEmpty) {
               await nc.deleteEvent(eventPath: href);
             }
             await db.delete('sync_items', where: 'remote_collection_id = ? AND remote_uid = ?', whereArgs: [remoteCollectionId, uid]);
-            debugPrint('[SYNC_DELETE][binding=$remoteCollectionId][uid=$uid] remote_deleted_immediately_reason=local_missing');
             deleteRemote++;
             summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.remote, type: SyncOperationType.deleted);
-            break;
-          case SyncItemAction.skip:
+            return true;
+          },
+          onMarkSynced: () async {
             if (mapping != null && remoteExists && status != SyncItemStatus.synced) {
               await db.update(
                 'sync_items',
@@ -253,8 +244,14 @@ class FullSyncBidiStrategy extends SyncStrategy {
                 whereArgs: [remoteCollectionId, uid],
               );
             }
-            skip++;
-            break;
+            return true;
+          },
+          onMappingDelete: () async => true,
+          onMappingUpsert: () async => true,
+        );
+
+        if (!completed || plan.operation == CanonicalSyncOperation.skip) {
+          skip++;
         }
       }
 

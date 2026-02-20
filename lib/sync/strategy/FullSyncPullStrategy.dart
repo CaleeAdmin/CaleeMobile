@@ -6,12 +6,17 @@ import 'package:caleesync/sync/strategy/SyncStrategy.dart';
 import 'package:flutter/cupertino.dart';
 
 import '../../entity/sync_run_record.dart';
+import '../operation/sync_operation.dart';
+import '../operation/sync_operation_executor.dart';
+import '../operation/sync_reconciler.dart';
 import '../sync_run_telemetry.dart';
 import '../sync_run_recorder.dart';
 
 import '../../core/platform/pigeon/calendar_api.g.dart';
 
 class FullSyncPullStrategy extends SyncStrategy {
+  final SyncReconciler _reconciler = const SyncReconciler();
+  final SyncOperationExecutor _executor = const SyncOperationExecutor();
   @override
   Future<void> execute(SyncContext ctx, SyncSummary summary) async {
     final String localCalendarId = ctx.localCalendarId;
@@ -77,35 +82,31 @@ class FullSyncPullStrategy extends SyncStrategy {
         final bool remoteChanged = localRecord == null || storedRemoteToken != remoteToken;
         final bool localChanged = localItem != null && (localRecord == null || localMtime > storedLocalMtime);
 
-        SyncItemAction action;
-        String reason;
+        final plan = _reconciler.plan(
+          uid: uid,
+          mode: SyncReconcileMode.pull,
+          remoteExists: true,
+          localExists: localItem != null,
+          remoteChanged: remoteChanged,
+          localChanged: localChanged,
+          hasMapping: localRecord != null,
+          bindingOrigin: origin,
+          deletionPolicy: SyncDeletionPolicy.bidirectional,
+        );
 
-        if (localRecord == null || localItem == null) {
-          action = SyncItemAction.createLocal;
-          reason = 'remote_exists_local_missing';
-        } else if (localChanged) {
-          action = SyncItemAction.pull;
-          reason = 'readonly_enforce_remote_overwrite_local_edit';
-        } else if (remoteChanged) {
-          action = SyncItemAction.pull;
-          reason = 'remote_changed';
-        } else {
-          action = SyncItemAction.skip;
-          reason = 'no_change';
-        }
+        debugPrint('[SYNC_ITEM][binding=$remoteCollectionId][uid=$uid] operation=${plan.operation} '
+            'flags(remoteExists=true localExists=${localItem != null} remoteChanged=$remoteChanged localChanged=$localChanged reason=${plan.reason})');
 
-        debugPrint('[SYNC_ITEM][binding=$remoteCollectionId][uid=$uid] action=$action '
-            'flags(remoteExists=true localExists=${localItem != null} remoteChanged=$remoteChanged localChanged=$localChanged reason=$reason)');
-
-        if (action == SyncItemAction.createLocal || action == SyncItemAction.pull) {
-          final RemotePullResult? pulled = await pullRemoteEventToLocal(
-            remote: remoteEvent,
-            localCalendarId: localCalendarId,
-            existingLocalId: localRecord?['local_item_id']?.toString(),
-            isSubscription: ctx.isSubscription ?? false,
-          );
-
-          if (pulled != null) {
+        final bool completed = await _executor.execute(
+          plan: plan,
+          onLocalCreate: () async {
+            final RemotePullResult? pulled = await pullRemoteEventToLocal(
+              remote: remoteEvent,
+              localCalendarId: localCalendarId,
+              existingLocalId: localRecord?['local_item_id']?.toString(),
+              isSubscription: ctx.isSubscription ?? false,
+            );
+            if (pulled == null) return false;
             await upsertSyncedItem(
               db: db,
               remoteCollectionId: remoteCollectionId,
@@ -116,25 +117,47 @@ class FullSyncPullStrategy extends SyncStrategy {
               remoteHref: (remoteEvent['href'] ?? '').toString(),
               summary: pulled.summary,
             );
-            if (action == SyncItemAction.createLocal) {
-              createLocal++;
-              summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.local, type: SyncOperationType.created);
-            } else {
-              pull++;
-              summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.local, type: SyncOperationType.updated);
-            }
-          } else {
-            skip++;
-          }
-        } else if (action == SyncItemAction.skip) {
-          if (localRecord != null && status != SyncItemStatus.synced) {
-            await db.update(
-              'sync_items',
-              {'sync_status': SyncItemStatus.synced},
-              where: 'remote_collection_id = ? AND remote_uid = ?',
-              whereArgs: [remoteCollectionId, uid],
+            createLocal++;
+            summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.local, type: SyncOperationType.created);
+            return true;
+          },
+          onLocalUpdate: () async {
+            final RemotePullResult? pulled = await pullRemoteEventToLocal(
+              remote: remoteEvent,
+              localCalendarId: localCalendarId,
+              existingLocalId: localRecord?['local_item_id']?.toString(),
+              isSubscription: ctx.isSubscription ?? false,
             );
-          }
+            if (pulled == null) return false;
+            await upsertSyncedItem(
+              db: db,
+              remoteCollectionId: remoteCollectionId,
+              uid: pulled.uid,
+              localItemId: pulled.localEventId,
+              etag: remoteToken,
+              lastMtime: localItem?.lastModified ?? DateTime.now().millisecondsSinceEpoch,
+              remoteHref: (remoteEvent['href'] ?? '').toString(),
+              summary: pulled.summary,
+            );
+            pull++;
+            summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.local, type: SyncOperationType.updated);
+            return true;
+          },
+          onMarkSynced: () async {
+            if (localRecord != null && status != SyncItemStatus.synced) {
+              await db.update(
+                'sync_items',
+                {'sync_status': SyncItemStatus.synced},
+                where: 'remote_collection_id = ? AND remote_uid = ?',
+                whereArgs: [remoteCollectionId, uid],
+              );
+            }
+            return true;
+          },
+          onMappingUpsert: () async => true,
+        );
+
+        if (!completed || plan.operation == CanonicalSyncOperation.skip) {
           skip++;
         }
       }
