@@ -39,6 +39,33 @@ class CalendarProbeController extends GetxController {
   Future<void> loadRecentRuns() async {
     final runs = await _runStore.loadRuns(limit: 20);
     syncRuns.assignAll(runs);
+    _syncOverviewFromLatestRun(runs);
+  }
+
+  void _syncOverviewFromLatestRun(List<SyncRunRecord> runs) {
+    if (runs.isEmpty || isSyncing.value) return;
+
+    final SyncRunRecord latestRun = runs.first;
+    int synced = 0;
+    int failures = 0;
+
+    for (final binding in latestRun.bindings) {
+      switch (binding.resultStatus) {
+        case SyncBindingResultStatus.success:
+          synced++;
+          break;
+        case SyncBindingResultStatus.partial:
+        case SyncBindingResultStatus.failed:
+        case SyncBindingResultStatus.abortedBySafety:
+          failures++;
+          break;
+      }
+    }
+
+    success.value = synced;
+    failed.value = failures;
+    processing.value = 0;
+    lastSyncAt.value = latestRun.endTime ?? latestRun.startTime;
   }
 
   /// 获取已Subscribed calendar及对应事件数
@@ -92,5 +119,4 @@ class CalendarProbeController extends GetxController {
     }
   }
 }
-
 
