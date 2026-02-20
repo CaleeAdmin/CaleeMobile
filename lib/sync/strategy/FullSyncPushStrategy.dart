@@ -1,22 +1,17 @@
-import 'package:caleesync/common/utils/UidGenerator.dart';
 import 'package:caleesync/entity/SyncContext.dart';
 import 'package:caleesync/entity/SyncSummary.dart';
 import 'package:caleesync/sync/SyncEnum.dart';
 import 'package:flutter/cupertino.dart';
-import 'package:sqflite/sqflite.dart';
 
-import '../../core/platform/pigeon/calendar_api.g.dart';
 import 'SyncStrategy.dart';
 
 class FullSyncPushStrategy extends SyncStrategy {
   @override
   Future<void> execute(SyncContext ctx, SyncSummary summary) async {
-    if (loginName == null ||
-        loginName?.isEmpty == true ||
-        password == null ||
-        password?.isEmpty == true) {
+    if (loginName == null || loginName!.isEmpty || password == null || password!.isEmpty) {
       return;
     }
+
     try {
       final db = await dbHelper.database;
       final String remotePath = ctx.remotePath;
@@ -24,12 +19,7 @@ class FullSyncPushStrategy extends SyncStrategy {
       final int remoteCollectionId = ctx.remoteCollectionId;
       final int bindingId = (ctx.extra['binding_id'] as int?) ?? 0;
 
-      final start = DateTime.now().subtract(const Duration(days: 365)).millisecondsSinceEpoch;
-      final end = DateTime.now().add(const Duration(days: 730)).millisecondsSinceEpoch;
-
-      final List<PlatformItem?> items = await nativeApi.getEvents(localCalendarId, start, end);
-      final List<PlatformItem> localEvents = items.whereType<PlatformItem>().toList();
-
+      final localEvents = await loadLocalEvents(localCalendarId);
       final List<Map<String, dynamic>> mappedRecords = await db.query(
         'sync_items',
         where: 'remote_collection_id = ?',
@@ -42,71 +32,50 @@ class FullSyncPushStrategy extends SyncStrategy {
       );
 
       final Map<String, Map<String, dynamic>> localSyncMap = {
-        for (var r in mappedRecords) r['local_item_id'].toString(): r
+        for (final record in mappedRecords) record['local_item_id'].toString(): record,
       };
 
       int changeCount = 0;
-
-      for (var local in localEvents) {
+      for (final local in localEvents) {
         final String localId = local.localId.toString();
         final int lastModified = local.lastModified ?? 0;
 
-        bool needsPush = false;
+        final Map<String, dynamic>? record = localSyncMap[localId];
+        final int syncStatus = (record?['sync_status'] as int?) ?? SyncItemStatus.synced;
+        final int recordMtime = (record?['last_mtime'] as int?) ?? 0;
 
-        if (!localSyncMap.containsKey(localId)) {
-          needsPush = true;
-        } else {
-          final record = localSyncMap[localId]!;
-          final int syncStatus = (record['sync_status'] as int?) ?? SyncItemStatus.synced;
-          if (syncStatus == SyncItemStatus.pendingPush ||
-              lastModified > (record['last_mtime'] ?? 0)) {
-            needsPush = true;
-          }
+        final bool needsPush =
+            record == null || syncStatus == SyncItemStatus.pendingPush || lastModified > recordMtime;
+        if (!needsPush) {
+          continue;
         }
 
-        if (needsPush) {
-          var uid = (local.uid ?? '').trim();
-          if (uid.isEmpty) {
-            uid = CaleeUid.generate();
-            await nativeApi.createOrUpdateEvent(CalendarEventRequest(
-              calendarId: localCalendarId,
-              eventId: local.localId,
-              uid: uid,
-              title: local.title ?? "无标题",
-              start: DateTime.fromMillisecondsSinceEpoch(local.startTime ?? 0).millisecondsSinceEpoch,
-              end: DateTime.fromMillisecondsSinceEpoch(local.endTime ?? 0).millisecondsSinceEpoch,
-              notes: local.notes,
-            ));
-          }
-
-          final String? newEtag = await nc.uploadEventData(
-            userId: loginName!,
-            calendarPath: remotePath,
-            uid: uid,
-            title: local.title ?? "无标题",
-            start: DateTime.fromMillisecondsSinceEpoch(local.startTime ?? 0),
-            end: DateTime.fromMillisecondsSinceEpoch(local.endTime ?? 0),
-          );
-
-          if (newEtag != null) {
-            await db.insert('sync_items', {
-              'remote_uid': uid,
-              'local_item_id': localId,
-              'remote_collection_id': remoteCollectionId,
-              'summary': local.title,
-              'last_etag': newEtag.replaceAll('"', ''),
-              'last_mtime': lastModified,
-              'remote_href': "${remotePath.endsWith('/') ? remotePath : '$remotePath/'}$uid.ics",
-              'sync_status': SyncItemStatus.synced,
-            }, conflictAlgorithm: ConflictAlgorithm.replace);
-            changeCount++;
-          }
+        final RemotePushResult? pushed = await pushLocalEventToRemote(
+          local: local,
+          remotePath: remotePath,
+          localCalendarId: localCalendarId,
+        );
+        if (pushed == null) {
+          continue;
         }
+
+        await upsertSyncedItem(
+          db: db,
+          remoteCollectionId: remoteCollectionId,
+          uid: pushed.uid,
+          localItemId: localId,
+          etag: pushed.etag,
+          lastMtime: pushed.lastMtime,
+          remoteHref: pushed.remoteHref,
+          summary: local.title,
+        );
+        changeCount++;
       }
 
-      final Set<String> currentLocalIds = localEvents.map((e) => e.localId.toString()).toSet();
+      final Set<String> currentLocalIds = localEvents.map((event) => event.localId.toString()).toSet();
       final int mappedCount = localSyncMap.length;
-      final int remoteDeleteCandidates = localSyncMap.keys.where((id) => !currentLocalIds.contains(id)).length;
+      final int remoteDeleteCandidates =
+          localSyncMap.keys.where((id) => !currentLocalIds.contains(id)).length;
       const int localDeleteCandidates = 0;
       final bool suspiciousEmptyLocalFetch = localEvents.isEmpty && mappedCount > 0;
       final bool suspiciousEmptyRemoteFetch = snapshot.parseProducedZeroEvents && mappedCount > 0;
@@ -128,27 +97,31 @@ class FullSyncPushStrategy extends SyncStrategy {
         summary.errorLog.add('🛑 ${ctx.displayName} Safety gate blocked deletions (localDeleteCandidates=$localDeleteCandidates, remoteDeleteCandidates=$remoteDeleteCandidates, mappedCount=$mappedCount, threshold=${SyncStrategy.massDeletionAbsoluteThreshold})');
       }
 
-      for (var localId in localSyncMap.keys) {
-        if (!currentLocalIds.contains(localId)) {
-          final record = localSyncMap[localId]!;
-          final String? href = record['remote_href'];
-          final String uid = (record['remote_uid'] ?? '').toString();
-          final int syncStatus = (record['sync_status'] as int?) ?? SyncItemStatus.synced;
+      for (final localId in localSyncMap.keys) {
+        if (currentLocalIds.contains(localId)) {
+          continue;
+        }
 
-          if (href != null && syncStatus == SyncItemStatus.pendingDelete) {
-            if (blockDeletesBySafetyGate || !localSnapshotTrusted || !remoteSnapshotTrusted) {
-              continue;
-            }
-            final bool isDeletedOnRemote = await nc.deleteEvent(eventPath: href);
-            if (isDeletedOnRemote) {
-              await db.delete(
-                'sync_items',
-                where: 'remote_collection_id = ? AND remote_uid = ?',
-                whereArgs: [remoteCollectionId, uid],
-              );
-              changeCount++;
-            }
-          }
+        final record = localSyncMap[localId]!;
+        final String href = (record['remote_href'] ?? '').toString();
+        final String uid = (record['remote_uid'] ?? '').toString();
+        final int syncStatus = (record['sync_status'] as int?) ?? SyncItemStatus.synced;
+
+        if (href.isEmpty || syncStatus != SyncItemStatus.pendingDelete) {
+          continue;
+        }
+        if (blockDeletesBySafetyGate || !localSnapshotTrusted || !remoteSnapshotTrusted) {
+          continue;
+        }
+
+        final bool isDeletedOnRemote = await nc.deleteEvent(eventPath: href);
+        if (isDeletedOnRemote) {
+          await db.delete(
+            'sync_items',
+            where: 'remote_collection_id = ? AND remote_uid = ?',
+            whereArgs: [remoteCollectionId, uid],
+          );
+          changeCount++;
         }
       }
 
@@ -164,7 +137,7 @@ class FullSyncPushStrategy extends SyncStrategy {
       }
     } catch (e) {
       summary.failed++;
-      summary.errorLog.add("❌ ${ctx.displayName} 发布失败: $e");
+      summary.errorLog.add('❌ ${ctx.displayName} 发布失败: $e');
     }
   }
 }
