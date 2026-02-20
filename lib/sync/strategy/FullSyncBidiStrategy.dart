@@ -1,6 +1,5 @@
 import 'package:caleesync/entity/SyncContext.dart';
 import 'package:caleesync/entity/SyncSummary.dart';
-import 'package:caleesync/services/calee_server_service.dart';
 import 'package:caleesync/sync/SyncEnum.dart';
 import 'package:caleesync/sync/strategy/SyncStrategy.dart';
 import 'package:flutter/cupertino.dart';
@@ -12,6 +11,8 @@ import '../operation/sync_operation_executor.dart';
 import '../operation/sync_reconciler.dart';
 import '../sync_run_telemetry.dart';
 import '../sync_run_recorder.dart';
+import '../operation/store_adapters.dart';
+import '../operation/unified_store_executor.dart';
 
 import '../../core/platform/pigeon/calendar_api.g.dart';
 
@@ -24,11 +25,6 @@ class FullSyncBidiStrategy extends SyncStrategy {
   final SyncReconciler _reconciler = const SyncReconciler();
   final SyncOperationExecutor _executor = const SyncOperationExecutor();
 
-  String _keyUid(PlatformItem e) {
-    final u = (e.uid ?? '').trim();
-    if (u.isNotEmpty) return u;
-    return 'local_${e.localId}';
-  }
 
   @override
   Future<void> execute(SyncContext ctx, SyncSummary summary) async {
@@ -43,11 +39,22 @@ class FullSyncBidiStrategy extends SyncStrategy {
       final int origin = (ctx.extra['binding_origin'] as int?) ?? SyncBindingOrigin.remote;
       final int bindingId = (ctx.extra['binding_id'] as int?) ?? 0;
 
-      final UnifiedEventsSnapshot snapshot = await nc.fetchUnifiedEventsSnapshot(
-        calendarPath: remotePath,
+      final RemoteStoreAdapter remoteAdapter = RemoteStoreAdapter(
+        nc: nc,
+        loginName: loginName!,
+        remotePath: remotePath,
         isSubscription: ctx.isSubscription ?? false,
       );
-      final List<Map<String, dynamic>> remoteEvents = snapshot.events;
+      final LocalStoreAdapter localAdapter = LocalStoreAdapter(
+        nativeApi: nativeApi,
+        localCalendarId: localCalendarId,
+      );
+      final UnifiedStoreExecutor storeExecutor = UnifiedStoreExecutor(
+        localAdapter: localAdapter,
+        remoteAdapter: remoteAdapter,
+      );
+
+      final AdapterSnapshot remoteSnapshot = await remoteAdapter.getSnapshot();
 
       final List<Map<String, dynamic>> mappedRecords = await db.query(
         'sync_items',
@@ -58,9 +65,10 @@ class FullSyncBidiStrategy extends SyncStrategy {
       final _RepairResult dedup = await _repairDuplicateMappings(db, remoteCollectionId, mappedRecords);
       final List<Map<String, dynamic>> records = dedup.records;
 
-      final localEvents = await loadLocalEvents(localCalendarId);
+      final AdapterSnapshot localSnapshot = await localAdapter.getSnapshot();
       final Map<String, PlatformItem> localItemsMap = {
-        for (final e in localEvents) _keyUid(e): e,
+        for (final entry in localSnapshot.byStableKey.entries)
+          if (entry.value.raw['item'] is PlatformItem) entry.key: entry.value.raw['item'] as PlatformItem,
       };
 
       final Map<String, Map<String, dynamic>> mappingByRemoteUid = {
@@ -69,8 +77,8 @@ class FullSyncBidiStrategy extends SyncStrategy {
       };
 
       final Map<String, Map<String, dynamic>> remoteByUid = {
-        for (var r in remoteEvents)
-          if ((r['remote_uid']?.toString() ?? '').isNotEmpty) r['remote_uid'].toString(): r
+        for (final entry in remoteSnapshot.byStableKey.entries)
+          if (entry.key.isNotEmpty) entry.key: entry.value.raw,
       };
 
       final Set<String> allUids = {
@@ -80,11 +88,11 @@ class FullSyncBidiStrategy extends SyncStrategy {
       };
 
       final int mappedCount = mappingByRemoteUid.length;
-      final bool suspiciousEmptyRemoteFetch = snapshot.parseProducedZeroEvents && mappedCount > 0;
+      final bool suspiciousEmptyRemoteFetch = remoteSnapshot.parseProducedZeroEvents && mappedCount > 0;
       final bool suspiciousEmptyLocalFetch = localItemsMap.isEmpty && mappedCount > 0;
       final bool remoteSnapshotTrusted =
-          snapshot.fetchSucceeded &&
-          (snapshot.statusCode == 200 || snapshot.statusCode == 207) &&
+          remoteSnapshot.fetchSucceeded &&
+          (remoteSnapshot.statusCode == 200 || remoteSnapshot.statusCode == 207) &&
           (newCtag ?? '').isNotEmpty &&
           !suspiciousEmptyRemoteFetch;
       final bool localSnapshotTrusted = !suspiciousEmptyLocalFetch;
@@ -111,7 +119,7 @@ class FullSyncBidiStrategy extends SyncStrategy {
 
       if (!remoteSnapshotTrusted || !localSnapshotTrusted) {
         debugPrint('[SYNC_SAFETY][binding=$remoteCollectionId] TWO_WAY untrusted snapshot; block delete actions '
-            '(remoteTrusted=$remoteSnapshotTrusted, localTrusted=$localSnapshotTrusted, status=${snapshot.statusCode}, fetchSucceeded=${snapshot.fetchSucceeded})');
+            '(remoteTrusted=$remoteSnapshotTrusted, localTrusted=$localSnapshotTrusted, status=${remoteSnapshot.statusCode}, fetchSucceeded=${remoteSnapshot.fetchSucceeded})');
       }
       if (blockDeletesBySafetyGate) {
         debugPrint('[SYNC_SAFETY][binding=$remoteCollectionId] aborted by safety gate '
@@ -172,64 +180,128 @@ class FullSyncBidiStrategy extends SyncStrategy {
 
         final bool completed = await _executor.execute(
           plan: plan,
-          onLocalCreate: remote == null
-              ? null
-              : () async {
-                  await _pullFromRemote(remote, localCalendarId, remoteCollectionId, mapping?['local_item_id']?.toString(), remoteToken, db);
-                  createLocal++;
-                  summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.local, type: SyncOperationType.created);
-                  return true;
-                },
-          onLocalUpdate: remote == null
-              ? null
-              : () async {
-                  await _pullFromRemote(remote, localCalendarId, remoteCollectionId, mapping?['local_item_id']?.toString(), remoteToken, db);
-                  pull++;
-                  summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.local, type: SyncOperationType.updated);
-                  return true;
-                },
-          onRemoteCreate: local == null
-              ? null
-              : () async {
-                  await _pushToRemote(local, remotePath, db, localCalendarId, remoteCollectionId);
-                  createRemote++;
-                  summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.remote, type: SyncOperationType.created);
-                  return true;
-                },
-          onRemoteUpdate: local == null
-              ? null
-              : () async {
-                  await _pushToRemote(local, remotePath, db, localCalendarId, remoteCollectionId);
-                  if (mapping == null) {
-                    createRemote++;
-                    summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.remote, type: SyncOperationType.created);
-                  } else {
-                    push++;
-                    summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.remote, type: SyncOperationType.updated);
-                  }
-                  return true;
-                },
+          onLocalCreate: () async {
+            final result = await storeExecutor.execute(
+              operation: CanonicalSyncOperation.localCreate,
+              uid: uid,
+              remote: remote,
+              local: local,
+              mapping: mapping,
+              remoteToken: remoteToken,
+            );
+            if (!result.success || result.mutation == null) return false;
+            await _persistPulledMutation(
+              db: db,
+              remoteCollectionId: remoteCollectionId,
+              uid: uid,
+              remote: remote,
+              remoteToken: remoteToken,
+              mutation: result.mutation!,
+            );
+            createLocal++;
+            summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.local, type: SyncOperationType.created);
+            return true;
+          },
+          onLocalUpdate: () async {
+            final result = await storeExecutor.execute(
+              operation: CanonicalSyncOperation.localUpdate,
+              uid: uid,
+              remote: remote,
+              local: local,
+              mapping: mapping,
+              remoteToken: remoteToken,
+            );
+            if (!result.success || result.mutation == null) return false;
+            await _persistPulledMutation(
+              db: db,
+              remoteCollectionId: remoteCollectionId,
+              uid: uid,
+              remote: remote,
+              remoteToken: remoteToken,
+              mutation: result.mutation!,
+            );
+            pull++;
+            summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.local, type: SyncOperationType.updated);
+            return true;
+          },
+          onRemoteCreate: () async {
+            final String stableUid = (local?.uid ?? '').trim().isNotEmpty
+                ? (local?.uid ?? '').trim()
+                : 'local_${local?.localId ?? ''}';
+            final result = await storeExecutor.execute(
+              operation: CanonicalSyncOperation.remoteCreate,
+              uid: stableUid,
+              remote: remote,
+              local: local,
+              mapping: mapping,
+              remoteToken: remoteToken,
+            );
+            if (!result.success || result.mutation == null) return false;
+            await _persistPushedMutation(
+              db: db,
+              remoteCollectionId: remoteCollectionId,
+              local: local,
+              mutation: result.mutation!,
+            );
+            createRemote++;
+            summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.remote, type: SyncOperationType.created);
+            return true;
+          },
+          onRemoteUpdate: () async {
+            final String stableUid = (local?.uid ?? '').trim().isNotEmpty
+                ? (local?.uid ?? '').trim()
+                : 'local_${local?.localId ?? ''}';
+            final result = await storeExecutor.execute(
+              operation: CanonicalSyncOperation.remoteUpdate,
+              uid: stableUid,
+              remote: remote,
+              local: local,
+              mapping: mapping,
+              remoteToken: remoteToken,
+            );
+            if (!result.success || result.mutation == null) return false;
+            await _persistPushedMutation(
+              db: db,
+              remoteCollectionId: remoteCollectionId,
+              local: local,
+              mutation: result.mutation!,
+            );
+            if (mapping == null) {
+              createRemote++;
+              summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.remote, type: SyncOperationType.created);
+            } else {
+              push++;
+              summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.remote, type: SyncOperationType.updated);
+            }
+            return true;
+          },
           onLocalDelete: () async {
-            if (blockDeletesBySafetyGate || !remoteSnapshotTrusted || !localSnapshotTrusted) {
-              return false;
-            }
-            final String localId = mapping?['local_item_id']?.toString() ?? local?.localId?.toString() ?? '';
-            if (localId.isNotEmpty) {
-              await nativeApi.deleteEvent(localId);
-            }
+            final result = await storeExecutor.execute(
+              operation: CanonicalSyncOperation.localDelete,
+              uid: uid,
+              remote: remote,
+              local: local,
+              mapping: mapping,
+              remoteToken: remoteToken,
+              allowDelete: !blockDeletesBySafetyGate && remoteSnapshotTrusted && localSnapshotTrusted,
+            );
+            if (!result.success) return false;
             await db.delete('sync_items', where: 'remote_collection_id = ? AND remote_uid = ?', whereArgs: [remoteCollectionId, uid]);
             deleteLocal++;
             summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.local, type: SyncOperationType.deleted);
             return true;
           },
           onRemoteDelete: () async {
-            if (blockDeletesBySafetyGate || !remoteSnapshotTrusted || !localSnapshotTrusted) {
-              return false;
-            }
-            final href = mapping?['remote_href']?.toString() ?? remote?['href']?.toString() ?? '';
-            if (href.isNotEmpty) {
-              await nc.deleteEvent(eventPath: href);
-            }
+            final result = await storeExecutor.execute(
+              operation: CanonicalSyncOperation.remoteDelete,
+              uid: uid,
+              remote: remote,
+              local: local,
+              mapping: mapping,
+              remoteToken: remoteToken,
+              allowDelete: !blockDeletesBySafetyGate && remoteSnapshotTrusted && localSnapshotTrusted,
+            );
+            if (!result.success) return false;
             await db.delete('sync_items', where: 'remote_collection_id = ? AND remote_uid = ?', whereArgs: [remoteCollectionId, uid]);
             deleteRemote++;
             summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.remote, type: SyncOperationType.deleted);
@@ -286,7 +358,7 @@ class FullSyncBidiStrategy extends SyncStrategy {
       debugPrint('[SYNC_SUMMARY][binding=$remoteCollectionId] createLocal=$createLocal createRemote=$createRemote '
           'pull=$pull push=$push deleteLocal=$deleteLocal deleteRemote=$deleteRemote skip=$skip '
           'conflicts=$conflicts dedupRemoved=${dedup.removedCount} remoteSnapshotTrusted=$remoteSnapshotTrusted localSnapshotTrusted=$localSnapshotTrusted '
-          'localDeleteCandidates=$localDeleteCandidates remoteDeleteCandidates=$remoteDeleteCandidates safetyAborted=$blockDeletesBySafetyGate allowMassDeletion=$allowMassDeletion status=${snapshot.statusCode}');
+          'localDeleteCandidates=$localDeleteCandidates remoteDeleteCandidates=$remoteDeleteCandidates safetyAborted=$blockDeletesBySafetyGate allowMassDeletion=$allowMassDeletion status=${remoteSnapshot.statusCode}');
     } catch (e) {
       summary.failed++;
       summary.errorLog.add('[ERROR] ${ctx.displayName} Two-way sync exception: $e');
@@ -375,66 +447,43 @@ class FullSyncBidiStrategy extends SyncStrategy {
     return _RepairResult(records: refreshed, removedCount: toDeleteIds.length);
   }
 
-  Future<void> _pullFromRemote(
-    Map<String, dynamic> remote,
-    String localCalendarId,
-    int remoteCollectionId,
-    String? localId,
-    String remoteToken,
-    Database db,
-  ) async {
-    final RemotePullResult? pulled = await pullRemoteEventToLocal(
-      remote: remote,
-      localCalendarId: localCalendarId,
-      existingLocalId: localId,
-      isSubscription: false,
-    );
-    if (pulled == null) {
-      return;
-    }
-
+  Future<void> _persistPulledMutation({
+    required Database db,
+    required int remoteCollectionId,
+    required String uid,
+    required Map<String, dynamic>? remote,
+    required String remoteToken,
+    required AdapterMutationResult mutation,
+  }) async {
     await upsertSyncedItem(
       db: db,
       remoteCollectionId: remoteCollectionId,
-      uid: pulled.uid,
-      localItemId: pulled.localEventId,
+      uid: uid,
+      localItemId: mutation.localId ?? '',
       etag: remoteToken,
-      lastMtime: DateTime.now().millisecondsSinceEpoch,
-      remoteHref: (remote['href'] ?? '').toString(),
-      summary: pulled.summary,
+      lastMtime: int.tryParse(mutation.token ?? '') ?? DateTime.now().millisecondsSinceEpoch,
+      remoteHref: (remote?['href'] ?? '').toString(),
+      summary: remote?['summary']?.toString(),
     );
   }
 
-  Future<void> _pushToRemote(
-    PlatformItem local,
-    String remotePath,
-    Database db,
-    String localCalendarId,
-    int remoteCollectionId,
-  ) async {
-    final String? localId = local.localId;
-    if (localId == null || localId.isEmpty) {
-      debugPrint('[SYNC_ITEM][binding=$remoteCollectionId] skip push: local item id is missing');
-      return;
-    }
-
-    final RemotePushResult? pushed = await pushLocalEventToRemote(
-      local: local,
-      remotePath: remotePath,
-      localCalendarId: localCalendarId,
-    );
-    if (pushed == null) {
-      return;
-    }
+  Future<void> _persistPushedMutation({
+    required Database db,
+    required int remoteCollectionId,
+    required PlatformItem? local,
+    required AdapterMutationResult mutation,
+  }) async {
+    final String localId = local?.localId ?? mutation.localId ?? '';
+    if (localId.isEmpty) return;
 
     await upsertSyncedItem(
       db: db,
       remoteCollectionId: remoteCollectionId,
-      uid: pushed.uid,
+      uid: mutation.stableKey,
       localItemId: localId,
-      etag: pushed.etag,
-      lastMtime: pushed.lastMtime,
-      remoteHref: pushed.remoteHref,
+      etag: mutation.token ?? '',
+      lastMtime: local?.lastModified ?? DateTime.now().millisecondsSinceEpoch,
+      remoteHref: mutation.remoteHref ?? '',
     );
   }
 }
