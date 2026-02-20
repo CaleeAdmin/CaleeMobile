@@ -4,12 +4,17 @@ import 'package:caleesync/sync/SyncEnum.dart';
 import 'package:flutter/cupertino.dart';
 
 import '../../entity/sync_run_record.dart';
+import '../operation/sync_operation.dart';
+import '../operation/sync_operation_executor.dart';
+import '../operation/sync_reconciler.dart';
 import '../sync_run_telemetry.dart';
 import '../sync_run_recorder.dart';
 
 import 'SyncStrategy.dart';
 
 class FullSyncPushStrategy extends SyncStrategy {
+  final SyncReconciler _reconciler = const SyncReconciler();
+  final SyncOperationExecutor _executor = const SyncOperationExecutor();
   @override
   Future<void> execute(SyncContext ctx, SyncSummary summary) async {
     if (loginName == null || loginName!.isEmpty || password == null || password!.isEmpty) {
@@ -67,34 +72,76 @@ class FullSyncPushStrategy extends SyncStrategy {
                 syncStatus == SyncItemStatus.pendingPush ||
                 lastModified > recordMtime ||
                 contentChanged;
-        if (!needsPush) {
+
+        final plan = _reconciler.plan(
+          uid: (local.uid ?? localId).toString(),
+          mode: SyncReconcileMode.push,
+          remoteExists: record != null,
+          localExists: true,
+          remoteChanged: false,
+          localChanged: needsPush,
+          hasMapping: record != null,
+          bindingOrigin: SyncBindingOrigin.local,
+          deletionPolicy: SyncDeletionPolicy.bidirectional,
+        );
+
+        final bool completed = await _executor.execute(
+          plan: plan,
+          onRemoteCreate: () async {
+            final RemotePushResult? pushed = await pushLocalEventToRemote(
+              local: local,
+              remotePath: remotePath,
+              localCalendarId: localCalendarId,
+            );
+            if (pushed == null) return false;
+            await upsertSyncedItem(
+              db: db,
+              remoteCollectionId: remoteCollectionId,
+              uid: pushed.uid,
+              localItemId: localId,
+              etag: pushed.etag,
+              lastMtime: pushed.lastMtime,
+              remoteHref: pushed.remoteHref,
+              summary: local.title,
+              description: local.notes,
+              dtstart: local.startTime,
+              dtend: local.endTime,
+            );
+            changeCount++;
+            summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.remote, type: SyncOperationType.created);
+            return true;
+          },
+          onRemoteUpdate: () async {
+            final RemotePushResult? pushed = await pushLocalEventToRemote(
+              local: local,
+              remotePath: remotePath,
+              localCalendarId: localCalendarId,
+            );
+            if (pushed == null) return false;
+            await upsertSyncedItem(
+              db: db,
+              remoteCollectionId: remoteCollectionId,
+              uid: pushed.uid,
+              localItemId: localId,
+              etag: pushed.etag,
+              lastMtime: pushed.lastMtime,
+              remoteHref: pushed.remoteHref,
+              summary: local.title,
+              description: local.notes,
+              dtstart: local.startTime,
+              dtend: local.endTime,
+            );
+            changeCount++;
+            summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.remote, type: SyncOperationType.updated);
+            return true;
+          },
+          onMarkSynced: () async => true,
+          onMappingUpsert: () async => true,
+        );
+
+        if (!completed) {
           continue;
         }
-
-        final RemotePushResult? pushed = await pushLocalEventToRemote(
-          local: local,
-          remotePath: remotePath,
-          localCalendarId: localCalendarId,
-        );
-        if (pushed == null) {
-          continue;
-        }
-
-        await upsertSyncedItem(
-          db: db,
-          remoteCollectionId: remoteCollectionId,
-          uid: pushed.uid,
-          localItemId: localId,
-          etag: pushed.etag,
-          lastMtime: pushed.lastMtime,
-          remoteHref: pushed.remoteHref,
-          summary: local.title,
-          description: local.notes,
-          dtstart: local.startTime,
-          dtend: local.endTime,
-        );
-        changeCount++;
-        summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.remote, type: SyncOperationType.updated);
       }
 
       final Set<String> currentLocalIds = localEvents.map((event) => event.localId.toString()).toSet();
@@ -124,35 +171,57 @@ class FullSyncPushStrategy extends SyncStrategy {
       }
 
       for (final localId in localSyncMap.keys) {
-        if (currentLocalIds.contains(localId)) {
-          continue;
-        }
-
         final record = localSyncMap[localId]!;
-        final String href = (record['remote_href'] ?? '').toString();
         final String uid = (record['remote_uid'] ?? '').toString();
+        final String href = (record['remote_href'] ?? '').toString();
 
-        if (href.isEmpty) {
-          debugPrint('[SYNC_DELETE][binding=$remoteCollectionId][uid=$uid] skipped_missing_remote_href');
+        final plan = _reconciler.plan(
+          uid: uid,
+          mode: SyncReconcileMode.push,
+          remoteExists: true,
+          localExists: currentLocalIds.contains(localId),
+          remoteChanged: false,
+          localChanged: false,
+          hasMapping: true,
+          bindingOrigin: SyncBindingOrigin.local,
+          deletionPolicy: SyncDeletionPolicy.bidirectional,
+        );
+        if (plan.operation != CanonicalSyncOperation.remoteDelete) {
           continue;
         }
-        if (blockDeletesBySafetyGate || !localSnapshotTrusted || !remoteSnapshotTrusted) {
-          debugPrint('[SYNC_DELETE][binding=$remoteCollectionId][uid=$uid] blocked_by_safety_or_untrusted_snapshot');
-          continue;
-        }
 
-        final bool isDeletedOnRemote = await nc.deleteEvent(eventPath: href);
-        if (isDeletedOnRemote) {
-          await db.delete(
-            'sync_items',
-            where: 'remote_collection_id = ? AND remote_uid = ?',
-            whereArgs: [remoteCollectionId, uid],
-          );
-          debugPrint('[SYNC_DELETE][binding=$remoteCollectionId][uid=$uid] remote_deleted_immediately_reason=local_missing');
-          changeCount++;
-          summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.remote, type: SyncOperationType.deleted);
-        } else {
-          debugPrint('[SYNC_DELETE][binding=$remoteCollectionId][uid=$uid] remote_delete_failed_reason=server_rejected');
+        final bool completed = await _executor.execute(
+          plan: plan,
+          onRemoteDelete: () async {
+            if (href.isEmpty) {
+              debugPrint('[SYNC_DELETE][binding=$remoteCollectionId][uid=$uid] skipped_missing_remote_href');
+              return false;
+            }
+            if (blockDeletesBySafetyGate || !localSnapshotTrusted || !remoteSnapshotTrusted) {
+              debugPrint('[SYNC_DELETE][binding=$remoteCollectionId][uid=$uid] blocked_by_safety_or_untrusted_snapshot');
+              return false;
+            }
+            final bool isDeletedOnRemote = await nc.deleteEvent(eventPath: href);
+            if (!isDeletedOnRemote) {
+              debugPrint('[SYNC_DELETE][binding=$remoteCollectionId][uid=$uid] remote_delete_failed_reason=server_rejected');
+              return false;
+            }
+            changeCount++;
+            summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.remote, type: SyncOperationType.deleted);
+            return true;
+          },
+          onMappingDelete: () async {
+            await db.delete(
+              'sync_items',
+              where: 'remote_collection_id = ? AND remote_uid = ?',
+              whereArgs: [remoteCollectionId, uid],
+            );
+            debugPrint('[SYNC_DELETE][binding=$remoteCollectionId][uid=$uid] remote_deleted_immediately_reason=local_missing');
+            return true;
+          },
+        );
+        if (!completed) {
+          continue;
         }
       }
 
