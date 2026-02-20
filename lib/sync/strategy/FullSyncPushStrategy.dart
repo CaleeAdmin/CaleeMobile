@@ -3,6 +3,10 @@ import 'package:caleesync/entity/SyncSummary.dart';
 import 'package:caleesync/sync/SyncEnum.dart';
 import 'package:flutter/cupertino.dart';
 
+import '../../entity/sync_run_record.dart';
+import '../sync_run_telemetry.dart';
+import '../sync_run_recorder.dart';
+
 import 'SyncStrategy.dart';
 
 class FullSyncPushStrategy extends SyncStrategy {
@@ -70,6 +74,7 @@ class FullSyncPushStrategy extends SyncStrategy {
           summary: local.title,
         );
         changeCount++;
+        summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.remote, type: SyncOperationType.updated);
       }
 
       final Set<String> currentLocalIds = localEvents.map((event) => event.localId.toString()).toSet();
@@ -94,6 +99,7 @@ class FullSyncPushStrategy extends SyncStrategy {
         debugPrint('[SYNC_SAFETY][binding=$remoteCollectionId] aborted by safety gate '
             '(localDeleteCandidates=$localDeleteCandidates, remoteDeleteCandidates=$remoteDeleteCandidates, mappedCount=$mappedCount, threshold=${SyncStrategy.massDeletionAbsoluteThreshold})');
         summary.recordBindingOutcome(bindingId, SyncOutcomeStatus.safetyGateBlockedDeletions);
+        summary.telemetry?.onSafetyTriggered(ctx: ctx, detail: 'remoteDeleteCandidates=$remoteDeleteCandidates');
         summary.errorLog.add('🛑 ${ctx.displayName} Safety gate blocked deletions (localDeleteCandidates=$localDeleteCandidates, remoteDeleteCandidates=$remoteDeleteCandidates, mappedCount=$mappedCount, threshold=${SyncStrategy.massDeletionAbsoluteThreshold})');
       }
 
@@ -122,6 +128,7 @@ class FullSyncPushStrategy extends SyncStrategy {
             whereArgs: [remoteCollectionId, uid],
           );
           changeCount++;
+          summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.remote, type: SyncOperationType.deleted);
         }
       }
 
@@ -134,10 +141,36 @@ class FullSyncPushStrategy extends SyncStrategy {
           summary.recordBindingOutcome(bindingId, SyncOutcomeStatus.completedNormally);
           summary.successLog.add('📤 ${ctx.displayName} Completed normally (processed $changeCount changes)');
         }
+        summary.telemetry?.onBindingEnd(
+          ctx: ctx,
+          status: SyncBindingResultStatus.success,
+          snapshotTrustStatus: remoteSnapshotTrusted ? SnapshotTrustStatus.remote : SnapshotTrustStatus.unknown,
+          safetyTriggered: false,
+        );
+      } else {
+        summary.telemetry?.onBindingEnd(
+          ctx: ctx,
+          status: SyncBindingResultStatus.abortedBySafety,
+          snapshotTrustStatus: remoteSnapshotTrusted ? SnapshotTrustStatus.remote : SnapshotTrustStatus.unknown,
+          safetyTriggered: true,
+          errorCode: SyncErrorCode.safetyStop,
+          errorMessage: 'Safety gate blocked deletions',
+        );
       }
     } catch (e) {
       summary.failed++;
       summary.errorLog.add('❌ ${ctx.displayName} 发布失败: $e');
+      final code = mapSyncErrorCode(e);
+      summary.telemetry?.onError(ctx: ctx, code: code, message: 'Push sync failed', technicalDetail: e.toString());
+      summary.telemetry?.onBindingEnd(
+        ctx: ctx,
+        status: SyncBindingResultStatus.failed,
+        snapshotTrustStatus: SnapshotTrustStatus.unknown,
+        safetyTriggered: false,
+        errorCode: code,
+        errorMessage: 'Push sync failed',
+        technicalDetail: e.toString(),
+      );
     }
   }
 }

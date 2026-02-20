@@ -6,6 +6,10 @@ import 'package:caleesync/sync/strategy/SyncStrategy.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:sqflite/sqflite.dart';
 
+import '../../entity/sync_run_record.dart';
+import '../sync_run_telemetry.dart';
+import '../sync_run_recorder.dart';
+
 import '../../core/platform/pigeon/calendar_api.g.dart';
 
 /// TWO_WAY strategy using a deterministic per-item decision matrix.
@@ -108,6 +112,7 @@ class FullSyncBidiStrategy extends SyncStrategy {
         debugPrint('[SYNC_SAFETY][binding=$remoteCollectionId] aborted by safety gate '
             '(localDeleteCandidates=$localDeleteCandidates, remoteDeleteCandidates=$remoteDeleteCandidates, mappedCount=$mappedCount, threshold=${SyncStrategy.massDeletionAbsoluteThreshold})');
         summary.recordBindingOutcome(bindingId, SyncOutcomeStatus.safetyGateBlockedDeletions);
+        summary.telemetry?.onSafetyTriggered(ctx: ctx, detail: 'localDeleteCandidates=$localDeleteCandidates remoteDeleteCandidates=$remoteDeleteCandidates');
         summary.errorLog.add('🛑 ${ctx.displayName} Safety gate blocked deletions (localDeleteCandidates=$localDeleteCandidates, remoteDeleteCandidates=$remoteDeleteCandidates, mappedCount=$mappedCount, threshold=${SyncStrategy.massDeletionAbsoluteThreshold})');
       }
 
@@ -188,17 +193,21 @@ class FullSyncBidiStrategy extends SyncStrategy {
           case SyncItemAction.createLocal:
             await _pullFromRemote(remote!, localCalendarId, remoteCollectionId, mapping?['local_item_id']?.toString(), remoteToken, db);
             createLocal++;
+            summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.local, type: SyncOperationType.created);
             break;
           case SyncItemAction.pull:
             await _pullFromRemote(remote!, localCalendarId, remoteCollectionId, mapping?['local_item_id']?.toString(), remoteToken, db);
             pull++;
+            summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.local, type: SyncOperationType.updated);
             break;
           case SyncItemAction.push:
             await _pushToRemote(local!, remotePath, db, localCalendarId, remoteCollectionId);
             if (mapping == null) {
               createRemote++;
+              summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.remote, type: SyncOperationType.created);
             } else {
               push++;
+              summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.remote, type: SyncOperationType.updated);
             }
             break;
           case SyncItemAction.deleteLocal:
@@ -231,6 +240,7 @@ class FullSyncBidiStrategy extends SyncStrategy {
             }
             await db.delete('sync_items', where: 'remote_collection_id = ? AND remote_uid = ?', whereArgs: [remoteCollectionId, uid]);
             deleteLocal++;
+            summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.local, type: SyncOperationType.deleted);
             break;
           case SyncItemAction.deleteRemote:
             if (blockDeletesBySafetyGate || !remoteSnapshotTrusted || !localSnapshotTrusted) {
@@ -242,6 +252,7 @@ class FullSyncBidiStrategy extends SyncStrategy {
             }
             await db.delete('sync_items', where: 'remote_collection_id = ? AND remote_uid = ?', whereArgs: [remoteCollectionId, uid]);
             deleteRemote++;
+            summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.remote, type: SyncOperationType.deleted);
             break;
           case SyncItemAction.skip:
             if (mapping != null && remoteExists && status != SyncItemStatus.synced) {
@@ -266,6 +277,24 @@ class FullSyncBidiStrategy extends SyncStrategy {
           summary.recordBindingOutcome(bindingId, SyncOutcomeStatus.completedNormally);
           summary.successLog.add('🔄 ${ctx.displayName} Completed normally');
         }
+        final trust = (!remoteSnapshotTrusted || !localSnapshotTrusted)
+            ? SnapshotTrustStatus.unknown
+            : SnapshotTrustStatus.remote;
+        summary.telemetry?.onBindingEnd(
+          ctx: ctx,
+          status: SyncBindingResultStatus.success,
+          snapshotTrustStatus: trust,
+          safetyTriggered: false,
+        );
+      } else {
+        summary.telemetry?.onBindingEnd(
+          ctx: ctx,
+          status: SyncBindingResultStatus.abortedBySafety,
+          snapshotTrustStatus: SnapshotTrustStatus.unknown,
+          safetyTriggered: true,
+          errorCode: SyncErrorCode.safetyStop,
+          errorMessage: 'Safety gate blocked deletions',
+        );
       }
       debugPrint('[SYNC_SUMMARY][binding=$remoteCollectionId] createLocal=$createLocal createRemote=$createRemote '
           'pull=$pull push=$push deleteLocal=$deleteLocal stagedDeleteLocal=$stagedDeleteLocal deleteRemote=$deleteRemote skip=$skip '
@@ -274,6 +303,17 @@ class FullSyncBidiStrategy extends SyncStrategy {
     } catch (e) {
       summary.failed++;
       summary.errorLog.add('❌ ${ctx.displayName} 双向同步异常: $e');
+      final code = mapSyncErrorCode(e);
+      summary.telemetry?.onError(ctx: ctx, code: code, message: 'Two-way sync failed', technicalDetail: e.toString());
+      summary.telemetry?.onBindingEnd(
+        ctx: ctx,
+        status: SyncBindingResultStatus.failed,
+        snapshotTrustStatus: SnapshotTrustStatus.unknown,
+        safetyTriggered: false,
+        errorCode: code,
+        errorMessage: 'Two-way sync failed',
+        technicalDetail: e.toString(),
+      );
     }
   }
 
