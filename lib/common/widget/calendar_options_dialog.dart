@@ -67,21 +67,23 @@ class _CalendarOptionsDialogState extends State<CalendarOptionsDialog> {
                     controlAffinity: ListTileControlAffinity.leading,
                   ),
 
-                  SwitchListTile(
+                  CheckboxListTile(
                     contentPadding: EdgeInsets.zero,
                     value: allowMassDeletionDangerous,
                     onChanged: (v) async {
+                      final bool nextValue = v ?? false;
                       if (widget.onAllowMassDeletionChanged == null) return;
-                      final bool applied = await widget.onAllowMassDeletionChanged!(v);
+                      final bool applied = await widget.onAllowMassDeletionChanged!(nextValue);
                       if (!mounted) return;
                       if (applied) {
                         setState(() {
-                          allowMassDeletionDangerous = v;
+                          allowMassDeletionDangerous = nextValue;
                         });
                       }
                     },
                     title: const Text('Allow mass deletion (dangerous)', style: TextStyle(fontWeight: FontWeight.w600)),
                     subtitle: const Text('When off, large delete waves are blocked for both local and remote deletes.', style: TextStyle(fontSize: 12)),
+                    controlAffinity: ListTileControlAffinity.leading,
                   ),
                 ],
               ),
