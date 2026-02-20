@@ -254,7 +254,7 @@ class LocalCalendarPageController extends GetxController {
           await db.update(
             'remote_collections',
             {
-              'is_enabled': 1,
+              'is_enabled': 0,
               'display_name': item.name,
               'account_name': accountName,
               'color': item.color,
@@ -272,7 +272,7 @@ class LocalCalendarPageController extends GetxController {
             'collection_type': 'calendar',
             'display_name': item.name,
             'color': item.color,
-            'is_enabled': 1,
+            'is_enabled': 0,
             'sync_mode': 0,
             'is_subscription': item.isSubscription ? 1 : 0,
             'subscription_url': item.subscriptionUrl,
