@@ -50,6 +50,8 @@ dependencies:
   device_calendar: ^4.3.2
   mobile_scanner: ^3.3.0
   webview_flutter: ^4.13.1
+  path_provider: ^2.1.4
+  package_info_plus: ^8.0.2
 
 dev_dependencies:
   flutter_test:

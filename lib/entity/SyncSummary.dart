@@ -1,3 +1,5 @@
+import '../sync/sync_run_telemetry.dart';
+
 enum SyncOutcomeStatus {
   completedNormally,
   safetyGateBlockedDeletions,
@@ -5,16 +7,17 @@ enum SyncOutcomeStatus {
 }
 
 class SyncSummary {
-  int total = 0;      // 总日历数
-  int success = 0;    // 成功数
-  int failed = 0;     // 失败数
-  int processing = 0; // 正在同步数
+  SyncSummary({this.telemetry});
 
-  // 详情记录
+  int total = 0;
+  int success = 0;
+  int failed = 0;
+  int processing = 0;
+  final SyncRunTelemetry? telemetry;
+
   List<String> successLog = [];
   List<String> errorLog = [];
 
-  // Per-binding high level outcomes.
   final Map<int, SyncOutcomeStatus> bindingOutcomes = {};
 
   void recordBindingOutcome(int bindingId, SyncOutcomeStatus status) {

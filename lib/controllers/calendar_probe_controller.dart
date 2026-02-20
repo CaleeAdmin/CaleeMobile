@@ -3,6 +3,8 @@ import '../sync/SyncEngine.dart';
 import '../entity/SyncSummary.dart';
 import 'CalendarPageController.dart';
 import '../data/sync_repository.dart';
+import '../data/sync_run_store.dart';
+import '../entity/sync_run_record.dart';
 
 class CalendarProbeController extends GetxController {
   final RxBool isSyncing = false.obs;
@@ -24,6 +26,20 @@ class CalendarProbeController extends GetxController {
   final RxList<Map<String, dynamic>> subscribedCalendars = <Map<String, dynamic>>[].obs;
 
   final SyncRepository _repo = SyncRepository();
+  final SyncRunStore _runStore = SyncRunStore();
+  final RxList<SyncRunRecord> syncRuns = <SyncRunRecord>[].obs;
+
+
+  @override
+  void onInit() {
+    super.onInit();
+    loadRecentRuns();
+  }
+
+  Future<void> loadRecentRuns() async {
+    final runs = await _runStore.loadRuns(limit: 20);
+    syncRuns.assignAll(runs);
+  }
 
   /// 获取已订阅日历及对应事件数
   Future<void> fetchSubscribedCalendars() async {
@@ -67,6 +83,7 @@ class CalendarProbeController extends GetxController {
       }
       // 记录上次同步时间
       lastSyncAt.value = DateTime.now();
+      await loadRecentRuns();
     } catch (e) {
       // 可在此处记录错误或展示提示
       rethrow;
