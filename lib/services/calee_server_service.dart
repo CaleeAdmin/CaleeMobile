@@ -495,7 +495,6 @@ class CaleeServerService {
         headers: {
           'Content-Type': 'text/calendar; charset=utf-8',
           'Authorization': 'Basic ${base64Encode(utf8.encode('$userId:$password'))}',
-          'If-None-Match': '*',
         },
         body: utf8.encode(icsData),
       );
@@ -507,9 +506,8 @@ class CaleeServerService {
         // 容错：如果 header 没给 etag, 则认为此时需要后续同步逻辑去补全, 或者返回一个占位符
         return etag ?? "pending_etag";
       } else if (response.statusCode == 412) {
-        // 冲突：云端已存在。对于场景 1, 这通常意味着该日程之前已经上传成功了
-        print("[Calee] Event already exists, skipping upload.");
-        return "exists";
+        print("[Calee] PUT precondition failed: ${response.body}");
+        return null;
       } else {
         print("[Calee] PUT Failed: ${response.statusCode} - ${response.body}");
         return null;
