@@ -178,7 +178,7 @@ class SyncRepository {
             debugPrint("[INFO] Detected local physical deletion: ${record['summary']}");
             await txn.update(
               'sync_items',
-              {'sync_status': SyncItemStatus.pendingDelete}, // 标记为 Deleted, 待通知云端
+              {'sync_status': SyncItemStatus.pendingPush}, // 标记为 Dirty, 待同步推送删除
               where: 'local_item_id = ?',
               whereArgs: [mappedId],
             );
@@ -215,11 +215,11 @@ class SyncRepository {
 
     await db.transaction((txn) async {
       // 2. 【核心逻辑】处理删除：找出数据库里有, 但系统里没了的记录
-      // 注意：只处理状态不为 2 的, 避免重复处理
+      // 注意：已标记为待推送的记录无需重复标记
       final List<Map<String, dynamic>> dbRows = await txn.query(
         'sync_items',
         where: 'remote_collection_id = ? AND sync_status != ?',
-        whereArgs: [remoteCollectionId, SyncItemStatus.pendingDelete],
+        whereArgs: [remoteCollectionId, SyncItemStatus.pendingPush],
       );
 
       for (var row in dbRows) {
@@ -228,12 +228,12 @@ class SyncRepository {
           // 系统里找不到了 -> 用户在日历 App 里删了
           await txn.update(
             'sync_items',
-            {'sync_status': SyncItemStatus.pendingDelete}, // 标记为“待同步删除”
+            {'sync_status': SyncItemStatus.pendingPush}, // 标记为 Dirty, 待同步推送删除
             where: 'remote_collection_id = ? AND remote_uid = ?',
             whereArgs: [remoteCollectionId, dbUid],
           );
           deleted++;
-          print('[INFO] Marked pending delete (soft delete): $dbUid');
+          print('[INFO] Detected local deletion, scheduled immediate remote delete on next sync: $dbUid');
         }
       }
 
@@ -347,14 +347,8 @@ class SyncRepository {
       final local = await db.query('sync_items', where: 'remote_collection_id = ? AND remote_uid = ?', whereArgs: [remoteCollectionId, uid]);
 
       if (local.isNotEmpty) {
-        final int currentStatus = local.first['sync_status'] as int;
-        // 冲突处理：本地待删除但云端还在, 以云端为准重置
-        if (currentStatus == SyncItemStatus.pendingDelete) {
-          await db.delete('sync_items', where: 'remote_collection_id = ? AND remote_uid = ?', whereArgs: [remoteCollectionId, uid]);
-        } else {
-          final String localEtag = (local.first['last_etag'] as String?) ?? "";
-          if (localEtag == etag) continue; // ETag 一致, 跳过
-        }
+        final String localEtag = (local.first['last_etag'] as String?) ?? "";
+        if (localEtag == etag) continue; // ETag 一致, 跳过
       }
 
       // 4. [INFO] 下载详情并写入系统日历
@@ -556,10 +550,10 @@ class SyncRepository {
     if (maps.isEmpty) return {};
     final cal = maps.first;
 
-    // 2. Stats该日历下的本地有效事件数（过滤 status 2）
+    // 2. Stats该日历下的本地有效事件数
     final int? remoteCollectionId = cal['id'] as int?;
     final countResult = await db.rawQuery(
-        'SELECT COUNT(*) as count FROM sync_items WHERE remote_collection_id = ? AND sync_status != ${SyncItemStatus.pendingDelete}',
+        'SELECT COUNT(*) as count FROM sync_items WHERE remote_collection_id = ?',
         [remoteCollectionId ?? -1]
     );
 

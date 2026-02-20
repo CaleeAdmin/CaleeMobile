@@ -51,6 +51,6 @@ class CalendarStatus {
 class SyncItemStatus {
   static const int pendingPush = 0; // local changed/new -> push required
   static const int pendingPull = 1; // remote changed -> pull required
-  static const int pendingDelete = 2; // local/remote deleted -> needs delete sync
+  // Value 2 is intentionally unused for backward-compatibility with existing DB rows.
   static const int synced = 3; // clean
 }

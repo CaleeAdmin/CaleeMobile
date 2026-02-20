@@ -99,7 +99,7 @@ class DatabaseHelper {
         dtend INTEGER, /* 结束时间（毫秒时间戳） */
         last_etag TEXT, /* 最近同步到的 etag */
         last_mtime INTEGER, /* 最近同步时记录的修改时间（毫秒时间戳） */
-        sync_status INTEGER NOT NULL DEFAULT 3 CHECK(sync_status IN (0,1,2,3)), /* 同步状态（0 待上传，1 待下载，2 冲突，3 已同步） */
+        sync_status INTEGER NOT NULL DEFAULT 3 CHECK(sync_status IN (0,1,2,3)), /* 同步状态（0 待上传，1 待下载，2 兼容保留，3 已同步） */
         FOREIGN KEY (remote_collection_id) REFERENCES remote_collections(id) ON DELETE CASCADE
       )
     ''');
