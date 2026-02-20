@@ -122,7 +122,6 @@ class FullSyncBidiStrategy extends SyncStrategy {
       int push = 0;
       int deleteLocal = 0;
       int deleteRemote = 0;
-      int stagedDeleteLocal = 0;
       int skip = 0;
       int conflicts = 0;
 
@@ -222,23 +221,13 @@ class FullSyncBidiStrategy extends SyncStrategy {
               break;
             }
 
-            if (status != SyncItemStatus.pendingDelete) {
-              await db.update(
-                'sync_items',
-                {'sync_status': SyncItemStatus.pendingDelete},
-                where: 'remote_collection_id = ? AND remote_uid = ?',
-                whereArgs: [remoteCollectionId, uid],
-              );
-              stagedDeleteLocal++;
-              break;
-            }
-
             if (mapping['local_item_id'] != null) {
               await nativeApi.deleteEvent(mapping['local_item_id'].toString());
             } else if (local != null && local.localId != null) {
               await nativeApi.deleteEvent(local.localId!);
             }
             await db.delete('sync_items', where: 'remote_collection_id = ? AND remote_uid = ?', whereArgs: [remoteCollectionId, uid]);
+            debugPrint('[SYNC_DELETE][binding=$remoteCollectionId][uid=$uid] local_deleted_immediately_reason=remote_missing');
             deleteLocal++;
             summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.local, type: SyncOperationType.deleted);
             break;
@@ -251,6 +240,7 @@ class FullSyncBidiStrategy extends SyncStrategy {
               await nc.deleteEvent(eventPath: href);
             }
             await db.delete('sync_items', where: 'remote_collection_id = ? AND remote_uid = ?', whereArgs: [remoteCollectionId, uid]);
+            debugPrint('[SYNC_DELETE][binding=$remoteCollectionId][uid=$uid] remote_deleted_immediately_reason=local_missing');
             deleteRemote++;
             summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.remote, type: SyncOperationType.deleted);
             break;
@@ -297,7 +287,7 @@ class FullSyncBidiStrategy extends SyncStrategy {
         );
       }
       debugPrint('[SYNC_SUMMARY][binding=$remoteCollectionId] createLocal=$createLocal createRemote=$createRemote '
-          'pull=$pull push=$push deleteLocal=$deleteLocal stagedDeleteLocal=$stagedDeleteLocal deleteRemote=$deleteRemote skip=$skip '
+          'pull=$pull push=$push deleteLocal=$deleteLocal deleteRemote=$deleteRemote skip=$skip '
           'conflicts=$conflicts dedupRemoved=${dedup.removedCount} remoteSnapshotTrusted=$remoteSnapshotTrusted localSnapshotTrusted=$localSnapshotTrusted '
           'localDeleteCandidates=$localDeleteCandidates remoteDeleteCandidates=$remoteDeleteCandidates safetyAborted=$blockDeletesBySafetyGate allowMassDeletion=$allowMassDeletion status=${snapshot.statusCode}');
     } catch (e) {

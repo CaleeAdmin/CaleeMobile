@@ -96,7 +96,6 @@ class FullSyncPullStrategy extends SyncStrategy {
         debugPrint('[SYNC_ITEM][binding=$remoteCollectionId][uid=$uid] action=$action '
             'flags(remoteExists=true localExists=${localItem != null} remoteChanged=$remoteChanged localChanged=$localChanged reason=$reason)');
 
-        final int status = (localRecord?['sync_status'] as int?) ?? SyncItemStatus.synced;
         if (action == SyncItemAction.createLocal || action == SyncItemAction.pull) {
           final RemotePullResult? pulled = await pullRemoteEventToLocal(
             remote: remoteEvent,
@@ -186,19 +185,8 @@ class FullSyncPullStrategy extends SyncStrategy {
         if (blockDeletesBySafetyGate) continue;
 
         final record = localSyncMap[uid]!;
-        final int status = (record['sync_status'] as int?) ?? SyncItemStatus.synced;
-
-        if (status != SyncItemStatus.pendingDelete) {
-          await db.update(
-            'sync_items',
-            {'sync_status': SyncItemStatus.pendingDelete},
-            where: 'remote_collection_id = ? AND remote_uid = ?',
-            whereArgs: [remoteCollectionId, uid],
-          );
-          continue;
-        }
-
         if (!canFinalizeDeletes) {
+          debugPrint('[SYNC_DELETE][binding=$remoteCollectionId][uid=$uid] blocked_by_finalize_guard');
           continue;
         }
 
@@ -209,6 +197,7 @@ class FullSyncPullStrategy extends SyncStrategy {
             where: 'remote_collection_id = ? AND remote_uid = ?',
             whereArgs: [remoteCollectionId, uid],
           );
+          debugPrint('[SYNC_DELETE][binding=$remoteCollectionId][uid=$uid] local_deleted_immediately_reason=remote_missing_no_local_id');
           deleteLocal++;
           summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.local, type: SyncOperationType.deleted);
           continue;
@@ -221,6 +210,7 @@ class FullSyncPullStrategy extends SyncStrategy {
             where: 'remote_collection_id = ? AND remote_uid = ?',
             whereArgs: [remoteCollectionId, uid],
           );
+          debugPrint('[SYNC_DELETE][binding=$remoteCollectionId][uid=$uid] local_deleted_immediately_reason=remote_missing');
           deleteLocal++;
           summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.local, type: SyncOperationType.deleted);
         }

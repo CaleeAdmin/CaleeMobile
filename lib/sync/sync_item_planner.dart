@@ -228,7 +228,7 @@ class SyncItemPlanner {
     final List<Map<String, dynamic>> dirtyCheck = await db.rawQuery('''
       SELECT 1 FROM sync_items
       WHERE remote_collection_id = ?
-        AND sync_status IN (${SyncItemStatus.pendingPush}, ${SyncItemStatus.pendingDelete})
+        AND sync_status = ${SyncItemStatus.pendingPush}
       LIMIT 1
     ''', [remoteCollectionId]);
     return dirtyCheck.isNotEmpty;

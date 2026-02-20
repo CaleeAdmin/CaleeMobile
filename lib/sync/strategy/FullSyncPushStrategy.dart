@@ -111,12 +111,13 @@ class FullSyncPushStrategy extends SyncStrategy {
         final record = localSyncMap[localId]!;
         final String href = (record['remote_href'] ?? '').toString();
         final String uid = (record['remote_uid'] ?? '').toString();
-        final int syncStatus = (record['sync_status'] as int?) ?? SyncItemStatus.synced;
 
-        if (href.isEmpty || syncStatus != SyncItemStatus.pendingDelete) {
+        if (href.isEmpty) {
+          debugPrint('[SYNC_DELETE][binding=$remoteCollectionId][uid=$uid] skipped_missing_remote_href');
           continue;
         }
         if (blockDeletesBySafetyGate || !localSnapshotTrusted || !remoteSnapshotTrusted) {
+          debugPrint('[SYNC_DELETE][binding=$remoteCollectionId][uid=$uid] blocked_by_safety_or_untrusted_snapshot');
           continue;
         }
 
@@ -127,8 +128,11 @@ class FullSyncPushStrategy extends SyncStrategy {
             where: 'remote_collection_id = ? AND remote_uid = ?',
             whereArgs: [remoteCollectionId, uid],
           );
+          debugPrint('[SYNC_DELETE][binding=$remoteCollectionId][uid=$uid] remote_deleted_immediately_reason=local_missing');
           changeCount++;
           summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.remote, type: SyncOperationType.deleted);
+        } else {
+          debugPrint('[SYNC_DELETE][binding=$remoteCollectionId][uid=$uid] remote_delete_failed_reason=server_rejected');
         }
       }
 
