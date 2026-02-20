@@ -38,6 +38,7 @@ class CaleeServerService {
       <d:current-user-privilege-set />
       <nc:calendar-color /> 
       <nc:subscribe />
+      <cs:source />
       <cal:supported-calendar-component-set />
       <cs:getctag />
     </d:prop>
@@ -91,7 +92,17 @@ class CaleeServerService {
       // Subscribed calendar可能没有 ctag, 使用空字符串兜底
       final ctag = prop.findAllElements('cs:getctag').firstOrNull?.innerText;
       final color = prop.findElements('nc:calendar-color').firstOrNull?.innerText;
-      final subscriptionUrl = prop.findElements('cs:source').firstOrNull?.innerText;
+      final sourceElement = prop.findElements('cs:source').firstOrNull;
+      final String? hrefInSource = sourceElement
+          ?.findElements('d:href')
+          .firstOrNull
+          ?.innerText
+          .trim();
+      final String? sourceText = sourceElement?.innerText.trim();
+      final String? sourceUrl = (hrefInSource != null && hrefInSource.isNotEmpty)
+          ? hrefInSource
+          : (sourceText != null && sourceText.isNotEmpty ? sourceText : null);
+      final String? subscriptionUrl = canonicalizeSubscriptionUrl(sourceUrl);
 
       // --- 权限与模式逻辑 ---
 
@@ -100,7 +111,8 @@ class CaleeServerService {
       // - resourcetype 包含 cs:subscribed
       // - nc:subscribe 字段值为 "1"
       final ncSubscribe = prop.findElements('nc:subscribe').firstOrNull?.innerText;
-      bool isSubscribed = isSubscribedResource || ncSubscribe == "1";
+      final bool hasSubscriptionSource = subscriptionUrl != null && subscriptionUrl.isNotEmpty;
+      bool isSubscribed = isSubscribedResource || _isTruthySubscriptionValue(ncSubscribe) || hasSubscriptionSource;
 
       // 3. 设定同步模式：新抓取/新创建的远端日历统一默认只读 (0)
       // 双向同步由 UI 的 "Two-way sync" 开关显式开启。
@@ -174,7 +186,11 @@ class CaleeServerService {
                        THEN excluded.color 
                        ELSE remote_collections.color END,
           is_subscription = excluded.is_subscription,
-          subscription_url = excluded.subscription_url
+          subscription_url = CASE
+            WHEN excluded.subscription_url IS NOT NULL AND excluded.subscription_url != ''
+              THEN excluded.subscription_url
+            ELSE remote_collections.subscription_url
+          END
           -- 注意：绑定信息由 local_bindings 管理, 不在此处更新。
       ''', [
               accountName,
@@ -186,7 +202,7 @@ class CaleeServerService {
               map['color'],
               0, // is_enabled
               (map['is_subscription'] == true || map['is_subscription'] == 1) ? 1 : 0,
-              map['subscription_url'],
+              canonicalizeSubscriptionUrl(map['subscription_url']?.toString()),
             ]);
       }
 
@@ -771,6 +787,46 @@ class CaleeServerService {
 
   String _getAuthString(String user, String pass) =>
       'Basic ${base64Encode(utf8.encode('$user:$pass'))}';
+
+
+  static bool _isTruthySubscriptionValue(String? value) {
+    final String normalized = (value ?? '').trim().toLowerCase();
+    return normalized == '1' || normalized == 'true' || normalized == 'yes';
+  }
+
+  static String? canonicalizeSubscriptionUrl(String? rawUrl) {
+    final String trimmed = (rawUrl ?? '').trim();
+    if (trimmed.isEmpty) return null;
+
+    final Uri? parsed = Uri.tryParse(trimmed);
+    if (parsed == null || parsed.host.isEmpty) {
+      return trimmed;
+    }
+
+    final String normalizedScheme = parsed.scheme.toLowerCase() == 'webcal'
+        ? 'https'
+        : parsed.scheme.toLowerCase();
+    final int? normalizedPort = (parsed.hasPort &&
+            !((normalizedScheme == 'http' && parsed.port == 80) ||
+                (normalizedScheme == 'https' && parsed.port == 443)))
+        ? parsed.port
+        : null;
+
+    final String normalizedPath = (parsed.path.length > 1 && parsed.path.endsWith('/'))
+        ? parsed.path.substring(0, parsed.path.length - 1)
+        : parsed.path;
+
+    final Uri canonical = parsed.replace(
+      scheme: normalizedScheme,
+      host: parsed.host.toLowerCase(),
+      port: normalizedPort,
+      path: normalizedPath,
+      fragment: null,
+    );
+
+    return canonical.toString();
+  }
+
   static String normalizeRemotePath(String input) {
     final String trimmed = input.trim();
     if (trimmed.isEmpty) return '';
