@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:caleesync/common/app_constant.dart';
 import 'package:caleesync/common/utils/mmkv_utils.dart';
 import 'package:caleesync/core/platform/pigeon/calendar_api.g.dart';
@@ -926,7 +928,7 @@ class SyncRepository {
           where: 'id = ?',
           whereArgs: [remoteCollectionId],
         );
-        await _triggerOneShotForceSync(remoteCollectionId);
+        _triggerOneShotForceSyncInBackground(remoteCollectionId);
         return true;
       }
 
@@ -992,7 +994,7 @@ class SyncRepository {
       }
 
       createdLocalIdForEnableAttempt = null;
-      await _triggerOneShotForceSync(remoteCollectionId);
+      _triggerOneShotForceSyncInBackground(remoteCollectionId);
       return true;
     } on PlatformException catch (e) {
       final String msg = '${e.code} ${e.message ?? ''}'.toLowerCase();
@@ -1026,6 +1028,10 @@ class SyncRepository {
       }
       return false;
     }
+  }
+
+  void _triggerOneShotForceSyncInBackground(int remoteCollectionId) {
+    unawaited(_triggerOneShotForceSync(remoteCollectionId));
   }
 
   Future<void> _triggerOneShotForceSync(int remoteCollectionId) async {
