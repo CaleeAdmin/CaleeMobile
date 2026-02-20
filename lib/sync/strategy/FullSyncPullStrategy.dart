@@ -143,13 +143,23 @@ class FullSyncPullStrategy extends SyncStrategy {
 
       final int localCount = localItemsByUid.length;
       final int mappedCount = localSyncMap.length;
+      final int remoteUidsMatchedCount = localSyncMap.keys.where((uid) => remoteUids.contains(uid)).length;
+      final int deleteCandidates = mappedCount - remoteUidsMatchedCount;
+      final bool massDeletionSafetyTripped = deleteCandidates >= 10;
       final bool suspiciousEmptyRemoteFetch = remoteEvents.isEmpty && localCount > 0 && mappedCount > 0;
       if (suspiciousEmptyRemoteFetch) {
         debugPrint('[SYNC_SAFETY][binding_id=$bindingId][origin=$origin] suspicious empty remote fetch, skip deletion (remote=${remoteEvents.length}, local=$localCount, mapped=$mappedCount)');
       }
 
+      if (massDeletionSafetyTripped) {
+        debugPrint('[SYNC_SAFETY][binding_id=$bindingId][origin=$origin] prevented mass deletion '
+            '(deleteCandidates=$deleteCandidates, mappedCount=$mappedCount, remoteUidsMatchedCount=$remoteUidsMatchedCount, remote=${remoteEvents.length}, local=$localCount)');
+        summary.failed++;
+        summary.errorLog.add('🛑 ${ctx.displayName} 只读同步安全中止: prevented mass deletion (deleteCandidates=$deleteCandidates)');
+      }
+
       for (var uid in localSyncMap.keys) {
-        if (suspiciousEmptyRemoteFetch) {
+        if (suspiciousEmptyRemoteFetch || massDeletionSafetyTripped) {
           break;
         }
         if (!remoteUids.contains(uid)) {
@@ -169,9 +179,12 @@ class FullSyncPullStrategy extends SyncStrategy {
         whereArgs: [remotePath, accountName],
       );
 
-      debugPrint('[SYNC_SUMMARY][binding=$remoteCollectionId] createLocal=$createLocal pull=$pull deleteLocal=$deleteLocal skip=$skip');
-      summary.success++;
-      summary.successLog.add('⬇️ 只读同步完成: ${ctx.displayName}');
+      debugPrint('[SYNC_SUMMARY][binding=$remoteCollectionId] createLocal=$createLocal pull=$pull deleteLocal=$deleteLocal skip=$skip '
+          'deleteCandidates=$deleteCandidates safetyAborted=$massDeletionSafetyTripped');
+      if (!massDeletionSafetyTripped) {
+        summary.success++;
+        summary.successLog.add('⬇️ 只读同步完成: ${ctx.displayName}');
+      }
     } catch (e) {
       debugPrint('❌ FullSyncPull 异常: $e');
       summary.failed++;
