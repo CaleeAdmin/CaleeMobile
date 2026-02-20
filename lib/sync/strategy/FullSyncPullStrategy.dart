@@ -72,6 +72,7 @@ class FullSyncPullStrategy extends SyncStrategy {
         final String storedRemoteToken = normalizeRemoteToken(localRecord?['last_etag']);
         final int localMtime = localItem?.lastModified ?? 0;
         final int storedLocalMtime = (localRecord?['last_mtime'] as int?) ?? 0;
+        final int status = (localRecord?['sync_status'] as int?) ?? SyncItemStatus.synced;
 
         final bool remoteChanged = localRecord == null || storedRemoteToken != remoteToken;
         final bool localChanged = localItem != null && (localRecord == null || localMtime > storedLocalMtime);
