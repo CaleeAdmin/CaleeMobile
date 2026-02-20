@@ -150,20 +150,62 @@ abstract class SyncStrategy {
     required String remoteHref,
     String? summary,
   }) async {
-    await db.insert(
+    final payload = {
+      'remote_uid': uid,
+      'local_item_id': localItemId,
+      'remote_collection_id': remoteCollectionId,
+      'summary': summary,
+      'last_etag': normalizeRemoteToken(etag),
+      'last_mtime': lastMtime,
+      'remote_href': remoteHref,
+      'sync_status': SyncItemStatus.synced,
+    };
+
+    final bool hasLocalItemId = localItemId.trim().isNotEmpty;
+    final String whereClause = hasLocalItemId
+        ? 'remote_collection_id = ? AND (remote_uid = ? OR local_item_id = ?)'
+        : 'remote_collection_id = ? AND remote_uid = ?';
+    final List<dynamic> whereArgs = hasLocalItemId
+        ? [remoteCollectionId, uid, localItemId]
+        : [remoteCollectionId, uid];
+
+    final List<Map<String, dynamic>> matches = await db.query(
       'sync_items',
-      {
-        'remote_uid': uid,
-        'local_item_id': localItemId,
-        'remote_collection_id': remoteCollectionId,
-        'summary': summary,
-        'last_etag': normalizeRemoteToken(etag),
-        'last_mtime': lastMtime,
-        'remote_href': remoteHref,
-        'sync_status': SyncItemStatus.synced,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
+      columns: ['id', 'remote_href'],
+      where: whereClause,
+      whereArgs: whereArgs,
     );
+
+    if (matches.isEmpty) {
+      await db.insert(
+        'sync_items',
+        payload,
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+      return;
+    }
+
+    matches.sort((a, b) {
+      final int aHasHref = ((a['remote_href']?.toString() ?? '').isNotEmpty) ? 1 : 0;
+      final int bHasHref = ((b['remote_href']?.toString() ?? '').isNotEmpty) ? 1 : 0;
+      if (aHasHref != bHasHref) {
+        return bHasHref.compareTo(aHasHref);
+      }
+      final int aid = (a['id'] as int?) ?? 0;
+      final int bid = (b['id'] as int?) ?? 0;
+      return aid.compareTo(bid);
+    });
+
+    final int winnerId = (matches.first['id'] as int?) ?? 0;
+    await db.update('sync_items', payload, where: 'id = ?', whereArgs: [winnerId]);
+
+    if (matches.length > 1) {
+      for (final row in matches.skip(1)) {
+        final int? duplicateId = row['id'] as int?;
+        if (duplicateId == null) continue;
+        await db.delete('sync_items', where: 'id = ?', whereArgs: [duplicateId]);
+      }
+    }
   }
 }
 
