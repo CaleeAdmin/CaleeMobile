@@ -1,3 +1,9 @@
+enum SyncOutcomeStatus {
+  completedNormally,
+  safetyGateBlockedDeletions,
+  persistentOverrideEnabled,
+}
+
 class SyncSummary {
   int total = 0;      // 总日历数
   int success = 0;    // 成功数
@@ -8,6 +14,14 @@ class SyncSummary {
   List<String> successLog = [];
   List<String> errorLog = [];
 
+  // Per-binding high level outcomes.
+  final Map<int, SyncOutcomeStatus> bindingOutcomes = {};
+
+  void recordBindingOutcome(int bindingId, SyncOutcomeStatus status) {
+    if (bindingId <= 0) return;
+    bindingOutcomes[bindingId] = status;
+  }
+
   void reset(int count) {
     total = count;
     success = 0;
@@ -15,5 +29,6 @@ class SyncSummary {
     processing = 0;
     successLog.clear();
     errorLog.clear();
+    bindingOutcomes.clear();
   }
 }

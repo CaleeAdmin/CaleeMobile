@@ -156,17 +156,20 @@ class FullSyncPullStrategy extends SyncStrategy {
       final int localCount = localItemsByUid.length;
       final int mappedCount = localSyncMap.length;
       final int remoteUidsMatchedCount = localSyncMap.keys.where((uid) => remoteUids.contains(uid)).length;
-      final int deleteCandidates = mappedCount - remoteUidsMatchedCount;
+      final int localDeleteCandidates = mappedCount - remoteUidsMatchedCount;
+      const int remoteDeleteCandidates = 0;
       final bool suspiciousEmptyRemoteFetch = snapshot.parseProducedZeroEvents && mappedCount > 0;
-      final double deleteCandidateRatio = mappedCount <= 0 ? 0 : (deleteCandidates / mappedCount);
-      final bool massDeletionSafetyTripped = deleteCandidates >= 10 || deleteCandidateRatio >= 0.5;
       final bool remoteSnapshotTrusted =
           snapshot.fetchSucceeded &&
           (snapshot.statusCode == 200 || snapshot.statusCode == 207) &&
           (newCtag ?? '').isNotEmpty &&
-          !suspiciousEmptyRemoteFetch &&
-          !massDeletionSafetyTripped;
-      final bool canFinalizeDeletes = remoteSnapshotTrusted && !massDeletionSafetyTripped;
+          !suspiciousEmptyRemoteFetch;
+      final bool allowMassDeletion = isMassDeletionOverrideEnabled(bindingId);
+      final bool massDeletionSafetyTripped =
+          localDeleteCandidates >= SyncStrategy.massDeletionAbsoluteThreshold ||
+          remoteDeleteCandidates >= SyncStrategy.massDeletionAbsoluteThreshold;
+      final bool blockDeletesBySafetyGate = massDeletionSafetyTripped && !allowMassDeletion;
+      final bool canFinalizeDeletes = remoteSnapshotTrusted && !blockDeletesBySafetyGate;
       if (!snapshot.fetchSucceeded) {
         debugPrint('[SYNC_SAFETY][binding_id=$bindingId][origin=$origin] untrusted remote snapshot: fetch failed');
       }
@@ -177,16 +180,16 @@ class FullSyncPullStrategy extends SyncStrategy {
         debugPrint('[SYNC_SAFETY][binding_id=$bindingId][origin=$origin] suspicious empty remote fetch, skip deletion (remote=${remoteEvents.length}, local=$localCount, mapped=$mappedCount)');
       }
 
-      if (massDeletionSafetyTripped) {
-        debugPrint('[SYNC_SAFETY][binding_id=$bindingId][origin=$origin] prevented mass deletion '
-            '(deleteCandidates=$deleteCandidates, mappedCount=$mappedCount, remoteUidsMatchedCount=$remoteUidsMatchedCount, remote=${remoteEvents.length}, local=$localCount)');
-        summary.failed++;
-        summary.errorLog.add('🛑 ${ctx.displayName} 只读同步安全中止: prevented mass deletion (deleteCandidates=$deleteCandidates)');
+      if (blockDeletesBySafetyGate) {
+        debugPrint('[SYNC_SAFETY][binding_id=$bindingId][origin=$origin] aborted by safety gate '
+            '(localDeleteCandidates=$localDeleteCandidates, remoteDeleteCandidates=$remoteDeleteCandidates, mappedCount=$mappedCount, threshold=${SyncStrategy.massDeletionAbsoluteThreshold})');
+        summary.recordBindingOutcome(bindingId, SyncOutcomeStatus.safetyGateBlockedDeletions);
+        summary.errorLog.add('🛑 ${ctx.displayName} Safety gate blocked deletions (localDeleteCandidates=$localDeleteCandidates, remoteDeleteCandidates=$remoteDeleteCandidates, mappedCount=$mappedCount, threshold=${SyncStrategy.massDeletionAbsoluteThreshold})');
       }
 
       if (!remoteSnapshotTrusted) {
         debugPrint('[SYNC_SAFETY][binding_id=$bindingId][origin=$origin] untrusted snapshot; skip remote-missing delete staging/finalization '
-            '(status=${snapshot.statusCode}, fetchSucceeded=${snapshot.fetchSucceeded}, parseZero=${snapshot.parseProducedZeroEvents}, deleteCandidateRatio=$deleteCandidateRatio)');
+            '(status=${snapshot.statusCode}, fetchSucceeded=${snapshot.fetchSucceeded}, parseZero=${snapshot.parseProducedZeroEvents}, localDeleteCandidates=$localDeleteCandidates)');
       }
 
       for (var uid in localSyncMap.keys) {
@@ -194,6 +197,9 @@ class FullSyncPullStrategy extends SyncStrategy {
           break;
         }
         if (!remoteUids.contains(uid)) {
+          if (blockDeletesBySafetyGate) {
+            continue;
+          }
           final record = localSyncMap[uid]!;
           final int status = (record['sync_status'] as int?) ?? SyncItemStatus.synced;
 
@@ -213,14 +219,18 @@ class FullSyncPullStrategy extends SyncStrategy {
 
           final String localItemId = record['local_item_id']?.toString() ?? '';
           if (localItemId.isEmpty) {
-            await db.delete('sync_items', where: 'remote_collection_id = ? AND remote_uid = ?', whereArgs: [remoteCollectionId, uid]);
+            if (!blockDeletesBySafetyGate) {
+              await db.delete('sync_items', where: 'remote_collection_id = ? AND remote_uid = ?', whereArgs: [remoteCollectionId, uid]);
+            }
             deleteLocal++;
             continue;
           }
 
           final bool deleted = await nativeApi.deleteEvent(localItemId);
           if (deleted) {
-            await db.delete('sync_items', where: 'remote_collection_id = ? AND remote_uid = ?', whereArgs: [remoteCollectionId, uid]);
+            if (!blockDeletesBySafetyGate) {
+              await db.delete('sync_items', where: 'remote_collection_id = ? AND remote_uid = ?', whereArgs: [remoteCollectionId, uid]);
+            }
             deleteLocal++;
           }
         }
@@ -234,11 +244,17 @@ class FullSyncPullStrategy extends SyncStrategy {
       );
 
       debugPrint('[SYNC_SUMMARY][binding=$remoteCollectionId] createLocal=$createLocal pull=$pull deleteLocal=$deleteLocal skip=$skip '
-          'deleteCandidates=$deleteCandidates deleteCandidateRatio=$deleteCandidateRatio safetyAborted=$massDeletionSafetyTripped '
-          'remoteSnapshotTrusted=$remoteSnapshotTrusted status=${snapshot.statusCode} fetchSucceeded=${snapshot.fetchSucceeded}');
-      if (!massDeletionSafetyTripped) {
+          'localDeleteCandidates=$localDeleteCandidates remoteDeleteCandidates=$remoteDeleteCandidates safetyAborted=$blockDeletesBySafetyGate '
+          'allowMassDeletion=$allowMassDeletion remoteSnapshotTrusted=$remoteSnapshotTrusted status=${snapshot.statusCode} fetchSucceeded=${snapshot.fetchSucceeded}');
+      if (!blockDeletesBySafetyGate) {
         summary.success++;
-        summary.successLog.add('⬇️ 只读同步完成: ${ctx.displayName}');
+        if (allowMassDeletion) {
+          summary.recordBindingOutcome(bindingId, SyncOutcomeStatus.persistentOverrideEnabled);
+          summary.successLog.add('⚠️ ${ctx.displayName} Persistent override enabled (dangerous mode)');
+        } else {
+          summary.recordBindingOutcome(bindingId, SyncOutcomeStatus.completedNormally);
+          summary.successLog.add('⬇️ ${ctx.displayName} Completed normally');
+        }
       }
     } catch (e) {
       debugPrint('❌ FullSyncPull 异常: $e');

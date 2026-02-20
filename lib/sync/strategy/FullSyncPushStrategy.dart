@@ -22,6 +22,7 @@ class FullSyncPushStrategy extends SyncStrategy {
       final String remotePath = ctx.remotePath;
       final String localCalendarId = ctx.localCalendarId;
       final int remoteCollectionId = ctx.remoteCollectionId;
+      final int bindingId = (ctx.extra['binding_id'] as int?) ?? 0;
 
       final start = DateTime.now().subtract(const Duration(days: 365)).millisecondsSinceEpoch;
       final end = DateTime.now().add(const Duration(days: 730)).millisecondsSinceEpoch;
@@ -33,6 +34,11 @@ class FullSyncPushStrategy extends SyncStrategy {
         'sync_items',
         where: 'remote_collection_id = ?',
         whereArgs: [remoteCollectionId],
+      );
+
+      final snapshot = await nc.fetchUnifiedEventsSnapshot(
+        calendarPath: remotePath,
+        isSubscription: ctx.isSubscription ?? false,
       );
 
       final Map<String, Map<String, dynamic>> localSyncMap = {
@@ -99,6 +105,28 @@ class FullSyncPushStrategy extends SyncStrategy {
       }
 
       final Set<String> currentLocalIds = localEvents.map((e) => e.localId.toString()).toSet();
+      final int mappedCount = localSyncMap.length;
+      final int remoteDeleteCandidates = localSyncMap.keys.where((id) => !currentLocalIds.contains(id)).length;
+      const int localDeleteCandidates = 0;
+      final bool suspiciousEmptyLocalFetch = localEvents.isEmpty && mappedCount > 0;
+      final bool suspiciousEmptyRemoteFetch = snapshot.parseProducedZeroEvents && mappedCount > 0;
+      final bool localSnapshotTrusted = !suspiciousEmptyLocalFetch;
+      final bool remoteSnapshotTrusted =
+          snapshot.fetchSucceeded &&
+          (snapshot.statusCode == 200 || snapshot.statusCode == 207) &&
+          !suspiciousEmptyRemoteFetch;
+      final bool allowMassDeletion = isMassDeletionOverrideEnabled(bindingId);
+      final bool massDeletionSafetyTripped =
+          localDeleteCandidates >= SyncStrategy.massDeletionAbsoluteThreshold ||
+          remoteDeleteCandidates >= SyncStrategy.massDeletionAbsoluteThreshold;
+      final bool blockDeletesBySafetyGate = massDeletionSafetyTripped && !allowMassDeletion;
+
+      if (blockDeletesBySafetyGate) {
+        debugPrint('[SYNC_SAFETY][binding=$remoteCollectionId] aborted by safety gate '
+            '(localDeleteCandidates=$localDeleteCandidates, remoteDeleteCandidates=$remoteDeleteCandidates, mappedCount=$mappedCount, threshold=${SyncStrategy.massDeletionAbsoluteThreshold})');
+        summary.recordBindingOutcome(bindingId, SyncOutcomeStatus.safetyGateBlockedDeletions);
+        summary.errorLog.add('🛑 ${ctx.displayName} Safety gate blocked deletions (localDeleteCandidates=$localDeleteCandidates, remoteDeleteCandidates=$remoteDeleteCandidates, mappedCount=$mappedCount, threshold=${SyncStrategy.massDeletionAbsoluteThreshold})');
+      }
 
       for (var localId in localSyncMap.keys) {
         if (!currentLocalIds.contains(localId)) {
@@ -108,6 +136,9 @@ class FullSyncPushStrategy extends SyncStrategy {
           final int syncStatus = (record['sync_status'] as int?) ?? SyncItemStatus.synced;
 
           if (href != null && syncStatus == SyncItemStatus.pendingDelete) {
+            if (blockDeletesBySafetyGate || !localSnapshotTrusted || !remoteSnapshotTrusted) {
+              continue;
+            }
             final bool isDeletedOnRemote = await nc.deleteEvent(eventPath: href);
             if (isDeletedOnRemote) {
               await db.delete(
@@ -121,8 +152,16 @@ class FullSyncPushStrategy extends SyncStrategy {
         }
       }
 
-      summary.success++;
-      summary.successLog.add("📤 发布同步完成: ${ctx.displayName} (处理了 $changeCount 项变动)");
+      if (!blockDeletesBySafetyGate) {
+        summary.success++;
+        if (allowMassDeletion) {
+          summary.recordBindingOutcome(bindingId, SyncOutcomeStatus.persistentOverrideEnabled);
+          summary.successLog.add('⚠️ ${ctx.displayName} Persistent override enabled (dangerous mode)');
+        } else {
+          summary.recordBindingOutcome(bindingId, SyncOutcomeStatus.completedNormally);
+          summary.successLog.add('📤 ${ctx.displayName} Completed normally (processed $changeCount changes)');
+        }
+      }
     } catch (e) {
       summary.failed++;
       summary.errorLog.add("❌ ${ctx.displayName} 发布失败: $e");
