@@ -1,8 +1,6 @@
-import 'package:caleesync/core/platform/pigeon/calendar_api.g.dart';
 import 'package:caleesync/entity/SyncContext.dart';
 import 'package:caleesync/entity/SyncSummary.dart';
 import 'package:caleesync/sync/SyncEnum.dart';
-import 'package:caleesync/common/utils/UidGenerator.dart';
 
 import 'SyncStrategy.dart';
 
@@ -26,80 +24,6 @@ class CreateRemoteStrategy extends SyncStrategy {
     );
     if (resultPath != null) {
       final db = await dbHelper.database;
-
-      // 2. 扩大扫描窗口, 确保存量数据全部覆盖
-      // 首次上云：取过去 2 年到未来 10 年
-      final start = DateTime.now()
-          .subtract(const Duration(days: 30))
-          .millisecondsSinceEpoch;
-      final end = DateTime.now()
-          .add(const Duration(days: 30))
-          .millisecondsSinceEpoch;
-
-      // 3. 抓取本地系统日程
-      final List<PlatformItem?> items = await nativeApi.getEvents(
-        ctx.localCalendarId,
-        start,
-        end,
-      );
-      final currentEvents = items.whereType<PlatformItem>().toList();
-
-      print("[Sync] Pushing ${currentEvents.length} existing events for the new calendar...");
-
-      // 4. 遍历并执行 Initial Push (建议串行或限制并发)
-      for (var event in currentEvents) {
-        // 1. 提取并处理空值
-        String uid = (event.uid ?? '').trim();
-        final String title = event.title ?? "Untitled";
-        if (uid.isEmpty) {
-          uid = CaleeUid.generate();
-          await nativeApi.createOrUpdateEvent(CalendarEventRequest(
-            calendarId: ctx.localCalendarId,
-            eventId: event.localId,
-            uid: uid,
-            title: title,
-            start: event.startTime ?? DateTime.now().millisecondsSinceEpoch,
-            end: event.endTime ?? (event.startTime ?? DateTime.now().millisecondsSinceEpoch) + 3600000,
-            notes: event.notes,
-          ));
-        }
-        final int startTime =
-            event.startTime ?? DateTime.now().millisecondsSinceEpoch;
-        final int endTime = event.endTime ?? startTime + 3600000; // 默认 1 小时后
-
-        // 2. 执行上传
-        final String? etag = await nc.uploadEventData(
-          userId: loginName!,
-          calendarPath: resultPath,
-          uid: uid,
-          // 现在是 String
-          title: title,
-          start: DateTime.fromMillisecondsSinceEpoch(startTime),
-          // 现在是 int
-          end: DateTime.fromMillisecondsSinceEpoch(endTime),
-        );
-
-        if (etag == null) {
-          continue;
-        }
-
-        final String? localItemId = event.localId;
-        if (localItemId == null || localItemId.isEmpty) {
-          continue;
-        }
-
-        await upsertSyncedItem(
-          db: db,
-          remoteCollectionId: ctx.remoteCollectionId,
-          uid: uid,
-          localItemId: localItemId,
-          etag: etag,
-          lastMtime: event.lastModified ?? 0,
-          remoteHref: "${resultPath.endsWith('/') ? resultPath : '$resultPath/'}$uid.ics",
-          summary: title,
-        );
-      }
-
       await db.rawUpdate('''
         UPDATE remote_collections
         SET remote_path = ?
@@ -107,7 +31,17 @@ class CreateRemoteStrategy extends SyncStrategy {
           SELECT remote_collection_id FROM local_bindings WHERE local_collection_id = ?
         )
       ''', [resultPath, ctx.localCalendarId]);
-      summary.success++;
+
+      final SyncContext bootstrapCtx = ctx.copyWith(
+        remotePath: resultPath,
+        action: SyncAction.fullSyncPush,
+      );
+      await runUnifiedSync(
+        bootstrapCtx,
+        summary,
+        mode: UnifiedSyncMode.push,
+        bootstrap: true,
+      );
     }
   }
 }
