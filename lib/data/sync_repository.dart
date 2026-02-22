@@ -74,102 +74,19 @@ class SyncRepository {
   }
 
   Future<void> refreshAllLocalEvents(String accountId) async {
-    final db = await _dbHelper.database;
-
-    // 1. 获取所有已绑定本地系统日历的远端集合
-    final List<Map<String, dynamic>> activeCalendars = await db.rawQuery(
-      '''
-      SELECT rc.id AS remote_collection_id, lb.local_collection_id
-      FROM remote_collections rc
-      INNER JOIN local_bindings lb ON lb.remote_collection_id = rc.id
-      WHERE rc.account_name = ?
-        AND lb.local_collection_id IS NOT NULL
-        AND lb.local_collection_id != ''
-      ''',
-      [accountId],
-    );
-
-    for (var cal in activeCalendars) {
-      final int remoteCollectionId = cal['remote_collection_id'] as int;
-      final String localCalId = cal['local_collection_id'].toString();
-
-      // 2. 拍一张系统日历的“物理快照”
-      final start = DateTime.now().subtract(const Duration(days: 365)).millisecondsSinceEpoch;
-      final end = DateTime.now().add(const Duration(days: 730)).millisecondsSinceEpoch;
-      final List<PlatformItem?> items = await _nativeApi.getEvents(localCalId, start, end);
-
-      // 转换为 Map: { local_id : PlatformItem }
-      final Map<String, PlatformItem> systemSnap = {
-        for (var e in items.whereType<PlatformItem>()) e.localId.toString(): e
-      };
-
-      // 3. 获取该日历在数据库里的“旧记录”
-      final List<Map<String, dynamic>> dbRecords = await db.query(
-        'sync_items',
-        where: 'remote_collection_id = ?',
-        whereArgs: [remoteCollectionId],
-      );
-      final Map<String, Map<String, dynamic>> dbMap = {
-        for (var r in dbRecords) r['local_item_id'].toString(): r
-      };
-
-      await db.transaction((txn) async {
-        // --- 环节一：处理【修改】和【漏网之鱼】 ---
-        for (var entry in systemSnap.entries) {
-          final String sid = entry.key;
-          final PlatformItem systemEvent = entry.value;
-          final record = dbMap[sid];
-
-          if (record == null) {
-            // 💡 情况 A：系统有, 数据库没。这就是你说的【新增事件b】
-            debugPrint("[INFO] Detected local physical addition: ${systemEvent.title}");
-            await txn.insert('sync_items', {
-              'remote_uid': (systemEvent.uid?.trim().isNotEmpty == true) ? systemEvent.uid!.trim() : 'local_${systemEvent.localId}',
-              'local_item_id': sid,
-              'remote_collection_id': remoteCollectionId,
-              'summary': systemEvent.title,
-              'last_mtime': systemEvent.lastModified,
-              'sync_status': SyncItemStatus.pendingPush, // 标记为 Dirty, 待 Push
-              'item_type': 'event'
-            });
-          } else {
-            // 💡 情况 B：数据库有。对比修改时间戳, 这就是你说的【修改名称】
-            final int systemMtime = systemEvent.lastModified ?? 0;
-            final int dbMtime = record['last_mtime'] ?? 0;
-
-            if (systemMtime > dbMtime) {
-              debugPrint("[INFO] Detected local physical update: ${systemEvent.title}");
-              await txn.update(
-                'sync_items',
-                {
-                  'summary': systemEvent.title,
-                  'last_mtime': systemMtime,
-                  'sync_status': SyncItemStatus.pendingPush, // 标记为 Dirty, 待 Push
-                },
-                where: 'local_item_id = ?',
-                whereArgs: [sid],
-              );
-            }
-          }
-        }
-
-        // --- 环节二：处理【删除】 ---
-        for (var record in dbRecords) {
-          final String mappedId = record['local_item_id'].toString();
-          if (!systemSnap.containsKey(mappedId)) {
-            // 💡 情况 C：数据库有, 系统没了。说明用户在系统日历删了。
-            debugPrint("[INFO] Detected local physical deletion: ${record['summary']}");
-            await txn.update(
-              'sync_items',
-              {'sync_status': SyncItemStatus.pendingPush}, // 标记为 Dirty, 待同步推送删除
-              where: 'local_item_id = ?',
-              whereArgs: [mappedId],
-            );
-          }
-        }
-      });
-    }
+    // Intentionally a no-op.
+    //
+    // Item-level reconciliation/mutation is centralized in the unified sync
+    // planner + executor pipeline (SyncEngine -> SyncItemPlanner/Executor ->
+    // SyncStrategy.runUnifiedSync). This repository method used to directly
+    // mutate `sync_items` by diffing raw native snapshots, which duplicated
+    // reconciliation logic and could diverge from mode/safety rules.
+    //
+    // Keep this method for compatibility with existing call sites during
+    // incremental migration.
+    return;
   }
+
 
   /// 统一的路径更新方法：用于将云端日历路径绑定到本地日历
   Future<void> updateRemotePath(String localId, String path) async {
