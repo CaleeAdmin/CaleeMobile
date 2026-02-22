@@ -7,8 +7,6 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
 import 'package:sqflite/sqflite.dart';
 
-import '../common/utils/IcsParser.dart';
-import '../common/utils/UidGenerator.dart';
 import '../entity/SyncSummary.dart';
 import '../sync/SyncEnum.dart';
 import '../sync/SyncEngine.dart';
@@ -193,236 +191,44 @@ class SyncRepository {
   // ==========================================
   Future<Map<String, int>> scanLocalEvents(String calendarLocalId) async {
     final db = await _dbHelper.database;
-    int newlyAdded = 0;
-    int modified = 0;
-    int deleted = 0;
-
     final int? remoteCollectionId = await _resolveRemoteCollectionIdByLocalCalendarId(db, calendarLocalId);
     if (remoteCollectionId == null) {
       debugPrint('[WARN] Local calendar binding not found, skipping scanLocalEvents: $calendarLocalId');
       return {'added': 0, 'modified': 0, 'deleted': 0};
     }
 
-    final start = DateTime.now().subtract(const Duration(days: 45)).millisecondsSinceEpoch;
-    final end = DateTime.now().add(const Duration(days: 45)).millisecondsSinceEpoch;
-
-    // 1. 获取系统当前存在的事件
-    final List<PlatformItem?> items = await _nativeApi.getEvents(calendarLocalId, start, end);
-    final currentEvents = items.where((i) => i != null && (i.isTask == false)).cast<PlatformItem>().toList();
-
-    // 提取系统当前的 UID 集合
-    final currentUids = currentEvents.map((e) => e.uid).toSet();
-
-    await db.transaction((txn) async {
-      // 2. 【核心逻辑】处理删除：找出数据库里有, 但系统里没了的记录
-      // 注意：已标记为待推送的记录无需重复标记
-      final List<Map<String, dynamic>> dbRows = await txn.query(
-        'sync_items',
-        where: 'remote_collection_id = ? AND sync_status != ?',
-        whereArgs: [remoteCollectionId, SyncItemStatus.pendingPush],
-      );
-
-      for (var row in dbRows) {
-        final String dbUid = row['remote_uid'];
-        if (!currentUids.contains(dbUid)) {
-          // 系统里找不到了 -> 用户在日历 App 里删了
-          await txn.update(
-            'sync_items',
-            {'sync_status': SyncItemStatus.pendingPush}, // 标记为 Dirty, 待同步推送删除
-            where: 'remote_collection_id = ? AND remote_uid = ?',
-            whereArgs: [remoteCollectionId, dbUid],
-          );
-          deleted++;
-          print('[INFO] Detected local deletion, scheduled immediate remote delete on next sync: $dbUid');
-        }
-      }
-
-      // 3. 处理新增或修改 (你原来的逻辑)
-      for (var event in currentEvents) {
-        // 核心改动：优先使用原生层返回的 event.uid (来自系统的 _SYNC_ID)
-        final String eventUid = (event.uid != null && !event.uid!.startsWith('local_'))
-            ? event.uid!
-            : CaleeUid.generate();
-
-        final List<Map<String, dynamic>> maps = await txn.query(
-          'sync_items',
-          where: 'remote_collection_id = ? AND remote_uid = ?',
-          whereArgs: [remoteCollectionId, event.uid],
-        );
-
-        if (maps.isEmpty) {
-          // 新增逻辑... (保持你原来的代码)
-          await txn.insert('sync_items', {
-            'remote_uid': eventUid,
-            'local_item_id': event.localId,
-            'remote_collection_id': remoteCollectionId,
-            'summary': event.title ?? 'Untitled',
-            'description': event.notes,
-            'dtstart': event.startTime,
-            'dtend': event.endTime,
-            'last_mtime': event.lastModified ?? DateTime.now().millisecondsSinceEpoch,
-            'item_type': 'event',
-            'sync_status': SyncItemStatus.pendingPush,
-          });
-          newlyAdded++;
-        } else {
-          // 更新逻辑... (保持你原来的对比逻辑)
-          // ... (省略你已有的 contentChanged 和 timeChanged 判断)
-          // 如果检测到变化, 更新并将 sync_status 设为 1
-        }
-      }
-    });
-
-    return {'added': newlyAdded, 'modified': modified, 'deleted': deleted};
+    await _runUnifiedSyncForCollection(remoteCollectionId);
+    return {'added': 0, 'modified': 0, 'deleted': 0};
   }
 
   Future<void> pullFromRemote(String calendarLocalId) async {
     final db = await _dbHelper.database;
-
-    // 1. [INFO] 动态获取日历配置（账号信息、远程路径等）
-    final Map<String, dynamic>? calConfig = await _resolveCollectionConfigByLocalCalendarId(db, calendarLocalId);
-
-    if (calConfig == null) {
+    final int? remoteCollectionId = await _resolveRemoteCollectionIdByLocalCalendarId(db, calendarLocalId);
+    if (remoteCollectionId == null) {
       print("[ERROR] Calendar mapping config not found: $calendarLocalId");
       return;
     }
 
-    final int? remoteCollectionId = calConfig['id'] as int?;
-    if (remoteCollectionId == null) {
-      print("[ERROR] Calendar mapping missing remote_collection_id: $calendarLocalId");
-      return;
-    }
-    final String remotePath = calConfig['remote_path'] ?? "";
-    final bool isSubscription =
-        (calConfig['is_subscription'] == 1 || calConfig['is_subscription'] == true);
-    // 这里的 userId 和 password 建议以后从账号管理模块获取, 目前先沿用你的 MMKV
-
-
-    if (remotePath.isEmpty) {
-      print("[WARN] Calendar is not bound to a remote path, skipping pull.");
-      return;
-    }
-
-    print("[INFO] Preparing to pull from account [${calConfig['account_name']}] path: $remotePath");
-
-    // 2. 获取云端所有事件
-    final remoteEvents = await CaleeServerService().fetchUnifiedEvents(
-      calendarPath: remotePath,
-      isSubscription: isSubscription,
-    );
-
-    // --- 【删除逻辑】对比云端与本地 UID 集合 ---
-    final Set<String> remoteUids = remoteEvents.map((e) {
-      final String href = e['href'];
-      return Uri.decodeComponent(href.split('/').last).replaceAll('.ics', '');
-    }).toSet();
-
-    final localEntries = await db.query(
-        'sync_items',
-        where: 'remote_collection_id = ?',
-        whereArgs: [remoteCollectionId]
-    );
-
-    for (var local in localEntries) {
-      final String uid = local['remote_uid'] as String;
-      final String? localId = local['local_item_id'] as String?;
-      final String summary = (local['summary'] ?? "Untitled") as String;
-
-      // 如果本地标记为已同步(0)但云端没了, 说明云端删除了
-      if (!remoteUids.contains(uid)) {
-        if (local['sync_status'] == SyncItemStatus.synced) {
-          print('[INFO] Deleted remotely, removing locally: $summary');
-          if (localId != null) await _nativeApi.deleteEvent(localId);
-          await db.delete('sync_items', where: 'remote_collection_id = ? AND remote_uid = ?', whereArgs: [remoteCollectionId, uid]);
-        }
-      }
-    }
-
-    // 3. 处理新增或更新
-    for (var remoteEvent in remoteEvents) {
-      final String href = remoteEvent['href'];
-      final String uid = Uri.decodeComponent(href.split('/').last).replaceAll('.ics', '');
-      final String etag = (remoteEvent['etag'] as String? ?? "").replaceAll('"', '');
-
-      final local = await db.query('sync_items', where: 'remote_collection_id = ? AND remote_uid = ?', whereArgs: [remoteCollectionId, uid]);
-
-      if (local.isNotEmpty) {
-        final String localEtag = (local.first['last_etag'] as String?) ?? "";
-        if (localEtag == etag) continue; // ETag 一致, 跳过
-      }
-
-      // 4. [INFO] 下载详情并写入系统日历
-      print('[INFO] Updating event details: $uid');
-      final String icsData = (remoteEvent['calendar_data'] as String?) ?? '';
-      if (icsData.trim().isEmpty) {
-        print('[WARN] Skipping empty ICS data: $uid');
-        continue;
-      }
-
-      final parsed = IcsParser.parse(icsData, uid);
-
-        // [INFO] 核心改动：调用 createEvent 时传入云端的 UID
-        // 这会让 Android 的 _SYNC_ID 字段被填充, 实现真正的 UUID 统一
-      final String? newLocalId = await _nativeApi.createEvent(
-        calendarLocalId,
-        parsed['summary'] ?? "Untitled",
-        parsed['dtstart'],
-        parsed['dtend'],
-        parsed['description'],
-        uid, // <--- 关键参数：传入生成的/云端的 UID
-      );
-
-      if (newLocalId != null) {
-        await db.insert('sync_items', {
-          'remote_uid': uid,
-          'local_item_id': newLocalId,
-          'remote_collection_id': remoteCollectionId,
-          'summary': parsed['summary'],
-          'last_etag': etag,
-          'sync_status': SyncItemStatus.synced,
-          'item_type': 'event',
-        }, conflictAlgorithm: ConflictAlgorithm.replace);
-      }
-    }
+    await _runUnifiedSyncForCollection(remoteCollectionId);
   }
 
   Future<void> pushDeletesToRemote(String calendarLocalId) async {
     final db = await _dbHelper.database;
-    final String userId = MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? "";
     final int? remoteCollectionId = await _resolveRemoteCollectionIdByLocalCalendarId(db, calendarLocalId);
     if (remoteCollectionId == null) {
       debugPrint('[WARN] Local calendar binding not found, skipping pushDeletesToRemote: $calendarLocalId');
       return;
     }
 
-    // 1. 获取手机系统日历目前所有的 Event ID
-    final List<String?> systemEventIds = await _nativeApi.getSystemEventIds(calendarLocalId);
+    await _runUnifiedSyncForCollection(remoteCollectionId);
+  }
 
-    // 2. 找出那些在 sync_items 里有记录, 但系统里已经没了的
-    final List<Map<String, dynamic>> trackedEvents = await db.query(
-        'sync_items',
-        where: 'remote_collection_id = ?',
-        whereArgs: [remoteCollectionId]
-    );
 
-    for (var entry in trackedEvents) {
-      final String localId = entry['local_item_id'];
-      final String uid = entry['remote_uid'];
-
-      if (!systemEventIds.contains(localId)) {
-        print('[INFO] Detected manual local deletion, deleting remote copy: ${entry['summary']}');
-
-        // 拼接云端路径 (如果是标准结构, 通常是 calendarPath + uid + .ics)
-        final String eventPath = "/remote.php/dav/calendars/$userId/cal_sync_6/$uid.ics";
-
-        final bool ok = await CaleeServerService().deleteEvent(
-          eventPath: eventPath,
-        );
-
-        if (ok) {
-          await db.delete('sync_items', where: 'remote_collection_id = ? AND remote_uid = ?', whereArgs: [remoteCollectionId, uid]);
-        }
-      }
+  Future<void> _runUnifiedSyncForCollection(int remoteCollectionId) async {
+    SyncEngine.requestForceSyncForCollection(remoteCollectionId);
+    final SyncSummary summary = await SyncEngine().executeFullSync();
+    if (summary.failed > 0) {
+      debugPrint('[WARN] Unified forced sync for collection $remoteCollectionId finished with failures: ${summary.failed}');
     }
   }
 
