@@ -904,7 +904,9 @@ class UnifiedModeRules {
             SyncItemAction.deleteRemote,
             SyncItemAction.skip,
           },
-          onRemoteOnlyMapped: SyncItemAction.skip,
+          // Local side is the source of truth in push mode.
+          // If a mapped local event disappears, propagate deletion to remote.
+          onRemoteOnlyMapped: SyncItemAction.deleteRemote,
           onRemoteOnlyUnmapped: SyncItemAction.skip,
           onLocalOnlyMapped: SyncItemAction.createRemote,
           onLocalOnlyUnmapped: SyncItemAction.createRemote,
@@ -924,7 +926,9 @@ class UnifiedModeRules {
             SyncItemAction.deleteRemote,
             SyncItemAction.skip,
           },
-          onRemoteOnlyMapped: SyncItemAction.createLocal,
+          // In two-way mode, a mapped remote-only record typically means
+          // the local event was deleted and should be propagated to remote.
+          onRemoteOnlyMapped: SyncItemAction.deleteRemote,
           onRemoteOnlyUnmapped: SyncItemAction.createLocal,
           onLocalOnlyMapped: SyncItemAction.deleteLocal,
           onLocalOnlyUnmapped: SyncItemAction.createRemote,
