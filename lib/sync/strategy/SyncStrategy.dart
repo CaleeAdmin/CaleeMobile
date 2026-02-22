@@ -883,7 +883,8 @@ class UnifiedModeRules {
           },
           onRemoteOnlyMapped: SyncItemAction.skip,
           onRemoteOnlyUnmapped: SyncItemAction.skip,
-          onLocalOnlyMapped: SyncItemAction.createRemote,
+          // local event was deleted while mapping still exists -> propagate delete to remote
+          onLocalOnlyMapped: SyncItemAction.deleteRemote,
           onLocalOnlyUnmapped: SyncItemAction.createRemote,
           onRemoteChanged: SyncItemAction.skip,
           onLocalChanged: SyncItemAction.updateRemote,

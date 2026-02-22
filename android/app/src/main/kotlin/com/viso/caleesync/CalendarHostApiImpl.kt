@@ -310,6 +310,7 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
             CalendarContract.Events.DTSTART,
             CalendarContract.Events.DTEND,
             CalendarContract.Events.DURATION,
+            CalendarContract.Events.LAST_MODIFIED,
             CalendarContract.Events.ALL_DAY,
             CalendarContract.Events.UID_2445,
             CalendarContract.Events._SYNC_ID,
@@ -347,6 +348,7 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
                     notes = cursor.getString(cursor.getColumnIndexOrThrow(CalendarContract.Events.DESCRIPTION)),
                     startTime = startTime,
                     endTime = endTime,
+                    lastModified = cursor.getLong(cursor.getColumnIndexOrThrow(CalendarContract.Events.LAST_MODIFIED)),
                     isAllDay = cursor.getInt(cursor.getColumnIndexOrThrow(CalendarContract.Events.ALL_DAY)) == 1,
                     status = 1L
                 ))
