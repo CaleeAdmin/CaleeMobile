@@ -73,19 +73,7 @@ class SyncRepository {
     });
   }
 
-  Future<void> refreshAllLocalEvents(String accountId) async {
-    // Intentionally a no-op.
-    //
-    // Item-level reconciliation/mutation is centralized in the unified sync
-    // planner + executor pipeline (SyncEngine -> SyncItemPlanner/Executor ->
-    // SyncStrategy.runUnifiedSync). This repository method used to directly
-    // mutate `sync_items` by diffing raw native snapshots, which duplicated
-    // reconciliation logic and could diverge from mode/safety rules.
-    //
-    // Keep this method for compatibility with existing call sites during
-    // incremental migration.
-    return;
-  }
+
 
 
   /// 统一的路径更新方法：用于将云端日历路径绑定到本地日历

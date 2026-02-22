@@ -354,11 +354,25 @@ abstract class SyncStrategy {
           (mapping != null ? localById[mapping['local_item_id']?.toString() ?? ''] : null);
 
       final action = _decideCanonicalAction(uid: uid, remote: remote, mapping: mapping, local: local, origin: origin, rules: rules, bootstrap: bootstrap);
-      plans.add(_PlannedAction(uid: uid, action: action, remote: remote, mapping: mapping, local: local));
+      plans.add(_PlannedAction(
+        uid: uid,
+        action: action,
+        remote: remote,
+        mapping: mapping,
+        local: local,
+        operations: _buildCanonicalOperations(
+          uid: uid,
+          action: action,
+          remote: remote,
+          mapping: mapping,
+          local: local,
+        ),
+      ));
     }
 
-    final int localDeleteCandidates = plans.where((p) => p.action == SyncItemAction.deleteLocal).length;
-    final int remoteDeleteCandidates = plans.where((p) => p.action == SyncItemAction.deleteRemote).length;
+    final List<_CanonicalOperation> allOperations = plans.expand((p) => p.operations).toList();
+    final int localDeleteCandidates = allOperations.where((o) => o.type == _CanonicalOperationType.localDelete).length;
+    final int remoteDeleteCandidates = allOperations.where((o) => o.type == _CanonicalOperationType.remoteDelete).length;
     final bool allowMassDeletion = isMassDeletionOverrideEnabled(bindingId);
     final bool massDeletionSafetyTripped =
         localDeleteCandidates >= SyncStrategy.massDeletionAbsoluteThreshold ||
@@ -381,41 +395,35 @@ abstract class SyncStrategy {
     int deleteRemote = 0;
     int skip = 0;
 
-    final nonDeletePlans = plans.where((p) => p.action != SyncItemAction.deleteLocal && p.action != SyncItemAction.deleteRemote);
-    final deletePlans = plans.where((p) => p.action == SyncItemAction.deleteLocal || p.action == SyncItemAction.deleteRemote);
+    final Map<String, _ExecutionState> states = {
+      for (final plan in plans) plan.uid: _ExecutionState(),
+    };
 
-    Future<void> executePlan(_PlannedAction plan) async {
-      switch (plan.action) {
-        case SyncItemAction.createLocal:
-        case SyncItemAction.updateLocal:
-          if (plan.remote == null) {
+    final nonDeleteOperations = allOperations.where((o) => !o.isDeleteOperation);
+    final deleteOperations = allOperations.where((o) => o.isDeleteOperation);
+
+    Future<void> executeOperation(_CanonicalOperation operation) async {
+      final state = states.putIfAbsent(operation.uid, () => _ExecutionState());
+      switch (operation.type) {
+        case _CanonicalOperationType.localCreate:
+        case _CanonicalOperationType.localUpdate:
+          if (operation.remote == null) {
             skip++;
             return;
           }
           final pulled = await pullRemoteEventToLocal(
-            remote: plan.remote!,
+            remote: operation.remote!,
             localCalendarId: localCalendarId,
-            existingLocalId: plan.mapping?['local_item_id']?.toString(),
+            existingLocalId: operation.mapping?['local_item_id']?.toString(),
             isSubscription: ctx.isSubscription ?? false,
           );
           if (pulled == null) {
             skip++;
             return;
           }
-          await upsertSyncedItem(
-            db: db,
-            remoteCollectionId: remoteCollectionId,
-            uid: pulled.uid,
-            localItemId: pulled.localEventId,
-            etag: normalizeRemoteToken(plan.remote?['etag']),
-            lastMtime: DateTime.now().millisecondsSinceEpoch,
-            remoteHref: (plan.remote?['href'] ?? '').toString(),
-            summary: pulled.summary,
-            description: pulled.description,
-            dtstart: pulled.dtstart,
-            dtend: pulled.dtend,
-          );
-          if (plan.action == SyncItemAction.createLocal) {
+          state.pulled = pulled;
+          state.mutationSucceeded = true;
+          if (operation.type == _CanonicalOperationType.localCreate) {
             createLocal++;
             summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.local, type: SyncOperationType.created);
           } else {
@@ -423,14 +431,14 @@ abstract class SyncStrategy {
             summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.local, type: SyncOperationType.updated);
           }
           return;
-        case SyncItemAction.createRemote:
-        case SyncItemAction.updateRemote:
-          if (plan.local == null) {
+        case _CanonicalOperationType.remoteCreate:
+        case _CanonicalOperationType.remoteUpdate:
+          if (operation.local == null) {
             skip++;
             return;
           }
           final pushed = await pushLocalEventToRemote(
-            local: plan.local!,
+            local: operation.local!,
             remotePath: ctx.remotePath,
             localCalendarId: localCalendarId,
           );
@@ -438,20 +446,9 @@ abstract class SyncStrategy {
             skip++;
             return;
           }
-          await upsertSyncedItem(
-            db: db,
-            remoteCollectionId: remoteCollectionId,
-            uid: pushed.uid,
-            localItemId: plan.local?.localId ?? '',
-            etag: pushed.etag,
-            lastMtime: pushed.lastMtime,
-            remoteHref: pushed.remoteHref,
-            summary: plan.local?.title,
-            description: plan.local?.notes,
-            dtstart: plan.local?.startTime,
-            dtend: plan.local?.endTime,
-          );
-          if (plan.action == SyncItemAction.createRemote) {
+          state.pushed = pushed;
+          state.mutationSucceeded = true;
+          if (operation.type == _CanonicalOperationType.remoteCreate) {
             createRemote++;
             summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.remote, type: SyncOperationType.created);
           } else {
@@ -459,59 +456,101 @@ abstract class SyncStrategy {
             summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.remote, type: SyncOperationType.updated);
           }
           return;
-        case SyncItemAction.deleteLocal:
+        case _CanonicalOperationType.localDelete:
           if (blockDeletes || !remoteTrusted || !localTrusted) {
             skip++;
             return;
           }
-          final localId = plan.mapping?['local_item_id']?.toString() ?? plan.local?.localId ?? '';
+          final localId = operation.mapping?['local_item_id']?.toString() ?? operation.local?.localId ?? '';
           if (localId.isNotEmpty) {
             await localGateway.deleteEvent(localId);
           }
-          await db.delete(
-            'sync_items',
-            where: 'remote_collection_id = ? AND remote_uid = ?',
-            whereArgs: [remoteCollectionId, plan.uid],
-          );
+          state.mutationSucceeded = true;
           deleteLocal++;
           summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.local, type: SyncOperationType.deleted);
           return;
-        case SyncItemAction.deleteRemote:
+        case _CanonicalOperationType.remoteDelete:
           if (blockDeletes || !remoteTrusted || !localTrusted) {
             skip++;
             return;
           }
-          final href = plan.mapping?['remote_href']?.toString() ?? plan.remote?['href']?.toString() ?? '';
+          final href = operation.mapping?['remote_href']?.toString() ?? operation.remote?['href']?.toString() ?? '';
           if (href.isNotEmpty) {
             await remoteGateway.deleteEvent(eventPath: href);
           }
-          await db.delete(
-            'sync_items',
-            where: 'remote_collection_id = ? AND remote_uid = ?',
-            whereArgs: [remoteCollectionId, plan.uid],
-          );
+          state.mutationSucceeded = true;
           deleteRemote++;
           summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.remote, type: SyncOperationType.deleted);
           return;
-        case SyncItemAction.skip:
-          if (plan.mapping != null) {
+        case _CanonicalOperationType.mappingUpsert:
+          if (operation.requireMutationSuccess && !state.mutationSucceeded) {
+            return;
+          }
+          final pulled = state.pulled;
+          final pushed = state.pushed;
+          final mapping = operation.mapping;
+          if (pulled != null) {
+            await upsertSyncedItem(
+              db: db,
+              remoteCollectionId: remoteCollectionId,
+              uid: pulled.uid,
+              localItemId: pulled.localEventId,
+              etag: normalizeRemoteToken(operation.remote?['etag']),
+              lastMtime: DateTime.now().millisecondsSinceEpoch,
+              remoteHref: (operation.remote?['href'] ?? '').toString(),
+              summary: pulled.summary,
+              description: pulled.description,
+              dtstart: pulled.dtstart,
+              dtend: pulled.dtend,
+            );
+            return;
+          }
+          if (pushed != null) {
+            await upsertSyncedItem(
+              db: db,
+              remoteCollectionId: remoteCollectionId,
+              uid: pushed.uid,
+              localItemId: operation.local?.localId ?? '',
+              etag: pushed.etag,
+              lastMtime: pushed.lastMtime,
+              remoteHref: pushed.remoteHref,
+              summary: operation.local?.title,
+              description: operation.local?.notes,
+              dtstart: operation.local?.startTime,
+              dtend: operation.local?.endTime,
+            );
+            return;
+          }
+          if (mapping != null) {
             await db.update(
               'sync_items',
               {'sync_status': SyncItemStatus.synced},
               where: 'id = ?',
-              whereArgs: [plan.mapping!['id']],
+              whereArgs: [mapping['id']],
             );
           }
+          return;
+        case _CanonicalOperationType.mappingDelete:
+          if (operation.requireMutationSuccess && !state.mutationSucceeded) {
+            return;
+          }
+          await db.delete(
+            'sync_items',
+            where: 'remote_collection_id = ? AND remote_uid = ?',
+            whereArgs: [remoteCollectionId, operation.uid],
+          );
+          return;
+        case _CanonicalOperationType.skip:
           skip++;
           return;
       }
     }
 
-    for (final plan in nonDeletePlans) {
-      await executePlan(plan);
+    for (final operation in nonDeleteOperations) {
+      await executeOperation(operation);
     }
-    for (final plan in deletePlans) {
-      await executePlan(plan);
+    for (final operation in deleteOperations) {
+      await executeOperation(operation);
     }
 
     await db.update(
@@ -542,6 +581,65 @@ abstract class SyncStrategy {
         errorCode: SyncErrorCode.safetyStop,
         errorMessage: 'Safety gate blocked deletions',
       );
+    }
+
+  }
+
+  List<_CanonicalOperation> _buildCanonicalOperations({
+    required String uid,
+    required SyncItemAction action,
+    required Map<String, dynamic>? remote,
+    required Map<String, dynamic>? mapping,
+    required PlatformItem? local,
+  }) {
+    switch (action) {
+      case SyncItemAction.createLocal:
+        return [
+          _CanonicalOperation(type: _CanonicalOperationType.localCreate, uid: uid, remote: remote, mapping: mapping, local: local),
+          _CanonicalOperation(type: _CanonicalOperationType.mappingUpsert, uid: uid, remote: remote, mapping: mapping, local: local, requireMutationSuccess: true),
+        ];
+      case SyncItemAction.updateLocal:
+        return [
+          _CanonicalOperation(type: _CanonicalOperationType.localUpdate, uid: uid, remote: remote, mapping: mapping, local: local),
+          _CanonicalOperation(type: _CanonicalOperationType.mappingUpsert, uid: uid, remote: remote, mapping: mapping, local: local, requireMutationSuccess: true),
+        ];
+      case SyncItemAction.createRemote:
+        return [
+          _CanonicalOperation(type: _CanonicalOperationType.remoteCreate, uid: uid, remote: remote, mapping: mapping, local: local),
+          _CanonicalOperation(type: _CanonicalOperationType.mappingUpsert, uid: uid, remote: remote, mapping: mapping, local: local, requireMutationSuccess: true),
+        ];
+      case SyncItemAction.updateRemote:
+        return [
+          _CanonicalOperation(type: _CanonicalOperationType.remoteUpdate, uid: uid, remote: remote, mapping: mapping, local: local),
+          _CanonicalOperation(type: _CanonicalOperationType.mappingUpsert, uid: uid, remote: remote, mapping: mapping, local: local, requireMutationSuccess: true),
+        ];
+      case SyncItemAction.deleteLocal:
+        return [
+          _CanonicalOperation(type: _CanonicalOperationType.localDelete, uid: uid, remote: remote, mapping: mapping, local: local),
+          _CanonicalOperation(type: _CanonicalOperationType.mappingDelete, uid: uid, remote: remote, mapping: mapping, local: local, requireMutationSuccess: true),
+        ];
+      case SyncItemAction.deleteRemote:
+        return [
+          _CanonicalOperation(type: _CanonicalOperationType.remoteDelete, uid: uid, remote: remote, mapping: mapping, local: local),
+          _CanonicalOperation(type: _CanonicalOperationType.mappingDelete, uid: uid, remote: remote, mapping: mapping, local: local, requireMutationSuccess: true),
+        ];
+      case SyncItemAction.mappingUpsert:
+        return [
+          _CanonicalOperation(type: _CanonicalOperationType.mappingUpsert, uid: uid, remote: remote, mapping: mapping, local: local),
+        ];
+      case SyncItemAction.mappingDelete:
+        return [
+          _CanonicalOperation(type: _CanonicalOperationType.mappingDelete, uid: uid, remote: remote, mapping: mapping, local: local),
+        ];
+      case SyncItemAction.skip:
+        if (mapping != null) {
+          return [
+            _CanonicalOperation(type: _CanonicalOperationType.mappingUpsert, uid: uid, remote: remote, mapping: mapping, local: local),
+          ];
+        }
+        return [
+          _CanonicalOperation(type: _CanonicalOperationType.skip, uid: uid, remote: remote, mapping: mapping, local: local),
+        ];
     }
   }
 
@@ -819,12 +917,53 @@ class UnifiedModeRules {
   }
 }
 
+enum _CanonicalOperationType {
+  localCreate,
+  localUpdate,
+  localDelete,
+  remoteCreate,
+  remoteUpdate,
+  remoteDelete,
+  mappingUpsert,
+  mappingDelete,
+  skip,
+}
+
+class _CanonicalOperation {
+  final _CanonicalOperationType type;
+  final String uid;
+  final Map<String, dynamic>? remote;
+  final Map<String, dynamic>? mapping;
+  final PlatformItem? local;
+  final bool requireMutationSuccess;
+
+  const _CanonicalOperation({
+    required this.type,
+    required this.uid,
+    required this.remote,
+    required this.mapping,
+    required this.local,
+    this.requireMutationSuccess = false,
+  });
+
+  bool get isDeleteOperation =>
+      type == _CanonicalOperationType.localDelete ||
+      type == _CanonicalOperationType.remoteDelete;
+}
+
+class _ExecutionState {
+  bool mutationSucceeded = false;
+  RemotePullResult? pulled;
+  RemotePushResult? pushed;
+}
+
 class _PlannedAction {
   final String uid;
   final SyncItemAction action;
   final Map<String, dynamic>? remote;
   final Map<String, dynamic>? mapping;
   final PlatformItem? local;
+  final List<_CanonicalOperation> operations;
 
   _PlannedAction({
     required this.uid,
@@ -832,6 +971,7 @@ class _PlannedAction {
     required this.remote,
     required this.mapping,
     required this.local,
+    required this.operations,
   });
 }
 

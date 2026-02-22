@@ -32,6 +32,8 @@ enum SyncItemAction {
   createRemote,
   updateRemote,
   deleteRemote,
+  mappingUpsert,
+  mappingDelete,
   skip,
 }
 
