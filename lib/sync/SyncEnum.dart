@@ -37,7 +37,6 @@ enum SyncItemAction {
 
 // 仅用于显式 UI 工作流（非 SyncEngine worker）
 enum ProvisioningAction {
-  uiCreateRemoteCalendar,
   uiDeleteLocalCalendar,
   uiDeleteRemoteCalendar,
   uiDeleteDatabaseOnly,

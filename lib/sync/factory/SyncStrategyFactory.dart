@@ -4,14 +4,12 @@ import '../strategy/DeleteDatabaseOnlyStrategy.dart';
 import '../strategy/DeleteLocalStrategy.dart';
 import '../strategy/FullSyncBidiStrategy.dart';
 import '../SyncEnum.dart';
-import '../strategy/CreateRemoteStrategy.dart';
 import '../strategy/FullSyncPullStrategy.dart';
 import '../strategy/FullSyncPushStrategy.dart';
 import '../strategy/SyncStrategy.dart';
 
 class SyncStrategyFactory {
   static final Map<ProvisioningAction, SyncStrategy> _uiProvisioningStrategies = {
-    ProvisioningAction.uiCreateRemoteCalendar: CreateRemoteStrategy(),
     ProvisioningAction.uiDeleteLocalCalendar: Deletelocalstrategy(),
     ProvisioningAction.uiDeleteRemoteCalendar: DeleteRemoteStrategy(),
     ProvisioningAction.uiDeleteDatabaseOnly: DeleteDatabaseOnlyStrategy(),
