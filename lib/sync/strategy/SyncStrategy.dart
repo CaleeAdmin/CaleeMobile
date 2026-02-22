@@ -40,8 +40,12 @@ abstract class SyncStrategy {
   String normalizeRemoteToken(dynamic token) => (token ?? '').toString().replaceAll('"', '');
 
   Future<List<PlatformItem>> loadLocalEvents(String localCalendarId) async {
-    final int start = DateTime.now().subtract(const Duration(days: 365)).millisecondsSinceEpoch;
-    final int end = DateTime.now().add(const Duration(days: 730)).millisecondsSinceEpoch;
+    // Use a wide, deterministic window so mapped events are still discoverable
+    // even when they were created far in the past/future. A narrow window can
+    // make a remotely deleted event look "missing locally", which prevents the
+    // deleteLocal action and leaves stale sync_items/local entries behind.
+    final int start = DateTime(1970, 1, 1).millisecondsSinceEpoch;
+    final int end = DateTime(2100, 1, 1).millisecondsSinceEpoch;
     return localGateway.getEvents(localCalendarId, start, end);
   }
 
