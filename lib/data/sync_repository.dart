@@ -44,21 +44,6 @@ class SyncRepository {
     return null;
   }
 
-  Future<Map<String, dynamic>?> _resolveCollectionConfigByLocalCalendarId(Database db, String localCalendarId) async {
-    final rows = await db.rawQuery(
-      """
-      SELECT rc.id, rc.account_name, rc.remote_path, rc.is_subscription
-      FROM remote_collections rc
-      INNER JOIN local_bindings lb ON lb.remote_collection_id = rc.id
-      WHERE lb.local_collection_id = ?
-      LIMIT 1
-      """,
-      [localCalendarId],
-    );
-    if (rows.isEmpty) return null;
-    return rows.first;
-  }
-
 // ==========================================
   // 1. 日历扫描
   // ==========================================
@@ -186,52 +171,6 @@ class SyncRepository {
     }
   }
 
-  // ==========================================
-  // 2. 事件扫描 (已修正字段名为 remote_collection_id)
-  // ==========================================
-  Future<Map<String, int>> scanLocalEvents(String calendarLocalId) async {
-    final db = await _dbHelper.database;
-    final int? remoteCollectionId = await _resolveRemoteCollectionIdByLocalCalendarId(db, calendarLocalId);
-    if (remoteCollectionId == null) {
-      debugPrint('[WARN] Local calendar binding not found, skipping scanLocalEvents: $calendarLocalId');
-      return {'added': 0, 'modified': 0, 'deleted': 0};
-    }
-
-    await _runUnifiedSyncForCollection(remoteCollectionId);
-    return {'added': 0, 'modified': 0, 'deleted': 0};
-  }
-
-  Future<void> pullFromRemote(String calendarLocalId) async {
-    final db = await _dbHelper.database;
-    final int? remoteCollectionId = await _resolveRemoteCollectionIdByLocalCalendarId(db, calendarLocalId);
-    if (remoteCollectionId == null) {
-      print("[ERROR] Calendar mapping config not found: $calendarLocalId");
-      return;
-    }
-
-    await _runUnifiedSyncForCollection(remoteCollectionId);
-  }
-
-  Future<void> pushDeletesToRemote(String calendarLocalId) async {
-    final db = await _dbHelper.database;
-    final int? remoteCollectionId = await _resolveRemoteCollectionIdByLocalCalendarId(db, calendarLocalId);
-    if (remoteCollectionId == null) {
-      debugPrint('[WARN] Local calendar binding not found, skipping pushDeletesToRemote: $calendarLocalId');
-      return;
-    }
-
-    await _runUnifiedSyncForCollection(remoteCollectionId);
-  }
-
-
-  Future<void> _runUnifiedSyncForCollection(int remoteCollectionId) async {
-    SyncEngine.requestForceSyncForCollection(remoteCollectionId);
-    final SyncSummary summary = await SyncEngine().executeFullSync();
-    if (summary.failed > 0) {
-      debugPrint('[WARN] Unified forced sync for collection $remoteCollectionId finished with failures: ${summary.failed}');
-    }
-  }
-
   /// 统一的路径更新方法：用于将云端日历路径绑定到本地日历
   Future<void> updateRemotePath(String localId, String path) async {
     final db = await _dbHelper.database;
@@ -254,87 +193,6 @@ class SyncRepository {
       print('[OK] [Repository] Path binding succeeded: $localId -> $path');
     } else {
       print('[WARN] [Repository] Path binding failed: no local calendar for ID $localId');
-    }
-  }
-
-  // ==========================================
-  // 3. 云端反馈更新 (Cloud Response Handling)
-  // ==========================================
-
-  /// 当 Push 成功后, 更新云端返回的 ETag 和路径
-  /// 当 Push 成功后, 同步本地状态
-  Future<void> updateAfterSuccessfulPush(String uid, String etag, {String? remoteHref}) async {
-    final db = await _dbHelper.database;
-
-    // 构建更新 Map
-    Map<String, dynamic> updateValues = {
-      'last_etag': etag,
-      'sync_status': SyncItemStatus.synced, // 0: 已同步, 本地与云端一致
-      'last_mtime': DateTime.now().millisecondsSinceEpoch, // 更新本地记录的最后维护时间
-    };
-
-    // 如果提供了新的路径（比如首次创建）, 则更新
-    if (remoteHref != null) {
-      updateValues['remote_href'] = remoteHref;
-    }
-
-    await db.update(
-      'sync_items',
-      updateValues,
-      where: 'remote_uid = ?',
-      whereArgs: [uid],
-    );
-    print('[OK] Database synced: UID $uid, New ETag: $etag');
-  }
-
-  /// 将从云端同步下来的事件记录到本地数据库
-  Future<void> saveSyncedEvent(String localId, dynamic remote) async {
-    final db = await _dbHelper.database;
-
-    // 从 remote 数据中提取信息（注意：remote 是我们在 SyncEngine 中定义的 map）
-    final String uid = remote['remote_uid'] as String;
-    // 去掉 ETag 的引号
-    final String etag = (remote['etag'] as String).replaceAll('"', '');
-
-    await db.insert(
-      'sync_items',
-      {
-        'remote_uid': uid,
-        'local_item_id': localId,
-        'remote_collection_id': remote['remote_collection_id'], // 确保这个字段被传入
-        'last_etag': etag,
-        'sync_status': SyncItemStatus.synced,    // 0 表示已同步状态
-        'item_type': 'event',
-        'last_mtime': DateTime.now().millisecondsSinceEpoch,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
-    print('[OK] Remote event saved to local database: UID $uid');
-  }
-
-  /// 彻底删除一events：包括系统日历格子和本地数据库追踪记录
-  Future<bool> deleteEventTotally(String localId, String uid) async {
-    try {
-      // 1. 调用 Pigeon 接口删除手机系统日历里的事件
-      final bool systemOk = await _nativeApi.deleteEvent(localId);
-
-      if (systemOk) {
-        // 2. 删除本地数据库 sync_items 中的追踪记录
-        final db = await _dbHelper.database;
-        await db.delete(
-          'sync_items',
-          where: 'remote_uid = ?',
-          whereArgs: [uid],
-        );
-        print('[OK] Hard delete succeeded: UID $uid');
-        return true;
-      } else {
-        print('[ERROR] System calendar deletion failed: ID $localId');
-        return false;
-      }
-    } catch (e) {
-      print('[ERROR] Delete operation exception: $e');
-      return false;
     }
   }
 
