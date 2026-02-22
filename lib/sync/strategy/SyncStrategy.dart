@@ -671,7 +671,7 @@ abstract class SyncStrategy {
     } else if (!remoteExists && localExists) {
       action = mapped ? rules.onLocalOnlyMapped : rules.onLocalOnlyUnmapped;
     } else if (!remoteExists && !localExists) {
-      action = SyncItemAction.skip;
+      action = mapped ? SyncItemAction.mappingDelete : SyncItemAction.skip;
     } else if (!remoteChanged && !localChanged) {
       action = SyncItemAction.skip;
     } else if (remoteChanged && !localChanged) {
