@@ -945,7 +945,8 @@ class _CanonicalOperation {
 
   bool get isDeleteOperation =>
       type == _CanonicalOperationType.localDelete ||
-      type == _CanonicalOperationType.remoteDelete;
+      type == _CanonicalOperationType.remoteDelete ||
+      type == _CanonicalOperationType.mappingDelete;
 }
 
 class _ExecutionState {
