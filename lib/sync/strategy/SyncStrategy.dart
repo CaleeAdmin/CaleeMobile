@@ -640,6 +640,27 @@ abstract class SyncStrategy {
     }
   }
 
+
+  bool _hasLocalPayloadChanged(PlatformItem local, Map<String, dynamic>? mapping) {
+    if (mapping == null) return true;
+
+    final String localTitle = (local.title ?? '').trim();
+    final String mappedTitle = (mapping['summary']?.toString() ?? '').trim();
+    if (localTitle != mappedTitle) return true;
+
+    final String localNotes = (local.notes ?? '').trim();
+    final String mappedNotes = (mapping['description']?.toString() ?? '').trim();
+    if (localNotes != mappedNotes) return true;
+
+    final int localStart = local.startTime ?? 0;
+    final int mappedStart = (mapping['dtstart'] as int?) ?? 0;
+    if (localStart != mappedStart) return true;
+
+    final int localEnd = local.endTime ?? 0;
+    final int mappedEnd = (mapping['dtend'] as int?) ?? 0;
+    return localEnd != mappedEnd;
+  }
+
   SyncItemAction _decideCanonicalAction({
     required String uid,
     required Map<String, dynamic>? remote,
@@ -658,7 +679,9 @@ abstract class SyncStrategy {
     final int storedLocalLastModified = (mapping?['last_mtime'] as int?) ?? 0;
 
     final bool remoteChanged = remoteExists && (mapping == null || remoteToken != storedRemoteToken);
-    final bool localChanged = localExists && (mapping == null || localLastModified > storedLocalLastModified);
+    final bool localPayloadChanged = localExists && _hasLocalPayloadChanged(local!, mapping);
+    final bool localChanged = localExists &&
+        (mapping == null || localLastModified > storedLocalLastModified || localPayloadChanged);
 
     final bool mapped = mapping != null;
 
