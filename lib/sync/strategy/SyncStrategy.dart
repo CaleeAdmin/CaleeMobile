@@ -339,12 +339,9 @@ abstract class SyncStrategy {
 
     final rules = UnifiedModeRules.forMode(mode);
 
-    final bool suspiciousEmptyRemoteFetch = snapshot.parseProducedZeroEvents && mappingByUid.isNotEmpty;
-    final bool suspiciousEmptyLocalFetch = localEvents.isEmpty && mappingByUid.isNotEmpty;
     final bool remoteTrusted = snapshot.fetchSucceeded &&
-        (snapshot.statusCode == 200 || snapshot.statusCode == 207) &&
-        !suspiciousEmptyRemoteFetch;
-    final bool localTrusted = !suspiciousEmptyLocalFetch;
+        (snapshot.statusCode == 200 || snapshot.statusCode == 207);
+    const bool localTrusted = true;
 
     final List<_PlannedAction> plans = [];
     for (final uid in allUids) {
