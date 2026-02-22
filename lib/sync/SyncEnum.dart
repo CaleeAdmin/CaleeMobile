@@ -26,17 +26,19 @@ class SyncDeletionPolicy {
 }
 
 enum SyncItemAction {
-  skip,
-  pull,
-  push,
   createLocal,
+  updateLocal,
   deleteLocal,
+  createRemote,
+  updateRemote,
   deleteRemote,
+  mappingUpsert,
+  mappingDelete,
+  skip,
 }
 
 // 仅用于显式 UI 工作流（非 SyncEngine worker）
 enum ProvisioningAction {
-  uiCreateRemoteCalendar,
   uiDeleteLocalCalendar,
   uiDeleteRemoteCalendar,
   uiDeleteDatabaseOnly,

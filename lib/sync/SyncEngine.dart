@@ -44,8 +44,6 @@ class SyncEngine {
     if (loginName == null) return summary;
 
     await _repo.scanLocalCalendars(loginName);
-    await _repo.refreshAllLocalEvents(loginName);
-
     final List<Map<String, dynamic>> remoteCalendars = await _serverService.scanRemoteCalendars(
       serverUrl: _authService.normalizedUrl,
       userId: loginName,
