@@ -122,7 +122,9 @@ class CaleeServerService {
       const int syncMode = 0;
 
       final String normalizedPath = normalizeRemotePath(href);
+      final String collectionType = _classifyCollectionType(prop);
       results.add({
+        'collection_type': collectionType,
         'remote_path': normalizedPath,
         'display_name': displayName ?? (isSubscribed ? "Subscribed calendar" : "Untitled calendar"),
         'ctag': ctag ?? "",
@@ -133,6 +135,28 @@ class CaleeServerService {
       });
     }
     return results;
+  }
+
+  String _classifyCollectionType(xml.XmlElement prop) {
+    final Set<String> componentNames = prop
+        .findAllElements('cal:comp')
+        .map((node) => (node.getAttribute('name') ?? '').trim().toUpperCase())
+        .where((name) => name.isNotEmpty)
+        .toSet();
+
+    if (componentNames.contains('VEVENT')) {
+      return 'calendar';
+    }
+
+    if (componentNames.contains('VTODO')) {
+      return 'tasklist';
+    }
+
+    if (componentNames.isNotEmpty && componentNames.every((name) => name == 'VJOURNAL')) {
+      return 'tasklist';
+    }
+
+    return 'calendar';
   }
 
 // 辅助工具：确保不把根目录 /calendars/focus/ 当做日历处理
@@ -153,13 +177,24 @@ class CaleeServerService {
     final db = await _dbHelper.database;
 
     await db.transaction((txn) async {
-      // 1. 提取本次远端扫描到的所有合法路径, 作为“白名单”
-      final List<String> currentRemotePaths = remoteMaps
-          .map((m) => normalizeRemotePath((m['remote_path'] ?? '').toString()))
-          .where((path) => path.isNotEmpty)
-          .toList();
+      // 1. 提取本次远端扫描到的所有合法路径, 按集合类型作为“白名单”
+      final Map<String, List<String>> currentRemotePathsByType = {
+        'calendar': <String>[],
+        'tasklist': <String>[],
+      };
 
-      debugPrint("Start persisting remote calendar list, active path count: ${currentRemotePaths.length}");
+      for (final map in remoteMaps) {
+        final String remotePath = normalizeRemotePath((map['remote_path'] ?? '').toString());
+        if (remotePath.isEmpty) continue;
+        final String collectionType = (map['collection_type']?.toString() ?? 'calendar').trim();
+        final String normalizedType = collectionType == 'tasklist' ? 'tasklist' : 'calendar';
+        currentRemotePathsByType[normalizedType]!.add(remotePath);
+      }
+
+      final int currentRemotePathCount =
+          currentRemotePathsByType.values.fold(0, (sum, paths) => sum + paths.length);
+
+      debugPrint("Start persisting remote calendar list, active path count: $currentRemotePathCount");
 
       // 2. 遍历远端列表：执行“增”或“改”
       for (var map in remoteMaps) {
@@ -167,6 +202,9 @@ class CaleeServerService {
         final int syncMode = (map['sync_mode'] as int?) ?? 0;
         final String remotePath = normalizeRemotePath((map['remote_path'] ?? '').toString());
         if (remotePath.isEmpty) continue;
+        final String collectionType = (map['collection_type']?.toString() ?? 'calendar').trim() == 'tasklist'
+            ? 'tasklist'
+            : 'calendar';
         await txn.rawInsert('''
         INSERT INTO remote_collections (
           account_name,
@@ -197,7 +235,7 @@ class CaleeServerService {
           -- 注意：绑定信息由 local_bindings 管理, 不在此处更新。
       ''', [
               accountName,
-              'calendar',
+              collectionType,
               remotePath,
               map['display_name'],
               map['ctag'],
@@ -209,20 +247,23 @@ class CaleeServerService {
             ]);
       }
 
-      // 3. 删除云端已不存在的远端起源记录
-      if (currentRemotePaths.isNotEmpty) {
-        final placeholders = List.filled(currentRemotePaths.length, '?').join(',');
-        await txn.delete(
-          'remote_collections',
-          where: 'account_name = ? AND collection_type = ? AND remote_path NOT IN ($placeholders)',
-          whereArgs: [accountName, 'calendar', ...currentRemotePaths],
-        );
-      } else {
-        await txn.delete(
-          'remote_collections',
-          where: 'account_name = ? AND collection_type = ?',
-          whereArgs: [accountName, 'calendar'],
-        );
+      // 3. 删除云端已不存在的远端起源记录（按集合类型分别清理）
+      for (final String collectionType in const ['calendar', 'tasklist']) {
+        final List<String> currentRemotePaths = currentRemotePathsByType[collectionType] ?? const [];
+        if (currentRemotePaths.isNotEmpty) {
+          final placeholders = List.filled(currentRemotePaths.length, '?').join(',');
+          await txn.delete(
+            'remote_collections',
+            where: 'account_name = ? AND collection_type = ? AND remote_path NOT IN ($placeholders)',
+            whereArgs: [accountName, collectionType, ...currentRemotePaths],
+          );
+        } else {
+          await txn.delete(
+            'remote_collections',
+            where: 'account_name = ? AND collection_type = ?',
+            whereArgs: [accountName, collectionType],
+          );
+        }
       }
     });
   }
