@@ -10,31 +10,32 @@ class SyncRunDetailsPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Run ${run.runId.substring(0, 8)}')),
+      appBar: AppBar(title: Text('Sync details • ${run.runId.substring(0, 8)}')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          Text('Mode: ${run.mode.name}'),
-          Text('Result: ${run.result.name}'),
-          Text('Duration: ${(run.durationMs ?? 0) / 1000}s'),
+          Text('Sync type: ${_modeLabel(run.mode)}'),
+          Text('Overall result: ${_runResultLabel(run.result)}'),
+          Text('Time spent: ${((run.durationMs ?? 0) / 1000).toStringAsFixed(1)}s'),
           const SizedBox(height: 12),
           ...run.bindings.map((b) => Card(
                 child: Padding(
                   padding: const EdgeInsets.all(12),
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(b.bindingIdentifier, style: const TextStyle(fontWeight: FontWeight.bold)),
+                    Text('Calendar link: ${b.bindingIdentifier}', style: const TextStyle(fontWeight: FontWeight.bold)),
                     Text('Account: ${b.accountIdentifier}'),
-                    Text('Snapshot trust: ${b.snapshotTrustStatus.name}'),
-                    Text('Safety gate: ${b.safetyGateTriggered ? 'YES' : 'No'}'),
-                    Text('Local: +${b.localCounts.created} ~${b.localCounts.updated} -${b.localCounts.deleted}'),
-                    Text('Remote: +${b.remoteCounts.created} ~${b.remoteCounts.updated} -${b.remoteCounts.deleted}'),
+                    Text('Status: ${_bindingResultLabel(b.resultStatus)}'),
+                    Text('Trusted source: ${_trustLabel(b.snapshotTrustStatus)}'),
+                    Text('Safety check triggered: ${b.safetyGateTriggered ? 'Yes' : 'No'}'),
+                    Text('On device: +${b.localCounts.created} / ${b.localCounts.updated} / -${b.localCounts.deleted}'),
+                    Text('In cloud: +${b.remoteCounts.created} / ${b.remoteCounts.updated} / -${b.remoteCounts.deleted}'),
                     if (b.errorCode != null) ...[
                       const SizedBox(height: 8),
-                      Text('Error code: ${b.errorCode!.name}', style: const TextStyle(color: Colors.red)),
-                      Text('Message: ${b.errorMessage ?? 'Unknown error'}'),
-                      Text('Recommended action: ${_recommendation(b.errorCode!)}'),
+                      const Text('What needs attention', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                      Text('Issue: ${b.errorMessage ?? 'Something went wrong while syncing this calendar.'}'),
+                      Text('What to do: ${_recommendation(b.errorCode!)}'),
                       ExpansionTile(
-                        title: const Text('Technical detail'),
+                        title: const Text('More details (for support)'),
                         tilePadding: EdgeInsets.zero,
                         children: [Align(alignment: Alignment.centerLeft, child: Text(b.technicalDetail ?? '-'))],
                       )
@@ -51,22 +52,56 @@ class SyncRunDetailsPage extends StatelessWidget {
 String _recommendation(SyncErrorCode code) {
   switch (code) {
     case SyncErrorCode.networkUnavailable:
-      return 'Check connectivity and retry.';
+      return 'Check your internet connection, then try again.';
     case SyncErrorCode.authExpired:
-      return 'Re-authenticate your account.';
+      return 'Reconnect your account and run sync again.';
     case SyncErrorCode.remoteCalendarMissing:
-      return 'Verify remote calendar still exists.';
+      return 'Make sure the destination calendar still exists.';
     case SyncErrorCode.permissionDenied:
-      return 'Grant permissions and retry.';
+      return 'Review permissions, allow access, and retry.';
     case SyncErrorCode.parseOrServerResponse:
-      return 'Retry later; server response may be invalid.';
+      return 'Try again in a few minutes.';
     case SyncErrorCode.localProviderFailure:
-      return 'Check local calendar provider availability.';
+      return 'Check that your device calendar is available and try again.';
     case SyncErrorCode.dbOrMappingConflict:
-      return 'Run sync again to repair mapping.';
+      return 'Run sync again to rebuild the calendar link.';
     case SyncErrorCode.safetyStop:
-      return 'Review potential mass deletion and retry intentionally.';
+      return 'Review large deletion changes before running sync again.';
     case SyncErrorCode.unknown:
-      return 'Retry and inspect diagnostics.';
+      return 'Try syncing again. If it keeps failing, contact support.';
   }
+}
+
+String _modeLabel(SyncRunMode mode) {
+  return switch (mode) {
+    SyncRunMode.pull => 'Import only',
+    SyncRunMode.push => 'Export only',
+    SyncRunMode.twoWay => 'Two-way sync',
+  };
+}
+
+String _runResultLabel(SyncRunResult result) {
+  return switch (result) {
+    SyncRunResult.success => 'Up to date',
+    SyncRunResult.partial => 'Partly synced',
+    SyncRunResult.failed => 'Sync failed',
+    SyncRunResult.abortedBySafety => 'Stopped for safety',
+  };
+}
+
+String _bindingResultLabel(SyncBindingResultStatus result) {
+  return switch (result) {
+    SyncBindingResultStatus.success => 'Synced',
+    SyncBindingResultStatus.partial => 'Partly synced',
+    SyncBindingResultStatus.failed => 'Failed',
+    SyncBindingResultStatus.abortedBySafety => 'Stopped for safety',
+  };
+}
+
+String _trustLabel(SnapshotTrustStatus status) {
+  return switch (status) {
+    SnapshotTrustStatus.remote => 'Cloud calendar',
+    SnapshotTrustStatus.local => 'Device calendar',
+    SnapshotTrustStatus.unknown => 'Not sure',
+  };
 }
