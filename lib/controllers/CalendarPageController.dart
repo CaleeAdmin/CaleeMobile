@@ -1,73 +1,40 @@
 import 'package:caleesync/common/app_constant.dart';
 import 'package:caleesync/common/utils/mmkv_utils.dart';
-import 'package:caleesync/core/platform/pigeon/calendar_api.g.dart';
-import 'package:flutter/cupertino.dart';
+import 'package:device_calendar/device_calendar.dart';
 import 'package:get/get.dart';
-import 'dart:async';
+import 'package:sqflite/sqflite.dart';
+import 'dart:ui';
 
-import '../services/calee_auth_service.dart';
-import '../sync/sync_trigger_orchestrator.dart';
+import '../data/SyncEngine.dart';
 import '../data/database_helper.dart';
 import '../data/sync_repository.dart';
-import '../services/calee_server_service.dart';
+import '../services/nextcloud_service.dart';
 import 'calendar_probe_controller.dart';
 
-class CalendarDisplayItem {
-  // 1. 标识符
-  final String? localId;     // Android/iOS 系统日历 ID (对应数据库 local_id), 可能为 null
-  final String? remotePath;   // 远程 WebDAV 路径 (作为数据库更新的绝对 Key), 不应为 null
+// 1. 数据模型定义
+class CalendarGroup {
+  final String accountName;
+  final List<CalendarDisplayItem> calendars;
 
-  // 2. 显示内容
+  CalendarGroup({required this.accountName, required this.calendars});
+}
+
+class CalendarDisplayItem {
+  final String id;
   final String name;
   final String color;
   final int eventCount;
-
-  // 3. 状态控制
-  final bool isReadOnly;
-  final bool isSubscription;
-  final bool isLocalReadOnly;
-  final String? subscriptionUrl;
-  bool isEnabled;            // 对应数据库 is_enabled
-  final int origin;          // 0: 本地创建, 1: 云端同步
-  final int bindingId;
-  bool allowMassDeletionDangerous;
+  final bool isTwoWay;
+  bool isSelected; // 👈 可变：映射数据库中的 sync_status 或特定开关字段
 
   CalendarDisplayItem({
-    this.localId,            // 允许为空
-    required this.remotePath, // 必须有, 否则无法同步
+    required this.id,
     required this.name,
     required this.color,
     required this.eventCount,
-    required this.isReadOnly,
-    required this.isSubscription,
-    required this.isLocalReadOnly,
-    this.subscriptionUrl,
-    required this.isEnabled,
-    required this.origin,
-    required this.bindingId,
-    required this.allowMassDeletionDangerous,
+    required this.isTwoWay,
+    required this.isSelected,
   });
-
-  // 方便从数据库 Map 转换
-  factory CalendarDisplayItem.fromMap(Map<String, dynamic> map) {
-    bool toBool(dynamic value) => value == true || value == 1 || value == '1';
-
-    return CalendarDisplayItem(
-      localId: map['local_collection_id']?.toString(), // 转为 String 处理
-      remotePath: map['remote_path'] ?? '',
-      name: map['display_name'] ?? 'Untitled',
-      color: map['color'] ?? '#000000',
-      eventCount: (map['event_count'] as int?) ?? 0, // 可由查询结果直接带入
-      isReadOnly: (map['sync_mode'] as int?) == 0,
-      isSubscription: toBool(map['is_subscription']),
-      isLocalReadOnly: toBool(map['is_local_read_only']),
-      subscriptionUrl: map['subscription_url']?.toString(),
-      isEnabled: toBool(map['is_enabled']),
-      origin: (map['binding_origin'] as int?) ?? 0,
-      bindingId: (map['binding_id'] as int?) ?? 0,
-      allowMassDeletionDangerous: false,
-    );
-  }
 }
 
 // 2. Controller 实现
@@ -77,24 +44,14 @@ class CalendarPageController extends GetxController {
 
   // 依赖注入：Repo 必须在 InitialBinding 或 main 中已 put
   final SyncRepository _repo = Get.find<SyncRepository>();
-  final CaleeServerService _nc = CaleeServerService();
-  final NativeCalendarApi _nativeApi = NativeCalendarApi();
-  final CaleeAuthService _authService = CaleeAuthService(serverBaseUrl: AppConstant.caleeServer);
+  final NextcloudService _nc = NextcloudService();
+  final engine = SyncEngine();
 
-  // response式变量
-  var calendars = <CalendarDisplayItem>[].obs;
+  // 响应式变量
+  var calendarGroups = <CalendarGroup>[].obs;
   var isLoading = false.obs;
   /// 选中的日历 ID 集合（用于 UI 绑定）
   var selectedCalendarIds = <String>{}.obs;
-  var togglingCalendarIds = <String>{}.obs;
-  var subscribingUrls = <String>{}.obs;
-  Future<void>? _refreshFuture;
-
-  void _notifyMeaningfulChange() {
-    if (Get.isRegistered<SyncTriggerOrchestrator>()) {
-      Get.find<SyncTriggerOrchestrator>().notifyMeaningfulForegroundChange();
-    }
-  }
 
   @override
   void onInit() {
@@ -104,252 +61,171 @@ class CalendarPageController extends GetxController {
   }
 
   /// 处理 Checkbox 点击事件
-  Future<void> handleCalendarEnableToggle(CalendarDisplayItem item, bool? newValue) async {
+  Future<void> toggleCalendarSelection(String localId, bool? newValue) async {
     if (newValue == null) return;
 
-    final String key = (item.remotePath != null && item.remotePath!.isNotEmpty)
-        ? item.remotePath!
-        : (item.localId ?? '');
-
-    if (key.isNotEmpty && togglingCalendarIds.contains(key)) {
-      return;
-    }
-
-    if (key.isNotEmpty) {
-      togglingCalendarIds.add(key);
-      calendars.refresh();
-    }
-
     try {
-      if (newValue == false) {
-        try {
-          item.isEnabled = false;
-          if (key.isNotEmpty) {
-            selectedCalendarIds.remove(key);
+      // 乐观更新本地模型，局部刷新 UI
+      CalendarDisplayItem? target;
+      for (var g in calendarGroups) {
+        for (var c in g.calendars) {
+          if (c.id == localId) {
+            target = c;
+            break;
           }
-          calendars.refresh();
-          await setCalendarEnabledStatus(item, false);
-        } catch (e) {
-          print("[ERROR] Failed to toggle calendar state: $e");
-          Get.snackbar("Error", "Unable to update calendar sync status");
-          item.isEnabled = true;
-          calendars.refresh();
         }
-        return;
+        if (target != null) break;
+      }
+      if (target == null) return;
+
+      final oldValue = target.isSelected;
+      target.isSelected = newValue;
+      // 通知 observers 局部刷新
+      calendarGroups.refresh();
+
+      // 持久化到数据库
+      final db = await DatabaseHelper.instance.database;
+      await db.update(
+        'calendar_map',
+        {'sync_status': newValue ? 1 : 0},
+        where: 'local_id = ?',
+        whereArgs: [localId],
+      );
+
+      // 可选：如果用户开启了勾选，可以触发一次静默同步
+      if (newValue == true) {
+        // _triggerSilentSync(localId);
       }
 
-      final String remotePath = CaleeServerService.normalizeRemotePath(item.remotePath ?? '');
-      if (remotePath.isEmpty) {
-        Get.snackbar('Connection failed', 'Invalid remote calendar path. Please refresh and try again');
-        item.isEnabled = false;
-        calendars.refresh();
-        return;
-      }
-
-      final bool ok = await _repo.connectAndEnableRemoteCalendarByPath(remotePath);
-      item.isEnabled = ok;
-      if (key.isNotEmpty) {
-        if (ok) {
-          selectedCalendarIds.add(key);
-        } else {
-          selectedCalendarIds.remove(key);
-        }
-      }
-
-      final String? syncMessage = _repo.takeLastConnectErrorMessage();
-      if (!ok) {
-        final String err = syncMessage ?? 'Connection failed. Please retry.';
-        Get.snackbar('Connection failed', err);
-      } else if (syncMessage != null && syncMessage.isNotEmpty) {
-        Get.snackbar('Sync failed', syncMessage);
-      }
-      await refreshDashboard(includeEventCounts: false);
-      // Enable flow already triggers a force sync in repository; avoid scheduling
-      // an additional debounced foreground sync for the same user action.
     } catch (e) {
-      print("[ERROR] Failed to toggle calendar state: $e");
-      Get.snackbar('Connection failed', 'An exception occurred while connecting the calendar. Please try again later');
-      item.isEnabled = false;
-      calendars.refresh();
-    } finally {
-      if (key.isNotEmpty) {
-        togglingCalendarIds.remove(key);
-        calendars.refresh();
+      print("❌ 切换日历状态失败: $e");
+      Get.snackbar("错误", "无法更新日历同步状态");
+      // 回滚本地模型并刷新 UI
+      CalendarDisplayItem? target;
+      for (var g in calendarGroups) {
+        for (var c in g.calendars) {
+          if (c.id == localId) {
+            target = c;
+            break;
+          }
+        }
+        if (target != null) break;
+      }
+      if (target != null) {
+        target.isSelected = !newValue;
+        calendarGroups.refresh();
       }
     }
-  }
-
-
-
-  Future<void> updateCalendarSyncMode(CalendarDisplayItem item, bool isTwoWay) async {
-    final db = await DatabaseHelper.instance.database;
-    final int nextSyncMode = isTwoWay ? 1 : 0;
-
-    String whereClause;
-    List<dynamic> whereArgs;
-
-    if (item.remotePath != null && item.remotePath!.isNotEmpty) {
-      whereClause = 'remote_path = ?';
-      whereArgs = [item.remotePath];
-    } else {
-      whereClause = 'id IN (SELECT remote_collection_id FROM local_bindings WHERE local_collection_id = ?)';
-      whereArgs = [item.localId];
-    }
-
-    await db.update(
-      'remote_collections',
-      {'sync_mode': nextSyncMode},
-      where: whereClause,
-      whereArgs: whereArgs,
-    );
-
-    await refreshDashboard(includeEventCounts: false);
-    _notifyMeaningfulChange();
-  }
-
-  Future<void> setAllowMassDeletionDangerous(CalendarDisplayItem item, bool allow) async {
-    if (item.bindingId <= 0) return;
-    MMKVUtils.instance.setBool(
-      '${AppConstant.allowMassDeletionByBindingKeyPrefix}${item.bindingId}',
-      allow,
-    );
-    item.allowMassDeletionDangerous = allow;
-    calendars.refresh();
-  }
-
-  Future<void> setCalendarEnabledStatus(CalendarDisplayItem item, bool newValue) async {
-    final db = await DatabaseHelper.instance.database;
-
-    String whereClause;
-    List<dynamic> whereArgs;
-
-    // 1. 优先判断身份：谁有值就用谁查
-    if (item.remotePath != null && item.remotePath!.isNotEmpty) {
-      // 它是远端日历（即使 localId 为空, 路径也是唯一的）
-      whereClause = 'remote_path = ?';
-      whereArgs = [item.remotePath];
-    } else {
-      // 它是纯本地日历（一定有系统分配的 ID）
-      whereClause = 'id IN (SELECT remote_collection_id FROM local_bindings WHERE local_collection_id = ?)';
-      whereArgs = [item.localId];
-    }
-
-    // 2. 执行更新
-    int count = await db.update(
-      'remote_collections',
-      {'is_enabled': newValue ? 1 : 0},
-      where: whereClause,
-      whereArgs: whereArgs,
-    );
-
-    debugPrint("[OK] Update succeeded, affected rows: $count (condition: $whereClause = ${whereArgs[0]})");
   }
 
   /// 核心方法：刷新并重新构建 UI 模型
-  Future<void> refreshDashboard({bool includeEventCounts = true}) async {
-    if (_refreshFuture != null) {
-      return _refreshFuture!;
-    }
-
-    _refreshFuture = _refreshDashboardImpl(includeEventCounts: includeEventCounts);
-    try {
-      await _refreshFuture;
-    } finally {
-      _refreshFuture = null;
-    }
-  }
-
-  Future<void> _refreshDashboardImpl({required bool includeEventCounts}) async {
+  Future<void> refreshDashboard() async {
     try {
       isLoading.value = true;
-      final String? loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey);
+      final String? loginName = MMKVUtils.instance.getString(AppConstant.loginName);
       if (loginName == null) return;
 
-      // 1. 拉取远端 Calee 日历并更新本地映射
-      await _nc.scanRemoteCalendars(
-          serverUrl: _authService.normalizedUrl,
-          userId: loginName);
-
-      // 2. 查询本地 remote_collections 的所有日历记录
       final db = await DatabaseHelper.instance.database;
-      final List<Map<String, dynamic>> calendarMaps = await db.rawQuery('''
-        SELECT rc.*, lb.local_collection_id, lb.binding_origin, lb.id AS binding_id
-        FROM remote_collections rc
-        LEFT JOIN local_bindings lb ON lb.remote_collection_id = rc.id
-        WHERE rc.account_name = ?
-          AND rc.collection_type = 'calendar'
-          AND rc.remote_path IS NOT NULL
-          AND rc.remote_path != ''
-        ORDER BY rc.id ASC
-      ''', [loginName]);
-      final Map<String, int> cachedCountByCalendarId = {};
-      final Map<String, bool> localReadOnlyById = {};
-      final List<CalendarDisplayItem> nextCloudCalendars = [];
 
-      try {
-        final List<PlatformCalendar?> platformCalendars = await _nativeApi.getCalendars();
-        for (final PlatformCalendar calendar in platformCalendars.whereType<PlatformCalendar>()) {
-          final String id = calendar.id ?? '';
-          if (id.isEmpty) continue;
-          localReadOnlyById[id] = calendar.isReadOnly ?? false;
-        }
-      } catch (e) {
-        debugPrint('[WARN] Failed to read local calendar read-only status: $e');
-      }
+      // 1. 🌟 双向扫描：确保云端新日历和本地新日历都能进入 calendar_map
+      await _repo.scanLocalCalendars(loginName);
+      await engine.discoverRemoteCalendars(loginName);
 
-      if (includeEventCounts) {
-        final countRows = await db.rawQuery(
-          'SELECT remote_collection_id, COUNT(*) AS count FROM sync_items GROUP BY remote_collection_id',
-        );
-        for (final row in countRows) {
-          final String key = (row['remote_collection_id'] ?? '').toString();
-          if (key.isEmpty) continue;
-          cachedCountByCalendarId[key] = (row['count'] as int?) ?? 0;
-        }
-      }
+      // 2. 获取所有日历记录
+      final List<Map<String, dynamic>> calendarMaps = await db.query(
+        'calendar_map',
+        where: 'account_name = ? OR account_type != ?',
+        whereArgs: [loginName, 'com.nextcloud.caleesync'],
+      );
+      final deviceCalendarPlugin = DeviceCalendarPlugin();
+      Map<String, List<CalendarDisplayItem>> tempMap = {};
 
       for (var cal in calendarMaps) {
-        final String? localId = cal['local_collection_id']?.toString();
+        final String account = cal['account_type'] ?? 'Unknown';
+        final String localId = cal['local_id'].toString();
         final String? remotePath = cal['remote_path'];
+        final String accType = account.toLowerCase();
         final int? syncMode = cal['sync_mode'];
-        final bool isSubscription = (cal['is_subscription'] == 1 || cal['is_subscription'] == true);
-        final int origin = (cal['binding_origin'] as int?) ?? 0;
 
         int realCount = 0;
-        if (includeEventCounts) {
-          final String countKey = (cal['id'] ?? '').toString();
-          realCount = cachedCountByCalendarId[countKey] ?? 0;
+
+        // --- 🌟 核心修改：针对云端日历的实时计数 ---
+        if (accType == 'com.nextcloud.caleesync' && remotePath != null && remotePath.isNotEmpty) {
+          // A. 先查本地数据库 sync_map
+          final localCountResult = await db.rawQuery(
+              'SELECT COUNT(*) as count FROM sync_map WHERE calendar_local_id = ? AND sync_status != 2',
+              [localId]);
+          realCount = (localCountResult.first['count'] as int?) ?? 0;
+
+          // B. 如果本地计数为 0，说明还没同步过，触发一次“静默拉取”
+          if (realCount == 0) {
+            print("🌐 [静默拉取] 正在为日历 ${cal['display_name']} 获取云端事件数...");
+            try {
+              // 仅拉取快照，不涉及复杂的系统日历写入，速度非常快
+              final remoteItems = await _nc.fetchRemoteEvents(calendarPath: remotePath);
+
+              // 将云端 UID 存入 sync_map（ local_id 设为 v_ 前缀的影子 ID）
+              // 这一步是让 Dashboard 统计生效的关键
+              await db.transaction((txn) async {
+                for (var item in remoteItems) {
+                  String uid = item['uid'] ?? item['href'].split('/').last;
+                  // 使用 insert ignore 或 replace 防止重复
+                  await txn.insert('sync_map', {
+                    'uid': uid,
+                    'local_id': 'v_$uid', // 影子 ID，表示未洗白到系统
+                    'calendar_local_id': localId,
+                    'last_etag': item['etag'] ?? '',
+                    'sync_status': 0,
+                  }, conflictAlgorithm: ConflictAlgorithm.ignore);
+                }
+              });
+
+              // 重新计算数量
+              realCount = remoteItems.length;
+            } catch (e) {
+              print("❌ 静默拉取失败: $e");
+            }
+          }
+        } else {
+          // --- C. 普通本地系统日历统计 ---
+          try {
+            final now = DateTime.now();
+            final eventsResult = await deviceCalendarPlugin.retrieveEvents(
+                localId,
+                RetrieveEventsParams(
+                    startDate: now.subtract(const Duration(days: 365)),
+                    endDate: now.add(const Duration(days: 365))
+                )
+            );
+            if (eventsResult.isSuccess) realCount = eventsResult.data?.length ?? 0;
+          } catch (_) {}
         }
 
         // 组装 UI 模型
-        final int bindingId = (cal['binding_id'] as int?) ?? 0;
-        final bool allowMassDeletionDangerous = bindingId > 0
-            ? (MMKVUtils.instance.getBool('${AppConstant.allowMassDeletionByBindingKeyPrefix}$bindingId', defaultValue: false) ?? false)
-            : false;
-
         var displayItem = CalendarDisplayItem(
-          localId: localId,
+          id: localId,
           name: cal['display_name'] ?? 'Unknown',
           color: cal['color'] ?? '#808080',
           eventCount: realCount,
-          isReadOnly: syncMode == 0,
-          isSubscription: isSubscription,
-          isLocalReadOnly: localReadOnlyById[localId] ?? false,
-          subscriptionUrl: cal['subscription_url']?.toString(),
-          isEnabled: cal['is_enabled'] == 1,
-          remotePath: remotePath,
-          origin: origin,
-          bindingId: bindingId,
-          allowMassDeletionDangerous: allowMassDeletionDangerous,
+          isTwoWay: remotePath != null && remotePath.isNotEmpty && (syncMode == 0),
+          isSelected: cal['sync_status'] == 1,
         );
 
-        nextCloudCalendars.add(displayItem);
+        tempMap.putIfAbsent(account, () => []).add(displayItem);
       }
 
-      calendars.assignAll(nextCloudCalendars);
+      // 排序并更新 UI
+      final entries = tempMap.entries.toList();
+      entries.sort((a, b) {
+        final la = a.key.toLowerCase();
+        if (la == 'nextcloud') return -1;
+        return 1;
+      });
+
+      calendarGroups.assignAll(entries.map((e) => CalendarGroup(accountName: e.key, calendars: e.value)).toList());
 
     } catch (e) {
-      print("[ERROR] Dashboard refresh exception: $e");
+      print("❌ Dashboard 刷新异常: $e");
     } finally {
       isLoading.value = false;
     }
@@ -364,94 +240,62 @@ class CalendarPageController extends GetxController {
   }
 
   /// 彻底删除一个日历（包含云端、系统日历与本地 DB 清理）
-  Future<void> deleteCalendarTotally({String? localId, String? remotePath}) async {
+  Future<void> deleteCalendarTotally(String localId) async {
     try {
-      final String? resolvedLocalId = (localId != null && localId.isNotEmpty) ? localId : null;
-      final String? resolvedRemotePath = (remotePath != null && remotePath.isNotEmpty) ? remotePath : null;
-      if (resolvedLocalId == null && resolvedRemotePath == null) return;
-
       isLoading.value = true;
-      await _repo.performAbsoluteDelete(localId: resolvedLocalId, remotePath: resolvedRemotePath);
-      await refreshDashboard(includeEventCounts: false);
-      unawaited(refreshDashboard());
-      _notifyMeaningfulChange();
+      await _repo.performAbsoluteDelete(localId);
+      await refreshDashboard();
     } catch (e) {
-      print('[ERROR] Dashboard failed to delete calendar: $e');
-      Get.snackbar('Error', 'Failed to delete calendar');
+      print('❌ Dashboard 删除日历失败: $e');
+      Get.snackbar('错误', '删除日历失败');
     } finally {
       isLoading.value = false;
     }
   }
 
   /// 重命名日历（委托给仓库并刷新）
-  Future<void> renameCalendar(String? localId, String? remotePath, String newName) async {
+  Future<void> renameCalendar(String localId, String newName) async {
     try {
-      if ((localId == null || localId.isEmpty) && (remotePath == null || remotePath.isEmpty)) return;
       isLoading.value = true;
-      await _repo.renameCalendar(localId: localId, remotePath: remotePath, newName: newName);
-      await refreshDashboard(includeEventCounts: false);
-      unawaited(refreshDashboard());
-      _notifyMeaningfulChange();
+      await _repo.renameCalendar(localId, newName);
+      await refreshDashboard();
     } catch (e) {
-      print('[ERROR] Dashboard rename failed: $e');
-      Get.snackbar('Error', 'Rename failed');
+      print('❌ Dashboard 重命名失败: $e');
+      Get.snackbar('错误', '重命名失败');
       rethrow;
     } finally {
       isLoading.value = false;
     }
   }
 
-  /// 创建新的本地日历（委托给 SyncRepository）, 并刷新界面
+  /// 创建新的本地日历（委托给 SyncRepository），并刷新界面
   Future<bool> createNewLocalCalendar(String displayName) async {
-    final String? invalidReason = validateNewCalendarName(displayName);
-    if (invalidReason != null) {
-      Get.snackbar('Invalid calendar name', invalidReason);
-      return false;
-    }
-
     try {
       isLoading.value = true;
-      final ok = await _repo.createNewLocalCalendar(displayName.trim());
+      final ok = await _repo.createNewLocalCalendar(displayName);
       if (ok) {
-        await refreshDashboard(includeEventCounts: false);
-        unawaited(refreshDashboard());
-        _notifyMeaningfulChange();
+        await refreshDashboard();
         return true;
       } else {
-        Get.snackbar('Error', 'Failed to create calendar');
+        Get.snackbar('错误', '创建日历失败');
         return false;
       }
     } catch (e) {
-      print('[ERROR] Failed to create local calendar: $e');
-      Get.snackbar('Error', 'Failed to create calendar');
+      print('❌ 创建本地日历失败: $e');
+      Get.snackbar('错误', '创建日历失败');
       return false;
     } finally {
       isLoading.value = false;
     }
   }
 
-  /// 订阅一个公开的 ICS 链接（委托给仓库）, 并在成功后刷新界面
+  /// 订阅一个公开的 ICS 链接（委托给仓库），并在成功后刷新界面
   Future<bool> subscribePublicIcs(String icsUrl) async {
-    final String normalizedUrl = canonicalizeSubscriptionUrl(icsUrl);
-    final String? invalidReason = validateSubscriptionUrl(normalizedUrl);
-    if (invalidReason != null) {
-      Get.snackbar('Invalid subscription URL', invalidReason);
-      return false;
-    }
-
-    if (subscribingUrls.contains(normalizedUrl)) {
-      return false;
-    }
-
-    subscribingUrls.add(normalizedUrl);
-
     try {
       isLoading.value = true;
-      final ok = await _repo.handlePublicSubscription(normalizedUrl);
+      final ok = await _repo.handlePublicSubscription(icsUrl);
       if (ok) {
-        await refreshDashboard(includeEventCounts: false);
-        unawaited(refreshDashboard());
-        _notifyMeaningfulChange();
+        await refreshDashboard();
         // 刷新已订阅列表（如果 probe controller 已注册）
         if (Get.isRegistered<CalendarProbeController>()) {
           await Get.find<CalendarProbeController>().fetchSubscribedCalendars();
@@ -459,93 +303,16 @@ class CalendarPageController extends GetxController {
         Get.snackbar('Success', 'Subscribed to calendar');
         return true;
       } else {
-        Get.snackbar('Error', 'Subscription failed');
+        Get.snackbar('错误', '订阅失败');
         return false;
       }
     } catch (e) {
-      print('[ERROR] Subscription failed: $e');
-      Get.snackbar('Error', 'Subscription failed');
+      print('❌ 订阅失败: $e');
+      Get.snackbar('错误', '订阅失败');
       return false;
     } finally {
-      subscribingUrls.remove(normalizedUrl);
       isLoading.value = false;
     }
-  }
-
-  bool isPublicIcsSubscribed(String? icsUrl) {
-    final String normalizedUrl = canonicalizeSubscriptionUrl(icsUrl);
-    if (normalizedUrl.isEmpty) return false;
-
-    return calendars.any((calendar) {
-      if (!calendar.isSubscription) return false;
-      return canonicalizeSubscriptionUrl(calendar.subscriptionUrl) == normalizedUrl;
-    });
-  }
-
-
-  String canonicalizeSubscriptionUrl(String? rawUrl) {
-    final String trimmed = (rawUrl ?? '').trim();
-    if (trimmed.isEmpty) return '';
-
-    final Uri? parsed = Uri.tryParse(trimmed);
-    if (parsed == null || parsed.host.isEmpty) {
-      return trimmed;
-    }
-
-    final String normalizedScheme = parsed.scheme.toLowerCase() == 'webcal'
-        ? 'https'
-        : parsed.scheme.toLowerCase();
-    final int? normalizedPort = (parsed.hasPort &&
-            !((normalizedScheme == 'http' && parsed.port == 80) ||
-                (normalizedScheme == 'https' && parsed.port == 443)))
-        ? parsed.port
-        : null;
-
-    final String normalizedPath = (parsed.path.length > 1 && parsed.path.endsWith('/'))
-        ? parsed.path.substring(0, parsed.path.length - 1)
-        : parsed.path;
-
-    return parsed
-        .replace(
-          scheme: normalizedScheme,
-          host: parsed.host.toLowerCase(),
-          port: normalizedPort,
-          path: normalizedPath,
-          fragment: null,
-        )
-        .toString();
-  }
-
-  String? validateNewCalendarName(String displayName) {
-    final String normalized = displayName.trim();
-    if (normalized.isEmpty) {
-      return 'Calendar name is required.';
-    }
-    if (normalized.length > 64) {
-      return 'Calendar name must be 64 characters or fewer.';
-    }
-    if (RegExp(r'[\\/:*?"<>|]').hasMatch(normalized)) {
-      return 'Calendar name contains unsupported characters.';
-    }
-    return null;
-  }
-
-  String? validateSubscriptionUrl(String icsUrl) {
-    final String normalized = icsUrl.trim();
-    if (normalized.isEmpty) {
-      return 'Subscription URL is required.';
-    }
-
-    final Uri? parsed = Uri.tryParse(normalized);
-    if (parsed == null || parsed.host.isEmpty) {
-      return 'Enter a valid URL.';
-    }
-
-    if (parsed.scheme != 'http' && parsed.scheme != 'https' && parsed.scheme != 'webcal') {
-      return 'Only http, https, or webcal URLs are supported.';
-    }
-
-    return null;
   }
 
 }

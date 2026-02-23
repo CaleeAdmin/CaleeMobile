@@ -1,35 +1,26 @@
-import 'package:caleesync/common/app_constant.dart';
 import 'package:caleesync/common/route_constant.dart';
-import 'package:caleesync/common/utils/mmkv_utils.dart';
-import 'package:caleesync/controllers/app_controller.dart';
 import 'package:caleesync/controllers/auth_controller.dart';
-import 'package:caleesync/models/nextcloud_auth_state.dart';
+import 'package:caleesync/models/nextcloud_register_state.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
-/// Login page with Nextcloud Login Flow v2 integration.
-class LoginPage extends StatefulWidget {
-  const LoginPage({super.key});
+class RegisterPage extends StatefulWidget {
+  const RegisterPage({super.key});
 
   @override
-  State<LoginPage> createState() => _LoginPageState();
+  State<RegisterPage> createState() => _RegisterPageState();
 }
 
-class _LoginPageState extends State<LoginPage> {
+class _RegisterPageState extends State<RegisterPage> {
   final _formKey = GlobalKey<FormState>();
   final _accountController = TextEditingController();
+  final _displayNameController = TextEditingController();
+  final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _confirmController = TextEditingController();
   bool _agree = false;
-  Worker? _authStateWorker;
-
-  @override
-  void dispose() {
-    _authStateWorker?.dispose();
-    _accountController.dispose();
-    _passwordController.dispose();
-    super.dispose();
-  }
+  Worker? _registerStateWorker;
 
   @override
   void initState() {
@@ -38,28 +29,31 @@ class _LoginPageState extends State<LoginPage> {
     // 获取AuthController实例
     final authController = Get.find<AuthController>();
 
-    // 监听认证状态变化
-    _authStateWorker = ever(authController.authStateRx, (NextcloudAuthState state) {
+    // 监听注册状态变化
+    _registerStateWorker = ever(authController.registerStateRx, (NextcloudRegisterState state) {
       // 检查页面是否还挂载
       if (!mounted) return;
 
-      if (state.isAuthenticated) {
-        // 登录成功
+      // 注册成功，显示成功提示并跳转到登录页
+      if (state.isSuccess) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Login success'),
+            content: Text('Registration successful'),
             backgroundColor: Colors.green,
             duration: Duration(seconds: 2),
           ),
         );
-        _saveCredentialsAndNavigate(state);
+        // 延迟跳转，让用户看到成功提示
+        Future.delayed(const Duration(milliseconds: 500), () {
+          Get.offAllNamed(RouteConstant.login);
+        });
       }
 
-      if (state.hasError && state.status == NextcloudAuthStatus.error) {
-        // 显示登录失败错误信息
+      // 显示注册失败错误信息
+      if (state.hasError && state.status == NextcloudRegisterStatus.error) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(state.errorMessage ?? 'Login failed'),
+            content: Text(state.errorMessage ?? 'Registration failed'),
             backgroundColor: Colors.red,
             duration: const Duration(seconds: 3),
           ),
@@ -68,38 +62,18 @@ class _LoginPageState extends State<LoginPage> {
     });
   }
 
-  /// 保存登录凭据并跳转到主页
-  Future<void> _saveCredentialsAndNavigate(NextcloudAuthState state) async {
-    if (state.serverUrl == null ||
-        state.loginName == null ||
-        state.appPassword == null) {
-      return;
-    }
-
-    try {
-      // 保存登录凭据到 MMKV
-      MMKVUtils.instance.setString(AppConstant.Server, state.serverUrl!);
-      MMKVUtils.instance.setString(AppConstant.loginName, state.loginName!);
-      MMKVUtils.instance.setString(AppConstant.password, state.appPassword!);
-
-      // 使用GetX的AppController处理登录成功
-      final appController = Get.find<AppController>();
-      appController.onLoginSuccess();
-    } catch (e) {
-      // 如果保存失败，显示错误信息
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('保存用户数据失败: $e'),
-            backgroundColor: Colors.red,
-            duration: const Duration(seconds: 3),
-          ),
-        );
-      }
-    }
+  @override
+  void dispose() {
+    _registerStateWorker?.dispose();
+    _accountController.dispose();
+    _displayNameController.dispose();
+    _emailController.dispose();
+    _passwordController.dispose();
+    _confirmController.dispose();
+    super.dispose();
   }
 
-  void _onLogin() {
+  void _onRegister() {
     if (!_formKey.currentState!.validate()) return;
     if (!_agree) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -108,13 +82,17 @@ class _LoginPageState extends State<LoginPage> {
       return;
     }
 
-    // 使用用户名密码登录
-    final loginName = _accountController.text.trim();
+    // 使用 Provisioning API 注册用户
+    final userid = _accountController.text.trim();
+    final displayName = _displayNameController.text.trim();
+    final email = _emailController.text.trim();
     final password = _passwordController.text.trim();
 
     final authController = Get.find<AuthController>();
-    authController.loginWithCredentials(
-      loginName: loginName,
+    authController.registerWithCredentials(
+      loginName: userid,
+      displayName: displayName,
+      email: email,
       password: password,
     );
   }
@@ -122,7 +100,7 @@ class _LoginPageState extends State<LoginPage> {
   @override
   Widget build(BuildContext context) {
     final authController = Get.find<AuthController>();
-    final isLoading = authController.authState.isLoading;
+    final isLoading = authController.registerState.isLoading;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF7F9FB),
@@ -135,7 +113,7 @@ class _LoginPageState extends State<LoginPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  const SizedBox(height: 32),
+                  const SizedBox(height: 24),
                   Container(
                     width: 72,
                     height: 72,
@@ -156,7 +134,7 @@ class _LoginPageState extends State<LoginPage> {
                   ),
                   const SizedBox(height: 16),
                   const Text(
-                    'Welcome to Calee',
+                    'Join Calee',
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.w600,
@@ -165,7 +143,7 @@ class _LoginPageState extends State<LoginPage> {
                   ),
                   const SizedBox(height: 6),
                   const Text(
-                    'Please login to your account',
+                    'Create your account to start syncing',
                     style: TextStyle(
                       fontSize: 15,
                       color: Colors.black54,
@@ -176,9 +154,28 @@ class _LoginPageState extends State<LoginPage> {
                   const SizedBox(height: 6),
                   _buildInput(
                     controller: _accountController,
-                    hint: 'Enter your account name',
+                    hint: 'Choose an account name',
                     validator: (v) =>
                         (v == null || v.trim().isEmpty) ? 'Account required' : null,
+                    enabled: !isLoading,
+                  ),
+                  const SizedBox(height: 16),
+                  _buildLabel('Email'),
+                  const SizedBox(height: 6),
+                  _buildInput(
+                    controller: _emailController,
+                    hint: 'Enter your email',
+                    keyboardType: TextInputType.emailAddress,
+                    validator: (v) {
+                      if (v == null || v.trim().isEmpty) {
+                        return 'Email required';
+                      }
+                      // 简单的邮箱格式验证
+                      if (!v.contains('@') || !v.contains('.')) {
+                        return 'Please enter a valid email';
+                      }
+                      return null;
+                    },
                     enabled: !isLoading,
                   ),
                   const SizedBox(height: 16),
@@ -186,10 +183,22 @@ class _LoginPageState extends State<LoginPage> {
                   const SizedBox(height: 6),
                   _buildInput(
                     controller: _passwordController,
-                    hint: 'Enter your password',
+                    hint: 'Create a password',
+                    obscure: true,
+                    validator: (v) => (v == null || v.length < 6)
+                        ? 'Password must be at least 6 characters'
+                        : null,
+                    enabled: !isLoading,
+                  ),
+                  const SizedBox(height: 16),
+                  _buildLabel('Confirm Password'),
+                  const SizedBox(height: 6),
+                  _buildInput(
+                    controller: _confirmController,
+                    hint: 'Confirm your password',
                     obscure: true,
                     validator: (v) =>
-                        (v == null || v.length < 6) ? 'Password must be at least 6 characters' : null,
+                        (v != _passwordController.text) ? 'Passwords do not match' : null,
                     enabled: !isLoading,
                   ),
                   const SizedBox(height: 16),
@@ -234,61 +243,49 @@ class _LoginPageState extends State<LoginPage> {
                     ],
                   ),
                   const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: isLoading ? null : _onLogin,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF0D0C14),
-                        foregroundColor: Colors.white,
-                        disabledBackgroundColor: Colors.grey.shade300,
-                        disabledForegroundColor: Colors.grey.shade600,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                      ),
-                      child: isLoading
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                              ),
-                            )
-                          : const Text(
-                              'Login',
-                              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-                            ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      TextButton(
-                        onPressed: isLoading
-                            ? null
-                            : () {
-                                Get.toNamed(RouteConstant.register);
-                              },
-                        child: const Text(
-                          'SignUp',
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: Color(0xFF2E7AFE),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: isLoading ? null : _onRegister,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF0D0C14),
+                          foregroundColor: Colors.white,
+                          disabledBackgroundColor: Colors.grey.shade300,
+                          disabledForegroundColor: Colors.grey.shade600,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
                           ),
                         ),
+                        child: isLoading
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                ),
+                              )
+                            : const Text(
+                                'Sign Up',
+                                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                              ),
+                      ),
+                    ),
+                  const SizedBox(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Text(
+                        'Already have an account? ',
+                        style: TextStyle(fontSize: 14, color: Colors.black87),
                       ),
                       TextButton(
-                        onPressed: isLoading
-                            ? null
-                            : () {
-                                // TODO: navigate to Forgot password page
-                              },
+                        onPressed: () {
+                          Get.toNamed(RouteConstant.login);
+                        },
                         child: const Text(
-                          'Forgot password?',
+                          'Login',
                           style: TextStyle(
                             fontSize: 14,
                             color: Color(0xFF2E7AFE),
@@ -326,12 +323,14 @@ class _LoginPageState extends State<LoginPage> {
     required String hint,
     bool obscure = false,
     bool enabled = true,
+    TextInputType? keyboardType,
     String? Function(String?)? validator,
   }) {
     return TextFormField(
       controller: controller,
       obscureText: obscure,
       enabled: enabled,
+      keyboardType: keyboardType,
       validator: validator,
       decoration: InputDecoration(
         hintText: hint,

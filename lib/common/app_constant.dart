@@ -2,23 +2,20 @@
 class AppConstant {
   AppConstant._();
 
-  /// Calee 服务器地址
-  static const String caleeServer = 'portal.calee.com.au';
+  /// Nextcloud 服务器地址
+  static const String nextcloudServer = 'nc-dev.ywpl.com.au';
+
+  /// Nextcloud 管理员凭据（用于 Provisioning API 创建用户）
+  /// 注意：这些凭据应该从环境变量或安全配置中读取，不要硬编码
+  /// TODO: 从环境变量或安全存储中读取
+  static const String adminUsername = 'userrA5XMYSG'; // 需要配置管理员用户名
+  static const String adminPassword = '4Geme5oLn8KQz4qrVpqm3w5wugHdmOsi'; // 需要配置管理员密码
 
   /// MMKV 存储 Key
-  static const String serverKey = 'calee_server';
-  static const String loginNameKey = 'calee_login_name';
-  static const String appPasswordKey = 'calee_app_password';
-
-  /// 同步策略开关：是否允许远端日历自动落地到系统本地日历。
-  /// 默认关闭，避免未授权的 remote -> local 初始化。
-  static const String autoCreateLocalFromRemoteKey = 'auto_create_local_from_remote';
-  static const String autoSyncEnabledKey = 'auto_sync_enabled';
-  static const String periodicSyncEnabledKey = 'periodic_sync_enabled';
-  static const String syncIntervalCalendarKey = 'sync_interval_calendar';
-
-  /// Per-binding dangerous override key prefix.
-  ///
-  /// Full key format: [allowMassDeletionByBindingKeyPrefix]{bindingId}
-  static const String allowMassDeletionByBindingKeyPrefix = 'allow_mass_deletion_binding_';
+  static const String Server = 'nextcloud_server';
+  static const String loginName = 'nextcloud_login_name';
+  static const String password = 'nextcloud_app_password';
+  static const String mmkvKeyAdminUsername = 'nextcloud_admin_username';
+  static const String mmkvKeyAdminPassword = 'nextcloud_admin_password';
 }
+

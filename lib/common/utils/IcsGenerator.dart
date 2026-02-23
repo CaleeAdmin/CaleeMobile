@@ -4,7 +4,7 @@ class IcsGenerator {
   /// 将数据库中的 map 转换为标准的 iCalendar (.ics) 字符串
   static String generate(Map<String, dynamic> local) {
     final String uid = local['uid'] ?? '';
-    final String summary = _escapeText(local['summary'] ?? 'Untitled');
+    final String summary = _escapeText(local['summary'] ?? '无标题');
     final String description = _escapeText(local['description'] ?? '');
 
     // 处理时间戳 (毫秒转为 UTC 格式: YYYYMMDDTHHMMSSZ)
@@ -16,7 +16,7 @@ class IcsGenerator {
     final buffer = StringBuffer();
     buffer.writeln('BEGIN:VCALENDAR');
     buffer.writeln('VERSION:2.0');
-    buffer.writeln('PRODID:-//My Calee Pty Ltd//CaleeSync//EN');
+    buffer.writeln('PRODID:-//CaleeSync//Nextcloud Sync//EN');
     buffer.writeln('BEGIN:VEVENT');
     buffer.writeln('UID:$uid');
     buffer.writeln('DTSTAMP:$stamp');

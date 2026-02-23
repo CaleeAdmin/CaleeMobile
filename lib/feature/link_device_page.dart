@@ -78,10 +78,10 @@ class LinkDevicePage extends StatelessWidget {
             width: 96,
             height: 96,
             decoration: BoxDecoration(
-              color: Colors.lightGreen.shade50,
+              color: Colors.blue.shade50,
               shape: BoxShape.circle,
             ),
-            child: const Center(child: Icon(Icons.smartphone, size: 40, color: Colors.lightGreen)),
+            child: const Center(child: Icon(Icons.smartphone, size: 40, color: Colors.blue)),
           ),
           const SizedBox(height: 18),
           Text(
@@ -113,22 +113,22 @@ class LinkDevicePage extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.lightGreen.shade50,
+        color: Colors.blue.shade50,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.lightGreen.shade100),
+        border: Border.all(color: Colors.blue.shade100),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('How it works', style: textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700, color: Colors.lightGreen[800])),
+          Text('How it works', style: textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700, color: Colors.blue[800])),
           const SizedBox(height: 8),
-          Text('- The other device will display a QR code', style: textTheme.bodyMedium),
+          Text('• The other device will display a QR code', style: textTheme.bodyMedium),
           const SizedBox(height: 6),
-          Text('- Use this device to scan and authorize the new device', style: textTheme.bodyMedium),
+          Text('• Use this device to scan and authorize the new device', style: textTheme.bodyMedium),
           const SizedBox(height: 6),
-          Text('- You can revoke device access anytime from device management', style: textTheme.bodyMedium),
+          Text('• You can revoke device access anytime from device management', style: textTheme.bodyMedium),
           const SizedBox(height: 6),
-          Text('- Only scan QR codes from devices you trust', style: textTheme.bodyMedium),
+          Text('• Only scan QR codes from devices you trust', style: textTheme.bodyMedium),
         ],
       ),
     );

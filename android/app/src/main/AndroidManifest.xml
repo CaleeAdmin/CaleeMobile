@@ -4,7 +4,7 @@
     <!-- Camera permission required for QR code scanning -->
     <uses-permission android:name="android.permission.CAMERA" />
     <application
-        android:label="CaleeSync"
+        android:label="caleesync"
         android:name="${applicationName}"
         android:icon="@mipmap/logo">
 

@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:package_info_plus/package_info_plus.dart';
 import '../common/utils/mmkv_utils.dart';
 import '../common/app_constant.dart';
 
@@ -21,48 +20,36 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> {
 
   int _calendarInterval = 15;
   int _tasksInterval = 30;
-  bool _autoSyncEnabled = true;
-  bool _periodicSyncEnabled = false;
-  late final Future<String> _appVersionLabelFuture;
+  bool _wifiOnly = true;
 
   @override
   void initState() {
     super.initState();
-    _appVersionLabelFuture = _loadAppVersionLabel();
     _loadSettings();
-  }
-
-
-  Future<String> _loadAppVersionLabel() async {
-    final packageInfo = await PackageInfo.fromPlatform();
-    return 'Version ${packageInfo.version} (${packageInfo.buildNumber})';
   }
 
   void _loadSettings() {
     try {
-      int valCal = MMKVUtils.instance.getInt(AppConstant.syncIntervalCalendarKey) ?? 15;
+      int valCal = MMKVUtils.instance.getInt('sync_interval_calendar') ?? 15;
       int valTask = MMKVUtils.instance.getInt('sync_interval_tasks') ?? 30;
-      final bool autoSyncEnabled = MMKVUtils.instance.getBool(AppConstant.autoSyncEnabledKey, defaultValue: true) ?? true;
-      final bool periodicSyncEnabled = MMKVUtils.instance.getBool(AppConstant.periodicSyncEnabledKey, defaultValue: false) ?? false;
       // validate against available options to avoid Dropdown assertion errors
       final validMinutes = _intervalOptions.map((e) => e['minutes'] as int).toSet();
       if (!validMinutes.contains(valCal) || valCal <= 0) valCal = 15;
       if (!validMinutes.contains(valTask) || valTask <= 0) valTask = 30;
+      final wifi = MMKVUtils.instance.getBool('sync_wifi_only') ?? true;
       setState(() {
         _calendarInterval = valCal;
         _tasksInterval = valTask;
-        _autoSyncEnabled = autoSyncEnabled;
-        _periodicSyncEnabled = periodicSyncEnabled;
+        _wifiOnly = wifi;
       });
     } catch (_) {}
   }
 
   void _saveSettings() {
     try {
-      MMKVUtils.instance.setInt(AppConstant.syncIntervalCalendarKey, _calendarInterval);
+      MMKVUtils.instance.setInt('sync_interval_calendar', _calendarInterval);
       MMKVUtils.instance.setInt('sync_interval_tasks', _tasksInterval);
-      MMKVUtils.instance.setBool(AppConstant.autoSyncEnabledKey, _autoSyncEnabled);
-      MMKVUtils.instance.setBool(AppConstant.periodicSyncEnabledKey, _periodicSyncEnabled);
+      MMKVUtils.instance.setBool('sync_wifi_only', _wifiOnly);
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Settings saved')));
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Save failed: $e')));
@@ -87,20 +74,6 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> {
                   const SizedBox(height: 6),
                   const Text('Configure how often your calendars and tasks sync with their sources', style: TextStyle(color: Colors.black54)),
                   const SizedBox(height: 16),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('Foreground Auto Sync', style: TextStyle(fontWeight: FontWeight.w600)),
-                    subtitle: const Text('Trigger sync on meaningful changes while app is active'),
-                    value: _autoSyncEnabled,
-                    onChanged: (v) => setState(() => _autoSyncEnabled = v),
-                  ),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('Periodic Background Sync', style: TextStyle(fontWeight: FontWeight.w600)),
-                    subtitle: const Text('Run periodic sync when network is available'),
-                    value: _periodicSyncEnabled,
-                    onChanged: (v) => setState(() => _periodicSyncEnabled = v),
-                  ),
 
                   const Text('Calendar Sync Interval', style: TextStyle(fontWeight: FontWeight.w600)),
                   const SizedBox(height: 8),
@@ -119,6 +92,56 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> {
                   ),
                   const SizedBox(height: 8),
                   const Text('More frequent syncing may impact battery life on mobile devices', style: TextStyle(color: Colors.black54, fontSize: 12)),
+                  const SizedBox(height: 16),
+
+                  const Text('Tasks Sync Interval', style: TextStyle(fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<int>(
+                    value: _tasksInterval,
+                    items: _intervalOptions.map((opt) {
+                      return DropdownMenuItem<int>(value: opt['minutes'] as int, child: Text(opt['label'] as String));
+                    }).toList(),
+                    onChanged: (v) {
+                      if (v != null) setState(() => _tasksInterval = v);
+                    },
+                    decoration: InputDecoration(
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text('More frequent syncing may impact battery life on mobile devices', style: TextStyle(color: Colors.black54, fontSize: 12)),
+                  const SizedBox(height: 16),
+
+                  // Wi-Fi only card
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.grey.shade200),
+                      color: Colors.grey.shade50,
+                    ),
+                    child: Row(
+                      children: [
+                        Checkbox(
+                          value: _wifiOnly,
+                          onChanged: (v) => setState(() => _wifiOnly = v ?? true),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: const [
+                              Text('Sync on Wi‑Fi only', style: TextStyle(fontWeight: FontWeight.w600)),
+                              SizedBox(height: 4),
+                              Text('Prevent syncing over cellular data to save bandwidth and reduce data usage', style: TextStyle(color: Colors.black54, fontSize: 12)),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                   const SizedBox(height: 16),
 
                   SizedBox(
@@ -145,29 +168,12 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> {
               padding: const EdgeInsets.all(16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('About Sync', style: TextStyle(fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 8),
-                  const Text(
+                children: const [
+                  Text('About Sync', style: TextStyle(fontWeight: FontWeight.w600)),
+                  SizedBox(height: 8),
+                  Text(
                     'Calee automatically synchronizes your calendars and tasks with Google, iCloud, Outlook, and other connected services. When "Two-way sync" is enabled, changes made in either location will be synced bidirectionally. Otherwise, data is read-only in the respective location to prevent conflicts.',
                     style: TextStyle(color: Colors.black54),
-                  ),
-                  const SizedBox(height: 12),
-                  FutureBuilder<String>(
-                    future: _appVersionLabelFuture,
-                    builder: (context, snapshot) {
-                      if (!snapshot.hasData) {
-                        return const SizedBox.shrink();
-                      }
-
-                      return Text(
-                        snapshot.data!,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: Colors.black45,
-                        ),
-                      );
-                    },
                   ),
                 ],
               ),
@@ -178,3 +184,4 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> {
     );
   }
 }
+

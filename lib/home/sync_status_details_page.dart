@@ -1,10 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:intl/intl.dart';
-
 import '../controllers/calendar_probe_controller.dart';
-import '../entity/sync_run_record.dart';
-import 'sync_run_details_page.dart';
 
 class SyncStatusDetailsPage extends StatelessWidget {
   const SyncStatusDetailsPage({super.key});
@@ -14,118 +10,240 @@ class SyncStatusDetailsPage extends StatelessWidget {
     final ctrl = Get.find<CalendarProbeController>();
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Sync Activity'),
-        actions: [
-          IconButton(onPressed: ctrl.loadRecentRuns, icon: const Icon(Icons.refresh)),
-        ],
+        title: const Text('Sync Status Details'),
+        backgroundColor: Colors.white,
+        elevation: 0,
+        centerTitle: false,
+        foregroundColor: Colors.black87,
       ),
       body: Obx(() {
-        final runs = ctrl.syncRuns;
-        if (runs.isEmpty) {
-          return const Center(child: Text('No sync activity yet.'));
-        }
-        return ListView.separated(
-          itemCount: runs.length,
-          separatorBuilder: (_, __) => const Divider(height: 1),
-          itemBuilder: (context, index) {
-            final run = runs[index];
-            final counts = _aggregateCounts(run);
-            return ListTile(
-              title: Text(
-                '${DateFormat('MMM d, yyyy • HH:mm').format(run.startTime)} • ${_duration(run)}',
+        return SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Real-time synchronization status for all sources',
+                  style: TextStyle(color: Colors.black54)),
+              const SizedBox(height: 12),
+
+              Card(
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: const [
+                                Text('All Sources', style: TextStyle(fontWeight: FontWeight.w600)),
+                                SizedBox(height: 4),
+                                Text('Monitor each connected service', style: TextStyle(color: Colors.black54)),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          FilledButton.icon(
+                            onPressed: ctrl.isSyncing.value ? null : () => ctrl.syncNow(),
+                            icon: const Icon(Icons.refresh, size: 12),
+                            label: const Text('Refresh All'),
+                            style: FilledButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                              backgroundColor: const Color(0xFF2F6AA6),
+                              foregroundColor: Colors.white,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                              textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+
+                      // list of simplified source cards built from summary counts
+                      Container(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Column(
+                      children: [
+                        // If detailed logs exist, render per-source cards; otherwise render aggregated placeholders
+                        ..._buildDetailCards(ctrl),
+                      ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
-              subtitle: Text(
-                '${_modeLabel(run.mode)} • ${run.bindings.length} calendar link${run.bindings.length == 1 ? '' : 's'}\n'
-                'On device +${counts.localCreated}/${counts.localUpdated}/-${counts.localDeleted}  '
-                'In cloud +${counts.remoteCreated}/${counts.remoteUpdated}/-${counts.remoteDeleted}',
-              ),
-              isThreeLine: true,
-              trailing: _resultChip(run.result, run.bindings.any((b) => b.safetyGateTriggered)),
-              onTap: () => Get.to(() => SyncRunDetailsPage(run: run)),
-            );
-          },
+            ],
+          ),
         );
       }),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: ctrl.isSyncing.value ? null : ctrl.syncNow,
-        icon: const Icon(Icons.sync),
-        label: const Text('Sync now'),
-      ),
     );
   }
 }
 
-Widget _resultChip(SyncRunResult result, bool safetyTriggered) {
-  final color = switch (result) {
-    SyncRunResult.success => Colors.green,
-    SyncRunResult.partial => Colors.orange,
-    SyncRunResult.abortedBySafety => Colors.deepOrange,
-    SyncRunResult.failed => Colors.red,
-  };
-  final label = switch (result) {
-    SyncRunResult.success => 'Up to date',
-    SyncRunResult.partial => 'Partly synced',
-    SyncRunResult.abortedBySafety => 'Stopped for safety',
-    SyncRunResult.failed => 'Sync failed',
-  };
-  return Column(
-    mainAxisAlignment: MainAxisAlignment.center,
-    children: [
-      Chip(label: Text(label), backgroundColor: color.withOpacity(0.15)),
-      if (safetyTriggered) const Text('Safety check', style: TextStyle(fontSize: 11, color: Colors.deepOrange)),
-    ],
-  );
-}
+enum _Status { synced, syncing, error }
 
-String _duration(SyncRunRecord run) {
-  final ms = run.durationMs ?? 0;
-  return '${(ms / 1000).toStringAsFixed(1)}s';
-}
-
-class _SyncChangeSummary {
-  const _SyncChangeSummary({
-    required this.localCreated,
-    required this.localUpdated,
-    required this.localDeleted,
-    required this.remoteCreated,
-    required this.remoteUpdated,
-    required this.remoteDeleted,
-  });
-
-  final int localCreated;
-  final int localUpdated;
-  final int localDeleted;
-  final int remoteCreated;
-  final int remoteUpdated;
-  final int remoteDeleted;
-}
-
-_SyncChangeSummary _aggregateCounts(SyncRunRecord run) {
-  int localCreated = 0, localUpdated = 0, localDeleted = 0;
-  int remoteCreated = 0, remoteUpdated = 0, remoteDeleted = 0;
-  for (final b in run.bindings) {
-    localCreated += b.localCounts.created;
-    localUpdated += b.localCounts.updated;
-    localDeleted += b.localCounts.deleted;
-    remoteCreated += b.remoteCounts.created;
-    remoteUpdated += b.remoteCounts.updated;
-    remoteDeleted += b.remoteCounts.deleted;
+Widget _sourceCard({
+  required String title,
+  required String subtitle,
+  required _Status status,
+  DateTime? last,
+  VoidCallback? onRetry,
+}) {
+  Color borderColor;
+  Color bgColor;
+  Widget statusWidget;
+  switch (status) {
+    case _Status.synced:
+      borderColor = Colors.green.shade100;
+      bgColor = Colors.green.shade50;
+      statusWidget = Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(color: Colors.green.shade100, borderRadius: BorderRadius.circular(8)),
+        child: const Text('Synced', style: TextStyle(color: Colors.green, fontSize: 12)),
+      );
+      break;
+    case _Status.syncing:
+      borderColor = Colors.blue.shade100;
+      bgColor = Colors.blue.shade50;
+      statusWidget = Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(color: Colors.blue.shade100, borderRadius: BorderRadius.circular(8)),
+        child: const Text('Syncing', style: TextStyle(color: Colors.blue, fontSize: 12)),
+      );
+      break;
+    case _Status.error:
+      borderColor = Colors.red.shade100;
+      bgColor = Colors.red.shade50;
+      statusWidget = Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(color: Colors.red.shade100, borderRadius: BorderRadius.circular(8)),
+        child: const Text('Error', style: TextStyle(color: Colors.red, fontSize: 12)),
+      );
+      break;
   }
 
-  return _SyncChangeSummary(
-    localCreated: localCreated,
-    localUpdated: localUpdated,
-    localDeleted: localDeleted,
-    remoteCreated: remoteCreated,
-    remoteUpdated: remoteUpdated,
-    remoteDeleted: remoteDeleted,
+  return Container(
+    width: double.infinity,
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(8),
+      border: Border.all(color: borderColor),
+    ),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(color: bgColor, borderRadius: BorderRadius.circular(8)),
+          child: Icon(
+            status == _Status.error ? Icons.error_outline : Icons.check_circle,
+            color: status == _Status.error ? Colors.red : Colors.green,
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Text(
+                      title,
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Flexible(child: statusWidget),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Text(subtitle, style: const TextStyle(color: Colors.black54)),
+              const SizedBox(height: 8),
+              Text('Last synced: ${last == null ? 'Never' : _formatRelative(last)}', style: const TextStyle(color: Colors.black45, fontSize: 12)),
+            ],
+          ),
+        ),
+        if (status == _Status.error)
+          const SizedBox(width: 8),
+        if (status == _Status.error)
+          OutlinedButton(onPressed: onRetry, child: const Text('Retry')),
+      ],
+    ),
   );
 }
 
-String _modeLabel(SyncRunMode mode) {
-  return switch (mode) {
-    SyncRunMode.pull => 'Import only',
-    SyncRunMode.push => 'Export only',
-    SyncRunMode.twoWay => 'Two-way sync',
-  };
+String _formatRelative(DateTime time) {
+  final diff = DateTime.now().difference(time);
+  if (diff.inSeconds < 60) return 'Just now';
+  if (diff.inMinutes < 60) return '${diff.inMinutes} minutes ago';
+  if (diff.inHours < 24) return '${diff.inHours} hours ago';
+  return '${diff.inDays} days ago';
 }
+
+List<Widget> _buildDetailCards(CalendarProbeController ctrl) {
+  final s = ctrl.summary.value;
+  final List<Widget> cards = [];
+
+  if (s != null && (s.successLog.isNotEmpty || s.errorLog.isNotEmpty)) {
+    for (var name in s.successLog) {
+      cards.add(_sourceCard(
+        title: name,
+        subtitle: 'Synced',
+        status: _Status.synced,
+        last: ctrl.lastSyncAt.value,
+        onRetry: null,
+      ));
+      cards.add(const SizedBox(height: 8));
+    }
+    for (var err in s.errorLog) {
+      cards.add(_sourceCard(
+        title: err,
+        subtitle: 'Error',
+        status: _Status.error,
+        last: ctrl.lastSyncAt.value,
+        onRetry: ctrl.isSyncing.value ? null : () => ctrl.syncNow(),
+      ));
+      cards.add(const SizedBox(height: 8));
+    }
+  } else {
+    // Fallback aggregated cards
+    cards.add(_sourceCard(
+      title: 'All Sources',
+      subtitle: '${s?.total ?? 0} sources monitored',
+      status: (ctrl.processing.value > 0) ? _Status.syncing : _Status.synced,
+      last: ctrl.lastSyncAt.value,
+      onRetry: null,
+    ));
+    cards.add(const SizedBox(height: 8));
+    cards.add(_sourceCard(
+      title: 'Successful',
+      subtitle: '${s?.success ?? ctrl.success.value} sources synced',
+      status: _Status.synced,
+      last: ctrl.lastSyncAt.value,
+      onRetry: null,
+    ));
+    cards.add(const SizedBox(height: 8));
+    cards.add(_sourceCard(
+      title: 'Errors',
+      subtitle: '${s?.failed ?? ctrl.failed.value} sources',
+      status: _Status.error,
+      last: ctrl.lastSyncAt.value,
+      onRetry: ctrl.isSyncing.value ? null : () => ctrl.syncNow(),
+    ));
+  }
+
+  return cards;
+}
+
+

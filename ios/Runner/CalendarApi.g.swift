@@ -51,8 +51,6 @@ struct PlatformCalendar {
   var isReadOnly: Bool? = nil
   var supportsEvents: Bool? = nil
   var supportsTasks: Bool? = nil
-  var isSubscription: Bool? = nil
-  var subscriptionUrl: String? = nil
 
   // swift-format-ignore: AlwaysUseLowerCamelCase
   static func fromList(_ __pigeon_list: [Any?]) -> PlatformCalendar? {
@@ -64,8 +62,6 @@ struct PlatformCalendar {
     let isReadOnly: Bool? = nilOrValue(__pigeon_list[5])
     let supportsEvents: Bool? = nilOrValue(__pigeon_list[6])
     let supportsTasks: Bool? = nilOrValue(__pigeon_list[7])
-    let isSubscription: Bool? = nilOrValue(__pigeon_list[8])
-    let subscriptionUrl: String? = nilOrValue(__pigeon_list[9])
 
     return PlatformCalendar(
       id: id,
@@ -75,9 +71,7 @@ struct PlatformCalendar {
       color: color,
       isReadOnly: isReadOnly,
       supportsEvents: supportsEvents,
-      supportsTasks: supportsTasks,
-      isSubscription: isSubscription,
-      subscriptionUrl: subscriptionUrl
+      supportsTasks: supportsTasks
     )
   }
   func toList() -> [Any?] {
@@ -90,8 +84,6 @@ struct PlatformCalendar {
       isReadOnly,
       supportsEvents,
       supportsTasks,
-      isSubscription,
-      subscriptionUrl,
     ]
   }
 }
@@ -159,57 +151,12 @@ struct PlatformItem {
   }
 }
 
-/// Generated class from Pigeon that represents data sent in messages.
-struct CalendarEventRequest {
-  var calendarId: String
-  var title: String
-  var start: Int64
-  var end: Int64
-  var notes: String? = nil
-  var uid: String
-  var eventId: String? = nil
-
-  // swift-format-ignore: AlwaysUseLowerCamelCase
-  static func fromList(_ __pigeon_list: [Any?]) -> CalendarEventRequest? {
-    let calendarId = __pigeon_list[0] as! String
-    let title = __pigeon_list[1] as! String
-    let start = __pigeon_list[2] is Int64 ? __pigeon_list[2] as! Int64 : Int64(__pigeon_list[2] as! Int32)
-    let end = __pigeon_list[3] is Int64 ? __pigeon_list[3] as! Int64 : Int64(__pigeon_list[3] as! Int32)
-    let notes: String? = nilOrValue(__pigeon_list[4])
-    let uid = __pigeon_list[5] as! String
-    let eventId: String? = nilOrValue(__pigeon_list[6])
-
-    return CalendarEventRequest(
-      calendarId: calendarId,
-      title: title,
-      start: start,
-      end: end,
-      notes: notes,
-      uid: uid,
-      eventId: eventId
-    )
-  }
-  func toList() -> [Any?] {
-    return [
-      calendarId,
-      title,
-      start,
-      end,
-      notes,
-      uid,
-      eventId,
-    ]
-  }
-}
-
 private class NativeCalendarApiCodecReader: FlutterStandardReader {
   override func readValue(ofType type: UInt8) -> Any? {
     switch type {
     case 128:
-      return CalendarEventRequest.fromList(self.readValue() as! [Any?])
-    case 129:
       return PlatformCalendar.fromList(self.readValue() as! [Any?])
-    case 130:
+    case 129:
       return PlatformItem.fromList(self.readValue() as! [Any?])
     default:
       return super.readValue(ofType: type)
@@ -219,14 +166,11 @@ private class NativeCalendarApiCodecReader: FlutterStandardReader {
 
 private class NativeCalendarApiCodecWriter: FlutterStandardWriter {
   override func writeValue(_ value: Any) {
-    if let value = value as? CalendarEventRequest {
+    if let value = value as? PlatformCalendar {
       super.writeByte(128)
       super.writeValue(value.toList())
-    } else if let value = value as? PlatformCalendar {
-      super.writeByte(129)
-      super.writeValue(value.toList())
     } else if let value = value as? PlatformItem {
-      super.writeByte(130)
+      super.writeByte(129)
       super.writeValue(value.toList())
     } else {
       super.writeValue(value)
@@ -261,12 +205,11 @@ protocol NativeCalendarApi {
   func getEvents(calendarId: String, startMs: Int64, endMs: Int64) throws -> [PlatformItem]
   /// 🚀 关键新增：在手机系统里创建一个新的日历账簿
   /// 返回系统分配的数字 ID (String 形式的 Long)
-  func createCalendar(displayName: String, accountName: String, color: Int64, completion: @escaping (Result<String?, Error>) -> Void)
+  func createCalendar(displayName: String, accountName: String, completion: @escaping (Result<String?, Error>) -> Void)
   /// 🚀 关键新增：根据 ID 删除整个日历账簿
   /// Android 上删除日历会自动联级删除该日历下的所有事件 (Events)
-  func deleteCalendar(calendarId: String, accountName: String, completion: @escaping (Result<Bool, Error>) -> Void)
+  func deleteCalendar(calendarId: String, accountName: String, accountType: String, completion: @escaping (Result<Bool, Error>) -> Void)
   func createEvent(calendarId: String, title: String, start: Int64, end: Int64, notes: String?, uid: String?, completion: @escaping (Result<String?, Error>) -> Void)
-  func createOrUpdateEvent(request: CalendarEventRequest, completion: @escaping (Result<String?, Error>) -> Void)
   /// 获取指定日历下所有事件的 ID 列表（用于检测本地删除了哪些）
   func getSystemEventIds(calendarId: String) throws -> [String]
   /// 根据 ID 删除本地事件（用于同步云端的删除操作）
@@ -340,8 +283,7 @@ class NativeCalendarApiSetup {
         let args = message as! [Any?]
         let displayNameArg = args[0] as! String
         let accountNameArg = args[1] as! String
-        let colorArg = args[2] is Int64 ? args[2] as! Int64 : Int64(args[2] as! Int32)
-        api.createCalendar(displayName: displayNameArg, accountName: accountNameArg, color: colorArg) { result in
+        api.createCalendar(displayName: displayNameArg, accountName: accountNameArg) { result in
           switch result {
           case .success(let res):
             reply(wrapResult(res))
@@ -361,7 +303,8 @@ class NativeCalendarApiSetup {
         let args = message as! [Any?]
         let calendarIdArg = args[0] as! String
         let accountNameArg = args[1] as! String
-        api.deleteCalendar(calendarId: calendarIdArg, accountName: accountNameArg) { result in
+        let accountTypeArg = args[2] as! String
+        api.deleteCalendar(calendarId: calendarIdArg, accountName: accountNameArg, accountType: accountTypeArg) { result in
           switch result {
           case .success(let res):
             reply(wrapResult(res))
@@ -394,23 +337,6 @@ class NativeCalendarApiSetup {
       }
     } else {
       createEventChannel.setMessageHandler(nil)
-    }
-    let createOrUpdateEventChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.caleesync.NativeCalendarApi.createOrUpdateEvent\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
-    if let api = api {
-      createOrUpdateEventChannel.setMessageHandler { message, reply in
-        let args = message as! [Any?]
-        let requestArg = args[0] as! CalendarEventRequest
-        api.createOrUpdateEvent(request: requestArg) { result in
-          switch result {
-          case .success(let res):
-            reply(wrapResult(res))
-          case .failure(let error):
-            reply(wrapError(error))
-          }
-        }
-      }
-    } else {
-      createOrUpdateEventChannel.setMessageHandler(nil)
     }
     /// 获取指定日历下所有事件的 ID 列表（用于检测本地删除了哪些）
     let getSystemEventIdsChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.caleesync.NativeCalendarApi.getSystemEventIds\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)

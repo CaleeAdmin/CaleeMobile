@@ -1,59 +1,37 @@
-import 'package:flutter/cupertino.dart';
-
 class IcsParser {
-  static Map<String, dynamic> parse(String icsString, String fallbackUid) {
-    // 1. 处理折叠行（注意：ICS 标准换行可能是 \r\n 或 \n）
-    final content = icsString.replaceAll(RegExp(r'\r?\n\s+'), '');
+  static Map<String, dynamic> parse(String icsString, String uid) {
+    // 1. 处理折叠行
+    final content = icsString.replaceAll(RegExp(r'\r\n\s+'), '');
 
     String extract(String key) {
-      // 修正点：增加 ^ 匹配行首, 以及 $ 匹配行尾, multiLine 设为 true
-      // 修正点：匹配 key 后面跟着 [冒号] 或 [分号...冒号]
-      final reg = RegExp('^$key(?:;[^:]*)?:(.*)\$', multiLine: true, caseSensitive: false);
+      final reg = RegExp('$key[:;](.*)', caseSensitive: false);
       final match = reg.firstMatch(content);
       if (match == null) return "";
-
-      return match.group(1)!.trim();
+      String val = match.group(1)!;
+      // 如果包含冒号（比如 TZID 后的冒号），只取冒号后的部分
+      return val.contains(':') ? val.split(':').last.trim() : val.trim();
     }
 
-    // 优先取 ICS 内部的 UID, 没有再用传进来的
-    final String internalUid = extract('UID');
-    final String finalUid = internalUid.isNotEmpty ? internalUid : fallbackUid;
+    final startMillis = _parseIcsDate(extract('DTSTART'));
+    final endMillis = _parseIcsDate(extract('DTEND'));
 
-    final startValue = extract('DTSTART');
-    final endValue = extract('DTEND');
-
-    final startMillis = _parseIcsDate(startValue);
-    final endMillis = _parseIcsDate(endValue);
-
-    if (startMillis == null) {
-      debugPrint("[WARN] Parse failed: DTSTART is empty or malformed ($startValue)");
-      return {};
-    }
+    // 🌟 如果解析不出开始时间，直接抛弃这条数据，不返回 DateTime.now()!
+    if (startMillis == null) return {};
 
     return {
-      'uid': finalUid,
-      'summary': _decodeIcsText(extract('SUMMARY').isEmpty ? "Untitled event" : extract('SUMMARY')),
-      'description': _decodeIcsText(extract('DESCRIPTION')),
+      'uid': uid,
+      'summary': extract('SUMMARY').isEmpty ? "无标题事件" : extract('SUMMARY'),
+      'description': extract('DESCRIPTION').replaceAll('\\n', '\n'),
       'dtstart': startMillis,
-      'dtend': endMillis ?? (startMillis + 3600000),
-      'dtstamp': extract('DTSTAMP'), // 建议存一下这个, 同步对比有用
+      'dtend': endMillis ?? (startMillis + 3600000), // 结束时间默认加1小时
     };
-  }
-
-// 辅助方法：处理 ICS 转义字符
-  static String _decodeIcsText(String input) {
-    return input
-        .replaceAll(r'\,', ',')
-        .replaceAll(r'\;', ';')
-        .replaceAll(r'\n', '\n')
-        .replaceAll(r'\\', r'\');
   }
 
   static int? _parseIcsDate(String dateStr) {
     try {
       if (dateStr.isEmpty) return null;
 
-      // 过滤掉非数字字符, 只保留数字和 T
+      // 过滤掉非数字字符，只保留数字和 T
       final compact = dateStr.replaceAll(RegExp(r'[^0-9T]'), '');
       if (compact.length < 8) return null;
 
