@@ -51,6 +51,18 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
             .build()
     }
 
+    private fun shouldUseSyncAdapterForEvents(calendarId: String): Boolean {
+        return getCalendarAccount(calendarId)?.type == "com.viso.caleesync"
+    }
+
+    private fun buildEventWriteUri(baseUri: Uri, calendarId: String): Uri {
+        return if (shouldUseSyncAdapterForEvents(calendarId)) {
+            buildSyncAdapterEventUri(baseUri, calendarId)
+        } else {
+            baseUri
+        }
+    }
+
     companion object {
         private val CALENDAR_PROJECTION = arrayOf(
             CalendarContract.Calendars._ID,
@@ -312,7 +324,6 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
             CalendarContract.Events.DURATION,
             CalendarContract.Events.ALL_DAY,
             CalendarContract.Events.UID_2445,
-            CalendarContract.Events._SYNC_ID,
             CalendarContract.Events.SYNC_DATA1,
             CalendarContract.Events.EVENT_TIMEZONE
         )
@@ -328,7 +339,7 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
                 val id = cursor.getLong(cursor.getColumnIndexOrThrow(CalendarContract.Events._ID)).toString()
 
                 // 统一 UID 来源，保证每次同步读取到同一个值。
-                // 优先级：UID_2445 -> _SYNC_ID -> SYNC_DATA1 -> local_<id>
+                // 优先级：UID_2445 -> SYNC_DATA1 -> local_<id>
                 val uid = resolveStableUid(cursor, id)
 
                 val startTime = cursor.getLong(cursor.getColumnIndexOrThrow(CalendarContract.Events.DTSTART))
@@ -358,7 +369,6 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
     private fun resolveStableUid(cursor: android.database.Cursor, id: String): String {
         val uidCandidates = listOf(
             CalendarContract.Events.UID_2445,
-            CalendarContract.Events._SYNC_ID,
             CalendarContract.Events.SYNC_DATA1
         )
 
@@ -431,13 +441,16 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
                 }
             }
 
-            // 2. 构建带有同步权限的 URI
-            // 注意：ACCOUNT_TYPE 必须与你创建日历时写死的一致 (建议统一用 com.viso.caleesync)
-            val syncUri = CalendarContract.Events.CONTENT_URI.buildUpon()
-                .appendQueryParameter(CalendarContract.CALLER_IS_SYNCADAPTER, "true")
-                .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_NAME, foundAccountName)
-                .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_TYPE, "com.viso.caleesync")
-                .build()
+            // 2. 仅对本应用账号类型使用 sync-adapter URI，其余账号走普通写入。
+            val eventInsertUri = if (shouldUseSyncAdapterForEvents(calendarId)) {
+                CalendarContract.Events.CONTENT_URI.buildUpon()
+                    .appendQueryParameter(CalendarContract.CALLER_IS_SYNCADAPTER, "true")
+                    .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_NAME, foundAccountName)
+                    .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_TYPE, "com.viso.caleesync")
+                    .build()
+            } else {
+                CalendarContract.Events.CONTENT_URI
+            }
 
             val values = ContentValues().apply {
                 put(CalendarContract.Events.DTSTART, start)
@@ -447,10 +460,9 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
                 put(CalendarContract.Events.CALENDAR_ID, calendarId.toLong())
                 put(CalendarContract.Events.EVENT_TIMEZONE, TimeZone.getDefault().id)
 
-                // 将 UID 同时写入多个字段，兼容不同 ROM/Provider 的读取行为。
+                // 将 UID 写入安全字段，兼容不同 ROM/Provider 的读取行为。
                 uid?.let {
                     put(CalendarContract.Events.UID_2445, it)
-                    put(CalendarContract.Events._SYNC_ID, it)
                     put(CalendarContract.Events.SYNC_DATA1, it)
                 }
 
@@ -460,7 +472,7 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
             }
 
             // 3. 执行插入
-            val resultUri = context.contentResolver.insert(syncUri, values)
+            val resultUri = context.contentResolver.insert(eventInsertUri, values)
             val newEventId = resultUri?.lastPathSegment
 
             if (newEventId != null) {
@@ -495,7 +507,6 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
                 putAll(baseValues)
                 // UID 需要稳定写入，确保后续 getEvents 始终能返回同一 UID。
                 put(CalendarContract.Events.UID_2445, request.uid)
-                put(CalendarContract.Events._SYNC_ID, request.uid)
                 put(CalendarContract.Events.SYNC_DATA1, request.uid)
             }
 
@@ -505,17 +516,11 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
                     CalendarContract.Events.CONTENT_URI,
                     request.eventId.toLong()
                 )
-                val syncAdapterUpdateUri = buildSyncAdapterEventUri(eventBaseUri, request.calendarId)
+                val syncAdapterUpdateUri = buildEventWriteUri(eventBaseUri, request.calendarId)
                 val rows = try {
                     contentResolver.update(syncAdapterUpdateUri, values, null, null)
                 } catch (iae: IllegalArgumentException) {
-                    // 非 sync-adapter URI 上写入 _SYNC_ID 会被 Provider 拒绝，回退到普通更新。
-                    val fallbackValues = ContentValues().apply {
-                        putAll(baseValues)
-                        put(CalendarContract.Events.UID_2445, request.uid)
-                        put(CalendarContract.Events.SYNC_DATA1, request.uid)
-                    }
-                    contentResolver.update(eventBaseUri, fallbackValues, null, null)
+                    contentResolver.update(eventBaseUri, values, null, null)
                 }
 
                 if (rows > 0) {
@@ -526,17 +531,12 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
                 }
             } else {
                 // --- 执行插入 INSERT ---
-                val syncAdapterUri = buildSyncAdapterEventUri(CalendarContract.Events.CONTENT_URI, request.calendarId)
+                val syncAdapterUri = buildEventWriteUri(CalendarContract.Events.CONTENT_URI, request.calendarId)
                 var uri = contentResolver.insert(syncAdapterUri, values)
 
                 if (uri == null) {
                     // 部分 ROM/Provider 对 sync-adapter 参数支持不稳定，回退到普通写入。
-                    val fallbackValues = ContentValues().apply {
-                        putAll(baseValues)
-                        put(CalendarContract.Events.UID_2445, request.uid)
-                        put(CalendarContract.Events.SYNC_DATA1, request.uid)
-                    }
-                    uri = contentResolver.insert(CalendarContract.Events.CONTENT_URI, fallbackValues)
+                    uri = contentResolver.insert(CalendarContract.Events.CONTENT_URI, values)
                 }
 
                 if (uri != null) {
