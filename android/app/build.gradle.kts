@@ -8,17 +8,17 @@ plugins {
 }
 
 // ====== Custom Version Config ======
-val versionStage = "RC"
+val versionStage = "Beta"
 val major = 0
-val minor = 1
-val patch = 4
+val minor = 0
+val patch = 1
 
 // e.g. "RC-v0.1.4"
-val caleeVersionName = "$versionStage-v$major.$minor.$patch"
+val caleeSyncVersionName = "$versionStage-v$major.$minor.$patch"
 
 // Play Store requires increasing integers
 // e.g. 0.1.4 -> 0*10000 + 1*100 + 4 = 104
-val caleeVersionCode = major * 10000 + minor * 100 + patch
+val caleeSyncVersionCode = major * 10000 + minor * 100 + patch
 // ===================================
 
 val isReleaseBuildRequested =
@@ -52,8 +52,8 @@ android {
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
-        versionCode = caleeVersionCode
-        versionName = caleeVersionName
+        versionCode = caleeSyncVersionCode
+        versionName = caleeSyncVersionName
     }
 
     signingConfigs {
