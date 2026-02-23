@@ -324,7 +324,6 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
             CalendarContract.Events.DURATION,
             CalendarContract.Events.ALL_DAY,
             CalendarContract.Events.UID_2445,
-            CalendarContract.Events.SYNC_DATA1,
             CalendarContract.Events.EVENT_TIMEZONE
         )
 
@@ -339,7 +338,7 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
                 val id = cursor.getLong(cursor.getColumnIndexOrThrow(CalendarContract.Events._ID)).toString()
 
                 // 统一 UID 来源，保证每次同步读取到同一个值。
-                // 优先级：UID_2445 -> SYNC_DATA1 -> local_<id>
+                // 优先级：UID_2445 -> local_<id>
                 val uid = resolveStableUid(cursor, id)
 
                 val startTime = cursor.getLong(cursor.getColumnIndexOrThrow(CalendarContract.Events.DTSTART))
@@ -367,10 +366,7 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
     }
 
     private fun resolveStableUid(cursor: android.database.Cursor, id: String): String {
-        val uidCandidates = listOf(
-            CalendarContract.Events.UID_2445,
-            CalendarContract.Events.SYNC_DATA1
-        )
+        val uidCandidates = listOf(CalendarContract.Events.UID_2445)
 
         for (column in uidCandidates) {
             val index = cursor.getColumnIndex(column)
@@ -463,7 +459,6 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
                 // 将 UID 写入安全字段，兼容不同 ROM/Provider 的读取行为。
                 uid?.let {
                     put(CalendarContract.Events.UID_2445, it)
-                    put(CalendarContract.Events.SYNC_DATA1, it)
                 }
 
                 // 设置状态和忙闲，确保在系统日历 App 中可见
@@ -507,7 +502,6 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
                 putAll(baseValues)
                 // UID 需要稳定写入，确保后续 getEvents 始终能返回同一 UID。
                 put(CalendarContract.Events.UID_2445, request.uid)
-                put(CalendarContract.Events.SYNC_DATA1, request.uid)
             }
 
             if (request.eventId != null && request.eventId.isNotEmpty()) {
