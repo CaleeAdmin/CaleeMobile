@@ -112,25 +112,6 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> {
                   const Text('More frequent syncing may impact battery life on mobile devices', style: TextStyle(color: Colors.black54, fontSize: 12)),
                   const SizedBox(height: 16),
 
-                  const Text('Tasks Sync Interval', style: TextStyle(fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 8),
-                  DropdownButtonFormField<int>(
-                    value: _tasksInterval,
-                    items: _intervalOptions.map((opt) {
-                      return DropdownMenuItem<int>(value: opt['minutes'] as int, child: Text(opt['label'] as String));
-                    }).toList(),
-                    onChanged: (v) {
-                      if (v != null) setState(() => _tasksInterval = v);
-                    },
-                    decoration: InputDecoration(
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text('More frequent syncing may impact battery life on mobile devices', style: TextStyle(color: Colors.black54, fontSize: 12)),
-                  const SizedBox(height: 16),
-
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
