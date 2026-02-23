@@ -39,7 +39,7 @@ class Eventparsedutils {
     required bool isSubscription,
   }) async {
     // 1. 内部配置与资源准备
-    const String baseUrl = "https://nc-dev.ywpl.com.au";
+    final String baseUrl = _activeServerBase();
     final String loginName = MMKVUtils.instance.getString(
         AppConstant.loginNameKey) ?? '';
     final String password = MMKVUtils.instance.getString(
@@ -111,5 +111,14 @@ class Eventparsedutils {
     } finally {
       client.close(); // 释放连接资源
     }
+  }
+
+  static String _activeServerBase() {
+    final String saved = MMKVUtils.instance.getString(AppConstant.serverKey) ?? AppConstant.caleeServer;
+    String normalized = saved.trim();
+    if (!normalized.startsWith('http://') && !normalized.startsWith('https://')) {
+      normalized = 'https://$normalized';
+    }
+    return normalized.endsWith('/') ? normalized.substring(0, normalized.length - 1) : normalized;
   }
 }

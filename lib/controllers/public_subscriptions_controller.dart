@@ -15,9 +15,17 @@ class PublicSubscriptionsController extends GetxController {
   @override
   void onInit() {
     super.onInit();
-    final base = AppConstant.caleeServer;
-    _service = PublicSubscriptionsService(baseUrl: "https://portal.calee.com.au");
+    final String server = MMKVUtils.instance.getString(AppConstant.serverKey) ?? AppConstant.caleeServer;
+    _service = PublicSubscriptionsService(baseUrl: _normalizeServer(server));
     load();
+  }
+
+  String _normalizeServer(String base) {
+    var normalized = base.trim();
+    if (!normalized.startsWith('http://') && !normalized.startsWith('https://')) {
+      normalized = 'https://$normalized';
+    }
+    return normalized.endsWith('/') ? normalized.substring(0, normalized.length - 1) : normalized;
   }
 
   Future<void> load() async {
@@ -25,9 +33,9 @@ class PublicSubscriptionsController extends GetxController {
       isLoading.value = true;
       error.value = '';
       categories.clear();
-      // final String username = MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? '';
-      // final String appPassword = MMKVUtils.instance.getString(AppConstant.appPasswordKey) ?? '';
-      final List<PublicSubscriptionCategory> result = await _service.fetch(username: "test", appPassword: "Ex75A-3XQNN-yGdzP-dM37J-azidb");
+      final String username = MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? '';
+      final String appPassword = MMKVUtils.instance.getString(AppConstant.appPasswordKey) ?? '';
+      final List<PublicSubscriptionCategory> result = await _service.fetch(username: username, appPassword: appPassword);
       categories.assignAll(result);
     } catch (e) {
       error.value = e.toString();

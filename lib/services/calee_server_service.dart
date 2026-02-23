@@ -14,6 +14,9 @@ class CaleeServerService {
   final http.Client _client = http.Client();
   final DatabaseHelper _dbHelper = DatabaseHelper.instance;
 
+  String get _activeServerBase => _normalizeServer(
+      MMKVUtils.instance.getString(AppConstant.serverKey) ?? AppConstant.caleeServer);
+
   /// 1. 获取并解析云端日历 (对应 remote_collections)
   Future<List<Map<String, dynamic>>> scanRemoteCalendars({
     required String serverUrl,
@@ -225,14 +228,13 @@ class CaleeServerService {
   }
 
   /// 2. 获取并解析云端条目 (对应 sync_items)
-  final String baseUrl = "https://nc-dev.ywpl.com.au";
 
   /// 核心方法：统一获取事件（适配普通与Subscribed calendar）
   Future<UnifiedEventsSnapshot> fetchUnifiedEventsSnapshot({
     required String calendarPath,
     required bool isSubscription,
   }) async {
-    final String fullUrl = "$baseUrl$calendarPath${isSubscription ? '?export' : ''}";
+    final String fullUrl = "$_activeServerBase$calendarPath${isSubscription ? '?export' : ''}";
     final Map<String, String> headers = _getAuthHeaders();
 
     try {
@@ -398,7 +400,7 @@ class CaleeServerService {
     required String calendarId,
     required String color, // 格式应为 #RRGGBB 或 #RRGGBBAA
   }) async {
-    final server = _normalizeServer(AppConstant.caleeServer);
+    final server = _activeServerBase;
     final password = MMKVUtils.instance.getString(AppConstant.appPasswordKey);
 
     final encodedId = Uri.encodeComponent(calendarId);
@@ -483,7 +485,7 @@ class CaleeServerService {
     required String userId,
     String? targetEventPath,
   }) async {
-    final baseUrl = "https://nc-dev.ywpl.com.au";
+    final baseUrl = _activeServerBase;
     final password = MMKVUtils.instance.getString(AppConstant.appPasswordKey);
 
     // 严谨拼接 URL
@@ -532,7 +534,7 @@ class CaleeServerService {
     required String eventPath,
     required String authHeader,
   }) async {
-    final url = "https://nc-dev.ywpl.com.au$eventPath";
+    final url = "$_activeServerBase$eventPath";
 
     try {
       final response = await client.get(
@@ -562,7 +564,7 @@ class CaleeServerService {
   }) async {
     final String userId = MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? "";
     final String password = MMKVUtils.instance.getString(AppConstant.appPasswordKey) ?? "";
-    final baseUrl = "https://nc-dev.ywpl.com.au";
+    final baseUrl = _activeServerBase;
     final url = "$baseUrl${path.startsWith('/') ? path : '/$path'}";
 
     print("[Calee] Preparing to upload event to: $url");
@@ -602,7 +604,7 @@ class CaleeServerService {
 
     // 建议：确保 eventPath 以 / 开头, 避免 URL 拼接Error
     final String cleanPath = eventPath.startsWith('/') ? eventPath : '/$eventPath';
-    final url = "https://nc-dev.ywpl.com.au$cleanPath";
+    final url = "$_activeServerBase$cleanPath";
 
     try {
       final response = await http.delete(
@@ -633,7 +635,7 @@ class CaleeServerService {
     required String userId,
     required String calendarPath,
   }) async {
-    final server = _normalizeServer(AppConstant.caleeServer);
+    final server = _activeServerBase;
     final password = MMKVUtils.instance.getString(AppConstant.appPasswordKey);
 
     if (password == null) return false;
@@ -675,7 +677,7 @@ class CaleeServerService {
     required String calendarPath,
     required String newName,
   }) async {
-    final server = _normalizeServer(AppConstant.caleeServer);
+    final server = _activeServerBase;
     final password = MMKVUtils.instance.getString(AppConstant.appPasswordKey);
     final uri = Uri.parse('$server$calendarPath');
 
@@ -732,7 +734,7 @@ class CaleeServerService {
     required String calendarId, // 这里的 ID 建议用 sub_时间戳
     required String icsUrl,     // 外部公共 ICS 链接
   }) async {
-    final server = _normalizeServer(AppConstant.caleeServer);
+    final server = _activeServerBase;
     final password = MMKVUtils.instance.getString(AppConstant.appPasswordKey);
 
     // 1. 构建云端路径

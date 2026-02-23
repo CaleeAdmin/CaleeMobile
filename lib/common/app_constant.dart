@@ -3,7 +3,7 @@ class AppConstant {
   AppConstant._();
 
   /// Calee 服务器地址
-  static const String caleeServer = 'nc-dev.ywpl.com.au';
+  static const String caleeServer = 'portal.calee.com.au';
 
   /// MMKV 存储 Key
   static const String serverKey = 'calee_server';

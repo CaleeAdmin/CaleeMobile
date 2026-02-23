@@ -15,6 +15,15 @@ import '../services/calee_server_service.dart';
 import 'database_helper.dart';
 
 class SyncRepository {
+
+  String get _activeServerBase {
+    final String saved = MMKVUtils.instance.getString(AppConstant.serverKey) ?? AppConstant.caleeServer;
+    String normalized = saved.trim();
+    if (!normalized.startsWith('http://') && !normalized.startsWith('https://')) {
+      normalized = 'https://$normalized';
+    }
+    return normalized.endsWith('/') ? normalized.substring(0, normalized.length - 1) : normalized;
+  }
   final NativeCalendarApi _nativeApi = NativeCalendarApi();
   final DatabaseHelper _dbHelper = DatabaseHelper.instance;
 
@@ -680,7 +689,7 @@ class SyncRepository {
 
       // 3) 重扫远端并落库（不创建本地日历，不创建 binding）。
       await CaleeServerService().scanRemoteCalendars(
-        serverUrl: AppConstant.caleeServer,
+        serverUrl: _activeServerBase,
         userId: userId,
       );
 
@@ -753,7 +762,7 @@ class SyncRepository {
     if (remotePath != null) {
       // 通过统一远端扫描流程落库, 再补充来源 URL。
       await CaleeServerService().scanRemoteCalendars(
-        serverUrl: AppConstant.caleeServer,
+        serverUrl: _activeServerBase,
         userId: userId,
       );
 
