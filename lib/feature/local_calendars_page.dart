@@ -20,7 +20,7 @@ class LocalCalendarsPage extends StatelessWidget {
           onPressed: () => Navigator.maybePop(context),
         ),
         title: const Text(
-          'Connect to local Calendar',
+          'Link to Device Calendar',
           style: TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
         ),
         elevation: 0,
@@ -159,7 +159,7 @@ class _LocalCalendarCard extends StatelessWidget {
                         const SizedBox(width: 8),
                         calendar.isConnected
                             ? const Text(
-                                'Connected',
+                                'Linked',
                                 style: TextStyle(
                                   fontSize: 14,
                                   fontWeight: FontWeight.w600,
@@ -196,7 +196,7 @@ class _LocalCalendarCard extends StatelessWidget {
                                           valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                                         ),
                                       )
-                                    : const Text('Connect'),
+                                    : const Text('Link'),
                               ),
                       ],
                     ),
