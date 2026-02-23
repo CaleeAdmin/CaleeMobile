@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import '../common/utils/mmkv_utils.dart';
 import '../common/app_constant.dart';
 
@@ -22,11 +23,19 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> {
   int _tasksInterval = 30;
   bool _autoSyncEnabled = true;
   bool _periodicSyncEnabled = false;
+  late final Future<String> _appVersionLabelFuture;
 
   @override
   void initState() {
     super.initState();
+    _appVersionLabelFuture = _loadAppVersionLabel();
     _loadSettings();
+  }
+
+
+  Future<String> _loadAppVersionLabel() async {
+    final packageInfo = await PackageInfo.fromPlatform();
+    return 'Version ${packageInfo.version} (${packageInfo.buildNumber})';
   }
 
   void _loadSettings() {
@@ -136,12 +145,29 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> {
               padding: const EdgeInsets.all(16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                children: const [
-                  Text('About Sync', style: TextStyle(fontWeight: FontWeight.w600)),
-                  SizedBox(height: 8),
-                  Text(
+                children: [
+                  const Text('About Sync', style: TextStyle(fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 8),
+                  const Text(
                     'Calee automatically synchronizes your calendars and tasks with Google, iCloud, Outlook, and other connected services. When "Two-way sync" is enabled, changes made in either location will be synced bidirectionally. Otherwise, data is read-only in the respective location to prevent conflicts.',
                     style: TextStyle(color: Colors.black54),
+                  ),
+                  const SizedBox(height: 12),
+                  FutureBuilder<String>(
+                    future: _appVersionLabelFuture,
+                    builder: (context, snapshot) {
+                      if (!snapshot.hasData) {
+                        return const SizedBox.shrink();
+                      }
+
+                      return Text(
+                        snapshot.data!,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Colors.black45,
+                        ),
+                      );
+                    },
                   ),
                 ],
               ),
