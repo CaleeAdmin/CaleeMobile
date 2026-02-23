@@ -24,6 +24,7 @@ void main() async {
 
   // 初始化 MMKV
   await MMKVUtils.instance.init();
+  _seedDefaultSyncSettings();
 
   // 2. 注入 Repository
   // 使用 permanent: true 确保它在整个 App 运行期间不被销毁
@@ -37,6 +38,12 @@ void main() async {
   await appController.init();
 
   runApp(const CaleeApp());
+}
+
+void _seedDefaultSyncSettings() {
+  if (!MMKVUtils.instance.contains(AppConstant.autoSyncEnabledKey)) {
+    MMKVUtils.instance.setBool(AppConstant.autoSyncEnabledKey, true);
+  }
 }
 
 class CaleeApp extends StatelessWidget {
