@@ -13,6 +13,9 @@ class AppConstant {
   /// 同步策略开关：是否允许远端日历自动落地到系统本地日历。
   /// 默认关闭，避免未授权的 remote -> local 初始化。
   static const String autoCreateLocalFromRemoteKey = 'auto_create_local_from_remote';
+  static const String autoSyncEnabledKey = 'auto_sync_enabled';
+  static const String periodicSyncEnabledKey = 'periodic_sync_enabled';
+  static const String syncIntervalCalendarKey = 'sync_interval_calendar';
 
   /// Per-binding dangerous override key prefix.
   ///

@@ -6,7 +6,7 @@ import 'package:get/get.dart';
 import 'dart:async';
 
 import '../services/calee_auth_service.dart';
-import '../sync/SyncEngine.dart';
+import '../sync/sync_trigger_orchestrator.dart';
 import '../data/database_helper.dart';
 import '../data/sync_repository.dart';
 import '../services/calee_server_service.dart';
@@ -79,7 +79,6 @@ class CalendarPageController extends GetxController {
   final SyncRepository _repo = Get.find<SyncRepository>();
   final CaleeServerService _nc = CaleeServerService();
   final NativeCalendarApi _nativeApi = NativeCalendarApi();
-  final engine = SyncEngine();
   final CaleeAuthService _authService = CaleeAuthService(serverBaseUrl: AppConstant.caleeServer);
 
   // response式变量
@@ -90,6 +89,12 @@ class CalendarPageController extends GetxController {
   var togglingCalendarIds = <String>{}.obs;
   var subscribingUrls = <String>{}.obs;
   Future<void>? _refreshFuture;
+
+  void _notifyMeaningfulChange() {
+    if (Get.isRegistered<SyncTriggerOrchestrator>()) {
+      Get.find<SyncTriggerOrchestrator>().notifyMeaningfulForegroundChange();
+    }
+  }
 
   @override
   void onInit() {
@@ -159,6 +164,8 @@ class CalendarPageController extends GetxController {
         Get.snackbar('Sync failed', syncMessage);
       }
       await refreshDashboard(includeEventCounts: false);
+      // Enable flow already triggers a force sync in repository; avoid scheduling
+      // an additional debounced foreground sync for the same user action.
     } catch (e) {
       print("[ERROR] Failed to toggle calendar state: $e");
       Get.snackbar('Connection failed', 'An exception occurred while connecting the calendar. Please try again later');
@@ -197,6 +204,7 @@ class CalendarPageController extends GetxController {
     );
 
     await refreshDashboard(includeEventCounts: false);
+    _notifyMeaningfulChange();
   }
 
   Future<void> setAllowMassDeletionDangerous(CalendarDisplayItem item, bool allow) async {
@@ -365,6 +373,7 @@ class CalendarPageController extends GetxController {
       await _repo.performAbsoluteDelete(localId: resolvedLocalId, remotePath: resolvedRemotePath);
       await refreshDashboard(includeEventCounts: false);
       unawaited(refreshDashboard());
+      _notifyMeaningfulChange();
     } catch (e) {
       print('[ERROR] Dashboard failed to delete calendar: $e');
       Get.snackbar('Error', 'Failed to delete calendar');
@@ -381,6 +390,7 @@ class CalendarPageController extends GetxController {
       await _repo.renameCalendar(localId: localId, remotePath: remotePath, newName: newName);
       await refreshDashboard(includeEventCounts: false);
       unawaited(refreshDashboard());
+      _notifyMeaningfulChange();
     } catch (e) {
       print('[ERROR] Dashboard rename failed: $e');
       Get.snackbar('Error', 'Rename failed');
@@ -404,6 +414,7 @@ class CalendarPageController extends GetxController {
       if (ok) {
         await refreshDashboard(includeEventCounts: false);
         unawaited(refreshDashboard());
+        _notifyMeaningfulChange();
         return true;
       } else {
         Get.snackbar('Error', 'Failed to create calendar');
@@ -439,6 +450,7 @@ class CalendarPageController extends GetxController {
       if (ok) {
         await refreshDashboard(includeEventCounts: false);
         unawaited(refreshDashboard());
+        _notifyMeaningfulChange();
         // 刷新已订阅列表（如果 probe controller 已注册）
         if (Get.isRegistered<CalendarProbeController>()) {
           await Get.find<CalendarProbeController>().fetchSubscribedCalendars();

@@ -1,10 +1,10 @@
 import 'package:get/get.dart';
-import '../sync/SyncEngine.dart';
 import '../entity/SyncSummary.dart';
 import 'CalendarPageController.dart';
 import '../data/sync_repository.dart';
 import '../data/sync_run_store.dart';
 import '../entity/sync_run_record.dart';
+import '../sync/sync_trigger_orchestrator.dart';
 
 class CalendarProbeController extends GetxController {
   final RxBool isSyncing = false.obs;
@@ -90,8 +90,7 @@ class CalendarProbeController extends GetxController {
     processing.value = 0;
 
     try {
-      final engine = SyncEngine();
-      final SyncSummary result = await engine.executeFullSync(onProgress: (s) {
+      final SyncSummary result = await Get.find<SyncTriggerOrchestrator>().triggerManual(onProgress: (s) {
         // 更新进度到 Rx 变量（UI 可订阅）
         success.value = s.success;
         failed.value = s.failed;
