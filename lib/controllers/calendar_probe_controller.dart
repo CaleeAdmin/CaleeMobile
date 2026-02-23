@@ -1,15 +1,17 @@
 import 'package:get/get.dart';
-import '../data/SyncEngine.dart';
 import '../entity/SyncSummary.dart';
 import 'CalendarPageController.dart';
 import '../data/sync_repository.dart';
+import '../data/sync_run_store.dart';
+import '../entity/sync_run_record.dart';
+import '../sync/sync_trigger_orchestrator.dart';
 
 class CalendarProbeController extends GetxController {
   final RxBool isSyncing = false.obs;
   final RxInt success = 0.obs;
   final RxInt failed = 0.obs;
   final RxInt processing = 0.obs;
-  /// 当前选中的页面索引（0: Dashboard, 1: Calendars, 2: TaskLists, 3: SyncSettings）
+  /// 当前选中的页面索引（0: Dashboard, 1: Calendars, 2: SyncSettings）
   final RxInt selectedIndex = 1.obs;
 
   /// 设置选中的页面索引
@@ -18,23 +20,62 @@ class CalendarProbeController extends GetxController {
   }
   /// 上次同步时间
   final Rxn<DateTime> lastSyncAt = Rxn<DateTime>();
-  /// 当前同步模式描述
-  final RxString syncMode = 'Wi-Fi only'.obs;
   /// 当前同步摘要
   final Rxn<SyncSummary> summary = Rxn<SyncSummary>();
-  /// 订阅日历列表（含 event_count 等字段），由仓库提供
+  /// Subscribed calendar列表（含 event_count 等字段），由仓库提供
   final RxList<Map<String, dynamic>> subscribedCalendars = <Map<String, dynamic>>[].obs;
 
   final SyncRepository _repo = SyncRepository();
+  final SyncRunStore _runStore = SyncRunStore();
+  final RxList<SyncRunRecord> syncRuns = <SyncRunRecord>[].obs;
 
-  /// 获取已订阅日历及对应事件数
+
+  @override
+  void onInit() {
+    super.onInit();
+    loadRecentRuns();
+  }
+
+  Future<void> loadRecentRuns() async {
+    final runs = await _runStore.loadRuns(limit: 20);
+    syncRuns.assignAll(runs);
+    _syncOverviewFromLatestRun(runs);
+  }
+
+  void _syncOverviewFromLatestRun(List<SyncRunRecord> runs) {
+    if (runs.isEmpty || isSyncing.value) return;
+
+    final SyncRunRecord latestRun = runs.first;
+    int synced = 0;
+    int failures = 0;
+
+    for (final binding in latestRun.bindings) {
+      switch (binding.resultStatus) {
+        case SyncBindingResultStatus.success:
+          synced++;
+          break;
+        case SyncBindingResultStatus.partial:
+        case SyncBindingResultStatus.failed:
+        case SyncBindingResultStatus.abortedBySafety:
+          failures++;
+          break;
+      }
+    }
+
+    success.value = synced;
+    failed.value = failures;
+    processing.value = 0;
+    lastSyncAt.value = latestRun.endTime ?? latestRun.startTime;
+  }
+
+  /// 获取已Subscribed calendar及对应事件数
   Future<void> fetchSubscribedCalendars() async {
     try {
       isSyncing.value = true; // reuse flag as loading indicator
       final List<Map<String, dynamic>> rows = await _repo.getSubscribedCalendarsWithCount();
       subscribedCalendars.assignAll(rows);
     } catch (e) {
-      print('❌ fetchSubscribedCalendars failed: $e');
+      print('[ERROR] fetchSubscribedCalendars failed: $e');
     } finally {
       isSyncing.value = false;
     }
@@ -49,8 +90,7 @@ class CalendarProbeController extends GetxController {
     processing.value = 0;
 
     try {
-      final engine = SyncEngine();
-      final SyncSummary result = await engine.executeFullSync(onProgress: (s) {
+      final SyncSummary result = await Get.find<SyncTriggerOrchestrator>().triggerManual(onProgress: (s) {
         // 更新进度到 Rx 变量（UI 可订阅）
         success.value = s.success;
         failed.value = s.failed;
@@ -69,13 +109,13 @@ class CalendarProbeController extends GetxController {
       }
       // 记录上次同步时间
       lastSyncAt.value = DateTime.now();
+      await loadRecentRuns();
     } catch (e) {
-      // 可在此处记录错误或展示提示
+      // 可在此处记录Error或展示提示
       rethrow;
     } finally {
       isSyncing.value = false;
     }
   }
 }
-
 

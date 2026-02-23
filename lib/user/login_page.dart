@@ -3,10 +3,12 @@ import 'package:caleesync/common/route_constant.dart';
 import 'package:caleesync/common/utils/mmkv_utils.dart';
 import 'package:caleesync/controllers/app_controller.dart';
 import 'package:caleesync/controllers/auth_controller.dart';
-import 'package:caleesync/models/nextcloud_auth_state.dart';
+import 'package:caleesync/models/auth_state.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 /// Login page with Nextcloud Login Flow v2 integration.
 class LoginPage extends StatefulWidget {
@@ -20,8 +22,11 @@ class _LoginPageState extends State<LoginPage> {
   final _formKey = GlobalKey<FormState>();
   final _accountController = TextEditingController();
   final _passwordController = TextEditingController();
+  bool _obscurePassword = true;
   bool _agree = false;
+  bool _isSubmittingLogin = false;
   Worker? _authStateWorker;
+  late final Future<String> _appVersionLabelFuture;
 
   @override
   void dispose() {
@@ -34,16 +39,22 @@ class _LoginPageState extends State<LoginPage> {
   @override
   void initState() {
     super.initState();
+    _appVersionLabelFuture = _loadAppVersionLabel();
 
     // 获取AuthController实例
     final authController = Get.find<AuthController>();
 
     // 监听认证状态变化
-    _authStateWorker = ever(authController.authStateRx, (NextcloudAuthState state) {
+    _authStateWorker = ever(authController.authStateRx, (AuthState state) {
       // 检查页面是否还挂载
       if (!mounted) return;
 
       if (state.isAuthenticated) {
+        if (_isSubmittingLogin) {
+          setState(() {
+            _isSubmittingLogin = false;
+          });
+        }
         // 登录成功
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -55,8 +66,13 @@ class _LoginPageState extends State<LoginPage> {
         _saveCredentialsAndNavigate(state);
       }
 
-      if (state.hasError && state.status == NextcloudAuthStatus.error) {
-        // 显示登录失败错误信息
+      if (state.hasError && state.status == AuthStatus.error) {
+        if (_isSubmittingLogin) {
+          setState(() {
+            _isSubmittingLogin = false;
+          });
+        }
+        // 显示登录失败Error信息
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(state.errorMessage ?? 'Login failed'),
@@ -68,8 +84,13 @@ class _LoginPageState extends State<LoginPage> {
     });
   }
 
+  Future<String> _loadAppVersionLabel() async {
+    final packageInfo = await PackageInfo.fromPlatform();
+    return 'Version ${packageInfo.version} (${packageInfo.buildNumber})';
+  }
+
   /// 保存登录凭据并跳转到主页
-  Future<void> _saveCredentialsAndNavigate(NextcloudAuthState state) async {
+  Future<void> _saveCredentialsAndNavigate(AuthState state) async {
     if (state.serverUrl == null ||
         state.loginName == null ||
         state.appPassword == null) {
@@ -78,19 +99,19 @@ class _LoginPageState extends State<LoginPage> {
 
     try {
       // 保存登录凭据到 MMKV
-      MMKVUtils.instance.setString(AppConstant.Server, state.serverUrl!);
-      MMKVUtils.instance.setString(AppConstant.loginName, state.loginName!);
-      MMKVUtils.instance.setString(AppConstant.password, state.appPassword!);
+      MMKVUtils.instance.setString(AppConstant.serverKey, state.serverUrl!);
+      MMKVUtils.instance.setString(AppConstant.loginNameKey, state.loginName!);
+      MMKVUtils.instance.setString(AppConstant.appPasswordKey, state.appPassword!);
 
       // 使用GetX的AppController处理登录成功
       final appController = Get.find<AppController>();
       appController.onLoginSuccess();
     } catch (e) {
-      // 如果保存失败，显示错误信息
+      // 如果保存失败，显示Error信息
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('保存用户数据失败: $e'),
+            content: Text('Failed to save user data: $e'),
             backgroundColor: Colors.red,
             duration: const Duration(seconds: 3),
           ),
@@ -108,24 +129,53 @@ class _LoginPageState extends State<LoginPage> {
       return;
     }
 
+    if (_isSubmittingLogin) {
+      return;
+    }
+
     // 使用用户名密码登录
     final loginName = _accountController.text.trim();
     final password = _passwordController.text.trim();
 
     final authController = Get.find<AuthController>();
+    setState(() {
+      _isSubmittingLogin = true;
+    });
     authController.loginWithCredentials(
       loginName: loginName,
       password: password,
     );
   }
 
+  Future<void> _openForgotPasswordPage() async {
+    final resetPasswordUri = Uri.https(
+      AppConstant.caleeServer,
+      '/index.php/login',
+    );
+
+    final opened = await launchUrl(
+      resetPasswordUri,
+      mode: LaunchMode.platformDefault,
+    );
+
+    if (opened) return;
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Could not open reset password page in browser'),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final authController = Get.find<AuthController>();
-    final isLoading = authController.authState.isLoading;
+    return Obx(() {
+      final authController = Get.find<AuthController>();
+      final isLoading = authController.authState.isLoading || _isSubmittingLogin;
 
-    return Scaffold(
-      backgroundColor: const Color(0xFFF7F9FB),
+      return Scaffold(
+      backgroundColor: const Color(0xFFF3FAF3),
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
@@ -140,17 +190,15 @@ class _LoginPageState extends State<LoginPage> {
                     width: 72,
                     height: 72,
                     decoration: BoxDecoration(
-                      color: const Color(0xFF2E7AFE),
+                      color: const Color(0xFF66BB6A),
                       borderRadius: BorderRadius.circular(16),
                     ),
-                    child: const Center(
-                      child: Text(
-                        'C',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 30,
-                          fontWeight: FontWeight.bold,
-                        ),
+                    clipBehavior: Clip.antiAlias,
+                    child: Padding(
+                      padding: const EdgeInsets.all(10),
+                      child: Image.asset(
+                        'assets/images/logo.png',
+                        fit: BoxFit.contain,
                       ),
                     ),
                   ),
@@ -187,7 +235,20 @@ class _LoginPageState extends State<LoginPage> {
                   _buildInput(
                     controller: _passwordController,
                     hint: 'Enter your password',
-                    obscure: true,
+                    obscure: _obscurePassword,
+                    suffixIcon: IconButton(
+                      onPressed: isLoading
+                          ? null
+                          : () {
+                              setState(() {
+                                _obscurePassword = !_obscurePassword;
+                              });
+                            },
+                      icon: Icon(
+                        _obscurePassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
                     validator: (v) =>
                         (v == null || v.length < 6) ? 'Password must be at least 6 characters' : null,
                     enabled: !isLoading,
@@ -219,7 +280,7 @@ class _LoginPageState extends State<LoginPage> {
                               TextSpan(
                                 text: 'terms and conditions',
                                 style: const TextStyle(
-                                  color: Color(0xFF2E7AFE),
+                                  color: Color(0xFF66BB6A),
                                   decoration: TextDecoration.underline,
                                 ),
                                 recognizer: TapGestureRecognizer()
@@ -265,46 +326,45 @@ class _LoginPageState extends State<LoginPage> {
                   ),
                   const SizedBox(height: 16),
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       TextButton(
-                        onPressed: isLoading
-                            ? null
-                            : () {
-                                Get.toNamed(RouteConstant.register);
-                              },
-                        child: const Text(
-                          'SignUp',
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: Color(0xFF2E7AFE),
-                          ),
-                        ),
-                      ),
-                      TextButton(
-                        onPressed: isLoading
-                            ? null
-                            : () {
-                                // TODO: navigate to Forgot password page
-                              },
+                        onPressed: isLoading ? null : _openForgotPasswordPage,
                         child: const Text(
                           'Forgot password?',
                           style: TextStyle(
                             fontSize: 14,
-                            color: Color(0xFF2E7AFE),
+                            color: Color(0xFF66BB6A),
                           ),
                         ),
                       ),
                     ],
                   ),
                   const SizedBox(height: 16),
+                  FutureBuilder<String>(
+                    future: _appVersionLabelFuture,
+                    builder: (context, snapshot) {
+                      if (!snapshot.hasData) {
+                        return const SizedBox.shrink();
+                      }
+
+                      return Text(
+                        snapshot.data!,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Colors.black45,
+                        ),
+                      );
+                    },
+                  ),
                 ],
               ),
             ),
           ),
         ),
       ),
-    );
+      );
+    });
   }
 
   Widget _buildLabel(String text) {
@@ -326,6 +386,7 @@ class _LoginPageState extends State<LoginPage> {
     required String hint,
     bool obscure = false,
     bool enabled = true,
+    Widget? suffixIcon,
     String? Function(String?)? validator,
   }) {
     return TextFormField(
@@ -336,15 +397,16 @@ class _LoginPageState extends State<LoginPage> {
       decoration: InputDecoration(
         hintText: hint,
         filled: true,
-        fillColor: enabled ? const Color(0xFFF4F3F7) : Colors.grey.shade200,
+        fillColor: enabled ? const Color(0xFFEEF7EE) : Colors.grey.shade200,
         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        suffixIcon: suffixIcon,
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
           borderSide: BorderSide(color: Colors.grey.shade300, width: 0.8),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: Color(0xFF2E7AFE), width: 1.2),
+          borderSide: const BorderSide(color: Color(0xFF66BB6A), width: 1.2),
         ),
         disabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
@@ -354,4 +416,3 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 }
-

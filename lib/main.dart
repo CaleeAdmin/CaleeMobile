@@ -7,13 +7,14 @@ import 'package:caleesync/controllers/auth_controller.dart';
 import 'package:caleesync/middlewares/auth_middleware.dart';
 import 'package:caleesync/user/login_page.dart';
 import 'package:caleesync/user/profile_page.dart';
-import 'package:caleesync/user/register_page.dart';
+import 'package:caleesync/user/security_page.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
 import 'data/database_helper.dart';
 import 'data/sync_repository.dart';
 import 'home/calendar_probe_page.dart';
+import 'sync/sync_trigger_orchestrator.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -23,6 +24,7 @@ void main() async {
 
   // 初始化 MMKV
   await MMKVUtils.instance.init();
+  _seedDefaultSyncSettings();
 
   // 2. 注入 Repository
   // 使用 permanent: true 确保它在整个 App 运行期间不被销毁
@@ -32,9 +34,16 @@ void main() async {
   final appController = Get.put(AppController());
   Get.put(AuthController());
   Get.put(CalendarPageController());
+  Get.put(SyncTriggerOrchestrator(), permanent: true);
   await appController.init();
 
   runApp(const CaleeApp());
+}
+
+void _seedDefaultSyncSettings() {
+  if (!MMKVUtils.instance.contains(AppConstant.autoSyncEnabledKey)) {
+    MMKVUtils.instance.setBool(AppConstant.autoSyncEnabledKey, true);
+  }
 }
 
 class CaleeApp extends StatelessWidget {
@@ -45,7 +54,16 @@ class CaleeApp extends StatelessWidget {
     return GetMaterialApp(
       title: 'Calee',
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: Colors.lightGreen,
+          brightness: Brightness.light,
+        ),
+        scaffoldBackgroundColor: const Color(0xFFF3FAF3),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Color(0xFFF3FAF3),
+          foregroundColor: Color(0xFF1B5E20),
+        ),
+        cardColor: const Color(0xFFFFFFFF),
         useMaterial3: true,
       ),
       initialRoute: Get.find<AppController>().getInitialRoute(),
@@ -56,11 +74,6 @@ class CaleeApp extends StatelessWidget {
           middlewares: [AuthMiddleware()],
         ),
         GetPage(
-          name: RouteConstant.register,
-          page: () => const RegisterPage(),
-          middlewares: [AuthMiddleware()],
-        ),
-        GetPage(
           name: RouteConstant.home,
           page: () => const CalendarProbePage(),
           middlewares: [AuthMiddleware()],
@@ -68,6 +81,11 @@ class CaleeApp extends StatelessWidget {
         GetPage(
           name: RouteConstant.profile,
           page: () => const ProfilePage(),
+          middlewares: [AuthMiddleware()],
+        ),
+        GetPage(
+          name: RouteConstant.security,
+          page: () => const SecurityPage(),
           middlewares: [AuthMiddleware()],
         ),
       ],

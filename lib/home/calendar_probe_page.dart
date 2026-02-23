@@ -1,11 +1,8 @@
 import 'package:caleesync/common/route_constant.dart';
 import 'package:caleesync/home/sync_settings_page.dart';
-import 'package:caleesync/home/task_lists_page.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import '../data/SyncEngine.dart';
 import '../controllers/calendar_probe_controller.dart';
-import '../data/sync_repository.dart';
 import 'DashboardPage.dart';
 import 'CalendarPage.dart';
 import '../feature/link_device_page.dart';
@@ -22,7 +19,6 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
   final List<Widget> _pages = const [
     DashboardPage(),
     CalendarPage(),
-    TaskListsPage(),
     SyncSettingsPage(),
   ];
 
@@ -52,23 +48,21 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
                 width: 40,
                 height: 40,
                 decoration: BoxDecoration(
-                  color: Colors.blue,
+                  color: const Color(0xFF66BB6A),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Center(
-                  child: Text(
-                    'C',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                    ),
+                clipBehavior: Clip.antiAlias,
+                child: const Padding(
+                  padding: EdgeInsets.all(6),
+                  child: Image(
+                    image: AssetImage('assets/images/logo.png'),
+                    fit: BoxFit.contain,
                   ),
                 ),
               ),
               const SizedBox(width: 12),
               const Text(
-                'Calee',
+                'CaleeSync',
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.w600,
@@ -95,7 +89,7 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
                   icon: const Icon(Icons.sync, size: 18),
                   label: Text(ctrl.isSyncing.value ? 'Syncing...' : 'Sync'),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blue,
+                    backgroundColor: Colors.lightGreen,
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     shape: RoundedRectangleBorder(
@@ -111,18 +105,32 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
         ],
         centerTitle: true,
       ),
-      body: Column(
-        children: [
-          // Top navigation icons row
-          _buildBottomNavigation(),
-          // Main content area - use IndexedStack to preserve state of pages and avoid re-initialization
-          Expanded(
-            child: Obx(() => IndexedStack(
-                  index: _ctrl.selectedIndex.value,
-                  children: _pages,
-                )),
-          ),
-        ],
+      body: Obx(() => IndexedStack(
+            index: _ctrl.selectedIndex.value,
+            children: _pages,
+          )),
+      bottomNavigationBar: Obx(
+        () => NavigationBar(
+          selectedIndex: _ctrl.selectedIndex.value,
+          onDestinationSelected: _ctrl.setSelectedIndex,
+          destinations: const [
+            NavigationDestination(
+              icon: Icon(Icons.dashboard_outlined),
+              selectedIcon: Icon(Icons.dashboard),
+              label: 'Dashboard',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.calendar_today_outlined),
+              selectedIcon: Icon(Icons.calendar_today),
+              label: 'Calendars',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.settings_outlined),
+              selectedIcon: Icon(Icons.settings),
+              label: 'Sync Settings',
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -151,23 +159,21 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
                       width: 44,
                       height: 44,
                       decoration: BoxDecoration(
-                        color: const Color(0xFF2E7AFE),
+                        color: const Color(0xFF66BB6A),
                         borderRadius: BorderRadius.circular(12),
                       ),
-                      child: const Center(
-                        child: Text(
-                          'C',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                          ),
+                      clipBehavior: Clip.antiAlias,
+                      child: const Padding(
+                        padding: EdgeInsets.all(7),
+                        child: Image(
+                          image: AssetImage('assets/images/logo.png'),
+                          fit: BoxFit.contain,
                         ),
                       ),
                     ),
                     const SizedBox(width: 12),
                     const Text(
-                      'Calee',
+                      'CaleeSync',
                       style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.w600,
@@ -187,6 +193,14 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
               },
             ),
             _drawerItem(
+              icon: Icons.security_outlined,
+              label: 'Security',
+              onTap: () {
+                Navigator.of(context).pop(); // Close drawer
+                Get.toNamed(RouteConstant.security);
+              },
+            ),
+            _drawerItem(
               icon: Icons.qr_code_2_outlined,
               label: 'Link a device',
               onTap: () {
@@ -199,8 +213,6 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
             //   label: 'Manage devices',
             //   onTap: () {},
             // ),
-            const Spacer(),
-            _buildSyncButton(),
           ],
         ),
       ),
@@ -234,98 +246,4 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
     );
   }
 
-  Widget _buildSyncButton() {
-    final bottomPadding = MediaQuery.of(context).padding.bottom;
-    return Padding(
-      padding: EdgeInsets.fromLTRB(16, 12, 16, bottomPadding),
-      child: SizedBox(
-        width: double.infinity,
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: const Color(0xFF0D0C14),
-            borderRadius: BorderRadius.circular(12),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.1),
-                blurRadius: 10,
-                offset: const Offset(0, 4),
-              )
-            ],
-          ),
-          child: ElevatedButton.icon(
-            onPressed: () {
-              // TODO: Sync action
-            },
-            style: ElevatedButton.styleFrom(
-              elevation: 0,
-              backgroundColor: Colors.transparent,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            icon: const Icon(Icons.sync, size: 18),
-            label: const Text(
-              'Sync Now',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildBottomNavigation() {
-    return Obx(() {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
-      decoration: const BoxDecoration(
-        color: Colors.white,
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
-        children: [
-          _buildNavItem(Icons.dashboard_outlined, 'Dashboard', 0),
-          _buildNavItem(Icons.calendar_today_outlined, 'Calendars', 1),
-          _buildNavItem(Icons.checklist_outlined, 'Task Lists', 2),
-          _buildNavItem(Icons.settings, 'Sync Settings', 3),
-        ],
-      ),
-    );
-    });
-  }
-
-  Widget _buildNavItem(IconData icon, String label, int index) {
-    final isSelected = _ctrl.selectedIndex.value == index;
-    // Last item (Sync Settings) should have dark background when selected
-    final isLastItem = index == 3;
-    
-    return GestureDetector(
-      onTap: () {
-        _ctrl.setSelectedIndex(index);
-      },
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-        decoration: BoxDecoration(
-          color: isSelected 
-              ? (isLastItem ? const Color(0xFF1A1A1C) : Colors.black87)
-              : Colors.transparent,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Icon(
-          icon,
-          color: isSelected 
-              ? Colors.white 
-              : (isLastItem && !isSelected ? Colors.black54 : Colors.black54),
-          size: 24,
-        ),
-      ),
-    );
-  }
 }
-

@@ -26,6 +26,8 @@ class PlatformCalendar {
     this.isReadOnly,
     this.supportsEvents,
     this.supportsTasks,
+    this.isSubscription,
+    this.subscriptionUrl,
   });
 
   String? id;
@@ -44,6 +46,10 @@ class PlatformCalendar {
 
   bool? supportsTasks;
 
+  bool? isSubscription;
+
+  String? subscriptionUrl;
+
   Object encode() {
     return <Object?>[
       id,
@@ -54,6 +60,8 @@ class PlatformCalendar {
       isReadOnly,
       supportsEvents,
       supportsTasks,
+      isSubscription,
+      subscriptionUrl,
     ];
   }
 
@@ -68,15 +76,10 @@ class PlatformCalendar {
       isReadOnly: result[5] as bool?,
       supportsEvents: result[6] as bool?,
       supportsTasks: result[7] as bool?,
+      isSubscription: result[8] as bool?,
+      subscriptionUrl: result[9] as String?,
     );
   }
-
-  @override
-  String toString() {
-    return 'PlatformCalendar{id: $id, name: $name, accountName: $accountName, accountType: $accountType, color: $color, isReadOnly: $isReadOnly, supportsEvents: $supportsEvents, supportsTasks: $supportsTasks}';
-  }
-
-
 }
 
 class PlatformItem {
@@ -155,15 +158,69 @@ class PlatformItem {
   }
 }
 
+class CalendarEventRequest {
+  CalendarEventRequest({
+    required this.calendarId,
+    required this.title,
+    required this.start,
+    required this.end,
+    this.notes,
+    required this.uid,
+    this.eventId,
+  });
+
+  String calendarId;
+
+  String title;
+
+  int start;
+
+  int end;
+
+  String? notes;
+
+  String uid;
+
+  String? eventId;
+
+  Object encode() {
+    return <Object?>[
+      calendarId,
+      title,
+      start,
+      end,
+      notes,
+      uid,
+      eventId,
+    ];
+  }
+
+  static CalendarEventRequest decode(Object result) {
+    result as List<Object?>;
+    return CalendarEventRequest(
+      calendarId: result[0]! as String,
+      title: result[1]! as String,
+      start: result[2]! as int,
+      end: result[3]! as int,
+      notes: result[4] as String?,
+      uid: result[5]! as String,
+      eventId: result[6] as String?,
+    );
+  }
+}
+
 class _NativeCalendarApiCodec extends StandardMessageCodec {
   const _NativeCalendarApiCodec();
   @override
   void writeValue(WriteBuffer buffer, Object? value) {
-    if (value is PlatformCalendar) {
+    if (value is CalendarEventRequest) {
       buffer.putUint8(128);
       writeValue(buffer, value.encode());
-    } else if (value is PlatformItem) {
+    } else if (value is PlatformCalendar) {
       buffer.putUint8(129);
+      writeValue(buffer, value.encode());
+    } else if (value is PlatformItem) {
+      buffer.putUint8(130);
       writeValue(buffer, value.encode());
     } else {
       super.writeValue(buffer, value);
@@ -174,8 +231,10 @@ class _NativeCalendarApiCodec extends StandardMessageCodec {
   Object? readValueOfType(int type, ReadBuffer buffer) {
     switch (type) {
       case 128: 
-        return PlatformCalendar.decode(readValue(buffer)!);
+        return CalendarEventRequest.decode(readValue(buffer)!);
       case 129: 
+        return PlatformCalendar.decode(readValue(buffer)!);
+      case 130: 
         return PlatformItem.decode(readValue(buffer)!);
       default:
         return super.readValueOfType(type, buffer);
@@ -284,7 +343,7 @@ class NativeCalendarApi {
 
   /// 🚀 关键新增：在手机系统里创建一个新的日历账簿
   /// 返回系统分配的数字 ID (String 形式的 Long)
-  Future<String?> createCalendar(String displayName, String accountName) async {
+  Future<String?> createCalendar(String displayName, String accountName, int color) async {
     final String __pigeon_channelName = 'dev.flutter.pigeon.caleesync.NativeCalendarApi.createCalendar$__pigeon_messageChannelSuffix';
     final BasicMessageChannel<Object?> __pigeon_channel = BasicMessageChannel<Object?>(
       __pigeon_channelName,
@@ -292,7 +351,7 @@ class NativeCalendarApi {
       binaryMessenger: __pigeon_binaryMessenger,
     );
     final List<Object?>? __pigeon_replyList =
-        await __pigeon_channel.send(<Object?>[displayName, accountName]) as List<Object?>?;
+        await __pigeon_channel.send(<Object?>[displayName, accountName, color]) as List<Object?>?;
     if (__pigeon_replyList == null) {
       throw _createConnectionError(__pigeon_channelName);
     } else if (__pigeon_replyList.length > 1) {
@@ -308,7 +367,7 @@ class NativeCalendarApi {
 
   /// 🚀 关键新增：根据 ID 删除整个日历账簿
   /// Android 上删除日历会自动联级删除该日历下的所有事件 (Events)
-  Future<bool> deleteCalendar(String calendarId, String accountName, String accountType) async {
+  Future<bool> deleteCalendar(String calendarId, String accountName) async {
     final String __pigeon_channelName = 'dev.flutter.pigeon.caleesync.NativeCalendarApi.deleteCalendar$__pigeon_messageChannelSuffix';
     final BasicMessageChannel<Object?> __pigeon_channel = BasicMessageChannel<Object?>(
       __pigeon_channelName,
@@ -316,7 +375,7 @@ class NativeCalendarApi {
       binaryMessenger: __pigeon_binaryMessenger,
     );
     final List<Object?>? __pigeon_replyList =
-        await __pigeon_channel.send(<Object?>[calendarId, accountName, accountType]) as List<Object?>?;
+        await __pigeon_channel.send(<Object?>[calendarId, accountName]) as List<Object?>?;
     if (__pigeon_replyList == null) {
       throw _createConnectionError(__pigeon_channelName);
     } else if (__pigeon_replyList.length > 1) {
@@ -344,6 +403,28 @@ class NativeCalendarApi {
     );
     final List<Object?>? __pigeon_replyList =
         await __pigeon_channel.send(<Object?>[calendarId, title, start, end, notes, uid]) as List<Object?>?;
+    if (__pigeon_replyList == null) {
+      throw _createConnectionError(__pigeon_channelName);
+    } else if (__pigeon_replyList.length > 1) {
+      throw PlatformException(
+        code: __pigeon_replyList[0]! as String,
+        message: __pigeon_replyList[1] as String?,
+        details: __pigeon_replyList[2],
+      );
+    } else {
+      return (__pigeon_replyList[0] as String?);
+    }
+  }
+
+  Future<String?> createOrUpdateEvent(CalendarEventRequest request) async {
+    final String __pigeon_channelName = 'dev.flutter.pigeon.caleesync.NativeCalendarApi.createOrUpdateEvent$__pigeon_messageChannelSuffix';
+    final BasicMessageChannel<Object?> __pigeon_channel = BasicMessageChannel<Object?>(
+      __pigeon_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: __pigeon_binaryMessenger,
+    );
+    final List<Object?>? __pigeon_replyList =
+        await __pigeon_channel.send(<Object?>[request]) as List<Object?>?;
     if (__pigeon_replyList == null) {
       throw _createConnectionError(__pigeon_channelName);
     } else if (__pigeon_replyList.length > 1) {

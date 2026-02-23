@@ -16,9 +16,9 @@ class AppController extends GetxController {
 
   // 检查登录状态
   Future<void> _checkLoginStatus() async {
-    final serverUrl = MMKVUtils.instance.getString(AppConstant.Server);
-    final loginName = MMKVUtils.instance.getString(AppConstant.loginName);
-    final appPassword = MMKVUtils.instance.getString(AppConstant.password);
+    final serverUrl = MMKVUtils.instance.getString(AppConstant.serverKey);
+    final loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey);
+    final appPassword = MMKVUtils.instance.getString(AppConstant.appPasswordKey);
 
     _isLoggedIn.value = serverUrl != null &&
         serverUrl.isNotEmpty &&
@@ -45,9 +45,9 @@ class AppController extends GetxController {
   // 登出处理
   void logout() {
     // 清除登录凭据
-    MMKVUtils.instance.remove(AppConstant.Server);
-    MMKVUtils.instance.remove(AppConstant.loginName);
-    MMKVUtils.instance.remove(AppConstant.password);
+    MMKVUtils.instance.remove(AppConstant.serverKey);
+    MMKVUtils.instance.remove(AppConstant.loginNameKey);
+    MMKVUtils.instance.remove(AppConstant.appPasswordKey);
 
     setLoggedIn(false);
 
@@ -64,8 +64,8 @@ class AppController extends GetxController {
   String? checkRoutePermission(String route) {
     final isLoggedIn = this.isLoggedIn;
 
-    // 如果已登录，但访问登录或注册页面，重定向到主页
-    if (isLoggedIn && (route == RouteConstant.login || route == RouteConstant.register)) {
+    // 如果已登录，但访问登录页面，重定向到主页
+    if (isLoggedIn && route == RouteConstant.login) {
       return RouteConstant.home;
     }
 

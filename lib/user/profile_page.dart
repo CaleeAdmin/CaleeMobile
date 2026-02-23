@@ -1,7 +1,9 @@
 import 'package:caleesync/common/app_constant.dart';
+import 'package:caleesync/common/user_profile_timezones.dart';
 import 'package:caleesync/common/route_constant.dart';
 import 'package:caleesync/common/utils/mmkv_utils.dart';
 import 'package:caleesync/controllers/app_controller.dart';
+import 'package:caleesync/services/user_profile_service.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
@@ -14,40 +16,27 @@ class ProfilePage extends StatefulWidget {
 }
 
 class _ProfilePageState extends State<ProfilePage> {
+  final UserProfileService _profileService = UserProfileService();
   // Personal Information controllers
   final _fullNameController = TextEditingController(text: 'John Doe');
   final _emailController = TextEditingController(text: 'john.doe@example.com');
   final _postCodeController = TextEditingController(text: '10001');
+  String _selectedTimezone = 'UTC';
   
-  // Password controllers
-  final _currentPasswordController = TextEditingController();
-  final _newPasswordController = TextEditingController();
-  final _confirmPasswordController = TextEditingController();
-  
-  // First Day of Week dropdown value
-  String _firstDayOfWeek = 'Monday';
-  final List<String> _weekDays = [
-    'Monday',
-    'Tuesday',
-    'Wednesday',
-    'Thursday',
-    'Friday',
-    'Saturday',
-    'Sunday',
-  ];
-
   // Account name from stored credentials
   String? _accountName;
+  bool _isSyncingProfile = false;
 
   @override
   void initState() {
     super.initState();
     // Load account name from stored credentials
     _loadAccountName();
+    _loadProfileFromCalee();
   }
 
   void _loadAccountName() {
-    final loginName = MMKVUtils.instance.getString(AppConstant.loginName);
+    final loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey);
     setState(() {
       _accountName = loginName;
     });
@@ -58,10 +47,24 @@ class _ProfilePageState extends State<ProfilePage> {
     _fullNameController.dispose();
     _emailController.dispose();
     _postCodeController.dispose();
-    _currentPasswordController.dispose();
-    _newPasswordController.dispose();
-    _confirmPasswordController.dispose();
     super.dispose();
+  }
+
+
+
+  Future<void> _loadProfileFromCalee() async {
+    try {
+      final profile = await _profileService.fetchCurrentProfile();
+      if (!mounted) return;
+      setState(() {
+        _fullNameController.text = profile['displayname'] ?? '';
+        _emailController.text = profile['email'] ?? '';
+        _postCodeController.text = profile['address'] ?? '';
+        _selectedTimezone = _normalizeTimezone(profile['timezone']);
+      });
+    } catch (_) {
+      // Keep local defaults when remote profile is unavailable.
+    }
   }
 
   void _onLogout() {
@@ -70,71 +73,63 @@ class _ProfilePageState extends State<ProfilePage> {
     appController.logout();
   }
 
-  void _onSavePersonalInfo() {
-    // TODO: Implement save personal information logic
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Personal information saved successfully'),
-        backgroundColor: Colors.green,
-        duration: Duration(seconds: 2),
-      ),
-    );
-  }
+  Future<void> _onSavePersonalInfo() async {
+    final displayName = _fullNameController.text.trim();
+    final email = _emailController.text.trim();
+    final address = _postCodeController.text.trim();
+    final timezone = _selectedTimezone.trim();
 
-  void _onChangePassword() {
-    final currentPassword = _currentPasswordController.text.trim();
-    final newPassword = _newPasswordController.text.trim();
-    final confirmPassword = _confirmPasswordController.text.trim();
-
-    if (currentPassword.isEmpty) {
+    if (displayName.isEmpty || email.isEmpty || timezone.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Please enter current password'),
+          content: Text('Full name, email, and timezone are required'),
           backgroundColor: Colors.red,
         ),
       );
       return;
     }
 
-    if (newPassword.isEmpty || newPassword.length < 6) {
+    setState(() {
+      _isSyncingProfile = true;
+    });
+
+    try {
+      await _profileService.updateCurrentProfile(
+        displayName: displayName,
+        email: email,
+        address: address,
+        timezone: timezone,
+      );
+
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('New password must be at least 6 characters'),
-          backgroundColor: Colors.red,
+          content: Text('Personal information synced to Calee'),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 2),
         ),
       );
-      return;
-    }
-
-    if (newPassword != confirmPassword) {
+    } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('New passwords do not match'),
+        SnackBar(
+          content: Text('Sync failed: $e'),
           backgroundColor: Colors.red,
+          duration: const Duration(seconds: 3),
         ),
       );
-      return;
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        _isSyncingProfile = false;
+      });
     }
-
-    // TODO: Implement change password logic
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Password changed successfully'),
-        backgroundColor: Colors.green,
-        duration: Duration(seconds: 2),
-      ),
-    );
-
-    // Clear password fields
-    _currentPasswordController.clear();
-    _newPasswordController.clear();
-    _confirmPasswordController.clear();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF7F9FB),
+      backgroundColor: const Color(0xFFF3FAF3),
       appBar: AppBar(
         title: const Text(
           'Profile',
@@ -245,27 +240,27 @@ class _ProfilePageState extends State<ProfilePage> {
                     ),
                     const SizedBox(height: 20),
 
-                    // Post Code
-                    _buildLabel('Post Code'),
+                    // Postcode
+                    _buildLabel('Postcode'),
                     const SizedBox(height: 6),
                     _buildInput(
                       controller: _postCodeController,
-                      hint: 'Enter your post code',
+                      hint: 'Enter your postcode',
                       keyboardType: TextInputType.number,
                     ),
                     const SizedBox(height: 20),
 
-                    // First Day of Week
-                    _buildLabel('First Day of Week'),
+                    // Timezone
+                    _buildLabel('Timezone'),
                     const SizedBox(height: 6),
-                    _buildDropdown(),
+                    _buildTimezoneDropdown(),
                     const SizedBox(height: 24),
 
                     // Save Changes button
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
-                        onPressed: _onSavePersonalInfo,
+                        onPressed: _isSyncingProfile ? null : _onSavePersonalInfo,
                         style: ElevatedButton.styleFrom(
                           backgroundColor: const Color(0xFF0D0C14),
                           foregroundColor: Colors.white,
@@ -274,72 +269,17 @@ class _ProfilePageState extends State<ProfilePage> {
                             borderRadius: BorderRadius.circular(8),
                           ),
                         ),
-                        child: const Text(
+                        child: _isSyncingProfile
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                ),
+                              )
+                            : const Text(
                           'Save Changes',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ),
-
-                    const SizedBox(height: 40),
-                    const Divider(),
-                    const SizedBox(height: 40),
-
-                    // Change Password Section
-                    _buildSectionTitle(
-                      'Change Password',
-                      'Update your password to keep your account secure',
-                    ),
-                    const SizedBox(height: 24),
-
-                    // Current Password
-                    _buildLabel('Current Password'),
-                    const SizedBox(height: 6),
-                    _buildInput(
-                      controller: _currentPasswordController,
-                      hint: 'Enter current password',
-                      obscure: true,
-                    ),
-                    const SizedBox(height: 20),
-
-                    // New Password
-                    _buildLabel('New Password'),
-                    const SizedBox(height: 6),
-                    _buildInput(
-                      controller: _newPasswordController,
-                      hint: 'Enter new password',
-                      obscure: true,
-                    ),
-                    const SizedBox(height: 20),
-
-                    // Confirm New Password
-                    _buildLabel('Confirm New Password'),
-                    const SizedBox(height: 6),
-                    _buildInput(
-                      controller: _confirmPasswordController,
-                      hint: 'Confirm new password',
-                      obscure: true,
-                    ),
-                    const SizedBox(height: 24),
-
-                    // Change Password button
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: _onChangePassword,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF0D0C14),
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                        child: const Text(
-                          'Change Password',
                           style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w600,
@@ -354,6 +294,53 @@ class _ProfilePageState extends State<ProfilePage> {
           ),
         ),
       ),
+    );
+  }
+
+
+  String _normalizeTimezone(dynamic timezone) {
+    final raw = timezone?.toString().trim() ?? '';
+    if (raw.isEmpty) {
+      return 'UTC';
+    }
+
+    return kNextcloudTimezones.contains(raw) ? raw : 'UTC';
+  }
+
+  Widget _buildTimezoneDropdown() {
+    return DropdownButtonFormField<String>(
+      initialValue: _selectedTimezone,
+      isExpanded: true,
+      decoration: InputDecoration(
+        filled: true,
+        fillColor: const Color(0xFFEEF7EE),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide(color: Colors.grey.shade300, width: 0.8),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: Color(0xFF66BB6A), width: 1.2),
+        ),
+      ),
+      items: kNextcloudTimezones
+          .map(
+            (timezone) => DropdownMenuItem<String>(
+              value: timezone,
+              child: Text(
+                timezone,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          )
+          .toList(),
+      onChanged: (value) {
+        if (value == null) return;
+        setState(() {
+          _selectedTimezone = value;
+        });
+      },
     );
   }
 
@@ -405,7 +392,7 @@ class _ProfilePageState extends State<ProfilePage> {
       decoration: InputDecoration(
         hintText: hint,
         filled: true,
-        fillColor: const Color(0xFFF4F3F7),
+        fillColor: const Color(0xFFEEF7EE),
         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
@@ -413,7 +400,7 @@ class _ProfilePageState extends State<ProfilePage> {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: Color(0xFF2E7AFE), width: 1.2),
+          borderSide: const BorderSide(color: Color(0xFF66BB6A), width: 1.2),
         ),
       ),
     );
@@ -423,7 +410,7 @@ class _ProfilePageState extends State<ProfilePage> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
       decoration: BoxDecoration(
-        color: const Color(0xFFF4F3F7),
+        color: const Color(0xFFEEF7EE),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: Colors.grey.shade300, width: 0.8),
       ),
@@ -442,41 +429,4 @@ class _ProfilePageState extends State<ProfilePage> {
       ),
     );
   }
-
-  Widget _buildDropdown() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF4F3F7),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.grey.shade300, width: 0.8),
-      ),
-      child: DropdownButton<String>(
-        value: _firstDayOfWeek,
-        isExpanded: true,
-        underline: const SizedBox(),
-        icon: Icon(Icons.keyboard_arrow_down, color: Colors.grey.shade600),
-        items: _weekDays.map((String day) {
-          return DropdownMenuItem<String>(
-            value: day,
-            child: Text(
-              day,
-              style: const TextStyle(
-                fontSize: 16,
-                color: Colors.black87,
-              ),
-            ),
-          );
-        }).toList(),
-        onChanged: (String? newValue) {
-          if (newValue != null) {
-            setState(() {
-              _firstDayOfWeek = newValue;
-            });
-          }
-        },
-      ),
-    );
-  }
 }
-
