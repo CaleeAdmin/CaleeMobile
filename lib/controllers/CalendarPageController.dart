@@ -277,6 +277,7 @@ class CalendarPageController extends GetxController {
         FROM remote_collections rc
         LEFT JOIN local_bindings lb ON lb.remote_collection_id = rc.id
         WHERE rc.account_name = ?
+          AND rc.collection_type = 'calendar'
           AND rc.remote_path IS NOT NULL
           AND rc.remote_path != ''
         ORDER BY rc.id ASC
