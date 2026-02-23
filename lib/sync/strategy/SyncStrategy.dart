@@ -101,12 +101,16 @@ abstract class SyncStrategy {
     required PlatformItem local,
     required String remotePath,
     required String localCalendarId,
+    String? uidOverride,
   }) async {
     if (loginName == null || loginName!.isEmpty) {
       return null;
     }
 
-    String uid = (local.uid ?? '').trim();
+    String uid = (uidOverride ?? '').trim();
+    if (uid.isEmpty) {
+      uid = (local.uid ?? '').trim();
+    }
     if (uid.isEmpty) {
       uid = CaleeUid.generate();
       await localGateway.createOrUpdateEvent(
@@ -438,6 +442,7 @@ abstract class SyncStrategy {
             local: operation.local!,
             remotePath: ctx.remotePath,
             localCalendarId: localCalendarId,
+            uidOverride: operation.uid,
           );
           if (pushed == null) {
             skip++;
