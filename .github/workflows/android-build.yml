@@ -1,0 +1,203 @@
+name: Android Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_name:
+        description: 'Optional custom version name (example: beta v1.0.10)'
+        required: false
+        type: string
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+
+jobs:
+  android-build:
+    runs-on: ubuntu-latest
+    env:
+      KEYSTORE_PATH: ${{ runner.temp }}/release-keystore.jks
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Flutter (stable)
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Resolve app version from pubspec.yaml
+        id: app_version
+        shell: bash
+        env:
+          INPUT_VERSION_NAME: ${{ github.event.inputs.version_name }}
+        run: |
+          set -euo pipefail
+          VERSION_LINE=$(awk '/^version:/ {print $2; exit}' pubspec.yaml)
+          if [[ -z "${VERSION_LINE:-}" ]]; then
+            echo "Unable to resolve version from pubspec.yaml" >&2
+            exit 1
+          fi
+
+          PUBSPEC_VERSION_NAME="${VERSION_LINE%%+*}"
+          VERSION_NAME="${INPUT_VERSION_NAME:-$PUBSPEC_VERSION_NAME}"
+
+          # Build a numeric Android version code from the version name by extracting
+          # the first semantic-like number (e.g. "beta v1.0.10" -> "1.0.10" -> 10010).
+          VERSION_DIGITS=$(echo "$VERSION_NAME" | grep -oE "[0-9]+(\.[0-9]+)*" | head -n 1)
+          if [[ -z "${VERSION_DIGITS:-}" ]]; then
+            echo "Unable to derive version number from version name: $VERSION_NAME" >&2
+            exit 1
+          fi
+
+          IFS='.' read -r -a VERSION_PARTS <<< "$VERSION_DIGITS"
+          WEIGHT=1
+          VERSION_NUMBER=0
+          for (( idx=${#VERSION_PARTS[@]}-1; idx>=0; idx-- )); do
+            PART="${VERSION_PARTS[idx]}"
+            if [[ ! "$PART" =~ ^[0-9]+$ ]]; then
+              echo "Invalid numeric part in derived version: $PART" >&2
+              exit 1
+            fi
+            VERSION_NUMBER=$(( VERSION_NUMBER + PART * WEIGHT ))
+            WEIGHT=$(( WEIGHT * 100 ))
+          done
+
+          ARTIFACT_VERSION=$(echo "$VERSION_NAME" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//')
+          if [[ -z "${ARTIFACT_VERSION:-}" ]]; then
+            echo "Unable to derive artifact version label from version name: $VERSION_NAME" >&2
+            exit 1
+          fi
+
+          echo "version=$VERSION_LINE" >> "$GITHUB_OUTPUT"
+          echo "version_name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
+          echo "version_number=$VERSION_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "artifact_version=$ARTIFACT_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Flutter dependencies
+        run: flutter pub get
+
+      - name: Flutter analyze
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p reports
+          flutter analyze --no-fatal-infos | tee reports/flutter-analyze.txt
+
+      - name: Flutter tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          flutter test --machine | tee reports/flutter-test-machine.json
+
+      - name: Dart format check
+        shell: bash
+        run: |
+          set -euo pipefail
+          dart format --set-exit-if-changed . | tee reports/dart-format-check.txt
+
+      - name: Decode Android release keystore
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          : "${ANDROID_KEYSTORE_BASE64:?Missing required secret ANDROID_KEYSTORE_BASE64}"
+          : "${ANDROID_KEYSTORE_PASSWORD:?Missing required secret ANDROID_KEYSTORE_PASSWORD}"
+          : "${ANDROID_KEY_ALIAS:?Missing required secret ANDROID_KEY_ALIAS}"
+          : "${ANDROID_KEY_PASSWORD:?Missing required secret ANDROID_KEY_PASSWORD}"
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
+          chmod 600 "$KEYSTORE_PATH"
+
+      - name: Build debug APK
+        run: |
+          flutter build apk --debug \
+            --build-name "${{ steps.app_version.outputs.version_name }}" \
+            --build-number "${{ steps.app_version.outputs.version_number }}"
+
+      - name: Build signed release APK
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          flutter build apk --release \
+            --build-name "${{ steps.app_version.outputs.version_name }}" \
+            --build-number "${{ steps.app_version.outputs.version_number }}"
+
+      - name: Verify release APK signature
+        shell: bash
+        run: |
+          set -euo pipefail
+          RELEASE_APK="build/app/outputs/flutter-apk/app-release.apk"
+          BUILD_TOOLS_DIR=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)
+          APKSIGNER="$BUILD_TOOLS_DIR/apksigner"
+          "$APKSIGNER" verify --print-certs "$RELEASE_APK" | tee reports/apksigner-verify.txt
+
+      - name: Package build artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.app_version.outputs.version }}"
+          VERSION_NAME="${{ steps.app_version.outputs.version_name }}"
+          VERSION_NUMBER="${{ steps.app_version.outputs.version_number }}"
+          ARTIFACT_VERSION="${{ steps.app_version.outputs.artifact_version }}"
+          mkdir -p build-artifacts
+
+          {
+            echo "version=${VERSION}"
+            echo "version_name=${VERSION_NAME}"
+            echo "version_number=${VERSION_NUMBER}"
+            echo "artifact_version=${ARTIFACT_VERSION}"
+          } > build-artifacts/version-info.txt
+
+          DEBUG_SRC="build/app/outputs/flutter-apk/app-debug.apk"
+          RELEASE_SRC="build/app/outputs/flutter-apk/app-release.apk"
+          DEBUG_DEST="build-artifacts/caleesync-${ARTIFACT_VERSION}-debug.apk"
+          RELEASE_DEST="build-artifacts/caleesync-${ARTIFACT_VERSION}-release.apk"
+
+          cp "$DEBUG_SRC" "$DEBUG_DEST"
+          cp "$RELEASE_SRC" "$RELEASE_DEST"
+
+          sha256sum "$DEBUG_DEST" > "${DEBUG_DEST}.sha256"
+          sha256sum "$RELEASE_DEST" > "${RELEASE_DEST}.sha256"
+
+          if [[ -d reports ]]; then
+            find reports -type f -print0 | while IFS= read -r -d '' report; do
+              cp "$report" build-artifacts/
+            done
+          fi
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: caleesync-${{ steps.app_version.outputs.artifact_version }}-android-build
+          path: build-artifacts/
+          if-no-files-found: error
+
+      - name: Publish GitHub Release assets
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            build-artifacts/caleesync-${{ steps.app_version.outputs.artifact_version }}-release.apk
+            build-artifacts/caleesync-${{ steps.app_version.outputs.artifact_version }}-release.apk.sha256
+          fail_on_unmatched_files: true
