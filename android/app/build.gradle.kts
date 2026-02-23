@@ -7,6 +7,20 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// ====== Custom Version Config ======
+val versionStage = "RC"
+val major = 0
+val minor = 1
+val patch = 4
+
+// e.g. "RC-v0.1.4"
+val caleeVersionName = "$versionStage-v$major.$minor.$patch"
+
+// Play Store requires increasing integers
+// e.g. 0.1.4 -> 0*10000 + 1*100 + 4 = 104
+val caleeVersionCode = major * 10000 + minor * 100 + patch
+// ===================================
+
 val isReleaseBuildRequested =
     gradle.startParameter.taskNames.any { taskName ->
         taskName.contains("release", ignoreCase = true)
@@ -38,8 +52,8 @@ android {
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = caleeVersionCode
+        versionName = caleeVersionName
     }
 
     signingConfigs {
