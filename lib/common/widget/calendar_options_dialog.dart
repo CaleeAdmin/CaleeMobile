@@ -81,7 +81,7 @@ class _CalendarOptionsDialogState extends State<CalendarOptionsDialog> {
                         });
                       }
                     },
-                    title: const Text('Allow mass deletion (dangerous)', style: TextStyle(fontWeight: FontWeight.w600)),
+                    title: const Text('Allow mass deletion', style: TextStyle(fontWeight: FontWeight.w600)),
                     subtitle: const Text('When off, large delete waves are blocked for both local and remote deletes.', style: TextStyle(fontSize: 12)),
                     controlAffinity: ListTileControlAffinity.leading,
                   ),

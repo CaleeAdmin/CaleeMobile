@@ -678,7 +678,7 @@ class _CalendarRow extends StatelessWidget {
                               final bool? confirmed = await showDialog<bool>(
                                 context: c,
                                 builder: (dialogContext) => AlertDialog(
-                                  title: const Text('Enable dangerous mode?'),
+                                  title: const Text('Enable mass deletion?'),
                                   content: const Text(
                                     'This can permanently delete large amounts of data on your phone and/or server if the snapshot is incomplete.',
                                   ),
