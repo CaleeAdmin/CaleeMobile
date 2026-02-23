@@ -119,8 +119,11 @@ class SyncItemPlanner {
     final bool isOneWayRemoteOrigin = !isTwoWay && bindingOrigin == SyncBindingOrigin.remote;
     final bool isOneWayLocalOrigin = !isTwoWay && bindingOrigin == SyncBindingOrigin.local;
 
+    // Two-way sync must always enter item-level planning. Collection-level
+    // gates (ctag / pending flags) are only heuristics and can miss updates
+    // (for example, when local change markers are absent).
     final bool shouldSync = isTwoWay
-        ? (remoteChanged || localChanged || metaChanged)
+        ? true
         : isOneWayRemoteOrigin
             ? (remoteChanged || metaChanged)
             : (localChanged || metaChanged);
