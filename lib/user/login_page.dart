@@ -7,6 +7,7 @@ import 'package:caleesync/models/auth_state.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 /// Login page with Nextcloud Login Flow v2 integration.
@@ -25,6 +26,7 @@ class _LoginPageState extends State<LoginPage> {
   bool _agree = false;
   bool _isSubmittingLogin = false;
   Worker? _authStateWorker;
+  late final Future<String> _appVersionLabelFuture;
 
   @override
   void dispose() {
@@ -37,6 +39,7 @@ class _LoginPageState extends State<LoginPage> {
   @override
   void initState() {
     super.initState();
+    _appVersionLabelFuture = _loadAppVersionLabel();
 
     // 获取AuthController实例
     final authController = Get.find<AuthController>();
@@ -79,6 +82,11 @@ class _LoginPageState extends State<LoginPage> {
         );
       }
     });
+  }
+
+  Future<String> _loadAppVersionLabel() async {
+    final packageInfo = await PackageInfo.fromPlatform();
+    return 'Version ${packageInfo.version} (${packageInfo.buildNumber})';
   }
 
   /// 保存登录凭据并跳转到主页
@@ -333,6 +341,22 @@ class _LoginPageState extends State<LoginPage> {
                     ],
                   ),
                   const SizedBox(height: 16),
+                  FutureBuilder<String>(
+                    future: _appVersionLabelFuture,
+                    builder: (context, snapshot) {
+                      if (!snapshot.hasData) {
+                        return const SizedBox.shrink();
+                      }
+
+                      return Text(
+                        snapshot.data!,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Colors.black45,
+                        ),
+                      );
+                    },
+                  ),
                 ],
               ),
             ),
