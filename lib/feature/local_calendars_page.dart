@@ -32,7 +32,7 @@ class LocalCalendarsPage extends StatelessWidget {
 
         final groups = ctrl.calendarGroups.toList();
         if (groups.isEmpty) {
-          return const Center(child: Text('No local calendars found'));
+          return const Center(child: Text('No device calendars found'));
         }
 
         return ListView.builder(
