@@ -309,7 +309,7 @@ class _ProfilePageState extends State<ProfilePage> {
 
   Widget _buildTimezoneDropdown() {
     return DropdownButtonFormField<String>(
-      initialValue: _selectedTimezone,
+      value: _selectedTimezone,
       isExpanded: true,
       decoration: InputDecoration(
         filled: true,
