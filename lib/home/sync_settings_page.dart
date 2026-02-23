@@ -20,6 +20,8 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> {
 
   int _calendarInterval = 15;
   int _tasksInterval = 30;
+  bool _autoSyncEnabled = true;
+  bool _periodicSyncEnabled = false;
 
   @override
   void initState() {
@@ -29,8 +31,10 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> {
 
   void _loadSettings() {
     try {
-      int valCal = MMKVUtils.instance.getInt('sync_interval_calendar') ?? 15;
+      int valCal = MMKVUtils.instance.getInt(AppConstant.syncIntervalCalendarKey) ?? 15;
       int valTask = MMKVUtils.instance.getInt('sync_interval_tasks') ?? 30;
+      final bool autoSyncEnabled = MMKVUtils.instance.getBool(AppConstant.autoSyncEnabledKey, defaultValue: true) ?? true;
+      final bool periodicSyncEnabled = MMKVUtils.instance.getBool(AppConstant.periodicSyncEnabledKey, defaultValue: false) ?? false;
       // validate against available options to avoid Dropdown assertion errors
       final validMinutes = _intervalOptions.map((e) => e['minutes'] as int).toSet();
       if (!validMinutes.contains(valCal) || valCal <= 0) valCal = 15;
@@ -38,14 +42,18 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> {
       setState(() {
         _calendarInterval = valCal;
         _tasksInterval = valTask;
+        _autoSyncEnabled = autoSyncEnabled;
+        _periodicSyncEnabled = periodicSyncEnabled;
       });
     } catch (_) {}
   }
 
   void _saveSettings() {
     try {
-      MMKVUtils.instance.setInt('sync_interval_calendar', _calendarInterval);
+      MMKVUtils.instance.setInt(AppConstant.syncIntervalCalendarKey, _calendarInterval);
       MMKVUtils.instance.setInt('sync_interval_tasks', _tasksInterval);
+      MMKVUtils.instance.setBool(AppConstant.autoSyncEnabledKey, _autoSyncEnabled);
+      MMKVUtils.instance.setBool(AppConstant.periodicSyncEnabledKey, _periodicSyncEnabled);
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Settings saved')));
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Save failed: $e')));
@@ -70,6 +78,20 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> {
                   const SizedBox(height: 6),
                   const Text('Configure how often your calendars and tasks sync with their sources', style: TextStyle(color: Colors.black54)),
                   const SizedBox(height: 16),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Foreground Auto Sync', style: TextStyle(fontWeight: FontWeight.w600)),
+                    subtitle: const Text('Trigger sync on meaningful changes while app is active'),
+                    value: _autoSyncEnabled,
+                    onChanged: (v) => setState(() => _autoSyncEnabled = v),
+                  ),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Periodic Background Sync', style: TextStyle(fontWeight: FontWeight.w600)),
+                    subtitle: const Text('Run periodic sync when network is available'),
+                    value: _periodicSyncEnabled,
+                    onChanged: (v) => setState(() => _periodicSyncEnabled = v),
+                  ),
 
                   const Text('Calendar Sync Interval', style: TextStyle(fontWeight: FontWeight.w600)),
                   const SizedBox(height: 8),

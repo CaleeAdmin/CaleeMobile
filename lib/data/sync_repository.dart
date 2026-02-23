@@ -5,11 +5,12 @@ import 'package:caleesync/common/utils/mmkv_utils.dart';
 import 'package:caleesync/core/platform/pigeon/calendar_api.g.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
+import 'package:get/get.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../entity/SyncSummary.dart';
 import '../sync/SyncEnum.dart';
-import '../sync/SyncEngine.dart';
+import '../sync/sync_trigger_orchestrator.dart';
 import '../services/calee_server_service.dart';
 import 'database_helper.dart';
 
@@ -599,8 +600,10 @@ class SyncRepository {
 
   Future<void> _triggerOneShotForceSync(int remoteCollectionId) async {
     if (remoteCollectionId <= 0) return;
-    SyncEngine.requestForceSyncForCollection(remoteCollectionId);
-    final SyncSummary summary = await SyncEngine().executeFullSync();
+    final SyncTriggerOrchestrator orchestrator = Get.isRegistered<SyncTriggerOrchestrator>()
+        ? Get.find<SyncTriggerOrchestrator>()
+        : Get.put(SyncTriggerOrchestrator(), permanent: true);
+    final SyncSummary summary = await orchestrator.triggerForce(remoteCollectionId);
     if (summary.failed > 0) {
       final String detail = summary.errorLog.isNotEmpty ? summary.errorLog.join('; ') : 'Sync failed';
       _lastConnectError = 'Sync failed: $detail';
