@@ -14,7 +14,7 @@ class SyncStatusDetailsPage extends StatelessWidget {
     final ctrl = Get.find<CalendarProbeController>();
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Sync History'),
+        title: const Text('Sync Activity'),
         actions: [
           IconButton(onPressed: ctrl.loadRecentRuns, icon: const Icon(Icons.refresh)),
         ],
@@ -22,7 +22,7 @@ class SyncStatusDetailsPage extends StatelessWidget {
       body: Obx(() {
         final runs = ctrl.syncRuns;
         if (runs.isEmpty) {
-          return const Center(child: Text('No sync runs yet.'));
+          return const Center(child: Text('No sync activity yet.'));
         }
         return ListView.separated(
           itemCount: runs.length,
@@ -31,9 +31,14 @@ class SyncStatusDetailsPage extends StatelessWidget {
             final run = runs[index];
             final counts = _aggregateCounts(run);
             return ListTile(
-              title: Text('${DateFormat('yyyy-MM-dd HH:mm').format(run.startTime)} | ${_duration(run)}'),
-              subtitle: Text('${run.mode.name.toUpperCase()} | ${run.bindings.length} bindings\n'
-                  'L +${counts.$1}/${counts.$2}/-${counts.$3}  R +${counts.$4}/${counts.$5}/-${counts.$6}'),
+              title: Text(
+                '${DateFormat('MMM d, yyyy • HH:mm').format(run.startTime)} • ${_duration(run)}',
+              ),
+              subtitle: Text(
+                '${_modeLabel(run.mode)} • ${run.bindings.length} calendar link${run.bindings.length == 1 ? '' : 's'}\n'
+                'On device +${counts.localCreated}/${counts.localUpdated}/-${counts.localDeleted}  '
+                'In cloud +${counts.remoteCreated}/${counts.remoteUpdated}/-${counts.remoteDeleted}',
+              ),
               isThreeLine: true,
               trailing: _resultChip(run.result, run.bindings.any((b) => b.safetyGateTriggered)),
               onTap: () => Get.to(() => SyncRunDetailsPage(run: run)),
@@ -44,7 +49,7 @@ class SyncStatusDetailsPage extends StatelessWidget {
       floatingActionButton: FloatingActionButton.extended(
         onPressed: ctrl.isSyncing.value ? null : ctrl.syncNow,
         icon: const Icon(Icons.sync),
-        label: const Text('Sync Now'),
+        label: const Text('Sync now'),
       ),
     );
   }
@@ -58,16 +63,16 @@ Widget _resultChip(SyncRunResult result, bool safetyTriggered) {
     SyncRunResult.failed => Colors.red,
   };
   final label = switch (result) {
-    SyncRunResult.success => 'Success',
-    SyncRunResult.partial => 'Partial',
-    SyncRunResult.abortedBySafety => 'Aborted',
-    SyncRunResult.failed => 'Failed',
+    SyncRunResult.success => 'Up to date',
+    SyncRunResult.partial => 'Partly synced',
+    SyncRunResult.abortedBySafety => 'Stopped for safety',
+    SyncRunResult.failed => 'Sync failed',
   };
   return Column(
     mainAxisAlignment: MainAxisAlignment.center,
     children: [
       Chip(label: Text(label), backgroundColor: color.withOpacity(0.15)),
-      if (safetyTriggered) const Text('Safety', style: TextStyle(fontSize: 11, color: Colors.deepOrange)),
+      if (safetyTriggered) const Text('Safety check', style: TextStyle(fontSize: 11, color: Colors.deepOrange)),
     ],
   );
 }
@@ -77,15 +82,50 @@ String _duration(SyncRunRecord run) {
   return '${(ms / 1000).toStringAsFixed(1)}s';
 }
 
-(int, int, int, int, int, int) _aggregateCounts(SyncRunRecord run) {
-  int lc = 0, lu = 0, ld = 0, rc = 0, ru = 0, rd = 0;
+class _SyncChangeSummary {
+  const _SyncChangeSummary({
+    required this.localCreated,
+    required this.localUpdated,
+    required this.localDeleted,
+    required this.remoteCreated,
+    required this.remoteUpdated,
+    required this.remoteDeleted,
+  });
+
+  final int localCreated;
+  final int localUpdated;
+  final int localDeleted;
+  final int remoteCreated;
+  final int remoteUpdated;
+  final int remoteDeleted;
+}
+
+_SyncChangeSummary _aggregateCounts(SyncRunRecord run) {
+  int localCreated = 0, localUpdated = 0, localDeleted = 0;
+  int remoteCreated = 0, remoteUpdated = 0, remoteDeleted = 0;
   for (final b in run.bindings) {
-    lc += b.localCounts.created;
-    lu += b.localCounts.updated;
-    ld += b.localCounts.deleted;
-    rc += b.remoteCounts.created;
-    ru += b.remoteCounts.updated;
-    rd += b.remoteCounts.deleted;
+    localCreated += b.localCounts.created;
+    localUpdated += b.localCounts.updated;
+    localDeleted += b.localCounts.deleted;
+    remoteCreated += b.remoteCounts.created;
+    remoteUpdated += b.remoteCounts.updated;
+    remoteDeleted += b.remoteCounts.deleted;
   }
-  return (lc, lu, ld, rc, ru, rd);
+
+  return _SyncChangeSummary(
+    localCreated: localCreated,
+    localUpdated: localUpdated,
+    localDeleted: localDeleted,
+    remoteCreated: remoteCreated,
+    remoteUpdated: remoteUpdated,
+    remoteDeleted: remoteDeleted,
+  );
+}
+
+String _modeLabel(SyncRunMode mode) {
+  return switch (mode) {
+    SyncRunMode.pull => 'Import only',
+    SyncRunMode.push => 'Export only',
+    SyncRunMode.twoWay => 'Two-way sync',
+  };
 }
