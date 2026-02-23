@@ -8,6 +8,8 @@ import '../controllers/CalendarPageController.dart';
 import '../controllers/calendar_probe_controller.dart';
 import '../services/calee_auth_service.dart';
 import '../services/calee_server_service.dart';
+import '../feature/local_calendars_page.dart';
+import '../feature/public_subscriptions_page.dart';
 import 'sync_status_details_page.dart';
 
 class DashboardPage extends StatefulWidget {
@@ -73,6 +75,59 @@ class _DashboardPageState extends State<DashboardPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          Card(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Quick Actions',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Jump directly to common calendar setup tasks.',
+                    style: TextStyle(color: Colors.black54),
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        alignment: Alignment.centerLeft,
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      onPressed: () {
+                        Get.to(() => const PublicSubscriptionsGetxPage());
+                      },
+                      icon: const Icon(Icons.public),
+                      label: const Text('Subscribe to Calee Calendar'),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        alignment: Alignment.centerLeft,
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      onPressed: () {
+                        Get.to(() => const LocalCalendarsPage());
+                      },
+                      icon: const Icon(Icons.link),
+                      label: const Text('Link to Device Calendar'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
           // Sync Overview card
           Obx(() {
             return Card(
@@ -245,4 +300,3 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 }
-
