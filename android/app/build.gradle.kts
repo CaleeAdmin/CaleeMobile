@@ -1,3 +1,5 @@
+import com.android.build.gradle.internal.api.BaseVariantOutputImpl
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
@@ -67,18 +69,13 @@ android {
             signingConfig = signingConfigs.getByName("release")
         }
     }
-}
 
-androidComponents {
-    onVariants(selector().withBuildType("release")) { variant ->
-        val versionName = variant.versionName.orElse("0.0.0")
-        val versionCode = variant.versionCode.orElse(0)
-        variant.outputs.forEach { output ->
-            output.outputFileName.set(
-                versionName.zip(versionCode) { name, code ->
-                    "caleesync-release-$name($code).apk"
-                },
-            )
+    applicationVariants.all {
+        if (buildType.name == "release") {
+            outputs.all {
+                val output = this as BaseVariantOutputImpl
+                output.outputFileName = "caleesync-release-${versionName}(${versionCode}).apk"
+            }
         }
     }
 }
