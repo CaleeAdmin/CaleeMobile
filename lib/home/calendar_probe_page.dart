@@ -1,6 +1,5 @@
 import 'package:caleesync/common/route_constant.dart';
 import 'package:caleesync/home/sync_settings_page.dart';
-import 'package:caleesync/home/task_lists_page.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import '../controllers/calendar_probe_controller.dart';
@@ -20,7 +19,6 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
   final List<Widget> _pages = const [
     DashboardPage(),
     CalendarPage(),
-    TaskListsPage(),
     SyncSettingsPage(),
   ];
 
@@ -125,11 +123,6 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
               icon: Icon(Icons.calendar_today_outlined),
               selectedIcon: Icon(Icons.calendar_today),
               label: 'Calendars',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.checklist_outlined),
-              selectedIcon: Icon(Icons.checklist),
-              label: 'Task Lists',
             ),
             NavigationDestination(
               icon: Icon(Icons.settings_outlined),

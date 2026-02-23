@@ -11,7 +11,7 @@ class CalendarProbeController extends GetxController {
   final RxInt success = 0.obs;
   final RxInt failed = 0.obs;
   final RxInt processing = 0.obs;
-  /// 当前选中的页面索引（0: Dashboard, 1: Calendars, 2: TaskLists, 3: SyncSettings）
+  /// 当前选中的页面索引（0: Dashboard, 1: Calendars, 2: SyncSettings）
   final RxInt selectedIndex = 1.obs;
 
   /// 设置选中的页面索引
