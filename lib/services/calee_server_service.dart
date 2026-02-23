@@ -454,6 +454,7 @@ class CaleeServerService {
     required String title,
     DateTime? start,
     DateTime? end,
+    String? targetEventPath,
   }) async {
     // 1. 调用工具类生成标准的 ICS 文本
     final icsString = IcsSerializer.toIcs(
@@ -469,6 +470,7 @@ class CaleeServerService {
       uid: uid,
       icsData: icsString,
       userId: userId,
+      targetEventPath: targetEventPath,
     );
   }
 
@@ -479,6 +481,7 @@ class CaleeServerService {
     required String uid,
     required String icsData,
     required String userId,
+    String? targetEventPath,
   }) async {
     final baseUrl = "https://nc-dev.ywpl.com.au";
     final password = MMKVUtils.instance.getString(AppConstant.appPasswordKey);
@@ -487,7 +490,11 @@ class CaleeServerService {
     final String cleanPath = calendarPath.endsWith('/')
         ? calendarPath.substring(0, calendarPath.length - 1)
         : calendarPath;
-    final fullUrl = "$baseUrl$cleanPath/$uid.ics";
+    final String normalizedTargetPath = (targetEventPath ?? '').trim();
+    final String eventPath = normalizedTargetPath.isNotEmpty
+        ? (normalizedTargetPath.startsWith('/') ? normalizedTargetPath : '/$normalizedTargetPath')
+        : '$cleanPath/$uid.ics';
+    final fullUrl = "$baseUrl$eventPath";
 
     try {
       final response = await http.put(

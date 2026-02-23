@@ -101,6 +101,7 @@ abstract class SyncStrategy {
     required PlatformItem local,
     required String remotePath,
     required String localCalendarId,
+    String? targetRemoteHref,
   }) async {
     if (loginName == null || loginName!.isEmpty) {
       return null;
@@ -127,6 +128,7 @@ abstract class SyncStrategy {
       title: local.title ?? 'Untitled',
       start: DateTime.fromMillisecondsSinceEpoch(local.startTime ?? 0),
       end: DateTime.fromMillisecondsSinceEpoch(local.endTime ?? 0),
+      targetEventPath: targetRemoteHref,
     );
 
     if (newEtag == null) {
@@ -134,10 +136,13 @@ abstract class SyncStrategy {
     }
 
     final String normalizedRemotePath = remotePath.endsWith('/') ? remotePath : '$remotePath/';
+    final String remoteHref = (targetRemoteHref != null && targetRemoteHref.trim().isNotEmpty)
+        ? targetRemoteHref.trim()
+        : '${normalizedRemotePath}$uid.ics';
     return RemotePushResult(
       uid: uid,
       etag: normalizeRemoteToken(newEtag),
-      remoteHref: '${normalizedRemotePath}$uid.ics',
+      remoteHref: remoteHref,
       lastMtime: local.lastModified ?? DateTime.now().millisecondsSinceEpoch,
     );
   }
@@ -438,6 +443,9 @@ abstract class SyncStrategy {
             local: operation.local!,
             remotePath: ctx.remotePath,
             localCalendarId: localCalendarId,
+            targetRemoteHref: operation.type == _CanonicalOperationType.remoteUpdate
+                ? (operation.mapping?['remote_href']?.toString() ?? operation.remote?['href']?.toString())
+                : null,
           );
           if (pushed == null) {
             skip++;
@@ -813,6 +821,7 @@ abstract class RemoteItemGateway {
     required String title,
     DateTime? start,
     DateTime? end,
+    String? targetEventPath,
   });
 
   Future<bool> deleteEvent({
@@ -839,6 +848,7 @@ class CaleeRemoteItemGateway extends RemoteItemGateway {
     required String title,
     DateTime? start,
     DateTime? end,
+    String? targetEventPath,
   }) => _service.uploadEventData(
         userId: userId,
         calendarPath: calendarPath,
@@ -846,6 +856,7 @@ class CaleeRemoteItemGateway extends RemoteItemGateway {
         title: title,
         start: start,
         end: end,
+        targetEventPath: targetEventPath,
       );
 
   @override
