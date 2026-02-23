@@ -14,6 +14,9 @@ if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(FileInputStream(keystorePropertiesFile))
 }
 
+val releaseKeystoreFile = keystoreProperties["storeFile"]?.toString()?.let { file(it) }
+val hasReleaseSigningConfig = keystorePropertiesFile.exists() && releaseKeystoreFile?.exists() == true
+
 android {
     namespace = "com.viso.caleesync"
     compileSdk = flutter.compileSdkVersion
@@ -41,10 +44,10 @@ android {
 
     signingConfigs {
         create("release") {
-            if (keystorePropertiesFile.exists()) {
+            if (hasReleaseSigningConfig) {
                 keyAlias = keystoreProperties["keyAlias"] as String?
                 keyPassword = keystoreProperties["keyPassword"] as String?
-                storeFile = keystoreProperties["storeFile"]?.let { file(it) }
+                storeFile = releaseKeystoreFile
                 storePassword = keystoreProperties["storePassword"] as String?
             }
         }
@@ -52,7 +55,7 @@ android {
 
     buildTypes {
         release {
-            signingConfig = if (keystorePropertiesFile.exists()) {
+            signingConfig = if (hasReleaseSigningConfig) {
                 signingConfigs.getByName("release")
             } else {
                 signingConfigs.getByName("debug")
