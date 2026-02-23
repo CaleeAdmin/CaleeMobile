@@ -5,6 +5,16 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+val isReleaseBuildRequested =
+    gradle.startParameter.taskNames.any { taskName ->
+        taskName.contains("release", ignoreCase = true)
+    }
+
+fun requiredEnv(name: String): String {
+    return System.getenv(name)?.takeIf { it.isNotBlank() }
+        ?: throw GradleException("Missing required environment variable for release signing: $name")
+}
+
 android {
     namespace = "com.viso.caleesync"
     compileSdk = flutter.compileSdkVersion
@@ -30,11 +40,45 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        create("release") {
+            if (isReleaseBuildRequested) {
+                val keystorePath = requiredEnv("ANDROID_KEYSTORE_PATH")
+                val keystorePassword = requiredEnv("ANDROID_KEYSTORE_PASSWORD")
+                val keyAlias = requiredEnv("ANDROID_KEY_ALIAS")
+                val keyPassword =
+                    System.getenv("ANDROID_KEY_PASSWORD")
+                        ?.takeIf { it.isNotBlank() }
+                        ?: keystorePassword
+
+                storeFile = file(keystorePath)
+                if (!storeFile!!.exists()) {
+                    throw GradleException("Keystore file not found at ANDROID_KEYSTORE_PATH: $keystorePath")
+                }
+                storePassword = keystorePassword
+                this.keyAlias = keyAlias
+                this.keyPassword = keyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
+        }
+    }
+}
+
+androidComponents {
+    onVariants(selector().withBuildType("release")) { variant ->
+        val versionName = variant.versionName.orElse("0.0.0")
+        val versionCode = variant.versionCode.orElse(0)
+        variant.outputs.forEach { output ->
+            output.outputFileName.set(
+                versionName.zip(versionCode) { name, code ->
+                    "caleesync-release-$name($code).apk"
+                },
+            )
         }
     }
 }

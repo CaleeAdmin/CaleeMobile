@@ -1,0 +1,99 @@
+name: Android CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - '**'
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-analyze:
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/'))
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Build debug APK
+        run: flutter build apk --debug
+
+  release-android:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Validate tag version matches pubspec
+        env:
+          GIT_TAG: ${{ github.ref_name }}
+        run: |
+          PUBSPEC_VERSION=$(python3 - <<'PY'
+          import pathlib
+          for line in pathlib.Path('pubspec.yaml').read_text().splitlines():
+              if line.startswith('version:'):
+                  value = line.split(':', 1)[1].strip()
+                  print(value.split('+', 1)[0])
+                  break
+          else:
+              raise SystemExit('version not found in pubspec.yaml')
+          PY
+          )
+
+          if [ "v${PUBSPEC_VERSION}" != "${GIT_TAG}" ]; then
+            echo "Tag ${GIT_TAG} does not match pubspec version v${PUBSPEC_VERSION}" >&2
+            exit 1
+          fi
+
+      - name: Decode Android keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "${ANDROID_KEYSTORE_BASE64}" ]; then
+            echo "Missing required secret: ANDROID_KEYSTORE_BASE64" >&2
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/android"
+          echo "${ANDROID_KEYSTORE_BASE64}" | base64 --decode > "$RUNNER_TEMP/android/release.keystore"
+
+      - name: Build release APK
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/android/release.keystore
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          [ -n "${ANDROID_KEYSTORE_PASSWORD}" ] || (echo "Missing required secret: ANDROID_KEYSTORE_PASSWORD" >&2 && exit 1)
+          [ -n "${ANDROID_KEY_ALIAS}" ] || (echo "Missing required secret: ANDROID_KEY_ALIAS" >&2 && exit 1)
+          flutter pub get
+          flutter build apk --release
+
+      - name: Upload release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: caleesync-release-apk-${{ github.ref_name }}
+          path: build/app/outputs/flutter-apk/caleesync-release-*.apk
+          if-no-files-found: error
