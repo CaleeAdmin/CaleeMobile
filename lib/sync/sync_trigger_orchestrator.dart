@@ -96,15 +96,22 @@ class SyncTriggerOrchestrator extends GetxService with WidgetsBindingObserver {
       return;
     }
 
-    final SyncSummary summary = await _scheduleRun(SyncTriggerType.periodicBackground);
-    if (summary.failed > 0) {
+    try {
+      final SyncSummary summary = await _scheduleRun(SyncTriggerType.periodicBackground);
+      if (summary.failed > 0) {
+        _periodicBackoff = _nextBackoff(_periodicBackoff);
+        _schedulePeriodicTimer(_periodicBackoff);
+        return;
+      }
+
+      _periodicBackoff = Duration.zero;
+      _schedulePeriodicTimer(interval);
+    } catch (error, stackTrace) {
+      debugPrint('[SYNC_TRIGGER] periodic run failed: $error');
+      debugPrintStack(label: '[SYNC_TRIGGER] periodic run stack', stackTrace: stackTrace);
       _periodicBackoff = _nextBackoff(_periodicBackoff);
       _schedulePeriodicTimer(_periodicBackoff);
-      return;
     }
-
-    _periodicBackoff = Duration.zero;
-    _schedulePeriodicTimer(interval);
   }
 
   Duration _nextBackoff(Duration current) {
