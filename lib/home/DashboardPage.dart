@@ -75,6 +75,25 @@ class _DashboardPageState extends State<DashboardPage> {
     };
   }
 
+  DateTime? _latestSyncActivity(DateTime? foreground, DateTime? background) {
+    if (foreground == null) return background;
+    if (background == null) return foreground;
+    return foreground.isAfter(background) ? foreground : background;
+  }
+
+  String _lastSyncActivityLabel(DateTime? foreground, BackgroundSyncStatus? backgroundStatus) {
+    final DateTime? latest = _latestSyncActivity(foreground, backgroundStatus?.lastRunAt);
+    if (latest == null) {
+      return 'Never';
+    }
+    final bool fromBackground = backgroundStatus?.lastRunAt != null && latest == backgroundStatus!.lastRunAt;
+    if (!fromBackground) {
+      return '${latest.toLocal()} (foreground)';
+    }
+    final String result = backgroundStatus?.lastResult ?? 'unknown';
+    return '${latest.toLocal()} (background • $result)';
+  }
+
   @override
   Widget build(BuildContext context) {
     final probeCtrl = Get.find<CalendarProbeController>();
@@ -176,23 +195,20 @@ class _DashboardPageState extends State<DashboardPage> {
                     _kvRow(
                       icon: Icons.timeline,
                       label: 'Last sync activity',
-                      value: probeCtrl.lastSyncAt.value == null ? 'Never' : probeCtrl.lastSyncAt.value!.toLocal().toString(),
+                      value: _lastSyncActivityLabel(probeCtrl.lastSyncAt.value, _backgroundStatus),
                     ),
-                    const Divider(height: 20),
+                    const SizedBox(height: 4),
+                    const Text('Background sync details', style: TextStyle(fontWeight: FontWeight.w600, color: Colors.black87)),
+                    const SizedBox(height: 4),
                     _kvRow(
                       icon: Icons.schedule,
-                      label: 'Background sync',
+                      label: 'Periodic schedule',
                       value: _backgroundStatus?.periodicEnabled == true ? 'Enabled' : 'Disabled',
                     ),
                     _kvRow(
                       icon: Icons.task_alt,
-                      label: 'Background result',
+                      label: 'Last background result',
                       value: _friendlyResult(_backgroundStatus?.lastResult),
-                    ),
-                    _kvRow(
-                      icon: Icons.update,
-                      label: 'Last background run',
-                      value: _backgroundStatus?.lastRunAt?.toLocal().toString() ?? 'Never',
                     ),
                     _kvRow(
                       icon: Icons.av_timer,
