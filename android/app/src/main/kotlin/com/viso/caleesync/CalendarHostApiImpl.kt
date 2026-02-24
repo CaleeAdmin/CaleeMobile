@@ -8,7 +8,6 @@ import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
 import android.content.pm.PackageManager
-import android.content.pm.PermissionChecker
 import android.net.Uri
 import java.util.TimeZone
 import android.provider.CalendarContract
@@ -106,10 +105,10 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
     }
 
     private fun enforceCalendarSyncSettings(account: Account) {
-        val canWriteSyncSettings = PermissionChecker.checkSelfPermission(
+        val canWriteSyncSettings = ContextCompat.checkSelfPermission(
             context,
             android.Manifest.permission.WRITE_SYNC_SETTINGS
-        ) == PermissionChecker.PERMISSION_GRANTED
+        ) == PackageManager.PERMISSION_GRANTED
 
         if (!canWriteSyncSettings) {
             Log.w("CalendarSync", "WRITE_SYNC_SETTINGS not granted; skipping setIsSyncable/setSyncAutomatically")
@@ -690,10 +689,10 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
     ) {
         try {
             val account = ensureCalendarAccount(accountName)
-            val canReadSyncSettings = PermissionChecker.checkSelfPermission(
+            val canReadSyncSettings = ContextCompat.checkSelfPermission(
                 context,
                 android.Manifest.permission.READ_SYNC_SETTINGS
-            ) == PermissionChecker.PERMISSION_GRANTED
+            ) == PackageManager.PERMISSION_GRANTED
 
             if (!canReadSyncSettings) {
                 Log.w("CalendarSync", "READ_SYNC_SETTINGS not granted; cannot read sync state")
