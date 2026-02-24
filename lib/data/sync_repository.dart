@@ -767,52 +767,6 @@ class SyncRepository {
     return false;
   }
 
-  /// 获取Subscribed calendar列表及其对应的事件总数（含详细打印）
-  Future<List<Map<String, dynamic>>> getSubscribedCalendarsWithCount() async {
-    final db = await _dbHelper.database;
-
-    try {
-      print("------------------------------------------------------------");
-      print("[INFO] [Repository] Start querying subscriptions (sorted by local_id)...");
-
-      // 🌟 核心修正：
-      // 1. 去掉 c.id, 全部使用 c.local_id
-      // 2. COUNT(s.uid) Stats sync_items 中的事件总数
-      final String sql = '''
-      SELECT 
-        c.*, 
-        COUNT(s.id) as event_count 
-      FROM remote_collections c
-      LEFT JOIN sync_items s ON c.id = s.remote_collection_id
-      WHERE c.is_subscription = 1
-      GROUP BY c.id
-      ORDER BY c.id DESC
-    ''';
-
-      final List<Map<String, dynamic>> results = await db.rawQuery(sql);
-
-      print("[INFO] [Repository] Query complete, found ${results.length} subscription records");
-
-      for (var i = 0; i < results.length; i++) {
-        final item = results[i];
-        final String currentLocalId = item['id'].toString();
-        print("""
-  [INFO] Record [#$i]
-     Display name: ${item['display_name']}
-     Local ID    : $currentLocalId
-     Event count : ${item['event_count']}
-     Sync state  : ${item['sync_status'] == SyncItemStatus.pendingPush ? "[OK] enabled" : "[INFO] disabled"}
-     Remote path : ${item['remote_path']}
-  ------------------------------------------------------------""");
-      }
-
-      return results;
-    } catch (e) {
-      print("[ERROR] [Repository] Failed to fetch counted subscription list: $e");
-      return [];
-    }
-  }
-
   Future<void> updateSystemCalendarId(String oldLocalId, String newSystemId) async {
     final db = await DatabaseHelper.instance.database;
 

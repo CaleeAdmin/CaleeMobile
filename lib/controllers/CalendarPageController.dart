@@ -11,7 +11,6 @@ import '../sync/sync_trigger_orchestrator.dart';
 import '../data/database_helper.dart';
 import '../data/sync_repository.dart';
 import '../services/calee_server_service.dart';
-import 'calendar_probe_controller.dart';
 
 class CalendarDisplayItem {
   // 1. 标识符
@@ -481,10 +480,6 @@ class CalendarPageController extends GetxController {
         await refreshDashboard(includeEventCounts: false);
         unawaited(refreshDashboard());
         _notifyMeaningfulChange();
-        // 刷新已订阅列表（如果 probe controller 已注册）
-        if (Get.isRegistered<CalendarProbeController>()) {
-          await Get.find<CalendarProbeController>().fetchSubscribedCalendars();
-        }
         Get.snackbar('Success', 'Subscribed to calendar');
         return true;
       } else {
