@@ -14,7 +14,14 @@ import 'package:get/get.dart';
 import 'data/database_helper.dart';
 import 'data/sync_repository.dart';
 import 'home/calendar_probe_page.dart';
+import 'sync/background_sync_scheduler.dart';
+import 'sync/background_sync_worker_bridge.dart';
 import 'sync/sync_trigger_orchestrator.dart';
+
+@pragma('vm:entry-point')
+Future<void> caleeSyncBackgroundEntrypoint() async {
+  await BackgroundSyncWorkerBridge.start();
+}
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -35,6 +42,7 @@ void main() async {
   Get.put(AuthController());
   Get.put(CalendarPageController());
   Get.put(SyncTriggerOrchestrator(), permanent: true);
+  await BackgroundSyncScheduler.selfHealPeriodicIfNeeded();
   await appController.init();
 
   runApp(const CaleeApp());

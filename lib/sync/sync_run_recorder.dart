@@ -19,7 +19,8 @@ class SyncRunRecorder implements SyncRunTelemetry {
   SyncRunRecord? get currentRun => _run;
   bool get hasSafetyAbort => _bindings.values.any((b) => b.resultStatus == SyncBindingResultStatus.abortedBySafety);
 
-  Future<void> startRun({required SyncRunMode mode}) async {
+  Future<void> startRun({required SyncRunMode mode, required SyncRunTrigger trigger}) async {
+    _bindings.clear();
     final packageInfo = await PackageInfo.fromPlatform();
     final runId = const Uuid().v4();
     final deviceId = _getDeviceId();
@@ -30,6 +31,7 @@ class SyncRunRecorder implements SyncRunTelemetry {
       appVersion: packageInfo.version,
       deviceIdentifier: deviceId,
       result: SyncRunResult.success,
+      trigger: trigger,
     );
   }
 
@@ -39,6 +41,10 @@ class SyncRunRecorder implements SyncRunTelemetry {
     run.endTime = DateTime.now();
     run.durationMs = run.endTime!.difference(run.startTime).inMilliseconds;
     run.result = result;
+
+    for (final binding in _bindings.values) {
+      binding.endedAt ??= run.endTime;
+    }
     run.bindings
       ..clear()
       ..addAll(_bindings.values);
