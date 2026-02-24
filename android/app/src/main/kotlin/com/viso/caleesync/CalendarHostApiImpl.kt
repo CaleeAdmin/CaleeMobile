@@ -8,6 +8,7 @@ import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
 import android.content.pm.PackageManager
+import android.content.pm.PermissionChecker
 import android.net.Uri
 import java.util.TimeZone
 import android.provider.CalendarContract
@@ -105,8 +106,22 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
     }
 
     private fun enforceCalendarSyncSettings(account: Account) {
-        ContentResolver.setIsSyncable(account, CALENDAR_AUTHORITY, 1)
-        ContentResolver.setSyncAutomatically(account, CALENDAR_AUTHORITY, true)
+        val canWriteSyncSettings = PermissionChecker.checkSelfPermission(
+            context,
+            android.Manifest.permission.WRITE_SYNC_SETTINGS
+        ) == PermissionChecker.PERMISSION_GRANTED
+
+        if (!canWriteSyncSettings) {
+            Log.w("CalendarSync", "WRITE_SYNC_SETTINGS not granted; skipping setIsSyncable/setSyncAutomatically")
+            return
+        }
+
+        try {
+            ContentResolver.setIsSyncable(account, CALENDAR_AUTHORITY, 1)
+            ContentResolver.setSyncAutomatically(account, CALENDAR_AUTHORITY, true)
+        } catch (se: SecurityException) {
+            Log.w("CalendarSync", "No permission to update sync settings for ${account.name}", se)
+        }
     }
 
     private fun ensureAccountAndSync(accountName: String): Account {
@@ -675,8 +690,29 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
     ) {
         try {
             val account = ensureCalendarAccount(accountName)
-            val isSyncable = ContentResolver.getIsSyncable(account, CALENDAR_AUTHORITY) > 0
-            val autoSync = ContentResolver.getSyncAutomatically(account, CALENDAR_AUTHORITY)
+            val canReadSyncSettings = PermissionChecker.checkSelfPermission(
+                context,
+                android.Manifest.permission.READ_SYNC_SETTINGS
+            ) == PermissionChecker.PERMISSION_GRANTED
+
+            if (!canReadSyncSettings) {
+                Log.w("CalendarSync", "READ_SYNC_SETTINGS not granted; cannot read sync state")
+                callback(Result.success(true))
+                return
+            }
+
+            val isSyncable = try {
+                ContentResolver.getIsSyncable(account, CALENDAR_AUTHORITY) > 0
+            } catch (se: SecurityException) {
+                Log.w("CalendarSync", "No permission to read syncable state", se)
+                true
+            }
+            val autoSync = try {
+                ContentResolver.getSyncAutomatically(account, CALENDAR_AUTHORITY)
+            } catch (se: SecurityException) {
+                Log.w("CalendarSync", "No permission to read auto-sync state", se)
+                true
+            }
             callback(Result.success(isSyncable && autoSync))
         } catch (e: Exception) {
             callback(Result.failure(e))
