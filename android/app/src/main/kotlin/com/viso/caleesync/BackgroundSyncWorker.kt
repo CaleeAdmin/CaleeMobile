@@ -129,28 +129,16 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
         private const val ONE_OFF_UNIQUE = "CaleeSyncOneTimeWorker"
         private val runLock = AtomicBoolean(false)
 
-        private fun periodicConstraints(): Constraints {
+        private fun networkConnectedConstraints(): Constraints {
             return Constraints.Builder()
                 .setRequiredNetworkType(NetworkType.CONNECTED)
-                .setRequiresBatteryNotLow(true)
-                .setRequiresStorageNotLow(true)
                 .build()
-        }
-
-        private fun oneOffConstraints(expedited: Boolean): Constraints {
-            val builder = Constraints.Builder()
-                .setRequiredNetworkType(NetworkType.CONNECTED)
-                .setRequiresStorageNotLow(true)
-            if (!expedited) {
-                builder.setRequiresBatteryNotLow(true)
-            }
-            return builder.build()
         }
 
         fun schedulePeriodic(context: Context, intervalMinutes: Int): Operation {
             val bounded = intervalMinutes.coerceAtLeast(15).toLong()
             val request = PeriodicWorkRequestBuilder<CaleeSyncPeriodicWorker>(bounded, TimeUnit.MINUTES)
-                .setConstraints(periodicConstraints())
+                .setConstraints(networkConnectedConstraints())
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 15, TimeUnit.MINUTES)
                 .build()
             return WorkManager.getInstance(context)
@@ -169,7 +157,7 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
 
         fun enqueueOneOff(context: Context, reason: String, expedited: Boolean): Operation {
             val builder = OneTimeWorkRequestBuilder<CaleeSyncPeriodicWorker>()
-                .setConstraints(oneOffConstraints(expedited))
+                .setConstraints(networkConnectedConstraints())
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 15, TimeUnit.MINUTES)
                 .setInputData(androidx.work.workDataOf("trigger" to reason))
 
@@ -181,7 +169,7 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
                 } catch (iae: IllegalArgumentException) {
                     Log.w("CaleeSyncWorker", "Invalid expedited constraints; falling back to non-expedited one-off", iae)
                     OneTimeWorkRequestBuilder<CaleeSyncPeriodicWorker>()
-                        .setConstraints(oneOffConstraints(false))
+                        .setConstraints(networkConnectedConstraints())
                         .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 15, TimeUnit.MINUTES)
                         .setInputData(androidx.work.workDataOf("trigger" to reason))
                         .build()
