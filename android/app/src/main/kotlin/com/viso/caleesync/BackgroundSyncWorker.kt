@@ -60,6 +60,11 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
 
                         val localEngine = FlutterEngine(context)
                         engine = localEngine
+
+                        // Register Pigeon host APIs on the background engine as well.
+                        val calendarApi = CalendarHostApiImpl(context)
+                        NativeCalendarApi.setUp(localEngine.dartExecutor.binaryMessenger, calendarApi)
+
                         val channel = MethodChannel(localEngine.dartExecutor.binaryMessenger, CHANNEL)
                         localEngine.dartExecutor.executeDartEntrypoint(
                             DartExecutor.DartEntrypoint(loader.findAppBundlePath(), "caleeSyncBackgroundEntrypoint")
