@@ -1,6 +1,9 @@
 package com.viso.caleesync
 
 import android.Manifest
+import android.accounts.Account
+import android.accounts.AccountManager
+import android.content.ContentResolver
 import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
@@ -52,7 +55,7 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
     }
 
     private fun shouldUseSyncAdapterForEvents(calendarId: String): Boolean {
-        return getCalendarAccount(calendarId)?.type == "com.viso.caleesync"
+        return getCalendarAccount(calendarId)?.type == ACCOUNT_TYPE
     }
 
     private fun buildEventWriteUri(baseUri: Uri, calendarId: String): Uri {
@@ -64,6 +67,9 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
     }
 
     companion object {
+        private const val ACCOUNT_TYPE = "com.viso.caleesync"
+        private const val CALENDAR_AUTHORITY = "com.android.calendar"
+
         private val CALENDAR_PROJECTION = arrayOf(
             CalendarContract.Calendars._ID,
             CalendarContract.Calendars.CALENDAR_DISPLAY_NAME,
@@ -86,6 +92,27 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
             CalendarContract.Events.LAST_DATE,
             CalendarContract.Events.CALENDAR_ID,
             )
+    }
+
+    private fun ensureCalendarAccount(accountName: String): Account {
+        val manager = AccountManager.get(context)
+        val existing = manager.getAccountsByType(ACCOUNT_TYPE).firstOrNull { it.name == accountName }
+        if (existing != null) return existing
+
+        val account = Account(accountName, ACCOUNT_TYPE)
+        manager.addAccountExplicitly(account, null, null)
+        return account
+    }
+
+    private fun enforceCalendarSyncSettings(account: Account) {
+        ContentResolver.setIsSyncable(account, CALENDAR_AUTHORITY, 1)
+        ContentResolver.setSyncAutomatically(account, CALENDAR_AUTHORITY, true)
+    }
+
+    private fun ensureAccountAndSync(accountName: String): Account {
+        val account = ensureCalendarAccount(accountName)
+        enforceCalendarSyncSettings(account)
+        return account
     }
 
     override fun requestPermission(forTask: Boolean, callback: (Result<Boolean>) -> Unit) {
@@ -220,8 +247,9 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
         color: Long,
         callback: (Result<String?>) -> Unit
     ) {
-        val accountType = "com.viso.caleesync"
+        val accountType = ACCOUNT_TYPE
         val cr = context.contentResolver
+        ensureAccountAndSync(accountName)
 
         // 1. 构建带有 SyncAdapter 标识的 URI
         val uri = CalendarContract.Calendars.CONTENT_URI.buildUpon()
@@ -259,6 +287,7 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
             val newId = resultUri?.lastPathSegment
 
             if (newId != null) {
+                enforceCalendarSyncSettings(Account(accountName, accountType))
                 callback(Result.success(newId))
             } else {
                 callback(Result.failure(Exception("Calendar creation failed: URI is null")))
@@ -280,7 +309,7 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
         // 建议在子线程执行
         Thread {
             try {
-                val accountType = "com.viso.caleesync"
+                val accountType = ACCOUNT_TYPE
                 val cr = context.contentResolver
                 val idLong = calendarId.toLongOrNull() ?: throw IllegalArgumentException("Invalid ID")
 
@@ -442,7 +471,7 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
                 CalendarContract.Events.CONTENT_URI.buildUpon()
                     .appendQueryParameter(CalendarContract.CALLER_IS_SYNCADAPTER, "true")
                     .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_NAME, foundAccountName)
-                    .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_TYPE, "com.viso.caleesync")
+                    .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_TYPE, ACCOUNT_TYPE)
                     .build()
             } else {
                 CalendarContract.Events.CONTENT_URI
@@ -604,6 +633,52 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
             callback(Result.success(rows > 0))
         } catch (e: Exception) {
             Log.e("CalendarSync", "Rename failed: ${e.message}")
+            callback(Result.failure(e))
+        }
+    }
+
+    override fun setCalendarEnabled(
+        calendarId: String,
+        accountName: String,
+        enabled: Boolean,
+        callback: (Result<Boolean>) -> Unit
+    ) {
+        try {
+            val idLong = calendarId.toLongOrNull() ?: run {
+                callback(Result.success(false))
+                return
+            }
+
+            val account = ensureAccountAndSync(accountName)
+            val values = ContentValues().apply {
+                put(CalendarContract.Calendars.SYNC_EVENTS, if (enabled) 1 else 0)
+                put(CalendarContract.Calendars.VISIBLE, if (enabled) 1 else 0)
+            }
+
+            val updateUri = ContentUris.withAppendedId(CalendarContract.Calendars.CONTENT_URI, idLong)
+                .buildUpon()
+                .appendQueryParameter(CalendarContract.CALLER_IS_SYNCADAPTER, "true")
+                .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_NAME, account.name)
+                .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_TYPE, account.type)
+                .build()
+
+            val rows = context.contentResolver.update(updateUri, values, null, null)
+            callback(Result.success(rows > 0))
+        } catch (e: Exception) {
+            callback(Result.failure(e))
+        }
+    }
+
+    override fun isCalendarAccountSyncEnabled(
+        accountName: String,
+        callback: (Result<Boolean>) -> Unit
+    ) {
+        try {
+            val account = ensureCalendarAccount(accountName)
+            val isSyncable = ContentResolver.getIsSyncable(account, CALENDAR_AUTHORITY) > 0
+            val autoSync = ContentResolver.getSyncAutomatically(account, CALENDAR_AUTHORITY)
+            callback(Result.success(isSyncable && autoSync))
+        } catch (e: Exception) {
             callback(Result.failure(e))
         }
     }
