@@ -75,6 +75,13 @@ class _DashboardPageState extends State<DashboardPage> {
     };
   }
 
+  String _backgroundStateSubtitle(BackgroundSyncStatus? status) {
+    if (status == null) return 'No background status yet';
+    final String mode = status.periodicEnabled ? 'Periodic enabled' : 'Periodic disabled';
+    final String result = _friendlyResult(status.lastResult);
+    return '$mode • $result';
+  }
+
   DateTime? _latestSyncActivity(DateTime? foreground, DateTime? background) {
     if (foreground == null) return background;
     if (background == null) return foreground;
@@ -176,20 +183,26 @@ class _DashboardPageState extends State<DashboardPage> {
                     _statusTile(
                       color: Colors.green,
                       icon: Icons.check_circle,
-                      title: 'Synced',
+                      title: 'Foreground synced',
                       subtitle: '${probeCtrl.success.value} sources',
                     ),
                     _statusTile(
                       color: Colors.lightGreen,
                       icon: Icons.sync,
-                      title: 'Syncing',
+                      title: 'Foreground syncing',
                       subtitle: '${probeCtrl.processing.value} source',
                     ),
                     _statusTile(
                       color: Colors.red,
                       icon: Icons.error_outline,
-                      title: 'Errors',
+                      title: 'Foreground errors',
                       subtitle: '${probeCtrl.failed.value} source',
+                    ),
+                    _statusTile(
+                      color: Colors.blue,
+                      icon: Icons.cloud_sync,
+                      title: 'Background worker',
+                      subtitle: _backgroundStateSubtitle(_backgroundStatus),
                     ),
                     const SizedBox(height: 8),
                     _kvRow(
