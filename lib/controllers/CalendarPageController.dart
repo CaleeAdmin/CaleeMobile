@@ -6,11 +6,11 @@ import 'package:get/get.dart';
 import 'dart:async';
 
 import '../services/calee_auth_service.dart';
+import '../sync/sync_completed_event_bus.dart';
 import '../sync/sync_trigger_orchestrator.dart';
 import '../data/database_helper.dart';
 import '../data/sync_repository.dart';
 import '../services/calee_server_service.dart';
-import 'calendar_probe_controller.dart';
 
 class CalendarDisplayItem {
   // 1. 标识符
@@ -89,6 +89,7 @@ class CalendarPageController extends GetxController {
   var togglingCalendarIds = <String>{}.obs;
   var subscribingUrls = <String>{}.obs;
   Future<void>? _refreshFuture;
+  StreamSubscription<SyncCompletedEvent>? _syncCompletedSub;
 
   void _notifyMeaningfulChange() {
     if (Get.isRegistered<SyncTriggerOrchestrator>()) {
@@ -99,8 +100,17 @@ class CalendarPageController extends GetxController {
   @override
   void onInit() {
     super.onInit();
+    _syncCompletedSub = SyncCompletedEventBus.stream.listen((_) {
+      unawaited(refreshDashboard());
+    });
     // 页面加载时自动执行一次扫描和数据拉取
     refreshDashboard();
+  }
+
+  @override
+  void onClose() {
+    _syncCompletedSub?.cancel();
+    super.onClose();
   }
 
   /// 处理 Checkbox 点击事件
@@ -146,26 +156,27 @@ class CalendarPageController extends GetxController {
         return;
       }
 
-      final bool ok = await _repo.connectAndEnableRemoteCalendarByPath(remotePath);
-      item.isEnabled = ok;
-      if (key.isNotEmpty) {
-        if (ok) {
-          selectedCalendarIds.add(key);
-        } else {
-          selectedCalendarIds.remove(key);
-        }
-      }
+      final EnableCalendarResult enableResult = await _repo.connectAndEnableRemoteCalendarByPath(remotePath);
+      _applyEnableResultToCalendarItem(item, enableResult);
 
       final String? syncMessage = _repo.takeLastConnectErrorMessage();
-      if (!ok) {
+      if (!enableResult.success) {
         final String err = syncMessage ?? 'Connection failed. Please retry.';
         Get.snackbar('Connection failed', err);
       } else if (syncMessage != null && syncMessage.isNotEmpty) {
         Get.snackbar('Sync failed', syncMessage);
+      } else {
+        final String? loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey);
+        if (loginName != null && loginName.isNotEmpty) {
+          final bool syncEnabled = await _nativeApi.isCalendarAccountSyncEnabled(loginName);
+          if (!syncEnabled) {
+            Get.snackbar('Sync disabled in system', 'Please enable CaleeSync account calendar sync in Android Settings.');
+          }
+        }
       }
-      await refreshDashboard(includeEventCounts: false);
-      // Enable flow already triggers a force sync in repository; avoid scheduling
-      // an additional debounced foreground sync for the same user action.
+      // Keep enable workflow authoritative in repository and update only the
+      // affected item here. Full dashboard refresh remains an explicit action
+      // (manual refresh, lifecycle load, sync-completed event).
     } catch (e) {
       print("[ERROR] Failed to toggle calendar state: $e");
       Get.snackbar('Connection failed', 'An exception occurred while connecting the calendar. Please try again later');
@@ -178,6 +189,55 @@ class CalendarPageController extends GetxController {
       }
     }
   }
+
+
+  void _applyEnableResultToCalendarItem(CalendarDisplayItem item, EnableCalendarResult result) {
+    final String normalizedRemotePath = CaleeServerService.normalizeRemotePath(item.remotePath ?? '');
+    final String resultRemotePath = CaleeServerService.normalizeRemotePath(result.remotePath);
+    final bool isSameCalendar = normalizedRemotePath.isNotEmpty && normalizedRemotePath == resultRemotePath;
+
+    if (!isSameCalendar) {
+      item.isEnabled = result.success;
+      calendars.refresh();
+      return;
+    }
+
+    final String newKey = resultRemotePath.isNotEmpty ? resultRemotePath : (item.localId ?? '');
+    if (result.success) {
+      if (newKey.isNotEmpty) {
+        selectedCalendarIds.add(newKey);
+      }
+    } else {
+      if (newKey.isNotEmpty) {
+        selectedCalendarIds.remove(newKey);
+      }
+    }
+
+    final int index = calendars.indexOf(item);
+    if (index < 0) {
+      item.isEnabled = result.success;
+      calendars.refresh();
+      return;
+    }
+
+    calendars[index] = CalendarDisplayItem(
+      localId: result.localCalendarId ?? item.localId,
+      remotePath: item.remotePath,
+      name: item.name,
+      color: item.color,
+      eventCount: item.eventCount,
+      isReadOnly: item.isReadOnly,
+      isSubscription: item.isSubscription,
+      isLocalReadOnly: item.isLocalReadOnly,
+      subscriptionUrl: item.subscriptionUrl,
+      isEnabled: result.success,
+      origin: item.origin,
+      bindingId: item.bindingId,
+      allowMassDeletionDangerous: item.allowMassDeletionDangerous,
+    );
+    calendars.refresh();
+  }
+
 
 
 
@@ -243,6 +303,16 @@ class CalendarPageController extends GetxController {
     );
 
     debugPrint("[OK] Update succeeded, affected rows: $count (condition: $whereClause = ${whereArgs[0]})");
+
+    final String? localCalendarId = item.localId;
+    final String? loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey);
+    if (localCalendarId != null && localCalendarId.isNotEmpty && loginName != null && loginName.isNotEmpty) {
+      try {
+        await _nativeApi.setCalendarEnabled(localCalendarId, loginName, newValue);
+      } catch (e) {
+        debugPrint('[WARN] Failed to update CalendarContract flags for $localCalendarId: $e');
+      }
+    }
   }
 
   /// 核心方法：刷新并重新构建 UI 模型
@@ -452,10 +522,6 @@ class CalendarPageController extends GetxController {
         await refreshDashboard(includeEventCounts: false);
         unawaited(refreshDashboard());
         _notifyMeaningfulChange();
-        // 刷新已订阅列表（如果 probe controller 已注册）
-        if (Get.isRegistered<CalendarProbeController>()) {
-          await Get.find<CalendarProbeController>().fetchSubscribedCalendars();
-        }
         Get.snackbar('Success', 'Subscribed to calendar');
         return true;
       } else {

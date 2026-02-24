@@ -107,4 +107,10 @@ abstract class NativeCalendarApi {
 
   @async
   bool modifyCalendarTitle(String calendarId, String newTitle, String accountName, String accountType);
+
+  @async
+  bool setCalendarEnabled(String calendarId, String accountName, bool enabled);
+
+  @async
+  bool isCalendarAccountSyncEnabled(String accountName);
 }
