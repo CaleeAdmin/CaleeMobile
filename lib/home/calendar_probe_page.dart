@@ -71,38 +71,6 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
               ),
             ],
           ),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: GetX<CalendarProbeController>(
-              init: CalendarProbeController(),
-              builder: (ctrl) {
-                return ElevatedButton.icon(
-                  onPressed: ctrl.isSyncing.value ? null : () async {
-                    try {
-                      await ctrl.syncNow();
-                      Get.snackbar('Sync', 'Sync completed', snackPosition: SnackPosition.BOTTOM);
-                    } catch (e) {
-                      Get.snackbar('Sync', 'Sync failed: $e', snackPosition: SnackPosition.BOTTOM);
-                    }
-                  },
-                  icon: const Icon(Icons.sync, size: 18),
-                  label: Text(ctrl.isSyncing.value ? 'Syncing...' : 'Sync'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.lightGreen,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    minimumSize: const Size(0, 36),
-                  ),
-                );
-              },
-            ),
-          ),
-        ],
         centerTitle: true,
       ),
       body: Obx(() => IndexedStack(
