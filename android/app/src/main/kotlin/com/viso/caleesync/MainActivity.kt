@@ -34,8 +34,13 @@ class MainActivity : FlutterActivity() {
                 "enqueueOneOff" -> {
                     val reason = call.argument<String>("reason") ?: "manual"
                     val expedited = call.argument<Boolean>("expedited") ?: false
-                    CaleeSyncPeriodicWorker.enqueueOneOff(this, reason, expedited)
-                    result.success(true)
+                    try {
+                        CaleeSyncPeriodicWorker.enqueueOneOff(this, reason, expedited)
+                        result.success(true)
+                    } catch (e: IllegalArgumentException) {
+                        Log.e("CaleeSyncWorker", "enqueueOneOff failed", e)
+                        result.error("invalid_work_request", e.message, null)
+                    }
                 }
 
                 "ensurePeriodicScheduled" -> {
