@@ -3,6 +3,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../data/database_helper.dart';
+import '../data/sync_repository.dart';
 import '../entity/SyncContext.dart';
 import '../services/calee_server_service.dart';
 import 'SyncEnum.dart';
@@ -179,14 +180,46 @@ class SyncItemPlanner {
       debugPrint('[SYNC_FORCE][binding_id=$bindingId][path=$path][origin=$bindingOrigin] force=true consumed_but_ineligible reason=$reason');
     }
 
-    if (reason == 'local_calendar_missing' && remoteCollectionId > 0) {
+    if (remoteCollectionId <= 0) return;
+
+    if (reason == 'local_calendar_missing_remote_origin') {
+      await db.transaction((txn) async {
+        await txn.delete(
+          'sync_items',
+          where: 'remote_collection_id = ?',
+          whereArgs: [remoteCollectionId],
+        );
+        await txn.delete(
+          'local_bindings',
+          where: 'id = ?',
+          whereArgs: [bindingId],
+        );
+      });
+
+      debugPrint('[SYNC_REPAIR][binding_id=$bindingId][path=$path][origin=$bindingOrigin] remote_origin_missing_local repair=rebase+drop_binding');
+      final result = await SyncRepository().connectAndEnableRemoteCalendarByPath(path);
+      if (result.success) {
+        debugPrint('[SYNC_REPAIR][binding_id=$bindingId][path=$path][origin=$bindingOrigin] remote_origin_missing_local repair=enable_workflow_ok');
+      } else {
+        await db.update(
+          'remote_collections',
+          {'is_enabled': 0},
+          where: 'id = ?',
+          whereArgs: [remoteCollectionId],
+        );
+        debugPrint('[SYNC_REPAIR][binding_id=$bindingId][path=$path][origin=$bindingOrigin] remote_origin_missing_local repair=enable_workflow_failed gated=true');
+      }
+      return;
+    }
+
+    if (reason == 'local_calendar_missing_local_origin') {
       await db.update(
         'remote_collections',
         {'is_enabled': 0},
         where: 'id = ?',
         whereArgs: [remoteCollectionId],
       );
-      debugPrint('[SYNC_GATE][binding_id=$bindingId][origin=$bindingOrigin] disabled_due_to_missing_local_calendar');
+      debugPrint('[SYNC_GATE][binding_id=$bindingId][path=$path][origin=$bindingOrigin] local_origin_missing_local gated=true state=local_calendar_missing');
     }
   }
 
@@ -215,8 +248,16 @@ class SyncItemPlanner {
       return {'eligible': false, 'reason': 'missing_local_collection_id', 'ui_hint': 'Bind to a local calendar to sync'};
     }
 
+    final int origin = (row['binding_origin'] as int?) ?? SyncBindingOrigin.remote;
     if (!nativeCalendarIds.contains(localCollectionId)) {
-      return {'eligible': false, 'reason': 'local_calendar_missing', 'ui_hint': 'Local calendar not found'};
+      if (origin == SyncBindingOrigin.remote) {
+        return {'eligible': false, 'reason': 'local_calendar_missing_remote_origin', 'ui_hint': 'Repairing missing local calendar'};
+      }
+      return {
+        'eligible': false,
+        'reason': 'local_calendar_missing_local_origin',
+        'ui_hint': 'Device calendar was removed. Delete link and reconnect to resume sync',
+      };
     }
 
     if (!remoteExists) {
