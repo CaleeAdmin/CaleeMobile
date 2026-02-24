@@ -7,6 +7,10 @@ on:
         description: Flutter version to use
         required: false
         default: "3.24.0"
+      build_name:
+        description: "Optional build name (for example: 1.2.3 or 1.2.3-beta.1)"
+        required: false
+        default: ""
 
 jobs:
   build-signed-apk:
@@ -32,6 +36,60 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Resolve build name and build number
+        id: versioning
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          input_build_name="${{ github.event.inputs.build_name }}"
+
+          if [[ -n "${input_build_name}" ]]; then
+            resolved_build_name="${input_build_name}"
+          else
+            if [[ ! -f pubspec.yaml ]]; then
+              echo "Error: pubspec.yaml not found; cannot derive build name." >&2
+              exit 1
+            fi
+
+            pubspec_version="$(sed -nE 's/^version:[[:space:]]*["\x27]?([^"\x27[:space:]]+)["\x27]?[[:space:]]*$/\1/p' pubspec.yaml | head -n1)"
+            if [[ -z "${pubspec_version}" ]]; then
+              echo "Error: unable to read version from pubspec.yaml." >&2
+              exit 1
+            fi
+
+            # Use SemVer core from pubspec.yaml version by stripping metadata and suffixes.
+            version_without_metadata="${pubspec_version%%+*}"
+            if [[ "${version_without_metadata}" =~ ^([0-9]+\.[0-9]+\.[0-9]+) ]]; then
+              resolved_build_name="${BASH_REMATCH[1]}"
+            else
+              echo "Error: pubspec.yaml version '${pubspec_version}' does not start with numeric X.Y.Z." >&2
+              exit 1
+            fi
+          fi
+
+          if [[ ! "${resolved_build_name}" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)(-.+)?$ ]]; then
+            echo "Error: invalid build-name '${resolved_build_name}'. Expected format X.Y.Z or X.Y.Z-suffix." >&2
+            exit 1
+          fi
+
+          major="${BASH_REMATCH[1]}"
+          minor="${BASH_REMATCH[2]}"
+          patch="${BASH_REMATCH[3]}"
+
+          if (( minor >= 100 || patch >= 100 )); then
+            echo "Error: invalid build-name '${resolved_build_name}'. minor and patch must be less than 100 to compute build-number." >&2
+            exit 1
+          fi
+
+          build_number="$(( major * 10000 + minor * 100 + patch ))"
+          sanitized_build_name="$(printf '%s' "${resolved_build_name}" | sed 's/[^A-Za-z0-9._-]/-/g')"
+          renamed_apk_path="build/app/outputs/flutter-apk/caleesync-${sanitized_build_name}.apk"
+
+          echo "build_name=${resolved_build_name}" >> "$GITHUB_OUTPUT"
+          echo "build_number=${build_number}" >> "$GITHUB_OUTPUT"
+          echo "apk_path=${renamed_apk_path}" >> "$GITHUB_OUTPUT"
+
       - name: Prepare Android signing files
         shell: bash
         run: |
@@ -49,14 +107,49 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
 
+      - name: Verify Android keystore
+        shell: bash
+        run: |
+          set -euo pipefail
+          keystore_path="android/upload-keystore.jks"
+          if [[ ! -s "${keystore_path}" ]]; then
+            echo "Error: keystore file not found or empty at ${keystore_path}." >&2
+            exit 1
+          fi
+          keytool -list \
+            -keystore "${keystore_path}" \
+            -alias "$ANDROID_KEY_ALIAS" \
+            -storepass "$ANDROID_STORE_PASSWORD" \
+            -keypass "$ANDROID_KEY_PASSWORD"
+        env:
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+
+
       - name: Build signed APK
-        run: flutter build apk --release
+        run: |
+          flutter build apk --release \
+            --build-name="${{ steps.versioning.outputs.build_name }}" \
+            --build-number="${{ steps.versioning.outputs.build_number }}"
+
+      - name: Rename APK output
+        shell: bash
+        run: |
+          set -euo pipefail
+          original_apk="build/app/outputs/flutter-apk/app-release.apk"
+          target_apk="${{ steps.versioning.outputs.apk_path }}"
+          if [[ ! -f "${original_apk}" ]]; then
+            echo "Error: expected APK not found at ${original_apk}." >&2
+            exit 1
+          fi
+          mv "${original_apk}" "${target_apk}"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: signed-release-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: ${{ steps.versioning.outputs.apk_path }}
           if-no-files-found: error
 
       - name: Clean up signing files
