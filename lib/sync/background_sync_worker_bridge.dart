@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 import 'SyncEngine.dart';
+import '../entity/sync_run_record.dart';
 
 class BackgroundSyncWorkerBridge {
   static const MethodChannel _channel = MethodChannel('caleesync/background_sync');
@@ -35,20 +36,8 @@ class BackgroundSyncWorkerBridge {
       return {'state': 'failure', 'reason': 'no_account'};
     }
 
-    final db = await DatabaseHelper.instance.database;
-    final rows = await db.rawQuery('''
-      SELECT COUNT(1) AS cnt
-      FROM local_bindings lb
-      INNER JOIN remote_collections rc ON rc.id = lb.remote_collection_id
-      WHERE rc.is_enabled = 1
-    ''');
-    final int enabledBindings = (rows.first['cnt'] as num?)?.toInt() ?? 0;
-    if (enabledBindings <= 0) {
-      return {'state': 'failure', 'reason': 'no_enabled_binding'};
-    }
-
     try {
-      final summary = await SyncEngine().executeFullSync();
+      final summary = await SyncEngine().executeFullSync(trigger: _mapTrigger(trigger));
       if (summary.failed == 0) {
         return {'state': 'success', 'reason': trigger};
       }
@@ -68,6 +57,15 @@ class BackgroundSyncWorkerBridge {
       }
       return {'state': 'failure', 'reason': reason};
     }
+  }
+
+
+  static SyncRunTrigger _mapTrigger(String trigger) {
+    final normalized = trigger.toLowerCase();
+    if (normalized.contains('periodic')) return SyncRunTrigger.periodic;
+    if (normalized.contains('force')) return SyncRunTrigger.force;
+    if (normalized.contains('auto')) return SyncRunTrigger.autoForeground;
+    return SyncRunTrigger.manual;
   }
 
   static bool _isTransient(String message) {

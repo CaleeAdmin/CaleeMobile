@@ -6,6 +6,7 @@ import 'package:flutter/widgets.dart';
 import 'package:get/get.dart';
 
 import '../entity/SyncSummary.dart';
+import '../entity/sync_run_record.dart';
 import 'SyncEngine.dart';
 
 enum SyncTriggerType {
@@ -89,7 +90,10 @@ class SyncTriggerOrchestrator extends GetxService with WidgetsBindingObserver {
     Function(SyncSummary)? onProgress,
   }) {
     debugPrint('[SYNC_TRIGGER] start trigger=$trigger');
-    final Future<SyncSummary> run = _engine.executeFullSync(onProgress: onProgress);
+    final Future<SyncSummary> run = _engine.executeFullSync(
+      onProgress: onProgress,
+      trigger: _mapRunTrigger(trigger),
+    );
     _activeRun = run;
 
     run.then((summary) {
@@ -159,6 +163,14 @@ class SyncTriggerOrchestrator extends GetxService with WidgetsBindingObserver {
       });
     });
   }
+  SyncRunTrigger _mapRunTrigger(SyncTriggerType trigger) {
+    return switch (trigger) {
+      SyncTriggerType.manual => SyncRunTrigger.manual,
+      SyncTriggerType.autoForeground => SyncRunTrigger.autoForeground,
+      SyncTriggerType.force => SyncRunTrigger.force,
+    };
+  }
+
 }
 
 class _QueuedRequest {

@@ -6,26 +6,35 @@ import '../common/utils/mmkv_utils.dart';
 class BackgroundSyncStatus {
   const BackgroundSyncStatus({
     required this.periodicEnabled,
+    required this.periodicConfigured,
     this.lastRunAt,
     this.lastResult,
     this.lastReason,
     this.nextScheduledAt,
+    this.workerRunning = false,
+    this.intervalMinutes,
   });
 
   final bool periodicEnabled;
+  final bool periodicConfigured;
   final DateTime? lastRunAt;
   final String? lastResult;
   final String? lastReason;
   final DateTime? nextScheduledAt;
+  final bool workerRunning;
+  final int? intervalMinutes;
 
   factory BackgroundSyncStatus.fromMap(Map<dynamic, dynamic> map) {
     DateTime? _parse(dynamic v) => v is int ? DateTime.fromMillisecondsSinceEpoch(v) : null;
     return BackgroundSyncStatus(
       periodicEnabled: map['periodicEnabled'] == true,
+      periodicConfigured: MMKVUtils.instance.getBool(AppConstant.periodicSyncEnabledKey, defaultValue: false) ?? false,
       lastRunAt: _parse(map['lastRunAtMs']),
       lastResult: map['lastResult']?.toString(),
       lastReason: map['lastReason']?.toString(),
       nextScheduledAt: _parse(map['nextScheduledAtMs']),
+      workerRunning: map['workerRunning'] == true,
+      intervalMinutes: (map['intervalMinutes'] as num?)?.toInt(),
     );
   }
 }

@@ -15,6 +15,7 @@ class SyncRunDetailsPage extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         children: [
           Text('Sync type: ${_modeLabel(run.mode)}'),
+          Text('Trigger: ${run.trigger.name}'),
           Text('Overall result: ${_runResultLabel(run.result)}'),
           Text('Time spent: ${((run.durationMs ?? 0) / 1000).toStringAsFixed(1)}s'),
           const SizedBox(height: 12),
@@ -82,10 +83,12 @@ String _modeLabel(SyncRunMode mode) {
 
 String _runResultLabel(SyncRunResult result) {
   return switch (result) {
-    SyncRunResult.success => 'Up to date',
-    SyncRunResult.partial => 'Partly synced',
-    SyncRunResult.failed => 'Sync failed',
-    SyncRunResult.abortedBySafety => 'Stopped for safety',
+    SyncRunResult.success => 'Succeeded',
+    SyncRunResult.partial => 'Partially Synced',
+    SyncRunResult.failed => 'Failed',
+    SyncRunResult.abortedBySafety => 'Stopped for Safety',
+    SyncRunResult.skippedNoEnabledSources => 'Skipped (No Enabled Sources)',
+    SyncRunResult.skippedNoChanges => 'Skipped (No Changes)',
   };
 }
 
