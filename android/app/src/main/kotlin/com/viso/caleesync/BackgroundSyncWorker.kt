@@ -1,6 +1,8 @@
 package com.viso.caleesync
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
@@ -15,14 +17,18 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.FlutterInjector
+import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.dart.DartExecutor
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugins.GeneratedPluginRegistrant
-import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.coroutines.resume
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : CoroutineWorker(appContext, params) {
     override suspend fun doWork(): Result {
@@ -30,11 +36,89 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
             Log.i("CaleeSyncWorker", "skip trigger=${inputData.getString("trigger")} because another run is active")
             return Result.retry()
         }
-        try {
-        return runSyncTask(applicationContext, inputData.getString("trigger") ?: "periodic")
+
+        val trigger = inputData.getString("trigger") ?: "periodic"
+        return try {
+            runSyncTask(applicationContext, trigger)
         } finally {
             runLock.set(false)
         }
+    }
+
+    private suspend fun runSyncTask(context: Context, trigger: String): Result {
+        val prefs = context.getSharedPreferences("calee_sync_bg", Context.MODE_PRIVATE)
+        prefs.edit().putLong("last_run_at", System.currentTimeMillis()).apply()
+        Log.i("CaleeSyncWorker", "enter trigger=$trigger")
+
+        var engine: FlutterEngine? = null
+        val workerResult = withTimeoutOrNull(90_000) {
+            suspendCancellableCoroutine<Result> { continuation ->
+                Handler(Looper.getMainLooper()).post {
+                    try {
+                        val loader = FlutterInjector.instance().flutterLoader()
+                        loader.startInitialization(context)
+                        loader.ensureInitializationComplete(context, null)
+
+                        val localEngine = FlutterEngine(context)
+                        engine = localEngine
+                        GeneratedPluginRegistrant.registerWith(localEngine)
+
+                        val channel = MethodChannel(localEngine.dartExecutor.binaryMessenger, CHANNEL)
+                        localEngine.dartExecutor.executeDartEntrypoint(
+                            DartExecutor.DartEntrypoint(loader.findAppBundlePath(), "caleeSyncBackgroundEntrypoint")
+                        )
+
+                        channel.invokeMethod("runBackgroundSync", mapOf("trigger" to trigger), object : MethodChannel.Result {
+                            override fun success(result: Any?) {
+                                val map = result as? Map<*, *>
+                                val state = map?.get("state")?.toString() ?: "failure"
+                                val reason = map?.get("reason")?.toString() ?: "unknown"
+                                prefs.edit().putString("last_reason", reason).putString("last_result", state).apply()
+                                if (continuation.isActive) {
+                                    continuation.resume(
+                                        when (state) {
+                                            "success" -> Result.success()
+                                            "retry" -> Result.retry()
+                                            else -> Result.failure()
+                                        }
+                                    )
+                                }
+                            }
+
+                            override fun error(errorCode: String, errorMessage: String?, errorDetails: Any?) {
+                                prefs.edit().putString("last_result", "retry").putString("last_reason", "$errorCode:$errorMessage").apply()
+                                if (continuation.isActive) {
+                                    continuation.resume(Result.retry())
+                                }
+                            }
+
+                            override fun notImplemented() {
+                                prefs.edit().putString("last_result", "failure").putString("last_reason", "not_implemented").apply()
+                                if (continuation.isActive) {
+                                    continuation.resume(Result.failure())
+                                }
+                            }
+                        })
+                    } catch (t: Throwable) {
+                        prefs.edit().putString("last_result", "retry").putString("last_reason", t.message ?: "engine_init_error").apply()
+                        if (continuation.isActive) {
+                            continuation.resume(Result.retry())
+                        }
+                    }
+                }
+            }
+        } ?: run {
+            prefs.edit().putString("last_result", "retry").putString("last_reason", "timeout_waiting_for_background_sync").apply()
+            Result.retry()
+        }
+
+        withContext(Dispatchers.Main.immediate) {
+            engine?.destroy()
+        }
+
+        prefs.edit().putLong("periodic_next_at", System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(15)).apply()
+        Log.i("CaleeSyncWorker", "exit result=$workerResult")
+        return workerResult
     }
 
     companion object {
@@ -95,62 +179,6 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
                 "lastReason" to prefs.getString("last_reason", ""),
                 "nextScheduledAtMs" to nextAt,
             )
-        }
-
-        private fun runSyncTask(context: Context, trigger: String): Result {
-            val prefs = context.getSharedPreferences("calee_sync_bg", Context.MODE_PRIVATE)
-            prefs.edit().putLong("last_run_at", System.currentTimeMillis()).apply()
-            Log.i("CaleeSyncWorker", "enter trigger=$trigger")
-
-            val engine = FlutterEngine(context)
-            val loader = FlutterInjector.instance().flutterLoader()
-            loader.startInitialization(context)
-            loader.ensureInitializationComplete(context, null)
-            GeneratedPluginRegistrant.registerWith(engine)
-            val latch = CountDownLatch(1)
-            var workerResult: Result = Result.failure()
-
-            val channel = MethodChannel(engine.dartExecutor.binaryMessenger, CHANNEL)
-            engine.dartExecutor.executeDartEntrypoint(
-                DartExecutor.DartEntrypoint(
-                    loader.findAppBundlePath(),
-                    "caleeSyncBackgroundEntrypoint",
-                )
-            )
-
-            channel.invokeMethod("runBackgroundSync", mapOf("trigger" to trigger), object : MethodChannel.Result {
-                override fun success(result: Any?) {
-                    val map = result as? Map<*, *>
-                    val state = map?.get("state")?.toString() ?: "failure"
-                    val reason = map?.get("reason")?.toString() ?: "unknown"
-                    prefs.edit().putString("last_reason", reason).apply()
-                    workerResult = when (state) {
-                        "success" -> Result.success()
-                        "retry" -> Result.retry()
-                        else -> Result.failure()
-                    }
-                    prefs.edit().putString("last_result", state).apply()
-                    latch.countDown()
-                }
-
-                override fun error(errorCode: String, errorMessage: String?, errorDetails: Any?) {
-                    prefs.edit().putString("last_result", "retry").putString("last_reason", "$errorCode:$errorMessage").apply()
-                    workerResult = Result.retry()
-                    latch.countDown()
-                }
-
-                override fun notImplemented() {
-                    prefs.edit().putString("last_result", "failure").putString("last_reason", "not_implemented").apply()
-                    workerResult = Result.failure()
-                    latch.countDown()
-                }
-            })
-
-            latch.await(90, TimeUnit.SECONDS)
-            prefs.edit().putLong("periodic_next_at", System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(15)).apply()
-            engine.destroy()
-            Log.i("CaleeSyncWorker", "exit result=$workerResult")
-            return workerResult
         }
     }
 }
