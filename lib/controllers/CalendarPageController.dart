@@ -156,18 +156,11 @@ class CalendarPageController extends GetxController {
         return;
       }
 
-      final bool ok = await _repo.connectAndEnableRemoteCalendarByPath(remotePath);
-      item.isEnabled = ok;
-      if (key.isNotEmpty) {
-        if (ok) {
-          selectedCalendarIds.add(key);
-        } else {
-          selectedCalendarIds.remove(key);
-        }
-      }
+      final EnableCalendarResult enableResult = await _repo.connectAndEnableRemoteCalendarByPath(remotePath);
+      _applyEnableResultToCalendarItem(item, enableResult);
 
       final String? syncMessage = _repo.takeLastConnectErrorMessage();
-      if (!ok) {
+      if (!enableResult.success) {
         final String err = syncMessage ?? 'Connection failed. Please retry.';
         Get.snackbar('Connection failed', err);
       } else if (syncMessage != null && syncMessage.isNotEmpty) {
@@ -181,9 +174,9 @@ class CalendarPageController extends GetxController {
           }
         }
       }
-      await refreshDashboard(includeEventCounts: false);
-      // Enable flow already triggers a force sync in repository; avoid scheduling
-      // an additional debounced foreground sync for the same user action.
+      // Keep enable workflow authoritative in repository and update only the
+      // affected item here. Full dashboard refresh remains an explicit action
+      // (manual refresh, lifecycle load, sync-completed event).
     } catch (e) {
       print("[ERROR] Failed to toggle calendar state: $e");
       Get.snackbar('Connection failed', 'An exception occurred while connecting the calendar. Please try again later');
@@ -196,6 +189,55 @@ class CalendarPageController extends GetxController {
       }
     }
   }
+
+
+  void _applyEnableResultToCalendarItem(CalendarDisplayItem item, EnableCalendarResult result) {
+    final String normalizedRemotePath = CaleeServerService.normalizeRemotePath(item.remotePath ?? '');
+    final String resultRemotePath = CaleeServerService.normalizeRemotePath(result.remotePath);
+    final bool isSameCalendar = normalizedRemotePath.isNotEmpty && normalizedRemotePath == resultRemotePath;
+
+    if (!isSameCalendar) {
+      item.isEnabled = result.success;
+      calendars.refresh();
+      return;
+    }
+
+    final String newKey = resultRemotePath.isNotEmpty ? resultRemotePath : (item.localId ?? '');
+    if (result.success) {
+      if (newKey.isNotEmpty) {
+        selectedCalendarIds.add(newKey);
+      }
+    } else {
+      if (newKey.isNotEmpty) {
+        selectedCalendarIds.remove(newKey);
+      }
+    }
+
+    final int index = calendars.indexOf(item);
+    if (index < 0) {
+      item.isEnabled = result.success;
+      calendars.refresh();
+      return;
+    }
+
+    calendars[index] = CalendarDisplayItem(
+      localId: result.localCalendarId ?? item.localId,
+      remotePath: item.remotePath,
+      name: item.name,
+      color: item.color,
+      eventCount: item.eventCount,
+      isReadOnly: item.isReadOnly,
+      isSubscription: item.isSubscription,
+      isLocalReadOnly: item.isLocalReadOnly,
+      subscriptionUrl: item.subscriptionUrl,
+      isEnabled: result.success,
+      origin: item.origin,
+      bindingId: item.bindingId,
+      allowMassDeletionDangerous: item.allowMassDeletionDangerous,
+    );
+    calendars.refresh();
+  }
+
 
 
 
