@@ -162,6 +162,14 @@ class CalendarPageController extends GetxController {
         Get.snackbar('Connection failed', err);
       } else if (syncMessage != null && syncMessage.isNotEmpty) {
         Get.snackbar('Sync failed', syncMessage);
+      } else {
+        final String? loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey);
+        if (loginName != null && loginName.isNotEmpty) {
+          final bool syncEnabled = await _nativeApi.isCalendarAccountSyncEnabled(loginName);
+          if (!syncEnabled) {
+            Get.snackbar('Sync disabled in system', 'Please enable CaleeSync account calendar sync in Android Settings.');
+          }
+        }
       }
       await refreshDashboard(includeEventCounts: false);
       // Enable flow already triggers a force sync in repository; avoid scheduling
@@ -243,6 +251,16 @@ class CalendarPageController extends GetxController {
     );
 
     debugPrint("[OK] Update succeeded, affected rows: $count (condition: $whereClause = ${whereArgs[0]})");
+
+    final String? localCalendarId = item.localId;
+    final String? loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey);
+    if (localCalendarId != null && localCalendarId.isNotEmpty && loginName != null && loginName.isNotEmpty) {
+      try {
+        await _nativeApi.setCalendarEnabled(localCalendarId, loginName, newValue);
+      } catch (e) {
+        debugPrint('[WARN] Failed to update CalendarContract flags for $localCalendarId: $e');
+      }
+    }
   }
 
   /// 核心方法：刷新并重新构建 UI 模型

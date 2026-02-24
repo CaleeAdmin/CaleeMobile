@@ -255,6 +255,8 @@ interface NativeCalendarApi {
   /** 根据 ID 删除本地事件（用于同步云端的删除操作） */
   fun deleteEvent(eventId: String): Boolean
   fun modifyCalendarTitle(calendarId: String, newTitle: String, accountName: String, accountType: String, callback: (Result<Boolean>) -> Unit)
+  fun setCalendarEnabled(calendarId: String, accountName: String, enabled: Boolean, callback: (Result<Boolean>) -> Unit)
+  fun isCalendarAccountSyncEnabled(accountName: String, callback: (Result<Boolean>) -> Unit)
 
   companion object {
     /** The codec used by NativeCalendarApi. */
@@ -450,6 +452,48 @@ interface NativeCalendarApi {
             val accountNameArg = args[2] as String
             val accountTypeArg = args[3] as String
             api.modifyCalendarTitle(calendarIdArg, newTitleArg, accountNameArg, accountTypeArg) { result: Result<Boolean> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(wrapError(error))
+              } else {
+                val data = result.getOrNull()
+                reply.reply(wrapResult(data))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.caleesync.NativeCalendarApi.setCalendarEnabled$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val calendarIdArg = args[0] as String
+            val accountNameArg = args[1] as String
+            val enabledArg = args[2] as Boolean
+            api.setCalendarEnabled(calendarIdArg, accountNameArg, enabledArg) { result: Result<Boolean> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(wrapError(error))
+              } else {
+                val data = result.getOrNull()
+                reply.reply(wrapResult(data))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.caleesync.NativeCalendarApi.isCalendarAccountSyncEnabled$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val accountNameArg = args[0] as String
+            api.isCalendarAccountSyncEnabled(accountNameArg) { result: Result<Boolean> ->
               val error = result.exceptionOrNull()
               if (error != null) {
                 reply.reply(wrapError(error))
