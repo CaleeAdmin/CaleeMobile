@@ -7,6 +7,7 @@ import '../data/sync_repository.dart';
 import '../data/sync_run_store.dart';
 import '../entity/sync_run_record.dart';
 import '../sync/background_sync_scheduler.dart';
+import '../sync/sync_trigger_orchestrator.dart';
 
 class CalendarProbeController extends GetxController {
   final RxBool isSyncing = false.obs;
@@ -111,8 +112,33 @@ class CalendarProbeController extends GetxController {
     }
   }
 
-  Future<void> syncNow() async {
-    await BackgroundSyncScheduler.scheduleOneOff(reason: 'sync_now', expedited: true);
-    await refreshOverviewState();
+  Future<SyncSummary> syncNow() async {
+    if (isSyncing.value) {
+      return summary.value ?? SyncSummary();
+    }
+
+    isSyncing.value = true;
+    processing.value = 1;
+
+    try {
+      final SyncSummary result;
+      if (Get.isRegistered<SyncTriggerOrchestrator>()) {
+        result = await Get.find<SyncTriggerOrchestrator>().triggerManual(
+          onProgress: (progress) {
+            summary.value = progress;
+            processing.value = progress.processing;
+          },
+        );
+      } else {
+        await BackgroundSyncScheduler.scheduleOneOff(reason: 'sync_now', expedited: true);
+        result = SyncSummary();
+      }
+
+      await refreshOverviewState();
+      return result;
+    } finally {
+      processing.value = 0;
+      isSyncing.value = false;
+    }
   }
 }
