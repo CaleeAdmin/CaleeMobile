@@ -2,7 +2,9 @@ import 'dart:convert';
 
 enum SyncRunMode { pull, push, twoWay }
 
-enum SyncRunResult { success, partial, failed, abortedBySafety }
+enum SyncRunResult { success, partial, failed, abortedBySafety, skippedNoEnabledSources, skippedNoChanges }
+
+enum SyncRunTrigger { manual, autoForeground, periodic, force }
 
 enum SnapshotTrustStatus { remote, local, unknown }
 
@@ -116,6 +118,7 @@ class SyncRunRecord {
   String appVersion;
   String deviceIdentifier;
   SyncRunResult result;
+  SyncRunTrigger trigger;
   List<SyncBindingRunRecord> bindings;
 
   SyncRunRecord({
@@ -126,6 +129,7 @@ class SyncRunRecord {
     required this.mode,
     required this.appVersion,
     required this.deviceIdentifier,
+    this.trigger = SyncRunTrigger.manual,
     this.result = SyncRunResult.success,
     List<SyncBindingRunRecord>? bindings,
   }) : bindings = bindings ?? [];
@@ -139,6 +143,7 @@ class SyncRunRecord {
         'appVersion': appVersion,
         'deviceIdentifier': deviceIdentifier,
         'result': result.name,
+        'trigger': trigger.name,
         'bindings': bindings.map((b) => b.toJson()).toList(),
       };
 
@@ -152,6 +157,7 @@ class SyncRunRecord {
         mode: SyncRunMode.values.firstWhere((e) => e.name == json['mode'], orElse: () => SyncRunMode.twoWay),
         appVersion: (json['appVersion'] ?? 'unknown').toString(),
         deviceIdentifier: (json['deviceIdentifier'] ?? 'unknown-device').toString(),
+        trigger: SyncRunTrigger.values.firstWhere((e) => e.name == json['trigger'], orElse: () => SyncRunTrigger.manual),
         result: SyncRunResult.values.firstWhere((e) => e.name == json['result'], orElse: () => SyncRunResult.failed),
         bindings: ((json['bindings'] as List?) ?? [])
             .whereType<Map>()

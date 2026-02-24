@@ -1,9 +1,12 @@
+import 'package:caleesync/common/app_constant.dart';
+import 'package:caleesync/common/utils/mmkv_utils.dart';
 import 'package:get/get.dart';
+
 import '../entity/SyncSummary.dart';
-import 'CalendarPageController.dart';
 import '../data/sync_repository.dart';
 import '../data/sync_run_store.dart';
 import '../entity/sync_run_record.dart';
+import '../sync/background_sync_scheduler.dart';
 import '../sync/sync_trigger_orchestrator.dart';
 
 class CalendarProbeController extends GetxController {
@@ -11,6 +14,10 @@ class CalendarProbeController extends GetxController {
   final RxInt success = 0.obs;
   final RxInt failed = 0.obs;
   final RxInt processing = 0.obs;
+  final RxInt configuredSources = 0.obs;
+  final RxBool workManagerRunning = false.obs;
+  final Rxn<SyncRunRecord> latestRun = Rxn<SyncRunRecord>();
+
   /// 当前选中的页面索引（0: Dashboard, 1: Calendars, 2: SyncSettings）
   final RxInt selectedIndex = 1.obs;
 
@@ -18,6 +25,7 @@ class CalendarProbeController extends GetxController {
   void setSelectedIndex(int index) {
     selectedIndex.value = index;
   }
+
   /// 上次同步时间
   final Rxn<DateTime> lastSyncAt = Rxn<DateTime>();
   /// 当前同步摘要
@@ -29,11 +37,34 @@ class CalendarProbeController extends GetxController {
   final SyncRunStore _runStore = SyncRunStore();
   final RxList<SyncRunRecord> syncRuns = <SyncRunRecord>[].obs;
 
+  bool get isRunActive => isSyncing.value || processing.value > 0 || workManagerRunning.value;
 
   @override
   void onInit() {
     super.onInit();
-    loadRecentRuns();
+    refreshOverviewState();
+  }
+
+  Future<void> refreshOverviewState() async {
+    await Future.wait([
+      loadRecentRuns(),
+      loadConfiguredSourceCount(),
+      loadSchedulerState(),
+    ]);
+  }
+
+  Future<void> loadConfiguredSourceCount() async {
+    final loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey);
+    if (loginName == null || loginName.isEmpty) {
+      configuredSources.value = 0;
+      return;
+    }
+    configuredSources.value = await _repo.countEnabledCalendarBindings(loginName);
+  }
+
+  Future<void> loadSchedulerState() async {
+    final status = await BackgroundSyncScheduler.getStatus();
+    workManagerRunning.value = status.workerRunning;
   }
 
   Future<void> loadRecentRuns() async {
@@ -45,11 +76,12 @@ class CalendarProbeController extends GetxController {
   void _syncOverviewFromLatestRun(List<SyncRunRecord> runs) {
     if (runs.isEmpty || isSyncing.value) return;
 
-    final SyncRunRecord latestRun = runs.first;
+    final SyncRunRecord latest = runs.first;
+    latestRun.value = latest;
     int synced = 0;
     int failures = 0;
 
-    for (final binding in latestRun.bindings) {
+    for (final binding in latest.bindings) {
       switch (binding.resultStatus) {
         case SyncBindingResultStatus.success:
           synced++;
@@ -65,13 +97,12 @@ class CalendarProbeController extends GetxController {
     success.value = synced;
     failed.value = failures;
     processing.value = 0;
-    lastSyncAt.value = latestRun.endTime ?? latestRun.startTime;
+    lastSyncAt.value = latest.endTime ?? latest.startTime;
   }
 
-  /// 获取已Subscribed calendar及对应事件数
   Future<void> fetchSubscribedCalendars() async {
     try {
-      isSyncing.value = true; // reuse flag as loading indicator
+      isSyncing.value = true;
       final List<Map<String, dynamic>> rows = await _repo.getSubscribedCalendarsWithCount();
       subscribedCalendars.assignAll(rows);
     } catch (e) {
@@ -81,41 +112,33 @@ class CalendarProbeController extends GetxController {
     }
   }
 
-  /// 执行完整同步并在完成后通知 Dashboard 刷新
-  Future<void> syncNow() async {
-    if (isSyncing.value) return;
+  Future<SyncSummary> syncNow() async {
+    if (isSyncing.value) {
+      return summary.value ?? SyncSummary();
+    }
+
     isSyncing.value = true;
-    success.value = 0;
-    failed.value = 0;
-    processing.value = 0;
+    processing.value = 1;
 
     try {
-      final SyncSummary result = await Get.find<SyncTriggerOrchestrator>().triggerManual(onProgress: (s) {
-        // 更新进度到 Rx 变量（UI 可订阅）
-        success.value = s.success;
-        failed.value = s.failed;
-        processing.value = s.processing;
-        summary.value = s;
-      });
-      // 最终结果
-      summary.value = result;
-      success.value = result.success;
-      failed.value = result.failed;
-      processing.value = result.processing;
-
-      // 同步完成后通知 Dashboard 刷新数据
-      if (Get.isRegistered<CalendarPageController>()) {
-        await Get.find<CalendarPageController>().refreshDashboard();
+      final SyncSummary result;
+      if (Get.isRegistered<SyncTriggerOrchestrator>()) {
+        result = await Get.find<SyncTriggerOrchestrator>().triggerManual(
+          onProgress: (progress) {
+            summary.value = progress;
+            processing.value = progress.processing;
+          },
+        );
+      } else {
+        await BackgroundSyncScheduler.scheduleOneOff(reason: 'sync_now', expedited: true);
+        result = SyncSummary();
       }
-      // 记录上次同步时间
-      lastSyncAt.value = DateTime.now();
-      await loadRecentRuns();
-    } catch (e) {
-      // 可在此处记录Error或展示提示
-      rethrow;
+
+      await refreshOverviewState();
+      return result;
     } finally {
+      processing.value = 0;
       isSyncing.value = false;
     }
   }
 }
-
