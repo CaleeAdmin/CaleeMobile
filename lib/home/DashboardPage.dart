@@ -1,17 +1,12 @@
-import 'package:caleesync/common/app_constant.dart';
-import 'package:caleesync/common/utils/mmkv_utils.dart';
-import 'package:caleesync/data/sync_repository.dart';
 import 'package:caleesync/sync/background_sync_scheduler.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:permission_handler/permission_handler.dart';
+import 'package:intl/intl.dart';
 
-import '../controllers/CalendarPageController.dart';
 import '../controllers/calendar_probe_controller.dart';
+import '../entity/sync_run_record.dart';
 import '../feature/local_calendars_page.dart';
 import '../feature/public_subscriptions_page.dart';
-import '../services/calee_auth_service.dart';
-import '../services/calee_server_service.dart';
 import 'sync_status_details_page.dart';
 
 class DashboardPage extends StatefulWidget {
@@ -21,260 +16,274 @@ class DashboardPage extends StatefulWidget {
   State<DashboardPage> createState() => _DashboardPageState();
 }
 
-class _DashboardPageState extends State<DashboardPage> {
-  final SyncRepository _repo = SyncRepository();
-  final CaleeServerService _nc = CaleeServerService();
-  final CaleeAuthService _authService = CaleeAuthService(serverBaseUrl: AppConstant.caleeServer);
-
+class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserver {
   BackgroundSyncStatus? _backgroundStatus;
 
   @override
   void initState() {
     super.initState();
-    _loadBackgroundStatus();
+    WidgetsBinding.instance.addObserver(this);
+    _refreshAll();
   }
 
-  Future<void> _loadBackgroundStatus() async {
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _refreshAll();
+    }
+  }
+
+  Future<void> _refreshAll() async {
     final status = await BackgroundSyncScheduler.getStatus();
-    if (!mounted) return;
-    setState(() => _backgroundStatus = status);
+    if (mounted) {
+      setState(() => _backgroundStatus = status);
+    }
+    await Get.find<CalendarProbeController>().refreshOverviewState();
   }
 
-  Future<void> _requestCalendarPermission() async {
-    Permission calendarPermission = Permission.calendarFullAccess;
-    var status = await calendarPermission.status;
-    if (status.isPermanentlyDenied) {
-      openAppSettings();
-      return;
-    }
-    status = await calendarPermission.request();
-    if (status.isGranted) {
-      final loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? 'current_user_id';
-      await _repo.scanLocalCalendars(loginName);
-      await _nc.scanRemoteCalendars(serverUrl: _authService.normalizedUrl, userId: loginName);
-      if (Get.isRegistered<CalendarPageController>()) {
-        Get.find<CalendarPageController>().refreshDashboard();
-      }
-      try {
-        if (Get.isRegistered<CalendarProbeController>()) {
-          await Get.find<CalendarProbeController>().fetchSubscribedCalendars();
-        } else {
-          Get.put(CalendarProbeController());
-          await Get.find<CalendarProbeController>().fetchSubscribedCalendars();
-        }
-      } catch (_) {}
-    }
+  String _sourceLabel(int count) => '$count ${count == 1 ? 'source' : 'sources'}';
+
+  String _relative(DateTime? dt) {
+    if (dt == null) return 'never';
+    final diff = DateTime.now().difference(dt.toLocal());
+    if (diff.inMinutes < 1) return 'just now';
+    if (diff.inHours < 1) return '${diff.inMinutes}m ago';
+    if (diff.inDays < 1) return '${diff.inHours}h ago';
+    return '${diff.inDays}d ago';
   }
 
-  String _friendlyResult(String? result) {
+  String _clock(DateTime? dt) {
+    if (dt == null) return 'Not Scheduled';
+    return DateFormat('HH:mm').format(dt.toLocal());
+  }
+
+  String _runLabel(SyncRunResult? result) {
     return switch (result) {
-      'success' => 'Last run succeeded',
-      'retry' => 'Last run will retry',
-      'failure' => 'Last run failed',
-      _ => 'No background result yet',
+      SyncRunResult.success => 'Succeeded',
+      SyncRunResult.partial => 'Partially Synced',
+      SyncRunResult.failed => 'Failed',
+      SyncRunResult.abortedBySafety => 'Stopped for Safety',
+      SyncRunResult.skippedNoEnabledSources => 'Skipped (No Enabled Sources)',
+      SyncRunResult.skippedNoChanges => 'Skipped (No Changes)',
+      null => 'No runs yet',
     };
+  }
+
+  IconData _runIcon(SyncRunResult? result) {
+    return switch (result) {
+      SyncRunResult.success => Icons.check_circle,
+      SyncRunResult.skippedNoChanges => Icons.info,
+      SyncRunResult.skippedNoEnabledSources => Icons.info,
+      SyncRunResult.partial => Icons.warning_amber,
+      SyncRunResult.abortedBySafety || SyncRunResult.failed => Icons.error,
+      null => Icons.history,
+    };
+  }
+
+  Color _runColor(SyncRunResult? result) {
+    return switch (result) {
+      SyncRunResult.success => Colors.green,
+      SyncRunResult.skippedNoChanges => Colors.blueGrey,
+      SyncRunResult.skippedNoEnabledSources => Colors.blueGrey,
+      SyncRunResult.partial => Colors.orange,
+      SyncRunResult.abortedBySafety || SyncRunResult.failed => Colors.red,
+      null => Colors.black54,
+    };
+  }
+
+  String _schedulerSummary() {
+    final enabled = _backgroundStatus?.periodicEnabled == true;
+    final interval = _backgroundStatus?.intervalMinutes != null ? 'Every ${_backgroundStatus!.intervalMinutes}m' : 'Every 15m';
+    final next = _clock(_backgroundStatus?.nextScheduledAt);
+    return '${enabled ? 'Enabled' : 'Disabled'} · $interval · Next $next';
+  }
+
+  bool get _showSchedulerWarning {
+    if (_backgroundStatus == null) return false;
+    if (_backgroundStatus!.periodicConfigured && !_backgroundStatus!.periodicEnabled) return true;
+    return (_backgroundStatus!.lastResult == 'retry' || _backgroundStatus!.lastResult == 'failure');
   }
 
   @override
   Widget build(BuildContext context) {
     final probeCtrl = Get.find<CalendarProbeController>();
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Card(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Quick Actions', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 6),
-                  const Text('Jump directly to common calendar setup tasks.', style: TextStyle(color: Colors.black54)),
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
+
+    return RefreshIndicator(
+      onRefresh: _refreshAll,
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(16),
+        child: Obx(() {
+          final run = probeCtrl.latestRun.value;
+          final configured = probeCtrl.configuredSources.value;
+          final isRunning = probeCtrl.isRunActive || (_backgroundStatus?.workerRunning == true);
+          final needsAttention = !isRunning && run != null && run.result != SyncRunResult.success;
+          final runColor = _runColor(run?.result);
+
+          return Column(
+            children: [
+              Card(
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _banner(isRunning, needsAttention),
+                      const SizedBox(height: 20),
+
+                      // Last Sync
+                      Row(
+                        children: [
+                          Icon(_runIcon(run?.result), color: runColor, size: 18),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              '${_runLabel(run?.result)} · ${_relative(run?.endTime ?? run?.startTime)}',
+                              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                        ],
+                      ),
+
+                      const SizedBox(height: 20),
+
+                      // Configured
+                      Text(_sourceLabel(configured), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                      if (configured == 0) ...[
+                        const SizedBox(height: 8),
+                        const Text(
+                          'No calendars enabled for sync',
+                          style: TextStyle(color: Colors.black54),
+                        ),
+                      ],
+
+                      const SizedBox(height: 20),
+                      const Divider(height: 1),
+                      const SizedBox(height: 20),
+
+                      // Background
+                      const Text('Background', style: TextStyle(fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 8),
+                      Text(_schedulerSummary(), style: const TextStyle(color: Colors.black87)),
+                      if (_showSchedulerWarning) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          _backgroundStatus?.periodicConfigured == true && _backgroundStatus?.periodicEnabled != true
+                              ? 'Scheduler not currently active.'
+                              : (_backgroundStatus?.lastResult == 'retry' ? 'Background run will retry.' : 'Background run failed.'),
+                          style: const TextStyle(color: Colors.deepOrange),
+                        ),
+                        const SizedBox(height: 6),
+                        ExpansionTile(
+                          tilePadding: EdgeInsets.zero,
+                          title: const Text('Diagnostics', style: TextStyle(fontSize: 13)),
+                          childrenPadding: EdgeInsets.zero,
+                          children: [
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('Result: ${_backgroundStatus?.lastResult ?? 'unknown'}'),
+                                  Text('Reason: ${_backgroundStatus?.lastReason?.isNotEmpty == true ? _backgroundStatus!.lastReason! : 'n/a'}'),
+                                  const SizedBox(height: 8),
+                                  TextButton.icon(
+                                    onPressed: () async {
+                                      await BackgroundSyncScheduler.selfHealPeriodicIfNeeded();
+                                      await _refreshAll();
+                                    },
+                                    icon: const Icon(Icons.build, size: 16),
+                                    label: const Text('Repair Scheduler'),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+
+                      const SizedBox(height: 24),
+
+                      // Actions
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
+                          onPressed: probeCtrl.isSyncing.value ? null : () async {
+                            await probeCtrl.syncNow();
+                          },
+                          icon: const Icon(Icons.sync),
+                          label: Text(probeCtrl.isSyncing.value ? 'Syncing…' : 'Sync Now'),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Align(
                         alignment: Alignment.centerLeft,
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        child: TextButton(
+                          onPressed: () => Get.to(() => const SyncStatusDetailsPage()),
+                          child: const Text('View Activity'),
+                        ),
                       ),
-                      onPressed: () => Get.to(() => const PublicSubscriptionsGetxPage()),
-                      icon: const Icon(Icons.public),
-                      label: const Text('Subscribe to Calee Calendar'),
-                    ),
+                    ],
                   ),
-                  const SizedBox(height: 10),
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        alignment: Alignment.centerLeft,
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      ),
-                      onPressed: () => Get.to(() => const LocalCalendarsPage()),
-                      icon: const Icon(Icons.link),
-                      label: const Text('Link to Device Calendar'),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          Obx(() {
-            return Card(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('Sync Overview', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 6),
-                    const Text(
-                      'See sync health, recent activity, and background scheduler status in one place.',
-                      style: TextStyle(color: Colors.black54),
-                    ),
-                    const SizedBox(height: 12),
-                    Container(
-                      width: double.infinity,
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade300,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: TextButton.icon(
-                        onPressed: () => Get.to(() => const SyncStatusDetailsPage()),
-                        icon: const Icon(Icons.arrow_forward, size: 16),
-                        label: const Text('View Detailed Activity'),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    _statusTile(
-                      color: Colors.green,
-                      icon: Icons.check_circle,
-                      title: 'Synced',
-                      subtitle: '${probeCtrl.success.value} sources',
-                    ),
-                    _statusTile(
-                      color: Colors.lightGreen,
-                      icon: Icons.sync,
-                      title: 'Syncing',
-                      subtitle: '${probeCtrl.processing.value} source',
-                    ),
-                    _statusTile(
-                      color: Colors.red,
-                      icon: Icons.error_outline,
-                      title: 'Errors',
-                      subtitle: '${probeCtrl.failed.value} source',
-                    ),
-                    const SizedBox(height: 8),
-                    _kvRow(
-                      icon: Icons.timeline,
-                      label: 'Last sync activity',
-                      value: probeCtrl.lastSyncAt.value == null ? 'Never' : probeCtrl.lastSyncAt.value!.toLocal().toString(),
-                    ),
-                    const Divider(height: 20),
-                    _kvRow(
-                      icon: Icons.schedule,
-                      label: 'Background sync',
-                      value: _backgroundStatus?.periodicEnabled == true ? 'Enabled' : 'Disabled',
-                    ),
-                    _kvRow(
-                      icon: Icons.task_alt,
-                      label: 'Background result',
-                      value: _friendlyResult(_backgroundStatus?.lastResult),
-                    ),
-                    _kvRow(
-                      icon: Icons.update,
-                      label: 'Last background run',
-                      value: _backgroundStatus?.lastRunAt?.toLocal().toString() ?? 'Never',
-                    ),
-                    _kvRow(
-                      icon: Icons.av_timer,
-                      label: 'Next background window',
-                      value: _backgroundStatus?.nextScheduledAt?.toLocal().toString() ?? 'Not scheduled',
-                    ),
-                    if ((_backgroundStatus?.lastReason ?? '').isNotEmpty)
-                      _kvRow(
-                        icon: Icons.info_outline,
-                        label: 'Note',
-                        value: _backgroundStatus!.lastReason!,
-                      ),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: TextButton.icon(
-                        onPressed: _loadBackgroundStatus,
-                        icon: const Icon(Icons.refresh),
-                        label: const Text('Refresh background status'),
-                      ),
-                    ),
-                  ],
                 ),
               ),
-            );
-          }),
-          const SizedBox(height: 32),
-        ],
+              const SizedBox(height: 16),
+              Card(
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Quick Actions', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: () => Get.to(() => const PublicSubscriptionsGetxPage()),
+                          icon: const Icon(Icons.public),
+                          label: const Text('Subscribe to Calee Calendar'),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: () => Get.to(() => const LocalCalendarsPage()),
+                          icon: const Icon(Icons.link),
+                          label: const Text('Link to Device Calendar'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          );
+        }),
       ),
     );
   }
 
-  Widget _statusTile({
-    required Color color,
-    required IconData icon,
-    required String title,
-    required String subtitle,
-  }) {
+  Widget _banner(bool isRunning, bool attention) {
+    final color = isRunning ? Colors.blue : (attention ? Colors.orange : Colors.green);
+    final text = isRunning ? 'Syncing…' : (attention ? 'Attention Required' : 'Idle');
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(12),
-      margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.08),
+        color: color.withOpacity(0.1),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color.withOpacity(0.25)),
+        border: Border.all(color: color.withOpacity(0.3)),
       ),
-      child: Row(
-        children: [
-          Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(color: color.withOpacity(0.2), borderRadius: BorderRadius.circular(8)),
-            child: Icon(icon, color: color),
-          ),
-          const SizedBox(width: 12),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
-              Text(subtitle, style: const TextStyle(color: Colors.black54)),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _kvRow({required IconData icon, required String label, required String value}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, size: 18, color: Colors.black54),
-          const SizedBox(width: 8),
-          Expanded(child: Text(label, style: const TextStyle(color: Colors.black54))),
-          const SizedBox(width: 8),
-          Flexible(
-            child: Text(value, textAlign: TextAlign.right, style: const TextStyle(color: Colors.black87)),
-          ),
-        ],
-      ),
+      child: Text(text, style: TextStyle(color: color, fontWeight: FontWeight.w700)),
     );
   }
 }

@@ -38,7 +38,10 @@ class SyncEngine {
     ForceSyncRegistry.requestForceSyncForCollection(remoteCollectionId);
   }
 
-  Future<SyncSummary> executeFullSync({Function(SyncSummary)? onProgress}) async {
+  Future<SyncSummary> executeFullSync({
+    Function(SyncSummary)? onProgress,
+    SyncRunTrigger trigger = SyncRunTrigger.manual,
+  }) async {
     final summary = SyncSummary(telemetry: _runRecorder);
     final String? loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey);
     if (loginName == null) return summary;
@@ -49,13 +52,21 @@ class SyncEngine {
       userId: loginName,
     );
 
+    final int enabledBindings = await _repo.countEnabledCalendarBindings(loginName);
     final syncItems = await _planner.generateSyncItems(loginName, remoteCalendars);
     debugPrint('====generateSyncItems===$syncItems');
 
     final mode = syncItems.isEmpty ? SyncRunMode.twoWay : mapRunModeFromAction(syncItems.first.action);
-    await _runRecorder.startRun(mode: mode);
+    await _runRecorder.startRun(mode: mode, trigger: trigger);
 
     summary.reset(syncItems.length);
+    if (syncItems.isEmpty) {
+      final skippedResult = enabledBindings <= 0
+          ? SyncRunResult.skippedNoEnabledSources
+          : SyncRunResult.skippedNoChanges;
+      await _runRecorder.finalizeAndPersist(skippedResult);
+      return summary;
+    }
 
     for (final syncItem in syncItems) {
       summary.processing++;
