@@ -22,10 +22,6 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
     SyncSettingsPage(),
   ];
 
-  @override
-  void initState() {
-    super.initState();
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -176,11 +172,6 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
                 Get.to(() => const LinkDevicePage());
               },
             ),
-            // _drawerItem(
-            //   icon: Icons.shield_outlined,
-            //   label: 'Manage devices',
-            //   onTap: () {},
-            // ),
           ],
         ),
       ),
@@ -213,5 +204,4 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
       ),
     );
   }
-
 }
