@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:caleesync/common/app_constant.dart';
 import 'package:caleesync/common/utils/mmkv_utils.dart';
@@ -12,7 +11,6 @@ import 'SyncEngine.dart';
 enum SyncTriggerType {
   manual,
   autoForeground,
-  periodicBackground,
   force,
 }
 
@@ -23,28 +21,22 @@ class SyncTriggerOrchestrator extends GetxService with WidgetsBindingObserver {
 
   bool _appActive = true;
   Timer? _autoDebounceTimer;
-  Timer? _periodicTimer;
-  Duration _periodicBackoff = Duration.zero;
 
   Future<SyncSummary>? _activeRun;
   _QueuedRequest? _queuedRequest;
 
   static const Duration _foregroundDebounce = Duration(seconds: 2);
-  static const Duration _initialPeriodicDelay = Duration(minutes: 1);
-  static const Duration _maxBackoff = Duration(minutes: 30);
 
   @override
   void onInit() {
     super.onInit();
     WidgetsBinding.instance.addObserver(this);
-    _schedulePeriodicTimer(_initialPeriodicDelay);
   }
 
   @override
   void onClose() {
     WidgetsBinding.instance.removeObserver(this);
     _autoDebounceTimer?.cancel();
-    _periodicTimer?.cancel();
     super.onClose();
   }
 
@@ -71,67 +63,6 @@ class SyncTriggerOrchestrator extends GetxService with WidgetsBindingObserver {
     _autoDebounceTimer = Timer(_foregroundDebounce, () {
       _scheduleRun(SyncTriggerType.autoForeground);
     });
-  }
-
-  void _schedulePeriodicTimer(Duration delay) {
-    _periodicTimer?.cancel();
-    _periodicTimer = Timer(delay, _onPeriodicTick);
-  }
-
-  Future<void> _onPeriodicTick() async {
-    final int configuredMinutes = MMKVUtils.instance.getInt(AppConstant.syncIntervalCalendarKey) ?? 15;
-    final Duration interval = Duration(minutes: configuredMinutes <= 0 ? 15 : configuredMinutes);
-    final bool periodicEnabled = MMKVUtils.instance.getBool(AppConstant.periodicSyncEnabledKey, defaultValue: false) ?? false;
-
-    if (!periodicEnabled) {
-      _periodicBackoff = Duration.zero;
-      _schedulePeriodicTimer(interval);
-      return;
-    }
-
-    final bool hasNetwork = await _hasNetwork();
-    if (!hasNetwork) {
-      _periodicBackoff = _nextBackoff(_periodicBackoff);
-      _schedulePeriodicTimer(_periodicBackoff);
-      return;
-    }
-
-    try {
-      final SyncSummary summary = await _scheduleRun(SyncTriggerType.periodicBackground);
-      if (summary.failed > 0) {
-        _periodicBackoff = _nextBackoff(_periodicBackoff);
-        _schedulePeriodicTimer(_periodicBackoff);
-        return;
-      }
-
-      _periodicBackoff = Duration.zero;
-      _schedulePeriodicTimer(interval);
-    } catch (error, stackTrace) {
-      debugPrint('[SYNC_TRIGGER] periodic run failed: $error');
-      debugPrintStack(label: '[SYNC_TRIGGER] periodic run stack', stackTrace: stackTrace);
-      _periodicBackoff = _nextBackoff(_periodicBackoff);
-      _schedulePeriodicTimer(_periodicBackoff);
-    }
-  }
-
-  Duration _nextBackoff(Duration current) {
-    if (current == Duration.zero) {
-      return const Duration(minutes: 1);
-    }
-    final int doubledSeconds = current.inSeconds * 2;
-    if (doubledSeconds >= _maxBackoff.inSeconds) {
-      return _maxBackoff;
-    }
-    return Duration(seconds: doubledSeconds);
-  }
-
-  Future<bool> _hasNetwork() async {
-    try {
-      final List<InternetAddress> result = await InternetAddress.lookup('example.com');
-      return result.isNotEmpty;
-    } catch (_) {
-      return false;
-    }
   }
 
   Future<SyncSummary> _scheduleRun(
