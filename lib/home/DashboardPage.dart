@@ -97,6 +97,13 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
     };
   }
 
+  bool _requiresAttention(SyncRunResult? result) {
+    return switch (result) {
+      SyncRunResult.partial || SyncRunResult.failed || SyncRunResult.abortedBySafety => true,
+      SyncRunResult.success || SyncRunResult.skippedNoChanges || SyncRunResult.skippedNoEnabledSources || null => false,
+    };
+  }
+
   String _schedulerSummary() {
     final enabled = _backgroundStatus?.periodicEnabled == true;
     final interval = _backgroundStatus?.intervalMinutes != null ? 'Every ${_backgroundStatus!.intervalMinutes}m' : 'Every 15m';
@@ -123,7 +130,7 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
           final run = probeCtrl.latestRun.value;
           final configured = probeCtrl.configuredSources.value;
           final isRunning = probeCtrl.isRunActive || (_backgroundStatus?.workerRunning == true);
-          final needsAttention = !isRunning && run != null && run.result != SyncRunResult.success;
+          final needsAttention = !isRunning && _requiresAttention(run?.result);
           final runColor = _runColor(run?.result);
 
           return Column(
