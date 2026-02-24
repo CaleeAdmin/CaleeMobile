@@ -15,6 +15,23 @@ import 'database_helper.dart';
 
 class SyncRepository {
 
+  Future<Map<String, int>> getConfiguredSourceCounts() async {
+    final db = await _dbHelper.database;
+    final rows = await db.rawQuery('''
+      SELECT
+        SUM(CASE WHEN rc.is_enabled = 1 THEN 1 ELSE 0 END) AS enabled_count,
+        SUM(CASE WHEN rc.is_enabled = 0 THEN 1 ELSE 0 END) AS disabled_count
+      FROM remote_collections rc
+      INNER JOIN local_bindings lb ON lb.remote_collection_id = rc.id
+      WHERE rc.collection_type = 'calendar'
+    ''');
+    final row = rows.isNotEmpty ? rows.first : const <String, Object?>{};
+    return {
+      'enabled': (row['enabled_count'] as num?)?.toInt() ?? 0,
+      'disabled': (row['disabled_count'] as num?)?.toInt() ?? 0,
+    };
+  }
+
   String get _activeServerBase {
     final String saved = MMKVUtils.instance.getString(AppConstant.serverKey) ?? AppConstant.caleeServer;
     String normalized = saved.trim();
