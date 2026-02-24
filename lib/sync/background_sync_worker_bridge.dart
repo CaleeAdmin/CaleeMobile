@@ -36,8 +36,13 @@ class BackgroundSyncWorkerBridge {
     }
 
     final db = await DatabaseHelper.instance.database;
-    final rows = await db.rawQuery('SELECT COUNT(1) AS cnt FROM local_bindings WHERE is_enabled = 1');
-    final int enabledBindings = (rows.first['cnt'] as int?) ?? 0;
+    final rows = await db.rawQuery('''
+      SELECT COUNT(1) AS cnt
+      FROM local_bindings lb
+      INNER JOIN remote_collections rc ON rc.id = lb.remote_collection_id
+      WHERE rc.is_enabled = 1
+    ''');
+    final int enabledBindings = (rows.first['cnt'] as num?)?.toInt() ?? 0;
     if (enabledBindings <= 0) {
       return {'state': 'failure', 'reason': 'no_enabled_binding'};
     }
