@@ -19,8 +19,8 @@ import 'sync/background_sync_worker_bridge.dart';
 import 'sync/sync_trigger_orchestrator.dart';
 
 @pragma('vm:entry-point')
-void caleeSyncBackgroundEntrypoint() {
-  BackgroundSyncWorkerBridge.start();
+Future<void> caleeSyncBackgroundEntrypoint() async {
+  await BackgroundSyncWorkerBridge.start();
 }
 
 void main() async {
