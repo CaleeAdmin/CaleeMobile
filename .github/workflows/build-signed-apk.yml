@@ -2,16 +2,13 @@ name: Build Signed APK
 
 on:
   workflow_dispatch:
-    inputs:
-      flutter_version:
-        description: Flutter version to use
-        required: false
-        default: "3.24.0"
 
 jobs:
   build-signed-apk:
     name: Generate signed release APK
     runs-on: ubuntu-latest
+    env:
+      BUILD_NAME: "0.0.1"
 
     steps:
       - name: Checkout
@@ -26,7 +23,7 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: ${{ github.event.inputs.flutter_version }}
+          flutter-version: "3.24.0"
           cache: true
 
       - name: Install dependencies
@@ -38,25 +35,78 @@ jobs:
           set -euo pipefail
           echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/upload-keystore.jks
           cat > android/key.properties <<EOF
-          storePassword=$ANDROID_STORE_PASSWORD
+          storePassword=$ANDROID_KEYSTORE_PASSWORD
           keyPassword=$ANDROID_KEY_PASSWORD
           keyAlias=$ANDROID_KEY_ALIAS
           storeFile=upload-keystore.jks
           EOF
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
 
+      - name: Verify Android keystore
+        shell: bash
+        run: |
+          set -euo pipefail
+          keytool -list -v -keystore android/upload-keystore.jks -storepass "$ANDROID_KEYSTORE_PASSWORD" -alias "$ANDROID_KEY_ALIAS" >/dev/null
+          echo "Keystore verification succeeded for alias '$ANDROID_KEY_ALIAS'."
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+
+      - name: Derive build number from build name
+        id: build_meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$BUILD_NAME" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
+            echo "BUILD_NAME must start with X.Y.Z; got '$BUILD_NAME'" >&2
+            exit 1
+          fi
+
+          major="${BASH_REMATCH[1]}"
+          minor="${BASH_REMATCH[2]}"
+          patch="${BASH_REMATCH[3]}"
+
+          if (( minor >= 100 || patch >= 100 )); then
+            echo "Invalid BUILD_NAME '$BUILD_NAME': require minor < 100 and patch < 100" >&2
+            exit 1
+          fi
+
+          build_number=$(( major * 10000 + minor * 100 + patch ))
+
+          sanitized_build_name="$(echo "$BUILD_NAME" | sed -E 's/[^A-Za-z0-9._-]+/-/g; s/^-+//; s/-+$//')"
+          if [[ -z "$sanitized_build_name" ]]; then
+            echo "Sanitized build name is empty for BUILD_NAME '$BUILD_NAME'" >&2
+            exit 1
+          fi
+
+          echo "build_number=$build_number" >> "$GITHUB_OUTPUT"
+          echo "sanitized_build_name=$sanitized_build_name" >> "$GITHUB_OUTPUT"
+
       - name: Build signed APK
-        run: flutter build apk --release
+        run: |
+          flutter build apk --release \
+            --build-name="$BUILD_NAME" \
+            --build-number="${{ steps.build_meta.outputs.build_number }}"
+
+      - name: Rename APK with build name
+        shell: bash
+        run: |
+          set -euo pipefail
+          src="build/app/outputs/flutter-apk/app-release.apk"
+          dst="build/app/outputs/flutter-apk/caleesync-${{ steps.build_meta.outputs.sanitized_build_name }}.apk"
+          mv "$src" "$dst"
+          echo "Renamed APK to $dst"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: signed-release-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: build/app/outputs/flutter-apk/caleesync-${{ steps.build_meta.outputs.sanitized_build_name }}.apk
           if-no-files-found: error
 
       - name: Clean up signing files
