@@ -1,10 +1,9 @@
 import 'package:get/get.dart';
 import '../entity/SyncSummary.dart';
-import 'CalendarPageController.dart';
 import '../data/sync_repository.dart';
 import '../data/sync_run_store.dart';
 import '../entity/sync_run_record.dart';
-import '../sync/sync_trigger_orchestrator.dart';
+import '../sync/background_sync_scheduler.dart';
 
 class CalendarProbeController extends GetxController {
   final RxBool isSyncing = false.obs;
@@ -83,39 +82,6 @@ class CalendarProbeController extends GetxController {
 
   /// 执行完整同步并在完成后通知 Dashboard 刷新
   Future<void> syncNow() async {
-    if (isSyncing.value) return;
-    isSyncing.value = true;
-    success.value = 0;
-    failed.value = 0;
-    processing.value = 0;
-
-    try {
-      final SyncSummary result = await Get.find<SyncTriggerOrchestrator>().triggerManual(onProgress: (s) {
-        // 更新进度到 Rx 变量（UI 可订阅）
-        success.value = s.success;
-        failed.value = s.failed;
-        processing.value = s.processing;
-        summary.value = s;
-      });
-      // 最终结果
-      summary.value = result;
-      success.value = result.success;
-      failed.value = result.failed;
-      processing.value = result.processing;
-
-      // 同步完成后通知 Dashboard 刷新数据
-      if (Get.isRegistered<CalendarPageController>()) {
-        await Get.find<CalendarPageController>().refreshDashboard();
-      }
-      // 记录上次同步时间
-      lastSyncAt.value = DateTime.now();
-      await loadRecentRuns();
-    } catch (e) {
-      // 可在此处记录Error或展示提示
-      rethrow;
-    } finally {
-      isSyncing.value = false;
-    }
+    await BackgroundSyncScheduler.scheduleOneOff(reason: 'sync_now', expedited: true);
   }
 }
-
