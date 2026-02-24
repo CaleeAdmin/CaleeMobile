@@ -3,7 +3,7 @@ name: Build Signed APK
 on:
   workflow_dispatch:
     inputs:
-      flutter-version:
+      flutter_version:
         description: Flutter version to use
         required: false
         default: "3.24.0"
@@ -26,7 +26,7 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: ${{ github.event.inputs.flutter-version }}
+          flutter-version: ${{ github.event.inputs.flutter_version }}
           cache: true
 
       - name: Install dependencies
