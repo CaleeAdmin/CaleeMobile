@@ -18,9 +18,13 @@ import 'sync/background_sync_scheduler.dart';
 import 'sync/background_sync_worker_bridge.dart';
 import 'sync/sync_trigger_orchestrator.dart';
 
+@pragma('vm:entry-point')
+void caleeSyncBackgroundEntrypoint() {
+  BackgroundSyncWorkerBridge.start();
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  _registerBackgroundEntrypoint();
 
 // 1. 先注入数据库（如果有依赖）
   await Get.putAsync(() => DatabaseHelper.instance.init());
@@ -42,10 +46,6 @@ void main() async {
   await appController.init();
 
   runApp(const CaleeApp());
-}
-
-void _registerBackgroundEntrypoint() {
-  caleeSyncBackgroundEntrypoint;
 }
 
 void _seedDefaultSyncSettings() {

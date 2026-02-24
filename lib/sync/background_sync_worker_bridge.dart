@@ -10,11 +10,6 @@ import 'package:flutter/widgets.dart';
 
 import 'SyncEngine.dart';
 
-@pragma('vm:entry-point')
-void caleeSyncBackgroundEntrypoint() {
-  BackgroundSyncWorkerBridge.start();
-}
-
 class BackgroundSyncWorkerBridge {
   static const MethodChannel _channel = MethodChannel('caleesync/background_sync');
 

@@ -21,7 +21,6 @@ import io.flutter.FlutterInjector
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.dart.DartExecutor
 import io.flutter.plugin.common.MethodChannel
-import io.flutter.plugins.GeneratedPluginRegistrant
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
@@ -61,8 +60,6 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
 
                         val localEngine = FlutterEngine(context)
                         engine = localEngine
-                        GeneratedPluginRegistrant.registerWith(localEngine)
-
                         val channel = MethodChannel(localEngine.dartExecutor.binaryMessenger, CHANNEL)
                         localEngine.dartExecutor.executeDartEntrypoint(
                             DartExecutor.DartEntrypoint(loader.findAppBundlePath(), "caleeSyncBackgroundEntrypoint")
