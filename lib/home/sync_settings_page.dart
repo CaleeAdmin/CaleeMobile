@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import '../common/utils/mmkv_utils.dart';
 import '../common/app_constant.dart';
+import '../sync/background_sync_scheduler.dart';
 
 class SyncSettingsPage extends StatefulWidget {
   const SyncSettingsPage({super.key});
@@ -24,12 +25,14 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> {
   bool _autoSyncEnabled = true;
   bool _periodicSyncEnabled = false;
   late final Future<String> _appVersionLabelFuture;
+  BackgroundSyncStatus? _backgroundStatus;
 
   @override
   void initState() {
     super.initState();
     _appVersionLabelFuture = _loadAppVersionLabel();
     _loadSettings();
+    _loadBackgroundStatus();
   }
 
 
@@ -57,12 +60,19 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> {
     } catch (_) {}
   }
 
-  void _saveSettings() {
+  Future<void> _loadBackgroundStatus() async {
+    final status = await BackgroundSyncScheduler.getStatus();
+    if (!mounted) return;
+    setState(() => _backgroundStatus = status);
+  }
+
+  Future<void> _saveSettings() async {
     try {
       MMKVUtils.instance.setInt(AppConstant.syncIntervalCalendarKey, _calendarInterval);
       MMKVUtils.instance.setInt('sync_interval_tasks', _tasksInterval);
       MMKVUtils.instance.setBool(AppConstant.autoSyncEnabledKey, _autoSyncEnabled);
-      MMKVUtils.instance.setBool(AppConstant.periodicSyncEnabledKey, _periodicSyncEnabled);
+      await BackgroundSyncScheduler.setPeriodicEnabled(_periodicSyncEnabled);
+      await _loadBackgroundStatus();
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Settings saved')));
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Save failed: $e')));
@@ -124,7 +134,7 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> {
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
-                      onPressed: _saveSettings,
+                      onPressed: () => _saveSettings(),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.black87,
                         padding: const EdgeInsets.symmetric(vertical: 14),
@@ -138,6 +148,29 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> {
             ),
           ),
 
+          const SizedBox(height: 16),
+          Card(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Background sync status', style: TextStyle(fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 8),
+                  Text('Periodic: ${_backgroundStatus?.periodicEnabled == true ? 'Enabled' : 'Disabled'}'),
+                  Text('Last run: ${_backgroundStatus?.lastRunAt?.toLocal().toString() ?? 'Never'}'),
+                  Text('Last result: ${_backgroundStatus?.lastResult ?? 'Unknown'}'),
+                  Text('Reason: ${_backgroundStatus?.lastReason ?? '-'}'),
+                  Text('Next window: ${_backgroundStatus?.nextScheduledAt?.toLocal().toString() ?? 'Not scheduled'}'),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(onPressed: _loadBackgroundStatus, child: const Text('Refresh status')),
+                  ),
+                ],
+              ),
+            ),
+          ),
           const SizedBox(height: 16),
           Card(
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
