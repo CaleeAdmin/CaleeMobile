@@ -4,8 +4,6 @@ import 'package:get/get.dart';
 import 'package:intl/intl.dart';
 
 import '../controllers/calendar_probe_controller.dart';
-import '../feature/local_calendars_page.dart';
-import '../feature/public_subscriptions_page.dart';
 import '../entity/sync_run_record.dart';
 import 'sync_status_details_page.dart';
 
@@ -23,8 +21,7 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _loadBackgroundStatus();
-    Get.find<CalendarProbeController>().refreshOverviewState();
+    _refreshAll();
   }
 
   @override
@@ -36,205 +33,218 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      _loadBackgroundStatus();
-      Get.find<CalendarProbeController>().refreshOverviewState();
+      _refreshAll();
     }
   }
 
-  Future<void> _loadBackgroundStatus() async {
+  Future<void> _refreshAll() async {
     final status = await BackgroundSyncScheduler.getStatus();
-    if (!mounted) return;
-    setState(() => _backgroundStatus = status);
-  }
-
-  String _formatTime(DateTime? dt) {
-    if (dt == null) return 'Never';
-    final local = dt.toLocal();
-    final absolute = DateFormat('MMM d, yyyy • HH:mm').format(local);
-    final diff = DateTime.now().difference(local);
-    final rel = diff.inMinutes < 1
-        ? 'just now'
-        : diff.inHours < 1
-            ? '${diff.inMinutes}m ago'
-            : diff.inDays < 1
-                ? '${diff.inHours}h ago'
-                : '${diff.inDays}d ago';
-    return '$absolute ($rel)';
+    if (mounted) {
+      setState(() => _backgroundStatus = status);
+    }
+    await Get.find<CalendarProbeController>().refreshOverviewState();
   }
 
   String _sourceLabel(int count) => '$count ${count == 1 ? 'source' : 'sources'}';
 
-  String _runResultLabel(SyncRunResult? result) {
-    switch (result) {
-      case SyncRunResult.success:
-        return 'Succeeded';
-      case SyncRunResult.partial:
-        return 'Partially Synced';
-      case SyncRunResult.failed:
-        return 'Failed';
-      case SyncRunResult.abortedBySafety:
-        return 'Stopped for Safety';
-      case SyncRunResult.skippedNoEnabledSources:
-        return 'Skipped (No Enabled Sources)';
-      case SyncRunResult.skippedNoChanges:
-        return 'Skipped (No Changes)';
-      case null:
-        return 'No runs yet';
-    }
+  String _relative(DateTime? dt) {
+    if (dt == null) return 'never';
+    final diff = DateTime.now().difference(dt.toLocal());
+    if (diff.inMinutes < 1) return 'just now';
+    if (diff.inHours < 1) return '${diff.inMinutes}m ago';
+    if (diff.inDays < 1) return '${diff.inHours}h ago';
+    return '${diff.inDays}d ago';
+  }
+
+  String _clock(DateTime? dt) {
+    if (dt == null) return 'Not Scheduled';
+    return DateFormat('HH:mm').format(dt.toLocal());
+  }
+
+  String _runLabel(SyncRunResult? result) {
+    return switch (result) {
+      SyncRunResult.success => 'Succeeded',
+      SyncRunResult.partial => 'Partially Synced',
+      SyncRunResult.failed => 'Failed',
+      SyncRunResult.abortedBySafety => 'Stopped for Safety',
+      SyncRunResult.skippedNoEnabledSources => 'Skipped (No Enabled Sources)',
+      SyncRunResult.skippedNoChanges => 'Skipped (No Changes)',
+      null => 'No runs yet',
+    };
+  }
+
+  IconData _runIcon(SyncRunResult? result) {
+    return switch (result) {
+      SyncRunResult.success => Icons.check_circle,
+      SyncRunResult.skippedNoChanges => Icons.info,
+      SyncRunResult.skippedNoEnabledSources => Icons.info,
+      SyncRunResult.partial => Icons.warning_amber,
+      SyncRunResult.abortedBySafety || SyncRunResult.failed => Icons.error,
+      null => Icons.history,
+    };
+  }
+
+  Color _runColor(SyncRunResult? result) {
+    return switch (result) {
+      SyncRunResult.success => Colors.green,
+      SyncRunResult.skippedNoChanges => Colors.blueGrey,
+      SyncRunResult.skippedNoEnabledSources => Colors.blueGrey,
+      SyncRunResult.partial => Colors.orange,
+      SyncRunResult.abortedBySafety || SyncRunResult.failed => Colors.red,
+      null => Colors.black54,
+    };
+  }
+
+  String _schedulerSummary() {
+    final enabled = _backgroundStatus?.periodicEnabled == true;
+    final interval = _backgroundStatus?.intervalMinutes != null ? 'Every ${_backgroundStatus!.intervalMinutes}m' : 'Every 15m';
+    final next = _clock(_backgroundStatus?.nextScheduledAt);
+    return '${enabled ? 'Enabled' : 'Disabled'} · $interval · Next $next';
+  }
+
+  bool get _showSchedulerWarning {
+    if (_backgroundStatus == null) return false;
+    if (_backgroundStatus!.periodicConfigured && !_backgroundStatus!.periodicEnabled) return true;
+    return (_backgroundStatus!.lastResult == 'retry' || _backgroundStatus!.lastResult == 'failure');
   }
 
   @override
   Widget build(BuildContext context) {
     final probeCtrl = Get.find<CalendarProbeController>();
+
     return RefreshIndicator(
-      onRefresh: () async {
-        await _loadBackgroundStatus();
-        await probeCtrl.refreshOverviewState();
-      },
+      onRefresh: _refreshAll,
       child: SingleChildScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Obx(() {
-              final run = probeCtrl.latestRun.value;
-              final configured = probeCtrl.configuredSources.value;
-              final isRunning = probeCtrl.isRunActive || (_backgroundStatus?.workerRunning == true);
-              final needsAttention = !isRunning && run != null && run.result != SyncRunResult.success;
-              return Card(
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    _banner(isRunning, needsAttention),
-                    const SizedBox(height: 12),
-                    _kvRow(icon: Icons.checklist, label: 'Last completed run', value: _runResultLabel(run?.result)),
-                    _kvRow(icon: Icons.history, label: 'Completed at', value: _formatTime(run?.endTime ?? run?.startTime)),
-                    const Divider(height: 20),
-                    _kvRow(icon: Icons.link, label: 'Configured sources', value: _sourceLabel(configured)),
-                    if (configured == 0)
-                      Container(
-                        margin: const EdgeInsets.only(top: 8),
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(color: Colors.blueGrey.withOpacity(0.08), borderRadius: BorderRadius.circular(8)),
-                        child: const Text('No calendars enabled for sync. Open Calendars to enable at least one source.'),
+        child: Obx(() {
+          final run = probeCtrl.latestRun.value;
+          final configured = probeCtrl.configuredSources.value;
+          final isRunning = probeCtrl.isRunActive || (_backgroundStatus?.workerRunning == true);
+          final needsAttention = !isRunning && run != null && run.result != SyncRunResult.success;
+          final runColor = _runColor(run?.result);
+
+          return Card(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _banner(isRunning, needsAttention),
+                  const SizedBox(height: 20),
+
+                  // Last Sync
+                  Row(
+                    children: [
+                      Icon(_runIcon(run?.result), color: runColor, size: 18),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          '${_runLabel(run?.result)} · ${_relative(run?.endTime ?? run?.startTime)}',
+                          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                        ),
                       ),
-                    const Divider(height: 20),
-                    const Text('Background scheduler', style: TextStyle(fontWeight: FontWeight.w600)),
+                    ],
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  // Configured
+                  Text(_sourceLabel(configured), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                  if (configured == 0) ...[
                     const SizedBox(height: 8),
-                    _kvRow(icon: Icons.schedule, label: 'State', value: _schedulerStateLabel()),
-                    _kvRow(icon: Icons.timer, label: 'Interval', value: _backgroundStatus?.intervalMinutes != null ? 'Every ${_backgroundStatus!.intervalMinutes} minutes' : 'Not set'),
-                    _kvRow(icon: Icons.task_alt, label: 'Last run result', value: _friendlyResult(_backgroundStatus?.lastResult)),
-                    _kvRow(icon: Icons.update, label: 'Next window', value: _backgroundStatus?.nextScheduledAt == null ? 'Not Scheduled' : _formatTime(_backgroundStatus?.nextScheduledAt)),
-                    if ((_backgroundStatus?.periodicConfigured == true) && (_backgroundStatus?.periodicEnabled != true))
-                      const Padding(
-                        padding: EdgeInsets.only(top: 4),
-                        child: Text('Periodic sync is enabled in settings but currently not scheduled. Use Repair Scheduler.', style: TextStyle(color: Colors.deepOrange, fontSize: 12)),
-                      ),
-                    const SizedBox(height: 8),
-                    Wrap(spacing: 8, children: [
-                      OutlinedButton.icon(onPressed: probeCtrl.syncNow, icon: const Icon(Icons.sync), label: const Text('Sync Now')),
-                      OutlinedButton.icon(
-                        onPressed: _repairScheduler,
-                        icon: const Icon(Icons.build),
-                        label: const Text('Repair Scheduler'),
-                      ),
-                    ]),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: TextButton.icon(onPressed: () async { await _loadBackgroundStatus(); await probeCtrl.refreshOverviewState(); }, icon: const Icon(Icons.refresh), label: const Text('Refresh')),
-                    ),
-                    Container(
-                      width: double.infinity,
-                      decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(8)),
-                      child: TextButton.icon(
-                        onPressed: () => Get.to(() => const SyncStatusDetailsPage()),
-                        icon: const Icon(Icons.arrow_forward, size: 16),
-                        label: const Text('View Detailed Activity'),
-                      ),
-                    ),
-                  ]),
-                ),
-              );
-            }),
-            const SizedBox(height: 16),
-            Card(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('Quick Actions', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 12),
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(onPressed: () => Get.to(() => const PublicSubscriptionsGetxPage()), icon: const Icon(Icons.public), label: const Text('Subscribe to Calee Calendar')),
-                    ),
-                    const SizedBox(height: 10),
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(onPressed: () => Get.to(() => const LocalCalendarsPage()), icon: const Icon(Icons.link), label: const Text('Link to Device Calendar')),
+                    const Text(
+                      'No calendars enabled for sync',
+                      style: TextStyle(color: Colors.black54),
                     ),
                   ],
-                ),
+
+                  const SizedBox(height: 20),
+                  const Divider(height: 1),
+                  const SizedBox(height: 20),
+
+                  // Background
+                  const Text('Background', style: TextStyle(fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 8),
+                  Text(_schedulerSummary(), style: const TextStyle(color: Colors.black87)),
+                  if (_showSchedulerWarning) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      _backgroundStatus?.periodicConfigured == true && _backgroundStatus?.periodicEnabled != true
+                          ? 'Scheduler not currently active.'
+                          : (_backgroundStatus?.lastResult == 'retry' ? 'Background run will retry.' : 'Background run failed.'),
+                      style: const TextStyle(color: Colors.deepOrange),
+                    ),
+                    const SizedBox(height: 6),
+                    ExpansionTile(
+                      tilePadding: EdgeInsets.zero,
+                      title: const Text('Diagnostics', style: TextStyle(fontSize: 13)),
+                      childrenPadding: EdgeInsets.zero,
+                      children: [
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Result: ${_backgroundStatus?.lastResult ?? 'unknown'}'),
+                              Text('Reason: ${_backgroundStatus?.lastReason?.isNotEmpty == true ? _backgroundStatus!.lastReason! : 'n/a'}'),
+                              const SizedBox(height: 8),
+                              TextButton.icon(
+                                onPressed: () async {
+                                  await BackgroundSyncScheduler.selfHealPeriodicIfNeeded();
+                                  await _refreshAll();
+                                },
+                                icon: const Icon(Icons.build, size: 16),
+                                label: const Text('Repair Scheduler'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+
+                  const SizedBox(height: 24),
+
+                  // Actions
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: probeCtrl.syncNow,
+                      icon: const Icon(Icons.sync),
+                      label: const Text('Sync Now'),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton(
+                      onPressed: () => Get.to(() => const SyncStatusDetailsPage()),
+                      child: const Text('View Activity'),
+                    ),
+                  ),
+                ],
               ),
             ),
-            const SizedBox(height: 32),
-          ],
-        ),
+          );
+        }),
       ),
     );
-  }
-
-  String _schedulerStateLabel() {
-    if (_backgroundStatus == null) return 'Disabled';
-    if (_backgroundStatus!.periodicConfigured && !_backgroundStatus!.periodicEnabled) {
-      return 'Enabled (Not Scheduled)';
-    }
-    return _backgroundStatus!.periodicEnabled ? 'Enabled' : 'Disabled';
-  }
-
-
-  Future<void> _repairScheduler() async {
-    await BackgroundSyncScheduler.selfHealPeriodicIfNeeded();
-    await _loadBackgroundStatus();
   }
 
   Widget _banner(bool isRunning, bool attention) {
-    final Color color = isRunning ? Colors.blue : (attention ? Colors.orange : Colors.green);
-    final String text = isRunning ? 'Syncing…' : (attention ? 'Attention Required' : 'Idle');
+    final color = isRunning ? Colors.blue : (attention ? Colors.orange : Colors.green);
+    final text = isRunning ? 'Syncing…' : (attention ? 'Attention Required' : 'Idle');
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(8), border: Border.all(color: color.withOpacity(0.3))),
-      child: Text(text, style: TextStyle(color: color, fontWeight: FontWeight.w700)),
-    );
-  }
-
-  String _friendlyResult(String? result) {
-    return switch (result) {
-      'success' => 'Succeeded',
-      'retry' => 'Will retry',
-      'failure' => 'Failed',
-      _ => 'No background result yet',
-    };
-  }
-
-  Widget _kvRow({required IconData icon, required String label, required String value}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, size: 18, color: Colors.black54),
-          const SizedBox(width: 8),
-          Expanded(child: Text(label, style: const TextStyle(color: Colors.black54))),
-          const SizedBox(width: 8),
-          Flexible(child: Text(value, textAlign: TextAlign.right, style: const TextStyle(color: Colors.black87))),
-        ],
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withOpacity(0.3)),
       ),
+      child: Text(text, style: TextStyle(color: color, fontWeight: FontWeight.w700)),
     );
   }
 }
