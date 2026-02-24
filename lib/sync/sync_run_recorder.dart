@@ -7,6 +7,7 @@ import '../data/sync_run_store.dart';
 import '../entity/SyncContext.dart';
 import '../entity/sync_run_record.dart';
 import 'SyncEnum.dart';
+import 'sync_completed_event_bus.dart';
 import 'sync_run_telemetry.dart';
 
 class SyncRunRecorder implements SyncRunTelemetry {
@@ -49,6 +50,12 @@ class SyncRunRecorder implements SyncRunTelemetry {
       ..clear()
       ..addAll(_bindings.values);
     await _store.persistCompletedRun(run);
+    SyncCompletedEventBus.publish(
+      SyncCompletedEvent(
+        runId: run.runId,
+        completedAt: run.endTime ?? DateTime.now(),
+      ),
+    );
   }
 
   @override

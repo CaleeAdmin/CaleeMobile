@@ -6,6 +6,7 @@ import 'package:get/get.dart';
 import 'dart:async';
 
 import '../services/calee_auth_service.dart';
+import '../sync/sync_completed_event_bus.dart';
 import '../sync/sync_trigger_orchestrator.dart';
 import '../data/database_helper.dart';
 import '../data/sync_repository.dart';
@@ -89,6 +90,7 @@ class CalendarPageController extends GetxController {
   var togglingCalendarIds = <String>{}.obs;
   var subscribingUrls = <String>{}.obs;
   Future<void>? _refreshFuture;
+  StreamSubscription<SyncCompletedEvent>? _syncCompletedSub;
 
   void _notifyMeaningfulChange() {
     if (Get.isRegistered<SyncTriggerOrchestrator>()) {
@@ -99,8 +101,17 @@ class CalendarPageController extends GetxController {
   @override
   void onInit() {
     super.onInit();
+    _syncCompletedSub = SyncCompletedEventBus.stream.listen((_) {
+      unawaited(refreshDashboard());
+    });
     // 页面加载时自动执行一次扫描和数据拉取
     refreshDashboard();
+  }
+
+  @override
+  void onClose() {
+    _syncCompletedSub?.cancel();
+    super.onClose();
   }
 
   /// 处理 Checkbox 点击事件
