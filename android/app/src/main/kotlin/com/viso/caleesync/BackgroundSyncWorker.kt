@@ -173,6 +173,7 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
             val prefs = context.getSharedPreferences("calee_sync_bg", Context.MODE_PRIVATE)
             val periodicInfos = WorkManager.getInstance(context).getWorkInfosForUniqueWork(PERIODIC_UNIQUE).get()
             val periodicEnabled = periodicInfos.any { it.state == WorkInfo.State.ENQUEUED || it.state == WorkInfo.State.RUNNING }
+            val workerRunning = periodicInfos.any { it.state == WorkInfo.State.RUNNING }
             val nextAt = prefs.getLong("periodic_next_at", 0L).takeIf { it > 0 }
             return mapOf(
                 "periodicEnabled" to periodicEnabled,
@@ -180,6 +181,8 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
                 "lastResult" to prefs.getString("last_result", "unknown"),
                 "lastReason" to prefs.getString("last_reason", ""),
                 "nextScheduledAtMs" to nextAt,
+                "workerRunning" to workerRunning,
+                "intervalMinutes" to 15,
             )
         }
     }

@@ -32,10 +32,10 @@ class SyncStatusDetailsPage extends StatelessWidget {
             final counts = _aggregateCounts(run);
             return ListTile(
               title: Text(
-                '${DateFormat('MMM d, yyyy • HH:mm').format(run.startTime)} • ${_duration(run)}',
+                '${_formatTimestamp(run.startTime)} • ${_duration(run)}',
               ),
               subtitle: Text(
-                '${_modeLabel(run.mode)} • ${run.bindings.length} calendar link${run.bindings.length == 1 ? '' : 's'}\n'
+                '${_triggerLabel(run.trigger)} • ${run.bindings.length} ${run.bindings.length == 1 ? 'source' : 'sources'}\n'
                 'On device +${counts.localCreated}/${counts.localUpdated}/-${counts.localDeleted}  '
                 'In cloud +${counts.remoteCreated}/${counts.remoteUpdated}/-${counts.remoteDeleted}',
               ),
@@ -61,12 +61,16 @@ Widget _resultChip(SyncRunResult result, bool safetyTriggered) {
     SyncRunResult.partial => Colors.orange,
     SyncRunResult.abortedBySafety => Colors.deepOrange,
     SyncRunResult.failed => Colors.red,
+    SyncRunResult.skippedNoEnabledSources => Colors.blueGrey,
+    SyncRunResult.skippedNoChanges => Colors.blueGrey,
   };
   final label = switch (result) {
-    SyncRunResult.success => 'Up to date',
-    SyncRunResult.partial => 'Partly synced',
-    SyncRunResult.abortedBySafety => 'Stopped for safety',
-    SyncRunResult.failed => 'Sync failed',
+    SyncRunResult.success => 'Succeeded',
+    SyncRunResult.partial => 'Partially Synced',
+    SyncRunResult.abortedBySafety => 'Stopped for Safety',
+    SyncRunResult.failed => 'Failed',
+    SyncRunResult.skippedNoEnabledSources => 'Skipped (No Enabled Sources)',
+    SyncRunResult.skippedNoChanges => 'Skipped (No Changes)',
   };
   return Column(
     mainAxisAlignment: MainAxisAlignment.center,
@@ -122,10 +126,26 @@ _SyncChangeSummary _aggregateCounts(SyncRunRecord run) {
   );
 }
 
-String _modeLabel(SyncRunMode mode) {
-  return switch (mode) {
-    SyncRunMode.pull => 'Import only',
-    SyncRunMode.push => 'Export only',
-    SyncRunMode.twoWay => 'Two-way sync',
+String _formatTimestamp(DateTime time) {
+  final local = time.toLocal();
+  final abs = DateFormat('MMM d, yyyy • HH:mm').format(local);
+  final diff = DateTime.now().difference(local);
+  final rel = diff.inMinutes < 1
+      ? 'just now'
+      : diff.inHours < 1
+          ? '${diff.inMinutes}m ago'
+          : diff.inDays < 1
+              ? '${diff.inHours}h ago'
+              : '${diff.inDays}d ago';
+  return '$abs ($rel)';
+}
+
+String _triggerLabel(SyncRunTrigger trigger) {
+  return switch (trigger) {
+    SyncRunTrigger.manual => 'manual',
+    SyncRunTrigger.autoForeground => 'auto',
+    SyncRunTrigger.periodic => 'periodic',
+    SyncRunTrigger.force => 'force',
   };
 }
+

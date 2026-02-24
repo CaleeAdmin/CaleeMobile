@@ -839,6 +839,22 @@ class SyncRepository {
     print("[DB] Calendar ID updated from $oldLocalId to $newSystemId");
   }
 
+  Future<int> countEnabledCalendarBindings(String accountId) async {
+    final db = await _dbHelper.database;
+    final rows = await db.rawQuery(
+      """
+      SELECT COUNT(1) AS cnt
+      FROM remote_collections rc
+      INNER JOIN local_bindings lb ON lb.remote_collection_id = rc.id
+      WHERE rc.account_name = ?
+        AND rc.collection_type = 'calendar'
+        AND rc.is_enabled = 1
+      """,
+      [accountId],
+    );
+    return (rows.first['cnt'] as num?)?.toInt() ?? 0;
+  }
+
   // ==========================================
   // 4. 数据提取 (For Sync Engine)
   // ==========================================
