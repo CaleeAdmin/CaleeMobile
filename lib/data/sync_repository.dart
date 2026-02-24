@@ -13,6 +13,32 @@ import '../sync/background_sync_scheduler.dart';
 import '../services/calee_server_service.dart';
 import 'database_helper.dart';
 
+
+class EnableCalendarResult {
+  final bool success;
+  final String remotePath;
+  final int? remoteCollectionId;
+  final String? localCalendarId;
+  final bool didTriggerSync;
+  final bool hasFreshEventCount;
+
+  const EnableCalendarResult({
+    required this.success,
+    required this.remotePath,
+    this.remoteCollectionId,
+    this.localCalendarId,
+    this.didTriggerSync = false,
+    this.hasFreshEventCount = false,
+  });
+
+  const EnableCalendarResult.failure({required this.remotePath})
+      : success = false,
+        remoteCollectionId = null,
+        localCalendarId = null,
+        didTriggerSync = false,
+        hasFreshEventCount = false;
+}
+
 class SyncRepository {
 
   String get _activeServerBase {
@@ -26,7 +52,7 @@ class SyncRepository {
   final NativeCalendarApi _nativeApi = NativeCalendarApi();
   final DatabaseHelper _dbHelper = DatabaseHelper.instance;
 
-  static final Map<String, Future<bool>> _connectFlights = <String, Future<bool>>{};
+  static final Map<String, Future<EnableCalendarResult>> _connectFlights = <String, Future<EnableCalendarResult>>{};
   String? _lastConnectError;
 
   String? takeLastConnectErrorMessage() {
@@ -410,19 +436,19 @@ class SyncRepository {
   }
 
 
-  Future<bool> connectAndEnableRemoteCalendarByPath(String remotePath) async {
+  Future<EnableCalendarResult> connectAndEnableRemoteCalendarByPath(String remotePath) async {
     final String trimmedRemotePath = CaleeServerService.normalizeRemotePath(remotePath);
     if (trimmedRemotePath.isEmpty) {
       _lastConnectError = 'Invalid remote path. Please refresh and try again.';
-      return false;
+      return EnableCalendarResult.failure(remotePath: trimmedRemotePath);
     }
 
-    final Future<bool>? inFlight = _connectFlights[trimmedRemotePath];
+    final Future<EnableCalendarResult>? inFlight = _connectFlights[trimmedRemotePath];
     if (inFlight != null) {
       return inFlight;
     }
 
-    final Future<bool> task = _provisionAndEnableRemoteCalendarByPath(trimmedRemotePath);
+    final Future<EnableCalendarResult> task = _provisionAndEnableRemoteCalendarByPath(trimmedRemotePath);
     _connectFlights[trimmedRemotePath] = task;
     try {
       return await task;
@@ -431,13 +457,13 @@ class SyncRepository {
     }
   }
 
-  Future<bool> _provisionAndEnableRemoteCalendarByPath(String remotePath) async {
+  Future<EnableCalendarResult> _provisionAndEnableRemoteCalendarByPath(String remotePath) async {
     _lastConnectError = null;
     remotePath = CaleeServerService.normalizeRemotePath(remotePath);
     final String loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? '';
     if (loginName.isEmpty) {
       _lastConnectError = 'Session expired. Please sign in again and retry.';
-      return false;
+      return EnableCalendarResult.failure(remotePath: remotePath);
     }
 
     final db = await _dbHelper.database;
@@ -455,7 +481,7 @@ class SyncRepository {
 
       if (remoteRows.isEmpty) {
         _lastConnectError = 'Remote calendar not found. Pull to refresh and try again.';
-        return false;
+        return EnableCalendarResult.failure(remotePath: remotePath);
       }
 
       final Map<String, dynamic> remote = remoteRows.first;
@@ -464,7 +490,7 @@ class SyncRepository {
           CaleeServerService.normalizeRemotePath((remote['remote_path'] ?? '').toString());
       if (persistedRemotePath.isEmpty) {
         _lastConnectError = 'Invalid remote calendar path. Please refresh and try again.';
-        return false;
+        return EnableCalendarResult.failure(remotePath: remotePath);
       }
 
       final String displayName = (remote['display_name']?.toString().isNotEmpty ?? false)
@@ -501,7 +527,14 @@ class SyncRepository {
           whereArgs: [remoteCollectionId],
         );
         _triggerOneShotForceSyncInBackground(remoteCollectionId);
-        return true;
+        return EnableCalendarResult(
+          success: true,
+          remotePath: persistedRemotePath,
+          remoteCollectionId: remoteCollectionId,
+          localCalendarId: existingLocalId,
+          didTriggerSync: true,
+          hasFreshEventCount: false,
+        );
       }
 
       int colorInt = 0xFF4CAF50;
@@ -518,7 +551,7 @@ class SyncRepository {
       final String? newLocalId = await _nativeApi.createCalendar(displayName, loginName, colorInt);
       if (newLocalId == null || newLocalId.isEmpty) {
         _lastConnectError = 'Failed to create local calendar. Check calendar permissions and try again.';
-        return false;
+        return EnableCalendarResult.failure(remotePath: persistedRemotePath);
       }
       createdLocalIdForEnableAttempt = newLocalId;
 
@@ -562,12 +595,19 @@ class SyncRepository {
             await _nativeApi.deleteCalendar(createdLocalIdForEnableAttempt!, loginName);
           } catch (_) {}
         }
-        return false;
+        return EnableCalendarResult.failure(remotePath: persistedRemotePath);
       }
 
       createdLocalIdForEnableAttempt = null;
       _triggerOneShotForceSyncInBackground(remoteCollectionId);
-      return true;
+      return EnableCalendarResult(
+        success: true,
+        remotePath: persistedRemotePath,
+        remoteCollectionId: remoteCollectionId,
+        localCalendarId: newLocalId,
+        didTriggerSync: true,
+        hasFreshEventCount: false,
+      );
     } on PlatformException catch (e) {
       final String msg = '${e.code} ${e.message ?? ''}'.toLowerCase();
       if (msg.contains('permission')) {
@@ -587,7 +627,7 @@ class SyncRepository {
           await _nativeApi.deleteCalendar(createdLocalIdForEnableAttempt!, loginName);
         } catch (_) {}
       }
-      return false;
+      return EnableCalendarResult.failure(remotePath: remotePath);
     } catch (e) {
       _lastConnectError = 'Connection failed. Please try again later.';
       debugPrint('[ERROR] connectAndEnableRemoteCalendarByPath failed: $e');
@@ -598,7 +638,7 @@ class SyncRepository {
           await _nativeApi.deleteCalendar(createdLocalIdForEnableAttempt!, loginName);
         } catch (_) {}
       }
-      return false;
+      return EnableCalendarResult.failure(remotePath: remotePath);
     }
   }
 
