@@ -22,7 +22,6 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.dart.DartExecutor
 import io.flutter.plugin.common.MethodChannel
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -31,17 +30,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 
 class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : CoroutineWorker(appContext, params) {
     override suspend fun doWork(): Result {
-        if (!runLock.compareAndSet(false, true)) {
-            Log.i("CaleeSyncWorker", "skip trigger=${inputData.getString("trigger")} because another run is active")
-            return Result.retry()
-        }
-
         val trigger = inputData.getString("trigger") ?: "periodic"
-        return try {
-            runSyncTask(applicationContext, trigger)
-        } finally {
-            runLock.set(false)
-        }
+        return runSyncTask(applicationContext, trigger)
     }
 
     private suspend fun runSyncTask(context: Context, trigger: String): Result {
@@ -126,8 +116,7 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
     companion object {
         private const val CHANNEL = "caleesync/background_sync"
         private const val PERIODIC_UNIQUE = "CaleeSyncPeriodicWorker"
-        private const val ONE_OFF_UNIQUE = "CaleeSyncOneTimeWorker"
-        private val runLock = AtomicBoolean(false)
+        private const val SYNC_UNIQUE = "CaleeSyncSyncWorker"
 
         private fun networkConnectedConstraints(): Constraints {
             return Constraints.Builder()
@@ -137,7 +126,7 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
 
         fun schedulePeriodic(context: Context, intervalMinutes: Int): Operation {
             val bounded = intervalMinutes.coerceAtLeast(15).toLong()
-            val request = PeriodicWorkRequestBuilder<CaleeSyncPeriodicWorker>(bounded, TimeUnit.MINUTES)
+            val request = PeriodicWorkRequestBuilder<CaleeSyncPeriodicTriggerWorker>(bounded, TimeUnit.MINUTES)
                 .setConstraints(networkConnectedConstraints())
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 15, TimeUnit.MINUTES)
                 .build()
@@ -179,14 +168,15 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
             }
 
             return WorkManager.getInstance(context)
-                .enqueueUniqueWork(ONE_OFF_UNIQUE, ExistingWorkPolicy.KEEP, request)
+                .enqueueUniqueWork(SYNC_UNIQUE, ExistingWorkPolicy.KEEP, request)
         }
 
         fun readStatus(context: Context): Map<String, Any?> {
             val prefs = context.getSharedPreferences("calee_sync_bg", Context.MODE_PRIVATE)
             val periodicInfos = WorkManager.getInstance(context).getWorkInfosForUniqueWork(PERIODIC_UNIQUE).get()
+            val syncInfos = WorkManager.getInstance(context).getWorkInfosForUniqueWork(SYNC_UNIQUE).get()
             val periodicEnabled = periodicInfos.any { it.state == WorkInfo.State.ENQUEUED || it.state == WorkInfo.State.RUNNING }
-            val workerRunning = periodicInfos.any { it.state == WorkInfo.State.RUNNING }
+            val workerRunning = (periodicInfos + syncInfos).any { it.state == WorkInfo.State.RUNNING }
             val nextAt = prefs.getLong("periodic_next_at", 0L).takeIf { it > 0 }
             return mapOf(
                 "periodicEnabled" to periodicEnabled,
@@ -198,5 +188,12 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
                 "intervalMinutes" to 15,
             )
         }
+    }
+}
+
+class CaleeSyncPeriodicTriggerWorker(appContext: Context, params: WorkerParameters) : CoroutineWorker(appContext, params) {
+    override suspend fun doWork(): Result {
+        CaleeSyncPeriodicWorker.enqueueOneOff(applicationContext, "periodic", expedited = false)
+        return Result.success()
     }
 }
