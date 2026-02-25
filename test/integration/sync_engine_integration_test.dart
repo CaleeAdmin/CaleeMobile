@@ -100,6 +100,25 @@ void main() {
   });
 
   test('executeFullSync plans, executes, and records run', () async {
+    await db.insert('remote_collections', {
+      'id': 1,
+      'account_name': 'u1',
+      'collection_type': 'calendar',
+      'remote_path': '/c/1',
+      'display_name': 'Remote',
+      'color': '#fff',
+      'sync_mode': SyncBindingMode.twoWay,
+      'is_enabled': 1,
+      'is_subscription': 0,
+    });
+
+    await db.insert('local_bindings', {
+      'id': 1,
+      'remote_collection_id': 1,
+      'local_collection_id': 'local-c1',
+      'binding_origin': SyncBindingOrigin.remote,
+    });
+
     final ctx = SyncContext(
       remoteCollectionId: 1,
       localCalendarId: 'local-c1',
