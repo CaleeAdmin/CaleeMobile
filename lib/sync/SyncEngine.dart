@@ -20,12 +20,14 @@ class SyncEngine {
     SyncItemPlanner? planner,
     SyncItemExecutor? executor,
     SyncRunRecorder? runRecorder,
+    String? Function()? loginNameReader,
   })  : _repo = repo ?? SyncRepository(),
         _serverService = serverService ?? CaleeServerService(),
         _authService = authService ?? CaleeAuthService(serverBaseUrl: AppConstant.caleeServer),
         _planner = planner ?? SyncItemPlanner(),
         _executor = executor ?? SyncItemExecutor(),
-        _runRecorder = runRecorder ?? SyncRunRecorder();
+        _runRecorder = runRecorder ?? SyncRunRecorder(),
+        _loginNameReader = loginNameReader;
 
   final SyncRepository _repo;
   final CaleeServerService _serverService;
@@ -33,6 +35,7 @@ class SyncEngine {
   final SyncItemPlanner _planner;
   final SyncItemExecutor _executor;
   final SyncRunRecorder _runRecorder;
+  final String? Function()? _loginNameReader;
 
   static void requestForceSyncForCollection(int remoteCollectionId) {
     ForceSyncRegistry.requestForceSyncForCollection(remoteCollectionId);
@@ -43,7 +46,7 @@ class SyncEngine {
     SyncRunTrigger trigger = SyncRunTrigger.manual,
   }) async {
     final summary = SyncSummary(telemetry: _runRecorder);
-    final String? loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey);
+    final String? loginName = _loginNameReader?.call() ?? MMKVUtils.instance.getString(AppConstant.loginNameKey);
     if (loginName == null) return summary;
 
     await _repo.scanLocalCalendars(loginName);

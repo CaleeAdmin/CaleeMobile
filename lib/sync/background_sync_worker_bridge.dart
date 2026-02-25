@@ -9,9 +9,19 @@ import 'package:caleesync/data/database_helper.dart';
 import 'package:flutter/widgets.dart';
 
 import 'SyncEngine.dart';
+import '../entity/SyncSummary.dart';
 import '../entity/sync_run_record.dart';
 
 class BackgroundSyncWorkerBridge implements BackgroundSyncRunnerApi {
+  BackgroundSyncWorkerBridge({
+    Future<SyncSummary> Function(SyncRunTrigger trigger)? executeSync,
+    String? Function()? loginNameReader,
+  })  : _executeSync = executeSync,
+        _loginNameReader = loginNameReader;
+
+  final Future<SyncSummary> Function(SyncRunTrigger trigger)? _executeSync;
+  final String? Function()? _loginNameReader;
+
   static Future<void>? _initFuture;
 
   static Future<void> start() async {
@@ -41,13 +51,13 @@ class BackgroundSyncWorkerBridge implements BackgroundSyncRunnerApi {
         contractVersion: kBackgroundSyncContractVersion,
       );
     }
-    final String? loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey);
+    final String? loginName = _loginNameReader?.call() ?? MMKVUtils.instance.getString(AppConstant.loginNameKey);
     if (loginName == null || loginName.isEmpty) {
       return BackgroundRunResult(outcome: BackgroundRunOutcome.failure, reason: 'no_account', gateReason: BackgroundGateReason.authInvalid, error: 'missing_login_name', contractVersion: kBackgroundSyncContractVersion);
     }
 
     try {
-      final summary = await SyncEngine().executeFullSync(trigger: _mapTrigger(trigger));
+      final summary = await (_executeSync?.call(_mapTrigger(trigger)) ?? SyncEngine().executeFullSync(trigger: _mapTrigger(trigger)));
       if (summary.failed == 0) {
         return BackgroundRunResult(outcome: BackgroundRunOutcome.success, reason: trigger, gateReason: BackgroundGateReason.none, contractVersion: kBackgroundSyncContractVersion);
       }

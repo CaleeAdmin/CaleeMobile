@@ -20,11 +20,30 @@ class SyncTriggerOrchestrator extends GetxService with WidgetsBindingObserver {
   bool _appActive = true;
   Timer? _autoDebounceTimer;
 
-  final SyncRunStore _runStore = SyncRunStore();
+  SyncTriggerOrchestrator({
+    SyncRunStore? runStore,
+    Future<void> Function({required String reason, bool expedited})? scheduleOneOff,
+    Future<BackgroundSyncStatus> Function()? loadStatus,
+    Duration foregroundDebounce = const Duration(seconds: 2),
+    Duration pollInterval = const Duration(milliseconds: 500),
+    Duration waitTimeout = const Duration(minutes: 3),
+    bool Function()? autoSyncEnabledReader,
+  })  : _runStore = runStore ?? SyncRunStore(),
+        _scheduleOneOff = scheduleOneOff ?? BackgroundSyncScheduler.scheduleOneOff,
+        _loadStatus = loadStatus ?? BackgroundSyncScheduler.getStatus,
+        _autoSyncEnabledReader = autoSyncEnabledReader,
+        _foregroundDebounce = foregroundDebounce,
+        _pollInterval = pollInterval,
+        _waitTimeout = waitTimeout;
 
-  static const Duration _foregroundDebounce = Duration(seconds: 2);
-  static const Duration _pollInterval = Duration(milliseconds: 500);
-  static const Duration _waitTimeout = Duration(minutes: 3);
+  final SyncRunStore _runStore;
+  final Future<void> Function({required String reason, bool expedited}) _scheduleOneOff;
+  final Future<BackgroundSyncStatus> Function() _loadStatus;
+  final bool Function()? _autoSyncEnabledReader;
+
+  final Duration _foregroundDebounce;
+  final Duration _pollInterval;
+  final Duration _waitTimeout;
 
   @override
   void onInit() {
@@ -53,7 +72,7 @@ class SyncTriggerOrchestrator extends GetxService with WidgetsBindingObserver {
   }
 
   void notifyMeaningfulForegroundChange() {
-    final bool autoSyncEnabled = MMKVUtils.instance.getBool(AppConstant.autoSyncEnabledKey, defaultValue: true) ?? true;
+    final bool autoSyncEnabled = _autoSyncEnabledReader?.call() ?? (MMKVUtils.instance.getBool(AppConstant.autoSyncEnabledKey, defaultValue: true) ?? true);
     if (!autoSyncEnabled || !_appActive) {
       return;
     }
@@ -71,7 +90,7 @@ class SyncTriggerOrchestrator extends GetxService with WidgetsBindingObserver {
   }) async {
     final String? baselineRunId = await _loadLatestRunId();
     final String triggerReason = reason ?? _mapReason(trigger);
-    await BackgroundSyncScheduler.scheduleOneOff(reason: triggerReason, expedited: expedited);
+    await _scheduleOneOff(reason: triggerReason, expedited: expedited);
     final SyncSummary summary = await _awaitRunCompletion(baselineRunId: baselineRunId);
     onProgress?.call(summary);
     return summary;
@@ -86,7 +105,7 @@ class SyncTriggerOrchestrator extends GetxService with WidgetsBindingObserver {
   Future<SyncSummary> _awaitRunCompletion({required String? baselineRunId}) async {
     final DateTime deadline = DateTime.now().add(_waitTimeout);
     while (DateTime.now().isBefore(deadline)) {
-      final status = await BackgroundSyncScheduler.getStatus();
+      final status = await _loadStatus();
       final runs = await _runStore.loadRuns(limit: 1);
       if (runs.isNotEmpty) {
         final latest = runs.first;

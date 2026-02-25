@@ -15,11 +15,14 @@ class SyncItemPlanner {
   SyncItemPlanner({
     DatabaseHelper? dbHelper,
     NativeCalendarApi? nativeApi,
+    bool Function(String userId)? authValidator,
   })  : _dbHelper = dbHelper ?? DatabaseHelper.instance,
-        _native = nativeApi ?? NativeCalendarApi();
+        _native = nativeApi ?? NativeCalendarApi(),
+        _authValidator = authValidator;
 
   final DatabaseHelper _dbHelper;
   final NativeCalendarApi _native;
+  final bool Function(String userId)? _authValidator;
 
   Future<List<SyncContext>> generateSyncItems(
     String userId,
@@ -258,6 +261,8 @@ class SyncItemPlanner {
   }
 
   bool _hasValidAuthContext(String userId) {
+    final custom = _authValidator;
+    if (custom != null) return custom(userId);
     final String loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? '';
     final String password = MMKVUtils.instance.getString(AppConstant.appPasswordKey) ?? '';
     if (loginName.isEmpty || password.isEmpty) {

@@ -221,6 +221,18 @@ abstract class SyncStrategy {
     }
   }
 
+
+  Future<Map<String, dynamic>> repairDuplicateMappingsPublic(
+    Database db,
+    int remoteCollectionId,
+    List<Map<String, dynamic>> mappedRecords,
+  ) async {
+    final result = await repairDuplicateMappings(db, remoteCollectionId, mappedRecords);
+    return {
+      'records': result.records,
+      'removedCount': result.removedCount,
+    };
+  }
   Future<_RepairResult> repairDuplicateMappings(
     Database db,
     int remoteCollectionId,
