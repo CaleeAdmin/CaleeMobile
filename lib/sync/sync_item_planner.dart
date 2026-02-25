@@ -294,6 +294,11 @@ class SyncItemPlanner {
   }
 
   SyncContext _buildContext(Map remote, Map local, SyncAction action) {
+    final dynamic subscriptionRaw = remote.containsKey('is_subscription')
+        ? remote['is_subscription']
+        : local['is_subscription'];
+    final bool isSubscription = subscriptionRaw == true || subscriptionRaw == 1 || subscriptionRaw?.toString() == '1';
+
     return SyncContext(
       remoteCollectionId: (local['id'] as int?) ?? 0,
       localCalendarId: local['local_collection_id']?.toString() ?? '',
@@ -304,7 +309,7 @@ class SyncItemPlanner {
       syncMode: local['sync_mode'] ?? remote['sync_mode'] ?? 0,
       action: action,
       ctag: remote['ctag'] ?? local['synced_ctag'],
-      isSubscription: remote['is_subscription'] ?? local['is_subscription'] ?? false,
+      isSubscription: isSubscription,
       extra: {
         'binding_id': local['binding_id'] ?? 0,
         'binding_origin': local['binding_origin'] ?? 0,

@@ -12,6 +12,7 @@ import 'package:caleesync/sync/SyncEnum.dart';
 import 'package:caleesync/sync/sync_item_executor.dart';
 import 'package:caleesync/sync/sync_item_planner.dart';
 import 'package:caleesync/sync/sync_run_recorder.dart';
+import 'package:caleesync/sync/strategy/SyncStrategy.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
