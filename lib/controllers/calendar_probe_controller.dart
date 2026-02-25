@@ -4,6 +4,7 @@ import 'package:caleesync/common/app_constant.dart';
 import 'package:caleesync/common/utils/mmkv_utils.dart';
 import 'package:get/get.dart';
 
+import 'CalendarPageController.dart';
 import '../entity/SyncSummary.dart';
 import '../data/sync_repository.dart';
 import '../data/sync_run_store.dart';
@@ -61,6 +62,18 @@ class CalendarProbeController extends GetxController {
       loadConfiguredSourceCount(),
       loadSchedulerState(),
     ]);
+  }
+
+  Future<void> refreshPagesBeforeSync() async {
+    final List<Future<void>> refreshTasks = [refreshOverviewState()];
+
+    if (Get.isRegistered<CalendarPageController>()) {
+      refreshTasks.add(
+        Get.find<CalendarPageController>().refreshDashboard(),
+      );
+    }
+
+    await Future.wait(refreshTasks);
   }
 
   Future<void> loadConfiguredSourceCount() async {
