@@ -15,7 +15,7 @@ import java.nio.ByteBuffer
 private fun wrapResult(result: Any?): List<Any?> = listOf(result)
 
 private fun wrapError(exception: Throwable): List<Any?> {
-  return if (exception is FlutterError) {
+  return if (exception is BackgroundSyncFlutterError) {
     listOf(exception.code, exception.message, exception.details)
   } else {
     listOf(
@@ -26,7 +26,7 @@ private fun wrapError(exception: Throwable): List<Any?> {
   }
 }
 
-private class FlutterError(
+private class BackgroundSyncFlutterError(
   val code: String,
   override val message: String? = null,
   val details: Any? = null
