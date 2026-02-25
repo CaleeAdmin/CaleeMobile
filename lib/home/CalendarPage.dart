@@ -6,6 +6,7 @@ import 'package:caleesync/feature/local_calendars_page.dart';
 import 'package:caleesync/feature/public_subscriptions_page.dart';
 
 import '../controllers/CalendarPageController.dart';
+import '../sync/sync_gate_reason.dart';
 
 class CalendarPage extends StatefulWidget {
   const CalendarPage({super.key});
@@ -37,19 +38,11 @@ class _CalendarPageState extends State<CalendarPage> {
         status = await calendarPermission.request();
       }
 
-      if (status.isGranted) {
-        // try {
-        //   final nativeApi = NativeCalendarApi();
-        //   await nativeApi.requestPermission(false);
-        // } catch (_) {}
-
-        // 仅在尚未加载数据时才触发一次刷新, 避免每次切换 tab 重复刷新
-        if (controller.calendars.isEmpty && !controller.isLoading.value) {
-          await controller.refreshDashboard();
-        }
-      } else {
-        // 未授权, 暂不刷新
-      }
+      // try {
+      //   final nativeApi = NativeCalendarApi();
+      //   await nativeApi.requestPermission(false);
+      // } catch (_) {}
+      await controller.refreshDashboard();
     } catch (e) {
       print('[WARN] Error while requesting calendar permission: $e');
       await controller.refreshDashboard();
@@ -342,7 +335,7 @@ extension on _CalendarRow {
         final bool? confirm = await _showRenameDialog(context, item);
         // 刷新数据（保持原行为）
         if (confirm == true) {
-          await controller.refreshDashboard();
+          await controller.reloadCalendars();
         }
         break;
       case 'delete':
@@ -606,6 +599,11 @@ class _CalendarCard extends StatelessWidget {
   }
 }
 
+
+String? _syncGateReasonMessage(String? reason) {
+  return SyncGateReason.toUiMessage(reason);
+}
+
 class _CalendarRow extends StatelessWidget {
   final CalendarDisplayItem item;
   const _CalendarRow({Key? key, required this.item}) : super(key: key);
@@ -711,19 +709,40 @@ class _CalendarRow extends StatelessWidget {
                   ],
                 )),
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 4, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade300,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        item.isReadOnly ? 'Read-only' : 'Two-way sync',
-                        style: const TextStyle(fontSize: 12, color: Colors.black54),
-                      ),
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    item.isReadOnly ? 'Read-only' : 'Two-way sync',
+                    style: const TextStyle(fontSize: 12, color: Colors.black54),
+                  ),
+                ),
+                if (item.isEnabled && (_syncGateReasonMessage(item.syncGateReason) ?? '').isNotEmpty)
+                  Container(
+                    margin: const EdgeInsets.only(top: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFF7ED),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFFF59E0B)),
                     ),
-                // const SizedBox(width: 12),
-                    Text('${item.eventCount} events', style: const TextStyle(fontSize: 12, color: Colors.black54)),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.warning_amber_rounded, size: 14, color: Color(0xFFD97706)),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text(
+                            _syncGateReasonMessage(item.syncGateReason)!,
+                            style: const TextStyle(fontSize: 12, color: Color(0xFFB45309)),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                Text('${item.eventCount} events', style: const TextStyle(fontSize: 12, color: Colors.black54)),
 
               ],
             ),

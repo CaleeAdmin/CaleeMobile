@@ -5,9 +5,10 @@ import 'package:caleesync/common/utils/mmkv_utils.dart';
 import 'package:flutter/widgets.dart';
 import 'package:get/get.dart';
 
+import '../data/sync_run_store.dart';
 import '../entity/SyncSummary.dart';
 import '../entity/sync_run_record.dart';
-import 'SyncEngine.dart';
+import 'background_sync_scheduler.dart';
 
 enum SyncTriggerType {
   manual,
@@ -16,17 +17,14 @@ enum SyncTriggerType {
 }
 
 class SyncTriggerOrchestrator extends GetxService with WidgetsBindingObserver {
-  SyncTriggerOrchestrator({SyncEngine? engine}) : _engine = engine ?? SyncEngine();
-
-  final SyncEngine _engine;
-
   bool _appActive = true;
   Timer? _autoDebounceTimer;
 
-  Future<SyncSummary>? _activeRun;
-  _QueuedRequest? _queuedRequest;
+  final SyncRunStore _runStore = SyncRunStore();
 
   static const Duration _foregroundDebounce = Duration(seconds: 2);
+  static const Duration _pollInterval = Duration(milliseconds: 500);
+  static const Duration _waitTimeout = Duration(minutes: 3);
 
   @override
   void onInit() {
@@ -51,8 +49,7 @@ class SyncTriggerOrchestrator extends GetxService with WidgetsBindingObserver {
   }
 
   Future<SyncSummary> triggerForce(int remoteCollectionId, {Function(SyncSummary)? onProgress}) {
-    SyncEngine.requestForceSyncForCollection(remoteCollectionId);
-    return _scheduleRun(SyncTriggerType.force, onProgress: onProgress);
+    return _scheduleRun(SyncTriggerType.force, onProgress: onProgress, reason: 'force:$remoteCollectionId', expedited: true);
   }
 
   void notifyMeaningfulForegroundChange() {
@@ -69,120 +66,65 @@ class SyncTriggerOrchestrator extends GetxService with WidgetsBindingObserver {
   Future<SyncSummary> _scheduleRun(
     SyncTriggerType trigger, {
     Function(SyncSummary)? onProgress,
-  }) {
-    final completer = Completer<SyncSummary>();
-
-    if (_activeRun == null) {
-      _startRun(trigger, completer, onProgress: onProgress);
-      return completer.future;
-    }
-
-    if (_queuedRequest == null) {
-      _queuedRequest = _QueuedRequest(trigger: trigger);
-    }
-    _queuedRequest!.promises.add(_QueuedPromise(completer: completer, onProgress: onProgress));
-    return completer.future;
+    String? reason,
+    bool expedited = false,
+  }) async {
+    final String? baselineRunId = await _loadLatestRunId();
+    final String triggerReason = reason ?? _mapReason(trigger);
+    await BackgroundSyncScheduler.scheduleOneOff(reason: triggerReason, expedited: expedited);
+    final SyncSummary summary = await _awaitRunCompletion(baselineRunId: baselineRunId);
+    onProgress?.call(summary);
+    return summary;
   }
 
-  void _startRun(
-    SyncTriggerType trigger,
-    Completer<SyncSummary> rootCompleter, {
-    Function(SyncSummary)? onProgress,
-  }) {
-    debugPrint('[SYNC_TRIGGER] start trigger=$trigger');
-    final Future<SyncSummary> run = _engine.executeFullSync(
-      onProgress: onProgress,
-      trigger: _mapRunTrigger(trigger),
-    );
-    _activeRun = run;
-
-    run.then((summary) {
-      if (!rootCompleter.isCompleted) {
-        rootCompleter.complete(summary);
-      }
-      final queued = _queuedRequest;
-      _queuedRequest = null;
-      _activeRun = null;
-
-      if (queued == null) {
-        return;
-      }
-      final first = queued.promises.isNotEmpty ? queued.promises.first : null;
-      final Completer<SyncSummary> queuedRoot = first?.completer ?? Completer<SyncSummary>();
-      _startRun(queued.trigger, queuedRoot, onProgress: first?.onProgress);
-      if (first == null) {
-        return;
-      }
-      queuedRoot.future.then((value) {
-        for (int i = 1; i < queued.promises.length; i++) {
-          final next = queued.promises[i];
-          next.onProgress?.call(value);
-          if (!next.completer.isCompleted) {
-            next.completer.complete(value);
-          }
-        }
-      }).catchError((error, stackTrace) {
-        for (int i = 1; i < queued.promises.length; i++) {
-          final next = queued.promises[i];
-          if (!next.completer.isCompleted) {
-            next.completer.completeError(error, stackTrace);
-          }
-        }
-      });
-    }).catchError((error, stackTrace) {
-      if (!rootCompleter.isCompleted) {
-        rootCompleter.completeError(error, stackTrace);
-      }
-      final queued = _queuedRequest;
-      _queuedRequest = null;
-      _activeRun = null;
-      if (queued == null) {
-        return;
-      }
-      final first = queued.promises.isNotEmpty ? queued.promises.first : null;
-      final Completer<SyncSummary> queuedRoot = first?.completer ?? Completer<SyncSummary>();
-      _startRun(queued.trigger, queuedRoot, onProgress: first?.onProgress);
-      if (first == null) {
-        return;
-      }
-      queuedRoot.future.then((value) {
-        for (int i = 1; i < queued.promises.length; i++) {
-          final next = queued.promises[i];
-          next.onProgress?.call(value);
-          if (!next.completer.isCompleted) {
-            next.completer.complete(value);
-          }
-        }
-      }).catchError((queuedError, queuedStack) {
-        for (int i = 1; i < queued.promises.length; i++) {
-          final next = queued.promises[i];
-          if (!next.completer.isCompleted) {
-            next.completer.completeError(queuedError, queuedStack);
-          }
-        }
-      });
-    });
+  Future<String?> _loadLatestRunId() async {
+    final runs = await _runStore.loadRuns(limit: 1);
+    if (runs.isEmpty) return null;
+    return runs.first.runId;
   }
-  SyncRunTrigger _mapRunTrigger(SyncTriggerType trigger) {
+
+  Future<SyncSummary> _awaitRunCompletion({required String? baselineRunId}) async {
+    final DateTime deadline = DateTime.now().add(_waitTimeout);
+    while (DateTime.now().isBefore(deadline)) {
+      final status = await BackgroundSyncScheduler.getStatus();
+      final runs = await _runStore.loadRuns(limit: 1);
+      if (runs.isNotEmpty) {
+        final latest = runs.first;
+        final bool isNewRun = baselineRunId == null || latest.runId != baselineRunId;
+        if (isNewRun && latest.endTime != null && !status.workerRunning) {
+          return _toSummary(latest);
+        }
+      }
+      await Future.delayed(_pollInterval);
+    }
+    return SyncSummary();
+  }
+
+  SyncSummary _toSummary(SyncRunRecord run) {
+    final summary = SyncSummary();
+    summary.total = run.bindings.length;
+    for (final binding in run.bindings) {
+      switch (binding.resultStatus) {
+        case SyncBindingResultStatus.success:
+          summary.success++;
+          summary.successLog.add(binding.bindingIdentifier);
+          break;
+        case SyncBindingResultStatus.partial:
+        case SyncBindingResultStatus.failed:
+        case SyncBindingResultStatus.abortedBySafety:
+          summary.failed++;
+          summary.errorLog.add(binding.errorMessage ?? binding.resultStatus.name);
+          break;
+      }
+    }
+    return summary;
+  }
+
+  String _mapReason(SyncTriggerType trigger) {
     return switch (trigger) {
-      SyncTriggerType.manual => SyncRunTrigger.manual,
-      SyncTriggerType.autoForeground => SyncRunTrigger.autoForeground,
-      SyncTriggerType.force => SyncRunTrigger.force,
+      SyncTriggerType.manual => 'manual',
+      SyncTriggerType.autoForeground => 'autoForeground',
+      SyncTriggerType.force => 'force',
     };
   }
-
-}
-
-class _QueuedRequest {
-  _QueuedRequest({required this.trigger});
-
-  final SyncTriggerType trigger;
-  final List<_QueuedPromise> promises = [];
-}
-
-class _QueuedPromise {
-  _QueuedPromise({required this.completer, this.onProgress});
-
-  final Completer<SyncSummary> completer;
-  final Function(SyncSummary)? onProgress;
 }

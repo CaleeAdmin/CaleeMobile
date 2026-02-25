@@ -156,9 +156,9 @@ class LocalCalendarPageController extends GetxController {
     }
   }
 
-  Future<void> toggleCalendarSelection(
+  Future<void> linkCalendar(
     LocalCalendarItem item,
-    bool enabled, {
+    bool linkRequested, {
     bool returnToCalendarListAfterConnect = false,
   }) async {
     if (connectingCalendarIds.contains(item.id)) {
@@ -167,7 +167,7 @@ class LocalCalendarPageController extends GetxController {
 
     connectingCalendarIds.add(item.id);
     final bool previousConnectionState = item.isConnected;
-    if (enabled) {
+    if (linkRequested) {
       item.isConnected = true;
     }
     calendarGroups.refresh();
@@ -176,7 +176,7 @@ class LocalCalendarPageController extends GetxController {
       final db = await DatabaseHelper.instance.database;
 
       String? remotePath;
-      if (enabled) {
+      if (linkRequested) {
         final List<Map<String, dynamic>> existingRows = await db.rawQuery('''
           SELECT rc.remote_path
           FROM local_bindings lb
@@ -236,9 +236,9 @@ class LocalCalendarPageController extends GetxController {
           MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? item.accountName;
       int? remoteCollectionId;
 
-      if (enabled) {
+      if (linkRequested) {
         if (remotePath == null || remotePath.isEmpty) {
-          throw Exception('Missing remote path while enabling calendar');
+          throw Exception('Missing remote path while linking calendar');
         }
 
         final List<Map<String, dynamic>> remoteRows = await db.query(
@@ -254,7 +254,6 @@ class LocalCalendarPageController extends GetxController {
           await db.update(
             'remote_collections',
             {
-              'is_enabled': 0,
               'display_name': item.name,
               'account_name': accountName,
               'color': item.color,
@@ -272,7 +271,6 @@ class LocalCalendarPageController extends GetxController {
             'collection_type': 'calendar',
             'display_name': item.name,
             'color': item.color,
-            'is_enabled': 0,
             'sync_mode': 0,
             'is_subscription': item.isSubscription ? 1 : 0,
             'subscription_url': item.subscriptionUrl,
@@ -295,7 +293,6 @@ class LocalCalendarPageController extends GetxController {
         await db.update(
           'remote_collections',
           {
-            'is_enabled': 0,
             'display_name': item.name,
             'account_name': accountName,
             'color': item.color,
@@ -308,7 +305,7 @@ class LocalCalendarPageController extends GetxController {
         );
       }
 
-      if (enabled && returnToCalendarListAfterConnect) {
+      if (linkRequested && returnToCalendarListAfterConnect) {
         await _refreshMainCalendarList();
         if (Get.isOverlaysOpen == true) {
           Get.closeAllSnackbars();
@@ -321,7 +318,7 @@ class LocalCalendarPageController extends GetxController {
       item.isConnected = previousConnectionState;
       calendarGroups.refresh();
       debugPrint('[ERROR] Failed to update local calendar switch: $e');
-      Get.snackbar('Error', 'Unable to update calendar state');
+      Get.snackbar('Error', 'Unable to update calendar link state');
     } finally {
       connectingCalendarIds.remove(item.id);
     }
@@ -333,7 +330,6 @@ class LocalCalendarPageController extends GetxController {
     }
 
     final CalendarPageController dashboardController = Get.find<CalendarPageController>();
-    await dashboardController.refreshDashboard(includeEventCounts: false);
-    unawaited(dashboardController.refreshDashboard());
+    await dashboardController.reloadCalendars();
   }
 }

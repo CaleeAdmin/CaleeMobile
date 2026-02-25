@@ -1,12 +1,16 @@
+import 'dart:async';
+
 import 'package:caleesync/common/app_constant.dart';
 import 'package:caleesync/common/utils/mmkv_utils.dart';
 import 'package:get/get.dart';
 
+import 'CalendarPageController.dart';
 import '../entity/SyncSummary.dart';
 import '../data/sync_repository.dart';
 import '../data/sync_run_store.dart';
 import '../entity/sync_run_record.dart';
 import '../sync/background_sync_scheduler.dart';
+import '../sync/sync_completed_event_bus.dart';
 import '../sync/sync_trigger_orchestrator.dart';
 
 class CalendarProbeController extends GetxController {
@@ -30,19 +34,26 @@ class CalendarProbeController extends GetxController {
   final Rxn<DateTime> lastSyncAt = Rxn<DateTime>();
   /// 当前同步摘要
   final Rxn<SyncSummary> summary = Rxn<SyncSummary>();
-  /// Subscribed calendar列表（含 event_count 等字段），由仓库提供
-  final RxList<Map<String, dynamic>> subscribedCalendars = <Map<String, dynamic>>[].obs;
-
   final SyncRepository _repo = SyncRepository();
   final SyncRunStore _runStore = SyncRunStore();
   final RxList<SyncRunRecord> syncRuns = <SyncRunRecord>[].obs;
+  StreamSubscription<SyncCompletedEvent>? _syncCompletedSub;
 
   bool get isRunActive => isSyncing.value || processing.value > 0 || workManagerRunning.value;
 
   @override
   void onInit() {
     super.onInit();
+    _syncCompletedSub = SyncCompletedEventBus.stream.listen((_) async {
+      await refreshOverviewState();
+    });
     refreshOverviewState();
+  }
+
+  @override
+  void onClose() {
+    _syncCompletedSub?.cancel();
+    super.onClose();
   }
 
   Future<void> refreshOverviewState() async {
@@ -51,6 +62,18 @@ class CalendarProbeController extends GetxController {
       loadConfiguredSourceCount(),
       loadSchedulerState(),
     ]);
+  }
+
+  Future<void> refreshPagesBeforeSync() async {
+    final List<Future<void>> refreshTasks = [refreshOverviewState()];
+
+    if (Get.isRegistered<CalendarPageController>()) {
+      refreshTasks.add(
+        Get.find<CalendarPageController>().reloadCalendars(),
+      );
+    }
+
+    await Future.wait(refreshTasks);
   }
 
   Future<void> loadConfiguredSourceCount() async {
@@ -98,18 +121,6 @@ class CalendarProbeController extends GetxController {
     failed.value = failures;
     processing.value = 0;
     lastSyncAt.value = latest.endTime ?? latest.startTime;
-  }
-
-  Future<void> fetchSubscribedCalendars() async {
-    try {
-      isSyncing.value = true;
-      final List<Map<String, dynamic>> rows = await _repo.getSubscribedCalendarsWithCount();
-      subscribedCalendars.assignAll(rows);
-    } catch (e) {
-      print('[ERROR] fetchSubscribedCalendars failed: $e');
-    } finally {
-      isSyncing.value = false;
-    }
   }
 
   Future<SyncSummary> syncNow() async {
