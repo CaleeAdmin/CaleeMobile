@@ -1,3 +1,4 @@
+import 'package:caleesync/core/platform/pigeon/background_sync_api.g.dart';
 import 'package:caleesync/sync/background_sync_scheduler.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
@@ -114,7 +115,7 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
   bool get _showSchedulerWarning {
     if (_backgroundStatus == null) return false;
     if (_backgroundStatus!.periodicConfigured && !_backgroundStatus!.periodicEnabled) return true;
-    return (_backgroundStatus!.lastResult == 'retry' || _backgroundStatus!.lastResult == 'failure');
+    return (_backgroundStatus!.lastResult == BackgroundRunOutcome.retry || _backgroundStatus!.lastResult == BackgroundRunOutcome.failure);
   }
 
   @override
@@ -184,7 +185,7 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
                         Text(
                           _backgroundStatus?.periodicConfigured == true && _backgroundStatus?.periodicEnabled != true
                               ? 'Scheduler not currently active.'
-                              : (_backgroundStatus?.lastResult == 'retry' ? 'Background run will retry.' : 'Background run failed.'),
+                              : (_backgroundStatus?.lastResult == BackgroundRunOutcome.retry ? 'Background run will retry.' : 'Background run failed.'),
                           style: const TextStyle(color: Colors.deepOrange),
                         ),
                         const SizedBox(height: 6),
@@ -198,8 +199,10 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text('Result: ${_backgroundStatus?.lastResult ?? 'unknown'}'),
+                                  Text('Result: ${_backgroundStatus?.lastResult?.name ?? 'unknown'}'),
                                   Text('Reason: ${_backgroundStatus?.lastReason?.isNotEmpty == true ? _backgroundStatus!.lastReason! : 'n/a'}'),
+                                  Text('Gate: ${_backgroundStatus?.lastGate?.name ?? 'n/a'}'),
+                                  Text('Error: ${_backgroundStatus?.lastError?.isNotEmpty == true ? _backgroundStatus!.lastError! : 'n/a'}'),
                                   const SizedBox(height: 8),
                                   TextButton.icon(
                                     onPressed: () async {
