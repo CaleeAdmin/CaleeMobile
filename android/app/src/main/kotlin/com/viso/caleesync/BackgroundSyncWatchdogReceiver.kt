@@ -3,6 +3,9 @@ package com.viso.caleesync
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class BackgroundSyncWatchdogReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
@@ -14,10 +17,17 @@ class BackgroundSyncWatchdogReceiver : BroadcastReceiver() {
                     CaleeSyncPeriodicWorker.cancelWatchdogAlarm(context)
                     return
                 }
-                val interval = CaleeSyncPeriodicWorker.readConfiguredIntervalMinutes(context)
-                CaleeSyncPeriodicWorker.ensurePeriodic(context, interval)
-                CaleeSyncPeriodicWorker.enqueueOneOff(context, "watchdog", expedited = false)
-                CaleeSyncPeriodicWorker.scheduleWatchdogAlarm(context, interval)
+                val pendingResult = goAsync()
+                CoroutineScope(Dispatchers.Default).launch {
+                    try {
+                        val interval = CaleeSyncPeriodicWorker.readConfiguredIntervalMinutes(context)
+                        CaleeSyncPeriodicWorker.ensurePeriodic(context, interval)
+                        CaleeSyncPeriodicWorker.enqueueOneOff(context, "watchdog", expedited = false)
+                        CaleeSyncPeriodicWorker.scheduleWatchdogAlarm(context, interval)
+                    } finally {
+                        pendingResult.finish()
+                    }
+                }
             }
         }
     }

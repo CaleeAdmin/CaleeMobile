@@ -3,63 +3,54 @@
 # Script to generate Pigeon code for Android and iOS
 # Usage: ./scripts/generate_pigeon.sh
 
-set -e  # Exit on error
+set -e
 
-# Colors for output
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-# Get the project root directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+CALENDAR_INPUT="lib/core/platform/pigeon/calendar_api.dart"
+BACKGROUND_INPUT="lib/core/platform/pigeon/background_sync_api.dart"
+
 echo -e "${GREEN}🚀 Generating Pigeon code...${NC}"
 
-# Check if pigeon is installed
 if ! command -v flutter &> /dev/null; then
-    echo -e "${RED}❌ Flutter is not installed or not in PATH${NC}"
-    exit 1
+  echo -e "${RED}❌ Flutter is not installed or not in PATH${NC}"
+  exit 1
 fi
 
-# Change to project root
 cd "$PROJECT_ROOT"
 
-# Ensure dependencies are installed
 echo -e "${YELLOW}📦 Installing dependencies...${NC}"
 flutter pub get
 
-# Generate Pigeon code
-echo -e "${YELLOW}🔨 Running Pigeon code generator...${NC}"
-flutter pub run pigeon --input pigeons/calendar_api.dart
+echo -e "${YELLOW}🔨 Generating calendar Pigeon code...${NC}"
+flutter pub run pigeon --input "$CALENDAR_INPUT"
 
-# Check if files were generated
-DART_OUTPUT="$PROJECT_ROOT/lib/core/platform/pigeon/calendar_api.g.dart"
-KOTLIN_OUTPUT="$PROJECT_ROOT/android/app/src/main/kotlin/com/viso/caleesync/CalendarApi.g.kt"
-SWIFT_OUTPUT="$PROJECT_ROOT/ios/Runner/CalendarApi.g.swift"
+echo -e "${YELLOW}🔨 Generating background-sync Pigeon code...${NC}"
+flutter pub run pigeon --input "$BACKGROUND_INPUT"
+
+verify_file() {
+  local label="$1"
+  local path="$2"
+  if [ -f "$path" ]; then
+    echo -e "  ${GREEN}✓${NC} ${label}: $path"
+  else
+    echo -e "  ${RED}✗${NC} ${label}: $path (not found)"
+  fi
+}
 
 echo -e "\n${GREEN}✅ Pigeon code generation completed!${NC}\n"
-
-# Verify outputs
 echo -e "${YELLOW}📋 Generated files:${NC}"
-if [ -f "$DART_OUTPUT" ]; then
-    echo -e "  ${GREEN}✓${NC} Dart: $DART_OUTPUT"
-else
-    echo -e "  ${RED}✗${NC} Dart: $DART_OUTPUT (not found)"
-fi
-
-if [ -f "$KOTLIN_OUTPUT" ]; then
-    echo -e "  ${GREEN}✓${NC} Kotlin: $KOTLIN_OUTPUT"
-else
-    echo -e "  ${RED}✗${NC} Kotlin: $KOTLIN_OUTPUT (not found)"
-fi
-
-if [ -f "$SWIFT_OUTPUT" ]; then
-    echo -e "  ${GREEN}✓${NC} Swift: $SWIFT_OUTPUT"
-else
-    echo -e "  ${RED}✗${NC} Swift: $SWIFT_OUTPUT (not found)"
-fi
+verify_file "Dart (calendar)" "$PROJECT_ROOT/lib/core/platform/pigeon/calendar_api.g.dart"
+verify_file "Kotlin (calendar)" "$PROJECT_ROOT/android/app/src/main/kotlin/com/viso/caleesync/CalendarApi.g.kt"
+verify_file "Swift (calendar)" "$PROJECT_ROOT/ios/Runner/CalendarApi.g.swift"
+verify_file "Dart (background)" "$PROJECT_ROOT/lib/core/platform/pigeon/background_sync_api.g.dart"
+verify_file "Kotlin (background)" "$PROJECT_ROOT/android/app/src/main/kotlin/com/viso/caleesync/BackgroundSyncApi.g.kt"
+verify_file "Swift (background)" "$PROJECT_ROOT/ios/Runner/BackgroundSyncApi.g.swift"
 
 echo -e "\n${GREEN}✨ Done!${NC}"
-
