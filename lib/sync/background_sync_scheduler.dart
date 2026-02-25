@@ -1,7 +1,6 @@
-import 'package:flutter/services.dart';
-
 import '../common/app_constant.dart';
 import '../common/utils/mmkv_utils.dart';
+import '../core/platform/pigeon/background_sync_api.g.dart';
 
 class BackgroundSyncStatus {
   const BackgroundSyncStatus({
@@ -10,6 +9,8 @@ class BackgroundSyncStatus {
     this.lastRunAt,
     this.lastResult,
     this.lastReason,
+    this.lastGate,
+    this.lastError,
     this.nextScheduledAt,
     this.workerRunning = false,
     this.intervalMinutes,
@@ -18,48 +19,46 @@ class BackgroundSyncStatus {
   final bool periodicEnabled;
   final bool periodicConfigured;
   final DateTime? lastRunAt;
-  final String? lastResult;
+  final BackgroundRunOutcome? lastResult;
   final String? lastReason;
+  final BackgroundGateReason? lastGate;
+  final String? lastError;
   final DateTime? nextScheduledAt;
   final bool workerRunning;
   final int? intervalMinutes;
 
-  factory BackgroundSyncStatus.fromMap(Map<dynamic, dynamic> map) {
-    DateTime? _parse(dynamic v) => v is int ? DateTime.fromMillisecondsSinceEpoch(v) : null;
+  factory BackgroundSyncStatus.fromDto(BackgroundStatusDto dto) {
+    DateTime? parse(int? ms) => ms == null ? null : DateTime.fromMillisecondsSinceEpoch(ms);
     return BackgroundSyncStatus(
-      periodicEnabled: map['periodicEnabled'] == true,
-      periodicConfigured: MMKVUtils.instance.getBool(AppConstant.periodicSyncEnabledKey, defaultValue: false) ?? false,
-      lastRunAt: _parse(map['lastRunAtMs']),
-      lastResult: map['lastResult']?.toString(),
-      lastReason: map['lastReason']?.toString(),
-      nextScheduledAt: _parse(map['nextScheduledAtMs']),
-      workerRunning: map['workerRunning'] == true,
-      intervalMinutes: (map['intervalMinutes'] as num?)?.toInt(),
+      periodicEnabled: dto.periodicEnabled,
+      periodicConfigured: dto.periodicEnabled || (MMKVUtils.instance.getBool(AppConstant.periodicSyncEnabledKey, defaultValue: false) ?? false),
+      lastRunAt: parse(dto.lastRunAtMs),
+      lastResult: dto.lastOutcome,
+      lastReason: dto.lastReason,
+      lastGate: dto.lastGateReason,
+      lastError: dto.lastError,
+      nextScheduledAt: parse(dto.nextScheduledAtMs),
+      workerRunning: dto.workerRunning,
+      intervalMinutes: dto.intervalMinutes,
     );
   }
 }
 
 class BackgroundSyncScheduler {
-  static const MethodChannel _channel = MethodChannel('caleesync/background_sync');
-  static const String _periodicWork = 'CaleeSyncPeriodicWorker';
-  static const String _oneTimeWork = 'CaleeSyncOneTimeWorker';
+  static final BackgroundSyncControlApi _api = BackgroundSyncControlApi();
 
   static Future<void> setPeriodicEnabled(bool enabled) async {
     MMKVUtils.instance.setBool(AppConstant.periodicSyncEnabledKey, enabled);
     if (enabled) {
       final int interval = MMKVUtils.instance.getInt(AppConstant.syncIntervalCalendarKey) ?? 15;
-      await _channel.invokeMethod('schedulePeriodic', {'intervalMinutes': interval});
+      await _api.schedulePeriodic(interval);
       return;
     }
-    await _channel.invokeMethod('cancelPeriodic');
+    await _api.cancelPeriodic();
   }
 
   static Future<void> scheduleOneOff({required String reason, bool expedited = false}) {
-    return _channel.invokeMethod('enqueueOneOff', {
-      'reason': reason,
-      'expedited': expedited,
-      'uniqueName': _oneTimeWork,
-    });
+    return _api.enqueueOneOff(reason, expedited);
   }
 
   static Future<void> selfHealPeriodicIfNeeded() async {
@@ -68,14 +67,11 @@ class BackgroundSyncScheduler {
       return;
     }
     final int interval = MMKVUtils.instance.getInt(AppConstant.syncIntervalCalendarKey) ?? 15;
-    await _channel.invokeMethod('ensurePeriodicScheduled', {
-      'intervalMinutes': interval,
-      'uniqueName': _periodicWork,
-    });
+    await _api.ensurePeriodicScheduled(interval);
   }
 
   static Future<BackgroundSyncStatus> getStatus() async {
-    final map = await _channel.invokeMethod<Map<dynamic, dynamic>>('getBackgroundStatus');
-    return BackgroundSyncStatus.fromMap(map ?? const {});
+    final dto = await _api.getBackgroundStatus();
+    return BackgroundSyncStatus.fromDto(dto);
   }
 }

@@ -1,5 +1,9 @@
+import 'dart:io';
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../common/utils/mmkv_utils.dart';
 import '../common/app_constant.dart';
 import '../sync/background_sync_scheduler.dart';
@@ -11,7 +15,7 @@ class SyncSettingsPage extends StatefulWidget {
   State<SyncSettingsPage> createState() => _SyncSettingsPageState();
 }
 
-class _SyncSettingsPageState extends State<SyncSettingsPage> {
+class _SyncSettingsPageState extends State<SyncSettingsPage> with WidgetsBindingObserver {
   final List<Map<String, dynamic>> _intervalOptions = const [
     {'label': 'Every 15 minutes', 'minutes': 15},
     {'label': 'Every 30 minutes', 'minutes': 30},
@@ -25,14 +29,34 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> {
   bool _autoSyncEnabled = true;
   bool _periodicSyncEnabled = false;
   late final Future<String> _appVersionLabelFuture;
+  Completer<void>? _resumeCompleter;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _appVersionLabelFuture = _loadAppVersionLabel();
     _loadSettings();
   }
 
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _resumeCompleter?.complete();
+      _resumeCompleter = null;
+    }
+  }
+
+  Future<void> _waitForAppResume({Duration timeout = const Duration(seconds: 90)}) async {
+    _resumeCompleter = Completer<void>();
+    await _resumeCompleter!.future.timeout(timeout, onTimeout: () {});
+  }
 
   Future<String> _loadAppVersionLabel() async {
     final packageInfo = await PackageInfo.fromPlatform();
@@ -58,8 +82,73 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> {
     } catch (_) {}
   }
 
+  Future<bool> _ensureBackgroundPermissionGranted() async {
+    if (!Platform.isAndroid) {
+      return true;
+    }
+
+    var status = await Permission.ignoreBatteryOptimizations.status;
+    if (status.isGranted) {
+      return true;
+    }
+
+    status = await Permission.ignoreBatteryOptimizations.request();
+    if (status.isGranted) {
+      return true;
+    }
+
+    if (!mounted) {
+      return false;
+    }
+
+    final shouldOpenSettings = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Allow background running'),
+        content: const Text(
+          'To enable periodic background sync, please allow this app to run in the background (unrestricted battery/background activity) in system settings.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Open Settings'),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldOpenSettings == true) {
+      await openAppSettings();
+      await _waitForAppResume();
+      status = await Permission.ignoreBatteryOptimizations.status;
+      if (status.isGranted) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   Future<void> _saveSettings() async {
     try {
+      if (_periodicSyncEnabled) {
+        final hasPermission = await _ensureBackgroundPermissionGranted();
+        if (!hasPermission) {
+          if (!mounted) {
+            return;
+          }
+          setState(() => _periodicSyncEnabled = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Please grant background running permission before enabling periodic sync.')),
+          );
+          return;
+        }
+      }
+
       MMKVUtils.instance.setInt(AppConstant.syncIntervalCalendarKey, _calendarInterval);
       MMKVUtils.instance.setInt('sync_interval_tasks', _tasksInterval);
       MMKVUtils.instance.setBool(AppConstant.autoSyncEnabledKey, _autoSyncEnabled);
@@ -100,7 +189,18 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> {
                     title: const Text('Periodic Background Sync', style: TextStyle(fontWeight: FontWeight.w600)),
                     subtitle: const Text('Run periodic sync when network is available'),
                     value: _periodicSyncEnabled,
-                    onChanged: (v) => setState(() => _periodicSyncEnabled = v),
+                    onChanged: (v) async {
+                      if (!v) {
+                        setState(() => _periodicSyncEnabled = false);
+                        return;
+                      }
+
+                      final hasPermission = await _ensureBackgroundPermissionGranted();
+                      if (!mounted) {
+                        return;
+                      }
+                      setState(() => _periodicSyncEnabled = hasPermission);
+                    },
                   ),
 
                   const Text('Calendar Sync Interval', style: TextStyle(fontWeight: FontWeight.w600)),
