@@ -37,19 +37,11 @@ class _CalendarPageState extends State<CalendarPage> {
         status = await calendarPermission.request();
       }
 
-      if (status.isGranted) {
-        // try {
-        //   final nativeApi = NativeCalendarApi();
-        //   await nativeApi.requestPermission(false);
-        // } catch (_) {}
-
-        // 仅在尚未加载数据时才触发一次刷新, 避免每次切换 tab 重复刷新
-        if (controller.calendars.isEmpty && !controller.isLoading.value) {
-          await controller.refreshDashboard();
-        }
-      } else {
-        // 未授权, 暂不刷新
-      }
+      // try {
+      //   final nativeApi = NativeCalendarApi();
+      //   await nativeApi.requestPermission(false);
+      // } catch (_) {}
+      await controller.refreshDashboard();
     } catch (e) {
       print('[WARN] Error while requesting calendar permission: $e');
       await controller.refreshDashboard();
@@ -342,7 +334,7 @@ extension on _CalendarRow {
         final bool? confirm = await _showRenameDialog(context, item);
         // 刷新数据（保持原行为）
         if (confirm == true) {
-          await controller.refreshDashboard();
+          await controller.reloadCalendars();
         }
         break;
       case 'delete':
