@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -14,7 +15,7 @@ class SyncSettingsPage extends StatefulWidget {
   State<SyncSettingsPage> createState() => _SyncSettingsPageState();
 }
 
-class _SyncSettingsPageState extends State<SyncSettingsPage> {
+class _SyncSettingsPageState extends State<SyncSettingsPage> with WidgetsBindingObserver {
   final List<Map<String, dynamic>> _intervalOptions = const [
     {'label': 'Every 15 minutes', 'minutes': 15},
     {'label': 'Every 30 minutes', 'minutes': 30},
@@ -28,14 +29,34 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> {
   bool _autoSyncEnabled = true;
   bool _periodicSyncEnabled = false;
   late final Future<String> _appVersionLabelFuture;
+  Completer<void>? _resumeCompleter;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _appVersionLabelFuture = _loadAppVersionLabel();
     _loadSettings();
   }
 
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _resumeCompleter?.complete();
+      _resumeCompleter = null;
+    }
+  }
+
+  Future<void> _waitForAppResume({Duration timeout = const Duration(seconds: 90)}) async {
+    _resumeCompleter = Completer<void>();
+    await _resumeCompleter!.future.timeout(timeout, onTimeout: () {});
+  }
 
   Future<String> _loadAppVersionLabel() async {
     final packageInfo = await PackageInfo.fromPlatform();
@@ -80,7 +101,7 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> {
       return false;
     }
 
-    await showDialog<void>(
+    final shouldOpenSettings = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Allow background running'),
@@ -89,19 +110,26 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
+            onPressed: () => Navigator.of(dialogContext).pop(false),
             child: const Text('Cancel'),
           ),
           TextButton(
-            onPressed: () async {
-              Navigator.of(dialogContext).pop();
-              await openAppSettings();
-            },
+            onPressed: () => Navigator.of(dialogContext).pop(true),
             child: const Text('Open Settings'),
           ),
         ],
       ),
     );
+
+    if (shouldOpenSettings == true) {
+      await openAppSettings();
+      await _waitForAppResume();
+      status = await Permission.ignoreBatteryOptimizations.status;
+      if (status.isGranted) {
+        return true;
+      }
+    }
+
     return false;
   }
 
