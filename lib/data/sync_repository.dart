@@ -436,7 +436,7 @@ class SyncRepository {
   }
 
 
-  Future<EnableCalendarResult> connectAndEnableRemoteCalendarByPath(String remotePath) async {
+  Future<EnableCalendarResult> enableRemoteCalendarFromUserAction(String remotePath) async {
     final String trimmedRemotePath = CaleeServerService.normalizeRemotePath(remotePath);
     if (trimmedRemotePath.isEmpty) {
       _lastConnectError = 'Invalid remote path. Please refresh and try again.';
@@ -448,7 +448,7 @@ class SyncRepository {
       return inFlight;
     }
 
-    final Future<EnableCalendarResult> task = _provisionAndEnableRemoteCalendarByPath(trimmedRemotePath);
+    final Future<EnableCalendarResult> task = _enableRemoteCalendarFromUserActionInternal(trimmedRemotePath);
     _connectFlights[trimmedRemotePath] = task;
     try {
       return await task;
@@ -457,7 +457,7 @@ class SyncRepository {
     }
   }
 
-  Future<EnableCalendarResult> _provisionAndEnableRemoteCalendarByPath(String remotePath) async {
+  Future<EnableCalendarResult> _enableRemoteCalendarFromUserActionInternal(String remotePath) async {
     _lastConnectError = null;
     remotePath = CaleeServerService.normalizeRemotePath(remotePath);
     final String loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? '';
@@ -619,7 +619,7 @@ class SyncRepository {
       } else {
         _lastConnectError = 'System calendar API error. Please try again later.';
       }
-      debugPrint('[ERROR] connectAndEnableRemoteCalendarByPath platform exception: $e');
+      debugPrint('[ERROR] enableRemoteCalendarFromUserAction platform exception: $e');
       if (createdLocalIdForEnableAttempt != null &&
           createdLocalIdForEnableAttempt!.isNotEmpty &&
           bindingOriginForEnableAttempt == SyncBindingOrigin.remote) {
@@ -630,7 +630,7 @@ class SyncRepository {
       return EnableCalendarResult.failure(remotePath: remotePath);
     } catch (e) {
       _lastConnectError = 'Connection failed. Please try again later.';
-      debugPrint('[ERROR] connectAndEnableRemoteCalendarByPath failed: $e');
+      debugPrint('[ERROR] enableRemoteCalendarFromUserAction failed: $e');
       if (createdLocalIdForEnableAttempt != null &&
           createdLocalIdForEnableAttempt!.isNotEmpty &&
           bindingOriginForEnableAttempt == SyncBindingOrigin.remote) {
