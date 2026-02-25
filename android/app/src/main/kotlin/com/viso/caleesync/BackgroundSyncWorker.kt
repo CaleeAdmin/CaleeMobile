@@ -1,6 +1,9 @@
 package com.viso.caleesync
 
+import android.app.AlarmManager
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -21,6 +24,7 @@ import io.flutter.FlutterInjector
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.dart.DartExecutor
 import io.flutter.plugin.common.MethodChannel
+import io.flutter.plugins.GeneratedPluginRegistrant
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlinx.coroutines.Dispatchers
@@ -49,6 +53,7 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
                         loader.ensureInitializationComplete(context, null)
 
                         val localEngine = FlutterEngine(context)
+                        GeneratedPluginRegistrant.registerWith(localEngine)
                         engine = localEngine
 
                         // Register Pigeon host APIs on the background engine as well.
@@ -60,37 +65,13 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
                             DartExecutor.DartEntrypoint(loader.findAppBundlePath(), "caleeSyncBackgroundEntrypoint")
                         )
 
-                        channel.invokeMethod("runBackgroundSync", mapOf("trigger" to trigger), object : MethodChannel.Result {
-                            override fun success(result: Any?) {
-                                val map = result as? Map<*, *>
-                                val state = map?.get("state")?.toString() ?: "failure"
-                                val reason = map?.get("reason")?.toString() ?: "unknown"
-                                prefs.edit().putString("last_reason", reason).putString("last_result", state).apply()
-                                if (continuation.isActive) {
-                                    continuation.resume(
-                                        when (state) {
-                                            "success" -> Result.success()
-                                            "retry" -> Result.retry()
-                                            else -> Result.failure()
-                                        }
-                                    )
-                                }
-                            }
-
-                            override fun error(errorCode: String, errorMessage: String?, errorDetails: Any?) {
-                                prefs.edit().putString("last_result", "retry").putString("last_reason", "$errorCode:$errorMessage").apply()
-                                if (continuation.isActive) {
-                                    continuation.resume(Result.retry())
-                                }
-                            }
-
-                            override fun notImplemented() {
-                                prefs.edit().putString("last_result", "failure").putString("last_reason", "not_implemented").apply()
-                                if (continuation.isActive) {
-                                    continuation.resume(Result.failure())
-                                }
-                            }
-                        })
+                        invokeRunBackgroundSync(
+                            channel = channel,
+                            trigger = trigger,
+                            prefs = prefs,
+                            continuation = continuation,
+                            attempt = 0,
+                        ) { continuation.isActive }
                     } catch (t: Throwable) {
                         prefs.edit().putString("last_result", "retry").putString("last_reason", t.message ?: "engine_init_error").apply()
                         if (continuation.isActive) {
@@ -108,15 +89,74 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
             engine?.destroy()
         }
 
-        prefs.edit().putLong("periodic_next_at", System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(15)).apply()
+        if (trigger.contains("periodic", ignoreCase = true)) {
+            val configuredInterval = inputData.getInt("intervalMinutes", 15).coerceAtLeast(15)
+            prefs.edit()
+                .putInt("periodic_interval_minutes", configuredInterval)
+                .putLong("periodic_next_at", System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(configuredInterval.toLong()))
+                .apply()
+            scheduleWatchdogAlarm(context, configuredInterval)
+        }
         Log.i("CaleeSyncWorker", "exit result=$workerResult")
         return workerResult
+    }
+
+    private fun invokeRunBackgroundSync(
+        channel: MethodChannel,
+        trigger: String,
+        prefs: android.content.SharedPreferences,
+        continuation: kotlin.coroutines.Continuation<Result>,
+        attempt: Int,
+        isActive: () -> Boolean,
+    ) {
+        channel.invokeMethod("runBackgroundSync", mapOf("trigger" to trigger), object : MethodChannel.Result {
+            override fun success(result: Any?) {
+                val map = result as? Map<*, *>
+                val state = map?.get("state")?.toString() ?: "failure"
+                val reason = map?.get("reason")?.toString() ?: "unknown"
+                prefs.edit().putString("last_reason", reason).putString("last_result", state).apply()
+                if (isActive()) {
+                    continuation.resume(
+                        when (state) {
+                            "success" -> Result.success()
+                            "retry" -> Result.retry()
+                            else -> Result.failure()
+                        }
+                    )
+                }
+            }
+
+            override fun error(errorCode: String, errorMessage: String?, errorDetails: Any?) {
+                prefs.edit().putString("last_result", "retry").putString("last_reason", "$errorCode:$errorMessage").apply()
+                if (isActive()) {
+                    continuation.resume(Result.retry())
+                }
+            }
+
+            override fun notImplemented() {
+                if (attempt < MAX_NOT_IMPLEMENTED_RETRIES) {
+                    Handler(Looper.getMainLooper()).postDelayed({
+                        invokeRunBackgroundSync(channel, trigger, prefs, continuation, attempt = attempt + 1, isActive = isActive)
+                    }, NOT_IMPLEMENTED_RETRY_DELAY_MS)
+                    return
+                }
+                prefs.edit().putString("last_result", "retry").putString("last_reason", "not_implemented").apply()
+                if (isActive()) {
+                    continuation.resume(Result.retry())
+                }
+            }
+        })
     }
 
     companion object {
         private const val CHANNEL = "caleesync/background_sync"
         private const val PERIODIC_UNIQUE = "CaleeSyncPeriodicWorker"
         private const val SYNC_UNIQUE = "CaleeSyncSyncWorker"
+        private const val MAX_NOT_IMPLEMENTED_RETRIES = 6
+        private const val NOT_IMPLEMENTED_RETRY_DELAY_MS = 400L
+        private const val WATCHDOG_INTERVAL_MINUTES = 20L
+        private const val WATCHDOG_REQUEST_CODE = 90241
+        const val ACTION_WATCHDOG = "com.viso.caleesync.ACTION_BACKGROUND_SYNC_WATCHDOG"
 
         private fun networkConnectedConstraints(): Constraints {
             return Constraints.Builder()
@@ -126,21 +166,40 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
 
         fun schedulePeriodic(context: Context, intervalMinutes: Int): Operation {
             val bounded = intervalMinutes.coerceAtLeast(15).toLong()
-            val request = PeriodicWorkRequestBuilder<CaleeSyncPeriodicTriggerWorker>(bounded, TimeUnit.MINUTES)
+            val request = PeriodicWorkRequestBuilder<CaleeSyncPeriodicWorker>(bounded, TimeUnit.MINUTES)
+                .setInputData(androidx.work.workDataOf("trigger" to "periodic", "intervalMinutes" to bounded.toInt()))
                 .setConstraints(networkConnectedConstraints())
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 15, TimeUnit.MINUTES)
                 .build()
-            return WorkManager.getInstance(context)
+            context.getSharedPreferences("calee_sync_bg", Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean("periodic_enabled", true)
+                .putInt("periodic_interval_minutes", bounded.toInt())
+                .putLong("periodic_next_at", System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(bounded))
+                .apply()
+            val operation = WorkManager.getInstance(context)
                 .enqueueUniquePeriodicWork(PERIODIC_UNIQUE, ExistingPeriodicWorkPolicy.UPDATE, request)
+            scheduleWatchdogAlarm(context, bounded.toInt())
+            return operation
         }
 
         fun ensurePeriodic(context: Context, intervalMinutes: Int) {
+            val bounded = intervalMinutes.coerceAtLeast(15)
             val infos = WorkManager.getInstance(context).getWorkInfosForUniqueWork(PERIODIC_UNIQUE).get()
-            if (infos.any { it.state == WorkInfo.State.ENQUEUED || it.state == WorkInfo.State.RUNNING }) return
-            schedulePeriodic(context, intervalMinutes)
+            if (infos.any { it.state == WorkInfo.State.ENQUEUED || it.state == WorkInfo.State.RUNNING }) {
+                scheduleWatchdogAlarm(context, bounded)
+                return
+            }
+            schedulePeriodic(context, bounded)
         }
 
         fun cancelPeriodic(context: Context): Operation {
+            context.getSharedPreferences("calee_sync_bg", Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean("periodic_enabled", false)
+                .remove("periodic_next_at")
+                .apply()
+            cancelWatchdogAlarm(context)
             return WorkManager.getInstance(context).cancelUniqueWork(PERIODIC_UNIQUE)
         }
 
@@ -168,15 +227,52 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
             }
 
             return WorkManager.getInstance(context)
-                .enqueueUniqueWork(SYNC_UNIQUE, ExistingWorkPolicy.KEEP, request)
+                .enqueueUniqueWork(SYNC_UNIQUE, ExistingWorkPolicy.REPLACE, request)
+        }
+
+        fun scheduleWatchdogAlarm(context: Context, intervalMinutes: Int? = null) {
+            val bounded = (intervalMinutes ?: readConfiguredIntervalMinutes(context)).coerceAtLeast(15)
+            val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+            val triggerAtMs = System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(maxOf(bounded.toLong(), WATCHDOG_INTERVAL_MINUTES))
+            val pendingIntent = PendingIntent.getBroadcast(
+                context,
+                WATCHDOG_REQUEST_CODE,
+                Intent(context, BackgroundSyncWatchdogReceiver::class.java).setAction(ACTION_WATCHDOG),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAtMs, pendingIntent)
+        }
+
+        fun cancelWatchdogAlarm(context: Context) {
+            val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+            val pendingIntent = PendingIntent.getBroadcast(
+                context,
+                WATCHDOG_REQUEST_CODE,
+                Intent(context, BackgroundSyncWatchdogReceiver::class.java).setAction(ACTION_WATCHDOG),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            alarmManager.cancel(pendingIntent)
+            pendingIntent.cancel()
+        }
+
+        fun readConfiguredIntervalMinutes(context: Context): Int {
+            val prefs = context.getSharedPreferences("calee_sync_bg", Context.MODE_PRIVATE)
+            return prefs.getInt("periodic_interval_minutes", 15).coerceAtLeast(15)
+        }
+
+
+        fun isPeriodicEnabled(context: Context): Boolean {
+            val prefs = context.getSharedPreferences("calee_sync_bg", Context.MODE_PRIVATE)
+            return prefs.getBoolean("periodic_enabled", false)
         }
 
         fun readStatus(context: Context): Map<String, Any?> {
             val prefs = context.getSharedPreferences("calee_sync_bg", Context.MODE_PRIVATE)
             val periodicInfos = WorkManager.getInstance(context).getWorkInfosForUniqueWork(PERIODIC_UNIQUE).get()
             val syncInfos = WorkManager.getInstance(context).getWorkInfosForUniqueWork(SYNC_UNIQUE).get()
-            val periodicEnabled = periodicInfos.any { it.state == WorkInfo.State.ENQUEUED || it.state == WorkInfo.State.RUNNING }
+            val periodicEnabled = prefs.getBoolean("periodic_enabled", false) && periodicInfos.any { it.state == WorkInfo.State.ENQUEUED || it.state == WorkInfo.State.RUNNING }
             val workerRunning = (periodicInfos + syncInfos).any { it.state == WorkInfo.State.RUNNING }
+            val configuredInterval = prefs.getInt("periodic_interval_minutes", 15).takeIf { it >= 15 } ?: 15
             val nextAt = prefs.getLong("periodic_next_at", 0L).takeIf { it > 0 }
             return mapOf(
                 "periodicEnabled" to periodicEnabled,
@@ -185,15 +281,9 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
                 "lastReason" to prefs.getString("last_reason", ""),
                 "nextScheduledAtMs" to nextAt,
                 "workerRunning" to workerRunning,
-                "intervalMinutes" to 15,
+                "intervalMinutes" to configuredInterval,
             )
         }
     }
 }
 
-class CaleeSyncPeriodicTriggerWorker(appContext: Context, params: WorkerParameters) : CoroutineWorker(appContext, params) {
-    override suspend fun doWork(): Result {
-        CaleeSyncPeriodicWorker.enqueueOneOff(applicationContext, "periodic", expedited = false)
-        return Result.success()
-    }
-}
