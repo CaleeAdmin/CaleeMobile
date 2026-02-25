@@ -16,10 +16,10 @@ class BackgroundSyncWorkerBridge {
   static Future<void>? _initFuture;
 
   static Future<void> start() async {
+    await _ensureInitialized();
     _channel.setMethodCallHandler((call) async {
       if (call.method != 'runBackgroundSync') return <String, dynamic>{'state': 'failure', 'reason': 'unknown_method'};
       final String trigger = (call.arguments as Map?)?['trigger']?.toString() ?? 'unknown';
-      await _ensureInitialized();
       return _run(trigger);
     });
   }
