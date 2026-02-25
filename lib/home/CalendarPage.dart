@@ -6,6 +6,7 @@ import 'package:caleesync/feature/local_calendars_page.dart';
 import 'package:caleesync/feature/public_subscriptions_page.dart';
 
 import '../controllers/CalendarPageController.dart';
+import '../sync/sync_gate_reason.dart';
 
 class CalendarPage extends StatefulWidget {
   const CalendarPage({super.key});
@@ -600,24 +601,7 @@ class _CalendarCard extends StatelessWidget {
 
 
 String? _syncGateReasonMessage(String? reason) {
-  switch (reason) {
-    case 'local_calendar_missing':
-      return 'Device calendar missing. Reconnect to resume.';
-    case 'remote_collection_missing':
-      return 'Remote collection missing. Reconnect to resume.';
-    case 'binding_invalid':
-      return 'Calendar binding invalid. Reconnect to resume.';
-    case 'auth_invalid':
-      return 'Authentication invalid. Sign in again to resume.';
-    case 'environment_blocked':
-      return 'Sync blocked by device environment. Check settings and retry.';
-    case 'subscription_readonly_violation':
-      return 'Subscription is read-only. Update sync mode to resume.';
-    case 'repair_required':
-      return 'Reconnect required to repair calendar binding.';
-    default:
-      return null;
-  }
+  return SyncGateReason.toUiMessage(reason);
 }
 
 class _CalendarRow extends StatelessWidget {

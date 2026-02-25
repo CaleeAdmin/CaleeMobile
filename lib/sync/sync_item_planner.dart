@@ -2,11 +2,14 @@ import 'package:caleesync/core/platform/pigeon/calendar_api.g.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:sqflite/sqflite.dart';
 
+import '../common/app_constant.dart';
+import '../common/utils/mmkv_utils.dart';
 import '../data/database_helper.dart';
 import '../entity/SyncContext.dart';
 import '../services/calee_server_service.dart';
 import 'SyncEnum.dart';
 import 'force_sync_registry.dart';
+import 'sync_gate_reason.dart';
 
 class SyncItemPlanner {
   SyncItemPlanner({
@@ -52,11 +55,12 @@ class SyncItemPlanner {
     };
 
     final List<PlatformCalendar?> nativeCalendars = await _native.getCalendars();
-    final Set<String> nativeIds = nativeCalendars
-        .whereType<PlatformCalendar>()
-        .map((calendar) => calendar.id ?? '')
-        .where((id) => id.isNotEmpty)
-        .toSet();
+    final Map<String, PlatformCalendar> nativeCalendarsById = {
+      for (final PlatformCalendar calendar in nativeCalendars.whereType<PlatformCalendar>())
+        if ((calendar.id ?? '').isNotEmpty) calendar.id!: calendar,
+    };
+
+    final bool hasValidAuth = _hasValidAuthContext(userId);
 
     final List<SyncContext> contexts = [];
     for (final local in collectionRows) {
@@ -64,7 +68,8 @@ class SyncItemPlanner {
         db: db,
         local: local,
         remoteMap: remoteMap,
-        nativeIds: nativeIds,
+        nativeCalendarsById: nativeCalendarsById,
+        hasValidAuth: hasValidAuth,
       );
       if (context != null) {
         contexts.add(context);
@@ -78,7 +83,8 @@ class SyncItemPlanner {
     required Database db,
     required Map<String, dynamic> local,
     required Map<String, dynamic> remoteMap,
-    required Set<String> nativeIds,
+    required Map<String, PlatformCalendar> nativeCalendarsById,
+    required bool hasValidAuth,
   }) async {
     final String path = CaleeServerService.normalizeRemotePath(local['remote_path']?.toString() ?? '');
     final Map<String, dynamic>? remote = remoteMap[path];
@@ -97,8 +103,9 @@ class SyncItemPlanner {
 
     final Map<String, dynamic> gate = _evaluateBindingEligibility(
       row: local,
-      nativeCalendarIds: nativeIds,
+      nativeCalendarsById: nativeCalendarsById,
       remoteExists: remote != null,
+      hasValidAuth: hasValidAuth,
     );
 
     if (!(gate['eligible'] as bool)) {
@@ -195,33 +202,68 @@ class SyncItemPlanner {
 
   Map<String, dynamic> _evaluateBindingEligibility({
     required Map<String, dynamic> row,
-    required Set<String> nativeCalendarIds,
+    required Map<String, PlatformCalendar> nativeCalendarsById,
     required bool remoteExists,
+    required bool hasValidAuth,
   }) {
+    if (!hasValidAuth) {
+      return {'eligible': false, 'reason': SyncGateReason.authInvalid};
+    }
+
     final String remotePath = row['remote_path']?.toString() ?? '';
     if (remotePath.isEmpty) {
-      return {'eligible': false, 'reason': 'binding_invalid'};
+      return {'eligible': false, 'reason': SyncGateReason.bindingInvalid};
     }
 
     final int bindingId = (row['binding_id'] as int?) ?? 0;
     if (bindingId <= 0) {
-      return {'eligible': false, 'reason': 'binding_invalid'};
+      return {'eligible': false, 'reason': SyncGateReason.bindingInvalid};
     }
 
     final String localCollectionId = row['local_collection_id']?.toString() ?? '';
     if (localCollectionId.isEmpty) {
-      return {'eligible': false, 'reason': 'binding_invalid'};
+      return {'eligible': false, 'reason': SyncGateReason.bindingInvalid};
     }
 
-    if (!nativeCalendarIds.contains(localCollectionId)) {
-      return {'eligible': false, 'reason': 'local_calendar_missing'};
+    final int bindingOrigin = (row['binding_origin'] as int?) ?? SyncBindingOrigin.remote;
+    final bool isValidBindingOrigin =
+        bindingOrigin == SyncBindingOrigin.local || bindingOrigin == SyncBindingOrigin.remote;
+    if (!isValidBindingOrigin) {
+      return {'eligible': false, 'reason': SyncGateReason.repairRequired};
     }
+
+    final int syncMode = (row['sync_mode'] as int?) ?? SyncBindingMode.readOnly;
+    final bool isSubscription = row['is_subscription'] == 1 || row['is_subscription'] == true;
+    if (isSubscription && syncMode == SyncBindingMode.twoWay) {
+      return {'eligible': false, 'reason': SyncGateReason.subscriptionReadonlyViolation};
+    }
+
+    final PlatformCalendar? nativeCalendar = nativeCalendarsById[localCollectionId];
+    if (nativeCalendar == null) {
+      return {'eligible': false, 'reason': SyncGateReason.localCalendarMissing};
+    }
+
+    final bool supportsEvents = nativeCalendar.supportsEvents ?? true;
+    final bool isReadOnly = nativeCalendar.isReadOnly ?? false;
+    if (!supportsEvents || (syncMode == SyncBindingMode.twoWay && isReadOnly)) {
+      return {'eligible': false, 'reason': SyncGateReason.environmentBlocked};
+    }
+
 
     if (!remoteExists) {
-      return {'eligible': false, 'reason': 'remote_collection_missing'};
+      return {'eligible': false, 'reason': SyncGateReason.remoteCollectionMissing};
     }
 
-    return {'eligible': true, 'reason': 'ok'};
+    return {'eligible': true, 'reason': SyncGateReason.ok};
+  }
+
+  bool _hasValidAuthContext(String userId) {
+    final String loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? '';
+    final String password = MMKVUtils.instance.getString(AppConstant.appPasswordKey) ?? '';
+    if (loginName.isEmpty || password.isEmpty) {
+      return false;
+    }
+    return loginName == userId;
   }
 
   Future<bool> _isCalendarDirty(Database db, Object? remoteCollectionId) async {
