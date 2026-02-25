@@ -29,6 +29,9 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Run Flutter tests before release build
+        run: flutter test
+
       - name: Prepare Android signing files
         shell: bash
         run: |
