@@ -13,6 +13,7 @@ import '../entity/sync_run_record.dart';
 
 class BackgroundSyncWorkerBridge {
   static const MethodChannel _channel = MethodChannel('caleesync/background_sync');
+  static Future<void>? _initFuture;
 
   static Future<void> start() async {
     await _ensureInitialized();
@@ -24,10 +25,13 @@ class BackgroundSyncWorkerBridge {
   }
 
   static Future<void> _ensureInitialized() async {
-    WidgetsFlutterBinding.ensureInitialized();
-    DartPluginRegistrant.ensureInitialized();
-    await MMKVUtils.instance.init();
-    await DatabaseHelper.instance.init();
+    _initFuture ??= () async {
+      WidgetsFlutterBinding.ensureInitialized();
+      DartPluginRegistrant.ensureInitialized();
+      await MMKVUtils.instance.init();
+      await DatabaseHelper.instance.init();
+    }();
+    await _initFuture;
   }
 
   static Future<Map<String, dynamic>> _run(String trigger) async {

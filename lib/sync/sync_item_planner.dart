@@ -2,11 +2,14 @@ import 'package:caleesync/core/platform/pigeon/calendar_api.g.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:sqflite/sqflite.dart';
 
+import '../common/app_constant.dart';
+import '../common/utils/mmkv_utils.dart';
 import '../data/database_helper.dart';
 import '../entity/SyncContext.dart';
 import '../services/calee_server_service.dart';
 import 'SyncEnum.dart';
 import 'force_sync_registry.dart';
+import 'sync_gate_reason.dart';
 
 class SyncItemPlanner {
   SyncItemPlanner({
@@ -37,7 +40,8 @@ class SyncItemPlanner {
         rc.is_subscription,
         lb.id AS binding_id,
         lb.local_collection_id,
-        lb.binding_origin
+        lb.binding_origin,
+        lb.sync_gate_reason
       FROM remote_collections rc
       LEFT JOIN local_bindings lb ON lb.remote_collection_id = rc.id
       WHERE rc.account_name = ?
@@ -51,11 +55,12 @@ class SyncItemPlanner {
     };
 
     final List<PlatformCalendar?> nativeCalendars = await _native.getCalendars();
-    final Set<String> nativeIds = nativeCalendars
-        .whereType<PlatformCalendar>()
-        .map((calendar) => calendar.id ?? '')
-        .where((id) => id.isNotEmpty)
-        .toSet();
+    final Map<String, PlatformCalendar> nativeCalendarsById = {
+      for (final PlatformCalendar calendar in nativeCalendars.whereType<PlatformCalendar>())
+        if ((calendar.id ?? '').isNotEmpty) calendar.id!: calendar,
+    };
+
+    final bool hasValidAuth = _hasValidAuthContext(userId);
 
     final List<SyncContext> contexts = [];
     for (final local in collectionRows) {
@@ -63,7 +68,8 @@ class SyncItemPlanner {
         db: db,
         local: local,
         remoteMap: remoteMap,
-        nativeIds: nativeIds,
+        nativeCalendarsById: nativeCalendarsById,
+        hasValidAuth: hasValidAuth,
       );
       if (context != null) {
         contexts.add(context);
@@ -77,34 +83,50 @@ class SyncItemPlanner {
     required Database db,
     required Map<String, dynamic> local,
     required Map<String, dynamic> remoteMap,
-    required Set<String> nativeIds,
+    required Map<String, PlatformCalendar> nativeCalendarsById,
+    required bool hasValidAuth,
   }) async {
     final String path = CaleeServerService.normalizeRemotePath(local['remote_path']?.toString() ?? '');
     final Map<String, dynamic>? remote = remoteMap[path];
     final int remoteCollectionId = (local['id'] as int?) ?? 0;
+    final int isEnabled = (local['is_enabled'] as int?) ?? 0;
     final int bindingId = (local['binding_id'] as int?) ?? 0;
     final int bindingOrigin = (local['binding_origin'] as int?) ?? SyncBindingOrigin.remote;
+
+    // Disabled collections are user-intent OFF and should not be gated or
+    // considered by planner reconciliation/execution.
+    if (isEnabled != 1) {
+      return null;
+    }
 
     final bool forceRequested = ForceSyncRegistry.consumeForceSyncForCollection(remoteCollectionId);
 
     final Map<String, dynamic> gate = _evaluateBindingEligibility(
       row: local,
-      nativeCalendarIds: nativeIds,
+      nativeCalendarsById: nativeCalendarsById,
       remoteExists: remote != null,
+      hasValidAuth: hasValidAuth,
     );
 
     if (!(gate['eligible'] as bool)) {
-      await _handleIneligibleBinding(
+      await _setSyncGateReason(
         db: db,
-        local: local,
-        path: path,
-        gate: gate,
         bindingId: bindingId,
-        bindingOrigin: bindingOrigin,
-        forceRequested: forceRequested,
+        nextReason: gate['reason']?.toString(),
       );
+      final String reason = gate['reason']?.toString() ?? 'unknown';
+      debugPrint('[SYNC_GATE][binding_id=$bindingId][path=$path][origin=$bindingOrigin] skipped reason=$reason');
+      if (forceRequested) {
+        debugPrint('[SYNC_FORCE][binding_id=$bindingId][path=$path][origin=$bindingOrigin] force=true consumed_but_ineligible reason=$reason');
+      }
       return null;
     }
+
+    await _setSyncGateReason(
+      db: db,
+      bindingId: bindingId,
+      nextReason: null,
+    );
 
     final int mode = (local['sync_mode'] as int?) ?? SyncBindingMode.readOnly;
     final String? dbCtag = local['synced_ctag']?.toString();
@@ -161,69 +183,87 @@ class SyncItemPlanner {
     return _buildContext(remote ?? {}, local, action);
   }
 
-  Future<void> _handleIneligibleBinding({
+
+  Future<void> _setSyncGateReason({
     required Database db,
-    required Map<String, dynamic> local,
-    required String path,
-    required Map<String, dynamic> gate,
     required int bindingId,
-    required int bindingOrigin,
-    required bool forceRequested,
+    required String? nextReason,
   }) async {
-    final String reason = gate['reason']?.toString() ?? 'unknown';
-    final String uiHint = gate['ui_hint']?.toString() ?? '';
-    final int remoteCollectionId = (local['id'] as int?) ?? 0;
+    if (bindingId <= 0) return;
 
-    debugPrint('[SYNC_GATE][binding_id=$bindingId][path=$path][origin=$bindingOrigin] skipped reason=$reason hint=$uiHint');
-    if (forceRequested) {
-      debugPrint('[SYNC_FORCE][binding_id=$bindingId][path=$path][origin=$bindingOrigin] force=true consumed_but_ineligible reason=$reason');
-    }
-
-    if (reason == 'local_calendar_missing' && remoteCollectionId > 0) {
-      await db.update(
-        'remote_collections',
-        {'is_enabled': 0},
-        where: 'id = ?',
-        whereArgs: [remoteCollectionId],
-      );
-      debugPrint('[SYNC_GATE][binding_id=$bindingId][origin=$bindingOrigin] disabled_due_to_missing_local_calendar');
-    }
+    final String? normalizedReason = (nextReason == null || nextReason.isEmpty) ? null : nextReason;
+    await db.update(
+      'local_bindings',
+      {'sync_gate_reason': normalizedReason},
+      where: 'id = ?',
+      whereArgs: [bindingId],
+    );
   }
 
   Map<String, dynamic> _evaluateBindingEligibility({
     required Map<String, dynamic> row,
-    required Set<String> nativeCalendarIds,
+    required Map<String, PlatformCalendar> nativeCalendarsById,
     required bool remoteExists,
+    required bool hasValidAuth,
   }) {
-    final int isEnabled = (row['is_enabled'] as int?) ?? 0;
-    if (isEnabled != 1) {
-      return {'eligible': false, 'reason': 'remote_collection_disabled'};
+    if (!hasValidAuth) {
+      return {'eligible': false, 'reason': SyncGateReason.authInvalid};
     }
 
     final String remotePath = row['remote_path']?.toString() ?? '';
     if (remotePath.isEmpty) {
-      return {'eligible': false, 'reason': 'missing_remote_path'};
+      return {'eligible': false, 'reason': SyncGateReason.bindingInvalid};
     }
 
     final int bindingId = (row['binding_id'] as int?) ?? 0;
     if (bindingId <= 0) {
-      return {'eligible': false, 'reason': 'missing_binding_id', 'ui_hint': 'Bind to a local calendar to sync'};
+      return {'eligible': false, 'reason': SyncGateReason.bindingInvalid};
     }
 
     final String localCollectionId = row['local_collection_id']?.toString() ?? '';
     if (localCollectionId.isEmpty) {
-      return {'eligible': false, 'reason': 'missing_local_collection_id', 'ui_hint': 'Bind to a local calendar to sync'};
+      return {'eligible': false, 'reason': SyncGateReason.bindingInvalid};
     }
 
-    if (!nativeCalendarIds.contains(localCollectionId)) {
-      return {'eligible': false, 'reason': 'local_calendar_missing', 'ui_hint': 'Local calendar not found'};
+    final int bindingOrigin = (row['binding_origin'] as int?) ?? SyncBindingOrigin.remote;
+    final bool isValidBindingOrigin =
+        bindingOrigin == SyncBindingOrigin.local || bindingOrigin == SyncBindingOrigin.remote;
+    if (!isValidBindingOrigin) {
+      return {'eligible': false, 'reason': SyncGateReason.repairRequired};
     }
+
+    final int syncMode = (row['sync_mode'] as int?) ?? SyncBindingMode.readOnly;
+    final bool isSubscription = row['is_subscription'] == 1 || row['is_subscription'] == true;
+    if (isSubscription && syncMode == SyncBindingMode.twoWay) {
+      return {'eligible': false, 'reason': SyncGateReason.subscriptionReadonlyViolation};
+    }
+
+    final PlatformCalendar? nativeCalendar = nativeCalendarsById[localCollectionId];
+    if (nativeCalendar == null) {
+      return {'eligible': false, 'reason': SyncGateReason.localCalendarMissing};
+    }
+
+    final bool supportsEvents = nativeCalendar.supportsEvents ?? true;
+    final bool isReadOnly = nativeCalendar.isReadOnly ?? false;
+    if (!supportsEvents || (syncMode == SyncBindingMode.twoWay && isReadOnly)) {
+      return {'eligible': false, 'reason': SyncGateReason.environmentBlocked};
+    }
+
 
     if (!remoteExists) {
-      return {'eligible': false, 'reason': 'remote_collection_missing', 'ui_hint': 'Remote path mismatch'};
+      return {'eligible': false, 'reason': SyncGateReason.remoteCollectionMissing};
     }
 
-    return {'eligible': true, 'reason': 'ok'};
+    return {'eligible': true, 'reason': SyncGateReason.ok};
+  }
+
+  bool _hasValidAuthContext(String userId) {
+    final String loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? '';
+    final String password = MMKVUtils.instance.getString(AppConstant.appPasswordKey) ?? '';
+    if (loginName.isEmpty || password.isEmpty) {
+      return false;
+    }
+    return loginName == userId;
   }
 
   Future<bool> _isCalendarDirty(Database db, Object? remoteCollectionId) async {

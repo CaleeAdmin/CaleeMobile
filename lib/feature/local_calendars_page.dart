@@ -170,7 +170,7 @@ class _LocalCalendarCard extends StatelessWidget {
                                 onPressed: isConnecting
                                     ? null
                                     : () async {
-                                        await controller.toggleCalendarSelection(
+                                        await controller.linkCalendar(
                                           calendar,
                                           true,
                                           returnToCalendarListAfterConnect: true,
