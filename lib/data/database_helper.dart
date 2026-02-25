@@ -67,6 +67,7 @@ class DatabaseHelper {
         id INTEGER PRIMARY KEY AUTOINCREMENT, /* 主键 */
         remote_collection_id INTEGER NOT NULL, /* 关联 remote_collections.id */
         local_collection_id TEXT NOT NULL, /* 本地侧集合 ID（平台返回的日历/任务列表 ID） */
+        sync_gate_reason TEXT, /* 系统门禁原因（NULL 表示可同步） */
         binding_origin INTEGER DEFAULT 1, /* 绑定来源（0 本地发起，1 远端发起） */
         created_at INTEGER, /* 绑定创建时间（毫秒时间戳） */
         updated_at INTEGER, /* 绑定更新时间（毫秒时间戳） */
@@ -129,6 +130,7 @@ class DatabaseHelper {
       ON sync_items(remote_collection_id, remote_uid)
     ''');
   }
+
 
   // 物理删除数据库（调试用：调用后需重启 App）
   Future<void> deleteMyDatabase() async {

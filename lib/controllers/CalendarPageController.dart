@@ -28,6 +28,7 @@ class CalendarDisplayItem {
   final bool isLocalReadOnly;
   final String? subscriptionUrl;
   bool isEnabled;            // 对应数据库 is_enabled
+  final String? syncGateReason;
   final int origin;          // 0: 本地创建, 1: 云端同步
   final int bindingId;
   bool allowMassDeletionDangerous;
@@ -43,6 +44,7 @@ class CalendarDisplayItem {
     required this.isLocalReadOnly,
     this.subscriptionUrl,
     required this.isEnabled,
+    this.syncGateReason,
     required this.origin,
     required this.bindingId,
     required this.allowMassDeletionDangerous,
@@ -63,6 +65,7 @@ class CalendarDisplayItem {
       isLocalReadOnly: toBool(map['is_local_read_only']),
       subscriptionUrl: map['subscription_url']?.toString(),
       isEnabled: toBool(map['is_enabled']),
+      syncGateReason: map['sync_gate_reason']?.toString(),
       origin: (map['binding_origin'] as int?) ?? 0,
       bindingId: (map['binding_id'] as int?) ?? 0,
       allowMassDeletionDangerous: false,
@@ -155,7 +158,7 @@ class CalendarPageController extends GetxController {
         return;
       }
 
-      final EnableCalendarResult enableResult = await _repo.connectAndEnableRemoteCalendarByPath(remotePath);
+      final EnableCalendarResult enableResult = await _repo.enableRemoteCalendarFromUserAction(remotePath);
       _applyEnableResultToCalendarItem(item, enableResult);
 
       final String? syncMessage = _repo.takeLastConnectErrorMessage();
@@ -230,6 +233,7 @@ class CalendarPageController extends GetxController {
       isLocalReadOnly: item.isLocalReadOnly,
       subscriptionUrl: item.subscriptionUrl,
       isEnabled: result.success,
+      syncGateReason: item.syncGateReason,
       origin: item.origin,
       bindingId: item.bindingId,
       allowMassDeletionDangerous: item.allowMassDeletionDangerous,
@@ -340,7 +344,7 @@ class CalendarPageController extends GetxController {
       // 2. 查询本地 remote_collections 的所有日历记录
       final db = await DatabaseHelper.instance.database;
       final List<Map<String, dynamic>> calendarMaps = await db.rawQuery('''
-        SELECT rc.*, lb.local_collection_id, lb.binding_origin, lb.id AS binding_id
+        SELECT rc.*, lb.local_collection_id, lb.binding_origin, lb.id AS binding_id, lb.sync_gate_reason
         FROM remote_collections rc
         LEFT JOIN local_bindings lb ON lb.remote_collection_id = rc.id
         WHERE rc.account_name = ?
@@ -399,6 +403,7 @@ class CalendarPageController extends GetxController {
           isLocalReadOnly: localReadOnlyById[localId] ?? false,
           subscriptionUrl: cal['subscription_url']?.toString(),
           isEnabled: cal['is_enabled'] == 1,
+          syncGateReason: cal['sync_gate_reason']?.toString(),
           remotePath: remotePath,
           origin: origin,
           bindingId: bindingId,

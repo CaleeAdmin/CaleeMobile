@@ -598,6 +598,28 @@ class _CalendarCard extends StatelessWidget {
   }
 }
 
+
+String? _syncGateReasonMessage(String? reason) {
+  switch (reason) {
+    case 'local_calendar_missing':
+      return 'Device calendar missing. Reconnect to resume.';
+    case 'remote_collection_missing':
+      return 'Remote collection missing. Reconnect to resume.';
+    case 'binding_invalid':
+      return 'Calendar binding invalid. Reconnect to resume.';
+    case 'auth_invalid':
+      return 'Authentication invalid. Sign in again to resume.';
+    case 'environment_blocked':
+      return 'Sync blocked by device environment. Check settings and retry.';
+    case 'subscription_readonly_violation':
+      return 'Subscription is read-only. Update sync mode to resume.';
+    case 'repair_required':
+      return 'Reconnect required to repair calendar binding.';
+    default:
+      return null;
+  }
+}
+
 class _CalendarRow extends StatelessWidget {
   final CalendarDisplayItem item;
   const _CalendarRow({Key? key, required this.item}) : super(key: key);
@@ -703,19 +725,40 @@ class _CalendarRow extends StatelessWidget {
                   ],
                 )),
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 4, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade300,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        item.isReadOnly ? 'Read-only' : 'Two-way sync',
-                        style: const TextStyle(fontSize: 12, color: Colors.black54),
-                      ),
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    item.isReadOnly ? 'Read-only' : 'Two-way sync',
+                    style: const TextStyle(fontSize: 12, color: Colors.black54),
+                  ),
+                ),
+                if (item.isEnabled && (_syncGateReasonMessage(item.syncGateReason) ?? '').isNotEmpty)
+                  Container(
+                    margin: const EdgeInsets.only(top: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFF7ED),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFFF59E0B)),
                     ),
-                // const SizedBox(width: 12),
-                    Text('${item.eventCount} events', style: const TextStyle(fontSize: 12, color: Colors.black54)),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.warning_amber_rounded, size: 14, color: Color(0xFFD97706)),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text(
+                            _syncGateReasonMessage(item.syncGateReason)!,
+                            style: const TextStyle(fontSize: 12, color: Color(0xFFB45309)),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                Text('${item.eventCount} events', style: const TextStyle(fontSize: 12, color: Colors.black54)),
 
               ],
             ),
