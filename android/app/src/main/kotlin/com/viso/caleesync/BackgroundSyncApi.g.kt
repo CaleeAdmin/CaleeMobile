@@ -306,13 +306,13 @@ class BackgroundSyncRunnerApi(
     channel.send(listOf(request)) { reply ->
       val listReply = reply as List<Any?>?
       if (listReply == null) {
-        callback(Result.failure(FlutterError("channel-error", "Unable to establish connection on channel: '$channelName'.")))
+        callback(Result.failure(BackgroundSyncFlutterError("channel-error", "Unable to establish connection on channel: '$channelName'.")))
       } else if (listReply.size > 1) {
-        callback(Result.failure(FlutterError(listReply[0] as String, listReply[1] as String?, listReply[2])))
+        callback(Result.failure(BackgroundSyncFlutterError(listReply[0] as String, listReply[1] as String?, listReply[2])))
       } else {
         val output = listReply[0] as BackgroundRunResult?
         if (output == null) {
-          callback(Result.failure(FlutterError("null-error", "Host platform returned null value for non-null return value.")))
+          callback(Result.failure(BackgroundSyncFlutterError("null-error", "Host platform returned null value for non-null return value.")))
         } else {
           callback(Result.success(output))
         }
