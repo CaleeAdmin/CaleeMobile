@@ -77,6 +77,7 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
               tooltip: isSyncing ? 'View Activity' : 'Sync Now',
               onPressed: () async {
                 if (!isSyncing) {
+                  await _ctrl.refreshPagesBeforeSync();
                   await _ctrl.syncNow();
                   return;
                 }
