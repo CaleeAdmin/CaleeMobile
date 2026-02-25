@@ -333,7 +333,6 @@ class LocalCalendarPageController extends GetxController {
     }
 
     final CalendarPageController dashboardController = Get.find<CalendarPageController>();
-    await dashboardController.refreshDashboard(includeEventCounts: false);
-    unawaited(dashboardController.refreshDashboard());
+    await dashboardController.reloadCalendars();
   }
 }

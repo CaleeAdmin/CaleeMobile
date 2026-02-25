@@ -69,7 +69,7 @@ class CalendarProbeController extends GetxController {
 
     if (Get.isRegistered<CalendarPageController>()) {
       refreshTasks.add(
-        Get.find<CalendarPageController>().refreshDashboard(),
+        Get.find<CalendarPageController>().reloadCalendars(),
       );
     }
 
