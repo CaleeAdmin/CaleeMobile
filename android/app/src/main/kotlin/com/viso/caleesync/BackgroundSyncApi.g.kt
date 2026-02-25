@@ -26,7 +26,7 @@ private fun wrapError(exception: Throwable): List<Any?> {
   }
 }
 
-class FlutterError(
+private class FlutterError(
   val code: String,
   override val message: String? = null,
   val details: Any? = null

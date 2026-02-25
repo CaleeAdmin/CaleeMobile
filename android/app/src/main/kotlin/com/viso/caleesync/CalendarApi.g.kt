@@ -38,7 +38,7 @@ private fun wrapError(exception: Throwable): List<Any?> {
  * @property message The error message.
  * @property details The error details. Must be a datatype supported by the api codec.
  */
-class FlutterError (
+private class FlutterError (
   val code: String,
   override val message: String? = null,
   val details: Any? = null
