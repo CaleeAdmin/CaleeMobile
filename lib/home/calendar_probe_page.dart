@@ -6,6 +6,7 @@ import '../controllers/calendar_probe_controller.dart';
 import 'DashboardPage.dart';
 import 'CalendarPage.dart';
 import '../feature/link_device_page.dart';
+import 'sync_status_details_page.dart';
 
 class CalendarProbePage extends StatefulWidget {
   const CalendarProbePage({super.key});
@@ -66,8 +67,40 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
                 ),
               ),
             ],
-          ),
+        ),
         centerTitle: true,
+        actions: [
+          Obx(() {
+            final isSyncing = _ctrl.isRunActive;
+
+            return IconButton(
+              tooltip: isSyncing ? 'View Activity' : 'Sync Now',
+              onPressed: () async {
+                if (!isSyncing) {
+                  await _ctrl.syncNow();
+                  return;
+                }
+                Get.to(() => const SyncStatusDetailsPage());
+              },
+              icon: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 200),
+                transitionBuilder: (child, animation) => FadeTransition(opacity: animation, child: child),
+                child: isSyncing
+                    ? const SizedBox(
+                        key: ValueKey('sync-progress'),
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(
+                        Icons.sync,
+                        key: ValueKey('sync-icon'),
+                        color: Colors.black87,
+                      ),
+              ),
+            );
+          }),
+        ],
       ),
       body: Obx(() => IndexedStack(
             index: _ctrl.selectedIndex.value,
