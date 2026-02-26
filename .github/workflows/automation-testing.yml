@@ -23,6 +23,11 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.12
+
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -72,6 +77,4 @@ jobs:
             # Extra boot readiness guard (reduces flakiness)
             adb wait-for-device
 
-            cd android
-            chmod +x ./gradlew
-            ./gradlew connectedDebugAndroidTest --stacktrace
+            gradle -p android connectedDebugAndroidTest --stacktrace
