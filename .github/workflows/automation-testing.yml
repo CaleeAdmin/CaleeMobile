@@ -28,6 +28,9 @@ jobs:
         with:
           gradle-version: 8.12
 
+      - name: Verify pinned Gradle version
+        run: gradle --version
+
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -77,4 +80,4 @@ jobs:
             # Extra boot readiness guard (reduces flakiness)
             adb wait-for-device
 
-            gradle -p android connectedDebugAndroidTest --stacktrace
+            gradle --no-daemon -p android connectedDebugAndroidTest --stacktrace
