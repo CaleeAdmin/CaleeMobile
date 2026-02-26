@@ -22,7 +22,9 @@ class BackgroundSyncWatchdogReceiver : BroadcastReceiver() {
                     try {
                         val interval = CaleeSyncPeriodicWorker.readConfiguredIntervalMinutes(context)
                         CaleeSyncPeriodicWorker.ensurePeriodic(context, interval)
-                        CaleeSyncPeriodicWorker.enqueueOneOff(context, "watchdog", expedited = false)
+                        if (!CaleeSyncPeriodicWorker.shouldSkipWatchdogOneOff(context)) {
+                            CaleeSyncPeriodicWorker.enqueueOneOff(context, "watchdog", expedited = false)
+                        }
                         CaleeSyncPeriodicWorker.scheduleWatchdogAlarm(context, interval)
                     } finally {
                         pendingResult.finish()
