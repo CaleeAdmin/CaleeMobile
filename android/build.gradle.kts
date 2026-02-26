@@ -1,5 +1,3 @@
-import com.android.build.gradle.BaseExtension
-
 allprojects {
     repositories {
         google()
@@ -20,18 +18,6 @@ subprojects {
 
 subprojects {
     project.evaluationDependsOn(":app")
-
-    pluginManager.withPlugin("com.android.application") {
-        extensions.configure<BaseExtension> {
-            compileSdkVersion(34)
-        }
-    }
-
-    pluginManager.withPlugin("com.android.library") {
-        extensions.configure<BaseExtension> {
-            compileSdkVersion(34)
-        }
-    }
 }
 
 tasks.register<Delete>("clean") {
