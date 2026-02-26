@@ -23,7 +23,7 @@ subprojects {
 
     plugins.withId("com.android.application") {
         extensions.configure<ApplicationExtension> {
-            if (compileSdk < 34) {
+            if ((compileSdk ?: 0) < 34) {
                 compileSdk = 34
             }
         }
@@ -31,7 +31,7 @@ subprojects {
 
     plugins.withId("com.android.library") {
         extensions.configure<LibraryExtension> {
-            if (compileSdk < 34) {
+            if ((compileSdk ?: 0) < 34) {
                 compileSdk = 34
             }
         }
