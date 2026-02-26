@@ -7,6 +7,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.work.WorkManager
 import androidx.work.testing.WorkManagerTestInitHelper
 import org.junit.Assert.assertTrue
+import java.util.concurrent.TimeUnit
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -33,9 +34,19 @@ class BackgroundSyncWatchdogReceiverInstrumentationTest {
         val receiver = BackgroundSyncWatchdogReceiver()
         receiver.onReceive(context, Intent(CaleeSyncPeriodicWorker.ACTION_WATCHDOG))
 
-        val infos = WorkManager.getInstance(context)
-            .getWorkInfosForUniqueWork(CaleeSyncPeriodicWorker.SYNC_UNIQUE)
-            .get()
-        assertTrue(infos.isNotEmpty())
+        val deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(5)
+        var found = false
+        while (System.currentTimeMillis() < deadline) {
+            val infos = WorkManager.getInstance(context)
+                .getWorkInfosForUniqueWork(CaleeSyncPeriodicWorker.SYNC_UNIQUE)
+                .get()
+            if (infos.isNotEmpty()) {
+                found = true
+                break
+            }
+            Thread.sleep(100)
+        }
+
+        assertTrue("Expected watchdog to enqueue unique sync work", found)
     }
 }
