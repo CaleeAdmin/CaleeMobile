@@ -1,5 +1,6 @@
 import java.io.FileInputStream
 import java.util.Properties
+import org.gradle.api.GradleException
 
 plugins {
     id("com.android.application")
@@ -25,16 +26,41 @@ val releaseKeyAlias = keystoreProperties["keyAlias"]?.toString() ?: envKeyAlias
 val releaseKeyPassword = keystoreProperties["keyPassword"]?.toString() ?: envKeyPassword
 
 val releaseKeystoreFile = releaseStoreFilePath?.let { file(it) }
-val hasReleaseSigningConfig =
-    releaseKeystoreFile?.exists() == true &&
-        !releaseStorePassword.isNullOrBlank() &&
-        !releaseKeyAlias.isNullOrBlank() &&
-        !releaseKeyPassword.isNullOrBlank()
+val missingSigningInputs = buildList {
+    if (releaseStoreFilePath.isNullOrBlank()) {
+        add("storeFile (key.properties: storeFile or env ANDROID_KEYSTORE_PATH)")
+    } else if (releaseKeystoreFile?.exists() != true) {
+        add("keystore file not found at '$releaseStoreFilePath'")
+    }
+
+    if (releaseStorePassword.isNullOrBlank()) {
+        add("storePassword (key.properties: storePassword or env ANDROID_KEYSTORE_PASSWORD)")
+    }
+    if (releaseKeyAlias.isNullOrBlank()) {
+        add("keyAlias (key.properties: keyAlias or env ANDROID_KEY_ALIAS)")
+    }
+    if (releaseKeyPassword.isNullOrBlank()) {
+        add("keyPassword (key.properties: keyPassword or env ANDROID_KEY_PASSWORD)")
+    }
+}
+val hasReleaseSigningConfig = missingSigningInputs.isEmpty()
+
+val isReleaseBuildRequested =
+    gradle.startParameter.taskNames.any { taskName -> taskName.contains("release", ignoreCase = true) }
 
 if (!hasReleaseSigningConfig) {
+    val signingRequirements =
+        "android/key.properties or ANDROID_KEYSTORE_PATH/ANDROID_KEYSTORE_PASSWORD/ANDROID_KEY_ALIAS/ANDROID_KEY_PASSWORD"
+    val missingInputsDescription = missingSigningInputs.joinToString(separator = "; ")
+    if (isReleaseBuildRequested) {
+        throw GradleException(
+            "Release signing is required for release builds. Missing: $missingInputsDescription. Configure $signingRequirements."
+        )
+    }
+
     logger.warn(
-        "Release signing is not configured. Build will continue without a release signing config; " +
-            "to sign artifacts, provide android/key.properties or ANDROID_KEYSTORE_PATH/ANDROID_KEYSTORE_PASSWORD/ANDROID_KEY_ALIAS/ANDROID_KEY_PASSWORD."
+        "Release signing is not configured for non-release tasks. Missing: $missingInputsDescription; " +
+            "to sign artifacts, provide $signingRequirements."
     )
 }
 
