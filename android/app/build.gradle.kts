@@ -20,10 +20,10 @@ val envStorePassword = providers.environmentVariable("ANDROID_KEYSTORE_PASSWORD"
 val envKeyAlias = providers.environmentVariable("ANDROID_KEY_ALIAS").orNull
 val envKeyPassword = providers.environmentVariable("ANDROID_KEY_PASSWORD").orNull
 
-val releaseStoreFilePath = keystoreProperties["storeFile"]?.toString() ?: envStoreFile
-val releaseStorePassword = keystoreProperties["storePassword"]?.toString() ?: envStorePassword
-val releaseKeyAlias = keystoreProperties["keyAlias"]?.toString() ?: envKeyAlias
-val releaseKeyPassword = keystoreProperties["keyPassword"]?.toString() ?: envKeyPassword
+val releaseStoreFilePath = envStoreFile ?: keystoreProperties["storeFile"]?.toString()
+val releaseStorePassword = envStorePassword ?: keystoreProperties["storePassword"]?.toString()
+val releaseKeyAlias = envKeyAlias ?: keystoreProperties["keyAlias"]?.toString()
+val releaseKeyPassword = envKeyPassword ?: keystoreProperties["keyPassword"]?.toString()
 
 val releaseKeystoreFile = releaseStoreFilePath?.let { file(it) }
 val missingSigningInputs = buildList {
