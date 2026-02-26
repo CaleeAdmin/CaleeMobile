@@ -166,15 +166,42 @@ jobs:
             exit 0
           fi
 
-          fallback_path="$(find build/app/intermediates -maxdepth 8 -type f -path '*native_debug_symbol*' -name '*.zip' | head -n1 || true)"
+          fallback_path="$({
+            find build/app/outputs -maxdepth 10 -type f -name '*.zip'
+            find build/app/intermediates -maxdepth 12 -type f -name '*.zip'
+          } | grep -E 'native([_-])debug([_-])symbol' | head -n1 || true)"
+
+          if [[ -n "$fallback_path" ]]; then
+            echo "zip_path=$fallback_path" >> "$GITHUB_OUTPUT"
+            echo "Resolved native symbols zip: $fallback_path"
+            exit 0
+          fi
+
+          generated_zip="build/app/outputs/native-debug-symbols/release/native-debug-symbols.zip"
+          mkdir -p "$(dirname "$generated_zip")"
+
+          symbols_dir="$({
+            find build/app/intermediates -maxdepth 12 -type d -path '*native_debug_symbol*' -name out
+            find build/app/intermediates -maxdepth 12 -type d -path '*native-debug-symbol*' -name out
+            find build/app/intermediates -maxdepth 12 -type d -path '*unstripped_native_libs*' -name out
+            find build/app/intermediates -maxdepth 12 -type d -path '*merged_native_libs*' -name out
+          } | head -n1 || true)"
+
+          if [[ -n "$symbols_dir" ]]; then
+            (
+              cd "$symbols_dir"
+              zip -r "$GITHUB_WORKSPACE/$generated_zip" .
+            )
+
+            echo "zip_path=$generated_zip" >> "$GITHUB_OUTPUT"
+            echo "Generated native symbols zip: $generated_zip from $symbols_dir"
+            exit 0
+          fi
 
           if [[ -z "$fallback_path" ]]; then
             echo "Native debug symbols zip not found in expected outputs" >&2
             exit 1
           fi
-
-          echo "zip_path=$fallback_path" >> "$GITHUB_OUTPUT"
-          echo "Resolved native symbols zip: $fallback_path"
 
       - name: Rename APK with build name
         shell: bash
