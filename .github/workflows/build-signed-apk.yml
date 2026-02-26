@@ -146,6 +146,36 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
 
+      - name: List native debug symbols output
+        shell: bash
+        run: |
+          set -euo pipefail
+          find build/app/outputs -maxdepth 8 -type f -name "*native*debug*symbol*.zip" -print
+          find build/app/intermediates -maxdepth 8 -type f -name "*.zip" | grep -E 'native[_-]debug[_-]symbol' || true
+
+      - name: Resolve native debug symbols zip path
+        id: native_symbols
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          primary_path="build/app/outputs/native-debug-symbols/release/native-debug-symbols.zip"
+          if [[ -f "$primary_path" ]]; then
+            echo "zip_path=$primary_path" >> "$GITHUB_OUTPUT"
+            echo "Resolved native symbols zip: $primary_path"
+            exit 0
+          fi
+
+          fallback_path="$(find build/app/intermediates -maxdepth 8 -type f -path '*native_debug_symbol*' -name '*.zip' | head -n1 || true)"
+
+          if [[ -z "$fallback_path" ]]; then
+            echo "Native debug symbols zip not found in expected outputs" >&2
+            exit 1
+          fi
+
+          echo "zip_path=$fallback_path" >> "$GITHUB_OUTPUT"
+          echo "Resolved native symbols zip: $fallback_path"
+
       - name: Rename APK with build name
         shell: bash
         run: |
@@ -200,6 +230,13 @@ jobs:
         with:
           name: signed-release-aab
           path: build/app/outputs/bundle/release/caleesync-${{ steps.build_meta.outputs.sanitized_build_name }}.aab
+          if-no-files-found: error
+
+      - name: Upload native debug symbols zip artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-debug-symbols
+          path: ${{ steps.native_symbols.outputs.zip_path }}
           if-no-files-found: error
 
       - name: Clean up signing files
