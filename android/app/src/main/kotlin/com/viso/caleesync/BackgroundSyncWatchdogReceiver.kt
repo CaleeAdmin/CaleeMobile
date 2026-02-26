@@ -25,7 +25,7 @@ class BackgroundSyncWatchdogReceiver : BroadcastReceiver() {
                         CaleeSyncPeriodicWorker.enqueueOneOff(context, "watchdog", expedited = false)
                         CaleeSyncPeriodicWorker.scheduleWatchdogAlarm(context, interval)
                     } finally {
-                        pendingResult.finish()
+                        pendingResult?.finish()
                     }
                 }
             }
