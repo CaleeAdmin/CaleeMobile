@@ -1,11 +1,11 @@
-name: Build Signed APK
+name: Build Signed Android Artifacts
 
 on:
   workflow_dispatch:
 
 jobs:
-  build-signed-apk:
-    name: Generate signed release APK
+  build-signed-android:
+    name: Generate signed release APK and AAB
     runs-on: ubuntu-latest
     env:
       BUILD_NAME: "0.0.2"
@@ -93,6 +93,12 @@ jobs:
             --build-name="$BUILD_NAME" \
             --build-number="${{ steps.build_meta.outputs.build_number }}"
 
+      - name: Build signed Android App Bundle
+        run: |
+          flutter build appbundle --release \
+            --build-name="$BUILD_NAME" \
+            --build-number="${{ steps.build_meta.outputs.build_number }}"
+
       - name: Rename APK with build name
         shell: bash
         run: |
@@ -102,11 +108,27 @@ jobs:
           mv "$src" "$dst"
           echo "Renamed APK to $dst"
 
+      - name: Rename AAB with build name
+        shell: bash
+        run: |
+          set -euo pipefail
+          src="build/app/outputs/bundle/release/app-release.aab"
+          dst="build/app/outputs/bundle/release/caleesync-${{ steps.build_meta.outputs.sanitized_build_name }}.aab"
+          mv "$src" "$dst"
+          echo "Renamed AAB to $dst"
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: signed-release-apk
           path: build/app/outputs/flutter-apk/caleesync-${{ steps.build_meta.outputs.sanitized_build_name }}.apk
+          if-no-files-found: error
+
+      - name: Upload AAB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: signed-release-aab
+          path: build/app/outputs/bundle/release/caleesync-${{ steps.build_meta.outputs.sanitized_build_name }}.aab
           if-no-files-found: error
 
       - name: Clean up signing files
