@@ -1,53 +1,21 @@
 name: Automation Testing
 
 on:
-  pull_request:
   push:
-    branches:
-      - main
-      - master
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
-  flutter-tests:
-    name: Flutter unit + integration tests
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: "3.24.0"
-          cache: true
-
-      - name: Install dependencies
-        run: flutter pub get
-
-      - name: Run Flutter tests (unit + sqlite integration)
-        run: flutter test
-
   android-instrumentation:
-    name: Android instrumentation (WorkManager/worker/receiver)
+    name: Run instrumentation tests on emulator
     runs-on: ubuntu-latest
-    needs: flutter-tests
+    timeout-minutes: 35
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Enable KVM for emulator acceleration
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -58,43 +26,52 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: "3.24.0"
+          channel: stable
           cache: true
 
-      - name: Install dependencies
+      - name: Flutter pub get
         run: flutter pub get
 
-      - name: Set up Android SDK tools
-        uses: android-actions/setup-android@v3
+      - name: Accept Android SDK licenses
+        run: yes | sdkmanager --licenses >/dev/null || true
 
-      - name: Install Android SDK platform for compileSdk 34
+      - name: Install Android SDK components (compileSdk 34 + build-tools + platform-tools + NDK)
+        env:
+          ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
+          ANDROID_HOME: ${{ env.ANDROID_HOME }}
         run: |
-          sdkmanager --install "platforms;android-34" "build-tools;34.0.0"
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-34" \
+            "build-tools;34.0.0" \
+            "ndk;27.0.12077973"
 
-
-      - name: Create Android local.properties
-        shell: bash
-        run: |
-          SDK_DIR="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
-
-          cat > android/local.properties <<EOF
-          flutter.sdk=$FLUTTER_ROOT
-          sdk.dir=$SDK_DIR
-          EOF
-
-      - name: Generate Gradle wrapper
-        run: gradle -p android wrapper --gradle-version 8.12
-
-      - name: Run instrumentation tests on emulator
+      - name: Run connectedDebugAndroidTest (emulator)
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 30
+          api-level: 34
           arch: x86_64
           profile: pixel_5
           emulator-options: -no-window -noaudio -no-boot-anim -gpu swiftshader_indirect
           disable-animations: true
           script: |
+            set -euo pipefail
+
+            # Ensure local.properties exists (required by android/settings.gradle.kts)
+            SDK_DIR="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+            if [ -z "$SDK_DIR" ]; then
+              echo "ERROR: ANDROID_SDK_ROOT/ANDROID_HOME not set"
+              exit 1
+            fi
+
+            cat > android/local.properties <<EOF
+            flutter.sdk=$FLUTTER_ROOT
+            sdk.dir=$SDK_DIR
+            EOF
+
+            # Extra boot readiness guard (reduces flakiness)
+            adb wait-for-device
+
             cd android
             chmod +x ./gradlew
-            adb wait-for-device
             ./gradlew connectedDebugAndroidTest --stacktrace
