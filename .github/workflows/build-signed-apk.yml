@@ -29,6 +29,27 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Validate signing secrets are configured
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          missing=()
+          [[ -n "$ANDROID_KEYSTORE_BASE64" ]] || missing+=("ANDROID_KEYSTORE_BASE64")
+          [[ -n "$ANDROID_KEYSTORE_PASSWORD" ]] || missing+=("ANDROID_KEYSTORE_PASSWORD")
+          [[ -n "$ANDROID_KEY_PASSWORD" ]] || missing+=("ANDROID_KEY_PASSWORD")
+          [[ -n "$ANDROID_KEY_ALIAS" ]] || missing+=("ANDROID_KEY_ALIAS")
+
+          if (( ${#missing[@]} > 0 )); then
+            printf 'Missing required signing secret(s): %s\n' "${missing[*]}" >&2
+            exit 1
+          fi
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+
       - name: Prepare Android signing files
         shell: bash
         run: |
@@ -116,6 +137,26 @@ jobs:
           dst="build/app/outputs/bundle/release/caleesync-${{ steps.build_meta.outputs.sanitized_build_name }}.aab"
           mv "$src" "$dst"
           echo "Renamed AAB to $dst"
+
+      - name: Verify signed artifacts before upload
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="build/app/outputs/flutter-apk/caleesync-${{ steps.build_meta.outputs.sanitized_build_name }}.apk"
+          aab="build/app/outputs/bundle/release/caleesync-${{ steps.build_meta.outputs.sanitized_build_name }}.aab"
+
+          latest_build_tools="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -n1)"
+          apksigner_bin="$ANDROID_HOME/build-tools/$latest_build_tools/apksigner"
+
+          if [[ ! -x "$apksigner_bin" ]]; then
+            echo "apksigner was not found at $apksigner_bin" >&2
+            exit 1
+          fi
+
+          "$apksigner_bin" verify --print-certs "$apk"
+          jarsigner -verify -strict -certs "$aab"
+
+          echo "Verified signed APK and AAB artifacts."
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
