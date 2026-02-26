@@ -61,6 +61,8 @@ class BackgroundStatusDto {
   String? lastReason;
   BackgroundGateReason? lastGateReason;
   String? lastError;
+  String? lastStage;
+  int? lastStageAtMs;
   int? nextScheduledAtMs;
   bool workerRunning;
   int intervalMinutes;
@@ -73,6 +75,8 @@ class BackgroundStatusDto {
     this.lastReason,
     this.lastGateReason,
     this.lastError,
+    this.lastStage,
+    this.lastStageAtMs,
     this.nextScheduledAtMs,
     required this.workerRunning,
     required this.intervalMinutes,
@@ -96,6 +100,12 @@ abstract class BackgroundSyncControlApi {
 
   @async
   BackgroundStatusDto getBackgroundStatus();
+}
+
+@HostApi()
+abstract class BackgroundSyncRunnerHostApi {
+  @async
+  void notifyBackgroundIsolateReady(int contractVersion);
 }
 
 @FlutterApi()
