@@ -61,12 +61,6 @@ jobs:
           flutter-version: "3.24.0"
           cache: true
 
-
-      - name: Set up Gradle (Flutter-compatible)
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: 8.11.1
-
       - name: Install dependencies
         run: flutter pub get
 
@@ -77,11 +71,30 @@ jobs:
         run: |
           sdkmanager --install "platforms;android-34" "build-tools;34.0.0"
 
+
+      - name: Create Android local.properties
+        shell: bash
+        run: |
+          SDK_DIR="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+
+          cat > android/local.properties <<EOF
+          flutter.sdk=$FLUTTER_ROOT
+          sdk.dir=$SDK_DIR
+          EOF
+
+      - name: Generate Gradle wrapper
+        run: gradle -p android wrapper --gradle-version 8.12
+
       - name: Run instrumentation tests on emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 30
           arch: x86_64
           profile: pixel_5
+          emulator-options: -no-window -noaudio -no-boot-anim -gpu swiftshader_indirect
+          disable-animations: true
           script: |
-            gradle -p android connectedDebugAndroidTest --stacktrace
+            cd android
+            chmod +x ./gradlew
+            adb wait-for-device
+            ./gradlew connectedDebugAndroidTest --stacktrace

@@ -26,6 +26,23 @@ jobs:
           flutter-version: "3.24.0"
           cache: true
 
+      - name: Set up Android SDK tools
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK platform for compileSdk 34
+        run: |
+          sdkmanager --install "platforms;android-34" "build-tools;34.0.0"
+
+      - name: Create Android local.properties
+        shell: bash
+        run: |
+          SDK_DIR="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+
+          cat > android/local.properties <<EOF
+          flutter.sdk=$FLUTTER_ROOT
+          sdk.dir=$SDK_DIR
+          EOF
+
       - name: Install dependencies
         run: flutter pub get
 
