@@ -50,28 +50,38 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
 
-      - name: Prepare Android signing files
+      - name: Decode Android keystore
         shell: bash
         run: |
           set -euo pipefail
-          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/upload-keystore.jks
-          cat > android/key.properties <<EOF
-          storePassword=$ANDROID_KEYSTORE_PASSWORD
-          keyPassword=$ANDROID_KEY_PASSWORD
-          keyAlias=$ANDROID_KEY_ALIAS
-          storeFile=upload-keystore.jks
-          EOF
+          if [[ "$ANDROID_KEYSTORE_BASE64" =~ [[:space:]] ]]; then
+            echo "Keystore decode failed; re-create ANDROID_KEYSTORE_BASE64 as single-line base64" >&2
+            exit 1
+          fi
+
+          keystore_path="$RUNNER_TEMP/upload-keystore.jks"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$keystore_path"
+
+          if [[ ! -s "$keystore_path" ]]; then
+            echo "Keystore decode failed; decoded keystore file is missing or empty" >&2
+            exit 1
+          fi
+
+          keystore_size_bytes="$(wc -c < "$keystore_path")"
+          if (( keystore_size_bytes < 1024 )); then
+            echo "Keystore decode failed; re-create ANDROID_KEYSTORE_BASE64 as single-line base64" >&2
+            exit 1
+          fi
+
+          ls -lah "$keystore_path"
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
 
       - name: Verify Android keystore
         shell: bash
         run: |
           set -euo pipefail
-          keytool -list -v -keystore android/upload-keystore.jks -storepass "$ANDROID_KEYSTORE_PASSWORD" -alias "$ANDROID_KEY_ALIAS" >/dev/null
+          keytool -list -v -keystore "$RUNNER_TEMP/upload-keystore.jks" -storepass "$ANDROID_KEYSTORE_PASSWORD" -alias "$ANDROID_KEY_ALIAS" >/dev/null
           echo "Keystore verification succeeded for alias '$ANDROID_KEY_ALIAS'."
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -113,12 +123,28 @@ jobs:
           flutter build apk --release \
             --build-name="$BUILD_NAME" \
             --build-number="${{ steps.build_meta.outputs.build_number }}"
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/upload-keystore.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+      - name: List generated APK files
+        shell: bash
+        run: |
+          set -euo pipefail
+          find build/app/outputs -maxdepth 5 -type f -name "*.apk" -print
 
       - name: Build signed Android App Bundle
         run: |
           flutter build appbundle --release \
             --build-name="$BUILD_NAME" \
             --build-number="${{ steps.build_meta.outputs.build_number }}"
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/upload-keystore.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
 
       - name: Rename APK with build name
         shell: bash
@@ -174,4 +200,4 @@ jobs:
 
       - name: Clean up signing files
         if: always()
-        run: rm -f android/key.properties android/upload-keystore.jks
+        run: rm -f "$RUNNER_TEMP/upload-keystore.jks"
