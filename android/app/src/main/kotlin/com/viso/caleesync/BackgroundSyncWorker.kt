@@ -12,6 +12,7 @@ import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.ExistingWorkPolicy
+import androidx.work.ListenableWorker
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.Operation
@@ -26,6 +27,7 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.dart.DartExecutor
 import io.flutter.plugins.GeneratedPluginRegistrant
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.Dispatchers
@@ -33,20 +35,31 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
+private typealias WorkResult = ListenableWorker.Result
+
 class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : CoroutineWorker(appContext, params) {
-    override suspend fun doWork(): Result {
+    override suspend fun doWork(): WorkResult {
+        if (isStopped) {
+            Log.w(TAG, "worker stopped before start")
+            return WorkResult.retry()
+        }
         val trigger = inputData.getString("trigger") ?: "periodic"
         return runSyncTask(applicationContext, trigger)
     }
 
-    private suspend fun runSyncTask(context: Context, trigger: String): Result {
+    private suspend fun runSyncTask(context: Context, trigger: String): WorkResult {
+        if (isStopped) {
+            Log.w(TAG, "runSyncTask aborted because worker is stopped")
+            return WorkResult.retry()
+        }
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         prefs.edit().putLong(KEY_LAST_RUN_AT, System.currentTimeMillis()).apply()
         Log.i(TAG, "enter trigger=$trigger")
 
         var engine: FlutterEngine? = null
-        val workerResult = withTimeoutOrNull(90_000) {
-            suspendCancellableCoroutine<Result> { continuation ->
+        var stage = STAGE_ENGINE_CREATED
+        val workerResult = withTimeoutOrNull(WORKER_EXEC_TIMEOUT_MS) {
+            suspendCancellableCoroutine<WorkResult> { continuation ->
                 Handler(Looper.getMainLooper()).post {
                     try {
                         val loader = FlutterInjector.instance().flutterLoader()
@@ -56,21 +69,70 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
                         val localEngine = FlutterEngine(context)
                         GeneratedPluginRegistrant.registerWith(localEngine)
                         engine = localEngine
+                        stage = STAGE_ENGINE_CREATED
+                        persistStage(prefs, stage)
 
                         val calendarApi = CalendarHostApiImpl(context)
                         NativeCalendarApi.setUp(localEngine.dartExecutor.binaryMessenger, calendarApi)
 
+                        val readyLatch = java.util.concurrent.CountDownLatch(1)
+                        val runnerHostApi = object : BackgroundSyncRunnerHostApi {
+                            override fun notifyBackgroundIsolateReady(contractVersion: Long, callback: (kotlin.Result<Unit>) -> Unit) {
+                                prefs.edit().putLong(KEY_LAST_READY_VERSION, contractVersion).apply()
+                                stage = STAGE_DART_READY_RECEIVED
+                                persistStage(prefs, stage)
+                                readyLatch.countDown()
+                                callback(kotlin.Result.success(Unit))
+                            }
+                        }
+                        BackgroundSyncRunnerHostApi.setUp(localEngine.dartExecutor.binaryMessenger, runnerHostApi)
+
                         val runnerApi = BackgroundSyncRunnerApi(localEngine.dartExecutor.binaryMessenger)
+                        stage = STAGE_DART_ENTRYPOINT_STARTED
+                        persistStage(prefs, stage)
                         localEngine.dartExecutor.executeDartEntrypoint(
                             DartExecutor.DartEntrypoint(loader.findAppBundlePath(), "caleeSyncBackgroundEntrypoint")
                         )
 
-                        invokeRunBackgroundSync(
-                            runnerApi = runnerApi,
-                            trigger = trigger,
-                            prefs = prefs,
-                            continuation = continuation
-                        ) { continuation.isActive }
+                        Thread {
+                            val isReady = readyLatch.await(DART_READY_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                            Handler(Looper.getMainLooper()).post {
+                                if (!continuation.isActive) {
+                                    return@post
+                                }
+                                if (isStopped) {
+                                    persistSnapshot(
+                                        prefs = prefs,
+                                        outcome = BackgroundRunOutcome.RETRY,
+                                        reason = "worker_stopped",
+                                        gateReason = BackgroundGateReason.UNKNOWN,
+                                    )
+                                    continuation.resume(WorkResult.retry())
+                                    return@post
+                                }
+                                if (!isReady) {
+                                    persistSnapshot(
+                                        prefs = prefs,
+                                        outcome = BackgroundRunOutcome.RETRY,
+                                        reason = "dart_not_ready",
+                                        gateReason = BackgroundGateReason.UNKNOWN,
+                                    )
+                                    continuation.resume(WorkResult.retry())
+                                    return@post
+                                }
+                                invokeRunBackgroundSync(
+                                    runnerApi = runnerApi,
+                                    trigger = trigger,
+                                    prefs = prefs,
+                                    continuation = continuation,
+                                    stageProvider = { stage },
+                                    stageSetter = {
+                                        stage = it
+                                        persistStage(prefs, stage)
+                                    },
+                                ) { continuation.isActive }
+                            }
+                        }.start()
                     } catch (t: Throwable) {
                         persistSnapshot(
                             prefs = prefs,
@@ -79,8 +141,9 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
                             gateReason = BackgroundGateReason.UNKNOWN,
                             error = t.message,
                         )
+                        persistStage(prefs, stage)
                         if (continuation.isActive) {
-                            continuation.resume(Result.retry())
+                            continuation.resume(WorkResult.retry())
                         }
                     }
                 }
@@ -89,10 +152,12 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
             persistSnapshot(
                 prefs = prefs,
                 outcome = BackgroundRunOutcome.RETRY,
-                reason = "timeout_waiting_for_background_sync",
+                reason = "sync_timeout",
                 gateReason = BackgroundGateReason.UNKNOWN,
+                error = "worker_execution_timeout",
             )
-            Result.retry()
+            persistStage(prefs, stage)
+            WorkResult.retry()
         }
 
         withContext(Dispatchers.Main.immediate) {
@@ -107,6 +172,7 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
                 .apply()
             scheduleWatchdogAlarm(context, configuredInterval)
         }
+        persistStage(prefs, STAGE_WORKER_FINISHED)
         Log.i(TAG, "exit result=$workerResult")
         return workerResult
     }
@@ -115,12 +181,35 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
         runnerApi: BackgroundSyncRunnerApi,
         trigger: String,
         prefs: android.content.SharedPreferences,
-        continuation: kotlin.coroutines.Continuation<Result>,
+        continuation: kotlin.coroutines.Continuation<WorkResult>,
+        stageProvider: () -> String,
+        stageSetter: (String) -> Unit,
         isActive: () -> Boolean,
     ) {
+        stageSetter(STAGE_RUN_SYNC_SENT)
+        val runReturned = AtomicLong(0L)
+        Thread {
+            Thread.sleep(SYNC_REPLY_TIMEOUT_MS)
+            if (runReturned.compareAndSet(0L, 1L) && isActive()) {
+                persistSnapshot(
+                    prefs = prefs,
+                    outcome = BackgroundRunOutcome.RETRY,
+                    reason = "engine_killed_or_no_reply",
+                    gateReason = BackgroundGateReason.UNKNOWN,
+                    error = "sync_reply_timeout",
+                )
+                persistStage(prefs, stageProvider())
+                continuation.resume(WorkResult.retry())
+            }
+        }.start()
+
         runnerApi.runBackgroundSync(BackgroundRunRequest(trigger, CONTRACT_VERSION.toLong())) { response ->
+            if (!runReturned.compareAndSet(0L, 1L)) {
+                return@runBackgroundSync
+            }
             response.fold(
                 onSuccess = { runResult ->
+                    stageSetter(STAGE_RUN_SYNC_REPLIED)
                     val outcome = runResult.outcome
                     persistSnapshot(
                         prefs = prefs,
@@ -136,6 +225,7 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
                     }
                 },
                 onFailure = { error ->
+                    stageSetter(STAGE_RUN_SYNC_REPLIED)
                     persistSnapshot(
                         prefs = prefs,
                         outcome = BackgroundRunOutcome.RETRY,
@@ -144,7 +234,7 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
                         error = error.message,
                     )
                     if (isActive()) {
-                        continuation.resume(Result.retry())
+                        continuation.resume(WorkResult.retry())
                     }
                 },
             )
@@ -163,6 +253,22 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
         private const val KEY_LAST_REASON = "last_reason"
         private const val KEY_LAST_GATE = "last_gate"
         private const val KEY_LAST_ERROR = "last_error"
+        private const val KEY_LAST_STAGE = "last_stage"
+        private const val KEY_LAST_STAGE_AT = "last_stage_at"
+        private const val KEY_LAST_READY_VERSION = "last_ready_version"
+        private const val KEY_LAST_ATTEMPT_AT = "last_attempt_at"
+
+        private const val STAGE_ENGINE_CREATED = "ENGINE_CREATED"
+        private const val STAGE_DART_ENTRYPOINT_STARTED = "DART_ENTRYPOINT_STARTED"
+        private const val STAGE_DART_READY_RECEIVED = "DART_READY_RECEIVED"
+        private const val STAGE_RUN_SYNC_SENT = "RUN_SYNC_SENT"
+        private const val STAGE_RUN_SYNC_REPLIED = "RUN_SYNC_REPLIED"
+        private const val STAGE_WORKER_FINISHED = "WORKER_FINISHED"
+
+        private const val DART_READY_TIMEOUT_MS = 15_000L
+        private const val SYNC_REPLY_TIMEOUT_MS = 25_000L
+        private const val WORKER_EXEC_TIMEOUT_MS = 90_000L
+        private const val RECENT_ATTEMPT_WINDOW_MS = 30_000L
 
         const val PERIODIC_UNIQUE = "CaleeSyncPeriodicWorker"
         const val SYNC_UNIQUE = "CaleeSyncSyncWorker"
@@ -176,11 +282,11 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
                 .build()
         }
 
-        private fun mapOutcomeToWorkerResult(outcome: BackgroundRunOutcome): Result {
+        private fun mapOutcomeToWorkerResult(outcome: BackgroundRunOutcome): WorkResult {
             return when (outcome) {
-                BackgroundRunOutcome.SUCCESS, BackgroundRunOutcome.GATED -> Result.success()
-                BackgroundRunOutcome.RETRY -> Result.retry()
-                BackgroundRunOutcome.FAILURE -> Result.failure()
+                BackgroundRunOutcome.SUCCESS, BackgroundRunOutcome.GATED -> WorkResult.success()
+                BackgroundRunOutcome.RETRY -> WorkResult.retry()
+                BackgroundRunOutcome.FAILURE -> WorkResult.failure()
             }
         }
 
@@ -197,6 +303,17 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
                 .putString(KEY_LAST_REASON, reason ?: "")
                 .putString(KEY_LAST_GATE, gateReason.name.lowercase())
                 .putString(KEY_LAST_ERROR, error ?: "")
+                .putLong(KEY_LAST_ATTEMPT_AT, System.currentTimeMillis())
+                .apply()
+        }
+
+        private fun persistStage(
+            prefs: android.content.SharedPreferences,
+            stage: String,
+        ) {
+            prefs.edit()
+                .putString(KEY_LAST_STAGE, stage)
+                .putLong(KEY_LAST_STAGE_AT, System.currentTimeMillis())
                 .apply()
         }
 
@@ -263,7 +380,17 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
             }
 
             return WorkManager.getInstance(context)
-                .enqueueUniqueWork(SYNC_UNIQUE, ExistingWorkPolicy.REPLACE, request)
+                .enqueueUniqueWork(SYNC_UNIQUE, ExistingWorkPolicy.KEEP, request)
+        }
+
+        fun shouldSkipWatchdogOneOff(context: Context): Boolean {
+            val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            val lastAttemptAt = prefs.getLong(KEY_LAST_ATTEMPT_AT, 0L)
+            if (lastAttemptAt > 0L && System.currentTimeMillis() - lastAttemptAt < RECENT_ATTEMPT_WINDOW_MS) {
+                return true
+            }
+            val infos = WorkManager.getInstance(context).getWorkInfosForUniqueWork(SYNC_UNIQUE).get()
+            return infos.any { it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.ENQUEUED }
         }
 
         fun scheduleWatchdogAlarm(context: Context, intervalMinutes: Int? = null) {
@@ -345,6 +472,8 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
                 lastReason = prefs.getString(KEY_LAST_REASON, ""),
                 lastGateReason = prefs.getString(KEY_LAST_GATE, "")?.let { parseGateReason(it) },
                 lastError = prefs.getString(KEY_LAST_ERROR, ""),
+                lastStage = prefs.getString(KEY_LAST_STAGE, ""),
+                lastStageAtMs = prefs.getLong(KEY_LAST_STAGE_AT, 0L).takeIf { it > 0 },
                 nextScheduledAtMs = nextAt,
                 workerRunning = workerRunning,
                 intervalMinutes = configuredInterval.toLong(),

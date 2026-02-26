@@ -103,6 +103,8 @@ data class BackgroundStatusDto(
   val lastReason: String? = null,
   val lastGateReason: BackgroundGateReason? = null,
   val lastError: String? = null,
+  val lastStage: String? = null,
+  val lastStageAtMs: Long? = null,
   val nextScheduledAtMs: Long? = null,
   val workerRunning: Boolean,
   val intervalMinutes: Long,
@@ -116,10 +118,12 @@ data class BackgroundStatusDto(
       val lastReason = list[3] as String?
       val lastGateReason = (list[4] as Number?)?.toInt()?.let { BackgroundGateReason.ofRaw(it) }
       val lastError = list[5] as String?
-      val nextScheduledAtMs = list[6].let { if (it is Int) it.toLong() else it as Long? }
-      val workerRunning = list[7] as Boolean
-      val intervalMinutes = list[8].let { if (it is Int) it.toLong() else it as Long }
-      val contractVersion = list[9].let { if (it is Int) it.toLong() else it as Long }
+      val lastStage = list[6] as String?
+      val lastStageAtMs = list[7].let { if (it is Int) it.toLong() else it as Long? }
+      val nextScheduledAtMs = list[8].let { if (it is Int) it.toLong() else it as Long? }
+      val workerRunning = list[9] as Boolean
+      val intervalMinutes = list[10].let { if (it is Int) it.toLong() else it as Long }
+      val contractVersion = list[11].let { if (it is Int) it.toLong() else it as Long }
       return BackgroundStatusDto(
         periodicEnabled,
         lastRunAtMs,
@@ -127,6 +131,8 @@ data class BackgroundStatusDto(
         lastReason,
         lastGateReason,
         lastError,
+        lastStage,
+        lastStageAtMs,
         nextScheduledAtMs,
         workerRunning,
         intervalMinutes,
@@ -142,6 +148,8 @@ data class BackgroundStatusDto(
     lastReason,
     lastGateReason?.raw,
     lastError,
+    lastStage,
+    lastStageAtMs,
     nextScheduledAtMs,
     workerRunning,
     intervalMinutes,
@@ -282,6 +290,38 @@ interface BackgroundSyncControlApi {
           api.getBackgroundStatus { result ->
             result.fold(
               onSuccess = { reply.reply(wrapResult(it)) },
+              onFailure = { reply.reply(wrapError(it)) },
+            )
+          }
+        }
+      }
+    }
+  }
+}
+
+interface BackgroundSyncRunnerHostApi {
+  fun notifyBackgroundIsolateReady(contractVersion: Long, callback: (Result<Unit>) -> Unit)
+
+  companion object {
+    val codec: MessageCodec<Any?> by lazy { BackgroundSyncApiCodec }
+
+    fun setUp(binaryMessenger: BinaryMessenger, api: BackgroundSyncRunnerHostApi?, messageChannelSuffix: String = "") {
+      val suffix = if (messageChannelSuffix.isNotEmpty()) ".$messageChannelSuffix" else ""
+
+      val readyChannel = BasicMessageChannel<Any?>(
+        binaryMessenger,
+        "dev.flutter.pigeon.caleesync.BackgroundSyncRunnerHostApi.notifyBackgroundIsolateReady$suffix",
+        codec,
+      )
+      if (api == null) {
+        readyChannel.setMessageHandler(null)
+      } else {
+        readyChannel.setMessageHandler { message, reply ->
+          val args = message as List<Any?>
+          val contractVersion = args[0].let { if (it is Int) it.toLong() else it as Long }
+          api.notifyBackgroundIsolateReady(contractVersion) { result ->
+            result.fold(
+              onSuccess = { reply.reply(wrapResult(null)) },
               onFailure = { reply.reply(wrapError(it)) },
             )
           }

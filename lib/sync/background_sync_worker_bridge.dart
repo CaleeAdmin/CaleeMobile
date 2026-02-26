@@ -13,20 +13,36 @@ import '../entity/sync_run_record.dart';
 
 class BackgroundSyncWorkerBridge implements BackgroundSyncRunnerApi {
   static Future<void>? _initFuture;
+  static final BackgroundSyncRunnerHostApi _runnerHostApi = BackgroundSyncRunnerHostApi();
+  static const Duration _initTimeout = Duration(seconds: 12);
+  static const int _readyNotifyAttempts = 3;
+  static const Duration _readyNotifyRetryDelay = Duration(milliseconds: 350);
 
   static Future<void> start() async {
-    await _ensureInitialized();
+    WidgetsFlutterBinding.ensureInitialized();
+    DartPluginRegistrant.ensureInitialized();
     BackgroundSyncRunnerApi.setUp(BackgroundSyncWorkerBridge());
+    unawaited(_notifyReadyWithRetry());
+    _initFuture ??= _heavyInit();
   }
 
-  static Future<void> _ensureInitialized() async {
-    _initFuture ??= () async {
-      WidgetsFlutterBinding.ensureInitialized();
-      DartPluginRegistrant.ensureInitialized();
-      await MMKVUtils.instance.init();
-      await DatabaseHelper.instance.init();
-    }();
-    await _initFuture;
+  static Future<void> _notifyReadyWithRetry() async {
+    for (int attempt = 1; attempt <= _readyNotifyAttempts; attempt++) {
+      try {
+        await _runnerHostApi.notifyBackgroundIsolateReady(kBackgroundSyncContractVersion);
+        return;
+      } catch (_) {
+        if (attempt == _readyNotifyAttempts) {
+          return;
+        }
+        await Future<void>.delayed(_readyNotifyRetryDelay);
+      }
+    }
+  }
+
+  static Future<void> _heavyInit() async {
+    await MMKVUtils.instance.init();
+    await DatabaseHelper.instance.init();
   }
 
   @override
@@ -41,13 +57,46 @@ class BackgroundSyncWorkerBridge implements BackgroundSyncRunnerApi {
         contractVersion: kBackgroundSyncContractVersion,
       );
     }
+    try {
+      final Future<void> initFuture = _initFuture ?? (_initFuture = _heavyInit());
+      await initFuture.timeout(_initTimeout);
+    } on TimeoutException {
+      return BackgroundRunResult(
+        outcome: BackgroundRunOutcome.retry,
+        reason: 'init_not_ready',
+        gateReason: BackgroundGateReason.environmentBlocked,
+        error: 'background_init_timeout',
+        contractVersion: kBackgroundSyncContractVersion,
+      );
+    }
+
     final String? loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey);
     if (loginName == null || loginName.isEmpty) {
       return BackgroundRunResult(outcome: BackgroundRunOutcome.failure, reason: 'no_account', gateReason: BackgroundGateReason.authInvalid, error: 'missing_login_name', contractVersion: kBackgroundSyncContractVersion);
     }
 
+    if (SyncEngine.isSyncInProgress) {
+      return BackgroundRunResult(
+        outcome: BackgroundRunOutcome.success,
+        reason: 'already_syncing',
+        gateReason: BackgroundGateReason.none,
+        contractVersion: kBackgroundSyncContractVersion,
+      );
+    }
+
     try {
-      final summary = await SyncEngine().executeFullSync(trigger: _mapTrigger(trigger));
+      final summary = await SyncEngine().executeFullSync(
+        trigger: _mapTrigger(trigger),
+        waitForTurn: false,
+      );
+      if (summary == null) {
+        return BackgroundRunResult(
+          outcome: BackgroundRunOutcome.success,
+          reason: 'already_syncing',
+          gateReason: BackgroundGateReason.none,
+          contractVersion: kBackgroundSyncContractVersion,
+        );
+      }
       if (summary.failed == 0) {
         return BackgroundRunResult(outcome: BackgroundRunOutcome.success, reason: trigger, gateReason: BackgroundGateReason.none, contractVersion: kBackgroundSyncContractVersion);
       }

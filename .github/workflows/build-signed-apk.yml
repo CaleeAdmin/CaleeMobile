@@ -1,14 +1,14 @@
-name: Build Signed APK
+name: Build Signed Android Artifacts
 
 on:
   workflow_dispatch:
 
 jobs:
-  build-signed-apk:
-    name: Generate signed release APK
+  build-signed-android:
+    name: Generate signed release APK and AAB
     runs-on: ubuntu-latest
     env:
-      BUILD_NAME: "0.0.2"
+      BUILD_NAME: "0.0.3"
 
     steps:
       - name: Checkout
@@ -29,28 +29,59 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Prepare Android signing files
+      - name: Validate signing secrets are configured
         shell: bash
         run: |
           set -euo pipefail
-          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/upload-keystore.jks
-          cat > android/key.properties <<EOF
-          storePassword=$ANDROID_KEYSTORE_PASSWORD
-          keyPassword=$ANDROID_KEY_PASSWORD
-          keyAlias=$ANDROID_KEY_ALIAS
-          storeFile=upload-keystore.jks
-          EOF
+
+          missing=()
+          [[ -n "$ANDROID_KEYSTORE_BASE64" ]] || missing+=("ANDROID_KEYSTORE_BASE64")
+          [[ -n "$ANDROID_KEYSTORE_PASSWORD" ]] || missing+=("ANDROID_KEYSTORE_PASSWORD")
+          [[ -n "$ANDROID_KEY_PASSWORD" ]] || missing+=("ANDROID_KEY_PASSWORD")
+          [[ -n "$ANDROID_KEY_ALIAS" ]] || missing+=("ANDROID_KEY_ALIAS")
+
+          if (( ${#missing[@]} > 0 )); then
+            printf 'Missing required signing secret(s): %s\n' "${missing[*]}" >&2
+            exit 1
+          fi
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
 
+      - name: Decode Android keystore
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$ANDROID_KEYSTORE_BASE64" =~ [[:space:]] ]]; then
+            echo "Keystore decode failed; re-create ANDROID_KEYSTORE_BASE64 as single-line base64" >&2
+            exit 1
+          fi
+
+          keystore_path="$RUNNER_TEMP/upload-keystore.jks"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$keystore_path"
+
+          if [[ ! -s "$keystore_path" ]]; then
+            echo "Keystore decode failed; decoded keystore file is missing or empty" >&2
+            exit 1
+          fi
+
+          keystore_size_bytes="$(wc -c < "$keystore_path")"
+          if (( keystore_size_bytes < 1024 )); then
+            echo "Keystore decode failed; re-create ANDROID_KEYSTORE_BASE64 as single-line base64" >&2
+            exit 1
+          fi
+
+          ls -lah "$keystore_path"
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+
       - name: Verify Android keystore
         shell: bash
         run: |
           set -euo pipefail
-          keytool -list -v -keystore android/upload-keystore.jks -storepass "$ANDROID_KEYSTORE_PASSWORD" -alias "$ANDROID_KEY_ALIAS" >/dev/null
+          keytool -list -v -keystore "$RUNNER_TEMP/upload-keystore.jks" -storepass "$ANDROID_KEYSTORE_PASSWORD" -alias "$ANDROID_KEY_ALIAS" >/dev/null
           echo "Keystore verification succeeded for alias '$ANDROID_KEY_ALIAS'."
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -92,6 +123,115 @@ jobs:
           flutter build apk --release \
             --build-name="$BUILD_NAME" \
             --build-number="${{ steps.build_meta.outputs.build_number }}"
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/upload-keystore.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+      - name: List generated APK files
+        shell: bash
+        run: |
+          set -euo pipefail
+          find build/app/outputs -maxdepth 5 -type f -name "*.apk" -print
+
+      - name: Build signed Android App Bundle
+        run: |
+          flutter build appbundle --release \
+            --build-name="$BUILD_NAME" \
+            --build-number="${{ steps.build_meta.outputs.build_number }}"
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/upload-keystore.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+      - name: List native debug symbols output
+        shell: bash
+        run: |
+          set -euo pipefail
+          find build/app/outputs -maxdepth 8 -type f -name "*native*debug*symbol*.zip" -print
+          find build/app/intermediates -maxdepth 8 -type f -name "*.zip" | grep -E 'native[_-]debug[_-]symbol' || true
+
+      - name: Resolve native debug symbols zip path
+        id: native_symbols
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          normalize_symbols_zip() {
+            local source_zip="$1"
+            local normalized_zip="build/app/outputs/native-debug-symbols/release/native-debug-symbols.zip"
+
+            mkdir -p "$(dirname "$normalized_zip")"
+
+            local tmp_dir
+            tmp_dir="$(mktemp -d)"
+            unzip -q "$source_zip" -d "$tmp_dir"
+
+            if [[ -d "$tmp_dir/lib" ]]; then
+              (
+                cd "$tmp_dir/lib"
+                zip -qr "$GITHUB_WORKSPACE/$normalized_zip" .
+              )
+              echo "zip_path=$normalized_zip" >> "$GITHUB_OUTPUT"
+              echo "Normalized native symbols zip by removing top-level lib/: $source_zip"
+            else
+              echo "zip_path=$source_zip" >> "$GITHUB_OUTPUT"
+              echo "Native symbols zip already ABI-rooted: $source_zip"
+            fi
+
+            rm -rf "$tmp_dir"
+          }
+
+          primary_path="build/app/outputs/native-debug-symbols/release/native-debug-symbols.zip"
+          if [[ -f "$primary_path" ]]; then
+            normalize_symbols_zip "$primary_path"
+            exit 0
+          fi
+
+          fallback_path="$({
+            find build/app/outputs -maxdepth 10 -type f -name '*.zip'
+            find build/app/intermediates -maxdepth 12 -type f -name '*.zip'
+          } | grep -E 'native([_-])debug([_-])symbol' | head -n1 || true)"
+
+          if [[ -n "$fallback_path" ]]; then
+            normalize_symbols_zip "$fallback_path"
+            exit 0
+          fi
+
+          generated_zip="build/app/outputs/native-debug-symbols/release/native-debug-symbols.zip"
+          mkdir -p "$(dirname "$generated_zip")"
+
+          symbols_dir="$({
+            find build/app/intermediates -maxdepth 12 -type d -path '*native_debug_symbol*' -name out
+            find build/app/intermediates -maxdepth 12 -type d -path '*native-debug-symbol*' -name out
+            find build/app/intermediates -maxdepth 12 -type d -path '*unstripped_native_libs*' -name out
+            find build/app/intermediates -maxdepth 12 -type d -path '*merged_native_libs*' -name out
+          } | head -n1 || true)"
+
+          if [[ -n "$symbols_dir" ]]; then
+            if [[ -d "$symbols_dir/lib" ]]; then
+              (
+                cd "$symbols_dir/lib"
+                zip -qr "$GITHUB_WORKSPACE/$generated_zip" .
+              )
+            else
+              (
+                cd "$symbols_dir"
+                zip -qr "$GITHUB_WORKSPACE/$generated_zip" .
+              )
+            fi
+
+            echo "zip_path=$generated_zip" >> "$GITHUB_OUTPUT"
+            echo "Generated native symbols zip: $generated_zip from $symbols_dir"
+            exit 0
+          fi
+
+          if [[ -z "$fallback_path" ]]; then
+            echo "Native debug symbols zip not found in expected outputs" >&2
+            exit 1
+          fi
 
       - name: Rename APK with build name
         shell: bash
@@ -102,6 +242,39 @@ jobs:
           mv "$src" "$dst"
           echo "Renamed APK to $dst"
 
+      - name: Rename AAB with build name
+        shell: bash
+        run: |
+          set -euo pipefail
+          src="build/app/outputs/bundle/release/app-release.aab"
+          dst="build/app/outputs/bundle/release/caleesync-${{ steps.build_meta.outputs.sanitized_build_name }}.aab"
+          mv "$src" "$dst"
+          echo "Renamed AAB to $dst"
+
+      - name: Verify signed artifacts before upload
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="build/app/outputs/flutter-apk/caleesync-${{ steps.build_meta.outputs.sanitized_build_name }}.apk"
+          aab="build/app/outputs/bundle/release/caleesync-${{ steps.build_meta.outputs.sanitized_build_name }}.aab"
+
+          latest_build_tools="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -n1)"
+          apksigner_bin="$ANDROID_HOME/build-tools/$latest_build_tools/apksigner"
+
+          if [[ ! -x "$apksigner_bin" ]]; then
+            echo "apksigner was not found at $apksigner_bin" >&2
+            exit 1
+          fi
+
+          "$apksigner_bin" verify --print-certs "$apk"
+          # Android App Bundles are commonly signed with an upload key whose
+          # certificate chain is not anchored in the runner trust store.
+          # `-strict` upgrades that expected condition to a hard failure,
+          # so we verify the AAB signature/cert details without strict mode.
+          jarsigner -verify -certs "$aab"
+
+          echo "Verified signed APK and AAB artifacts."
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
@@ -109,6 +282,20 @@ jobs:
           path: build/app/outputs/flutter-apk/caleesync-${{ steps.build_meta.outputs.sanitized_build_name }}.apk
           if-no-files-found: error
 
+      - name: Upload AAB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: signed-release-aab
+          path: build/app/outputs/bundle/release/caleesync-${{ steps.build_meta.outputs.sanitized_build_name }}.aab
+          if-no-files-found: error
+
+      - name: Upload native debug symbols zip artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-debug-symbols
+          path: ${{ steps.native_symbols.outputs.zip_path }}
+          if-no-files-found: error
+
       - name: Clean up signing files
         if: always()
-        run: rm -f android/key.properties android/upload-keystore.jks
+        run: rm -f "$RUNNER_TEMP/upload-keystore.jks"

@@ -15,16 +15,38 @@ For help getting started with Flutter development, view the
 [online documentation](https://docs.flutter.dev/), which offers tutorials,
 samples, guidance on mobile development, and a full API reference.
 
+
+## Local release signing setup
+
+Google Play rejects artifacts signed with the debug key. To build a release-signed APK/AAB locally, create `android/key.properties` (do not commit it) with:
+
+```properties
+storeFile=../upload-keystore.jks
+storePassword=<your-keystore-password>
+keyAlias=<your-key-alias>
+keyPassword=<your-key-password>
+```
+
+Then build with:
+
+```bash
+flutter build appbundle --release
+# or
+flutter build apk --release
+```
+
+If `android/key.properties` is not present, release builds can still be signed by setting the `ANDROID_KEYSTORE_PATH`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, and `ANDROID_KEY_PASSWORD` environment variables (for example in CI). Release builds now fail fast when signing is not configured, so uploaded bundles are always signed.
+
 ## GitHub Actions: Manual signed APK build
 
-A manual GitHub workflow is available at `.github/workflows/build-signed-apk.yml`.
+A manual GitHub workflow is available at `.github/workflows/build-signed-apk.yml`, and it now fails early with an explicit list of any missing signing secrets before build/verification/upload steps.
 
 ### Required repository secrets
 
 Configure these repository secrets before running the workflow:
 
 - `ANDROID_KEYSTORE_BASE64`: Base64-encoded JKS keystore content.
-- `ANDROID_STORE_PASSWORD`: Keystore password.
+- `ANDROID_KEYSTORE_PASSWORD`: Keystore password.
 - `ANDROID_KEY_PASSWORD`: Key password.
 - `ANDROID_KEY_ALIAS`: Alias of the signing key.
 

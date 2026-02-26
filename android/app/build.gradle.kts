@@ -1,5 +1,6 @@
 import java.io.FileInputStream
 import java.util.Properties
+import org.gradle.api.GradleException
 
 plugins {
     id("com.android.application")
@@ -14,12 +15,58 @@ if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(FileInputStream(keystorePropertiesFile))
 }
 
-val releaseKeystoreFile = keystoreProperties["storeFile"]?.toString()?.let { file(it) }
-val hasReleaseSigningConfig = keystorePropertiesFile.exists() && releaseKeystoreFile?.exists() == true
+val envStoreFile = providers.environmentVariable("ANDROID_KEYSTORE_PATH").orNull
+val envStorePassword = providers.environmentVariable("ANDROID_KEYSTORE_PASSWORD").orNull
+val envKeyAlias = providers.environmentVariable("ANDROID_KEY_ALIAS").orNull
+val envKeyPassword = providers.environmentVariable("ANDROID_KEY_PASSWORD").orNull
+
+val releaseStoreFilePath = envStoreFile ?: keystoreProperties["storeFile"]?.toString()
+val releaseStorePassword = envStorePassword ?: keystoreProperties["storePassword"]?.toString()
+val releaseKeyAlias = envKeyAlias ?: keystoreProperties["keyAlias"]?.toString()
+val releaseKeyPassword = envKeyPassword ?: keystoreProperties["keyPassword"]?.toString()
+
+val releaseKeystoreFile = releaseStoreFilePath?.let { file(it) }
+val missingSigningInputs = buildList {
+    if (releaseStoreFilePath.isNullOrBlank()) {
+        add("storeFile (key.properties: storeFile or env ANDROID_KEYSTORE_PATH)")
+    } else if (releaseKeystoreFile?.exists() != true) {
+        add("keystore file not found at '$releaseStoreFilePath'")
+    }
+
+    if (releaseStorePassword.isNullOrBlank()) {
+        add("storePassword (key.properties: storePassword or env ANDROID_KEYSTORE_PASSWORD)")
+    }
+    if (releaseKeyAlias.isNullOrBlank()) {
+        add("keyAlias (key.properties: keyAlias or env ANDROID_KEY_ALIAS)")
+    }
+    if (releaseKeyPassword.isNullOrBlank()) {
+        add("keyPassword (key.properties: keyPassword or env ANDROID_KEY_PASSWORD)")
+    }
+}
+val hasReleaseSigningConfig = missingSigningInputs.isEmpty()
+
+val isReleaseBuildRequested =
+    gradle.startParameter.taskNames.any { taskName -> taskName.contains("release", ignoreCase = true) }
+
+if (!hasReleaseSigningConfig) {
+    val signingRequirements =
+        "android/key.properties or ANDROID_KEYSTORE_PATH/ANDROID_KEYSTORE_PASSWORD/ANDROID_KEY_ALIAS/ANDROID_KEY_PASSWORD"
+    val missingInputsDescription = missingSigningInputs.joinToString(separator = "; ")
+    if (isReleaseBuildRequested) {
+        throw GradleException(
+            "Release signing is required for release builds. Missing: $missingInputsDescription. Configure $signingRequirements."
+        )
+    }
+
+    logger.warn(
+        "Release signing is not configured for non-release tasks. Missing: $missingInputsDescription; " +
+            "to sign artifacts, provide $signingRequirements."
+    )
+}
 
 android {
     namespace = "com.viso.caleesync"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 35
     ndkVersion = "27.0.12077973"
 
     compileOptions {
@@ -37,28 +84,28 @@ android {
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
-        targetSdk = flutter.targetSdkVersion
+        targetSdk = 35
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
 
     signingConfigs {
         create("release") {
-            if (hasReleaseSigningConfig) {
-                keyAlias = keystoreProperties["keyAlias"] as String?
-                keyPassword = keystoreProperties["keyPassword"] as String?
-                storeFile = releaseKeystoreFile
-                storePassword = keystoreProperties["storePassword"] as String?
-            }
+            keyAlias = releaseKeyAlias
+            keyPassword = releaseKeyPassword
+            storeFile = releaseKeystoreFile
+            storePassword = releaseStorePassword
         }
     }
 
     buildTypes {
         release {
-            signingConfig = if (hasReleaseSigningConfig) {
-                signingConfigs.getByName("release")
-            } else {
-                signingConfigs.getByName("debug")
+            if (hasReleaseSigningConfig) {
+                signingConfig = signingConfigs.getByName("release")
+            }
+
+            ndk {
+                debugSymbolLevel = "FULL"
             }
         }
     }

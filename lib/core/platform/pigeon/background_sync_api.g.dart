@@ -86,6 +86,8 @@ class BackgroundStatusDto {
     this.lastReason,
     this.lastGateReason,
     this.lastError,
+    this.lastStage,
+    this.lastStageAtMs,
     this.nextScheduledAtMs,
     required this.workerRunning,
     required this.intervalMinutes,
@@ -98,6 +100,8 @@ class BackgroundStatusDto {
   String? lastReason;
   BackgroundGateReason? lastGateReason;
   String? lastError;
+  String? lastStage;
+  int? lastStageAtMs;
   int? nextScheduledAtMs;
   bool workerRunning;
   int intervalMinutes;
@@ -110,6 +114,8 @@ class BackgroundStatusDto {
         lastReason,
         lastGateReason?.index,
         lastError,
+        lastStage,
+        lastStageAtMs,
         nextScheduledAtMs,
         workerRunning,
         intervalMinutes,
@@ -125,10 +131,12 @@ class BackgroundStatusDto {
       lastReason: result[3] as String?,
       lastGateReason: result[4] == null ? null : BackgroundGateReason.values[(result[4]! as num).toInt()],
       lastError: result[5] as String?,
-      nextScheduledAtMs: (result[6] as num?)?.toInt(),
-      workerRunning: result[7]! as bool,
-      intervalMinutes: (result[8]! as num).toInt(),
-      contractVersion: (result[9]! as num).toInt(),
+      lastStage: result[6] as String?,
+      lastStageAtMs: (result[7] as num?)?.toInt(),
+      nextScheduledAtMs: (result[8] as num?)?.toInt(),
+      workerRunning: result[9]! as bool,
+      intervalMinutes: (result[10]! as num).toInt(),
+      contractVersion: (result[11]! as num).toInt(),
     );
   }
 }
@@ -229,6 +237,27 @@ class BackgroundSyncControlApi {
       throw PlatformException(code: 'null-error', message: 'Host platform returned null value for non-null return value.');
     }
     return reply[0]! as BackgroundStatusDto;
+  }
+}
+
+class BackgroundSyncRunnerHostApi {
+  BackgroundSyncRunnerHostApi({BinaryMessenger? binaryMessenger, String messageChannelSuffix = ''})
+      : _binaryMessenger = binaryMessenger,
+        _suffix = messageChannelSuffix.isNotEmpty ? '.$messageChannelSuffix' : '';
+
+  static const int contractVersion = kBackgroundSyncContractVersion;
+  final BinaryMessenger? _binaryMessenger;
+  final String _suffix;
+  static const MessageCodec<Object?> pigeonChannelCodec = _BackgroundSyncApiCodec();
+
+  Future<void> notifyBackgroundIsolateReady(int contractVersion) async {
+    final channelName = 'dev.flutter.pigeon.caleesync.BackgroundSyncRunnerHostApi.notifyBackgroundIsolateReady$_suffix';
+    final channel = BasicMessageChannel<Object?>(channelName, pigeonChannelCodec, binaryMessenger: _binaryMessenger);
+    final reply = await channel.send(<Object?>[contractVersion]) as List<Object?>?;
+    if (reply == null) throw _createConnectionError(channelName);
+    if (reply.length > 1) {
+      throw PlatformException(code: reply[0]! as String, message: reply[1] as String?, details: reply[2]);
+    }
   }
 }
 
