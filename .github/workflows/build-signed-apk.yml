@@ -159,10 +159,34 @@ jobs:
         run: |
           set -euo pipefail
 
+          normalize_symbols_zip() {
+            local source_zip="$1"
+            local normalized_zip="build/app/outputs/native-debug-symbols/release/native-debug-symbols.zip"
+
+            mkdir -p "$(dirname "$normalized_zip")"
+
+            local tmp_dir
+            tmp_dir="$(mktemp -d)"
+            unzip -q "$source_zip" -d "$tmp_dir"
+
+            if [[ -d "$tmp_dir/lib" ]]; then
+              (
+                cd "$tmp_dir/lib"
+                zip -qr "$GITHUB_WORKSPACE/$normalized_zip" .
+              )
+              echo "zip_path=$normalized_zip" >> "$GITHUB_OUTPUT"
+              echo "Normalized native symbols zip by removing top-level lib/: $source_zip"
+            else
+              echo "zip_path=$source_zip" >> "$GITHUB_OUTPUT"
+              echo "Native symbols zip already ABI-rooted: $source_zip"
+            fi
+
+            rm -rf "$tmp_dir"
+          }
+
           primary_path="build/app/outputs/native-debug-symbols/release/native-debug-symbols.zip"
           if [[ -f "$primary_path" ]]; then
-            echo "zip_path=$primary_path" >> "$GITHUB_OUTPUT"
-            echo "Resolved native symbols zip: $primary_path"
+            normalize_symbols_zip "$primary_path"
             exit 0
           fi
 
@@ -172,8 +196,7 @@ jobs:
           } | grep -E 'native([_-])debug([_-])symbol' | head -n1 || true)"
 
           if [[ -n "$fallback_path" ]]; then
-            echo "zip_path=$fallback_path" >> "$GITHUB_OUTPUT"
-            echo "Resolved native symbols zip: $fallback_path"
+            normalize_symbols_zip "$fallback_path"
             exit 0
           fi
 
@@ -188,10 +211,17 @@ jobs:
           } | head -n1 || true)"
 
           if [[ -n "$symbols_dir" ]]; then
-            (
-              cd "$symbols_dir"
-              zip -r "$GITHUB_WORKSPACE/$generated_zip" .
-            )
+            if [[ -d "$symbols_dir/lib" ]]; then
+              (
+                cd "$symbols_dir/lib"
+                zip -qr "$GITHUB_WORKSPACE/$generated_zip" .
+              )
+            else
+              (
+                cd "$symbols_dir"
+                zip -qr "$GITHUB_WORKSPACE/$generated_zip" .
+              )
+            fi
 
             echo "zip_path=$generated_zip" >> "$GITHUB_OUTPUT"
             echo "Generated native symbols zip: $generated_zip from $symbols_dir"
