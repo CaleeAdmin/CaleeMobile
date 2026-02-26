@@ -15,13 +15,29 @@ class BackgroundSyncWorkerBridge implements BackgroundSyncRunnerApi {
   static Future<void>? _initFuture;
   static final BackgroundSyncRunnerHostApi _runnerHostApi = BackgroundSyncRunnerHostApi();
   static const Duration _initTimeout = Duration(seconds: 12);
+  static const int _readyNotifyAttempts = 3;
+  static const Duration _readyNotifyRetryDelay = Duration(milliseconds: 350);
 
   static Future<void> start() async {
     WidgetsFlutterBinding.ensureInitialized();
     DartPluginRegistrant.ensureInitialized();
     BackgroundSyncRunnerApi.setUp(BackgroundSyncWorkerBridge());
-    unawaited(_runnerHostApi.notifyBackgroundIsolateReady(kBackgroundSyncContractVersion));
+    unawaited(_notifyReadyWithRetry());
     _initFuture ??= _heavyInit();
+  }
+
+  static Future<void> _notifyReadyWithRetry() async {
+    for (int attempt = 1; attempt <= _readyNotifyAttempts; attempt++) {
+      try {
+        await _runnerHostApi.notifyBackgroundIsolateReady(kBackgroundSyncContractVersion);
+        return;
+      } catch (_) {
+        if (attempt == _readyNotifyAttempts) {
+          return;
+        }
+        await Future<void>.delayed(_readyNotifyRetryDelay);
+      }
+    }
   }
 
   static Future<void> _heavyInit() async {
