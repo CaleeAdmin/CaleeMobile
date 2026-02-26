@@ -35,7 +35,7 @@ flutter build appbundle --release
 flutter build apk --release
 ```
 
-If `android/key.properties` or the keystore file is missing, release builds now fail fast with a clear error instead of falling back to debug signing.
+If `android/key.properties` is not present, release builds can still be signed by setting the `ANDROID_KEYSTORE_PATH`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, and `ANDROID_KEY_PASSWORD` environment variables (for example in CI). If neither source is configured, the build still succeeds but produces an unsigned release artifact.
 
 ## GitHub Actions: Manual signed APK build
 
@@ -46,7 +46,8 @@ A manual GitHub workflow is available at `.github/workflows/build-signed-apk.yml
 Configure these repository secrets before running the workflow:
 
 - `ANDROID_KEYSTORE_BASE64`: Base64-encoded JKS keystore content.
-- `ANDROID_STORE_PASSWORD`: Keystore password.
+- `ANDROID_KEYSTORE_PATH`: Path to the JKS keystore file (optional if you generate `android/key.properties` with `storeFile`).
+- `ANDROID_KEYSTORE_PASSWORD`: Keystore password.
 - `ANDROID_KEY_PASSWORD`: Key password.
 - `ANDROID_KEY_ALIAS`: Alias of the signing key.
 

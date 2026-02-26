@@ -1,6 +1,5 @@
 import java.io.FileInputStream
 import java.util.Properties
-import org.gradle.api.GradleException
 
 plugins {
     id("com.android.application")
@@ -15,13 +14,27 @@ if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(FileInputStream(keystorePropertiesFile))
 }
 
-val releaseKeystoreFile = keystoreProperties["storeFile"]?.toString()?.let { file(it) }
-val hasReleaseSigningConfig = keystorePropertiesFile.exists() && releaseKeystoreFile?.exists() == true
-val isReleaseTaskRequested = gradle.startParameter.taskNames.any { it.contains("release", ignoreCase = true) }
+val envStoreFile = providers.environmentVariable("ANDROID_KEYSTORE_PATH").orNull
+val envStorePassword = providers.environmentVariable("ANDROID_KEYSTORE_PASSWORD").orNull
+val envKeyAlias = providers.environmentVariable("ANDROID_KEY_ALIAS").orNull
+val envKeyPassword = providers.environmentVariable("ANDROID_KEY_PASSWORD").orNull
 
-if (isReleaseTaskRequested && !hasReleaseSigningConfig) {
-    throw GradleException(
-        "Release signing is not configured. Create android/key.properties with a valid release keystore and credentials before building a release artifact."
+val releaseStoreFilePath = keystoreProperties["storeFile"]?.toString() ?: envStoreFile
+val releaseStorePassword = keystoreProperties["storePassword"]?.toString() ?: envStorePassword
+val releaseKeyAlias = keystoreProperties["keyAlias"]?.toString() ?: envKeyAlias
+val releaseKeyPassword = keystoreProperties["keyPassword"]?.toString() ?: envKeyPassword
+
+val releaseKeystoreFile = releaseStoreFilePath?.let { file(it) }
+val hasReleaseSigningConfig =
+    releaseKeystoreFile?.exists() == true &&
+        !releaseStorePassword.isNullOrBlank() &&
+        !releaseKeyAlias.isNullOrBlank() &&
+        !releaseKeyPassword.isNullOrBlank()
+
+if (!hasReleaseSigningConfig) {
+    logger.warn(
+        "Release signing is not configured. Build will continue without a release signing config; " +
+            "to sign artifacts, provide android/key.properties or ANDROID_KEYSTORE_PATH/ANDROID_KEYSTORE_PASSWORD/ANDROID_KEY_ALIAS/ANDROID_KEY_PASSWORD."
     )
 }
 
@@ -52,16 +65,18 @@ android {
 
     signingConfigs {
         create("release") {
-            keyAlias = keystoreProperties["keyAlias"] as String?
-            keyPassword = keystoreProperties["keyPassword"] as String?
+            keyAlias = releaseKeyAlias
+            keyPassword = releaseKeyPassword
             storeFile = releaseKeystoreFile
-            storePassword = keystoreProperties["storePassword"] as String?
+            storePassword = releaseStorePassword
         }
     }
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("release")
+            if (hasReleaseSigningConfig) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 }
