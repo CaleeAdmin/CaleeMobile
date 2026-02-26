@@ -15,6 +15,28 @@ For help getting started with Flutter development, view the
 [online documentation](https://docs.flutter.dev/), which offers tutorials,
 samples, guidance on mobile development, and a full API reference.
 
+
+## Local release signing setup
+
+Google Play rejects artifacts signed with the debug key. To build a release-signed APK/AAB locally, create `android/key.properties` (do not commit it) with:
+
+```properties
+storeFile=../upload-keystore.jks
+storePassword=<your-keystore-password>
+keyAlias=<your-key-alias>
+keyPassword=<your-key-password>
+```
+
+Then build with:
+
+```bash
+flutter build appbundle --release
+# or
+flutter build apk --release
+```
+
+If `android/key.properties` or the keystore file is missing, release builds now fail fast with a clear error instead of falling back to debug signing.
+
 ## GitHub Actions: Manual signed APK build
 
 A manual GitHub workflow is available at `.github/workflows/build-signed-apk.yml`.

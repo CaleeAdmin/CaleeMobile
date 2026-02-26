@@ -1,5 +1,6 @@
 import java.io.FileInputStream
 import java.util.Properties
+import org.gradle.api.GradleException
 
 plugins {
     id("com.android.application")
@@ -16,6 +17,13 @@ if (keystorePropertiesFile.exists()) {
 
 val releaseKeystoreFile = keystoreProperties["storeFile"]?.toString()?.let { file(it) }
 val hasReleaseSigningConfig = keystorePropertiesFile.exists() && releaseKeystoreFile?.exists() == true
+val isReleaseTaskRequested = gradle.startParameter.taskNames.any { it.contains("release", ignoreCase = true) }
+
+if (isReleaseTaskRequested && !hasReleaseSigningConfig) {
+    throw GradleException(
+        "Release signing is not configured. Create android/key.properties with a valid release keystore and credentials before building a release artifact."
+    )
+}
 
 android {
     namespace = "com.viso.caleesync"
@@ -44,22 +52,16 @@ android {
 
     signingConfigs {
         create("release") {
-            if (hasReleaseSigningConfig) {
-                keyAlias = keystoreProperties["keyAlias"] as String?
-                keyPassword = keystoreProperties["keyPassword"] as String?
-                storeFile = releaseKeystoreFile
-                storePassword = keystoreProperties["storePassword"] as String?
-            }
+            keyAlias = keystoreProperties["keyAlias"] as String?
+            keyPassword = keystoreProperties["keyPassword"] as String?
+            storeFile = releaseKeystoreFile
+            storePassword = keystoreProperties["storePassword"] as String?
         }
     }
 
     buildTypes {
         release {
-            signingConfig = if (hasReleaseSigningConfig) {
-                signingConfigs.getByName("release")
-            } else {
-                signingConfigs.getByName("debug")
-            }
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 }
