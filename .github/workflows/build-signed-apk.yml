@@ -180,7 +180,11 @@ jobs:
           fi
 
           "$apksigner_bin" verify --print-certs "$apk"
-          jarsigner -verify -strict -certs "$aab"
+          # Android App Bundles are commonly signed with an upload key whose
+          # certificate chain is not anchored in the runner trust store.
+          # `-strict` upgrades that expected condition to a hard failure,
+          # so we verify the AAB signature/cert details without strict mode.
+          jarsigner -verify -certs "$aab"
 
           echo "Verified signed APK and AAB artifacts."
 
