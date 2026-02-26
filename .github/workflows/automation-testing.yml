@@ -61,6 +61,10 @@ jobs:
           flutter-version: "3.24.0"
           cache: true
 
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
       - name: Install dependencies
         run: flutter pub get
 
@@ -71,5 +75,4 @@ jobs:
           arch: x86_64
           profile: pixel_5
           script: |
-            cd android
-            ./gradlew connectedDebugAndroidTest --stacktrace
+            gradle -p android connectedDebugAndroidTest --stacktrace
