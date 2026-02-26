@@ -11,7 +11,8 @@
     <application
         android:label="CaleeSync"
         android:name="${applicationName}"
-        android:icon="@mipmap/logo">
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round">
 
         <service android:name=".service.AuthenticatorService" android:exported="false">
             <intent-filter>
