@@ -30,6 +30,7 @@ class CalendarDisplayItem {
   bool isEnabled;            // 对应数据库 collection_states.is_enabled
   final String? syncGateReason;
   final int origin;          // 0: 本地创建, 1: 云端同步
+  final String? originKey;
   final int bindingId;
   bool allowMassDeletionDangerous;
 
@@ -46,6 +47,7 @@ class CalendarDisplayItem {
     required this.isEnabled,
     this.syncGateReason,
     required this.origin,
+    this.originKey,
     required this.bindingId,
     required this.allowMassDeletionDangerous,
   });
@@ -67,6 +69,7 @@ class CalendarDisplayItem {
       isEnabled: toBool(map['state_is_enabled']),
       syncGateReason: map['sync_gate_reason']?.toString(),
       origin: (map['origin_kind'] as int?) ?? 2,
+      originKey: map['origin_key']?.toString(),
       bindingId: (map['binding_id'] as int?) ?? 0,
       allowMassDeletionDangerous: false,
     );
@@ -425,6 +428,7 @@ class CalendarPageController extends GetxController {
           syncGateReason: cal['sync_gate_reason']?.toString(),
           remotePath: remotePath,
           origin: origin,
+          originKey: cal['origin_key']?.toString(),
           bindingId: bindingId,
           allowMassDeletionDangerous: allowMassDeletionDangerous,
         );
