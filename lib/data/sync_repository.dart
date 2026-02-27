@@ -274,7 +274,7 @@ class SyncRepository {
     final String accountName = cal['account_name'] ?? '';
     final String resolvedLocalId = cal['local_collection_id']?.toString() ?? sanitizedLocalId ?? '';
     final String? resolvedRemotePath = cal['remote_path']?.toString() ?? sanitizedRemotePath;
-    final int origin = (cal['origin_kind'] as int?) ?? SyncBindingOrigin.unknown;
+    final int origin = (cal['origin_kind'] as int?) ?? SyncBindingOrigin.remote;
     final bool shouldDeleteLocalCalendar = origin == 1;
 
     debugPrint("[INFO] Starting hard delete workflow: ID $resolvedLocalId, Path: $resolvedRemotePath");
@@ -519,7 +519,7 @@ class SyncRepository {
       final String existingLocalId = bindingRows.isNotEmpty
           ? (bindingRows.first['local_collection_id']?.toString() ?? '')
           : '';
-      final int existingOriginKind = (remote['origin_kind'] as int?) ?? SyncBindingOrigin.unknown;
+      final int existingOriginKind = (remote['origin_kind'] as int?) ?? SyncBindingOrigin.remote;
       bindingOriginForEnableAttempt = existingOriginKind;
 
       final Set<String> nativeCalendarIds = (await _nativeApi.getCalendars())

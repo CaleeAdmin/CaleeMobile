@@ -91,7 +91,7 @@ class SyncItemPlanner {
     final Map<String, dynamic>? remote = remoteMap[path];
     final int remoteCollectionId = (local['id'] as int?) ?? 0;
     final int isEnabled = (local['state_is_enabled'] as int?) ?? 0;
-    final int originKind = (local['origin_kind'] as int?) ?? SyncBindingOrigin.unknown;
+    final int originKind = (local['origin_kind'] as int?) ?? SyncBindingOrigin.remote;
 
     if (isEnabled != 1) {
       return null;
@@ -203,7 +203,7 @@ class SyncItemPlanner {
       return {'eligible': false, 'reason': SyncGateReason.bindingInvalid};
     }
 
-    final int originKind = (row['origin_kind'] as int?) ?? SyncBindingOrigin.unknown;
+    final int originKind = (row['origin_kind'] as int?) ?? SyncBindingOrigin.remote;
     final int bindingId = (row['binding_id'] as int?) ?? 0;
     final String localCollectionId = row['local_collection_id']?.toString() ?? '';
     if (bindingId <= 0 || localCollectionId.isEmpty) {
@@ -282,7 +282,7 @@ class SyncItemPlanner {
       isSubscription: remote['is_subscription'] ?? local['is_subscription'] ?? false,
       extra: {
         'binding_id': local['binding_id'] ?? 0,
-        'origin_kind': local['origin_kind'] ?? SyncBindingOrigin.unknown,
+        'origin_kind': local['origin_kind'] ?? SyncBindingOrigin.remote,
       },
     );
   }

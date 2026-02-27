@@ -144,12 +144,18 @@ class CaleeServerService {
 
   Map<String, dynamic> _extractOriginMetadata(String? calendarDescription) {
     if (calendarDescription == null || calendarDescription.trim().isEmpty) {
-      return {'origin_kind': 2, 'origin_key': null};
+      return {'origin_kind': 1, 'origin_key': null};
     }
+
+    final String normalizedDescription = calendarDescription
+        .replaceAll('&#10;', '\n')
+        .replaceAll('&#13;', '\r')
+        .replaceAll('\\n', '\n')
+        .replaceAll('\\r', '\r');
 
     String? origin;
     String? originKey;
-    for (final String line in calendarDescription.split(RegExp(r'[\r\n]+'))) {
+    for (final String line in normalizedDescription.split(RegExp(r'[\r\n]+'))) {
       final String normalized = line.trim();
       if (normalized.isEmpty) continue;
       final int idx = normalized.indexOf('=');
@@ -157,13 +163,20 @@ class CaleeServerService {
       final String key = normalized.substring(0, idx).trim().toLowerCase();
       final String value = normalized.substring(idx + 1).trim();
       if (key == 'origin') {
-        origin = value.toLowerCase();
+        final String lowered = value.toLowerCase();
+        if (lowered.startsWith('local')) {
+          origin = 'local';
+        } else if (lowered.startsWith('remote')) {
+          origin = 'remote';
+        } else {
+          origin = lowered;
+        }
       } else if (key == 'originkey' || key == 'origin_key') {
         originKey = value;
       }
     }
 
-    int originKind = 2;
+    int originKind = 1;
     if (origin == 'local') {
       originKind = 0;
     } else if (origin == 'remote') {
@@ -281,7 +294,7 @@ class CaleeServerService {
               map['color'],
               (map['is_subscription'] == true || map['is_subscription'] == 1) ? 1 : 0,
               canonicalizeSubscriptionUrl(map['subscription_url']?.toString()),
-              (map['origin_kind'] as int?) ?? 2,
+              (map['origin_kind'] as int?) ?? 1,
               map['origin_key']?.toString(),
             ]);
       }
@@ -585,7 +598,7 @@ class CaleeServerService {
 
   String _buildOriginDescription({required String origin, String? originKey}) {
     final String safeOrigin = const HtmlEscape(HtmlEscapeMode.element)
-        .convert(origin.trim().isEmpty ? 'unknown' : origin.trim().toLowerCase());
+        .convert(origin.trim().isEmpty ? 'remote' : origin.trim().toLowerCase());
     final List<String> rows = ['origin=$safeOrigin'];
     final String? key = originKey?.trim();
     if (key != null && key.isNotEmpty) {
