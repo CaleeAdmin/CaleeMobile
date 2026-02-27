@@ -32,6 +32,8 @@ class LocalCalendarItem {
   final bool isSubscription;
   final String? subscriptionUrl;
   bool isConnected;
+  final bool canRelink;
+  final int relinkConfidence;
 
   LocalCalendarItem({
     required this.id,
@@ -44,6 +46,8 @@ class LocalCalendarItem {
     required this.isSubscription,
     required this.subscriptionUrl,
     required this.isConnected,
+    required this.canRelink,
+    required this.relinkConfidence,
   });
 }
 
@@ -55,6 +59,7 @@ class LocalCalendarPageController extends GetxController {
   final calendarGroups = <LocalCalendarGroup>[].obs;
   final isLoading = false.obs;
   final connectingCalendarIds = <String>{}.obs;
+  static const int _highConfidenceRelinkThreshold = 70;
 
   @override
   void onInit() {
@@ -86,6 +91,18 @@ class LocalCalendarPageController extends GetxController {
 
       final String? loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey);
 
+      final List<Map<String, dynamic>> relinkCandidates = await db.rawQuery('''
+        SELECT rc.id, rc.remote_path, rc.display_name, rc.origin_key
+        FROM remote_collections rc
+        INNER JOIN collection_states cs ON cs.remote_collection_id = rc.id
+        LEFT JOIN local_bindings lb ON lb.remote_collection_id = rc.id
+        WHERE rc.account_name = ?
+          AND rc.collection_type = 'calendar'
+          AND rc.origin_kind = 0
+          AND cs.sync_gate_reason = ?
+          AND lb.id IS NULL
+      ''', [loginName ?? '', SyncGateReason.relinkRequired]);
+
       final List<Map<String, dynamic>> remoteProvisionedRows = await db.rawQuery('''
         SELECT lb.local_collection_id
         FROM local_bindings lb
@@ -105,6 +122,8 @@ class LocalCalendarPageController extends GetxController {
       final int rangeEnd = now.add(const Duration(days: 365)).millisecondsSinceEpoch;
 
       final Map<String, List<LocalCalendarItem>> grouped = {};
+      final Set<String> seenIds = <String>{};
+      final Map<String, LocalCalendarItem> dedupedByFingerprint = <String, LocalCalendarItem>{};
 
       for (final PlatformCalendar calendar in rawCalendars.whereType<PlatformCalendar>()) {
         if (calendar.supportsEvents == false) {
@@ -127,9 +146,20 @@ class LocalCalendarPageController extends GetxController {
             ? calendar.accountName!
             : 'Local';
 
+        final String normalizedName =
+            (calendar.name != null && calendar.name!.isNotEmpty) ? calendar.name! : 'Untitled calendar';
+        final bool isConnected = connectedLocalIds.contains(id);
+        int relinkConfidence = 0;
+        if (!isConnected && relinkCandidates.isNotEmpty) {
+          relinkConfidence = relinkCandidates
+              .map((candidate) =>
+                  _scoreCandidateProviderHint(candidate, _asScoringItem(id, normalizedName, accountName, calendar)))
+              .fold<int>(0, (best, score) => score > best ? score : best);
+        }
+
         final item = LocalCalendarItem(
           id: id,
-          name: (calendar.name != null && calendar.name!.isNotEmpty) ? calendar.name! : 'Untitled calendar',
+          name: normalizedName,
           accountName: accountName,
           accountType: calendar.accountType,
           color: calendar.color ?? '#808080',
@@ -137,10 +167,34 @@ class LocalCalendarPageController extends GetxController {
           eventCount: eventCount,
           isSubscription: calendar.isSubscription ?? false,
           subscriptionUrl: calendar.subscriptionUrl,
-          isConnected: connectedLocalIds.contains(id),
+          isConnected: isConnected,
+          canRelink: !isConnected && relinkConfidence >= _highConfidenceRelinkThreshold,
+          relinkConfidence: relinkConfidence,
         );
 
-        grouped.putIfAbsent(accountName, () => []).add(item);
+        if (!seenIds.add(id)) {
+          continue;
+        }
+
+        final String fingerprint = _calendarFingerprint(item);
+        final LocalCalendarItem? existing = dedupedByFingerprint[fingerprint];
+        if (existing == null) {
+          dedupedByFingerprint[fingerprint] = item;
+          continue;
+        }
+
+        if (!existing.isConnected && item.isConnected) {
+          dedupedByFingerprint[fingerprint] = item;
+          continue;
+        }
+
+        if (existing.isConnected == item.isConnected && item.eventCount > existing.eventCount) {
+          dedupedByFingerprint[fingerprint] = item;
+        }
+      }
+
+      for (final item in dedupedByFingerprint.values) {
+        grouped.putIfAbsent(item.accountName, () => []).add(item);
       }
 
       final List<LocalCalendarGroup> nextGroups = grouped.entries
@@ -508,6 +562,40 @@ class LocalCalendarPageController extends GetxController {
       return '';
     }
     return normalized;
+  }
+
+  String _calendarFingerprint(LocalCalendarItem item) {
+    return [
+      item.accountName.trim().toLowerCase(),
+      (item.accountType ?? '').trim().toLowerCase(),
+      item.name.trim().toLowerCase(),
+      item.color.trim().toLowerCase(),
+      item.isReadOnly ? 'ro' : 'rw',
+      item.isSubscription ? 'sub' : 'normal',
+      (item.subscriptionUrl ?? '').trim().toLowerCase(),
+    ].join('|');
+  }
+
+  LocalCalendarItem _asScoringItem(
+    String id,
+    String name,
+    String accountName,
+    PlatformCalendar calendar,
+  ) {
+    return LocalCalendarItem(
+      id: id,
+      name: name,
+      accountName: accountName,
+      accountType: calendar.accountType,
+      color: calendar.color ?? '#808080',
+      isReadOnly: calendar.isReadOnly ?? false,
+      eventCount: 0,
+      isSubscription: calendar.isSubscription ?? false,
+      subscriptionUrl: calendar.subscriptionUrl,
+      isConnected: false,
+      canRelink: false,
+      relinkConfidence: 0,
+    );
   }
 
   Future<bool> _confirmDangerousRemoteCreate(LocalCalendarItem item) async {
