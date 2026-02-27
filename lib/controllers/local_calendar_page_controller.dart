@@ -130,6 +130,11 @@ class LocalCalendarPageController extends GetxController {
           continue;
         }
 
+        final String normalizedAccountType = (calendar.accountType ?? '').trim().toLowerCase();
+        if (normalizedAccountType == AppConstant.calendarAccountType) {
+          continue;
+        }
+
         final String id = _normalizeLocalCollectionId(calendar.id);
         if (id.isEmpty) {
           continue;
