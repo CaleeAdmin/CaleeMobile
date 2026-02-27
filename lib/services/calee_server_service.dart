@@ -20,11 +20,12 @@ class CaleeServerService {
   /// 1. 获取并解析云端日历 (对应 remote_collections)
   Future<List<Map<String, dynamic>>> scanRemoteCalendars({
     required String serverUrl,
-    required String userId,
+    required String authUserId,
+    required String accountName,
   }) async {
     final normalizedServer = _normalizeServer(serverUrl);
     final uri = Uri.parse(
-      '$normalizedServer/remote.php/dav/calendars/${Uri.encodeComponent(userId)}/',
+      '$normalizedServer/remote.php/dav/calendars/${Uri.encodeComponent(authUserId)}/',
     );
     final String password = MMKVUtils.instance.getString(AppConstant.appPasswordKey) ?? "";
 
@@ -51,7 +52,7 @@ class CaleeServerService {
 
     final request = http.Request('PROPFIND', uri)
       ..headers.addAll({
-        'Authorization': 'Basic ${base64Encode(utf8.encode('$userId:$password'))}',
+        'Authorization': 'Basic ${base64Encode(utf8.encode('$authUserId:$password'))}',
         'Depth': '1',
         'Content-Type': 'application/xml; charset=utf-8',
       })
@@ -65,7 +66,7 @@ class CaleeServerService {
     }
 
     final List<Map<String, dynamic>> results = _parseCalendarXmlToMap(respBody);
-    await persistRemoteCalendars(results, userId);
+    await persistRemoteCalendars(results, accountName);
     return results;
   }
 

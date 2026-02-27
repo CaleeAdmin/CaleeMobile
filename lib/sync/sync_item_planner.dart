@@ -22,7 +22,7 @@ class SyncItemPlanner {
   final NativeCalendarApi _native;
 
   Future<List<SyncContext>> generateSyncItems(
-    String userId,
+    String accountName,
     List<Map<String, dynamic>> remoteResults,
   ) async {
     final db = await _dbHelper.database;
@@ -47,7 +47,7 @@ class SyncItemPlanner {
       LEFT JOIN collection_states cs ON cs.remote_collection_id = rc.id
       WHERE rc.account_name = ?
         AND rc.collection_type = 'calendar'
-    ''', [userId]);
+    ''', [accountName]);
 
     final remoteMap = {
       for (final r in remoteResults)
@@ -61,7 +61,7 @@ class SyncItemPlanner {
         if ((calendar.id ?? '').isNotEmpty) calendar.id!: calendar,
     };
 
-    final bool hasValidAuth = _hasValidAuthContext(userId);
+    final bool hasValidAuth = _hasValidAuthContext();
 
     final List<SyncContext> contexts = [];
     for (final local in collectionRows) {
@@ -240,13 +240,10 @@ class SyncItemPlanner {
     return {'eligible': true, 'reason': SyncGateReason.ok};
   }
 
-  bool _hasValidAuthContext(String userId) {
+  bool _hasValidAuthContext() {
     final String loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? '';
     final String password = MMKVUtils.instance.getString(AppConstant.appPasswordKey) ?? '';
-    if (loginName.isEmpty || password.isEmpty) {
-      return false;
-    }
-    return loginName == userId;
+    return loginName.isNotEmpty && password.isNotEmpty;
   }
 
   Future<bool> _isCalendarDirty(Database db, Object? remoteCollectionId) async {

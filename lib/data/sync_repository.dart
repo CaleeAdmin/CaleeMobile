@@ -289,7 +289,7 @@ class SyncRepository {
         // 逻辑：只要有远端路径就先尝试删除云端；failed则回滚事务, 不删本地映射
         if (resolvedRemotePath != null && resolvedRemotePath.isNotEmpty) {
           final bool cloudOk = await CaleeServerService().deleteRemoteCalendar(
-            userId: userId,
+            userId: authUserId,
             calendarPath: resolvedRemotePath,
           );
           if (!cloudOk) {
@@ -425,12 +425,16 @@ class SyncRepository {
     final String? path = cal['remote_path'] as String?;
 
 // 如果你确定 account_name 绝对有值, 用 String
-    final String userId = cal['account_name'] as String;
+    final String accountName = (cal['account_name'] ?? '').toString();
+    final String authUserId = MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? '';
+    if (authUserId.isEmpty) {
+      throw Exception('Not logged in');
+    }
     try {
       // 2. 先改云端 (如果failed, 建议直接抛exception, 不改本地)
       if (path != null) {
         bool isCloudOk = await CaleeServerService().renameRemoteCalendar(
-            userId: userId,
+            userId: authUserId,
             calendarPath: path,
             newName: newName
         );
@@ -444,7 +448,7 @@ class SyncRepository {
         final bool localRenameOk = await _nativeApi.modifyCalendarTitle(
           resolvedLocalId,
           newName,
-          userId,
+          accountName,
           AppConstant.calendarAccountType,
         );
         if (!localRenameOk) {
@@ -502,8 +506,9 @@ class SyncRepository {
   Future<EnableCalendarResult> _enableRemoteCalendarFromUserActionInternal(String remotePath) async {
     _lastConnectError = null;
     remotePath = CaleeServerService.normalizeRemotePath(remotePath);
-    final String loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? '';
-    if (loginName.isEmpty) {
+    final String authUserId = MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? '';
+    final String accountName = MMKVUtils.instance.getString(AppConstant.calendarAccountNameKey) ?? '';
+    if (authUserId.isEmpty || accountName.isEmpty) {
       _lastConnectError = 'Session expired. Please sign in again and retry.';
       return EnableCalendarResult.failure(remotePath: remotePath);
     }
@@ -522,7 +527,7 @@ class SyncRepository {
           AND rc.collection_type = 'calendar'
           AND rc.remote_path = ?
         LIMIT 1
-      ''', [loginName, remotePath]);
+      ''', [accountName, remotePath]);
 
       if (remoteRows.isEmpty) {
         _lastConnectError = 'Remote calendar not found. Pull to refresh and try again.';
@@ -609,7 +614,7 @@ class SyncRepository {
         }
       }
 
-      final String? newLocalId = await _nativeApi.createCalendar(displayName, loginName, colorInt);
+      final String? newLocalId = await _nativeApi.createCalendar(displayName, accountName, colorInt);
       if (!_isValidLocalCollectionId(newLocalId)) {
         _lastConnectError = 'Failed to create local calendar. Check calendar permissions and try again.';
         return EnableCalendarResult.failure(remotePath: persistedRemotePath);
@@ -663,7 +668,7 @@ class SyncRepository {
             createdLocalIdForEnableAttempt!.isNotEmpty &&
             bindingOriginForEnableAttempt != SyncBindingOrigin.local) {
           try {
-            await _nativeApi.deleteCalendar(createdLocalIdForEnableAttempt!, loginName);
+            await _nativeApi.deleteCalendar(createdLocalIdForEnableAttempt!, accountName);
           } catch (_) {}
         }
         return EnableCalendarResult.failure(remotePath: persistedRemotePath);
@@ -695,7 +700,7 @@ class SyncRepository {
           createdLocalIdForEnableAttempt!.isNotEmpty &&
           bindingOriginForEnableAttempt != SyncBindingOrigin.local) {
         try {
-          await _nativeApi.deleteCalendar(createdLocalIdForEnableAttempt!, loginName);
+          await _nativeApi.deleteCalendar(createdLocalIdForEnableAttempt!, accountName);
         } catch (_) {}
       }
       return EnableCalendarResult.failure(remotePath: remotePath);
@@ -706,7 +711,7 @@ class SyncRepository {
           createdLocalIdForEnableAttempt!.isNotEmpty &&
           bindingOriginForEnableAttempt != SyncBindingOrigin.local) {
         try {
-          await _nativeApi.deleteCalendar(createdLocalIdForEnableAttempt!, loginName);
+          await _nativeApi.deleteCalendar(createdLocalIdForEnableAttempt!, accountName);
         } catch (_) {}
       }
       return EnableCalendarResult.failure(remotePath: remotePath);
@@ -782,8 +787,13 @@ class SyncRepository {
       }
 
       // 2) 确保 remote_collections 记录存在，且保持 disabled。
+      final String accountName = MMKVUtils.instance.getString(AppConstant.calendarAccountNameKey) ?? '';
+      if (accountName.isEmpty) {
+        print("[ERROR] [Repository] Missing calendar account partition, cannot persist draft");
+        return false;
+      }
       await _ensureRemoteCalendarDraft(
-        accountName: userId,
+        accountName: accountName,
         displayName: displayName,
         remotePath: remotePath,
         originKey: originKey,
@@ -792,7 +802,8 @@ class SyncRepository {
       // 3) 重扫远端并落库（不创建本地日历，不创建 binding）。
       await CaleeServerService().scanRemoteCalendars(
         serverUrl: _activeServerBase,
-        userId: userId,
+        authUserId: userId,
+        accountName: accountName,
       );
 
       return true;
@@ -866,9 +877,15 @@ class SyncRepository {
 
     if (remotePath != null) {
       // 通过统一远端扫描流程落库, 再补充来源 URL。
+      final String accountName = MMKVUtils.instance.getString(AppConstant.calendarAccountNameKey) ?? '';
+      if (accountName.isEmpty) {
+        print('[ERROR] [Repository] Missing calendar account partition, cannot persist subscription');
+        return false;
+      }
       await CaleeServerService().scanRemoteCalendars(
         serverUrl: _activeServerBase,
-        userId: userId,
+        authUserId: userId,
+        accountName: accountName,
       );
 
       final db = await _dbHelper.database;
