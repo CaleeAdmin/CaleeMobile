@@ -105,6 +105,8 @@ class LocalCalendarPageController extends GetxController {
       final int rangeEnd = now.add(const Duration(days: 365)).millisecondsSinceEpoch;
 
       final Map<String, List<LocalCalendarItem>> grouped = {};
+      final Set<String> seenIds = <String>{};
+      final Map<String, LocalCalendarItem> dedupedByFingerprint = <String, LocalCalendarItem>{};
 
       for (final PlatformCalendar calendar in rawCalendars.whereType<PlatformCalendar>()) {
         if (calendar.supportsEvents == false) {
@@ -140,7 +142,29 @@ class LocalCalendarPageController extends GetxController {
           isConnected: connectedLocalIds.contains(id),
         );
 
-        grouped.putIfAbsent(accountName, () => []).add(item);
+        if (!seenIds.add(id)) {
+          continue;
+        }
+
+        final String fingerprint = _calendarFingerprint(item);
+        final LocalCalendarItem? existing = dedupedByFingerprint[fingerprint];
+        if (existing == null) {
+          dedupedByFingerprint[fingerprint] = item;
+          continue;
+        }
+
+        if (!existing.isConnected && item.isConnected) {
+          dedupedByFingerprint[fingerprint] = item;
+          continue;
+        }
+
+        if (existing.isConnected == item.isConnected && item.eventCount > existing.eventCount) {
+          dedupedByFingerprint[fingerprint] = item;
+        }
+      }
+
+      for (final item in dedupedByFingerprint.values) {
+        grouped.putIfAbsent(item.accountName, () => []).add(item);
       }
 
       final List<LocalCalendarGroup> nextGroups = grouped.entries
@@ -508,6 +532,18 @@ class LocalCalendarPageController extends GetxController {
       return '';
     }
     return normalized;
+  }
+
+  String _calendarFingerprint(LocalCalendarItem item) {
+    return [
+      item.accountName.trim().toLowerCase(),
+      (item.accountType ?? '').trim().toLowerCase(),
+      item.name.trim().toLowerCase(),
+      item.color.trim().toLowerCase(),
+      item.isReadOnly ? 'ro' : 'rw',
+      item.isSubscription ? 'sub' : 'normal',
+      (item.subscriptionUrl ?? '').trim().toLowerCase(),
+    ].join('|');
   }
 
   Future<bool> _confirmDangerousRemoteCreate(LocalCalendarItem item) async {
