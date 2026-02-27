@@ -93,7 +93,7 @@ class LocalCalendarPageController extends GetxController {
         SELECT lb.local_collection_id
         FROM local_bindings lb
         INNER JOIN remote_collections rc ON rc.id = lb.remote_collection_id
-        WHERE rc.origin_kind = 1
+        WHERE rc.origin_kind != 0
           AND lb.local_collection_id IS NOT NULL
           AND lb.local_collection_id != ''
           AND rc.account_name = ?
@@ -443,7 +443,6 @@ class LocalCalendarPageController extends GetxController {
             'account_name': accountName,
             'color': item.color,
             'sync_mode': 0,
-            'origin_kind': 0,
             'is_subscription': item.isSubscription ? 1 : 0,
             'subscription_url': item.subscriptionUrl,
           },
