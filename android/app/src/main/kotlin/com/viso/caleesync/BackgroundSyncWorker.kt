@@ -266,8 +266,11 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
         private const val STAGE_WORKER_FINISHED = "WORKER_FINISHED"
 
         private const val DART_READY_TIMEOUT_MS = 15_000L
-        private const val SYNC_REPLY_TIMEOUT_MS = 25_000L
-        private const val WORKER_EXEC_TIMEOUT_MS = 90_000L
+        // Full background sync can legitimately take longer than 25s on large calendars.
+        // Keep a dedicated reply timeout, but align it with a longer worker cap to avoid
+        // prematurely classifying active runs as "killed_or_no_reply".
+        private const val SYNC_REPLY_TIMEOUT_MS = 75_000L
+        private const val WORKER_EXEC_TIMEOUT_MS = 120_000L
         private const val RECENT_ATTEMPT_WINDOW_MS = 30_000L
 
         const val PERIODIC_UNIQUE = "CaleeSyncPeriodicWorker"
