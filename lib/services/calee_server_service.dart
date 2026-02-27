@@ -302,6 +302,8 @@ class CaleeServerService {
       await txn.rawUpdate('''
         UPDATE collection_states
         SET sync_gate_reason = CASE
+          WHEN sync_gate_reason IN ('relink_verifying', 'relink_mismatch')
+            THEN sync_gate_reason
           WHEN (
             SELECT rc.origin_kind FROM remote_collections rc
             WHERE rc.id = collection_states.remote_collection_id
@@ -310,6 +312,21 @@ class CaleeServerService {
             SELECT 1 FROM local_bindings lb
             WHERE lb.remote_collection_id = collection_states.remote_collection_id
           ) THEN 'relink_required'
+          WHEN sync_gate_reason IS NOT NULL AND sync_gate_reason != ''
+            THEN sync_gate_reason
+          WHEN EXISTS (
+            SELECT 1 FROM local_bindings lb
+            WHERE lb.remote_collection_id = collection_states.remote_collection_id
+              AND lb.sync_gate_reason IS NOT NULL
+              AND lb.sync_gate_reason != ''
+          ) THEN (
+            SELECT lb.sync_gate_reason
+            FROM local_bindings lb
+            WHERE lb.remote_collection_id = collection_states.remote_collection_id
+              AND lb.sync_gate_reason IS NOT NULL
+              AND lb.sync_gate_reason != ''
+            LIMIT 1
+          )
           ELSE NULL
         END,
         is_enabled = (
