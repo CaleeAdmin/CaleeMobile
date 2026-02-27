@@ -143,7 +143,7 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
         continuation: Continuation<WorkResult>,
         attemptStartedAt: Long,
         stageProvider: () -> String,
-        stageSetter: (String) -> Unit
+        stageSetter: (String) -> Unit,
         isActive: () -> Boolean,
     ) {
         stageSetter(STAGE_RUN_SYNC_SENT)
