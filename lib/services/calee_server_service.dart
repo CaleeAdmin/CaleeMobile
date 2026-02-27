@@ -249,12 +249,11 @@ class CaleeServerService {
           synced_ctag, 
           sync_mode, 
           color, 
-          is_enabled,
           is_subscription,
           subscription_url,
           origin_kind,
           origin_key
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) -- 增加订阅字段
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) -- 增加订阅字段
         ON CONFLICT(account_name, collection_type, remote_path) DO UPDATE SET
           display_name = excluded.display_name,
           synced_ctag = remote_collections.synced_ctag,
@@ -280,7 +279,6 @@ class CaleeServerService {
               map['ctag'],
               syncMode,
               map['color'],
-              0, // is_enabled
               (map['is_subscription'] == true || map['is_subscription'] == 1) ? 1 : 0,
               canonicalizeSubscriptionUrl(map['subscription_url']?.toString()),
               (map['origin_kind'] as int?) ?? 2,
@@ -291,7 +289,7 @@ class CaleeServerService {
       final int now = DateTime.now().millisecondsSinceEpoch;
       await txn.rawInsert('''
         INSERT INTO collection_states (remote_collection_id, is_enabled, updated_at)
-        SELECT rc.id, rc.is_enabled, ?
+        SELECT rc.id, 0, ?
         FROM remote_collections rc
         WHERE rc.account_name = ?
           AND NOT EXISTS (
@@ -329,9 +327,6 @@ class CaleeServerService {
           )
           ELSE NULL
         END,
-        is_enabled = (
-          SELECT rc.is_enabled FROM remote_collections rc WHERE rc.id = collection_states.remote_collection_id
-        ),
         updated_at = ?
         WHERE remote_collection_id IN (
           SELECT id FROM remote_collections WHERE account_name = ?
