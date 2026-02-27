@@ -38,12 +38,13 @@ class SyncItemPlanner {
         rc.sync_mode,
         rc.is_enabled,
         rc.is_subscription,
+        rc.origin_kind,
         lb.id AS binding_id,
         lb.local_collection_id,
-        lb.binding_origin,
-        lb.sync_gate_reason
+        cs.sync_gate_reason
       FROM remote_collections rc
       LEFT JOIN local_bindings lb ON lb.remote_collection_id = rc.id
+      LEFT JOIN collection_states cs ON cs.remote_collection_id = rc.id
       WHERE rc.account_name = ?
         AND rc.collection_type = 'calendar'
     ''', [userId]);
@@ -90,16 +91,20 @@ class SyncItemPlanner {
     final Map<String, dynamic>? remote = remoteMap[path];
     final int remoteCollectionId = (local['id'] as int?) ?? 0;
     final int isEnabled = (local['is_enabled'] as int?) ?? 0;
-    final int bindingId = (local['binding_id'] as int?) ?? 0;
-    final int bindingOrigin = (local['binding_origin'] as int?) ?? SyncBindingOrigin.remote;
+    final int originKind = (local['origin_kind'] as int?) ?? SyncBindingOrigin.unknown;
 
-    // Disabled collections are user-intent OFF and should not be gated or
-    // considered by planner reconciliation/execution.
     if (isEnabled != 1) {
       return null;
     }
 
     final bool forceRequested = ForceSyncRegistry.consumeForceSyncForCollection(remoteCollectionId);
+
+    final String? explicitGate = local['sync_gate_reason']?.toString();
+    if (explicitGate != null && explicitGate.isNotEmpty) {
+      await _setCollectionGateReason(db: db, remoteCollectionId: remoteCollectionId, nextReason: explicitGate);
+      debugPrint('[SYNC_GATE][remote_collection_id=$remoteCollectionId][path=$path][origin=$originKind] skipped reason=$explicitGate');
+      return null;
+    }
 
     final Map<String, dynamic> gate = _evaluateBindingEligibility(
       row: local,
@@ -109,24 +114,20 @@ class SyncItemPlanner {
     );
 
     if (!(gate['eligible'] as bool)) {
-      await _setSyncGateReason(
+      await _setCollectionGateReason(
         db: db,
-        bindingId: bindingId,
+        remoteCollectionId: remoteCollectionId,
         nextReason: gate['reason']?.toString(),
       );
       final String reason = gate['reason']?.toString() ?? 'unknown';
-      debugPrint('[SYNC_GATE][binding_id=$bindingId][path=$path][origin=$bindingOrigin] skipped reason=$reason');
+      debugPrint('[SYNC_GATE][remote_collection_id=$remoteCollectionId][path=$path][origin=$originKind] skipped reason=$reason');
       if (forceRequested) {
-        debugPrint('[SYNC_FORCE][binding_id=$bindingId][path=$path][origin=$bindingOrigin] force=true consumed_but_ineligible reason=$reason');
+        debugPrint('[SYNC_FORCE][remote_collection_id=$remoteCollectionId][path=$path][origin=$originKind] force=true consumed_but_ineligible reason=$reason');
       }
       return null;
     }
 
-    await _setSyncGateReason(
-      db: db,
-      bindingId: bindingId,
-      nextReason: null,
-    );
+    await _setCollectionGateReason(db: db, remoteCollectionId: remoteCollectionId, nextReason: null);
 
     final int mode = (local['sync_mode'] as int?) ?? SyncBindingMode.readOnly;
     final String? dbCtag = local['synced_ctag']?.toString();
@@ -138,33 +139,19 @@ class SyncItemPlanner {
             (remote?['color']?.toString() ?? '') != (local['color']?.toString() ?? '');
 
     final bool isTwoWay = mode == SyncBindingMode.twoWay;
-    final bool isOneWayRemoteOrigin = !isTwoWay && bindingOrigin == SyncBindingOrigin.remote;
-    final bool isOneWayLocalOrigin = !isTwoWay && bindingOrigin == SyncBindingOrigin.local;
+    final bool isOneWayLocalOrigin = !isTwoWay && originKind == SyncBindingOrigin.local;
 
-    // Two-way sync must always enter item-level planning. Collection-level
-    // gates (ctag / pending flags) are only heuristics and can miss updates
-    // (for example, when local change markers are absent).
     final bool shouldSync = isTwoWay
         ? true
-        : isOneWayRemoteOrigin
-            ? (remoteChanged || metaChanged)
-            : (localChanged || metaChanged);
+        : isOneWayLocalOrigin
+            ? (localChanged || metaChanged)
+            : (remoteChanged || metaChanged);
     final bool bootstrapRequired = await _isBootstrapRequired(db, remoteCollectionId);
     final bool forceMode = forceRequested || bootstrapRequired;
 
     if (!shouldSync && !forceMode) {
-      debugPrint('[SYNC_GATE][binding_id=$bindingId][path=$path][origin=$bindingOrigin] skipped reason=no_detected_change');
+      debugPrint('[SYNC_GATE][remote_collection_id=$remoteCollectionId][path=$path][origin=$originKind] skipped reason=no_detected_change');
       return null;
-    }
-
-    if (forceMode) {
-      final String localCollectionId = local['local_collection_id']?.toString() ?? '';
-      final String modeName = isTwoWay
-          ? 'bidi'
-          : isOneWayLocalOrigin
-              ? 'push'
-              : 'pull';
-      debugPrint('[SYNC_FORCE][binding_id=$bindingId][path=$path][local=$localCollectionId][origin=$bindingOrigin][mode=$modeName] force=true requested=$forceRequested bootstrap=$bootstrapRequired');
     }
 
     final SyncAction action = isTwoWay
@@ -173,30 +160,31 @@ class SyncItemPlanner {
             ? SyncAction.fullSyncPush
             : SyncAction.fullSyncPull;
 
-    final String modeName = action == SyncAction.fullSyncBidi
-        ? 'bidi'
-        : action == SyncAction.fullSyncPush
-            ? 'push'
-            : 'pull';
-    debugPrint('[SYNC_PLAN][binding_id=$bindingId][path=$path][origin=$bindingOrigin][mode=$modeName] changed(remote=$remoteChanged local=$localChanged meta=$metaChanged)');
-
     return _buildContext(remote ?? {}, local, action);
   }
 
-
-  Future<void> _setSyncGateReason({
+  Future<void> _setCollectionGateReason({
     required Database db,
-    required int bindingId,
+    required int remoteCollectionId,
     required String? nextReason,
   }) async {
-    if (bindingId <= 0) return;
-
+    if (remoteCollectionId <= 0) return;
     final String? normalizedReason = (nextReason == null || nextReason.isEmpty) ? null : nextReason;
+    final int now = DateTime.now().millisecondsSinceEpoch;
+    await db.insert(
+      'collection_states',
+      {
+        'remote_collection_id': remoteCollectionId,
+        'sync_gate_reason': normalizedReason,
+        'updated_at': now,
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
     await db.update(
-      'local_bindings',
-      {'sync_gate_reason': normalizedReason},
-      where: 'id = ?',
-      whereArgs: [bindingId],
+      'collection_states',
+      {'sync_gate_reason': normalizedReason, 'updated_at': now},
+      where: 'remote_collection_id = ?',
+      whereArgs: [remoteCollectionId],
     );
   }
 
@@ -215,21 +203,14 @@ class SyncItemPlanner {
       return {'eligible': false, 'reason': SyncGateReason.bindingInvalid};
     }
 
+    final int originKind = (row['origin_kind'] as int?) ?? SyncBindingOrigin.unknown;
     final int bindingId = (row['binding_id'] as int?) ?? 0;
-    if (bindingId <= 0) {
-      return {'eligible': false, 'reason': SyncGateReason.bindingInvalid};
-    }
-
     final String localCollectionId = row['local_collection_id']?.toString() ?? '';
-    if (localCollectionId.isEmpty) {
+    if (bindingId <= 0 || localCollectionId.isEmpty) {
+      if (originKind == SyncBindingOrigin.local) {
+        return {'eligible': false, 'reason': SyncGateReason.relinkRequired};
+      }
       return {'eligible': false, 'reason': SyncGateReason.bindingInvalid};
-    }
-
-    final int bindingOrigin = (row['binding_origin'] as int?) ?? SyncBindingOrigin.remote;
-    final bool isValidBindingOrigin =
-        bindingOrigin == SyncBindingOrigin.local || bindingOrigin == SyncBindingOrigin.remote;
-    if (!isValidBindingOrigin) {
-      return {'eligible': false, 'reason': SyncGateReason.repairRequired};
     }
 
     final int syncMode = (row['sync_mode'] as int?) ?? SyncBindingMode.readOnly;
@@ -248,7 +229,6 @@ class SyncItemPlanner {
     if (!supportsEvents || (syncMode == SyncBindingMode.twoWay && isReadOnly)) {
       return {'eligible': false, 'reason': SyncGateReason.environmentBlocked};
     }
-
 
     if (!remoteExists) {
       return {'eligible': false, 'reason': SyncGateReason.remoteCollectionMissing};
@@ -302,7 +282,7 @@ class SyncItemPlanner {
       isSubscription: remote['is_subscription'] ?? local['is_subscription'] ?? false,
       extra: {
         'binding_id': local['binding_id'] ?? 0,
-        'binding_origin': local['binding_origin'] ?? 0,
+        'origin_kind': local['origin_kind'] ?? SyncBindingOrigin.unknown,
       },
     );
   }

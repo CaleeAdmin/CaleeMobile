@@ -101,7 +101,7 @@ class SyncRepository {
           {
             'updated_at': DateTime.now().millisecondsSinceEpoch,
           },
-          where: 'local_collection_id = ? AND binding_origin = 1',
+          where: 'local_collection_id = ?',
           whereArgs: [localId],
         );
       }
@@ -235,7 +235,7 @@ class SyncRepository {
     final List<Map<String, dynamic>> maps = sanitizedLocalId != null
         ? await db.rawQuery(
             '''
-            SELECT rc.*, lb.local_collection_id, lb.binding_origin
+            SELECT rc.*, lb.local_collection_id, rc.origin_kind
             FROM remote_collections rc
             INNER JOIN local_bindings lb ON lb.remote_collection_id = rc.id
             WHERE lb.local_collection_id = ?
@@ -245,7 +245,7 @@ class SyncRepository {
           )
         : await db.rawQuery(
             '''
-            SELECT rc.*, lb.local_collection_id, lb.binding_origin
+            SELECT rc.*, lb.local_collection_id, rc.origin_kind
             FROM remote_collections rc
             LEFT JOIN local_bindings lb ON lb.remote_collection_id = rc.id
             WHERE rc.remote_path = ?
@@ -263,7 +263,7 @@ class SyncRepository {
     final String accountName = cal['account_name'] ?? '';
     final String resolvedLocalId = cal['local_collection_id']?.toString() ?? sanitizedLocalId ?? '';
     final String? resolvedRemotePath = cal['remote_path']?.toString() ?? sanitizedRemotePath;
-    final int origin = cal['binding_origin'] ?? 0;
+    final int origin = (cal['origin_kind'] as int?) ?? SyncBindingOrigin.unknown;
     final bool shouldDeleteLocalCalendar = origin == 1;
 
     debugPrint("[INFO] Starting hard delete workflow: ID $resolvedLocalId, Path: $resolvedRemotePath");
@@ -473,7 +473,7 @@ class SyncRepository {
     try {
       final List<Map<String, dynamic>> remoteRows = await db.query(
         'remote_collections',
-        columns: ['id', 'display_name', 'color', 'remote_path'],
+        columns: ['id', 'display_name', 'color', 'remote_path', 'origin_kind'],
         where: 'account_name = ? AND collection_type = ? AND remote_path = ?',
         whereArgs: [loginName, 'calendar', remotePath],
         limit: 1,
@@ -499,7 +499,7 @@ class SyncRepository {
 
       final List<Map<String, dynamic>> bindingRows = await db.query(
         'local_bindings',
-        columns: ['id', 'local_collection_id', 'binding_origin'],
+        columns: ['id', 'local_collection_id'],
         where: 'remote_collection_id = ?',
         whereArgs: [remoteCollectionId],
         limit: 1,
@@ -508,10 +508,8 @@ class SyncRepository {
       final String existingLocalId = bindingRows.isNotEmpty
           ? (bindingRows.first['local_collection_id']?.toString() ?? '')
           : '';
-      final int existingBindingOrigin = bindingRows.isNotEmpty
-          ? ((bindingRows.first['binding_origin'] as int?) ?? SyncBindingOrigin.remote)
-          : SyncBindingOrigin.remote;
-      bindingOriginForEnableAttempt = existingBindingOrigin;
+      final int existingOriginKind = (remote['origin_kind'] as int?) ?? SyncBindingOrigin.unknown;
+      bindingOriginForEnableAttempt = existingOriginKind;
 
       final Set<String> nativeCalendarIds = (await _nativeApi.getCalendars())
           .whereType<PlatformCalendar>()
@@ -563,8 +561,7 @@ class SyncRepository {
             {
               'remote_collection_id': remoteCollectionId,
               'local_collection_id': newLocalId,
-              'binding_origin': existingBindingOrigin,
-              'created_at': now,
+                            'created_at': now,
               'updated_at': now,
             },
             conflictAlgorithm: ConflictAlgorithm.replace,
@@ -590,7 +587,7 @@ class SyncRepository {
         }
         if (createdLocalIdForEnableAttempt != null &&
             createdLocalIdForEnableAttempt!.isNotEmpty &&
-            bindingOriginForEnableAttempt == SyncBindingOrigin.remote) {
+            bindingOriginForEnableAttempt != SyncBindingOrigin.local) {
           try {
             await _nativeApi.deleteCalendar(createdLocalIdForEnableAttempt!, loginName);
           } catch (_) {}
@@ -622,7 +619,7 @@ class SyncRepository {
       debugPrint('[ERROR] enableRemoteCalendarFromUserAction platform exception: $e');
       if (createdLocalIdForEnableAttempt != null &&
           createdLocalIdForEnableAttempt!.isNotEmpty &&
-          bindingOriginForEnableAttempt == SyncBindingOrigin.remote) {
+          bindingOriginForEnableAttempt != SyncBindingOrigin.local) {
         try {
           await _nativeApi.deleteCalendar(createdLocalIdForEnableAttempt!, loginName);
         } catch (_) {}
@@ -633,7 +630,7 @@ class SyncRepository {
       debugPrint('[ERROR] enableRemoteCalendarFromUserAction failed: $e');
       if (createdLocalIdForEnableAttempt != null &&
           createdLocalIdForEnableAttempt!.isNotEmpty &&
-          bindingOriginForEnableAttempt == SyncBindingOrigin.remote) {
+          bindingOriginForEnableAttempt != SyncBindingOrigin.local) {
         try {
           await _nativeApi.deleteCalendar(createdLocalIdForEnableAttempt!, loginName);
         } catch (_) {}
@@ -761,6 +758,7 @@ class SyncRepository {
       'color': '#4CAF50',
       'is_enabled': 0,
       'sync_mode': 0,
+      'origin_kind': SyncBindingOrigin.local,
       'remote_path': remotePath,
     });
   }

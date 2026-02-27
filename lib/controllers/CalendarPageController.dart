@@ -66,7 +66,7 @@ class CalendarDisplayItem {
       subscriptionUrl: map['subscription_url']?.toString(),
       isEnabled: toBool(map['is_enabled']),
       syncGateReason: map['sync_gate_reason']?.toString(),
-      origin: (map['binding_origin'] as int?) ?? 0,
+      origin: (map['origin_kind'] as int?) ?? 2,
       bindingId: (map['binding_id'] as int?) ?? 0,
       allowMassDeletionDangerous: false,
     );
@@ -344,9 +344,10 @@ class CalendarPageController extends GetxController {
       // 2. 查询本地 remote_collections 的所有日历记录
       final db = await DatabaseHelper.instance.database;
       final List<Map<String, dynamic>> calendarMaps = await db.rawQuery('''
-        SELECT rc.*, lb.local_collection_id, lb.binding_origin, lb.id AS binding_id, lb.sync_gate_reason
+        SELECT rc.*, lb.local_collection_id, lb.id AS binding_id, cs.sync_gate_reason
         FROM remote_collections rc
         LEFT JOIN local_bindings lb ON lb.remote_collection_id = rc.id
+        LEFT JOIN collection_states cs ON cs.remote_collection_id = rc.id
         WHERE rc.account_name = ?
           AND rc.collection_type = 'calendar'
           AND rc.remote_path IS NOT NULL
@@ -382,7 +383,7 @@ class CalendarPageController extends GetxController {
         final String? remotePath = cal['remote_path'];
         final int? syncMode = cal['sync_mode'];
         final bool isSubscription = (cal['is_subscription'] == 1 || cal['is_subscription'] == true);
-        final int origin = (cal['binding_origin'] as int?) ?? 0;
+        final int origin = (cal['origin_kind'] as int?) ?? 2;
 
         final String countKey = (cal['id'] ?? '').toString();
         final int realCount = cachedCountByCalendarId[countKey] ?? 0;
