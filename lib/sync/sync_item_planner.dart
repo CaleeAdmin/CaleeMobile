@@ -140,12 +140,15 @@ class SyncItemPlanner {
 
     final bool isTwoWay = mode == SyncBindingMode.twoWay;
     final bool isOneWayLocalOrigin = !isTwoWay && originKind == SyncBindingOrigin.local;
+    final bool isPullOnlyMode = !isTwoWay && !isOneWayLocalOrigin;
 
     final bool shouldSync = isTwoWay
         ? true
         : isOneWayLocalOrigin
             ? (localChanged || metaChanged)
-            : (remoteChanged || metaChanged);
+            : isPullOnlyMode
+                ? (remoteChanged || localChanged || metaChanged)
+                : (remoteChanged || metaChanged);
     final bool bootstrapRequired = await _isBootstrapRequired(db, remoteCollectionId);
     final bool forceMode = forceRequested || bootstrapRequired;
 

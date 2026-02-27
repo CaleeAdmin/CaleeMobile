@@ -903,7 +903,7 @@ class UnifiedModeRules {
           onLocalOnlyMapped: SyncItemAction.deleteLocal,
           onLocalOnlyUnmapped: SyncItemAction.skip,
           onRemoteChanged: SyncItemAction.updateLocal,
-          onLocalChanged: SyncItemAction.skip,
+          onLocalChanged: SyncItemAction.updateLocal,
           onConflictLocalWins: SyncItemAction.updateLocal,
           onConflictRemoteWins: SyncItemAction.updateLocal,
         );
