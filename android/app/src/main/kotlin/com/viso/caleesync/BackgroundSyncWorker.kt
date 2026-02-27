@@ -25,7 +25,6 @@ import com.google.common.util.concurrent.ListenableFuture
 import io.flutter.FlutterInjector
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.dart.DartExecutor
-import io.flutter.plugins.GeneratedPluginRegistrant
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
@@ -574,7 +573,6 @@ private object BackgroundEngineHolder {
         loader.ensureInitializationComplete(context, null)
 
         val engine = FlutterEngine(context)
-        GeneratedPluginRegistrant.registerWith(engine)
         stageSetter("ENGINE_CREATED")
 
         val calendarApi = CalendarHostApiImpl(context)
