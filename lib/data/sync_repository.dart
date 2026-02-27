@@ -363,7 +363,7 @@ class SyncRepository {
         }
       }
 
-      return (target?.accountType ?? '').trim().toLowerCase() == 'com.viso.caleesync';
+      return (target?.accountType ?? '').trim().toLowerCase() == AppConstant.calendarAccountType;
     } catch (e) {
       debugPrint('[WARN] Unable to verify calendar accountType for deletion: $e');
       return false;
@@ -444,7 +444,7 @@ class SyncRepository {
           resolvedLocalId,
           newName,
           userId,
-          'com.viso.caleesync',
+          AppConstant.calendarAccountType,
         );
         if (!localRenameOk) {
           throw Exception('System calendar rename failed');

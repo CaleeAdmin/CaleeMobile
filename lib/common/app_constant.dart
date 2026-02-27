@@ -17,6 +17,9 @@ class AppConstant {
   static const String periodicSyncEnabledKey = 'periodic_sync_enabled';
   static const String syncIntervalCalendarKey = 'sync_interval_calendar';
 
+  /// Android calendar account type used by system calendar integration.
+  static const String calendarAccountType = 'com.viso.caleesync';
+
   /// Per-binding dangerous override key prefix.
   ///
   /// Full key format: [allowMassDeletionByBindingKeyPrefix]{bindingId}

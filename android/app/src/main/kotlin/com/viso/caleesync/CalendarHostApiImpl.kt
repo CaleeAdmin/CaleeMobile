@@ -55,7 +55,7 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
     }
 
     private fun shouldUseSyncAdapterForEvents(calendarId: String): Boolean {
-        return getCalendarAccount(calendarId)?.type == ACCOUNT_TYPE
+        return getCalendarAccount(calendarId)?.type == CalendarConstants.ACCOUNT_TYPE
     }
 
     private fun buildEventWriteUri(baseUri: Uri, calendarId: String): Uri {
@@ -67,9 +67,7 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
     }
 
     companion object {
-        private const val ACCOUNT_TYPE = "com.viso.caleesync"
-        private const val CALENDAR_AUTHORITY = "com.android.calendar"
-
+        
         private val CALENDAR_PROJECTION = arrayOf(
             CalendarContract.Calendars._ID,
             CalendarContract.Calendars.CALENDAR_DISPLAY_NAME,
@@ -96,10 +94,10 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
 
     private fun ensureCalendarAccount(accountName: String): Account {
         val manager = AccountManager.get(context)
-        val existing = manager.getAccountsByType(ACCOUNT_TYPE).firstOrNull { it.name == accountName }
+        val existing = manager.getAccountsByType(CalendarConstants.ACCOUNT_TYPE).firstOrNull { it.name == accountName }
         if (existing != null) return existing
 
-        val account = Account(accountName, ACCOUNT_TYPE)
+        val account = Account(accountName, CalendarConstants.ACCOUNT_TYPE)
         manager.addAccountExplicitly(account, null, null)
         return account
     }
@@ -116,8 +114,8 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
         }
 
         try {
-            ContentResolver.setIsSyncable(account, CALENDAR_AUTHORITY, 1)
-            ContentResolver.setSyncAutomatically(account, CALENDAR_AUTHORITY, true)
+            ContentResolver.setIsSyncable(account, CalendarConstants.CALENDAR_AUTHORITY, 1)
+            ContentResolver.setSyncAutomatically(account, CalendarConstants.CALENDAR_AUTHORITY, true)
         } catch (se: SecurityException) {
             Log.w("CalendarSync", "No permission to update sync settings for ${account.name}", se)
         }
@@ -261,7 +259,7 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
         color: Long,
         callback: (Result<String?>) -> Unit
     ) {
-        val accountType = ACCOUNT_TYPE
+        val accountType = CalendarConstants.ACCOUNT_TYPE
         val cr = context.contentResolver
         ensureAccountAndSync(accountName)
 
@@ -323,7 +321,7 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
         // 建议在子线程执行
         Thread {
             try {
-                val accountType = ACCOUNT_TYPE
+                val accountType = CalendarConstants.ACCOUNT_TYPE
                 val cr = context.contentResolver
                 val idLong = calendarId.toLongOrNull() ?: throw IllegalArgumentException("Invalid ID")
 
@@ -485,7 +483,7 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
                 CalendarContract.Events.CONTENT_URI.buildUpon()
                     .appendQueryParameter(CalendarContract.CALLER_IS_SYNCADAPTER, "true")
                     .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_NAME, foundAccountName)
-                    .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_TYPE, ACCOUNT_TYPE)
+                    .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_TYPE, CalendarConstants.ACCOUNT_TYPE)
                     .build()
             } else {
                 CalendarContract.Events.CONTENT_URI
@@ -701,13 +699,13 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
             }
 
             val isSyncable = try {
-                ContentResolver.getIsSyncable(account, CALENDAR_AUTHORITY) > 0
+                ContentResolver.getIsSyncable(account, CalendarConstants.CALENDAR_AUTHORITY) > 0
             } catch (se: SecurityException) {
                 Log.w("CalendarSync", "No permission to read syncable state", se)
                 true
             }
             val autoSync = try {
-                ContentResolver.getSyncAutomatically(account, CALENDAR_AUTHORITY)
+                ContentResolver.getSyncAutomatically(account, CalendarConstants.CALENDAR_AUTHORITY)
             } catch (se: SecurityException) {
                 Log.w("CalendarSync", "No permission to read auto-sync state", se)
                 true
