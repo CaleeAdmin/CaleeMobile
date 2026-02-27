@@ -6,8 +6,13 @@ import '../services/calee_server_service.dart';
 class RelinkVerificationResult {
   final bool passed;
   final int confidenceScore;
+  final bool isIndeterminate;
 
-  const RelinkVerificationResult({required this.passed, required this.confidenceScore});
+  const RelinkVerificationResult({
+    required this.passed,
+    required this.confidenceScore,
+    this.isIndeterminate = false,
+  });
 }
 
 class RelinkVerifier {
@@ -35,6 +40,17 @@ class RelinkVerifier {
       calendarPath: remotePath,
       isSubscription: false,
     );
+
+    final bool remoteFetchSucceeded =
+        snapshot.fetchSucceeded && (snapshot.statusCode == 200 || snapshot.statusCode == 207);
+    if (!remoteFetchSucceeded) {
+      return RelinkVerificationResult(
+        passed: false,
+        confidenceScore: 0,
+        isIndeterminate: true,
+      );
+    }
+
     final List<PlatformItem?> localItems = await _native.getEvents(localCalendarId, startMs, endMs);
 
     final List<_RemoteEvent> remoteEvents = snapshot.events
@@ -76,6 +92,15 @@ class RelinkVerifier {
     }
 
     final int confidence = ((matched * 100) / baseline).round().clamp(0, 100);
+
+    if (remoteEvents.length < 5 && localEvents.length < 5 && confidence < 98) {
+      return RelinkVerificationResult(
+        passed: false,
+        confidenceScore: confidence,
+        isIndeterminate: true,
+      );
+    }
+
     return RelinkVerificationResult(passed: confidence >= 90, confidenceScore: confidence);
   }
 
