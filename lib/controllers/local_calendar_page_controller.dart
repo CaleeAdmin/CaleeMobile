@@ -74,19 +74,17 @@ class LocalCalendarPageController extends GetxController {
       }
 
       final db = await DatabaseHelper.instance.database;
-      final String? loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey);
-
       final List<Map<String, dynamic>> rows = await db.rawQuery('''
         SELECT lb.local_collection_id
         FROM local_bindings lb
-        INNER JOIN remote_collections rc ON rc.id = lb.remote_collection_id
         WHERE lb.local_collection_id IS NOT NULL
           AND lb.local_collection_id != ''
-          AND rc.account_name = ?
-      ''', [loginName ?? '']);
+      ''');
       final Set<String> connectedLocalIds = {
-        for (final row in rows) row['local_collection_id'].toString(),
-      };
+        for (final row in rows) _normalizeLocalCollectionId(row['local_collection_id'])
+      }..remove('');
+
+      final String? loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey);
 
       final List<Map<String, dynamic>> remoteProvisionedRows = await db.rawQuery('''
         SELECT lb.local_collection_id
@@ -98,8 +96,8 @@ class LocalCalendarPageController extends GetxController {
           AND rc.account_name = ?
       ''', [loginName ?? '']);
       final Set<String> remoteProvisionedLocalIds = {
-        for (final row in remoteProvisionedRows) row['local_collection_id'].toString(),
-      };
+        for (final row in remoteProvisionedRows) _normalizeLocalCollectionId(row['local_collection_id'])
+      }..remove('');
 
       final List<PlatformCalendar?> rawCalendars = await _nativeApi.getCalendars();
       final DateTime now = DateTime.now();
@@ -113,7 +111,7 @@ class LocalCalendarPageController extends GetxController {
           continue;
         }
 
-        final String id = calendar.id ?? '';
+        final String id = _normalizeLocalCollectionId(calendar.id);
         if (id.isEmpty) {
           continue;
         }
@@ -502,6 +500,14 @@ class LocalCalendarPageController extends GetxController {
     }
 
     return score.clamp(0, 100);
+  }
+
+  String _normalizeLocalCollectionId(Object? rawId) {
+    final String normalized = (rawId ?? '').toString().trim();
+    if (normalized.isEmpty || normalized.toLowerCase() == 'null') {
+      return '';
+    }
+    return normalized;
   }
 
   Future<bool> _confirmDangerousRemoteCreate(LocalCalendarItem item) async {
