@@ -281,8 +281,15 @@ class CaleeServerService {
               THEN excluded.subscription_url
             ELSE remote_collections.subscription_url
           END,
-          origin_kind = excluded.origin_kind,
-          origin_key = excluded.origin_key
+          origin_kind = CASE
+            WHEN remote_collections.origin_kind = 0 THEN 0
+            ELSE excluded.origin_kind
+          END,
+          origin_key = CASE
+            WHEN excluded.origin_key IS NOT NULL AND excluded.origin_key != ''
+              THEN excluded.origin_key
+            ELSE remote_collections.origin_key
+          END
           -- 注意：绑定信息由 local_bindings 管理, 不在此处更新。
       ''', [
               accountName,
