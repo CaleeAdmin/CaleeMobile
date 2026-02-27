@@ -36,7 +36,7 @@ class SyncItemPlanner {
         rc.color,
         rc.synced_ctag,
         rc.sync_mode,
-        rc.is_enabled,
+        cs.is_enabled AS state_is_enabled,
         rc.is_subscription,
         rc.origin_kind,
         lb.id AS binding_id,
@@ -90,7 +90,7 @@ class SyncItemPlanner {
     final String path = CaleeServerService.normalizeRemotePath(local['remote_path']?.toString() ?? '');
     final Map<String, dynamic>? remote = remoteMap[path];
     final int remoteCollectionId = (local['id'] as int?) ?? 0;
-    final int isEnabled = (local['is_enabled'] as int?) ?? 0;
+    final int isEnabled = (local['state_is_enabled'] as int?) ?? 0;
     final int originKind = (local['origin_kind'] as int?) ?? SyncBindingOrigin.unknown;
 
     if (isEnabled != 1) {

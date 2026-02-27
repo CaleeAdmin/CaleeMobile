@@ -27,7 +27,7 @@ class CalendarDisplayItem {
   final bool isSubscription;
   final bool isLocalReadOnly;
   final String? subscriptionUrl;
-  bool isEnabled;            // 对应数据库 is_enabled
+  bool isEnabled;            // 对应数据库 collection_states.is_enabled
   final String? syncGateReason;
   final int origin;          // 0: 本地创建, 1: 云端同步
   final int bindingId;
@@ -64,7 +64,7 @@ class CalendarDisplayItem {
       isSubscription: toBool(map['is_subscription']),
       isLocalReadOnly: toBool(map['is_local_read_only']),
       subscriptionUrl: map['subscription_url']?.toString(),
-      isEnabled: toBool(map['is_enabled']),
+      isEnabled: toBool(map['state_is_enabled']),
       syncGateReason: map['sync_gate_reason']?.toString(),
       origin: (map['origin_kind'] as int?) ?? 2,
       bindingId: (map['binding_id'] as int?) ?? 0,
@@ -297,12 +297,30 @@ class CalendarPageController extends GetxController {
       whereArgs = [item.localId];
     }
 
-    // 2. 执行更新
-    int count = await db.update(
-      'remote_collections',
-      {'is_enabled': newValue ? 1 : 0},
-      where: whereClause,
-      whereArgs: whereArgs,
+    final int now = DateTime.now().millisecondsSinceEpoch;
+
+    await db.rawInsert(
+      '''
+      INSERT INTO collection_states (remote_collection_id, is_enabled, updated_at)
+      SELECT rc.id, ?, ?
+      FROM remote_collections rc
+      WHERE $whereClause
+        AND NOT EXISTS (
+          SELECT 1 FROM collection_states cs WHERE cs.remote_collection_id = rc.id
+        )
+      ''',
+      [newValue ? 1 : 0, now, ...whereArgs],
+    );
+
+    final int count = await db.rawUpdate(
+      '''
+      UPDATE collection_states
+      SET is_enabled = ?, updated_at = ?
+      WHERE remote_collection_id IN (
+        SELECT id FROM remote_collections WHERE $whereClause
+      )
+      ''',
+      [newValue ? 1 : 0, now, ...whereArgs],
     );
 
     debugPrint("[OK] Update succeeded, affected rows: $count (condition: $whereClause = ${whereArgs[0]})");
@@ -344,7 +362,7 @@ class CalendarPageController extends GetxController {
       // 2. 查询本地 remote_collections 的所有日历记录
       final db = await DatabaseHelper.instance.database;
       final List<Map<String, dynamic>> calendarMaps = await db.rawQuery('''
-        SELECT rc.*, lb.local_collection_id, lb.id AS binding_id, cs.sync_gate_reason
+        SELECT rc.*, lb.local_collection_id, lb.id AS binding_id, cs.sync_gate_reason, cs.is_enabled AS state_is_enabled
         FROM remote_collections rc
         LEFT JOIN local_bindings lb ON lb.remote_collection_id = rc.id
         LEFT JOIN collection_states cs ON cs.remote_collection_id = rc.id
@@ -403,7 +421,7 @@ class CalendarPageController extends GetxController {
           isSubscription: isSubscription,
           isLocalReadOnly: localReadOnlyById[localId] ?? false,
           subscriptionUrl: cal['subscription_url']?.toString(),
-          isEnabled: cal['is_enabled'] == 1,
+          isEnabled: (cal['state_is_enabled'] as int?) == 1,
           syncGateReason: cal['sync_gate_reason']?.toString(),
           remotePath: remotePath,
           origin: origin,

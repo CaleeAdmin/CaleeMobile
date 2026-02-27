@@ -518,10 +518,20 @@ class SyncRepository {
           .toSet();
 
       if (existingLocalId.isNotEmpty && nativeCalendarIds.contains(existingLocalId)) {
+        final int now = DateTime.now().millisecondsSinceEpoch;
+        await db.insert(
+          'collection_states',
+          {
+            'remote_collection_id': remoteCollectionId,
+            'is_enabled': 1,
+            'updated_at': now,
+          },
+          conflictAlgorithm: ConflictAlgorithm.ignore,
+        );
         await db.update(
-          'remote_collections',
-          {'is_enabled': 1},
-          where: 'id = ?',
+          'collection_states',
+          {'is_enabled': 1, 'updated_at': now},
+          where: 'remote_collection_id = ?',
           whereArgs: [remoteCollectionId],
         );
         _triggerOneShotForceSyncInBackground(remoteCollectionId);
@@ -567,10 +577,20 @@ class SyncRepository {
             conflictAlgorithm: ConflictAlgorithm.replace,
           );
 
+          await txn.insert(
+            'collection_states',
+            {
+              'remote_collection_id': remoteCollectionId,
+              'is_enabled': 1,
+              'updated_at': now,
+            },
+            conflictAlgorithm: ConflictAlgorithm.ignore,
+          );
+
           await txn.update(
-            'remote_collections',
-            {'is_enabled': 1},
-            where: 'id = ?',
+            'collection_states',
+            {'is_enabled': 1, 'updated_at': now},
+            where: 'remote_collection_id = ?',
             whereArgs: [remoteCollectionId],
           );
         });
@@ -652,15 +672,16 @@ class SyncRepository {
   Future<String?> _deriveEligibilityHint(int remoteCollectionId) async {
     final db = await _dbHelper.database;
     final rows = await db.rawQuery('''
-      SELECT rc.remote_path, rc.is_enabled, lb.local_collection_id
+      SELECT rc.remote_path, cs.is_enabled AS state_is_enabled, lb.local_collection_id
       FROM remote_collections rc
+      LEFT JOIN collection_states cs ON cs.remote_collection_id = rc.id
       LEFT JOIN local_bindings lb ON lb.remote_collection_id = rc.id
       WHERE rc.id = ?
       LIMIT 1
     ''', [remoteCollectionId]);
     if (rows.isEmpty) return 'Remote path mismatch';
     final row = rows.first;
-    if ((row['is_enabled'] as int? ?? 0) != 1) return 'Bind to a local calendar to sync';
+    if ((row['state_is_enabled'] as int? ?? 0) != 1) return 'Bind to a local calendar to sync';
     final String remotePath = (row['remote_path']?.toString() ?? '').trim();
     if (remotePath.isEmpty) return 'Remote path mismatch';
     final String localId = row['local_collection_id']?.toString() ?? '';
@@ -756,7 +777,6 @@ class SyncRepository {
       'collection_type': 'calendar',
       'display_name': displayName,
       'color': '#4CAF50',
-      'is_enabled': 0,
       'sync_mode': 0,
       'origin_kind': SyncBindingOrigin.local,
       'remote_path': remotePath,
@@ -838,9 +858,10 @@ class SyncRepository {
       SELECT COUNT(1) AS cnt
       FROM remote_collections rc
       INNER JOIN local_bindings lb ON lb.remote_collection_id = rc.id
+      INNER JOIN collection_states cs ON cs.remote_collection_id = rc.id
       WHERE rc.account_name = ?
         AND rc.collection_type = 'calendar'
-        AND rc.is_enabled = 1
+        AND COALESCE(cs.is_enabled, 0) = 1
       """,
       [accountId],
     );
