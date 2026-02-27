@@ -37,6 +37,7 @@ class CaleeServerService {
               xmlns:oc="http://owncloud.org/ns">
     <d:prop>
       <d:displayname />
+      <cal:calendar-description />
       <oc:calendar-description />
       <d:resourcetype />
       <d:current-user-privilege-set />
@@ -93,7 +94,8 @@ class CaleeServerService {
 
       // --- 字段提取 ---
       final displayName = prop.findElements('d:displayname').firstOrNull?.innerText;
-      final String? calendarDescription = prop.findElements('oc:calendar-description').firstOrNull?.innerText;
+      final String? calendarDescription = prop.findElements('cal:calendar-description').firstOrNull?.innerText
+          ?? prop.findElements('oc:calendar-description').firstOrNull?.innerText;
       final Map<String, dynamic> originMeta = _extractOriginMetadata(calendarDescription);
       // Subscribed calendar可能没有 ctag, 使用空字符串兜底
       final ctag = prop.findAllElements('cs:getctag').firstOrNull?.innerText;
@@ -560,6 +562,8 @@ class CaleeServerService {
       origin: origin,
       originKey: originKey,
     );
+    final String safeCalendarName = const HtmlEscape(HtmlEscapeMode.element).convert(calendarName);
+    final String safeColor = const HtmlEscape(HtmlEscapeMode.element).convert(color);
 
     // 重点：增加 apple ical 命名空间来存储颜色
     final xmlBody = '''<?xml version="1.0" encoding="utf-8" ?>
@@ -569,9 +573,10 @@ class CaleeServerService {
               xmlns:oc="http://owncloud.org/ns">
   <d:set>
     <d:prop>
-      <d:displayname>$calendarName</d:displayname>
+      <d:displayname>$safeCalendarName</d:displayname>
+      <c:calendar-description>$encodedDescription</c:calendar-description>
       <oc:calendar-description>$encodedDescription</oc:calendar-description>
-      <ic:calendar-color>$color</ic:calendar-color>
+      <ic:calendar-color>$safeColor</ic:calendar-color>
       <c:supported-calendar-component-set>
         <c:comp name="VEVENT" />
       </c:supported-calendar-component-set>
