@@ -417,6 +417,13 @@ class CaleeServerService {
         final String parsedUid = (parsed['uid'] ?? '').toString();
         if (parsedUid.isEmpty) return null;
 
+        final String resolvedEtag = (item['etag']?.isNotEmpty == true)
+            ? item['etag']!
+            : _buildUnknownPendingEtag(
+                href: item['href'],
+                uid: parsedUid,
+              );
+
         return {
           // Canonical event keys shared by subscription and normal remote events.
           'uid': parsedUid,
@@ -430,7 +437,9 @@ class CaleeServerService {
 
           'summary': parsed['summary'],
           'href': isSubscription ? '$calendarPath$parsedUid.ics' : item['href'],
-          'etag': (item['etag']?.isNotEmpty == true ? item['etag'] : parsed['dtstamp']) ?? 'no-etag',
+          // Some CalDAV servers omit ETag. Mark as unknown/pending with a
+          // volatile token so sync planner treats it as remoteChanged.
+          'etag': resolvedEtag,
           'calendar_data': icsString,
         };
       }).whereType<Map<String, dynamic>>().toList();
@@ -484,6 +493,15 @@ class CaleeServerService {
       }
     }
     return results;
+  }
+
+  String _buildUnknownPendingEtag({
+    required String? href,
+    required String uid,
+  }) {
+    final int now = DateTime.now().microsecondsSinceEpoch;
+    final String stableHint = (href?.trim().isNotEmpty == true) ? href!.trim() : uid;
+    return 'pending_etag:$stableHint:$now';
   }
 
   /// 针对普通日历发送 REPORT 请求
