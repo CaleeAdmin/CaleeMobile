@@ -10,6 +10,7 @@ import 'package:uuid/uuid.dart';
 
 import '../sync/SyncEnum.dart';
 import '../sync/SyncEngine.dart';
+import '../sync/sync_gate_reason.dart';
 import '../sync/background_sync_scheduler.dart';
 import '../services/calee_server_service.dart';
 import 'database_helper.dart';
@@ -512,13 +513,16 @@ class SyncRepository {
     int bindingOriginForEnableAttempt = SyncBindingOrigin.remote;
 
     try {
-      final List<Map<String, dynamic>> remoteRows = await db.query(
-        'remote_collections',
-        columns: ['id', 'display_name', 'color', 'remote_path', 'origin_kind'],
-        where: 'account_name = ? AND collection_type = ? AND remote_path = ?',
-        whereArgs: [loginName, 'calendar', remotePath],
-        limit: 1,
-      );
+      final List<Map<String, dynamic>> remoteRows = await db.rawQuery('''
+        SELECT rc.id, rc.display_name, rc.color, rc.remote_path, rc.origin_kind,
+               cs.sync_gate_reason
+        FROM remote_collections rc
+        LEFT JOIN collection_states cs ON cs.remote_collection_id = rc.id
+        WHERE rc.account_name = ?
+          AND rc.collection_type = 'calendar'
+          AND rc.remote_path = ?
+        LIMIT 1
+      ''', [loginName, remotePath]);
 
       if (remoteRows.isEmpty) {
         _lastConnectError = 'Remote calendar not found. Pull to refresh and try again.';
@@ -532,6 +536,14 @@ class SyncRepository {
       if (persistedRemotePath.isEmpty) {
         _lastConnectError = 'Invalid remote calendar path. Please refresh and try again.';
         return EnableCalendarResult.failure(remotePath: remotePath);
+      }
+
+      final String syncGateReason = (remote['sync_gate_reason']?.toString() ?? '').trim();
+      if (syncGateReason == SyncGateReason.relinkRequired ||
+          syncGateReason == SyncGateReason.relinkVerifying ||
+          syncGateReason == SyncGateReason.relinkMismatch) {
+        _lastConnectError = 'Reconnect required. Open "Link to Device Calendar" and complete relink.';
+        return EnableCalendarResult.failure(remotePath: persistedRemotePath);
       }
 
       final String displayName = (remote['display_name']?.toString().isNotEmpty ?? false)
