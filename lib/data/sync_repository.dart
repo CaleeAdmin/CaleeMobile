@@ -351,9 +351,12 @@ class SyncRepository {
     }
 
     try {
-      final List<PlatformCalendar> calendars = await _nativeApi.getCalendars();
+      final List<PlatformCalendar?> calendars = await _nativeApi.getCalendars();
       PlatformCalendar? target;
-      for (final PlatformCalendar calendar in calendars) {
+      for (final PlatformCalendar? calendar in calendars) {
+        if (calendar == null) {
+          continue;
+        }
         if ((calendar.id ?? '').trim() == localCalendarId.trim()) {
           target = calendar;
           break;
