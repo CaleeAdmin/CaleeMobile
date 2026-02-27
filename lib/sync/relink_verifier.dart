@@ -53,15 +53,8 @@ class RelinkVerifier {
 
     final List<PlatformItem?> localItems = await _native.getEvents(localCalendarId, startMs, endMs);
 
-    final List<_RemoteEvent> remoteEvents = snapshot.events
-        .map((event) => _RemoteEvent.fromMap(event))
-        .whereType<_RemoteEvent>()
-        .toList();
-    final List<_LocalEvent> localEvents = localItems
-        .whereType<PlatformItem>()
-        .map((item) => _LocalEvent.fromPlatformItem(item))
-        .whereType<_LocalEvent>()
-        .toList();
+    final List<_RemoteEvent> remoteEvents = _parseRemoteEvents(snapshot.events);
+    final List<_LocalEvent> localEvents = _parseLocalEvents(localItems);
 
     if (remoteEvents.isEmpty && localEvents.isEmpty) {
       return const RelinkVerificationResult(passed: true, confidenceScore: 100);
@@ -72,6 +65,79 @@ class RelinkVerifier {
       return const RelinkVerificationResult(passed: false, confidenceScore: 0);
     }
 
+    final int matched = _countMatchedEvents(remoteEvents, localEvents);
+
+    final int confidence = ((matched * 100) / baseline).round().clamp(0, 100);
+
+    if (remoteEvents.length < 5 && localEvents.length < 5 && confidence < 98) {
+      return RelinkVerificationResult(
+        passed: false,
+        confidenceScore: confidence,
+        isIndeterminate: true,
+      );
+    }
+
+    return RelinkVerificationResult(passed: confidence >= 90, confidenceScore: confidence);
+  }
+
+  Future<int> previewConfidence({
+    required String remotePath,
+    required String localCalendarId,
+    int lookbackDays = 30,
+    int maxEvents = 20,
+  }) async {
+    final int boundedLookbackDays = lookbackDays.clamp(14, 60);
+    final int boundedMaxEvents = maxEvents.clamp(5, 50);
+    final DateTime now = DateTime.now().toUtc();
+    final DateTime startDt = now.subtract(Duration(days: boundedLookbackDays));
+    final int startMs = startDt.millisecondsSinceEpoch;
+    final int endMs = now.millisecondsSinceEpoch;
+
+    final snapshot = await _server.fetchUnifiedEventsSnapshot(
+      calendarPath: remotePath,
+      isSubscription: false,
+    );
+
+    final bool remoteFetchSucceeded =
+        snapshot.fetchSucceeded && (snapshot.statusCode == 200 || snapshot.statusCode == 207);
+    if (!remoteFetchSucceeded) {
+      return 0;
+    }
+
+    final List<PlatformItem?> localItems = await _native.getEvents(localCalendarId, startMs, endMs);
+    final List<_RemoteEvent> remoteEvents = _parseRemoteEvents(snapshot.events)
+      ..sort((a, b) => b.startMs.compareTo(a.startMs));
+    final List<_LocalEvent> localEvents = _parseLocalEvents(localItems)
+      ..sort((a, b) => b.startMs.compareTo(a.startMs));
+
+    final List<_RemoteEvent> sampledRemote = remoteEvents.take(boundedMaxEvents).toList();
+    final List<_LocalEvent> sampledLocal = localEvents.take(boundedMaxEvents).toList();
+    if (sampledRemote.isEmpty || sampledLocal.isEmpty) {
+      return 0;
+    }
+
+    final int baseline = math.max(sampledRemote.length, sampledLocal.length);
+    if (baseline == 0) {
+      return 0;
+    }
+
+    final int matched = _countMatchedEvents(sampledRemote, sampledLocal);
+    return ((matched * 100) / baseline).round().clamp(0, 100);
+  }
+
+  List<_RemoteEvent> _parseRemoteEvents(List<Map<String, dynamic>> events) {
+    return events.map((event) => _RemoteEvent.fromMap(event)).whereType<_RemoteEvent>().toList();
+  }
+
+  List<_LocalEvent> _parseLocalEvents(List<PlatformItem?> localItems) {
+    return localItems
+        .whereType<PlatformItem>()
+        .map((item) => _LocalEvent.fromPlatformItem(item))
+        .whereType<_LocalEvent>()
+        .toList();
+  }
+
+  int _countMatchedEvents(List<_RemoteEvent> remoteEvents, List<_LocalEvent> localEvents) {
     int matched = 0;
     final Set<int> usedLocalIndices = <int>{};
     for (final _RemoteEvent remote in remoteEvents) {
@@ -90,18 +156,7 @@ class RelinkVerifier {
         matched++;
       }
     }
-
-    final int confidence = ((matched * 100) / baseline).round().clamp(0, 100);
-
-    if (remoteEvents.length < 5 && localEvents.length < 5 && confidence < 98) {
-      return RelinkVerificationResult(
-        passed: false,
-        confidenceScore: confidence,
-        isIndeterminate: true,
-      );
-    }
-
-    return RelinkVerificationResult(passed: confidence >= 90, confidenceScore: confidence);
+    return matched;
   }
 
   int _matchScore(_RemoteEvent remote, _LocalEvent local) {

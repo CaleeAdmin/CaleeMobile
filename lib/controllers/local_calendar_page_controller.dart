@@ -60,6 +60,8 @@ class LocalCalendarPageController extends GetxController {
   final isLoading = false.obs;
   final connectingCalendarIds = <String>{}.obs;
   static const int _highConfidenceRelinkThreshold = 70;
+  static const int _providerHintWeight = 45;
+  static const int _eventPreviewWeight = 55;
 
   @override
   void onInit() {
@@ -156,10 +158,11 @@ class LocalCalendarPageController extends GetxController {
         final bool isConnected = connectedLocalIds.contains(id);
         int relinkConfidence = 0;
         if (!isConnected && relinkCandidates.isNotEmpty) {
-          relinkConfidence = relinkCandidates
-              .map((candidate) =>
-                  _scoreCandidateProviderHint(candidate, _asScoringItem(id, normalizedName, accountName, calendar)))
-              .fold<int>(0, (best, score) => score > best ? score : best);
+          relinkConfidence = await _computeRelinkPreviewConfidence(
+            localCalendarId: id,
+            item: _asScoringItem(id, normalizedName, accountName, calendar),
+            relinkCandidates: relinkCandidates,
+          );
         }
 
         final item = LocalCalendarItem(
@@ -559,6 +562,48 @@ class LocalCalendarPageController extends GetxController {
     }
 
     return score.clamp(0, 100);
+  }
+
+  Future<int> _computeRelinkPreviewConfidence({
+    required String localCalendarId,
+    required LocalCalendarItem item,
+    required List<Map<String, dynamic>> relinkCandidates,
+  }) async {
+    int bestConfidence = 0;
+    final List<_RankedReuseCandidate> rankedCandidates = relinkCandidates
+        .map((candidate) => _RankedReuseCandidate(
+              raw: candidate,
+              providerHintScore: _scoreCandidateProviderHint(candidate, item),
+            ))
+        .toList()
+      ..sort((a, b) => b.providerHintScore.compareTo(a.providerHintScore));
+
+    for (final _RankedReuseCandidate ranked in rankedCandidates.take(3)) {
+      final Map<String, dynamic> candidate = ranked.raw;
+      final String candidatePath = (candidate['remote_path'] ?? '').toString();
+      if (candidatePath.isEmpty) {
+        continue;
+      }
+
+      final int providerScore = ranked.providerHintScore;
+      int eventPreviewScore = 0;
+      try {
+        eventPreviewScore = await _relinkVerifier.previewConfidence(
+          remotePath: candidatePath,
+          localCalendarId: localCalendarId,
+        );
+      } catch (_) {
+        eventPreviewScore = 0;
+      }
+
+      final int blendedScore =
+          ((providerScore * _providerHintWeight) + (eventPreviewScore * _eventPreviewWeight)) ~/ 100;
+      if (blendedScore > bestConfidence) {
+        bestConfidence = blendedScore;
+      }
+    }
+
+    return bestConfidence.clamp(0, 100);
   }
 
   String _normalizeLocalCollectionId(Object? rawId) {
