@@ -5,6 +5,8 @@ import 'package:caleesync/sync/sync_completed_event_bus.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   group('BackgroundSyncWorkerBridge', () {
     test('returns contract mismatch failure before init/sync execution', () async {
       final bridge = BackgroundSyncWorkerBridge();
