@@ -360,12 +360,17 @@ class LocalCalendarPageController extends GetxController {
           });
         }
 
+        final String localCollectionId = (item.id ?? '').trim();
+        if (localCollectionId.isEmpty || localCollectionId.toLowerCase() == 'null') {
+          throw Exception('Invalid local calendar id while linking calendar');
+        }
+
         final int now = DateTime.now().millisecondsSinceEpoch;
         await db.insert(
           'local_bindings',
           {
             'remote_collection_id': remoteCollectionId,
-            'local_collection_id': item.id,
+            'local_collection_id': localCollectionId,
             'created_at': now,
             'updated_at': now,
           },
