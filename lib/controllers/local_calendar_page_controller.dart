@@ -507,10 +507,10 @@ class LocalCalendarPageController extends GetxController {
   Future<bool> _confirmDangerousRemoteCreate(LocalCalendarItem item) async {
     final bool? confirmed = await Get.dialog<bool>(
       AlertDialog(
-        title: const Text('Possible duplicate risk'),
+        title: const Text('Create remote calendar?'),
         content: Text(
-          'No high-confidence remote match was verified for "${item.name}". '
-          'Creating a new remote calendar may cause duplicates. Do you want to create a new remote anyway?',
+          'We could not find a matching remote calendar for "${item.name}". '
+          'You can still create one now and manage it anytime in settings. Continue?',
         ),
         actions: [
           TextButton(
@@ -519,7 +519,7 @@ class LocalCalendarPageController extends GetxController {
           ),
           ElevatedButton(
             onPressed: () => Get.back<bool>(result: true),
-            child: const Text('Create anyway'),
+            child: const Text('Create remote calendar'),
           ),
         ],
       ),
