@@ -51,5 +51,11 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.viso.caleesync.periodic</string>
+		<string>com.viso.caleesync.sync</string>
+		<string>com.viso.caleesync.watchdog</string>
+	</array>
 </dict>
 </plist>
