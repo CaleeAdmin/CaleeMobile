@@ -334,19 +334,6 @@ class CaleeServerService {
           ) THEN 'relink_required'
           WHEN sync_gate_reason IS NOT NULL AND sync_gate_reason != ''
             THEN sync_gate_reason
-          WHEN EXISTS (
-            SELECT 1 FROM local_bindings lb
-            WHERE lb.remote_collection_id = collection_states.remote_collection_id
-              AND lb.sync_gate_reason IS NOT NULL
-              AND lb.sync_gate_reason != ''
-          ) THEN (
-            SELECT lb.sync_gate_reason
-            FROM local_bindings lb
-            WHERE lb.remote_collection_id = collection_states.remote_collection_id
-              AND lb.sync_gate_reason IS NOT NULL
-              AND lb.sync_gate_reason != ''
-            LIMIT 1
-          )
           ELSE NULL
         END,
         updated_at = ?
