@@ -546,7 +546,7 @@ class CaleeServerService {
     required String calendarName,
     required String calendarId,
     required String color, // 格式应为 #RRGGBB 或 #RRGGBBAA
-    String origin = 'local',
+    String origin = 'remote',
     String? originKey,
   }) async {
     final server = _activeServerBase;
