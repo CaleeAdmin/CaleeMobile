@@ -86,8 +86,6 @@ class LocalCalendarPageController extends GetxController {
 
       final String? loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey);
 
-      final String? loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey);
-
       final List<Map<String, dynamic>> remoteProvisionedRows = await db.rawQuery('''
         SELECT lb.local_collection_id
         FROM local_bindings lb
