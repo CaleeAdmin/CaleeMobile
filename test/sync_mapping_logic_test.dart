@@ -33,7 +33,7 @@ void main() {
     });
 
     test('maps local provider errors', () {
-      expect(mapSyncErrorCode('calendar api unavailable from provider'), SyncErrorCode.localProviderFailure);
+      expect(mapSyncErrorCode('provider bridge unavailable'), SyncErrorCode.localProviderFailure);
     });
 
     test('falls back to unknown for unmatched errors', () {
