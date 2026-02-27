@@ -98,12 +98,11 @@ class LocalCalendarPageController extends GetxController {
         FROM remote_collections rc
         INNER JOIN collection_states cs ON cs.remote_collection_id = rc.id
         LEFT JOIN local_bindings lb ON lb.remote_collection_id = rc.id
-        WHERE rc.account_name = ?
-          AND rc.collection_type = 'calendar'
+        WHERE rc.collection_type = 'calendar'
           AND rc.origin_kind = 0
           AND cs.sync_gate_reason = ?
           AND lb.id IS NULL
-      ''', [loginName ?? '', SyncGateReason.relinkRequired]);
+      ''', [SyncGateReason.relinkRequired]);
 
       final List<Map<String, dynamic>> remoteProvisionedRows = await db.rawQuery('''
         SELECT lb.local_collection_id
