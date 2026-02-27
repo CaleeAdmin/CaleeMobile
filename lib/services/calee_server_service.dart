@@ -514,6 +514,8 @@ class CaleeServerService {
     required String calendarName,
     required String calendarId,
     required String color, // 格式应为 #RRGGBB 或 #RRGGBBAA
+    String origin = 'local',
+    String? originKey,
   }) async {
     final server = _activeServerBase;
     final password = MMKVUtils.instance.getString(AppConstant.appPasswordKey);
@@ -522,14 +524,21 @@ class CaleeServerService {
     final calendarPath = '/remote.php/dav/calendars/$userId/$encodedId/';
     final uri = Uri.parse('$server$calendarPath');
 
+    final String encodedDescription = _buildOriginDescription(
+      origin: origin,
+      originKey: originKey,
+    );
+
     // 重点：增加 apple ical 命名空间来存储颜色
     final xmlBody = '''<?xml version="1.0" encoding="utf-8" ?>
 <c:mkcalendar xmlns:d="DAV:" 
               xmlns:c="urn:ietf:params:xml:ns:caldav" 
-              xmlns:ic="http://apple.com/ns/ical/">
+              xmlns:ic="http://apple.com/ns/ical/"
+              xmlns:oc="http://owncloud.org/ns">
   <d:set>
     <d:prop>
       <d:displayname>$calendarName</d:displayname>
+      <oc:calendar-description>$encodedDescription</oc:calendar-description>
       <ic:calendar-color>$color</ic:calendar-color>
       <c:supported-calendar-component-set>
         <c:comp name="VEVENT" />
@@ -560,6 +569,17 @@ class CaleeServerService {
       debugPrint('[Calee] MKCALENDAR Exception: $e');
       return null;
     }
+  }
+
+  String _buildOriginDescription({required String origin, String? originKey}) {
+    final String safeOrigin = const HtmlEscape(HtmlEscapeMode.element)
+        .convert(origin.trim().isEmpty ? 'unknown' : origin.trim().toLowerCase());
+    final List<String> rows = ['origin=$safeOrigin'];
+    final String? key = originKey?.trim();
+    if (key != null && key.isNotEmpty) {
+      rows.add('originKey=${const HtmlEscape(HtmlEscapeMode.element).convert(key)}');
+    }
+    return rows.join('&#10;');
   }
 
 

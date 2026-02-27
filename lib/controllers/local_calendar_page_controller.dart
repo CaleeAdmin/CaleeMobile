@@ -201,7 +201,7 @@ class LocalCalendarPageController extends GetxController {
           }
 
           final List<Map<String, dynamic>> reuseCandidates = await db.rawQuery('''
-            SELECT rc.id, rc.remote_path, rc.display_name
+            SELECT rc.id, rc.remote_path, rc.display_name, rc.origin_key
             FROM remote_collections rc
             INNER JOIN collection_states cs ON cs.remote_collection_id = rc.id
             LEFT JOIN local_bindings lb ON lb.remote_collection_id = rc.id
@@ -210,10 +210,18 @@ class LocalCalendarPageController extends GetxController {
               AND rc.origin_kind = 0
               AND cs.sync_gate_reason = ?
               AND lb.id IS NULL
-            ORDER BY rc.id ASC
           ''', [loginName, SyncGateReason.relinkRequired]);
 
-          for (final candidate in reuseCandidates) {
+          final List<_RankedReuseCandidate> rankedCandidates = reuseCandidates
+              .map((candidate) => _RankedReuseCandidate(
+                    raw: candidate,
+                    providerHintScore: _scoreCandidateProviderHint(candidate, item),
+                  ))
+              .toList()
+            ..sort((a, b) => b.providerHintScore.compareTo(a.providerHintScore));
+
+          for (final ranked in rankedCandidates) {
+            final Map<String, dynamic> candidate = ranked.raw;
             final String candidatePath = (candidate['remote_path'] ?? '').toString();
             if (candidatePath.isEmpty) {
               continue;
@@ -256,41 +264,50 @@ class LocalCalendarPageController extends GetxController {
               where: 'remote_collection_id = ?',
               whereArgs: [candidate['id']],
             );
+
             break;
           }
 
           if (remotePath == null || remotePath.isEmpty) {
-            if (item.isSubscription) {
-            final String? sourceUrl = item.subscriptionUrl?.trim();
-            if (sourceUrl == null || sourceUrl.isEmpty) {
-              throw Exception('Subscription URL is unavailable for this local calendar');
+            final bool dangerConfirmed = await _confirmDangerousRemoteCreate(item);
+            if (!dangerConfirmed) {
+              throw Exception('Remote creation cancelled by user');
             }
 
-            final String subscriptionCalendarId =
-                'sub_${item.id}_${DateTime.now().millisecondsSinceEpoch}';
-            remotePath = await _caleeService.subscribeRemotePublicIcs(
-              userId: loginName,
-              calendarName: item.name,
-              calendarId: subscriptionCalendarId,
-              icsUrl: sourceUrl,
-            );
-          } else {
-            final String cloudCalendarId =
-                'local_${item.id}_${DateTime.now().millisecondsSinceEpoch}';
-            remotePath = await _caleeService.createRemoteCalendar(
-              userId: loginName,
-              calendarName: item.name,
-              calendarId: cloudCalendarId,
-              color: item.color,
-            );
-          }
+            if (item.isSubscription) {
+              final String? sourceUrl = item.subscriptionUrl?.trim();
+              if (sourceUrl == null || sourceUrl.isEmpty) {
+                throw Exception('Subscription URL is unavailable for this local calendar');
+              }
 
-          if (remotePath == null || remotePath.isEmpty) {
-            throw Exception(
-              item.isSubscription
-                  ? 'Failed to create remote subscription'
-                  : 'Failed to create remote calendar',
-            );
+              final String subscriptionCalendarId =
+                  'sub_${item.id}_${DateTime.now().millisecondsSinceEpoch}';
+              remotePath = await _caleeService.subscribeRemotePublicIcs(
+                userId: loginName,
+                calendarName: item.name,
+                calendarId: subscriptionCalendarId,
+                icsUrl: sourceUrl,
+              );
+            } else {
+              final String cloudCalendarId =
+                  'local_${item.id}_${DateTime.now().millisecondsSinceEpoch}';
+              remotePath = await _caleeService.createRemoteCalendar(
+                userId: loginName,
+                calendarName: item.name,
+                calendarId: cloudCalendarId,
+                color: item.color,
+                origin: 'local',
+                originKey: item.id,
+              );
+            }
+
+            if (remotePath == null || remotePath.isEmpty) {
+              throw Exception(
+                item.isSubscription
+                    ? 'Failed to create remote subscription'
+                    : 'Failed to create remote calendar',
+              );
+            }
           }
         }
       }
@@ -411,6 +428,65 @@ class LocalCalendarPageController extends GetxController {
     }
   }
 
+
+  int _scoreCandidateProviderHint(Map<String, dynamic> candidate, LocalCalendarItem item) {
+    int score = 0;
+    final String displayName = (candidate['display_name'] ?? '').toString().trim().toLowerCase();
+    final String localName = item.name.trim().toLowerCase();
+    if (displayName.isNotEmpty && localName.isNotEmpty) {
+      if (displayName == localName) {
+        score += 50;
+      } else if (displayName.contains(localName) || localName.contains(displayName)) {
+        score += 35;
+      }
+    }
+
+    final String providerCorpus = [
+      (item.accountType ?? '').toLowerCase(),
+      item.accountName.toLowerCase(),
+      (candidate['origin_key'] ?? '').toString().toLowerCase(),
+      (candidate['remote_path'] ?? '').toString().toLowerCase(),
+    ].join(' ');
+
+    if (providerCorpus.contains('google')) {
+      score += 25;
+    } else if (providerCorpus.contains('icloud') || providerCorpus.contains('apple')) {
+      score += 25;
+    } else if (providerCorpus.contains('outlook') || providerCorpus.contains('microsoft')) {
+      score += 25;
+    }
+
+    if ((candidate['remote_path'] ?? '').toString().toLowerCase().contains(item.id.toLowerCase())) {
+      score += 25;
+    }
+
+    return score.clamp(0, 100);
+  }
+
+  Future<bool> _confirmDangerousRemoteCreate(LocalCalendarItem item) async {
+    final bool? confirmed = await Get.dialog<bool>(
+      AlertDialog(
+        title: const Text('Possible duplicate risk'),
+        content: Text(
+          'No high-confidence remote match was verified for "${item.name}". '
+          'Creating a new remote calendar may cause duplicates. Do you want to create a new remote anyway?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Get.back<bool>(result: false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Get.back<bool>(result: true),
+            child: const Text('Create anyway'),
+          ),
+        ],
+      ),
+      barrierDismissible: false,
+    );
+    return confirmed == true;
+  }
+
   Future<void> _refreshMainCalendarList() async {
     if (!Get.isRegistered<CalendarPageController>()) {
       return;
@@ -419,4 +495,11 @@ class LocalCalendarPageController extends GetxController {
     final CalendarPageController dashboardController = Get.find<CalendarPageController>();
     await dashboardController.reloadCalendars();
   }
+}
+
+class _RankedReuseCandidate {
+  final Map<String, dynamic> raw;
+  final int providerHintScore;
+
+  const _RankedReuseCandidate({required this.raw, required this.providerHintScore});
 }

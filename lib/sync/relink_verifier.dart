@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import '../core/platform/pigeon/calendar_api.g.dart';
 import '../services/calee_server_service.dart';
 
@@ -23,32 +25,144 @@ class RelinkVerifier {
     required String localCalendarId,
     int lookbackDays = 60,
   }) async {
-    final int now = DateTime.now().millisecondsSinceEpoch;
-    final int start = now - Duration(days: lookbackDays).inMilliseconds;
+    final int boundedLookbackDays = lookbackDays.clamp(30, 90);
+    final DateTime now = DateTime.now().toUtc();
+    final DateTime startDt = now.subtract(Duration(days: boundedLookbackDays));
+    final int startMs = startDt.millisecondsSinceEpoch;
+    final int endMs = now.millisecondsSinceEpoch;
 
     final snapshot = await _server.fetchUnifiedEventsSnapshot(
       calendarPath: remotePath,
       isSubscription: false,
     );
-    final List<PlatformItem?> localItems = await _native.getEvents(localCalendarId, start, now);
+    final List<PlatformItem?> localItems = await _native.getEvents(localCalendarId, startMs, endMs);
 
-    final Set<String> remoteUids = snapshot.events
-        .map((event) => (event['uid'] ?? event['remote_uid'] ?? '').toString())
-        .where((uid) => uid.isNotEmpty)
-        .toSet();
-    final Set<String> localUids = localItems
+    final List<_RemoteEvent> remoteEvents = snapshot.events
+        .map((event) => _RemoteEvent.fromMap(event))
+        .whereType<_RemoteEvent>()
+        .toList();
+    final List<_LocalEvent> localEvents = localItems
         .whereType<PlatformItem>()
-        .map((item) => (item.uid ?? '').trim())
-        .where((uid) => uid.isNotEmpty)
-        .toSet();
+        .map((item) => _LocalEvent.fromPlatformItem(item))
+        .whereType<_LocalEvent>()
+        .toList();
 
-    if (remoteUids.isEmpty && localUids.isEmpty) {
+    if (remoteEvents.isEmpty && localEvents.isEmpty) {
       return const RelinkVerificationResult(passed: true, confidenceScore: 100);
     }
 
-    final int overlap = remoteUids.intersection(localUids).length;
-    final int baseline = remoteUids.length > localUids.length ? remoteUids.length : localUids.length;
-    final int score = baseline == 0 ? 0 : ((overlap * 100) / baseline).round();
-    return RelinkVerificationResult(passed: score >= 70, confidenceScore: score);
+    final int baseline = math.max(remoteEvents.length, localEvents.length);
+    if (baseline == 0) {
+      return const RelinkVerificationResult(passed: false, confidenceScore: 0);
+    }
+
+    int matched = 0;
+    final Set<int> usedLocalIndices = <int>{};
+    for (final _RemoteEvent remote in remoteEvents) {
+      int? bestIdx;
+      int bestScore = 0;
+      for (int idx = 0; idx < localEvents.length; idx++) {
+        if (usedLocalIndices.contains(idx)) continue;
+        final int score = _matchScore(remote, localEvents[idx]);
+        if (score > bestScore) {
+          bestScore = score;
+          bestIdx = idx;
+        }
+      }
+      if (bestIdx != null && bestScore >= 75) {
+        usedLocalIndices.add(bestIdx);
+        matched++;
+      }
+    }
+
+    final int confidence = ((matched * 100) / baseline).round().clamp(0, 100);
+    return RelinkVerificationResult(passed: confidence >= 90, confidenceScore: confidence);
   }
+
+  int _matchScore(_RemoteEvent remote, _LocalEvent local) {
+    int score = 0;
+
+    if (remote.title.isNotEmpty && local.title.isNotEmpty) {
+      final String r = _normalizeTitle(remote.title);
+      final String l = _normalizeTitle(local.title);
+      if (r == l) {
+        score += 65;
+      } else if (r.contains(l) || l.contains(r)) {
+        score += 50;
+      }
+    }
+
+    final int startDeltaMin = ((remote.startMs - local.startMs).abs() / 60000).round();
+    if (startDeltaMin <= 5) {
+      score += 25;
+    } else if (startDeltaMin <= 30) {
+      score += 15;
+    }
+
+    if (remote.endMs != null && local.endMs != null) {
+      final int endDeltaMin = (((remote.endMs! - local.endMs!).abs()) / 60000).round();
+      if (endDeltaMin <= 5) {
+        score += 10;
+      } else if (endDeltaMin <= 30) {
+        score += 5;
+      }
+    }
+
+    return score.clamp(0, 100);
+  }
+
+  String _normalizeTitle(String input) {
+    return input.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
+  }
+}
+
+class _RemoteEvent {
+  final String title;
+  final int startMs;
+  final int? endMs;
+
+  const _RemoteEvent({required this.title, required this.startMs, required this.endMs});
+
+  static _RemoteEvent? fromMap(Map<String, dynamic> map) {
+    final int? start = _coerceToEpoch(map['dtstart'] ?? map['start']);
+    if (start == null) return null;
+    return _RemoteEvent(
+      title: (map['summary'] ?? '').toString(),
+      startMs: start,
+      endMs: _coerceToEpoch(map['dtend'] ?? map['end']),
+    );
+  }
+}
+
+class _LocalEvent {
+  final String title;
+  final int startMs;
+  final int? endMs;
+
+  const _LocalEvent({required this.title, required this.startMs, required this.endMs});
+
+  static _LocalEvent? fromPlatformItem(PlatformItem item) {
+    final int? start = item.startTime;
+    if (start == null) return null;
+    return _LocalEvent(
+      title: (item.title ?? '').trim(),
+      startMs: start,
+      endMs: item.endTime,
+    );
+  }
+}
+
+int? _coerceToEpoch(dynamic value) {
+  if (value is int) return value;
+  if (value == null) return null;
+  final String text = value.toString().trim();
+  if (text.isEmpty) return null;
+
+  final int? asInt = int.tryParse(text);
+  if (asInt != null) {
+    return asInt > 1000000000000 ? asInt : asInt * 1000;
+  }
+
+  final DateTime? asDate = DateTime.tryParse(text);
+  return asDate?.toUtc().millisecondsSinceEpoch;
 }
