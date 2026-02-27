@@ -61,6 +61,12 @@ class SyncRepository {
     return message;
   }
 
+  bool _isValidLocalCollectionId(String? id) {
+    if (id == null) return false;
+    final String normalized = id.trim();
+    return normalized.isNotEmpty && normalized.toLowerCase() != 'null';
+  }
+
 
 
   Future<int?> _resolveRemoteCollectionIdByLocalCalendarId(DatabaseExecutor db, String localCalendarId) async {
@@ -175,6 +181,11 @@ class SyncRepository {
   }
 
   Future<void> updateCalendarLocalId(String oldId, String newId) async {
+    if (!_isValidLocalCollectionId(newId)) {
+      print("[WARN] [ID sanitize] Skip local_bindings update: invalid new local ID '$newId'");
+      return;
+    }
+
     final db = await DatabaseHelper.instance.database;
 
     await db.transaction((txn) async {
@@ -557,11 +568,12 @@ class SyncRepository {
       }
 
       final String? newLocalId = await _nativeApi.createCalendar(displayName, loginName, colorInt);
-      if (newLocalId == null || newLocalId.isEmpty) {
+      if (!_isValidLocalCollectionId(newLocalId)) {
         _lastConnectError = 'Failed to create local calendar. Check calendar permissions and try again.';
         return EnableCalendarResult.failure(remotePath: persistedRemotePath);
       }
-      createdLocalIdForEnableAttempt = newLocalId;
+      final String normalizedLocalId = newLocalId!.trim();
+      createdLocalIdForEnableAttempt = normalizedLocalId;
 
       try {
         await db.transaction((txn) async {
@@ -570,8 +582,8 @@ class SyncRepository {
             'local_bindings',
             {
               'remote_collection_id': remoteCollectionId,
-              'local_collection_id': newLocalId,
-                            'created_at': now,
+              'local_collection_id': normalizedLocalId,
+              'created_at': now,
               'updated_at': now,
             },
             conflictAlgorithm: ConflictAlgorithm.replace,
@@ -621,7 +633,7 @@ class SyncRepository {
         success: true,
         remotePath: persistedRemotePath,
         remoteCollectionId: remoteCollectionId,
-        localCalendarId: newLocalId,
+        localCalendarId: normalizedLocalId,
         didTriggerSync: true,
         hasFreshEventCount: false,
       );
@@ -826,6 +838,11 @@ class SyncRepository {
   }
 
   Future<void> updateSystemCalendarId(String oldLocalId, String newSystemId) async {
+    if (!_isValidLocalCollectionId(newSystemId)) {
+      print("[WARN] [DB] Skip calendar ID update: invalid new system ID '$newSystemId'");
+      return;
+    }
+
     final db = await DatabaseHelper.instance.database;
 
     // 使用事务确保两张表同步更新
