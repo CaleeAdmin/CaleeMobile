@@ -6,6 +6,7 @@ import 'package:caleesync/core/platform/pigeon/calendar_api.g.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
 import 'package:sqflite/sqflite.dart';
+import 'package:uuid/uuid.dart';
 
 import '../sync/SyncEnum.dart';
 import '../sync/SyncEngine.dart';
@@ -724,11 +725,14 @@ class SyncRepository {
     try {
       // 1) 创建云端日历。
       final String cloudId = "cal_${DateTime.now().millisecondsSinceEpoch}";
+      final String originKey = const Uuid().v4();
       final String? remotePath = await CaleeServerService().createRemoteCalendar(
         userId: userId,
         calendarName: displayName,
         calendarId: cloudId,
         color: '#4CAF50',
+        origin: 'local',
+        originKey: originKey,
       );
 
       if (remotePath == null) {
@@ -741,6 +745,7 @@ class SyncRepository {
         accountName: userId,
         displayName: displayName,
         remotePath: remotePath,
+        originKey: originKey,
       );
 
       // 3) 重扫远端并落库（不创建本地日历，不创建 binding）。
@@ -760,6 +765,7 @@ class SyncRepository {
     required String accountName,
     required String displayName,
     required String remotePath,
+    String? originKey,
   }) async {
     final db = await _dbHelper.database;
     final List<Map<String, dynamic>> rows = await db.query(
@@ -777,6 +783,7 @@ class SyncRepository {
         {
           'display_name': displayName,
           'color': '#4CAF50',
+          if (originKey != null && originKey.isNotEmpty) 'origin_key': originKey,
         },
         where: 'id = ?',
         whereArgs: [id],
@@ -791,6 +798,7 @@ class SyncRepository {
       'color': '#4CAF50',
       'sync_mode': 0,
       'origin_kind': SyncBindingOrigin.local,
+      'origin_key': originKey,
       'remote_path': remotePath,
     });
   }

@@ -417,7 +417,7 @@ class LocalCalendarPageController extends GetxController {
           {
             'remote_collection_id': remoteCollectionId,
             'sync_gate_reason': null,
-            'is_enabled': 1,
+            'is_enabled': 0,
             'updated_at': now,
           },
           conflictAlgorithm: ConflictAlgorithm.ignore,
@@ -426,7 +426,7 @@ class LocalCalendarPageController extends GetxController {
           'collection_states',
           {
             'sync_gate_reason': null,
-            'is_enabled': 1,
+            'is_enabled': 0,
             'updated_at': now,
           },
           where: 'remote_collection_id = ?',
