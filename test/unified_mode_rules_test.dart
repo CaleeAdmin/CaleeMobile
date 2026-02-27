@@ -21,7 +21,7 @@ void main() {
       expect(rules.onLocalOnlyMapped, SyncItemAction.deleteLocal);
       expect(rules.onLocalOnlyUnmapped, SyncItemAction.skip);
       expect(rules.onRemoteChanged, SyncItemAction.updateLocal);
-      expect(rules.onLocalChanged, SyncItemAction.skip);
+      expect(rules.onLocalChanged, SyncItemAction.updateLocal);
       expect(rules.onConflictLocalWins, SyncItemAction.updateLocal);
       expect(rules.onConflictRemoteWins, SyncItemAction.updateLocal);
     });
