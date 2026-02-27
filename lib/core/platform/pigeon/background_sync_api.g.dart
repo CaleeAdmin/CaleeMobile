@@ -30,6 +30,11 @@ enum BackgroundGateReason {
   unknown,
 }
 
+enum OneOffEnqueuePolicy {
+  keep,
+  replace,
+}
+
 const int kBackgroundSyncContractVersion = 1;
 
 class BackgroundRunRequest {
@@ -89,6 +94,11 @@ class BackgroundStatusDto {
     this.lastStage,
     this.lastStageAtMs,
     this.nextScheduledAtMs,
+    this.periodicWorkState,
+    this.oneOffWorkState,
+    this.lastFailureStage,
+    this.lastFailureElapsedMs,
+    this.lastFailureStep,
     required this.workerRunning,
     required this.intervalMinutes,
     required this.contractVersion,
@@ -103,6 +113,11 @@ class BackgroundStatusDto {
   String? lastStage;
   int? lastStageAtMs;
   int? nextScheduledAtMs;
+  String? periodicWorkState;
+  String? oneOffWorkState;
+  String? lastFailureStage;
+  int? lastFailureElapsedMs;
+  String? lastFailureStep;
   bool workerRunning;
   int intervalMinutes;
   int contractVersion;
@@ -117,6 +132,11 @@ class BackgroundStatusDto {
         lastStage,
         lastStageAtMs,
         nextScheduledAtMs,
+        periodicWorkState,
+        oneOffWorkState,
+        lastFailureStage,
+        lastFailureElapsedMs,
+        lastFailureStep,
         workerRunning,
         intervalMinutes,
         contractVersion,
@@ -134,9 +154,14 @@ class BackgroundStatusDto {
       lastStage: result[6] as String?,
       lastStageAtMs: (result[7] as num?)?.toInt(),
       nextScheduledAtMs: (result[8] as num?)?.toInt(),
-      workerRunning: result[9]! as bool,
-      intervalMinutes: (result[10]! as num).toInt(),
-      contractVersion: (result[11]! as num).toInt(),
+      periodicWorkState: result[9] as String?,
+      oneOffWorkState: result[10] as String?,
+      lastFailureStage: result[11] as String?,
+      lastFailureElapsedMs: (result[12] as num?)?.toInt(),
+      lastFailureStep: result[13] as String?,
+      workerRunning: result[14]! as bool,
+      intervalMinutes: (result[15]! as num).toInt(),
+      contractVersion: (result[16]! as num).toInt(),
     );
   }
 }
@@ -215,10 +240,10 @@ class BackgroundSyncControlApi {
     }
   }
 
-  Future<void> enqueueOneOff(String reason, bool expedited) async {
+  Future<void> enqueueOneOff(String reason, bool expedited, OneOffEnqueuePolicy enqueuePolicy) async {
     final channelName = 'dev.flutter.pigeon.caleesync.BackgroundSyncControlApi.enqueueOneOff$_suffix';
     final channel = BasicMessageChannel<Object?>(channelName, pigeonChannelCodec, binaryMessenger: _binaryMessenger);
-    final reply = await channel.send(<Object?>[reason, expedited]) as List<Object?>?;
+    final reply = await channel.send(<Object?>[reason, expedited, enqueuePolicy.index]) as List<Object?>?;
     if (reply == null) throw _createConnectionError(channelName);
     if (reply.length > 1) {
       throw PlatformException(code: reply[0]! as String, message: reply[1] as String?, details: reply[2]);
@@ -264,12 +289,14 @@ class BackgroundSyncRunnerHostApi {
 abstract class BackgroundSyncRunnerApi {
   static const MessageCodec<Object?> pigeonChannelCodec = _BackgroundSyncApiCodec();
 
+  Future<bool> pingBackgroundIsolate();
+
   Future<BackgroundRunResult> runBackgroundSync(BackgroundRunRequest request);
 
   static void setUp(BackgroundSyncRunnerApi? api, {BinaryMessenger? binaryMessenger, String messageChannelSuffix = ''}) {
     final suffix = messageChannelSuffix.isNotEmpty ? '.$messageChannelSuffix' : '';
     final channel = BasicMessageChannel<Object?>(
-      'dev.flutter.pigeon.caleesync.BackgroundSyncRunnerApi.runBackgroundSync$suffix',
+      'dev.flutter.pigeon.caleesync.BackgroundSyncRunnerApi.pingBackgroundIsolate$suffix',
       pigeonChannelCodec,
       binaryMessenger: binaryMessenger,
     );
@@ -277,6 +304,19 @@ abstract class BackgroundSyncRunnerApi {
       channel.setMessageHandler(null);
     } else {
       channel.setMessageHandler((message) async {
+        final output = await api.pingBackgroundIsolate();
+        return <Object?>[output];
+      });
+    }
+    final channel2 = BasicMessageChannel<Object?>(
+      'dev.flutter.pigeon.caleesync.BackgroundSyncRunnerApi.runBackgroundSync$suffix',
+      pigeonChannelCodec,
+      binaryMessenger: binaryMessenger,
+    );
+    if (api == null) {
+      channel2.setMessageHandler(null);
+    } else {
+      channel2.setMessageHandler((message) async {
         final args = message as List<Object?>;
         final output = await api.runBackgroundSync(args[0]! as BackgroundRunRequest);
         return <Object?>[output];

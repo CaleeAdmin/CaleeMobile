@@ -109,7 +109,8 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
     final enabled = _backgroundStatus?.periodicEnabled == true;
     final interval = _backgroundStatus?.intervalMinutes != null ? 'Every ${_backgroundStatus!.intervalMinutes}m' : 'Every 15m';
     final next = _clock(_backgroundStatus?.nextScheduledAt);
-    return '${enabled ? 'Enabled' : 'Disabled'} · $interval · Next $next';
+    final periodicState = _backgroundStatus?.periodicWorkState ?? 'unknown';
+    return '${enabled ? 'Enabled' : 'Disabled'} · $interval · Next $next · $periodicState';
   }
 
   bool get _showSchedulerWarning {
@@ -203,11 +204,24 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
                                   Text('Reason: ${_backgroundStatus?.lastReason?.isNotEmpty == true ? _backgroundStatus!.lastReason! : 'n/a'}'),
                                   Text('Gate: ${_backgroundStatus?.lastGate?.name ?? 'n/a'}'),
                                   Text('Error: ${_backgroundStatus?.lastError?.isNotEmpty == true ? _backgroundStatus!.lastError! : 'n/a'}'),
+                                  Text('Periodic: ${_backgroundStatus?.periodicEnabled == true ? 'enabled' : 'disabled'}'),
+                                  Text('Interval: ${_backgroundStatus?.intervalMinutes ?? 15}m'),
+                                  Text('Periodic Work: ${_backgroundStatus?.periodicWorkState ?? 'n/a'}'),
+                                  Text('One-off Work: ${_backgroundStatus?.oneOffWorkState ?? 'n/a'}'),
+                                  Text('Failure Stage: ${_backgroundStatus?.lastFailureStage?.isNotEmpty == true ? _backgroundStatus!.lastFailureStage! : 'n/a'}'),
+                                  Text('Failure Elapsed: ${_backgroundStatus?.lastFailureElapsedMs != null ? '${_backgroundStatus!.lastFailureElapsedMs}ms' : 'n/a'}'),
+                                  Text('Failure Step: ${_backgroundStatus?.lastFailureStep?.isNotEmpty == true ? _backgroundStatus!.lastFailureStep! : 'n/a'}'),
                                   const SizedBox(height: 8),
                                   TextButton.icon(
                                     onPressed: () async {
                                       await BackgroundSyncScheduler.selfHealPeriodicIfNeeded();
                                       await _refreshAll();
+                                      if (!mounted) return;
+                                      final status = _backgroundStatus;
+                                      final label = status?.periodicEnabled == true ? 'scheduled/updated' : 'not enabled';
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(content: Text('Repair complete: $label · one-off queued (repair_scheduler).')),
+                                      );
                                     },
                                     icon: const Icon(Icons.build, size: 16),
                                     label: const Text('Repair Scheduler'),

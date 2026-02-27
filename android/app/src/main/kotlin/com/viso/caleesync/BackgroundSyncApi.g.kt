@@ -60,6 +60,16 @@ enum class BackgroundGateReason(val raw: Int) {
   }
 }
 
+enum class OneOffEnqueuePolicy(val raw: Int) {
+  KEEP(0),
+  REPLACE(1);
+
+  companion object {
+    fun ofRaw(raw: Int): OneOffEnqueuePolicy = values().firstOrNull { it.raw == raw }
+      ?: throw IllegalArgumentException("Unknown OneOffEnqueuePolicy raw value: $raw")
+  }
+}
+
 data class BackgroundRunRequest(
   val trigger: String,
   val contractVersion: Long,
@@ -106,6 +116,11 @@ data class BackgroundStatusDto(
   val lastStage: String? = null,
   val lastStageAtMs: Long? = null,
   val nextScheduledAtMs: Long? = null,
+  val periodicWorkState: String? = null,
+  val oneOffWorkState: String? = null,
+  val lastFailureStage: String? = null,
+  val lastFailureElapsedMs: Long? = null,
+  val lastFailureStep: String? = null,
   val workerRunning: Boolean,
   val intervalMinutes: Long,
   val contractVersion: Long,
@@ -121,9 +136,14 @@ data class BackgroundStatusDto(
       val lastStage = list[6] as String?
       val lastStageAtMs = list[7].let { if (it is Int) it.toLong() else it as Long? }
       val nextScheduledAtMs = list[8].let { if (it is Int) it.toLong() else it as Long? }
-      val workerRunning = list[9] as Boolean
-      val intervalMinutes = list[10].let { if (it is Int) it.toLong() else it as Long }
-      val contractVersion = list[11].let { if (it is Int) it.toLong() else it as Long }
+      val periodicWorkState = list[9] as String?
+      val oneOffWorkState = list[10] as String?
+      val lastFailureStage = list[11] as String?
+      val lastFailureElapsedMs = list[12].let { if (it is Int) it.toLong() else it as Long? }
+      val lastFailureStep = list[13] as String?
+      val workerRunning = list[14] as Boolean
+      val intervalMinutes = list[15].let { if (it is Int) it.toLong() else it as Long }
+      val contractVersion = list[16].let { if (it is Int) it.toLong() else it as Long }
       return BackgroundStatusDto(
         periodicEnabled,
         lastRunAtMs,
@@ -134,6 +154,11 @@ data class BackgroundStatusDto(
         lastStage,
         lastStageAtMs,
         nextScheduledAtMs,
+        periodicWorkState,
+        oneOffWorkState,
+        lastFailureStage,
+        lastFailureElapsedMs,
+        lastFailureStep,
         workerRunning,
         intervalMinutes,
         contractVersion,
@@ -151,6 +176,11 @@ data class BackgroundStatusDto(
     lastStage,
     lastStageAtMs,
     nextScheduledAtMs,
+    periodicWorkState,
+    oneOffWorkState,
+    lastFailureStage,
+    lastFailureElapsedMs,
+    lastFailureStep,
     workerRunning,
     intervalMinutes,
     contractVersion,
@@ -190,7 +220,7 @@ interface BackgroundSyncControlApi {
   fun schedulePeriodic(intervalMinutes: Long, callback: (Result<Unit>) -> Unit)
   fun cancelPeriodic(callback: (Result<Unit>) -> Unit)
   fun ensurePeriodicScheduled(intervalMinutes: Long, callback: (Result<Unit>) -> Unit)
-  fun enqueueOneOff(reason: String, expedited: Boolean, callback: (Result<Unit>) -> Unit)
+  fun enqueueOneOff(reason: String, expedited: Boolean, enqueuePolicy: OneOffEnqueuePolicy, callback: (Result<Unit>) -> Unit)
   fun getBackgroundStatus(callback: (Result<BackgroundStatusDto>) -> Unit)
 
   companion object {
@@ -269,7 +299,8 @@ interface BackgroundSyncControlApi {
           val args = message as List<Any?>
           val reason = args[0] as String
           val expedited = args[1] as Boolean
-          api.enqueueOneOff(reason, expedited) { result ->
+          val enqueuePolicy = OneOffEnqueuePolicy.ofRaw((args[2] as Number).toInt())
+          api.enqueueOneOff(reason, expedited, enqueuePolicy) { result ->
             result.fold(
               onSuccess = { reply.reply(wrapResult(null)) },
               onFailure = { reply.reply(wrapError(it)) },
@@ -337,6 +368,27 @@ class BackgroundSyncRunnerApi(
 ) {
   companion object {
     val codec: MessageCodec<Any?> by lazy { BackgroundSyncApiCodec }
+  }
+
+  fun pingBackgroundIsolate(callback: (Result<Boolean>) -> Unit) {
+    val suffix = if (messageChannelSuffix.isNotEmpty()) ".$messageChannelSuffix" else ""
+    val channelName = "dev.flutter.pigeon.caleesync.BackgroundSyncRunnerApi.pingBackgroundIsolate$suffix"
+    val channel = BasicMessageChannel<Any?>(binaryMessenger, channelName, codec)
+    channel.send(null) { reply ->
+      val listReply = reply as List<Any?>?
+      if (listReply == null) {
+        callback(Result.failure(BackgroundSyncFlutterError("channel-error", "Unable to establish connection on channel: '$channelName'.")))
+      } else if (listReply.size > 1) {
+        callback(Result.failure(BackgroundSyncFlutterError(listReply[0] as String, listReply[1] as String?, listReply[2])))
+      } else {
+        val output = listReply[0] as Boolean?
+        if (output == null) {
+          callback(Result.failure(BackgroundSyncFlutterError("null-error", "Host platform returned null value for non-null return value.")))
+        } else {
+          callback(Result.success(output))
+        }
+      }
+    }
   }
 
   fun runBackgroundSync(request: BackgroundRunRequest, callback: (Result<BackgroundRunResult>) -> Unit) {

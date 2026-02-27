@@ -47,6 +47,11 @@ class BackgroundSyncWorkerBridge implements BackgroundSyncRunnerApi {
   }
 
   @override
+  Future<bool> pingBackgroundIsolate() async {
+    return true;
+  }
+
+  @override
   Future<BackgroundRunResult> runBackgroundSync(BackgroundRunRequest request) async {
     final String trigger = request.trigger;
     if (request.contractVersion != kBackgroundSyncContractVersion) {

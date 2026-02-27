@@ -42,10 +42,10 @@ class BackgroundSyncControlApiImpl(private val context: Context) : BackgroundSyn
         }
     }
 
-    override fun enqueueOneOff(reason: String, expedited: Boolean, callback: (Result<Unit>) -> Unit) {
+    override fun enqueueOneOff(reason: String, expedited: Boolean, enqueuePolicy: OneOffEnqueuePolicy, callback: (Result<Unit>) -> Unit) {
         scope.launch {
             runCatching {
-                CaleeSyncPeriodicWorker.enqueueOneOff(context, reason, expedited)
+                CaleeSyncPeriodicWorker.enqueueOneOff(context, reason, expedited, enqueuePolicy)
             }.fold(
                 onSuccess = { callback(Result.success(Unit)) },
                 onFailure = { callback(Result.failure(it)) },
