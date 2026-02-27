@@ -359,8 +359,17 @@ class CalendarPageController extends GetxController {
     try {
       isLoading.value = true;
       final String authUserId = MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? '';
-      final String accountName = MMKVUtils.instance.getString(AppConstant.calendarAccountNameKey) ?? '';
-      if (authUserId.isEmpty || accountName.isEmpty) return;
+      final String storedAccountName = MMKVUtils.instance.getString(AppConstant.calendarAccountNameKey) ?? '';
+      if (authUserId.isEmpty) return;
+
+      // Some users do not have a bound local calendar account yet, so the
+      // persisted account partition can be empty. In that case, fallback to
+      // auth user id so the main calendar page can still load remote calendars.
+      final String accountName = storedAccountName.isNotEmpty ? storedAccountName : authUserId;
+
+      if (storedAccountName.isEmpty) {
+        MMKVUtils.instance.setString(AppConstant.calendarAccountNameKey, accountName);
+      }
 
       // 1. 拉取远端 Calee 日历并更新本地映射
       await _nc.scanRemoteCalendars(
