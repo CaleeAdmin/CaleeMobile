@@ -115,7 +115,7 @@ class _CalendarPageState extends State<CalendarPage> {
                                           : () async {
                                               isSubmitting.value = true;
                                               final nm = newCalCtrl.text.trim();
-                                              final ok = await Get.find<CalendarPageController>().createNewLocalCalendar(nm);
+                                              final ok = await Get.find<CalendarPageController>().createRemoteCalendarDraft(nm);
                                               isSubmitting.value = false;
                                               if (ok) {
                                                 Navigator.of(dialogContext).pop(true);
