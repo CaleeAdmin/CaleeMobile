@@ -234,7 +234,10 @@ class SyncRepository {
   /// [INFO] 核心合并删除逻辑：物理销毁或解除绑定
   Future<void> performAbsoluteDelete({String? localId, String? remotePath}) async {
     final db = await _dbHelper.database;
-    final String userId = MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? "";
+    final String authUserId = MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? "";
+    if (authUserId.isEmpty) {
+      throw Exception("Missing auth userId (loginNameKey).");
+    }
 
     final String? sanitizedLocalId = (localId != null && localId.isNotEmpty) ? localId : null;
     final String? sanitizedRemotePath = (remotePath != null && remotePath.isNotEmpty) ? remotePath : null;
