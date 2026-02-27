@@ -27,6 +27,7 @@ class CalendarDisplayItem {
   final bool isSubscription;
   final bool isLocalReadOnly;
   final String? subscriptionUrl;
+  final String accountName;
   bool isEnabled;            // 对应数据库 collection_states.is_enabled
   final String? syncGateReason;
   final int origin;          // 0: 本地创建, 1: 云端同步
@@ -44,6 +45,7 @@ class CalendarDisplayItem {
     required this.isSubscription,
     required this.isLocalReadOnly,
     this.subscriptionUrl,
+    required this.accountName,
     required this.isEnabled,
     this.syncGateReason,
     required this.origin,
@@ -66,6 +68,7 @@ class CalendarDisplayItem {
       isSubscription: toBool(map['is_subscription']),
       isLocalReadOnly: toBool(map['is_local_read_only']),
       subscriptionUrl: map['subscription_url']?.toString(),
+      accountName: map['account_name']?.toString() ?? '',
       isEnabled: toBool(map['state_is_enabled']),
       syncGateReason: map['sync_gate_reason']?.toString(),
       origin: (map['origin_kind'] as int?) ?? 2,
@@ -171,9 +174,9 @@ class CalendarPageController extends GetxController {
       } else if (syncMessage != null && syncMessage.isNotEmpty) {
         Get.snackbar('Sync failed', syncMessage);
       } else {
-        final String? loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey);
-        if (loginName != null && loginName.isNotEmpty) {
-          final bool syncEnabled = await _nativeApi.isCalendarAccountSyncEnabled(loginName);
+        final String accountName = item.accountName;
+        if (accountName.isNotEmpty) {
+          final bool syncEnabled = await _nativeApi.isCalendarAccountSyncEnabled(accountName);
           if (!syncEnabled) {
             Get.snackbar('Sync disabled in system', 'Please enable CaleeSync account calendar sync in Android Settings.');
           }
@@ -235,6 +238,7 @@ class CalendarPageController extends GetxController {
       isSubscription: item.isSubscription,
       isLocalReadOnly: item.isLocalReadOnly,
       subscriptionUrl: item.subscriptionUrl,
+      accountName: item.accountName,
       isEnabled: result.success,
       syncGateReason: item.syncGateReason,
       origin: item.origin,
@@ -329,10 +333,10 @@ class CalendarPageController extends GetxController {
     debugPrint("[OK] Update succeeded, affected rows: $count (condition: $whereClause = ${whereArgs[0]})");
 
     final String? localCalendarId = item.localId;
-    final String? loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey);
-    if (localCalendarId != null && localCalendarId.isNotEmpty && loginName != null && loginName.isNotEmpty) {
+    final String accountName = item.accountName;
+    if (localCalendarId != null && localCalendarId.isNotEmpty && accountName.isNotEmpty) {
       try {
-        await _nativeApi.setCalendarEnabled(localCalendarId, loginName, newValue);
+        await _nativeApi.setCalendarEnabled(localCalendarId, accountName, newValue);
       } catch (e) {
         debugPrint('[WARN] Failed to update CalendarContract flags for $localCalendarId: $e');
       }
@@ -354,13 +358,15 @@ class CalendarPageController extends GetxController {
   Future<void> _reloadCalendarsImpl() async {
     try {
       isLoading.value = true;
-      final String? loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey);
-      if (loginName == null) return;
+      final String authUserId = MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? '';
+      final String accountName = MMKVUtils.instance.getString(AppConstant.calendarAccountNameKey) ?? '';
+      if (authUserId.isEmpty || accountName.isEmpty) return;
 
       // 1. 拉取远端 Calee 日历并更新本地映射
       await _nc.scanRemoteCalendars(
           serverUrl: _authService.normalizedUrl,
-          userId: loginName);
+          authUserId: authUserId,
+          accountName: accountName);
 
       // 2. 查询本地 remote_collections 的所有日历记录
       final db = await DatabaseHelper.instance.database;
@@ -374,7 +380,7 @@ class CalendarPageController extends GetxController {
           AND rc.remote_path IS NOT NULL
           AND rc.remote_path != ''
         ORDER BY rc.id ASC
-      ''', [loginName]);
+      ''', [accountName]);
       final Map<String, int> cachedCountByCalendarId = {};
       final Map<String, bool> localReadOnlyById = {};
       final List<CalendarDisplayItem> nextCloudCalendars = [];
@@ -424,6 +430,7 @@ class CalendarPageController extends GetxController {
           isSubscription: isSubscription,
           isLocalReadOnly: localReadOnlyById[localId] ?? false,
           subscriptionUrl: cal['subscription_url']?.toString(),
+          accountName: cal['account_name']?.toString() ?? '',
           isEnabled: (cal['state_is_enabled'] as int?) == 1,
           syncGateReason: cal['sync_gate_reason']?.toString(),
           remotePath: remotePath,

@@ -91,8 +91,6 @@ class LocalCalendarPageController extends GetxController {
         for (final row in rows) _normalizeLocalCollectionId(row['local_collection_id'])
       }..remove('');
 
-      final String? loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey);
-
       final List<Map<String, dynamic>> relinkCandidates = await db.rawQuery('''
         SELECT rc.id, rc.remote_path, rc.display_name, rc.origin_key
         FROM remote_collections rc
@@ -111,8 +109,7 @@ class LocalCalendarPageController extends GetxController {
         WHERE rc.origin_kind != 0
           AND lb.local_collection_id IS NOT NULL
           AND lb.local_collection_id != ''
-          AND rc.account_name = ?
-      ''', [loginName ?? '']);
+      ''');
       final Set<String> remoteProvisionedLocalIds = {
         for (final row in remoteProvisionedRows) _normalizeLocalCollectionId(row['local_collection_id'])
       }..remove('');
@@ -270,7 +267,7 @@ class LocalCalendarPageController extends GetxController {
               AND rc.origin_kind = 0
               AND cs.sync_gate_reason = ?
               AND lb.id IS NULL
-          ''', [loginName, SyncGateReason.relinkRequired]);
+          ''', [item.accountName, SyncGateReason.relinkRequired]);
 
           final List<_RankedReuseCandidate> rankedCandidates = reuseCandidates
               .map((candidate) => _RankedReuseCandidate(
@@ -403,8 +400,7 @@ class LocalCalendarPageController extends GetxController {
         }
       }
 
-      final String accountName =
-          MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? item.accountName;
+      final String accountName = item.accountName;
       int? remoteCollectionId;
 
       if (linkRequested) {
@@ -507,6 +503,11 @@ class LocalCalendarPageController extends GetxController {
           where: 'id IN (SELECT remote_collection_id FROM local_bindings WHERE local_collection_id = ?)',
           whereArgs: [item.id],
         );
+      }
+
+
+      if (linkRequested) {
+        MMKVUtils.instance.setString(AppConstant.calendarAccountNameKey, accountName);
       }
 
       if (linkRequested && returnToCalendarListAfterConnect) {

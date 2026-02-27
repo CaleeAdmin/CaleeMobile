@@ -57,17 +57,19 @@ class SyncEngine {
 
     try {
       final summary = SyncSummary(telemetry: _runRecorder);
-      final String? loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey);
-      if (loginName == null) return summary;
+      final String authUserId = MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? '';
+      final String accountName = MMKVUtils.instance.getString(AppConstant.calendarAccountNameKey) ?? '';
+      if (authUserId.isEmpty || accountName.isEmpty) return summary;
 
-      await _repo.scanLocalCalendars(loginName);
+      await _repo.scanLocalCalendars(authUserId);
       final List<Map<String, dynamic>> remoteCalendars = await _serverService.scanRemoteCalendars(
         serverUrl: _authService.normalizedUrl,
-        userId: loginName,
+        authUserId: authUserId,
+        accountName: accountName,
       );
 
-      final int enabledBindings = await _repo.countEnabledCalendarBindings(loginName);
-      final syncItems = await _planner.generateSyncItems(loginName, remoteCalendars);
+      final int enabledBindings = await _repo.countEnabledCalendarBindings(accountName);
+      final syncItems = await _planner.generateSyncItems(accountName, remoteCalendars);
       debugPrint('====generateSyncItems===$syncItems');
 
       final mode = syncItems.isEmpty ? SyncRunMode.twoWay : mapRunModeFromAction(syncItems.first.action);
