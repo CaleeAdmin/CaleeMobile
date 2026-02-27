@@ -715,7 +715,7 @@ class SyncRepository {
   ///
   /// 注意：本地系统日历只允许在“启用同步”流程中创建，
   /// 这里不再创建本地日历，也不再预建 local_bindings。
-  Future<bool> createNewLocalCalendar(String displayName) async {
+  Future<bool> createRemoteCalendarDraft(String displayName) async {
     final String userId = MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? "";
     if (userId.isEmpty) {
       print("[ERROR] [Repository] Not logged in, cannot create calendar");
@@ -731,7 +731,7 @@ class SyncRepository {
         calendarName: displayName,
         calendarId: cloudId,
         color: '#4CAF50',
-        origin: 'local',
+        origin: 'remote',
         originKey: originKey,
       );
 
@@ -797,7 +797,7 @@ class SyncRepository {
       'display_name': displayName,
       'color': '#4CAF50',
       'sync_mode': 0,
-      'origin_kind': SyncBindingOrigin.local,
+      'origin_kind': SyncBindingOrigin.remote,
       'origin_key': originKey,
       'remote_path': remotePath,
     });

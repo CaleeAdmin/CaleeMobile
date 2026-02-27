@@ -485,8 +485,8 @@ class CalendarPageController extends GetxController {
     }
   }
 
-  /// 创建新的本地日历（委托给 SyncRepository）, 并刷新界面
-  Future<bool> createNewLocalCalendar(String displayName) async {
+  /// 创建新的远端日历草稿（委托给 SyncRepository）, 并刷新界面
+  Future<bool> createRemoteCalendarDraft(String displayName) async {
     final String? invalidReason = validateNewCalendarName(displayName);
     if (invalidReason != null) {
       Get.snackbar('Invalid calendar name', invalidReason);
@@ -495,7 +495,7 @@ class CalendarPageController extends GetxController {
 
     try {
       isLoading.value = true;
-      final ok = await _repo.createNewLocalCalendar(displayName.trim());
+      final ok = await _repo.createRemoteCalendarDraft(displayName.trim());
       if (ok) {
         await reloadCalendars();
         _notifyMeaningfulChange();
@@ -505,7 +505,7 @@ class CalendarPageController extends GetxController {
         return false;
       }
     } catch (e) {
-      print('[ERROR] Failed to create local calendar: $e');
+      print('[ERROR] Failed to create remote calendar draft: $e');
       Get.snackbar('Error', 'Failed to create calendar');
       return false;
     } finally {
