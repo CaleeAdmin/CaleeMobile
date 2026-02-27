@@ -29,6 +29,9 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Run automation tests
+        run: flutter test
+
       - name: Validate signing secrets are configured
         shell: bash
         run: |
