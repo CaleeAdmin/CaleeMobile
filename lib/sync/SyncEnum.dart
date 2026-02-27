@@ -13,10 +13,9 @@ class SyncBindingMode {
 }
 
 class SyncBindingOrigin {
-  // 与 remote_collections.origin_kind 保持一致：0=本地起源，1=远端起源，2=未知
+  // 与 remote_collections.origin_kind 保持一致：0=本地起源，1=远端起源（默认）
   static const int local = 0;
   static const int remote = 1;
-  static const int unknown = 2;
 }
 
 class SyncDeletionPolicy {

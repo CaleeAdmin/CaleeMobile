@@ -46,7 +46,7 @@ class DatabaseHelper {
         sync_mode INTEGER DEFAULT 0, /* 同步模式（0 只读，1 双向） */
         is_subscription INTEGER DEFAULT 0, /* 是否为订阅型集合（0 否 / 1 是） */
         subscription_url TEXT, /* 订阅地址（仅订阅集合使用） */
-        origin_kind INTEGER DEFAULT 2, /* 远端来源（0 本地，1 远端，2 未知） */
+        origin_kind INTEGER DEFAULT 1, /* 远端来源（0 本地，1 远端；默认 1） */
         origin_key TEXT /* 远端来源稳定标识 */
       )
     ''');
