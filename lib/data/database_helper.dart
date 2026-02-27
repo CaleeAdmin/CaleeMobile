@@ -44,7 +44,6 @@ class DatabaseHelper {
         color TEXT, /* 集合颜色（十六进制或平台定义值） */
         synced_ctag TEXT, /* 最近一次同步时记录的 ctag */
         sync_mode INTEGER DEFAULT 0, /* 同步模式（0 只读，1 双向） */
-        is_enabled INTEGER DEFAULT 0, /* 是否启用同步（0 否 / 1 是） */
         is_subscription INTEGER DEFAULT 0, /* 是否为订阅型集合（0 否 / 1 是） */
         subscription_url TEXT, /* 订阅地址（仅订阅集合使用） */
         origin_kind INTEGER DEFAULT 2, /* 远端来源（0 本地，1 远端，2 未知） */
@@ -55,11 +54,6 @@ class DatabaseHelper {
     await db.execute('''
       CREATE UNIQUE INDEX IF NOT EXISTS uq_rc_account_type_path
       ON remote_collections(account_name, collection_type, remote_path)
-    ''');
-
-    await db.execute('''
-      CREATE INDEX IF NOT EXISTS idx_rc_account_type_enabled
-      ON remote_collections(account_name, collection_type, is_enabled)
     ''');
 
     // 2. 远端集合与本地集合绑定关系

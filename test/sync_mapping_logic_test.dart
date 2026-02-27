@@ -33,7 +33,7 @@ void main() {
     });
 
     test('maps local provider errors', () {
-      expect(mapSyncErrorCode('provider backend unavailable'), SyncErrorCode.localProviderFailure);
+      expect(mapSyncErrorCode('calendar api unavailable from provider'), SyncErrorCode.localProviderFailure);
     });
 
     test('falls back to unknown for unmatched errors', () {
