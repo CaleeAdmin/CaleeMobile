@@ -276,7 +276,9 @@ class SyncRepository {
     final String resolvedLocalId = cal['local_collection_id']?.toString() ?? sanitizedLocalId ?? '';
     final String? resolvedRemotePath = cal['remote_path']?.toString() ?? sanitizedRemotePath;
     final int origin = (cal['origin_kind'] as int?) ?? SyncBindingOrigin.remote;
-    final bool shouldDeleteLocalCalendar = origin == 1;
+    final bool isRemoteOrigin = origin == SyncBindingOrigin.remote;
+    final bool isCaleeSyncAccountType = await _isCaleeSyncCalendarAccountType(resolvedLocalId);
+    final bool shouldDeleteLocalCalendar = isRemoteOrigin && isCaleeSyncAccountType;
 
     debugPrint("[INFO] Starting hard delete workflow: ID $resolvedLocalId, Path: $resolvedRemotePath");
 
@@ -305,7 +307,9 @@ class SyncRepository {
           }
           debugPrint("[OK] Mobile system calendar removed");
         } else if (!shouldDeleteLocalCalendar) {
-          debugPrint("[INFO] Calendar originated locally, skipping local system calendar deletion");
+          debugPrint(
+            "[INFO] Skipping local system calendar deletion (origin=$origin, isCaleeSyncAccountType=$isCaleeSyncAccountType)",
+          );
         }
 
         // --- Step C: 物理删除成功后, 清理数据库 ---
@@ -338,6 +342,28 @@ class SyncRepository {
     } catch (e) {
       debugPrint("[WARN] Calendar deletion incomplete; retained remote_collections/sync_items: $e");
       rethrow;
+    }
+  }
+
+  Future<bool> _isCaleeSyncCalendarAccountType(String localCalendarId) async {
+    if (localCalendarId.trim().isEmpty) {
+      return false;
+    }
+
+    try {
+      final List<PlatformCalendar> calendars = await _nativeApi.getCalendars();
+      PlatformCalendar? target;
+      for (final PlatformCalendar calendar in calendars) {
+        if ((calendar.id ?? '').trim() == localCalendarId.trim()) {
+          target = calendar;
+          break;
+        }
+      }
+
+      return (target?.accountType ?? '').trim().toLowerCase() == 'com.viso.caleesync';
+    } catch (e) {
+      debugPrint('[WARN] Unable to verify calendar accountType for deletion: $e');
+      return false;
     }
   }
 
