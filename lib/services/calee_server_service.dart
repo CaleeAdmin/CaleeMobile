@@ -37,6 +37,7 @@ class CaleeServerService {
               xmlns:oc="http://owncloud.org/ns">
     <d:prop>
       <d:displayname />
+      <oc:calendar-description />
       <d:resourcetype />
       <d:current-user-privilege-set />
       <nc:calendar-color /> 
@@ -92,6 +93,8 @@ class CaleeServerService {
 
       // --- 字段提取 ---
       final displayName = prop.findElements('d:displayname').firstOrNull?.innerText;
+      final String? calendarDescription = prop.findElements('oc:calendar-description').firstOrNull?.innerText;
+      final Map<String, dynamic> originMeta = _extractOriginMetadata(calendarDescription);
       // Subscribed calendar可能没有 ctag, 使用空字符串兜底
       final ctag = prop.findAllElements('cs:getctag').firstOrNull?.innerText;
       final color = prop.findElements('nc:calendar-color').firstOrNull?.innerText;
@@ -132,9 +135,41 @@ class CaleeServerService {
         'color': color,
         'is_subscription': isSubscribed, // 建议增加此字段方便 UI 展示
         'subscription_url': subscriptionUrl,
+        'origin_kind': originMeta['origin_kind'],
+        'origin_key': originMeta['origin_key'],
       });
     }
     return results;
+  }
+
+  Map<String, dynamic> _extractOriginMetadata(String? calendarDescription) {
+    if (calendarDescription == null || calendarDescription.trim().isEmpty) {
+      return {'origin_kind': 2, 'origin_key': null};
+    }
+
+    String? origin;
+    String? originKey;
+    for (final String line in calendarDescription.split(RegExp(r'[\r\n]+'))) {
+      final String normalized = line.trim();
+      if (normalized.isEmpty) continue;
+      final int idx = normalized.indexOf('=');
+      if (idx <= 0) continue;
+      final String key = normalized.substring(0, idx).trim().toLowerCase();
+      final String value = normalized.substring(idx + 1).trim();
+      if (key == 'origin') {
+        origin = value.toLowerCase();
+      } else if (key == 'originkey' || key == 'origin_key') {
+        originKey = value;
+      }
+    }
+
+    int originKind = 2;
+    if (origin == 'local') {
+      originKind = 0;
+    } else if (origin == 'remote') {
+      originKind = 1;
+    }
+    return {'origin_kind': originKind, 'origin_key': originKey};
   }
 
   String _classifyCollectionType(xml.XmlElement prop) {
@@ -216,8 +251,10 @@ class CaleeServerService {
           color, 
           is_enabled,
           is_subscription,
-          subscription_url
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) -- 增加订阅字段
+          subscription_url,
+          origin_kind,
+          origin_key
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) -- 增加订阅字段
         ON CONFLICT(account_name, collection_type, remote_path) DO UPDATE SET
           display_name = excluded.display_name,
           synced_ctag = remote_collections.synced_ctag,
@@ -231,7 +268,9 @@ class CaleeServerService {
             WHEN excluded.subscription_url IS NOT NULL AND excluded.subscription_url != ''
               THEN excluded.subscription_url
             ELSE remote_collections.subscription_url
-          END
+          END,
+          origin_kind = excluded.origin_kind,
+          origin_key = excluded.origin_key
           -- 注意：绑定信息由 local_bindings 管理, 不在此处更新。
       ''', [
               accountName,
@@ -244,8 +283,43 @@ class CaleeServerService {
               0, // is_enabled
               (map['is_subscription'] == true || map['is_subscription'] == 1) ? 1 : 0,
               canonicalizeSubscriptionUrl(map['subscription_url']?.toString()),
+              (map['origin_kind'] as int?) ?? 2,
+              map['origin_key']?.toString(),
             ]);
       }
+
+      final int now = DateTime.now().millisecondsSinceEpoch;
+      await txn.rawInsert('''
+        INSERT INTO collection_states (remote_collection_id, is_enabled, updated_at)
+        SELECT rc.id, rc.is_enabled, ?
+        FROM remote_collections rc
+        WHERE rc.account_name = ?
+          AND NOT EXISTS (
+            SELECT 1 FROM collection_states cs WHERE cs.remote_collection_id = rc.id
+          )
+      ''', [now, accountName]);
+
+      await txn.rawUpdate('''
+        UPDATE collection_states
+        SET sync_gate_reason = CASE
+          WHEN (
+            SELECT rc.origin_kind FROM remote_collections rc
+            WHERE rc.id = collection_states.remote_collection_id
+          ) = 0
+          AND NOT EXISTS (
+            SELECT 1 FROM local_bindings lb
+            WHERE lb.remote_collection_id = collection_states.remote_collection_id
+          ) THEN 'relink_required'
+          ELSE NULL
+        END,
+        is_enabled = (
+          SELECT rc.is_enabled FROM remote_collections rc WHERE rc.id = collection_states.remote_collection_id
+        ),
+        updated_at = ?
+        WHERE remote_collection_id IN (
+          SELECT id FROM remote_collections WHERE account_name = ?
+        )
+      ''', [now, accountName]);
 
       // 3. 删除云端已不存在的远端起源记录（按集合类型分别清理）
       for (final String collectionType in const ['calendar', 'tasklist']) {

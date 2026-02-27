@@ -9,6 +9,8 @@ import 'package:sqflite/sqflite.dart';
 
 import '../data/database_helper.dart';
 import '../services/calee_server_service.dart';
+import '../sync/relink_verifier.dart';
+import '../sync/sync_gate_reason.dart';
 import 'CalendarPageController.dart';
 
 class LocalCalendarGroup {
@@ -47,6 +49,7 @@ class LocalCalendarItem {
 class LocalCalendarPageController extends GetxController {
   final NativeCalendarApi _nativeApi = NativeCalendarApi();
   final CaleeServerService _caleeService = CaleeServerService();
+  final RelinkVerifier _relinkVerifier = RelinkVerifier();
 
   final calendarGroups = <LocalCalendarGroup>[].obs;
   final isLoading = false.obs;
@@ -76,7 +79,7 @@ class LocalCalendarPageController extends GetxController {
         SELECT lb.local_collection_id
         FROM local_bindings lb
         INNER JOIN remote_collections rc ON rc.id = lb.remote_collection_id
-        WHERE lb.binding_origin = 0
+        WHERE rc.origin_kind = 0
           AND lb.local_collection_id IS NOT NULL
           AND lb.local_collection_id != ''
           AND rc.account_name = ?
@@ -89,7 +92,7 @@ class LocalCalendarPageController extends GetxController {
         SELECT lb.local_collection_id
         FROM local_bindings lb
         INNER JOIN remote_collections rc ON rc.id = lb.remote_collection_id
-        WHERE lb.binding_origin = 1
+        WHERE rc.origin_kind = 1
           AND lb.local_collection_id IS NOT NULL
           AND lb.local_collection_id != ''
           AND rc.account_name = ?
@@ -197,7 +200,67 @@ class LocalCalendarPageController extends GetxController {
             throw Exception('Not logged in to Calee');
           }
 
-          if (item.isSubscription) {
+          final List<Map<String, dynamic>> reuseCandidates = await db.rawQuery('''
+            SELECT rc.id, rc.remote_path, rc.display_name
+            FROM remote_collections rc
+            INNER JOIN collection_states cs ON cs.remote_collection_id = rc.id
+            LEFT JOIN local_bindings lb ON lb.remote_collection_id = rc.id
+            WHERE rc.account_name = ?
+              AND rc.collection_type = 'calendar'
+              AND rc.origin_kind = 0
+              AND cs.sync_gate_reason = ?
+              AND lb.id IS NULL
+            ORDER BY rc.id ASC
+          ''', [loginName, SyncGateReason.relinkRequired]);
+
+          for (final candidate in reuseCandidates) {
+            final String candidatePath = (candidate['remote_path'] ?? '').toString();
+            if (candidatePath.isEmpty) {
+              continue;
+            }
+
+            await db.update(
+              'collection_states',
+              {
+                'sync_gate_reason': SyncGateReason.relinkVerifying,
+                'updated_at': DateTime.now().millisecondsSinceEpoch,
+              },
+              where: 'remote_collection_id = ?',
+              whereArgs: [candidate['id']],
+            );
+
+            final RelinkVerificationResult verifyResult = await _relinkVerifier.verify(
+              remotePath: candidatePath,
+              localCalendarId: item.id,
+            );
+            if (!verifyResult.passed) {
+              await db.update(
+                'collection_states',
+                {
+                  'sync_gate_reason': SyncGateReason.relinkMismatch,
+                  'updated_at': DateTime.now().millisecondsSinceEpoch,
+                },
+                where: 'remote_collection_id = ?',
+                whereArgs: [candidate['id']],
+              );
+              continue;
+            }
+
+            remotePath = candidatePath;
+            await db.update(
+              'collection_states',
+              {
+                'sync_gate_reason': null,
+                'updated_at': DateTime.now().millisecondsSinceEpoch,
+              },
+              where: 'remote_collection_id = ?',
+              whereArgs: [candidate['id']],
+            );
+            break;
+          }
+
+          if (remotePath == null || remotePath.isEmpty) {
+            if (item.isSubscription) {
             final String? sourceUrl = item.subscriptionUrl?.trim();
             if (sourceUrl == null || sourceUrl.isEmpty) {
               throw Exception('Subscription URL is unavailable for this local calendar');
@@ -258,6 +321,7 @@ class LocalCalendarPageController extends GetxController {
               'account_name': accountName,
               'color': item.color,
               'sync_mode': 0,
+              'origin_kind': 0,
               'is_subscription': item.isSubscription ? 1 : 0,
               'subscription_url': item.subscriptionUrl,
               'remote_path': remotePath,
@@ -272,22 +336,44 @@ class LocalCalendarPageController extends GetxController {
             'display_name': item.name,
             'color': item.color,
             'sync_mode': 0,
+            'origin_kind': 0,
             'is_subscription': item.isSubscription ? 1 : 0,
             'subscription_url': item.subscriptionUrl,
             'remote_path': remotePath,
           });
         }
 
+        final int now = DateTime.now().millisecondsSinceEpoch;
         await db.insert(
           'local_bindings',
           {
             'remote_collection_id': remoteCollectionId,
             'local_collection_id': item.id,
-            'binding_origin': 0,
-            'created_at': DateTime.now().millisecondsSinceEpoch,
-            'updated_at': DateTime.now().millisecondsSinceEpoch,
+            'created_at': now,
+            'updated_at': now,
           },
           conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+
+        await db.insert(
+          'collection_states',
+          {
+            'remote_collection_id': remoteCollectionId,
+            'sync_gate_reason': null,
+            'is_enabled': 1,
+            'updated_at': now,
+          },
+          conflictAlgorithm: ConflictAlgorithm.ignore,
+        );
+        await db.update(
+          'collection_states',
+          {
+            'sync_gate_reason': null,
+            'is_enabled': 1,
+            'updated_at': now,
+          },
+          where: 'remote_collection_id = ?',
+          whereArgs: [remoteCollectionId],
         );
       } else {
         await db.update(
@@ -297,6 +383,7 @@ class LocalCalendarPageController extends GetxController {
             'account_name': accountName,
             'color': item.color,
             'sync_mode': 0,
+            'origin_kind': 0,
             'is_subscription': item.isSubscription ? 1 : 0,
             'subscription_url': item.subscriptionUrl,
           },
