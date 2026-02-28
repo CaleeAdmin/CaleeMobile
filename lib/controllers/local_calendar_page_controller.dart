@@ -373,19 +373,26 @@ class LocalCalendarPageController extends GetxController {
           }
 
           final List<Map<String, dynamic>> reuseCandidates = await db.rawQuery('''
-            SELECT rc.id, rc.remote_path, rc.display_name, rc.origin_key
+            SELECT
+              rc.id,
+              rc.remote_path,
+              rc.display_name,
+              rc.origin_key,
+              rc.is_subscription,
+              rc.subscription_url,
+              COALESCE(NULLIF(TRIM(rc.account_name), ''), 'Local') AS account_name
             FROM remote_collections rc
             INNER JOIN collection_states cs ON cs.remote_collection_id = rc.id
             LEFT JOIN local_bindings lb
               ON lb.remote_collection_id = rc.id
              AND lb.local_collection_id IS NOT NULL
              AND lb.local_collection_id != ''
-            WHERE COALESCE(NULLIF(TRIM(rc.account_name), ''), 'Local') = ?
-              AND rc.collection_type = 'calendar'
+            WHERE rc.collection_type = 'calendar'
               AND rc.origin_kind = 0
+              AND rc.origin_key = ?
               AND cs.sync_gate_reason = ?
               AND lb.id IS NULL
-          ''', [item.accountName, SyncGateReason.relinkRequired]);
+          ''', [item.id, SyncGateReason.relinkRequired]);
 
           final List<_RankedReuseCandidate> rankedCandidates = reuseCandidates
               .map((candidate) => _RankedReuseCandidate(
@@ -417,10 +424,13 @@ class LocalCalendarPageController extends GetxController {
             );
 
             try {
+              final bool candidateIsSubscription =
+                  candidate['is_subscription'] == 1 || candidate['is_subscription'] == true;
+
               final RelinkVerificationResult verifyResult = await _relinkVerifier.verify(
                 remotePath: candidatePath,
                 localCalendarId: item.id,
-                isSubscription: item.isSubscription,
+                isSubscription: candidateIsSubscription,
               );
 
               if (verifyResult.isIndeterminate) {
@@ -695,7 +705,7 @@ class LocalCalendarPageController extends GetxController {
     final String originKey = (candidate['origin_key'] ?? '').toString().trim().toLowerCase();
     final String localId = item.id.trim().toLowerCase();
     if (originKey.isNotEmpty && localId.isNotEmpty && originKey == localId) {
-      score += 40;
+      score += 80;
     }
 
     if (_normalizeAccountName(candidate['account_name']) == _normalizeAccountName(item.accountName)) {
@@ -711,10 +721,6 @@ class LocalCalendarPageController extends GetxController {
   }) {
     int bestConfidence = 0;
     final List<_RankedReuseCandidate> rankedCandidates = relinkCandidates
-        .where(
-          (candidate) =>
-              _normalizeAccountName(candidate['account_name']) == _normalizeAccountName(item.accountName),
-        )
         .map((candidate) => _RankedReuseCandidate(
               raw: candidate,
               providerHintScore: _scoreCandidateProviderHint(candidate, item),
