@@ -558,7 +558,9 @@ class SyncRepository {
       if (syncGateReason == SyncGateReason.relinkRequired ||
           syncGateReason == SyncGateReason.relinkVerifying ||
           syncGateReason == SyncGateReason.relinkMismatch) {
-        _lastConnectError = 'Reconnect required. Open "Link to Device Calendar" and complete relink.';
+        _lastConnectError =
+            'This calendar needs a quick relink. Open "Link to Device Calendar" to relink it, '
+            'or delete the current remote calendar and link again.';
         return EnableCalendarResult.failure(remotePath: persistedRemotePath);
       }
 
