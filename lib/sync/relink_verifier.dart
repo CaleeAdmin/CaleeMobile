@@ -19,7 +19,7 @@ class RelinkVerifier {
   RelinkVerifier({
     CaleeServerService? serverService,
     NativeCalendarApi? nativeApi,
-    Future<UnifiedEventsSnapshot> Function(String remotePath)? fetchRemoteSnapshot,
+    Future<UnifiedEventsSnapshot> Function(String remotePath, bool isSubscription)? fetchRemoteSnapshot,
     Future<List<PlatformItem?>> Function(String localCalendarId, int startMs, int endMs)? fetchLocalEvents,
   })  : _server = serverService ?? CaleeServerService(),
         _native = nativeApi ?? NativeCalendarApi(),
@@ -28,12 +28,13 @@ class RelinkVerifier {
 
   final CaleeServerService _server;
   final NativeCalendarApi _native;
-  final Future<UnifiedEventsSnapshot> Function(String remotePath)? _fetchRemoteSnapshot;
+  final Future<UnifiedEventsSnapshot> Function(String remotePath, bool isSubscription)? _fetchRemoteSnapshot;
   final Future<List<PlatformItem?>> Function(String localCalendarId, int startMs, int endMs)? _fetchLocalEvents;
 
   Future<RelinkVerificationResult> verify({
     required String remotePath,
     required String localCalendarId,
+    bool isSubscription = false,
     int lookbackDays = 60,
   }) async {
     final int boundedLookbackDays = lookbackDays.clamp(30, 90);
@@ -43,10 +44,10 @@ class RelinkVerifier {
     final int endMs = now.millisecondsSinceEpoch;
 
     final UnifiedEventsSnapshot snapshot =
-        await (_fetchRemoteSnapshot?.call(remotePath) ??
+        await (_fetchRemoteSnapshot?.call(remotePath, isSubscription) ??
             _server.fetchUnifiedEventsSnapshot(
               calendarPath: remotePath,
-              isSubscription: false,
+              isSubscription: isSubscription,
             ));
 
     final bool remoteFetchSucceeded =
@@ -97,6 +98,7 @@ class RelinkVerifier {
   Future<int> previewConfidence({
     required String remotePath,
     required String localCalendarId,
+    bool isSubscription = false,
     int lookbackDays = 30,
     int maxEvents = 20,
   }) async {
@@ -108,10 +110,10 @@ class RelinkVerifier {
     final int endMs = now.millisecondsSinceEpoch;
 
     final UnifiedEventsSnapshot snapshot =
-        await (_fetchRemoteSnapshot?.call(remotePath) ??
+        await (_fetchRemoteSnapshot?.call(remotePath, isSubscription) ??
             _server.fetchUnifiedEventsSnapshot(
               calendarPath: remotePath,
-              isSubscription: false,
+              isSubscription: isSubscription,
             ));
 
     final bool remoteFetchSucceeded =
