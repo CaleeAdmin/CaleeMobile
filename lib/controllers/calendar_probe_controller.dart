@@ -10,6 +10,7 @@ import '../data/sync_repository.dart';
 import '../data/sync_run_store.dart';
 import '../entity/sync_run_record.dart';
 import '../sync/background_sync_scheduler.dart';
+import '../core/platform/pigeon/background_sync_api.g.dart';
 import '../sync/sync_completed_event_bus.dart';
 import '../sync/sync_trigger_orchestrator.dart';
 
@@ -146,7 +147,7 @@ class CalendarProbeController extends GetxController {
           },
         );
       } else {
-        await BackgroundSyncScheduler.scheduleOneOff(reason: 'sync_now', expedited: true);
+        await BackgroundSyncScheduler.scheduleOneOff(reason: 'sync_now', expedited: true, policy: OneOffEnqueuePolicy.replace);
         result = SyncSummary();
       }
 

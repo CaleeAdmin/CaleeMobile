@@ -519,6 +519,7 @@ private object BackgroundEngineHolder {
     private var runnerApi: BackgroundSyncRunnerApi? = null
     private var generation: Long = 0L
     private var state: HolderState = HolderState.IDLE
+    private var dartReady: Boolean = false
     private var activeRunToken: String? = null
     private var readyDeferred: CompletableDeferred<ReadyResult>? = null
     private var runDeferred: CompletableDeferred<RunResult>? = null
@@ -526,17 +527,24 @@ private object BackgroundEngineHolder {
     suspend fun startOrReuseOnMain(context: Context, runToken: String, trigger: String): EngineHandle = runOnMain {
         requireMainThread("startOrReuseOnMain")
         val shouldCreate = synchronized(lock) {
-            engine == null || state == HolderState.UNHEALTHY
+            val unhealthy = state == HolderState.UNHEALTHY
+            state = if (engine != null && dartReady && !unhealthy) HolderState.READY else HolderState.STARTING
+            activeRunToken = runToken
+            readyDeferred = CompletableDeferred()
+            runDeferred = CompletableDeferred()
+            engine == null || unhealthy
         }
         if (shouldCreate) {
             createEngineOnMain(context.applicationContext)
         }
 
         synchronized(lock) {
-            state = HolderState.STARTING
-            activeRunToken = runToken
-            readyDeferred = CompletableDeferred()
-            runDeferred = CompletableDeferred()
+            if (engine != null && dartReady) {
+                state = HolderState.READY
+                readyDeferred?.takeIf { !it.isCompleted }?.complete(ReadyResult.READY)
+            } else {
+                state = HolderState.STARTING
+            }
             Log.i(TAG, "startOrReuseOnMain trigger=$trigger runToken=$runToken generation=$generation state=$state")
             EngineHandle(generation = generation)
         }
@@ -547,6 +555,9 @@ private object BackgroundEngineHolder {
         val deferred = synchronized(lock) {
             if (activeRunToken != runToken) {
                 return ReadyResult.NOT_READY_TIMEOUT
+            }
+            if (dartReady) {
+                return ReadyResult.READY
             }
             readyDeferred ?: CompletableDeferred<ReadyResult>().also { readyDeferred = it }
         }
@@ -611,6 +622,7 @@ private object BackgroundEngineHolder {
             engine = null
             runnerApi = null
             state = HolderState.IDLE
+            dartReady = false
             activeRunToken = null
             readyDeferred?.takeIf { !it.isCompleted }?.complete(ReadyResult.NOT_READY_TIMEOUT)
             runDeferred?.takeIf { !it.isCompleted }?.complete(RunResult.NO_REPLY_TIMEOUT)
@@ -628,6 +640,7 @@ private object BackgroundEngineHolder {
     fun markUnhealthy(reason: String) {
         synchronized(lock) {
             state = HolderState.UNHEALTHY
+            dartReady = false
             activeRunToken = null
             readyDeferred?.takeIf { !it.isCompleted }?.complete(ReadyResult.NOT_READY_TIMEOUT)
             runDeferred?.takeIf { !it.isCompleted }?.complete(RunResult.NO_REPLY_TIMEOUT)
@@ -660,7 +673,7 @@ private object BackgroundEngineHolder {
             object : BackgroundSyncRunnerHostApi {
                 override fun notifyBackgroundIsolateReady(contractVersion: Long, callback: (Result<Unit>) -> Unit) {
                     holderScope.launch(Dispatchers.Main.immediate) {
-                        onDartReady(activeRunToken, generation)
+                        onDartReady(generation)
                         callback(Result.success(Unit))
                     }
                 }
@@ -675,17 +688,19 @@ private object BackgroundEngineHolder {
             engine = nextEngine
             runnerApi = BackgroundSyncRunnerApi(nextEngine.dartExecutor.binaryMessenger)
             generation += 1
+            dartReady = false
             state = HolderState.IDLE
         }
     }
 
-    private fun onDartReady(runToken: String?, callbackGeneration: Long) {
+    private fun onDartReady(callbackGeneration: Long) {
         requireMainThread("onDartReady")
         synchronized(lock) {
-            if (runToken == null || runToken != activeRunToken || callbackGeneration != generation) {
-                Log.w(TAG, "Ignoring stale ready callback token=$runToken active=$activeRunToken callbackGen=$callbackGeneration generation=$generation")
+            if (callbackGeneration != generation) {
+                Log.w(TAG, "Ignoring stale ready callback callbackGen=$callbackGeneration generation=$generation")
                 return
             }
+            dartReady = true
             state = HolderState.READY
             readyDeferred?.takeIf { !it.isCompleted }?.complete(ReadyResult.READY)
         }
