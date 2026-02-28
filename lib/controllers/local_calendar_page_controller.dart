@@ -28,12 +28,12 @@ class LocalCalendarItem {
   final String? accountType;
   final String color;
   final bool isReadOnly;
-  final int eventCount;
+  int eventCount;
   final bool isSubscription;
   final String? subscriptionUrl;
   bool isConnected;
-  final bool canRelink;
-  final int relinkConfidence;
+  bool canRelink;
+  int relinkConfidence;
 
   LocalCalendarItem({
     required this.id,
@@ -62,6 +62,8 @@ class LocalCalendarPageController extends GetxController {
   static const int _highConfidenceRelinkThreshold = 70;
   static const int _providerHintWeight = 45;
   static const int _eventPreviewWeight = 55;
+  static const int _metadataBatchSize = 4;
+  int _refreshVersion = 0;
 
   @override
   void onInit() {
@@ -70,6 +72,7 @@ class LocalCalendarPageController extends GetxController {
   }
 
   Future<void> refreshLocalCalendars() async {
+    final int refreshVersion = ++_refreshVersion;
     try {
       isLoading.value = true;
 
@@ -123,10 +126,6 @@ class LocalCalendarPageController extends GetxController {
       }..remove('');
 
       final List<PlatformCalendar?> rawCalendars = await _nativeApi.getCalendars();
-      final DateTime now = DateTime.now();
-      final int rangeStart = now.subtract(const Duration(days: 365)).millisecondsSinceEpoch;
-      final int rangeEnd = now.add(const Duration(days: 365)).millisecondsSinceEpoch;
-
       final Map<String, List<LocalCalendarItem>> grouped = {};
       final Set<String> seenIds = <String>{};
       final Map<String, LocalCalendarItem> dedupedByFingerprint = <String, LocalCalendarItem>{};
@@ -150,23 +149,11 @@ class LocalCalendarPageController extends GetxController {
           continue;
         }
 
-        final List<PlatformItem?> events = await _nativeApi.getEvents(id, rangeStart, rangeEnd);
-        final int eventCount = events.whereType<PlatformItem>().where((event) => event.isTask != true).length;
-
         final String accountName = _normalizeAccountName(calendar.accountName);
 
         final String normalizedName =
             (calendar.name != null && calendar.name!.isNotEmpty) ? calendar.name! : 'Untitled calendar';
         final bool isConnected = connectedLocalIds.contains(id);
-        int relinkConfidence = 0;
-        if (!isConnected && relinkCandidates.isNotEmpty) {
-          relinkConfidence = await _computeRelinkPreviewConfidence(
-            localCalendarId: id,
-            item: _asScoringItem(id, normalizedName, accountName, calendar),
-            relinkCandidates: relinkCandidates,
-          );
-        }
-
         final item = LocalCalendarItem(
           id: id,
           name: normalizedName,
@@ -174,12 +161,12 @@ class LocalCalendarPageController extends GetxController {
           accountType: calendar.accountType,
           color: calendar.color ?? '#808080',
           isReadOnly: calendar.isReadOnly ?? false,
-          eventCount: eventCount,
+          eventCount: 0,
           isSubscription: calendar.isSubscription ?? false,
           subscriptionUrl: calendar.subscriptionUrl,
           isConnected: isConnected,
-          canRelink: !isConnected && relinkConfidence >= _highConfidenceRelinkThreshold,
-          relinkConfidence: relinkConfidence,
+          canRelink: false,
+          relinkConfidence: 0,
         );
 
         if (!seenIds.add(id)) {
@@ -213,12 +200,89 @@ class LocalCalendarPageController extends GetxController {
         ..sort((a, b) => a.accountName.toLowerCase().compareTo(b.accountName.toLowerCase()));
 
       calendarGroups.assignAll(nextGroups);
+
+      final List<LocalCalendarItem> allItems = [
+        for (final group in nextGroups) ...group.calendars,
+      ];
+      unawaited(
+        _populateCalendarMetadata(
+          refreshVersion: refreshVersion,
+          calendars: allItems,
+          relinkCandidates: relinkCandidates,
+        ),
+      );
     } catch (e) {
       debugPrint('[ERROR] Failed to load local calendars: $e');
       Get.snackbar('Error', 'Failed to load local calendars');
     } finally {
       isLoading.value = false;
     }
+  }
+
+  Future<void> _populateCalendarMetadata({
+    required int refreshVersion,
+    required List<LocalCalendarItem> calendars,
+    required List<Map<String, dynamic>> relinkCandidates,
+  }) async {
+    final DateTime now = DateTime.now();
+    final int rangeStart = now.subtract(const Duration(days: 365)).millisecondsSinceEpoch;
+    final int rangeEnd = now.add(const Duration(days: 365)).millisecondsSinceEpoch;
+
+    for (int start = 0; start < calendars.length; start += _metadataBatchSize) {
+      if (refreshVersion != _refreshVersion || isClosed) {
+        return;
+      }
+
+      final int end = (start + _metadataBatchSize < calendars.length)
+          ? start + _metadataBatchSize
+          : calendars.length;
+      final List<LocalCalendarItem> batch = calendars.sublist(start, end);
+
+      await Future.wait(
+        batch.map(
+          (item) => _populateCalendarItemMetadata(
+            item: item,
+            rangeStart: rangeStart,
+            rangeEnd: rangeEnd,
+            relinkCandidates: relinkCandidates,
+          ),
+        ),
+      );
+
+      if (refreshVersion != _refreshVersion || isClosed) {
+        return;
+      }
+
+      calendarGroups.refresh();
+    }
+  }
+
+  Future<void> _populateCalendarItemMetadata({
+    required LocalCalendarItem item,
+    required int rangeStart,
+    required int rangeEnd,
+    required List<Map<String, dynamic>> relinkCandidates,
+  }) async {
+    try {
+      final List<PlatformItem?> events = await _nativeApi.getEvents(item.id, rangeStart, rangeEnd);
+      item.eventCount = events.whereType<PlatformItem>().where((event) => event.isTask != true).length;
+    } catch (_) {
+      item.eventCount = 0;
+    }
+
+    if (item.isConnected || relinkCandidates.isEmpty) {
+      item.relinkConfidence = 0;
+      item.canRelink = false;
+      return;
+    }
+
+    final int relinkConfidence = await _computeRelinkPreviewConfidence(
+      localCalendarId: item.id,
+      item: item,
+      relinkCandidates: relinkCandidates,
+    );
+    item.relinkConfidence = relinkConfidence;
+    item.canRelink = relinkConfidence >= _highConfidenceRelinkThreshold;
   }
 
   Future<void> linkCalendar(
