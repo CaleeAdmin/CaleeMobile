@@ -369,7 +369,7 @@ class LocalCalendarPageController extends GetxController {
           }
 
           final List<Map<String, dynamic>> reuseCandidates = await db.rawQuery('''
-            SELECT rc.id, rc.remote_path, rc.display_name, rc.origin_key
+            SELECT rc.id, rc.remote_path, rc.display_name, rc.origin_key, rc.is_subscription
             FROM remote_collections rc
             INNER JOIN collection_states cs ON cs.remote_collection_id = rc.id
             LEFT JOIN local_bindings lb
@@ -412,6 +412,7 @@ class LocalCalendarPageController extends GetxController {
               final RelinkVerificationResult verifyResult = await _relinkVerifier.verify(
                 remotePath: candidatePath,
                 localCalendarId: item.id,
+                isSubscription: candidate['is_subscription'] == 1 || candidate['is_subscription'] == true,
               );
 
               if (verifyResult.isIndeterminate) {
