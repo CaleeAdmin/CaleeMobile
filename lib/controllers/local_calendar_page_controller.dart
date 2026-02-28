@@ -709,26 +709,31 @@ class LocalCalendarPageController extends GetxController {
 
 
   int _scoreCandidateProviderHint(Map<String, dynamic> candidate, LocalCalendarItem item) {
+    const int displayNameExactMatchWeight = 40;
+    const int displayNamePartialMatchWeight = 25;
+    const int originKeyMatchWeight = 40;
+    const int accountNameMatchWeight = 20;
+
     int score = 0;
 
     final String displayName = (candidate['display_name'] ?? '').toString().trim().toLowerCase();
     final String localName = item.name.trim().toLowerCase();
     if (displayName.isNotEmpty && localName.isNotEmpty) {
       if (displayName == localName) {
-        score += 45;
+        score += displayNameExactMatchWeight;
       } else if (displayName.contains(localName) || localName.contains(displayName)) {
-        score += 30;
+        score += displayNamePartialMatchWeight;
       }
     }
 
     final String originKey = (candidate['origin_key'] ?? '').toString().trim().toLowerCase();
     final String localOriginKey = _buildLocalOriginKey(item).trim().toLowerCase();
     if (originKey.isNotEmpty && localOriginKey.isNotEmpty && originKey == localOriginKey) {
-      score += 80;
+      score += originKeyMatchWeight;
     }
 
     if (_normalizeAccountName(candidate['account_name']) == _normalizeAccountName(item.accountName)) {
-      score += 20;
+      score += accountNameMatchWeight;
     }
 
     return score.clamp(0, 100);
