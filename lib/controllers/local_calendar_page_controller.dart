@@ -347,9 +347,10 @@ class LocalCalendarPageController extends GetxController {
       bool relinkConfirmationDeclined = false;
       if (linkRequested) {
         final List<Map<String, dynamic>> existingRows = await db.rawQuery('''
-          SELECT rc.origin_key, rc.remote_path
+          SELECT rc.origin_key, rc.remote_path, cs.sync_gate_reason
           FROM local_bindings lb
           INNER JOIN remote_collections rc ON rc.id = lb.remote_collection_id
+          LEFT JOIN collection_states cs ON cs.remote_collection_id = rc.id
           WHERE lb.local_collection_id = ?
           LIMIT 1
         ''', [item.id]);
@@ -360,9 +361,17 @@ class LocalCalendarPageController extends GetxController {
         final String existingRemotePath = existingRows.isNotEmpty
             ? (existingRows.first['remote_path']?.toString() ?? '')
             : '';
+        final String existingSyncGateReason = existingRows.isNotEmpty
+            ? (existingRows.first['sync_gate_reason']?.toString() ?? '')
+            : '';
+        final bool existingBindingNeedsRelink =
+            existingSyncGateReason == SyncGateReason.relinkRequired;
 
         final bool shouldBypassRelinkFlow =
-            existingOriginKey.isNotEmpty && existingOriginKey == item.id && !item.canRelink;
+            existingOriginKey.isNotEmpty &&
+            existingOriginKey == item.id &&
+            !item.canRelink &&
+            !existingBindingNeedsRelink;
 
         if (shouldBypassRelinkFlow) {
           remotePath = existingRemotePath;
