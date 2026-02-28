@@ -5,7 +5,6 @@ import 'package:caleesync/common/utils/mmkv_utils.dart';
 import 'package:caleesync/core/platform/pigeon/calendar_api.g.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:uuid/uuid.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../data/database_helper.dart';
@@ -98,7 +97,6 @@ class LocalCalendarPageController extends GetxController {
           rc.remote_path,
           rc.display_name,
           rc.origin_key,
-          rc.is_subscription,
           COALESCE(NULLIF(TRIM(rc.account_name), ''), 'Local') AS account_name
         FROM remote_collections rc
         INNER JOIN collection_states cs ON cs.remote_collection_id = rc.id
@@ -350,18 +348,24 @@ class LocalCalendarPageController extends GetxController {
       bool createNewRemoteSelected = false;
       if (linkRequested) {
         final List<Map<String, dynamic>> existingRows = await db.rawQuery('''
-          SELECT rc.remote_path
+          SELECT rc.origin_key, rc.remote_path
           FROM local_bindings lb
           INNER JOIN remote_collections rc ON rc.id = lb.remote_collection_id
           WHERE lb.local_collection_id = ?
           LIMIT 1
         ''', [item.id]);
 
+        final String existingOriginKey = existingRows.isNotEmpty
+            ? (existingRows.first['origin_key']?.toString() ?? '')
+            : '';
         final String existingRemotePath = existingRows.isNotEmpty
             ? (existingRows.first['remote_path']?.toString() ?? '')
             : '';
 
-        if (existingRemotePath.isNotEmpty) {
+        final bool shouldBypassRelinkFlow =
+            existingOriginKey.isNotEmpty && existingOriginKey == item.id && !item.canRelink;
+
+        if (shouldBypassRelinkFlow) {
           remotePath = existingRemotePath;
         } else {
           final String? loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey);
@@ -370,7 +374,7 @@ class LocalCalendarPageController extends GetxController {
           }
 
           final List<Map<String, dynamic>> reuseCandidates = await db.rawQuery('''
-            SELECT rc.id, rc.remote_path, rc.display_name, rc.origin_key, rc.is_subscription
+            SELECT rc.id, rc.remote_path, rc.display_name, rc.origin_key
             FROM remote_collections rc
             INNER JOIN collection_states cs ON cs.remote_collection_id = rc.id
             LEFT JOIN local_bindings lb
@@ -417,7 +421,7 @@ class LocalCalendarPageController extends GetxController {
               final RelinkVerificationResult verifyResult = await _relinkVerifier.verify(
                 remotePath: candidatePath,
                 localCalendarId: item.id,
-                isSubscription: candidate['is_subscription'] == 1 || candidate['is_subscription'] == true,
+                isSubscription: item.isSubscription,
               );
 
               if (verifyResult.isIndeterminate) {
@@ -520,7 +524,7 @@ class LocalCalendarPageController extends GetxController {
                 throw Exception('Subscription URL is unavailable for this local calendar');
               }
 
-              newRemoteOriginKey = const Uuid().v4();
+              newRemoteOriginKey = item.id;
               final String subscriptionCalendarId =
                   'sub_${item.id}_${DateTime.now().millisecondsSinceEpoch}';
               remotePath = await _caleeService.subscribeRemotePublicIcs(
@@ -530,7 +534,7 @@ class LocalCalendarPageController extends GetxController {
                 icsUrl: sourceUrl,
               );
             } else {
-              newRemoteOriginKey = const Uuid().v4();
+              newRemoteOriginKey = item.id;
               final String cloudCalendarId =
                   'local_${item.id}_${DateTime.now().millisecondsSinceEpoch}';
               remotePath = await _caleeService.createRemoteCalendar(
@@ -571,8 +575,8 @@ class LocalCalendarPageController extends GetxController {
           final List<Map<String, dynamic>> remoteRows = await txn.query(
             'remote_collections',
             columns: ['id'],
-            where: 'account_name = ? AND collection_type = ? AND remote_path = ?',
-            whereArgs: [accountName, 'calendar', remotePath],
+            where: 'account_name = ? AND collection_type = ? AND origin_key = ?',
+            whereArgs: [accountName, 'calendar', localCollectionId],
             limit: 1,
           );
 
@@ -587,10 +591,8 @@ class LocalCalendarPageController extends GetxController {
               'is_subscription': item.isSubscription ? 1 : 0,
               'subscription_url': item.subscriptionUrl,
               'remote_path': remotePath,
+              'origin_key': localCollectionId,
             };
-            if (newRemoteOriginKey != null && newRemoteOriginKey.isNotEmpty) {
-              remoteCollectionUpdates['origin_key'] = newRemoteOriginKey;
-            }
             await txn.update(
               'remote_collections',
               remoteCollectionUpdates,
@@ -608,7 +610,7 @@ class LocalCalendarPageController extends GetxController {
               'is_subscription': item.isSubscription ? 1 : 0,
               'subscription_url': item.subscriptionUrl,
               'remote_path': remotePath,
-              'origin_key': newRemoteOriginKey,
+              'origin_key': localCollectionId,
             });
           }
 
@@ -701,24 +703,12 @@ class LocalCalendarPageController extends GetxController {
 
     final String originKey = (candidate['origin_key'] ?? '').toString().trim().toLowerCase();
     final String localId = item.id.trim().toLowerCase();
-    if (originKey.isNotEmpty && localId.isNotEmpty) {
-      if (originKey == localId) {
-        score += 30;
-      } else if (originKey.contains(localId) || localId.contains(originKey)) {
-        score += 20;
-      }
+    if (originKey.isNotEmpty && localId.isNotEmpty && originKey == localId) {
+      score += 40;
     }
 
     if (_normalizeAccountName(candidate['account_name']) == _normalizeAccountName(item.accountName)) {
       score += 20;
-    }
-
-    final bool candidateIsSubscription =
-        candidate['is_subscription'] == 1 || candidate['is_subscription'] == true;
-    if (candidateIsSubscription == item.isSubscription) {
-      score += 15;
-    } else {
-      score -= 15;
     }
 
     return score.clamp(0, 100);
