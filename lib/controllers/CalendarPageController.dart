@@ -10,6 +10,7 @@ import '../sync/sync_completed_event_bus.dart';
 import '../sync/sync_trigger_orchestrator.dart';
 import '../data/database_helper.dart';
 import '../data/sync_repository.dart';
+import '../feature/local_calendars_page.dart';
 import '../services/calee_server_service.dart';
 
 class CalendarDisplayItem {
@@ -158,7 +159,7 @@ class CalendarPageController extends GetxController {
 
       final String remotePath = CaleeServerService.normalizeRemotePath(item.remotePath ?? '');
       if (remotePath.isEmpty) {
-        Get.snackbar('Connection failed', 'Invalid remote calendar path. Please refresh and try again');
+        Get.snackbar('Enable failed', 'Invalid remote calendar path. Please refresh and try again');
         item.isEnabled = false;
         calendars.refresh();
         return;
@@ -169,8 +170,21 @@ class CalendarPageController extends GetxController {
 
       final String? syncMessage = _repo.takeLastConnectErrorMessage();
       if (!enableResult.success) {
-        final String err = syncMessage ?? 'Connection failed. Please retry.';
-        Get.snackbar('Connection failed', err);
+        final String err = syncMessage ?? 'Enable failed. Please retry.';
+        final bool showRelinkAction = err.contains('needs a quick relink');
+        Get.snackbar(
+          'Enable failed',
+          err,
+          mainButton: showRelinkAction
+              ? TextButton(
+                  onPressed: () {
+                    Get.back();
+                    Get.to(() => const LocalCalendarsPage());
+                  },
+                  child: const Text('Link now'),
+                )
+              : null,
+        );
       } else if (syncMessage != null && syncMessage.isNotEmpty) {
         Get.snackbar('Sync failed', syncMessage);
       } else {
@@ -187,7 +201,7 @@ class CalendarPageController extends GetxController {
       // (manual refresh, lifecycle load, sync-completed event).
     } catch (e) {
       print("[ERROR] Failed to toggle calendar state: $e");
-      Get.snackbar('Connection failed', 'An exception occurred while connecting the calendar. Please try again later');
+      Get.snackbar('Enable failed', 'An exception occurred while enabling the calendar. Please try again later');
       item.isEnabled = false;
       calendars.refresh();
     } finally {
