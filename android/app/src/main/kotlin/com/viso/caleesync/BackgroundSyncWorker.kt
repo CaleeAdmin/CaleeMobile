@@ -133,7 +133,7 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
                 WorkResult.retry()
             }
         } finally {
-            releaseRunLease(runLease.runId)
+            releaseRunLease(runLease)
         }
 
         if (trigger.contains("periodic", ignoreCase = true)) {
