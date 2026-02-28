@@ -92,10 +92,18 @@ class LocalCalendarPageController extends GetxController {
       }..remove('');
 
       final List<Map<String, dynamic>> relinkCandidates = await db.rawQuery('''
-        SELECT rc.id, rc.remote_path, rc.display_name, rc.origin_key
+        SELECT
+          rc.id,
+          rc.remote_path,
+          rc.display_name,
+          rc.origin_key,
+          COALESCE(NULLIF(TRIM(rc.account_name), ''), 'Local') AS account_name
         FROM remote_collections rc
         INNER JOIN collection_states cs ON cs.remote_collection_id = rc.id
-        LEFT JOIN local_bindings lb ON lb.remote_collection_id = rc.id
+        LEFT JOIN local_bindings lb
+          ON lb.remote_collection_id = rc.id
+         AND lb.local_collection_id IS NOT NULL
+         AND lb.local_collection_id != ''
         WHERE rc.collection_type = 'calendar'
           AND rc.origin_kind = 0
           AND cs.sync_gate_reason = ?
@@ -145,9 +153,7 @@ class LocalCalendarPageController extends GetxController {
         final List<PlatformItem?> events = await _nativeApi.getEvents(id, rangeStart, rangeEnd);
         final int eventCount = events.whereType<PlatformItem>().where((event) => event.isTask != true).length;
 
-        final String accountName = (calendar.accountName != null && calendar.accountName!.isNotEmpty)
-            ? calendar.accountName!
-            : 'Local';
+        final String accountName = _normalizeAccountName(calendar.accountName);
 
         final String normalizedName =
             (calendar.name != null && calendar.name!.isNotEmpty) ? calendar.name! : 'Untitled calendar';
@@ -261,8 +267,11 @@ class LocalCalendarPageController extends GetxController {
             SELECT rc.id, rc.remote_path, rc.display_name, rc.origin_key
             FROM remote_collections rc
             INNER JOIN collection_states cs ON cs.remote_collection_id = rc.id
-            LEFT JOIN local_bindings lb ON lb.remote_collection_id = rc.id
-            WHERE rc.account_name = ?
+            LEFT JOIN local_bindings lb
+              ON lb.remote_collection_id = rc.id
+             AND lb.local_collection_id IS NOT NULL
+             AND lb.local_collection_id != ''
+            WHERE COALESCE(NULLIF(TRIM(rc.account_name), ''), 'Local') = ?
               AND rc.collection_type = 'calendar'
               AND rc.origin_kind = 0
               AND cs.sync_gate_reason = ?
@@ -573,6 +582,10 @@ class LocalCalendarPageController extends GetxController {
   }) async {
     int bestConfidence = 0;
     final List<_RankedReuseCandidate> rankedCandidates = relinkCandidates
+        .where(
+          (candidate) =>
+              _normalizeAccountName(candidate['account_name']) == _normalizeAccountName(item.accountName),
+        )
         .map((candidate) => _RankedReuseCandidate(
               raw: candidate,
               providerHintScore: _scoreCandidateProviderHint(candidate, item),
@@ -606,6 +619,11 @@ class LocalCalendarPageController extends GetxController {
     }
 
     return bestConfidence.clamp(0, 100);
+  }
+
+  String _normalizeAccountName(Object? rawAccountName) {
+    final String normalized = (rawAccountName ?? '').toString().trim();
+    return normalized.isEmpty ? 'Local' : normalized;
   }
 
   String _normalizeLocalCollectionId(Object? rawId) {
