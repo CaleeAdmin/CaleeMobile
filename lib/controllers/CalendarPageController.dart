@@ -2,6 +2,7 @@ import 'package:caleesync/common/app_constant.dart';
 import 'package:caleesync/common/utils/mmkv_utils.dart';
 import 'package:caleesync/core/platform/pigeon/calendar_api.g.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/material.dart' show Text, TextButton;
 import 'package:get/get.dart';
 import 'dart:async';
 
