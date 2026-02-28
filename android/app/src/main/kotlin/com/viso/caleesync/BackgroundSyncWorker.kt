@@ -520,7 +520,6 @@ private object BackgroundEngineHolder {
     private var generation: Long = 0L
     private var state: HolderState = HolderState.IDLE
     private var dartReady: Boolean = false
-    private var readyGeneration: Long = -1L
     private var activeRunToken: String? = null
     private var readyDeferred: CompletableDeferred<ReadyResult>? = null
     private var runDeferred: CompletableDeferred<RunResult>? = null
@@ -557,7 +556,7 @@ private object BackgroundEngineHolder {
             if (activeRunToken != runToken) {
                 return ReadyResult.NOT_READY_TIMEOUT
             }
-            if (readyGeneration == generation) {
+            if (dartReady && engine != null && state != HolderState.UNHEALTHY) {
                 return ReadyResult.READY
             }
             readyDeferred ?: CompletableDeferred<ReadyResult>().also { readyDeferred = it }
@@ -624,7 +623,6 @@ private object BackgroundEngineHolder {
             runnerApi = null
             state = HolderState.IDLE
             dartReady = false
-            readyGeneration = -1L
             activeRunToken = null
             readyDeferred?.takeIf { !it.isCompleted }?.complete(ReadyResult.NOT_READY_TIMEOUT)
             runDeferred?.takeIf { !it.isCompleted }?.complete(RunResult.NO_REPLY_TIMEOUT)
@@ -643,7 +641,6 @@ private object BackgroundEngineHolder {
         synchronized(lock) {
             state = HolderState.UNHEALTHY
             dartReady = false
-            readyGeneration = -1L
             activeRunToken = null
             readyDeferred?.takeIf { !it.isCompleted }?.complete(ReadyResult.NOT_READY_TIMEOUT)
             runDeferred?.takeIf { !it.isCompleted }?.complete(RunResult.NO_REPLY_TIMEOUT)
@@ -671,15 +668,13 @@ private object BackgroundEngineHolder {
         val nextEngine = FlutterEngine(context)
         NativeCalendarApi.setUp(nextEngine.dartExecutor.binaryMessenger, CalendarHostApiImpl(context))
 
-        val gen = synchronized(lock) {
+        val engineGen = synchronized(lock) {
             generation += 1
-            val currentGen = generation
             engine = nextEngine
             runnerApi = BackgroundSyncRunnerApi(nextEngine.dartExecutor.binaryMessenger)
             dartReady = false
-            readyGeneration = -1L
             state = HolderState.STARTING
-            currentGen
+            generation
         }
 
         BackgroundSyncRunnerHostApi.setUp(
@@ -687,7 +682,7 @@ private object BackgroundEngineHolder {
             object : BackgroundSyncRunnerHostApi {
                 override fun notifyBackgroundIsolateReady(contractVersion: Long, callback: (Result<Unit>) -> Unit) {
                     holderScope.launch(Dispatchers.Main.immediate) {
-                        onDartReady(gen)
+                        onDartReady(engineGen)
                         callback(Result.success(Unit))
                     }
                 }
@@ -707,7 +702,6 @@ private object BackgroundEngineHolder {
                 return
             }
             dartReady = true
-            readyGeneration = generation
             state = HolderState.READY
             readyDeferred?.takeIf { !it.isCompleted }?.complete(ReadyResult.READY)
         }
