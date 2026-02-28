@@ -18,8 +18,6 @@ class DashboardPage extends StatefulWidget {
 }
 
 class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserver {
-  BackgroundSyncStatus? _backgroundStatus;
-
   @override
   void initState() {
     super.initState();
@@ -41,10 +39,6 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
   }
 
   Future<void> _refreshAll() async {
-    final status = await BackgroundSyncScheduler.getStatus();
-    if (mounted) {
-      setState(() => _backgroundStatus = status);
-    }
     await Get.find<CalendarProbeController>().refreshOverviewState();
   }
 
@@ -105,18 +99,18 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
     };
   }
 
-  String _schedulerSummary() {
-    final enabled = _backgroundStatus?.periodicEnabled == true;
-    final interval = _backgroundStatus?.intervalMinutes != null ? 'Every ${_backgroundStatus!.intervalMinutes}m' : 'Every 15m';
-    final next = _clock(_backgroundStatus?.nextScheduledAt);
-    final periodicState = _backgroundStatus?.periodicWorkState ?? 'unknown';
+  String _schedulerSummary(BackgroundSyncStatus? backgroundStatus) {
+    final enabled = backgroundStatus?.periodicEnabled == true;
+    final interval = backgroundStatus?.intervalMinutes != null ? 'Every ${backgroundStatus!.intervalMinutes}m' : 'Every 15m';
+    final next = _clock(backgroundStatus?.nextScheduledAt);
+    final periodicState = backgroundStatus?.periodicWorkState ?? 'unknown';
     return '${enabled ? 'Enabled' : 'Disabled'} · $interval · Next $next · $periodicState';
   }
 
-  bool get _showSchedulerWarning {
-    if (_backgroundStatus == null) return false;
-    if (_backgroundStatus!.periodicConfigured && !_backgroundStatus!.periodicEnabled) return true;
-    return (_backgroundStatus!.lastResult == BackgroundRunOutcome.retry || _backgroundStatus!.lastResult == BackgroundRunOutcome.failure);
+  bool _showSchedulerWarning(BackgroundSyncStatus? backgroundStatus) {
+    if (backgroundStatus == null) return false;
+    if (backgroundStatus.periodicConfigured && !backgroundStatus.periodicEnabled) return true;
+    return (backgroundStatus.lastResult == BackgroundRunOutcome.retry || backgroundStatus.lastResult == BackgroundRunOutcome.failure);
   }
 
   @override
@@ -131,7 +125,8 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
         child: Obx(() {
           final run = probeCtrl.latestRun.value;
           final configured = probeCtrl.configuredSources.value;
-          final isRunning = probeCtrl.isRunActive || (_backgroundStatus?.workerRunning == true);
+          final backgroundStatus = probeCtrl.backgroundStatus.value;
+          final isRunning = probeCtrl.isRunActive || (backgroundStatus?.workerRunning == true);
           final needsAttention = !isRunning && _requiresAttention(run?.result);
           final runColor = _runColor(run?.result);
 
@@ -180,13 +175,13 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
                       // Background
                       const Text('Background', style: TextStyle(fontWeight: FontWeight.w600)),
                       const SizedBox(height: 8),
-                      Text(_schedulerSummary(), style: const TextStyle(color: Colors.black87)),
-                      if (_showSchedulerWarning) ...[
+                      Text(_schedulerSummary(backgroundStatus), style: const TextStyle(color: Colors.black87)),
+                      if (_showSchedulerWarning(backgroundStatus)) ...[
                         const SizedBox(height: 8),
                         Text(
-                          _backgroundStatus?.periodicConfigured == true && _backgroundStatus?.periodicEnabled != true
+                          backgroundStatus?.periodicConfigured == true && backgroundStatus?.periodicEnabled != true
                               ? 'Scheduler not currently active.'
-                              : (_backgroundStatus?.lastResult == BackgroundRunOutcome.retry ? 'Background run will retry.' : 'Background run failed.'),
+                              : (backgroundStatus?.lastResult == BackgroundRunOutcome.retry ? 'Background run will retry.' : 'Background run failed.'),
                           style: const TextStyle(color: Colors.deepOrange),
                         ),
                         const SizedBox(height: 6),
@@ -200,24 +195,24 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text('Result: ${_backgroundStatus?.lastResult?.name ?? 'unknown'}'),
-                                  Text('Reason: ${_backgroundStatus?.lastReason?.isNotEmpty == true ? _backgroundStatus!.lastReason! : 'n/a'}'),
-                                  Text('Gate: ${_backgroundStatus?.lastGate?.name ?? 'n/a'}'),
-                                  Text('Error: ${_backgroundStatus?.lastError?.isNotEmpty == true ? _backgroundStatus!.lastError! : 'n/a'}'),
-                                  Text('Periodic: ${_backgroundStatus?.periodicEnabled == true ? 'enabled' : 'disabled'}'),
-                                  Text('Interval: ${_backgroundStatus?.intervalMinutes ?? 15}m'),
-                                  Text('Periodic Work: ${_backgroundStatus?.periodicWorkState ?? 'n/a'}'),
-                                  Text('One-off Work: ${_backgroundStatus?.oneOffWorkState ?? 'n/a'}'),
-                                  Text('Failure Stage: ${_backgroundStatus?.lastFailureStage?.isNotEmpty == true ? _backgroundStatus!.lastFailureStage! : 'n/a'}'),
-                                  Text('Failure Elapsed: ${_backgroundStatus?.lastFailureElapsedMs != null ? '${_backgroundStatus!.lastFailureElapsedMs}ms' : 'n/a'}'),
-                                  Text('Failure Step: ${_backgroundStatus?.lastFailureStep?.isNotEmpty == true ? _backgroundStatus!.lastFailureStep! : 'n/a'}'),
+                                  Text('Result: ${backgroundStatus?.lastResult?.name ?? 'unknown'}'),
+                                  Text('Reason: ${backgroundStatus?.lastReason?.isNotEmpty == true ? backgroundStatus!.lastReason! : 'n/a'}'),
+                                  Text('Gate: ${backgroundStatus?.lastGate?.name ?? 'n/a'}'),
+                                  Text('Error: ${backgroundStatus?.lastError?.isNotEmpty == true ? backgroundStatus!.lastError! : 'n/a'}'),
+                                  Text('Periodic: ${backgroundStatus?.periodicEnabled == true ? 'enabled' : 'disabled'}'),
+                                  Text('Interval: ${backgroundStatus?.intervalMinutes ?? 15}m'),
+                                  Text('Periodic Work: ${backgroundStatus?.periodicWorkState ?? 'n/a'}'),
+                                  Text('One-off Work: ${backgroundStatus?.oneOffWorkState ?? 'n/a'}'),
+                                  Text('Failure Stage: ${backgroundStatus?.lastFailureStage?.isNotEmpty == true ? backgroundStatus!.lastFailureStage! : 'n/a'}'),
+                                  Text('Failure Elapsed: ${backgroundStatus?.lastFailureElapsedMs != null ? '${backgroundStatus!.lastFailureElapsedMs}ms' : 'n/a'}'),
+                                  Text('Failure Step: ${backgroundStatus?.lastFailureStep?.isNotEmpty == true ? backgroundStatus!.lastFailureStep! : 'n/a'}'),
                                   const SizedBox(height: 8),
                                   TextButton.icon(
                                     onPressed: () async {
                                       await BackgroundSyncScheduler.selfHealPeriodicIfNeeded();
                                       await _refreshAll();
                                       if (!mounted) return;
-                                      final status = _backgroundStatus;
+                                      final status = probeCtrl.backgroundStatus.value;
                                       final label = status?.periodicEnabled == true ? 'scheduled/updated' : 'not enabled';
                                       ScaffoldMessenger.of(context).showSnackBar(
                                         SnackBar(content: Text('Repair complete: $label · one-off queued (repair_scheduler).')),

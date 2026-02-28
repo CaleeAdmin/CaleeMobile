@@ -2,10 +2,12 @@ import 'dart:io';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:get/get.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../common/utils/mmkv_utils.dart';
 import '../common/app_constant.dart';
+import '../controllers/calendar_probe_controller.dart';
 import '../sync/background_sync_scheduler.dart';
 
 class SyncSettingsPage extends StatefulWidget {
@@ -153,6 +155,9 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> with WidgetsBinding
       MMKVUtils.instance.setInt('sync_interval_tasks', _tasksInterval);
       MMKVUtils.instance.setBool(AppConstant.autoSyncEnabledKey, _autoSyncEnabled);
       await BackgroundSyncScheduler.setPeriodicEnabled(_periodicSyncEnabled);
+      if (Get.isRegistered<CalendarProbeController>()) {
+        await Get.find<CalendarProbeController>().refreshOverviewState();
+      }
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Settings saved')));
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Save failed: $e')));
