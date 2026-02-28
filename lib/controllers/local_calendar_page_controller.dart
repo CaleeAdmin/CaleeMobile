@@ -25,6 +25,8 @@ class LocalCalendarItem {
   final String name;
   final String accountName;
   final String? accountType;
+  final String? ownerAccount;
+  final String? calSync1;
   final String color;
   final bool isReadOnly;
   int eventCount;
@@ -39,6 +41,8 @@ class LocalCalendarItem {
     required this.name,
     required this.accountName,
     required this.accountType,
+    required this.ownerAccount,
+    required this.calSync1,
     required this.color,
     required this.isReadOnly,
     required this.eventCount,
@@ -97,6 +101,8 @@ class LocalCalendarPageController extends GetxController {
           rc.remote_path,
           rc.display_name,
           rc.origin_key,
+          rc.is_subscription,
+          rc.subscription_url,
           COALESCE(NULLIF(TRIM(rc.account_name), ''), 'Local') AS account_name
         FROM remote_collections rc
         INNER JOIN collection_states cs ON cs.remote_collection_id = rc.id
@@ -156,6 +162,8 @@ class LocalCalendarPageController extends GetxController {
           name: normalizedName,
           accountName: accountName,
           accountType: calendar.accountType,
+          ownerAccount: calendar.ownerAccount,
+          calSync1: calendar.calSync1,
           color: calendar.color ?? '#808080',
           isReadOnly: calendar.isReadOnly ?? false,
           eventCount: 0,
@@ -344,6 +352,7 @@ class LocalCalendarPageController extends GetxController {
 
       String? remotePath;
       String? newRemoteOriginKey;
+      final String localOriginKey = _buildLocalOriginKey(item);
       bool relinkConfirmationDeclined = false;
       if (linkRequested) {
         final List<Map<String, dynamic>> existingRows = await db.rawQuery('''
@@ -369,7 +378,7 @@ class LocalCalendarPageController extends GetxController {
 
         final bool shouldBypassRelinkFlow =
             existingOriginKey.isNotEmpty &&
-            existingOriginKey == item.id &&
+            existingOriginKey == localOriginKey &&
             !item.canRelink &&
             !existingBindingNeedsRelink;
 
@@ -401,7 +410,7 @@ class LocalCalendarPageController extends GetxController {
               AND rc.origin_key = ?
               AND cs.sync_gate_reason = ?
               AND lb.id IS NULL
-          ''', [item.id, SyncGateReason.relinkRequired]);
+          ''', [localOriginKey, SyncGateReason.relinkRequired]);
 
           final List<_RankedReuseCandidate> rankedCandidates = reuseCandidates
               .map((candidate) => _RankedReuseCandidate(
@@ -534,7 +543,7 @@ class LocalCalendarPageController extends GetxController {
                 throw Exception('Subscription URL is unavailable for this local calendar');
               }
 
-              newRemoteOriginKey = item.id;
+              newRemoteOriginKey = localOriginKey;
               final String subscriptionCalendarId =
                   'sub_${item.id}_${DateTime.now().millisecondsSinceEpoch}';
               remotePath = await _caleeService.subscribeRemotePublicIcs(
@@ -542,9 +551,10 @@ class LocalCalendarPageController extends GetxController {
                 calendarName: item.name,
                 calendarId: subscriptionCalendarId,
                 icsUrl: sourceUrl,
+                originKey: newRemoteOriginKey,
               );
             } else {
-              newRemoteOriginKey = item.id;
+              newRemoteOriginKey = localOriginKey;
               final String cloudCalendarId =
                   'local_${item.id}_${DateTime.now().millisecondsSinceEpoch}';
               remotePath = await _caleeService.createRemoteCalendar(
@@ -585,8 +595,8 @@ class LocalCalendarPageController extends GetxController {
           final List<Map<String, dynamic>> remoteRows = await txn.query(
             'remote_collections',
             columns: ['id'],
-            where: 'account_name = ? AND collection_type = ? AND origin_key = ?',
-            whereArgs: [accountName, 'calendar', localCollectionId],
+            where: 'collection_type = ? AND origin_key = ?',
+            whereArgs: ['calendar', localOriginKey],
             limit: 1,
           );
 
@@ -601,7 +611,7 @@ class LocalCalendarPageController extends GetxController {
               'is_subscription': item.isSubscription ? 1 : 0,
               'subscription_url': item.subscriptionUrl,
               'remote_path': remotePath,
-              'origin_key': localCollectionId,
+              'origin_key': localOriginKey,
             };
             await txn.update(
               'remote_collections',
@@ -620,7 +630,7 @@ class LocalCalendarPageController extends GetxController {
               'is_subscription': item.isSubscription ? 1 : 0,
               'subscription_url': item.subscriptionUrl,
               'remote_path': remotePath,
-              'origin_key': localCollectionId,
+              'origin_key': localOriginKey,
             });
           }
 
@@ -712,8 +722,8 @@ class LocalCalendarPageController extends GetxController {
     }
 
     final String originKey = (candidate['origin_key'] ?? '').toString().trim().toLowerCase();
-    final String localId = item.id.trim().toLowerCase();
-    if (originKey.isNotEmpty && localId.isNotEmpty && originKey == localId) {
+    final String localOriginKey = _buildLocalOriginKey(item).trim().toLowerCase();
+    if (originKey.isNotEmpty && localOriginKey.isNotEmpty && originKey == localOriginKey) {
       score += 80;
     }
 
@@ -760,6 +770,29 @@ class LocalCalendarPageController extends GetxController {
     return normalized;
   }
 
+
+
+  String _normalizeOriginKeyPart(String? value) {
+    final String normalized = (value ?? '').trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
+    return normalized;
+  }
+
+  String _buildLocalOriginKey(LocalCalendarItem item) {
+    final String accountType = _normalizeOriginKeyPart(item.accountType);
+    final String accountName = _normalizeOriginKeyPart(item.accountName);
+    final String ownerAccount = _normalizeOriginKeyPart(item.ownerAccount);
+    final String calSync1 = _normalizeOriginKeyPart(item.calSync1);
+    final String displayName = _normalizeOriginKeyPart(item.name);
+
+    if (ownerAccount.isNotEmpty) {
+      return '$accountType|$accountName|$ownerAccount';
+    }
+    if (calSync1.isNotEmpty) {
+      return '$accountType|$accountName|$calSync1';
+    }
+    return '$accountType|$accountName|$displayName';
+  }
+
   String _calendarFingerprint(LocalCalendarItem item) {
     return [
       item.accountName.trim().toLowerCase(),
@@ -783,6 +816,8 @@ class LocalCalendarPageController extends GetxController {
       name: name,
       accountName: accountName,
       accountType: calendar.accountType,
+      ownerAccount: calendar.ownerAccount,
+      calSync1: calendar.calSync1,
       color: calendar.color ?? '#808080',
       isReadOnly: calendar.isReadOnly ?? false,
       eventCount: 0,

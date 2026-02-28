@@ -652,6 +652,45 @@ class CaleeServerService {
     }
   }
 
+
+  Future<bool> setRemoteCalendarOriginMetadata({
+    required String userId,
+    required String calendarPath,
+    required String origin,
+    String? originKey,
+  }) async {
+    final String? password = MMKVUtils.instance.getString(AppConstant.appPasswordKey);
+    if (password == null || password.isEmpty) {
+      return false;
+    }
+
+    final Uri uri = Uri.parse('$_activeServerBase$calendarPath');
+    final String encodedDescription = _buildOriginDescription(origin: origin, originKey: originKey);
+    final String xmlBody = '''<?xml version="1.0" encoding="utf-8" ?>
+<d:propertyupdate xmlns:d="DAV:" xmlns:cal="urn:ietf:params:xml:ns:caldav" xmlns:oc="http://owncloud.org/ns">
+  <d:set>
+    <d:prop>
+      <oc:calendar-description>$encodedDescription</oc:calendar-description>
+      <cal:calendar-description>$encodedDescription</cal:calendar-description>
+    </d:prop>
+  </d:set>
+</d:propertyupdate>''';
+
+    final req = http.Request('PROPPATCH', uri)
+      ..headers.addAll({
+        'Authorization': _getAuthString(userId, password),
+        'Content-Type': 'application/xml; charset=utf-8',
+      })
+      ..body = xmlBody;
+
+    try {
+      final res = await _client.send(req);
+      return res.statusCode == 200 || res.statusCode == 207;
+    } catch (_) {
+      return false;
+    }
+  }
+
   String _buildOriginDescription({required String origin, String? originKey}) {
     final String safeOrigin = const HtmlEscape(HtmlEscapeMode.element)
         .convert(origin.trim().isEmpty ? 'remote' : origin.trim().toLowerCase());
@@ -949,6 +988,7 @@ class CaleeServerService {
     required String calendarName,
     required String calendarId, // 这里的 ID 建议用 sub_时间戳
     required String icsUrl,     // 外部公共 ICS 链接
+    String? originKey,
   }) async {
     final server = _activeServerBase;
     final password = MMKVUtils.instance.getString(AppConstant.appPasswordKey);
@@ -996,6 +1036,12 @@ class CaleeServerService {
       debugPrint('[Calee] Subscription Status: ${res.statusCode}');
 
       if (res.statusCode == 201) {
+        await setRemoteCalendarOriginMetadata(
+          userId: userId,
+          calendarPath: calendarPath,
+          origin: 'local',
+          originKey: originKey,
+        );
         return calendarPath;
       } else {
         final body = await res.stream.bytesToString();

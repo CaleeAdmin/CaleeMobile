@@ -22,6 +22,8 @@ class PlatformCalendar {
     this.name,
     this.accountName,
     this.accountType,
+    this.ownerAccount,
+    this.calSync1,
     this.color,
     this.isReadOnly,
     this.supportsEvents,
@@ -37,6 +39,10 @@ class PlatformCalendar {
   String? accountName;
 
   String? accountType;
+
+  String? ownerAccount;
+
+  String? calSync1;
 
   String? color;
 
@@ -56,6 +62,8 @@ class PlatformCalendar {
       name,
       accountName,
       accountType,
+      ownerAccount,
+      calSync1,
       color,
       isReadOnly,
       supportsEvents,
@@ -72,12 +80,14 @@ class PlatformCalendar {
       name: result[1] as String?,
       accountName: result[2] as String?,
       accountType: result[3] as String?,
-      color: result[4] as String?,
-      isReadOnly: result[5] as bool?,
-      supportsEvents: result[6] as bool?,
-      supportsTasks: result[7] as bool?,
-      isSubscription: result[8] as bool?,
-      subscriptionUrl: result[9] as String?,
+      ownerAccount: result[4] as String?,
+      calSync1: result[5] as String?,
+      color: result[6] as String?,
+      isReadOnly: result[7] as bool?,
+      supportsEvents: result[8] as bool?,
+      supportsTasks: result[9] as bool?,
+      isSubscription: result[10] as bool?,
+      subscriptionUrl: result[11] as String?,
     );
   }
 }
