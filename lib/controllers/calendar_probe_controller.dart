@@ -20,6 +20,7 @@ class CalendarProbeController extends GetxController {
   final RxInt processing = 0.obs;
   final RxInt configuredSources = 0.obs;
   final RxBool workManagerRunning = false.obs;
+  final Rxn<BackgroundSyncStatus> backgroundStatus = Rxn<BackgroundSyncStatus>();
   final Rxn<SyncRunRecord> latestRun = Rxn<SyncRunRecord>();
 
   /// 当前选中的页面索引（0: Dashboard, 1: Calendars, 2: SyncSettings）
@@ -28,6 +29,9 @@ class CalendarProbeController extends GetxController {
   /// 设置选中的页面索引
   void setSelectedIndex(int index) {
     selectedIndex.value = index;
+    if (index == 0) {
+      unawaited(refreshOverviewState());
+    }
   }
 
   /// 上次同步时间
@@ -87,6 +91,7 @@ class CalendarProbeController extends GetxController {
 
   Future<void> loadSchedulerState() async {
     final status = await BackgroundSyncScheduler.getStatus();
+    backgroundStatus.value = status;
     workManagerRunning.value = status.workerRunning;
   }
 
