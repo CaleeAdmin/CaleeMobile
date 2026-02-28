@@ -571,15 +571,15 @@ class SyncRepository {
       final int existingOriginKind = (remote['origin_kind'] as int?) ?? SyncBindingOrigin.remote;
       bindingOriginForEnableAttempt = existingOriginKind;
 
-      // Local-origin rows without a bound device calendar are allowed to be
-      // enabled in UI, but they remain sync-gated until explicit relink.
+      // Guardrail: local-origin calendars must be explicitly relinked to a
+      // concrete device calendar before they can be enabled from the main list.
+      // Do not rely solely on stale/missing sync_gate_reason for this decision.
       if (existingOriginKind == SyncBindingOrigin.local && existingLocalId.isEmpty) {
         final int now = DateTime.now().millisecondsSinceEpoch;
         await db.insert(
           'collection_states',
           {
             'remote_collection_id': remoteCollectionId,
-            'is_enabled': 1,
             'sync_gate_reason': SyncGateReason.relinkRequired,
             'updated_at': now,
           },
@@ -588,22 +588,14 @@ class SyncRepository {
         await db.update(
           'collection_states',
           {
-            'is_enabled': 1,
             'sync_gate_reason': SyncGateReason.relinkRequired,
             'updated_at': now,
           },
           where: 'remote_collection_id = ?',
           whereArgs: [remoteCollectionId],
         );
-        _lastConnectError = 'Enabled, but relink required before sync can continue.';
-        return EnableCalendarResult(
-          success: true,
-          remotePath: persistedRemotePath,
-          remoteCollectionId: remoteCollectionId,
-          localCalendarId: null,
-          didTriggerSync: false,
-          hasFreshEventCount: false,
-        );
+        _lastConnectError = 'Reconnect required. Open "Link to Device Calendar" and complete relink.';
+        return EnableCalendarResult.failure(remotePath: persistedRemotePath);
       }
 
       final Set<String> nativeCalendarIds = (await _nativeApi.getCalendars())
