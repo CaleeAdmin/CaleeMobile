@@ -60,8 +60,6 @@ class LocalCalendarPageController extends GetxController {
   final isLoading = false.obs;
   final connectingCalendarIds = <String>{}.obs;
   static const int _highConfidenceRelinkThreshold = 70;
-  static const int _providerHintWeight = 45;
-  static const int _eventPreviewWeight = 55;
   static const int _metadataBatchSize = 4;
   int _refreshVersion = 0;
 
@@ -199,11 +197,16 @@ class LocalCalendarPageController extends GetxController {
           .toList()
         ..sort((a, b) => a.accountName.toLowerCase().compareTo(b.accountName.toLowerCase()));
 
-      calendarGroups.assignAll(nextGroups);
-
       final List<LocalCalendarItem> allItems = [
         for (final group in nextGroups) ...group.calendars,
       ];
+      await _primeRelinkPreviewConfidence(
+        refreshVersion: refreshVersion,
+        calendars: allItems,
+        relinkCandidates: relinkCandidates,
+      );
+
+      calendarGroups.assignAll(nextGroups);
       unawaited(
         _populateCalendarMetadata(
           refreshVersion: refreshVersion,
@@ -257,6 +260,35 @@ class LocalCalendarPageController extends GetxController {
     }
   }
 
+  Future<void> _primeRelinkPreviewConfidence({
+    required int refreshVersion,
+    required List<LocalCalendarItem> calendars,
+    required List<Map<String, dynamic>> relinkCandidates,
+  }) async {
+    if (relinkCandidates.isEmpty) {
+      for (final item in calendars) {
+        item.relinkConfidence = 0;
+        item.canRelink = false;
+      }
+      return;
+    }
+
+    for (int start = 0; start < calendars.length; start += _metadataBatchSize) {
+      if (refreshVersion != _refreshVersion || isClosed) {
+        return;
+      }
+
+      final int end = (start + _metadataBatchSize < calendars.length)
+          ? start + _metadataBatchSize
+          : calendars.length;
+      final List<LocalCalendarItem> batch = calendars.sublist(start, end);
+
+      await Future.wait(
+        batch.map((item) => _applyRelinkPreviewConfidence(item, relinkCandidates)),
+      );
+    }
+  }
+
   Future<void> _populateCalendarItemMetadata({
     required LocalCalendarItem item,
     required int rangeStart,
@@ -270,19 +302,26 @@ class LocalCalendarPageController extends GetxController {
       item.eventCount = 0;
     }
 
+    await _applyRelinkPreviewConfidence(item, relinkCandidates);
+  }
+
+  Future<void> _applyRelinkPreviewConfidence(
+    LocalCalendarItem item,
+    List<Map<String, dynamic>> relinkCandidates,
+  ) {
     if (item.isConnected || relinkCandidates.isEmpty) {
       item.relinkConfidence = 0;
       item.canRelink = false;
-      return;
+      return Future<void>.value();
     }
 
-    final int relinkConfidence = await _computeRelinkPreviewConfidence(
-      localCalendarId: item.id,
+    final int relinkConfidence = _computeRelinkPreviewConfidence(
       item: item,
       relinkCandidates: relinkCandidates,
     );
     item.relinkConfidence = relinkConfidence;
     item.canRelink = relinkConfidence >= _highConfidenceRelinkThreshold;
+    return Future<void>.value();
   }
 
   Future<void> linkCalendar(
@@ -669,11 +708,10 @@ class LocalCalendarPageController extends GetxController {
     return score.clamp(0, 100);
   }
 
-  Future<int> _computeRelinkPreviewConfidence({
-    required String localCalendarId,
+  int _computeRelinkPreviewConfidence({
     required LocalCalendarItem item,
     required List<Map<String, dynamic>> relinkCandidates,
-  }) async {
+  }) {
     int bestConfidence = 0;
     final List<_RankedReuseCandidate> rankedCandidates = relinkCandidates
         .where(
@@ -688,27 +726,9 @@ class LocalCalendarPageController extends GetxController {
       ..sort((a, b) => b.providerHintScore.compareTo(a.providerHintScore));
 
     for (final _RankedReuseCandidate ranked in rankedCandidates.take(3)) {
-      final Map<String, dynamic> candidate = ranked.raw;
-      final String candidatePath = (candidate['remote_path'] ?? '').toString();
-      if (candidatePath.isEmpty) {
-        continue;
-      }
-
       final int providerScore = ranked.providerHintScore;
-      int eventPreviewScore = 0;
-      try {
-        eventPreviewScore = await _relinkVerifier.previewConfidence(
-          remotePath: candidatePath,
-          localCalendarId: localCalendarId,
-        );
-      } catch (_) {
-        eventPreviewScore = 0;
-      }
-
-      final int blendedScore =
-          ((providerScore * _providerHintWeight) + (eventPreviewScore * _eventPreviewWeight)) ~/ 100;
-      if (blendedScore > bestConfidence) {
-        bestConfidence = blendedScore;
+      if (providerScore > bestConfidence) {
+        bestConfidence = providerScore;
       }
     }
 
