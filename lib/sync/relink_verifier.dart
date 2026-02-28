@@ -19,11 +19,17 @@ class RelinkVerifier {
   RelinkVerifier({
     CaleeServerService? serverService,
     NativeCalendarApi? nativeApi,
+    Future<UnifiedEventsSnapshot> Function(String remotePath)? fetchRemoteSnapshot,
+    Future<List<PlatformItem?>> Function(String localCalendarId, int startMs, int endMs)? fetchLocalEvents,
   })  : _server = serverService ?? CaleeServerService(),
-        _native = nativeApi ?? NativeCalendarApi();
+        _native = nativeApi ?? NativeCalendarApi(),
+        _fetchRemoteSnapshot = fetchRemoteSnapshot,
+        _fetchLocalEvents = fetchLocalEvents;
 
   final CaleeServerService _server;
   final NativeCalendarApi _native;
+  final Future<UnifiedEventsSnapshot> Function(String remotePath)? _fetchRemoteSnapshot;
+  final Future<List<PlatformItem?>> Function(String localCalendarId, int startMs, int endMs)? _fetchLocalEvents;
 
   Future<RelinkVerificationResult> verify({
     required String remotePath,
@@ -36,10 +42,12 @@ class RelinkVerifier {
     final int startMs = startDt.millisecondsSinceEpoch;
     final int endMs = now.millisecondsSinceEpoch;
 
-    final snapshot = await _server.fetchUnifiedEventsSnapshot(
-      calendarPath: remotePath,
-      isSubscription: false,
-    );
+    final UnifiedEventsSnapshot snapshot =
+        await (_fetchRemoteSnapshot?.call(remotePath) ??
+            _server.fetchUnifiedEventsSnapshot(
+              calendarPath: remotePath,
+              isSubscription: false,
+            ));
 
     final bool remoteFetchSucceeded =
         snapshot.fetchSucceeded && (snapshot.statusCode == 200 || snapshot.statusCode == 207);
@@ -51,13 +59,19 @@ class RelinkVerifier {
       );
     }
 
-    final List<PlatformItem?> localItems = await _native.getEvents(localCalendarId, startMs, endMs);
+    final List<PlatformItem?> localItems =
+        await (_fetchLocalEvents?.call(localCalendarId, startMs, endMs) ??
+            _native.getEvents(localCalendarId, startMs, endMs));
 
     final List<_RemoteEvent> remoteEvents = _parseRemoteEvents(snapshot.events);
     final List<_LocalEvent> localEvents = _parseLocalEvents(localItems);
 
     if (remoteEvents.isEmpty && localEvents.isEmpty) {
-      return const RelinkVerificationResult(passed: true, confidenceScore: 100);
+      return const RelinkVerificationResult(
+        passed: false,
+        confidenceScore: 0,
+        isIndeterminate: true,
+      );
     }
 
     final int baseline = math.max(remoteEvents.length, localEvents.length);
@@ -93,10 +107,12 @@ class RelinkVerifier {
     final int startMs = startDt.millisecondsSinceEpoch;
     final int endMs = now.millisecondsSinceEpoch;
 
-    final snapshot = await _server.fetchUnifiedEventsSnapshot(
-      calendarPath: remotePath,
-      isSubscription: false,
-    );
+    final UnifiedEventsSnapshot snapshot =
+        await (_fetchRemoteSnapshot?.call(remotePath) ??
+            _server.fetchUnifiedEventsSnapshot(
+              calendarPath: remotePath,
+              isSubscription: false,
+            ));
 
     final bool remoteFetchSucceeded =
         snapshot.fetchSucceeded && (snapshot.statusCode == 200 || snapshot.statusCode == 207);
@@ -104,7 +120,9 @@ class RelinkVerifier {
       return 0;
     }
 
-    final List<PlatformItem?> localItems = await _native.getEvents(localCalendarId, startMs, endMs);
+    final List<PlatformItem?> localItems =
+        await (_fetchLocalEvents?.call(localCalendarId, startMs, endMs) ??
+            _native.getEvents(localCalendarId, startMs, endMs));
     final List<_RemoteEvent> remoteEvents = _parseRemoteEvents(snapshot.events)
       ..sort((a, b) => b.startMs.compareTo(a.startMs));
     final List<_LocalEvent> localEvents = _parseLocalEvents(localItems)
