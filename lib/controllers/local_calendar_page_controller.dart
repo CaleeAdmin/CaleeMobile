@@ -408,87 +408,89 @@ class LocalCalendarPageController extends GetxController {
           throw Exception('Missing remote path while linking calendar');
         }
 
-        final List<Map<String, dynamic>> remoteRows = await db.query(
-          'remote_collections',
-          columns: ['id'],
-          where: 'account_name = ? AND collection_type = ? AND remote_path = ?',
-          whereArgs: [accountName, 'calendar', remotePath],
-          limit: 1,
-        );
-
-        if (remoteRows.isNotEmpty) {
-          remoteCollectionId = remoteRows.first['id'] as int;
-          final Map<String, dynamic> remoteCollectionUpdates = {
-            'display_name': item.name,
-            'account_name': accountName,
-            'color': item.color,
-            'sync_mode': 0,
-            'origin_kind': 0,
-            'is_subscription': item.isSubscription ? 1 : 0,
-            'subscription_url': item.subscriptionUrl,
-            'remote_path': remotePath,
-          };
-          if (newRemoteOriginKey != null && newRemoteOriginKey.isNotEmpty) {
-            remoteCollectionUpdates['origin_key'] = newRemoteOriginKey;
-          }
-          await db.update(
-            'remote_collections',
-            remoteCollectionUpdates,
-            where: 'id = ?',
-            whereArgs: [remoteCollectionId],
-          );
-        } else {
-          remoteCollectionId = await db.insert('remote_collections', {
-            'account_name': accountName,
-            'collection_type': 'calendar',
-            'display_name': item.name,
-            'color': item.color,
-            'sync_mode': 0,
-            'origin_kind': 0,
-            'is_subscription': item.isSubscription ? 1 : 0,
-            'subscription_url': item.subscriptionUrl,
-            'remote_path': remotePath,
-            'origin_key': newRemoteOriginKey,
-          });
-        }
-
         final String localCollectionId = (item.id ?? '').trim();
         if (localCollectionId.isEmpty || localCollectionId.toLowerCase() == 'null') {
           throw Exception('Invalid local calendar id while linking calendar');
         }
 
-        final int now = DateTime.now().millisecondsSinceEpoch;
-        await db.insert(
-          'local_bindings',
-          {
-            'remote_collection_id': remoteCollectionId,
-            'local_collection_id': localCollectionId,
-            'created_at': now,
-            'updated_at': now,
-          },
-          conflictAlgorithm: ConflictAlgorithm.replace,
-        );
+        await db.transaction((txn) async {
+          final List<Map<String, dynamic>> remoteRows = await txn.query(
+            'remote_collections',
+            columns: ['id'],
+            where: 'account_name = ? AND collection_type = ? AND remote_path = ?',
+            whereArgs: [accountName, 'calendar', remotePath],
+            limit: 1,
+          );
 
-        await db.insert(
-          'collection_states',
-          {
-            'remote_collection_id': remoteCollectionId,
-            'sync_gate_reason': null,
-            'is_enabled': 0,
-            'updated_at': now,
-          },
-          conflictAlgorithm: ConflictAlgorithm.ignore,
-        );
-        await db.update(
-          'collection_states',
-          {
-            'sync_gate_reason': null,
-            'is_enabled': 0,
-            'updated_at': now,
-          },
-          where: 'remote_collection_id = ?',
-          whereArgs: [remoteCollectionId],
-        );
+          if (remoteRows.isNotEmpty) {
+            remoteCollectionId = remoteRows.first['id'] as int;
+            final Map<String, dynamic> remoteCollectionUpdates = {
+              'display_name': item.name,
+              'account_name': accountName,
+              'color': item.color,
+              'sync_mode': 0,
+              'origin_kind': 0,
+              'is_subscription': item.isSubscription ? 1 : 0,
+              'subscription_url': item.subscriptionUrl,
+              'remote_path': remotePath,
+            };
+            if (newRemoteOriginKey != null && newRemoteOriginKey.isNotEmpty) {
+              remoteCollectionUpdates['origin_key'] = newRemoteOriginKey;
+            }
+            await txn.update(
+              'remote_collections',
+              remoteCollectionUpdates,
+              where: 'id = ?',
+              whereArgs: [remoteCollectionId],
+            );
+          } else {
+            remoteCollectionId = await txn.insert('remote_collections', {
+              'account_name': accountName,
+              'collection_type': 'calendar',
+              'display_name': item.name,
+              'color': item.color,
+              'sync_mode': 0,
+              'origin_kind': 0,
+              'is_subscription': item.isSubscription ? 1 : 0,
+              'subscription_url': item.subscriptionUrl,
+              'remote_path': remotePath,
+              'origin_key': newRemoteOriginKey,
+            });
+          }
+
+          final int now = DateTime.now().millisecondsSinceEpoch;
+          await txn.insert(
+            'collection_states',
+            {
+              'remote_collection_id': remoteCollectionId,
+              'sync_gate_reason': null,
+              'is_enabled': 0,
+              'updated_at': now,
+            },
+            conflictAlgorithm: ConflictAlgorithm.ignore,
+          );
+          await txn.update(
+            'collection_states',
+            {
+              'sync_gate_reason': null,
+              'is_enabled': 0,
+              'updated_at': now,
+            },
+            where: 'remote_collection_id = ?',
+            whereArgs: [remoteCollectionId],
+          );
+
+          await txn.insert(
+            'local_bindings',
+            {
+              'remote_collection_id': remoteCollectionId,
+              'local_collection_id': localCollectionId,
+              'created_at': now,
+              'updated_at': now,
+            },
+            conflictAlgorithm: ConflictAlgorithm.replace,
+          );
+        });
       } else {
         await db.update(
           'remote_collections',

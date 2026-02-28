@@ -20,6 +20,10 @@ class Deletelocalstrategy extends SyncStrategy {
           );
           // 2. 删除日历自身的配置（local_bindings/remote_collections）
           await txn.delete('local_bindings', where: 'local_collection_id = ?', whereArgs: [ctx.localCalendarId]);
+          await txn.delete(
+            'collection_states',
+            where: 'remote_collection_id NOT IN (SELECT remote_collection_id FROM local_bindings)',
+          );
           int cCount = await txn.delete(
               'remote_collections',
               where: 'id NOT IN (SELECT remote_collection_id FROM local_bindings)'
