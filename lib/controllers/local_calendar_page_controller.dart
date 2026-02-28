@@ -346,6 +346,7 @@ class LocalCalendarPageController extends GetxController {
       String? remotePath;
       String? newRemoteOriginKey;
       bool relinkConfirmationDeclined = false;
+      bool createNewRemoteSelected = false;
       if (linkRequested) {
         final List<Map<String, dynamic>> existingRows = await db.rawQuery('''
           SELECT rc.remote_path
@@ -427,31 +428,21 @@ class LocalCalendarPageController extends GetxController {
                 continue;
               }
 
-              if (!verifyResult.passed) {
-                await db.update(
-                  'collection_states',
-                  {
-                    'sync_gate_reason': SyncGateReason.relinkMismatch,
-                    'updated_at': DateTime.now().millisecondsSinceEpoch,
-                  },
-                  where: 'remote_collection_id = ?',
-                  whereArgs: [candidate['id']],
-                );
-                continue;
-              }
-
               final String remoteDisplayName =
                   (candidate['display_name'] ?? '').toString().trim().isNotEmpty
                   ? (candidate['display_name'] ?? '').toString().trim()
                   : candidatePath;
-              final bool relinkConfirmed = await _confirmRelinkTarget(
+
+              final _RelinkDecision relinkDecision = await _confirmRelinkTarget(
                 item,
                 remoteDisplayName: remoteDisplayName,
                 remotePath: candidatePath,
                 verifyConfidenceScore: verifyResult.confidenceScore,
                 providerHintScore: ranked.providerHintScore,
+                verificationPassed: verifyResult.passed,
               );
-              if (!relinkConfirmed) {
+
+              if (relinkDecision == _RelinkDecision.cancel) {
                 await db.update(
                   'collection_states',
                   {
@@ -463,6 +454,35 @@ class LocalCalendarPageController extends GetxController {
                 );
                 relinkConfirmationDeclined = true;
                 break;
+              }
+
+              if (relinkDecision == _RelinkDecision.createNewRemote) {
+                await db.update(
+                  'collection_states',
+                  {
+                    'sync_gate_reason': SyncGateReason.relinkRequired,
+                    'updated_at': DateTime.now().millisecondsSinceEpoch,
+                  },
+                  where: 'remote_collection_id = ?',
+                  whereArgs: [candidate['id']],
+                );
+                createNewRemoteSelected = true;
+                break;
+              }
+
+              if (relinkDecision == _RelinkDecision.tryAnother) {
+                await db.update(
+                  'collection_states',
+                  {
+                    'sync_gate_reason': verifyResult.passed
+                        ? SyncGateReason.relinkRequired
+                        : SyncGateReason.relinkMismatch,
+                    'updated_at': DateTime.now().millisecondsSinceEpoch,
+                  },
+                  where: 'remote_collection_id = ?',
+                  whereArgs: [candidate['id']],
+                );
+                continue;
               }
 
               remotePath = candidatePath;
@@ -497,9 +517,11 @@ class LocalCalendarPageController extends GetxController {
           }
 
           if (remotePath == null || remotePath.isEmpty) {
-            final bool dangerConfirmed = await _confirmDangerousRemoteCreate(item);
-            if (!dangerConfirmed) {
-              throw Exception('Remote creation cancelled by user');
+            if (!createNewRemoteSelected) {
+              final bool dangerConfirmed = await _confirmDangerousRemoteCreate(item);
+              if (!dangerConfirmed) {
+                throw Exception('Remote creation cancelled by user');
+              }
             }
 
             if (item.isSubscription) {
@@ -806,16 +828,17 @@ class LocalCalendarPageController extends GetxController {
     return confirmed == true;
   }
 
-  Future<bool> _confirmRelinkTarget(
+  Future<_RelinkDecision> _confirmRelinkTarget(
     LocalCalendarItem item, {
     required String remoteDisplayName,
     required String remotePath,
     required int verifyConfidenceScore,
     required int providerHintScore,
+    required bool verificationPassed,
   }) async {
-    final bool? confirmed = await Get.dialog<bool>(
+    final _RelinkDecision? decision = await Get.dialog<_RelinkDecision>(
       AlertDialog(
-        title: const Text('Confirm relink'),
+        title: Text(verificationPassed ? 'Confirm relink' : 'Possible mismatch'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -828,26 +851,36 @@ class LocalCalendarPageController extends GetxController {
             Text('Account: ${item.accountName}'),
             Text('Remote path: $remotePath'),
             const SizedBox(height: 8),
-            const Text(
-              'This will create/update the local binding for this device calendar.',
-              style: TextStyle(color: Color(0xFF4B5563), fontSize: 12),
+            Text(
+              verificationPassed
+                  ? 'Confidence is a recommendation only. You can still create a new remote instead.'
+                  : 'Verification did not pass. You can still link anyway, pick another candidate, or create a new remote calendar.',
+              style: const TextStyle(color: Color(0xFF4B5563), fontSize: 12),
             ),
           ],
         ),
         actions: [
           TextButton(
-            onPressed: () => Get.back<bool>(result: false),
+            onPressed: () => Get.back<_RelinkDecision>(result: _RelinkDecision.cancel),
             child: const Text('Cancel'),
           ),
+          TextButton(
+            onPressed: () => Get.back<_RelinkDecision>(result: _RelinkDecision.tryAnother),
+            child: const Text('Pick another'),
+          ),
+          TextButton(
+            onPressed: () => Get.back<_RelinkDecision>(result: _RelinkDecision.createNewRemote),
+            child: const Text('Create new remote'),
+          ),
           ElevatedButton(
-            onPressed: () => Get.back<bool>(result: true),
-            child: const Text('Confirm relink'),
+            onPressed: () => Get.back<_RelinkDecision>(result: _RelinkDecision.linkCandidate),
+            child: Text(verificationPassed ? 'Link this remote' : 'Link anyway'),
           ),
         ],
       ),
       barrierDismissible: false,
     );
-    return confirmed == true;
+    return decision ?? _RelinkDecision.cancel;
   }
 
   Future<void> _refreshMainCalendarList() async {
@@ -865,4 +898,11 @@ class _RankedReuseCandidate {
   final int providerHintScore;
 
   const _RankedReuseCandidate({required this.raw, required this.providerHintScore});
+}
+
+enum _RelinkDecision {
+  linkCandidate,
+  tryAnother,
+  createNewRemote,
+  cancel,
 }
