@@ -547,8 +547,7 @@ class SyncRepository {
       }
 
       final String syncGateReason = (remote['sync_gate_reason']?.toString() ?? '').trim();
-      if (syncGateReason == SyncGateReason.relinkRequired ||
-          syncGateReason == SyncGateReason.relinkVerifying ||
+      if (syncGateReason == SyncGateReason.relinkVerifying ||
           syncGateReason == SyncGateReason.relinkMismatch) {
         _lastConnectError = 'Reconnect required. Open "Link to Device Calendar" and complete relink.';
         return EnableCalendarResult.failure(remotePath: persistedRemotePath);
@@ -571,6 +570,41 @@ class SyncRepository {
           : '';
       final int existingOriginKind = (remote['origin_kind'] as int?) ?? SyncBindingOrigin.remote;
       bindingOriginForEnableAttempt = existingOriginKind;
+
+      // Local-origin rows without a bound device calendar are allowed to be
+      // enabled in UI, but they remain sync-gated until explicit relink.
+      if (existingOriginKind == SyncBindingOrigin.local && existingLocalId.isEmpty) {
+        final int now = DateTime.now().millisecondsSinceEpoch;
+        await db.insert(
+          'collection_states',
+          {
+            'remote_collection_id': remoteCollectionId,
+            'is_enabled': 1,
+            'sync_gate_reason': SyncGateReason.relinkRequired,
+            'updated_at': now,
+          },
+          conflictAlgorithm: ConflictAlgorithm.ignore,
+        );
+        await db.update(
+          'collection_states',
+          {
+            'is_enabled': 1,
+            'sync_gate_reason': SyncGateReason.relinkRequired,
+            'updated_at': now,
+          },
+          where: 'remote_collection_id = ?',
+          whereArgs: [remoteCollectionId],
+        );
+        _lastConnectError = 'Enabled, but relink required before sync can continue.';
+        return EnableCalendarResult(
+          success: true,
+          remotePath: persistedRemotePath,
+          remoteCollectionId: remoteCollectionId,
+          localCalendarId: null,
+          didTriggerSync: false,
+          hasFreshEventCount: false,
+        );
+      }
 
       final Set<String> nativeCalendarIds = (await _nativeApi.getCalendars())
           .whereType<PlatformCalendar>()
