@@ -335,6 +335,14 @@ class SyncRepository {
           );
         }
 
+        if (resolvedRemoteCollectionId != null) {
+          await txn.delete(
+            'collection_states',
+            where: 'remote_collection_id = ?',
+            whereArgs: [resolvedRemoteCollectionId],
+          );
+        }
+
         final int cCount = await txn.delete(
           'remote_collections',
           where: 'id = ?',
@@ -822,38 +830,61 @@ class SyncRepository {
     String? originKey,
   }) async {
     final db = await _dbHelper.database;
-    final List<Map<String, dynamic>> rows = await db.query(
-      'remote_collections',
-      columns: ['id'],
-      where: 'account_name = ? AND collection_type = ? AND remote_path = ?',
-      whereArgs: [accountName, 'calendar', remotePath],
-      limit: 1,
-    );
-
-    if (rows.isNotEmpty) {
-      final int id = rows.first['id'] as int;
-      await db.update(
+    await db.transaction((txn) async {
+      final List<Map<String, dynamic>> rows = await txn.query(
         'remote_collections',
-        {
-          'display_name': displayName,
-          'color': '#4CAF50',
-          if (originKey != null && originKey.isNotEmpty) 'origin_key': originKey,
-        },
-        where: 'id = ?',
-        whereArgs: [id],
+        columns: ['id'],
+        where: 'account_name = ? AND collection_type = ? AND remote_path = ?',
+        whereArgs: [accountName, 'calendar', remotePath],
+        limit: 1,
       );
-      return;
-    }
 
-    await db.insert('remote_collections', {
-      'account_name': accountName,
-      'collection_type': 'calendar',
-      'display_name': displayName,
-      'color': '#4CAF50',
-      'sync_mode': 0,
-      'origin_kind': SyncBindingOrigin.remote,
-      'origin_key': originKey,
-      'remote_path': remotePath,
+      if (rows.isNotEmpty) {
+        final int id = rows.first['id'] as int;
+        final int now = DateTime.now().millisecondsSinceEpoch;
+        await txn.update(
+          'remote_collections',
+          {
+            'display_name': displayName,
+            'color': '#4CAF50',
+            if (originKey != null && originKey.isNotEmpty) 'origin_key': originKey,
+          },
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+        await txn.insert(
+          'collection_states',
+          {
+            'remote_collection_id': id,
+            'sync_gate_reason': null,
+            'is_enabled': 0,
+            'updated_at': now,
+          },
+          conflictAlgorithm: ConflictAlgorithm.ignore,
+        );
+        return;
+      }
+
+      final int remoteCollectionId = await txn.insert('remote_collections', {
+        'account_name': accountName,
+        'collection_type': 'calendar',
+        'display_name': displayName,
+        'color': '#4CAF50',
+        'sync_mode': 0,
+        'origin_kind': SyncBindingOrigin.remote,
+        'origin_key': originKey,
+        'remote_path': remotePath,
+      });
+
+      await txn.insert(
+        'collection_states',
+        {
+          'remote_collection_id': remoteCollectionId,
+          'sync_gate_reason': null,
+          'is_enabled': 0,
+          'updated_at': DateTime.now().millisecondsSinceEpoch,
+        },
+      );
     });
   }
 

@@ -37,6 +37,11 @@ class DeleteDatabaseOnlyStrategy extends SyncStrategy {
           where: 'remote_collection_id = ?',
           whereArgs: [remoteCollectionId],
         );
+        await txn.delete(
+          'collection_states',
+          where: 'remote_collection_id = ?',
+          whereArgs: [remoteCollectionId],
+        );
       }
 
       await txn.delete(

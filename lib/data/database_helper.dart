@@ -137,6 +137,7 @@ class DatabaseHelper {
       CREATE INDEX IF NOT EXISTS idx_si_coll_uid
       ON sync_items(remote_collection_id, remote_uid)
     ''');
+
   }
 
 

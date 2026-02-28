@@ -357,20 +357,47 @@ class CaleeServerService {
       // 3. 删除云端已不存在的远端起源记录（按集合类型分别清理）
       for (final String collectionType in const ['calendar', 'tasklist']) {
         final List<String> currentRemotePaths = currentRemotePathsByType[collectionType] ?? const [];
+        final List<Map<String, dynamic>> rowsToDelete;
         if (currentRemotePaths.isNotEmpty) {
           final placeholders = List.filled(currentRemotePaths.length, '?').join(',');
-          await txn.delete(
+          rowsToDelete = await txn.query(
             'remote_collections',
+            columns: ['id'],
             where: 'account_name = ? AND collection_type = ? AND remote_path NOT IN ($placeholders)',
             whereArgs: [accountName, collectionType, ...currentRemotePaths],
           );
         } else {
-          await txn.delete(
+          rowsToDelete = await txn.query(
             'remote_collections',
+            columns: ['id'],
             where: 'account_name = ? AND collection_type = ?',
             whereArgs: [accountName, collectionType],
           );
         }
+
+        if (rowsToDelete.isEmpty) {
+          continue;
+        }
+
+        final List<int> remoteCollectionIds = rowsToDelete
+            .map((row) => row['id'])
+            .whereType<int>()
+            .toList();
+        if (remoteCollectionIds.isEmpty) {
+          continue;
+        }
+
+        final String idPlaceholders = List.filled(remoteCollectionIds.length, '?').join(',');
+        await txn.delete(
+          'collection_states',
+          where: 'remote_collection_id IN ($idPlaceholders)',
+          whereArgs: remoteCollectionIds,
+        );
+        await txn.delete(
+          'remote_collections',
+          where: 'id IN ($idPlaceholders)',
+          whereArgs: remoteCollectionIds,
+        );
       }
     });
   }
