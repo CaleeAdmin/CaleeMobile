@@ -311,8 +311,19 @@ class CaleeServerService {
 
       final int now = DateTime.now().millisecondsSinceEpoch;
       await txn.rawInsert('''
-        INSERT INTO collection_states (remote_collection_id, is_enabled, updated_at)
-        SELECT rc.id, 0, ?
+        INSERT INTO collection_states (remote_collection_id, sync_gate_reason, is_enabled, updated_at)
+        SELECT
+          rc.id,
+          CASE
+            WHEN rc.origin_kind = 0
+              AND NOT EXISTS (
+                SELECT 1 FROM local_bindings lb
+                WHERE lb.remote_collection_id = rc.id
+              ) THEN 'relink_required'
+            ELSE NULL
+          END,
+          0,
+          ?
         FROM remote_collections rc
         WHERE rc.account_name = ?
           AND NOT EXISTS (
