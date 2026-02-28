@@ -345,7 +345,6 @@ class LocalCalendarPageController extends GetxController {
       String? remotePath;
       String? newRemoteOriginKey;
       bool relinkConfirmationDeclined = false;
-      bool createNewRemoteSelected = false;
       if (linkRequested) {
         final List<Map<String, dynamic>> existingRows = await db.rawQuery('''
           SELECT rc.origin_key, rc.remote_path
@@ -476,7 +475,6 @@ class LocalCalendarPageController extends GetxController {
                   where: 'remote_collection_id = ?',
                   whereArgs: [candidate['id']],
                 );
-                createNewRemoteSelected = true;
                 break;
               }
               remotePath = candidatePath;
@@ -511,13 +509,6 @@ class LocalCalendarPageController extends GetxController {
           }
 
           if (remotePath == null || remotePath.isEmpty) {
-            if (!createNewRemoteSelected) {
-              final bool dangerConfirmed = await _confirmDangerousRemoteCreate(item);
-              if (!dangerConfirmed) {
-                throw Exception('Remote creation cancelled by user');
-              }
-            }
-
             if (item.isSubscription) {
               final String? sourceUrl = item.subscriptionUrl?.trim();
               if (sourceUrl == null || sourceUrl.isEmpty) {
@@ -786,30 +777,6 @@ class LocalCalendarPageController extends GetxController {
       canRelink: false,
       relinkConfidence: 0,
     );
-  }
-
-  Future<bool> _confirmDangerousRemoteCreate(LocalCalendarItem item) async {
-    final bool? confirmed = await Get.dialog<bool>(
-      AlertDialog(
-        title: const Text('Create remote calendar?'),
-        content: Text(
-          'We could not find a matching remote calendar for "${item.name}". '
-          'You can still create one now and manage it anytime in settings. Continue?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Get.back<bool>(result: false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Get.back<bool>(result: true),
-            child: const Text('Create remote calendar'),
-          ),
-        ],
-      ),
-      barrierDismissible: false,
-    );
-    return confirmed == true;
   }
 
   Future<_RelinkDecision> _confirmRelinkTarget(
