@@ -556,7 +556,7 @@ private object BackgroundEngineHolder {
             if (activeRunToken != runToken) {
                 return ReadyResult.NOT_READY_TIMEOUT
             }
-            if (dartReady) {
+            if (dartReady && engine != null && state != HolderState.UNHEALTHY) {
                 return ReadyResult.READY
             }
             readyDeferred ?: CompletableDeferred<ReadyResult>().also { readyDeferred = it }
@@ -668,12 +668,21 @@ private object BackgroundEngineHolder {
         val nextEngine = FlutterEngine(context)
         NativeCalendarApi.setUp(nextEngine.dartExecutor.binaryMessenger, CalendarHostApiImpl(context))
 
+        val engineGen = synchronized(lock) {
+            generation += 1
+            engine = nextEngine
+            runnerApi = BackgroundSyncRunnerApi(nextEngine.dartExecutor.binaryMessenger)
+            dartReady = false
+            state = HolderState.STARTING
+            generation
+        }
+
         BackgroundSyncRunnerHostApi.setUp(
             nextEngine.dartExecutor.binaryMessenger,
             object : BackgroundSyncRunnerHostApi {
                 override fun notifyBackgroundIsolateReady(contractVersion: Long, callback: (Result<Unit>) -> Unit) {
                     holderScope.launch(Dispatchers.Main.immediate) {
-                        onDartReady(generation)
+                        onDartReady(engineGen)
                         callback(Result.success(Unit))
                     }
                 }
@@ -683,14 +692,6 @@ private object BackgroundEngineHolder {
         nextEngine.dartExecutor.executeDartEntrypoint(
             DartExecutor.DartEntrypoint(loader.findAppBundlePath(), "caleeSyncBackgroundEntrypoint"),
         )
-
-        synchronized(lock) {
-            engine = nextEngine
-            runnerApi = BackgroundSyncRunnerApi(nextEngine.dartExecutor.binaryMessenger)
-            generation += 1
-            dartReady = false
-            state = HolderState.IDLE
-        }
     }
 
     private fun onDartReady(callbackGeneration: Long) {
