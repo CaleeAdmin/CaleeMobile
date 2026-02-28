@@ -98,6 +98,7 @@ class LocalCalendarPageController extends GetxController {
           rc.remote_path,
           rc.display_name,
           rc.origin_key,
+          rc.is_subscription,
           COALESCE(NULLIF(TRIM(rc.account_name), ''), 'Local') AS account_name
         FROM remote_collections rc
         INNER JOIN collection_states cs ON cs.remote_collection_id = rc.id
@@ -398,6 +399,10 @@ class LocalCalendarPageController extends GetxController {
               continue;
             }
 
+            if (ranked.providerHintScore < _highConfidenceRelinkThreshold) {
+              continue;
+            }
+
             await db.update(
               'collection_states',
               {
@@ -470,22 +475,6 @@ class LocalCalendarPageController extends GetxController {
                 createNewRemoteSelected = true;
                 break;
               }
-
-              if (relinkDecision == _RelinkDecision.tryAnother) {
-                await db.update(
-                  'collection_states',
-                  {
-                    'sync_gate_reason': verifyResult.passed
-                        ? SyncGateReason.relinkRequired
-                        : SyncGateReason.relinkMismatch,
-                    'updated_at': DateTime.now().millisecondsSinceEpoch,
-                  },
-                  where: 'remote_collection_id = ?',
-                  whereArgs: [candidate['id']],
-                );
-                continue;
-              }
-
               remotePath = candidatePath;
               await db.update(
                 'collection_states',
@@ -699,33 +688,37 @@ class LocalCalendarPageController extends GetxController {
 
   int _scoreCandidateProviderHint(Map<String, dynamic> candidate, LocalCalendarItem item) {
     int score = 0;
+
     final String displayName = (candidate['display_name'] ?? '').toString().trim().toLowerCase();
     final String localName = item.name.trim().toLowerCase();
     if (displayName.isNotEmpty && localName.isNotEmpty) {
       if (displayName == localName) {
-        score += 50;
+        score += 45;
       } else if (displayName.contains(localName) || localName.contains(displayName)) {
-        score += 35;
+        score += 30;
       }
     }
 
-    final String providerCorpus = [
-      (item.accountType ?? '').toLowerCase(),
-      item.accountName.toLowerCase(),
-      (candidate['origin_key'] ?? '').toString().toLowerCase(),
-      (candidate['remote_path'] ?? '').toString().toLowerCase(),
-    ].join(' ');
-
-    if (providerCorpus.contains('google')) {
-      score += 25;
-    } else if (providerCorpus.contains('icloud') || providerCorpus.contains('apple')) {
-      score += 25;
-    } else if (providerCorpus.contains('outlook') || providerCorpus.contains('microsoft')) {
-      score += 25;
+    final String originKey = (candidate['origin_key'] ?? '').toString().trim().toLowerCase();
+    final String localId = item.id.trim().toLowerCase();
+    if (originKey.isNotEmpty && localId.isNotEmpty) {
+      if (originKey == localId) {
+        score += 30;
+      } else if (originKey.contains(localId) || localId.contains(originKey)) {
+        score += 20;
+      }
     }
 
-    if ((candidate['remote_path'] ?? '').toString().toLowerCase().contains(item.id.toLowerCase())) {
-      score += 25;
+    if (_normalizeAccountName(candidate['account_name']) == _normalizeAccountName(item.accountName)) {
+      score += 20;
+    }
+
+    final bool candidateIsSubscription =
+        candidate['is_subscription'] == 1 || candidate['is_subscription'] == true;
+    if (candidateIsSubscription == item.isSubscription) {
+      score += 15;
+    } else {
+      score -= 15;
     }
 
     return score.clamp(0, 100);
@@ -837,6 +830,7 @@ class LocalCalendarPageController extends GetxController {
     required int providerHintScore,
     required bool verificationPassed,
   }) async {
+    final bool allowRelinkAction = providerHintScore >= _highConfidenceRelinkThreshold;
     final _RelinkDecision? decision = await Get.dialog<_RelinkDecision>(
       AlertDialog(
         title: Text(verificationPassed ? 'Confirm relink' : 'Possible mismatch'),
@@ -851,7 +845,7 @@ class LocalCalendarPageController extends GetxController {
               _verificationConfidenceExplanation(verifyConfidenceScore),
               style: const TextStyle(color: Color(0xFF4B5563), fontSize: 12),
             ),
-            Text('Provider/name match confidence: ${providerHintScore.clamp(0, 100)}%'),
+            Text('Collection match confidence: ${providerHintScore.clamp(0, 100)}%'),
             Text(
               _providerHintConfidenceExplanation(providerHintScore),
               style: const TextStyle(color: Color(0xFF4B5563), fontSize: 12),
@@ -863,7 +857,9 @@ class LocalCalendarPageController extends GetxController {
             Text(
               verificationPassed
                   ? 'Confidence is a recommendation only. You can still create a new remote instead.'
-                  : 'Verification did not pass. You can still link anyway, pick another candidate, or create a new remote calendar.',
+                  : allowRelinkAction
+                      ? 'Verification did not pass, but this candidate still matches strongly at collection level. You can link anyway or create a new remote calendar.'
+                      : 'Collection match confidence is low, so creating a new remote calendar is recommended.',
               style: const TextStyle(color: Color(0xFF4B5563), fontSize: 12),
             ),
           ],
@@ -874,17 +870,14 @@ class LocalCalendarPageController extends GetxController {
             child: const Text('Cancel'),
           ),
           TextButton(
-            onPressed: () => Get.back<_RelinkDecision>(result: _RelinkDecision.tryAnother),
-            child: const Text('Pick another'),
-          ),
-          TextButton(
             onPressed: () => Get.back<_RelinkDecision>(result: _RelinkDecision.createNewRemote),
             child: const Text('Create new remote'),
           ),
-          ElevatedButton(
-            onPressed: () => Get.back<_RelinkDecision>(result: _RelinkDecision.linkCandidate),
-            child: Text(verificationPassed ? 'Link this remote' : 'Link anyway'),
-          ),
+          if (allowRelinkAction)
+            ElevatedButton(
+              onPressed: () => Get.back<_RelinkDecision>(result: _RelinkDecision.linkCandidate),
+              child: Text(verificationPassed ? 'Link this remote' : 'Link anyway'),
+            ),
         ],
       ),
       barrierDismissible: false,
@@ -918,12 +911,12 @@ class LocalCalendarPageController extends GetxController {
   String _providerHintConfidenceExplanation(int confidenceScore) {
     final int score = confidenceScore.clamp(0, 100);
     if (score < 40) {
-      return 'Weak hint: account/provider metadata is not very similar.';
+      return 'Weak match: collection metadata alignment is low.';
     }
     if (score < 80) {
-      return 'Moderate hint: account/provider metadata is partially aligned.';
+      return 'Moderate match: collection metadata is partially aligned.';
     }
-    return 'Strong hint: account/provider metadata aligns well.';
+    return 'Strong match: collection metadata aligns well.';
   }
 }
 
@@ -936,7 +929,6 @@ class _RankedReuseCandidate {
 
 enum _RelinkDecision {
   linkCandidate,
-  tryAnother,
   createNewRemote,
   cancel,
 }
