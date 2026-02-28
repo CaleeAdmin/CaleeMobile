@@ -2,6 +2,7 @@ import 'package:caleesync/common/app_constant.dart';
 import 'package:caleesync/common/utils/mmkv_utils.dart';
 import 'package:caleesync/core/platform/pigeon/calendar_api.g.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/material.dart' show Text, TextButton;
 import 'package:get/get.dart';
 import 'dart:async';
 
@@ -10,6 +11,7 @@ import '../sync/sync_completed_event_bus.dart';
 import '../sync/sync_trigger_orchestrator.dart';
 import '../data/database_helper.dart';
 import '../data/sync_repository.dart';
+import '../feature/local_calendars_page.dart';
 import '../services/calee_server_service.dart';
 
 class CalendarDisplayItem {
@@ -27,9 +29,11 @@ class CalendarDisplayItem {
   final bool isSubscription;
   final bool isLocalReadOnly;
   final String? subscriptionUrl;
-  bool isEnabled;            // 对应数据库 is_enabled
+  final String accountName;
+  bool isEnabled;            // 对应数据库 collection_states.is_enabled
   final String? syncGateReason;
   final int origin;          // 0: 本地创建, 1: 云端同步
+  final String? originKey;
   final int bindingId;
   bool allowMassDeletionDangerous;
 
@@ -43,9 +47,11 @@ class CalendarDisplayItem {
     required this.isSubscription,
     required this.isLocalReadOnly,
     this.subscriptionUrl,
+    required this.accountName,
     required this.isEnabled,
     this.syncGateReason,
     required this.origin,
+    this.originKey,
     required this.bindingId,
     required this.allowMassDeletionDangerous,
   });
@@ -64,9 +70,11 @@ class CalendarDisplayItem {
       isSubscription: toBool(map['is_subscription']),
       isLocalReadOnly: toBool(map['is_local_read_only']),
       subscriptionUrl: map['subscription_url']?.toString(),
-      isEnabled: toBool(map['is_enabled']),
+      accountName: map['account_name']?.toString() ?? '',
+      isEnabled: toBool(map['state_is_enabled']),
       syncGateReason: map['sync_gate_reason']?.toString(),
-      origin: (map['binding_origin'] as int?) ?? 0,
+      origin: (map['origin_kind'] as int?) ?? 2,
+      originKey: map['origin_key']?.toString(),
       bindingId: (map['binding_id'] as int?) ?? 0,
       allowMassDeletionDangerous: false,
     );
@@ -152,7 +160,7 @@ class CalendarPageController extends GetxController {
 
       final String remotePath = CaleeServerService.normalizeRemotePath(item.remotePath ?? '');
       if (remotePath.isEmpty) {
-        Get.snackbar('Connection failed', 'Invalid remote calendar path. Please refresh and try again');
+        Get.snackbar('Enable failed', 'Invalid remote calendar path. Please refresh and try again');
         item.isEnabled = false;
         calendars.refresh();
         return;
@@ -163,14 +171,27 @@ class CalendarPageController extends GetxController {
 
       final String? syncMessage = _repo.takeLastConnectErrorMessage();
       if (!enableResult.success) {
-        final String err = syncMessage ?? 'Connection failed. Please retry.';
-        Get.snackbar('Connection failed', err);
+        final String err = syncMessage ?? 'Enable failed. Please retry.';
+        final bool showRelinkAction = err.contains('needs a quick relink');
+        Get.snackbar(
+          'Enable failed',
+          err,
+          mainButton: showRelinkAction
+              ? TextButton(
+                  onPressed: () {
+                    Get.back();
+                    Get.to(() => const LocalCalendarsPage());
+                  },
+                  child: const Text('Link now'),
+                )
+              : null,
+        );
       } else if (syncMessage != null && syncMessage.isNotEmpty) {
         Get.snackbar('Sync failed', syncMessage);
       } else {
-        final String? loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey);
-        if (loginName != null && loginName.isNotEmpty) {
-          final bool syncEnabled = await _nativeApi.isCalendarAccountSyncEnabled(loginName);
+        final String accountName = item.accountName;
+        if (accountName.isNotEmpty) {
+          final bool syncEnabled = await _nativeApi.isCalendarAccountSyncEnabled(accountName);
           if (!syncEnabled) {
             Get.snackbar('Sync disabled in system', 'Please enable CaleeSync account calendar sync in Android Settings.');
           }
@@ -181,7 +202,7 @@ class CalendarPageController extends GetxController {
       // (manual refresh, lifecycle load, sync-completed event).
     } catch (e) {
       print("[ERROR] Failed to toggle calendar state: $e");
-      Get.snackbar('Connection failed', 'An exception occurred while connecting the calendar. Please try again later');
+      Get.snackbar('Enable failed', 'An exception occurred while enabling the calendar. Please try again later');
       item.isEnabled = false;
       calendars.refresh();
     } finally {
@@ -232,6 +253,7 @@ class CalendarPageController extends GetxController {
       isSubscription: item.isSubscription,
       isLocalReadOnly: item.isLocalReadOnly,
       subscriptionUrl: item.subscriptionUrl,
+      accountName: item.accountName,
       isEnabled: result.success,
       syncGateReason: item.syncGateReason,
       origin: item.origin,
@@ -297,21 +319,39 @@ class CalendarPageController extends GetxController {
       whereArgs = [item.localId];
     }
 
-    // 2. 执行更新
-    int count = await db.update(
-      'remote_collections',
-      {'is_enabled': newValue ? 1 : 0},
-      where: whereClause,
-      whereArgs: whereArgs,
+    final int now = DateTime.now().millisecondsSinceEpoch;
+
+    await db.rawInsert(
+      '''
+      INSERT INTO collection_states (remote_collection_id, is_enabled, updated_at)
+      SELECT rc.id, ?, ?
+      FROM remote_collections rc
+      WHERE $whereClause
+        AND NOT EXISTS (
+          SELECT 1 FROM collection_states cs WHERE cs.remote_collection_id = rc.id
+        )
+      ''',
+      [newValue ? 1 : 0, now, ...whereArgs],
+    );
+
+    final int count = await db.rawUpdate(
+      '''
+      UPDATE collection_states
+      SET is_enabled = ?, updated_at = ?
+      WHERE remote_collection_id IN (
+        SELECT id FROM remote_collections WHERE $whereClause
+      )
+      ''',
+      [newValue ? 1 : 0, now, ...whereArgs],
     );
 
     debugPrint("[OK] Update succeeded, affected rows: $count (condition: $whereClause = ${whereArgs[0]})");
 
     final String? localCalendarId = item.localId;
-    final String? loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey);
-    if (localCalendarId != null && localCalendarId.isNotEmpty && loginName != null && loginName.isNotEmpty) {
+    final String accountName = item.accountName;
+    if (localCalendarId != null && localCalendarId.isNotEmpty && accountName.isNotEmpty) {
       try {
-        await _nativeApi.setCalendarEnabled(localCalendarId, loginName, newValue);
+        await _nativeApi.setCalendarEnabled(localCalendarId, accountName, newValue);
       } catch (e) {
         debugPrint('[WARN] Failed to update CalendarContract flags for $localCalendarId: $e');
       }
@@ -333,26 +373,38 @@ class CalendarPageController extends GetxController {
   Future<void> _reloadCalendarsImpl() async {
     try {
       isLoading.value = true;
-      final String? loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey);
-      if (loginName == null) return;
+      final String authUserId = MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? '';
+      final String storedAccountName = MMKVUtils.instance.getString(AppConstant.calendarAccountNameKey) ?? '';
+      if (authUserId.isEmpty) return;
+
+      // Some users do not have a bound local calendar account yet, so the
+      // persisted account partition can be empty. In that case, fallback to
+      // auth user id so the main calendar page can still load remote calendars.
+      final String accountName = storedAccountName.isNotEmpty ? storedAccountName : authUserId;
+
+      if (storedAccountName.isEmpty) {
+        MMKVUtils.instance.setString(AppConstant.calendarAccountNameKey, accountName);
+      }
 
       // 1. 拉取远端 Calee 日历并更新本地映射
       await _nc.scanRemoteCalendars(
           serverUrl: _authService.normalizedUrl,
-          userId: loginName);
+          authUserId: authUserId,
+          accountName: accountName);
 
       // 2. 查询本地 remote_collections 的所有日历记录
       final db = await DatabaseHelper.instance.database;
       final List<Map<String, dynamic>> calendarMaps = await db.rawQuery('''
-        SELECT rc.*, lb.local_collection_id, lb.binding_origin, lb.id AS binding_id, lb.sync_gate_reason
+        SELECT rc.*, lb.local_collection_id, lb.id AS binding_id, cs.sync_gate_reason, cs.is_enabled AS state_is_enabled
         FROM remote_collections rc
         LEFT JOIN local_bindings lb ON lb.remote_collection_id = rc.id
+        LEFT JOIN collection_states cs ON cs.remote_collection_id = rc.id
         WHERE rc.account_name = ?
           AND rc.collection_type = 'calendar'
           AND rc.remote_path IS NOT NULL
           AND rc.remote_path != ''
         ORDER BY rc.id ASC
-      ''', [loginName]);
+      ''', [accountName]);
       final Map<String, int> cachedCountByCalendarId = {};
       final Map<String, bool> localReadOnlyById = {};
       final List<CalendarDisplayItem> nextCloudCalendars = [];
@@ -382,7 +434,7 @@ class CalendarPageController extends GetxController {
         final String? remotePath = cal['remote_path'];
         final int? syncMode = cal['sync_mode'];
         final bool isSubscription = (cal['is_subscription'] == 1 || cal['is_subscription'] == true);
-        final int origin = (cal['binding_origin'] as int?) ?? 0;
+        final int origin = (cal['origin_kind'] as int?) ?? 2;
 
         final String countKey = (cal['id'] ?? '').toString();
         final int realCount = cachedCountByCalendarId[countKey] ?? 0;
@@ -402,10 +454,12 @@ class CalendarPageController extends GetxController {
           isSubscription: isSubscription,
           isLocalReadOnly: localReadOnlyById[localId] ?? false,
           subscriptionUrl: cal['subscription_url']?.toString(),
-          isEnabled: cal['is_enabled'] == 1,
+          accountName: cal['account_name']?.toString() ?? '',
+          isEnabled: (cal['state_is_enabled'] as int?) == 1,
           syncGateReason: cal['sync_gate_reason']?.toString(),
           remotePath: remotePath,
           origin: origin,
+          originKey: cal['origin_key']?.toString(),
           bindingId: bindingId,
           allowMassDeletionDangerous: allowMassDeletionDangerous,
         );
@@ -466,8 +520,8 @@ class CalendarPageController extends GetxController {
     }
   }
 
-  /// 创建新的本地日历（委托给 SyncRepository）, 并刷新界面
-  Future<bool> createNewLocalCalendar(String displayName) async {
+  /// 创建新的远端日历草稿（委托给 SyncRepository）, 并刷新界面
+  Future<bool> createRemoteCalendarDraft(String displayName) async {
     final String? invalidReason = validateNewCalendarName(displayName);
     if (invalidReason != null) {
       Get.snackbar('Invalid calendar name', invalidReason);
@@ -476,7 +530,7 @@ class CalendarPageController extends GetxController {
 
     try {
       isLoading.value = true;
-      final ok = await _repo.createNewLocalCalendar(displayName.trim());
+      final ok = await _repo.createRemoteCalendarDraft(displayName.trim());
       if (ok) {
         await reloadCalendars();
         _notifyMeaningfulChange();
@@ -486,7 +540,7 @@ class CalendarPageController extends GetxController {
         return false;
       }
     } catch (e) {
-      print('[ERROR] Failed to create local calendar: $e');
+      print('[ERROR] Failed to create remote calendar draft: $e');
       Get.snackbar('Error', 'Failed to create calendar');
       return false;
     } finally {

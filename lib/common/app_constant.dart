@@ -8,6 +8,7 @@ class AppConstant {
   /// MMKV 存储 Key
   static const String serverKey = 'calee_server';
   static const String loginNameKey = 'calee_login_name';
+  static const String calendarAccountNameKey = 'calee_calendar_account_name';
   static const String appPasswordKey = 'calee_app_password';
 
   /// 同步策略开关：是否允许远端日历自动落地到系统本地日历。
@@ -16,6 +17,9 @@ class AppConstant {
   static const String autoSyncEnabledKey = 'auto_sync_enabled';
   static const String periodicSyncEnabledKey = 'periodic_sync_enabled';
   static const String syncIntervalCalendarKey = 'sync_interval_calendar';
+
+  /// Android calendar account type used by system calendar integration.
+  static const String calendarAccountType = 'com.viso.caleesync';
 
   /// Per-binding dangerous override key prefix.
   ///

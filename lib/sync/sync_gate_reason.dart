@@ -9,6 +9,9 @@ class SyncGateReason {
   static const String environmentBlocked = 'environment_blocked';
   static const String subscriptionReadonlyViolation = 'subscription_readonly_violation';
   static const String repairRequired = 'repair_required';
+  static const String relinkRequired = 'relink_required';
+  static const String relinkVerifying = 'relink_verifying';
+  static const String relinkMismatch = 'relink_mismatch';
 
   static const Set<String> deterministicReasons = {
     ok,
@@ -19,6 +22,9 @@ class SyncGateReason {
     environmentBlocked,
     subscriptionReadonlyViolation,
     repairRequired,
+    relinkRequired,
+    relinkVerifying,
+    relinkMismatch,
   };
 
   static String? toUiMessage(String? reason) {
@@ -37,6 +43,12 @@ class SyncGateReason {
         return 'Subscription is read-only. Update sync mode to resume.';
       case repairRequired:
         return 'Reconnect required to repair calendar binding.';
+      case relinkRequired:
+        return 'Relink required before sync can continue.';
+      case relinkVerifying:
+        return 'Relink verification in progress.';
+      case relinkMismatch:
+        return 'Relink verification failed. Pick another calendar.';
       default:
         if (reason == null || reason.isEmpty) return null;
         return 'Sync paused (${reason.replaceAll('_', ' ')}).';

@@ -14,6 +14,11 @@ class BackgroundSyncStatus {
     this.nextScheduledAt,
     this.workerRunning = false,
     this.intervalMinutes,
+    this.periodicWorkState,
+    this.oneOffWorkState,
+    this.lastFailureStage,
+    this.lastFailureElapsedMs,
+    this.lastFailureStep,
   });
 
   final bool periodicEnabled;
@@ -26,6 +31,11 @@ class BackgroundSyncStatus {
   final DateTime? nextScheduledAt;
   final bool workerRunning;
   final int? intervalMinutes;
+  final String? periodicWorkState;
+  final String? oneOffWorkState;
+  final String? lastFailureStage;
+  final int? lastFailureElapsedMs;
+  final String? lastFailureStep;
 
   factory BackgroundSyncStatus.fromDto(BackgroundStatusDto dto) {
     DateTime? parse(int? ms) => ms == null ? null : DateTime.fromMillisecondsSinceEpoch(ms);
@@ -40,6 +50,11 @@ class BackgroundSyncStatus {
       nextScheduledAt: parse(dto.nextScheduledAtMs),
       workerRunning: dto.workerRunning,
       intervalMinutes: dto.intervalMinutes,
+      periodicWorkState: dto.periodicWorkState,
+      oneOffWorkState: dto.oneOffWorkState,
+      lastFailureStage: dto.lastFailureStage,
+      lastFailureElapsedMs: dto.lastFailureElapsedMs,
+      lastFailureStep: dto.lastFailureStep,
     );
   }
 }
@@ -57,17 +72,25 @@ class BackgroundSyncScheduler {
     await _api.cancelPeriodic();
   }
 
-  static Future<void> scheduleOneOff({required String reason, bool expedited = false}) {
-    return _api.enqueueOneOff(reason, expedited);
+  static Future<void> scheduleOneOff({
+    required String reason,
+    bool expedited = false,
+    OneOffEnqueuePolicy policy = OneOffEnqueuePolicy.keep,
+  }) {
+    return _api.enqueueOneOff(reason, expedited, policy);
   }
 
   static Future<void> selfHealPeriodicIfNeeded() async {
-    final bool enabled = MMKVUtils.instance.getBool(AppConstant.periodicSyncEnabledKey, defaultValue: false) ?? false;
-    if (!enabled) {
+    final status = await getStatus();
+    final bool enabledByMmkv = MMKVUtils.instance.getBool(AppConstant.periodicSyncEnabledKey, defaultValue: false) ?? false;
+    if (!status.periodicEnabled && !enabledByMmkv) {
       return;
     }
-    final int interval = MMKVUtils.instance.getInt(AppConstant.syncIntervalCalendarKey) ?? 15;
+    final int interval = (MMKVUtils.instance.getInt(AppConstant.syncIntervalCalendarKey) ?? status.intervalMinutes ?? 15)
+        .clamp(15, 24 * 60)
+        .toInt();
     await _api.ensurePeriodicScheduled(interval);
+    await _api.enqueueOneOff('repair_scheduler', false, OneOffEnqueuePolicy.replace);
   }
 
   static Future<BackgroundSyncStatus> getStatus() async {

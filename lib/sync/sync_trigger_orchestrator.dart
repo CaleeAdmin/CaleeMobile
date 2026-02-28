@@ -6,6 +6,7 @@ import 'package:flutter/widgets.dart';
 import 'package:get/get.dart';
 
 import '../data/sync_run_store.dart';
+import '../core/platform/pigeon/background_sync_api.g.dart';
 import '../entity/SyncSummary.dart';
 import '../entity/sync_run_record.dart';
 import 'background_sync_scheduler.dart';
@@ -71,7 +72,12 @@ class SyncTriggerOrchestrator extends GetxService with WidgetsBindingObserver {
   }) async {
     final String? baselineRunId = await _loadLatestRunId();
     final String triggerReason = reason ?? _mapReason(trigger);
-    await BackgroundSyncScheduler.scheduleOneOff(reason: triggerReason, expedited: expedited);
+    final bool isManualOrForce = trigger == SyncTriggerType.manual || trigger == SyncTriggerType.force;
+    await BackgroundSyncScheduler.scheduleOneOff(
+      reason: triggerReason,
+      expedited: expedited,
+      policy: isManualOrForce ? OneOffEnqueuePolicy.replace : OneOffEnqueuePolicy.keep,
+    );
     final SyncSummary summary = await _awaitRunCompletion(baselineRunId: baselineRunId);
     onProgress?.call(summary);
     return summary;

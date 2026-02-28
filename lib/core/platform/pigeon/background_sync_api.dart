@@ -28,6 +28,11 @@ enum BackgroundGateReason {
   unknown,
 }
 
+enum OneOffEnqueuePolicy {
+  keep,
+  replace,
+}
+
 class BackgroundRunRequest {
   String trigger;
   int contractVersion;
@@ -64,6 +69,11 @@ class BackgroundStatusDto {
   String? lastStage;
   int? lastStageAtMs;
   int? nextScheduledAtMs;
+  String? periodicWorkState;
+  String? oneOffWorkState;
+  String? lastFailureStage;
+  int? lastFailureElapsedMs;
+  String? lastFailureStep;
   bool workerRunning;
   int intervalMinutes;
   int contractVersion;
@@ -78,6 +88,11 @@ class BackgroundStatusDto {
     this.lastStage,
     this.lastStageAtMs,
     this.nextScheduledAtMs,
+    this.periodicWorkState,
+    this.oneOffWorkState,
+    this.lastFailureStage,
+    this.lastFailureElapsedMs,
+    this.lastFailureStep,
     required this.workerRunning,
     required this.intervalMinutes,
     required this.contractVersion,
@@ -96,7 +111,7 @@ abstract class BackgroundSyncControlApi {
   void ensurePeriodicScheduled(int intervalMinutes);
 
   @async
-  void enqueueOneOff(String reason, bool expedited);
+  void enqueueOneOff(String reason, bool expedited, OneOffEnqueuePolicy enqueuePolicy);
 
   @async
   BackgroundStatusDto getBackgroundStatus();
@@ -110,6 +125,9 @@ abstract class BackgroundSyncRunnerHostApi {
 
 @FlutterApi()
 abstract class BackgroundSyncRunnerApi {
+  @async
+  bool pingBackgroundIsolate();
+
   @async
   BackgroundRunResult runBackgroundSync(BackgroundRunRequest request);
 }

@@ -15,7 +15,7 @@ class BackgroundSyncWorkerBridge implements BackgroundSyncRunnerApi {
   static Future<void>? _initFuture;
   static final BackgroundSyncRunnerHostApi _runnerHostApi = BackgroundSyncRunnerHostApi();
   static const Duration _initTimeout = Duration(seconds: 12);
-  static const int _readyNotifyAttempts = 3;
+  static const Duration _readyNotifyWindow = Duration(seconds: 14);
   static const Duration _readyNotifyRetryDelay = Duration(milliseconds: 350);
 
   static Future<void> start() async {
@@ -27,12 +27,13 @@ class BackgroundSyncWorkerBridge implements BackgroundSyncRunnerApi {
   }
 
   static Future<void> _notifyReadyWithRetry() async {
-    for (int attempt = 1; attempt <= _readyNotifyAttempts; attempt++) {
+    final DateTime deadline = DateTime.now().add(_readyNotifyWindow);
+    while (true) {
       try {
         await _runnerHostApi.notifyBackgroundIsolateReady(kBackgroundSyncContractVersion);
         return;
       } catch (_) {
-        if (attempt == _readyNotifyAttempts) {
+        if (DateTime.now().isAfter(deadline)) {
           return;
         }
         await Future<void>.delayed(_readyNotifyRetryDelay);
@@ -43,6 +44,11 @@ class BackgroundSyncWorkerBridge implements BackgroundSyncRunnerApi {
   static Future<void> _heavyInit() async {
     await MMKVUtils.instance.init();
     await DatabaseHelper.instance.init();
+  }
+
+  @override
+  Future<bool> pingBackgroundIsolate() async {
+    return true;
   }
 
   @override

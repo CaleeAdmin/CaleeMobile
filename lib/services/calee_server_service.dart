@@ -20,11 +20,12 @@ class CaleeServerService {
   /// 1. 获取并解析云端日历 (对应 remote_collections)
   Future<List<Map<String, dynamic>>> scanRemoteCalendars({
     required String serverUrl,
-    required String userId,
+    required String authUserId,
+    required String accountName,
   }) async {
     final normalizedServer = _normalizeServer(serverUrl);
     final uri = Uri.parse(
-      '$normalizedServer/remote.php/dav/calendars/${Uri.encodeComponent(userId)}/',
+      '$normalizedServer/remote.php/dav/calendars/${Uri.encodeComponent(authUserId)}/',
     );
     final String password = MMKVUtils.instance.getString(AppConstant.appPasswordKey) ?? "";
 
@@ -37,6 +38,8 @@ class CaleeServerService {
               xmlns:oc="http://owncloud.org/ns">
     <d:prop>
       <d:displayname />
+      <cal:calendar-description />
+      <oc:calendar-description />
       <d:resourcetype />
       <d:current-user-privilege-set />
       <nc:calendar-color /> 
@@ -49,7 +52,7 @@ class CaleeServerService {
 
     final request = http.Request('PROPFIND', uri)
       ..headers.addAll({
-        'Authorization': 'Basic ${base64Encode(utf8.encode('$userId:$password'))}',
+        'Authorization': 'Basic ${base64Encode(utf8.encode('$authUserId:$password'))}',
         'Depth': '1',
         'Content-Type': 'application/xml; charset=utf-8',
       })
@@ -63,7 +66,7 @@ class CaleeServerService {
     }
 
     final List<Map<String, dynamic>> results = _parseCalendarXmlToMap(respBody);
-    await persistRemoteCalendars(results, userId);
+    await persistRemoteCalendars(results, accountName);
     return results;
   }
 
@@ -92,6 +95,9 @@ class CaleeServerService {
 
       // --- 字段提取 ---
       final displayName = prop.findElements('d:displayname').firstOrNull?.innerText;
+      final String? calendarDescription = prop.findElements('cal:calendar-description').firstOrNull?.innerText
+          ?? prop.findElements('oc:calendar-description').firstOrNull?.innerText;
+      final Map<String, dynamic> originMeta = _extractOriginMetadata(calendarDescription);
       // Subscribed calendar可能没有 ctag, 使用空字符串兜底
       final ctag = prop.findAllElements('cs:getctag').firstOrNull?.innerText;
       final color = prop.findElements('nc:calendar-color').firstOrNull?.innerText;
@@ -132,9 +138,54 @@ class CaleeServerService {
         'color': color,
         'is_subscription': isSubscribed, // 建议增加此字段方便 UI 展示
         'subscription_url': subscriptionUrl,
+        'origin_kind': originMeta['origin_kind'],
+        'origin_key': originMeta['origin_key'],
       });
     }
     return results;
+  }
+
+  Map<String, dynamic> _extractOriginMetadata(String? calendarDescription) {
+    if (calendarDescription == null || calendarDescription.trim().isEmpty) {
+      return {'origin_kind': 1, 'origin_key': null};
+    }
+
+    final String normalizedDescription = calendarDescription
+        .replaceAll('&#10;', '\n')
+        .replaceAll('&#13;', '\r')
+        .replaceAll('\\n', '\n')
+        .replaceAll('\\r', '\r');
+
+    String? origin;
+    String? originKey;
+    for (final String line in normalizedDescription.split(RegExp(r'[\r\n]+'))) {
+      final String normalized = line.trim();
+      if (normalized.isEmpty) continue;
+      final int idx = normalized.indexOf('=');
+      if (idx <= 0) continue;
+      final String key = normalized.substring(0, idx).trim().toLowerCase();
+      final String value = normalized.substring(idx + 1).trim();
+      if (key == 'origin') {
+        final String lowered = value.toLowerCase();
+        if (lowered.startsWith('local')) {
+          origin = 'local';
+        } else if (lowered.startsWith('remote')) {
+          origin = 'remote';
+        } else {
+          origin = lowered;
+        }
+      } else if (key == 'originkey' || key == 'origin_key') {
+        originKey = value;
+      }
+    }
+
+    int originKind = 1;
+    if (origin == 'local') {
+      originKind = 0;
+    } else if (origin == 'remote') {
+      originKind = 1;
+    }
+    return {'origin_kind': originKind, 'origin_key': originKey};
   }
 
   String _classifyCollectionType(xml.XmlElement prop) {
@@ -214,10 +265,11 @@ class CaleeServerService {
           synced_ctag, 
           sync_mode, 
           color, 
-          is_enabled,
           is_subscription,
-          subscription_url
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) -- 增加订阅字段
+          subscription_url,
+          origin_kind,
+          origin_key
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) -- 增加订阅字段
         ON CONFLICT(account_name, collection_type, remote_path) DO UPDATE SET
           display_name = excluded.display_name,
           synced_ctag = remote_collections.synced_ctag,
@@ -231,6 +283,15 @@ class CaleeServerService {
             WHEN excluded.subscription_url IS NOT NULL AND excluded.subscription_url != ''
               THEN excluded.subscription_url
             ELSE remote_collections.subscription_url
+          END,
+          origin_kind = CASE
+            WHEN remote_collections.origin_kind = 0 THEN 0
+            ELSE excluded.origin_kind
+          END,
+          origin_key = CASE
+            WHEN excluded.origin_key IS NOT NULL AND excluded.origin_key != ''
+              THEN excluded.origin_key
+            ELSE remote_collections.origin_key
           END
           -- 注意：绑定信息由 local_bindings 管理, 不在此处更新。
       ''', [
@@ -241,29 +302,102 @@ class CaleeServerService {
               map['ctag'],
               syncMode,
               map['color'],
-              0, // is_enabled
               (map['is_subscription'] == true || map['is_subscription'] == 1) ? 1 : 0,
               canonicalizeSubscriptionUrl(map['subscription_url']?.toString()),
+              (map['origin_kind'] as int?) ?? 1,
+              map['origin_key']?.toString(),
             ]);
       }
+
+      final int now = DateTime.now().millisecondsSinceEpoch;
+      await txn.rawInsert('''
+        INSERT INTO collection_states (remote_collection_id, sync_gate_reason, is_enabled, updated_at)
+        SELECT
+          rc.id,
+          CASE
+            WHEN rc.origin_kind = 0
+              AND NOT EXISTS (
+                SELECT 1 FROM local_bindings lb
+                WHERE lb.remote_collection_id = rc.id
+              ) THEN 'relink_required'
+            ELSE NULL
+          END,
+          0,
+          ?
+        FROM remote_collections rc
+        WHERE rc.account_name = ?
+          AND NOT EXISTS (
+            SELECT 1 FROM collection_states cs WHERE cs.remote_collection_id = rc.id
+          )
+      ''', [now, accountName]);
+
+      await txn.rawUpdate('''
+        UPDATE collection_states
+        SET sync_gate_reason = CASE
+          WHEN sync_gate_reason IN ('relink_verifying', 'relink_mismatch')
+            THEN sync_gate_reason
+          WHEN (
+            SELECT rc.origin_kind FROM remote_collections rc
+            WHERE rc.id = collection_states.remote_collection_id
+          ) = 0
+          AND NOT EXISTS (
+            SELECT 1 FROM local_bindings lb
+            WHERE lb.remote_collection_id = collection_states.remote_collection_id
+          ) THEN 'relink_required'
+          WHEN sync_gate_reason IS NOT NULL AND sync_gate_reason != ''
+            THEN sync_gate_reason
+          ELSE NULL
+        END,
+        updated_at = ?
+        WHERE remote_collection_id IN (
+          SELECT id FROM remote_collections WHERE account_name = ?
+        )
+      ''', [now, accountName]);
 
       // 3. 删除云端已不存在的远端起源记录（按集合类型分别清理）
       for (final String collectionType in const ['calendar', 'tasklist']) {
         final List<String> currentRemotePaths = currentRemotePathsByType[collectionType] ?? const [];
+        final List<Map<String, dynamic>> rowsToDelete;
         if (currentRemotePaths.isNotEmpty) {
           final placeholders = List.filled(currentRemotePaths.length, '?').join(',');
-          await txn.delete(
+          rowsToDelete = await txn.query(
             'remote_collections',
+            columns: ['id'],
             where: 'account_name = ? AND collection_type = ? AND remote_path NOT IN ($placeholders)',
             whereArgs: [accountName, collectionType, ...currentRemotePaths],
           );
         } else {
-          await txn.delete(
+          rowsToDelete = await txn.query(
             'remote_collections',
+            columns: ['id'],
             where: 'account_name = ? AND collection_type = ?',
             whereArgs: [accountName, collectionType],
           );
         }
+
+        if (rowsToDelete.isEmpty) {
+          continue;
+        }
+
+        final List<int> remoteCollectionIds = rowsToDelete
+            .map((row) => row['id'])
+            .whereType<int>()
+            .toList();
+        if (remoteCollectionIds.isEmpty) {
+          continue;
+        }
+
+        final String idPlaceholders = List.filled(remoteCollectionIds.length, '?').join(',');
+        await txn.delete(
+          'collection_states',
+          where: 'remote_collection_id IN ($idPlaceholders)',
+          whereArgs: remoteCollectionIds,
+        );
+        await txn.delete(
+          'remote_collections',
+          where: 'id IN ($idPlaceholders)',
+          whereArgs: remoteCollectionIds,
+        );
       }
     });
   }
@@ -309,6 +443,13 @@ class CaleeServerService {
         final String parsedUid = (parsed['uid'] ?? '').toString();
         if (parsedUid.isEmpty) return null;
 
+        final String resolvedEtag = (item['etag']?.isNotEmpty == true)
+            ? item['etag']!
+            : _buildUnknownPendingEtag(
+                href: item['href'],
+                uid: parsedUid,
+              );
+
         return {
           // Canonical event keys shared by subscription and normal remote events.
           'uid': parsedUid,
@@ -322,7 +463,9 @@ class CaleeServerService {
 
           'summary': parsed['summary'],
           'href': isSubscription ? '$calendarPath$parsedUid.ics' : item['href'],
-          'etag': (item['etag']?.isNotEmpty == true ? item['etag'] : parsed['dtstamp']) ?? 'no-etag',
+          // Some CalDAV servers omit ETag. Mark as unknown/pending with a
+          // volatile token so sync planner treats it as remoteChanged.
+          'etag': resolvedEtag,
           'calendar_data': icsString,
         };
       }).whereType<Map<String, dynamic>>().toList();
@@ -376,6 +519,15 @@ class CaleeServerService {
       }
     }
     return results;
+  }
+
+  String _buildUnknownPendingEtag({
+    required String? href,
+    required String uid,
+  }) {
+    final int now = DateTime.now().microsecondsSinceEpoch;
+    final String stableHint = (href?.trim().isNotEmpty == true) ? href!.trim() : uid;
+    return 'pending_etag:$stableHint:$now';
   }
 
   /// 针对普通日历发送 REPORT 请求
@@ -440,6 +592,8 @@ class CaleeServerService {
     required String calendarName,
     required String calendarId,
     required String color, // 格式应为 #RRGGBB 或 #RRGGBBAA
+    String origin = 'remote',
+    String? originKey,
   }) async {
     final server = _activeServerBase;
     final password = MMKVUtils.instance.getString(AppConstant.appPasswordKey);
@@ -448,15 +602,25 @@ class CaleeServerService {
     final calendarPath = '/remote.php/dav/calendars/$userId/$encodedId/';
     final uri = Uri.parse('$server$calendarPath');
 
+    final String encodedDescription = _buildOriginDescription(
+      origin: origin,
+      originKey: originKey,
+    );
+    final String safeCalendarName = const HtmlEscape(HtmlEscapeMode.element).convert(calendarName);
+    final String safeColor = const HtmlEscape(HtmlEscapeMode.element).convert(color);
+
     // 重点：增加 apple ical 命名空间来存储颜色
     final xmlBody = '''<?xml version="1.0" encoding="utf-8" ?>
 <c:mkcalendar xmlns:d="DAV:" 
               xmlns:c="urn:ietf:params:xml:ns:caldav" 
-              xmlns:ic="http://apple.com/ns/ical/">
+              xmlns:ic="http://apple.com/ns/ical/"
+              xmlns:oc="http://owncloud.org/ns">
   <d:set>
     <d:prop>
-      <d:displayname>$calendarName</d:displayname>
-      <ic:calendar-color>$color</ic:calendar-color>
+      <d:displayname>$safeCalendarName</d:displayname>
+      <c:calendar-description>$encodedDescription</c:calendar-description>
+      <oc:calendar-description>$encodedDescription</oc:calendar-description>
+      <ic:calendar-color>$safeColor</ic:calendar-color>
       <c:supported-calendar-component-set>
         <c:comp name="VEVENT" />
       </c:supported-calendar-component-set>
@@ -486,6 +650,56 @@ class CaleeServerService {
       debugPrint('[Calee] MKCALENDAR Exception: $e');
       return null;
     }
+  }
+
+
+  Future<bool> setRemoteCalendarOriginMetadata({
+    required String userId,
+    required String calendarPath,
+    required String origin,
+    String? originKey,
+  }) async {
+    final String? password = MMKVUtils.instance.getString(AppConstant.appPasswordKey);
+    if (password == null || password.isEmpty) {
+      return false;
+    }
+
+    final Uri uri = Uri.parse('$_activeServerBase$calendarPath');
+    final String encodedDescription = _buildOriginDescription(origin: origin, originKey: originKey);
+    final String xmlBody = '''<?xml version="1.0" encoding="utf-8" ?>
+<d:propertyupdate xmlns:d="DAV:" xmlns:cal="urn:ietf:params:xml:ns:caldav" xmlns:oc="http://owncloud.org/ns">
+  <d:set>
+    <d:prop>
+      <oc:calendar-description>$encodedDescription</oc:calendar-description>
+      <cal:calendar-description>$encodedDescription</cal:calendar-description>
+    </d:prop>
+  </d:set>
+</d:propertyupdate>''';
+
+    final req = http.Request('PROPPATCH', uri)
+      ..headers.addAll({
+        'Authorization': _getAuthString(userId, password),
+        'Content-Type': 'application/xml; charset=utf-8',
+      })
+      ..body = xmlBody;
+
+    try {
+      final res = await _client.send(req);
+      return res.statusCode == 200 || res.statusCode == 207;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  String _buildOriginDescription({required String origin, String? originKey}) {
+    final String safeOrigin = const HtmlEscape(HtmlEscapeMode.element)
+        .convert(origin.trim().isEmpty ? 'remote' : origin.trim().toLowerCase());
+    final List<String> rows = ['origin=$safeOrigin'];
+    final String? key = originKey?.trim();
+    if (key != null && key.isNotEmpty) {
+      rows.add('originKey=${const HtmlEscape(HtmlEscapeMode.element).convert(key)}');
+    }
+    return rows.join('&#10;');
   }
 
 
@@ -774,6 +988,7 @@ class CaleeServerService {
     required String calendarName,
     required String calendarId, // 这里的 ID 建议用 sub_时间戳
     required String icsUrl,     // 外部公共 ICS 链接
+    String? originKey,
   }) async {
     final server = _activeServerBase;
     final password = MMKVUtils.instance.getString(AppConstant.appPasswordKey);
@@ -821,6 +1036,12 @@ class CaleeServerService {
       debugPrint('[Calee] Subscription Status: ${res.statusCode}');
 
       if (res.statusCode == 201) {
+        await setRemoteCalendarOriginMetadata(
+          userId: userId,
+          calendarPath: calendarPath,
+          origin: 'local',
+          originKey: originKey,
+        );
         return calendarPath;
       } else {
         final body = await res.stream.bytesToString();

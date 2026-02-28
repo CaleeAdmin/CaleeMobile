@@ -177,7 +177,9 @@ class _LocalCalendarCard extends StatelessWidget {
                                         );
                                       },
                                 style: TextButton.styleFrom(
-                                  backgroundColor: const Color(0xFF111827),
+                                  backgroundColor: calendar.canRelink
+                                      ? const Color(0xFF1D4ED8)
+                                      : const Color(0xFF111827),
                                   foregroundColor: Colors.white,
                                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                                   textStyle: const TextStyle(
@@ -196,7 +198,7 @@ class _LocalCalendarCard extends StatelessWidget {
                                           valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                                         ),
                                       )
-                                    : const Text('Link'),
+                                    : Text(calendar.canRelink ? 'Re-link' : 'Link'),
                               ),
                       ],
                     ),

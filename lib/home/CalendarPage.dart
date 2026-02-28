@@ -115,7 +115,7 @@ class _CalendarPageState extends State<CalendarPage> {
                                           : () async {
                                               isSubmitting.value = true;
                                               final nm = newCalCtrl.text.trim();
-                                              final ok = await Get.find<CalendarPageController>().createNewLocalCalendar(nm);
+                                              final ok = await Get.find<CalendarPageController>().createRemoteCalendarDraft(nm);
                                               isSubmitting.value = false;
                                               if (ok) {
                                                 Navigator.of(dialogContext).pop(true);
@@ -329,6 +329,17 @@ extension on _CalendarRow {
     return error.toString().replaceFirst('Exception: ', '');
   }
 
+  String _originKindLabel(int originKind) {
+    switch (originKind) {
+      case 0:
+        return 'Local';
+      case 1:
+        return 'Remote';
+      default:
+        return 'Unknown ($originKind)';
+    }
+  }
+
   Future<void> _handleOptionResult(String result, BuildContext context, CalendarDisplayItem item, CalendarPageController controller) async {
     switch (result) {
       case 'rename':
@@ -379,6 +390,9 @@ extension on _CalendarRow {
                 _propertyRow('Sync Mode', item.isReadOnly ? 'Read-only' : 'Two-way sync'),
                 _propertyRow('Enabled', item.isEnabled ? 'Yes' : 'No'),
                 _propertyRow('Color', item.color),
+                _propertyRow('Origin Kind', _originKindLabel(item.origin)),
+                if ((item.originKey ?? '').isNotEmpty)
+                  _propertyRow('Origin Key', item.originKey!),
                 if ((item.remotePath ?? '').isNotEmpty)
                   _propertyRow('Remote Path', item.remotePath!),
                 if ((item.localId ?? '').isNotEmpty)

@@ -4,7 +4,6 @@ import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import androidx.work.BackoffPolicy
@@ -25,15 +24,21 @@ import com.google.common.util.concurrent.ListenableFuture
 import io.flutter.FlutterInjector
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.dart.DartExecutor
-import io.flutter.plugins.GeneratedPluginRegistrant
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
+import java.util.UUID
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.TimeoutCancellationException
 
 private typealias WorkResult = ListenableWorker.Result
 
@@ -52,116 +57,105 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
             Log.w(TAG, "runSyncTask aborted because worker is stopped")
             return WorkResult.retry()
         }
+
+        val runLease = tryAcquireRunLease(trigger)
+        if (runLease == null) {
+            val active = activeRunLeaseSnapshot()
+            Log.w(
+                TAG,
+                "run skipped due to active run trigger=$trigger activeRunId=${active?.runId} activeTrigger=${active?.trigger} activeStartedAt=${active?.startedAt}",
+            )
+            return WorkResult.retry()
+        }
+
+        val runToken = UUID.randomUUID().toString()
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         prefs.edit().putLong(KEY_LAST_RUN_AT, System.currentTimeMillis()).apply()
-        Log.i(TAG, "enter trigger=$trigger")
+        Log.i(TAG, "enter trigger=$trigger runToken=$runToken")
 
-        var engine: FlutterEngine? = null
         var stage = STAGE_ENGINE_CREATED
-        val workerResult = withTimeoutOrNull(WORKER_EXEC_TIMEOUT_MS) {
-            suspendCancellableCoroutine<WorkResult> { continuation ->
-                Handler(Looper.getMainLooper()).post {
-                    try {
-                        val loader = FlutterInjector.instance().flutterLoader()
-                        loader.startInitialization(context)
-                        loader.ensureInitializationComplete(context, null)
+        val attemptStartedAt = System.currentTimeMillis()
+        val workerResult = try {
+            withTimeout(WORKER_EXEC_TIMEOUT_MS) {
+                val stageSetter: (String) -> Unit = {
+                    stage = it
+                    persistStage(prefs, stage)
+                }
+                BackgroundEngineHolder.startOrReuseOnMain(context, runToken, trigger)
+                stageSetter(STAGE_DART_ENTRYPOINT_STARTED)
 
-                        val localEngine = FlutterEngine(context)
-                        GeneratedPluginRegistrant.registerWith(localEngine)
-                        engine = localEngine
-                        stage = STAGE_ENGINE_CREATED
-                        persistStage(prefs, stage)
+                when (BackgroundEngineHolder.awaitDartReadyOnWorker(runToken, DART_READY_TIMEOUT_MS)) {
+                    BackgroundEngineHolder.ReadyResult.READY -> {
+                        stageSetter(STAGE_DART_READY_RECEIVED)
+                    }
+                    BackgroundEngineHolder.ReadyResult.NOT_READY_TIMEOUT -> {
+                        stageSetter(STAGE_DART_READY_TIMEOUT)
+                        throw IllegalStateException("dart_not_ready")
+                    }
+                    BackgroundEngineHolder.ReadyResult.CANCELLED -> {
+                        stageSetter(STAGE_DART_READY_TIMEOUT)
+                        throw IllegalStateException("worker_cancelled")
+                    }
+                }
 
-                        val calendarApi = CalendarHostApiImpl(context)
-                        NativeCalendarApi.setUp(localEngine.dartExecutor.binaryMessenger, calendarApi)
-
-                        val readyLatch = java.util.concurrent.CountDownLatch(1)
-                        val runnerHostApi = object : BackgroundSyncRunnerHostApi {
-                            override fun notifyBackgroundIsolateReady(contractVersion: Long, callback: (kotlin.Result<Unit>) -> Unit) {
-                                prefs.edit().putLong(KEY_LAST_READY_VERSION, contractVersion).apply()
-                                stage = STAGE_DART_READY_RECEIVED
-                                persistStage(prefs, stage)
-                                readyLatch.countDown()
-                                callback(kotlin.Result.success(Unit))
-                            }
-                        }
-                        BackgroundSyncRunnerHostApi.setUp(localEngine.dartExecutor.binaryMessenger, runnerHostApi)
-
-                        val runnerApi = BackgroundSyncRunnerApi(localEngine.dartExecutor.binaryMessenger)
-                        stage = STAGE_DART_ENTRYPOINT_STARTED
-                        persistStage(prefs, stage)
-                        localEngine.dartExecutor.executeDartEntrypoint(
-                            DartExecutor.DartEntrypoint(loader.findAppBundlePath(), "caleeSyncBackgroundEntrypoint")
-                        )
-
-                        Thread {
-                            val isReady = readyLatch.await(DART_READY_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-                            Handler(Looper.getMainLooper()).post {
-                                if (!continuation.isActive) {
-                                    return@post
-                                }
-                                if (isStopped) {
-                                    persistSnapshot(
-                                        prefs = prefs,
-                                        outcome = BackgroundRunOutcome.RETRY,
-                                        reason = "worker_stopped",
-                                        gateReason = BackgroundGateReason.UNKNOWN,
-                                    )
-                                    continuation.resume(WorkResult.retry())
-                                    return@post
-                                }
-                                if (!isReady) {
-                                    persistSnapshot(
-                                        prefs = prefs,
-                                        outcome = BackgroundRunOutcome.RETRY,
-                                        reason = "dart_not_ready",
-                                        gateReason = BackgroundGateReason.UNKNOWN,
-                                    )
-                                    continuation.resume(WorkResult.retry())
-                                    return@post
-                                }
-                                invokeRunBackgroundSync(
-                                    runnerApi = runnerApi,
-                                    trigger = trigger,
-                                    prefs = prefs,
-                                    continuation = continuation,
-                                    stageProvider = { stage },
-                                    stageSetter = {
-                                        stage = it
-                                        persistStage(prefs, stage)
-                                    },
-                                ) { continuation.isActive }
-                            }
-                        }.start()
-                    } catch (t: Throwable) {
+                stageSetter(STAGE_RUN_SYNC_SENT)
+                BackgroundEngineHolder.invokeRunOnMain(runToken, BackgroundRunRequest(trigger, CONTRACT_VERSION.toLong()))
+                when (val runResult = BackgroundEngineHolder.awaitRunReplyOnWorker(runToken, SYNC_REPLY_TIMEOUT_MS)) {
+                    is BackgroundEngineHolder.RunResult.REPLY -> {
+                        stageSetter(STAGE_RUN_SYNC_REPLIED)
+                        val result = runResult.payload
                         persistSnapshot(
                             prefs = prefs,
-                            outcome = BackgroundRunOutcome.RETRY,
-                            reason = "engine_init_error",
-                            gateReason = BackgroundGateReason.UNKNOWN,
-                            error = t.message,
+                            outcome = result.outcome,
+                            reason = result.reason,
+                            gateReason = result.gateReason,
+                            error = result.error,
                         )
-                        persistStage(prefs, stage)
-                        if (continuation.isActive) {
-                            continuation.resume(WorkResult.retry())
-                        }
+                        mapOutcomeToWorkerResult(result.outcome)
+                    }
+                    is BackgroundEngineHolder.RunResult.NO_REPLY_TIMEOUT -> {
+                        stageSetter(STAGE_RUN_SYNC_TIMEOUT)
+                        throw IllegalStateException("sync_reply_timeout")
+                    }
+                    is BackgroundEngineHolder.RunResult.CHANNEL_ERROR -> {
+                        stageSetter(STAGE_RUN_SYNC_REPLIED)
+                        throw IllegalStateException("runner_channel_error:${runResult.message}")
+                    }
+                    is BackgroundEngineHolder.RunResult.CANCELLED -> {
+                        stageSetter(STAGE_RUN_SYNC_TIMEOUT)
+                        throw IllegalStateException("worker_cancelled")
                     }
                 }
             }
-        } ?: run {
+        } catch (t: Throwable) {
+            val reason = when {
+                t is TimeoutCancellationException -> "worker_execution_timeout"
+                t.message == "dart_not_ready" -> "dart_not_ready"
+                t.message == "sync_reply_timeout" -> "sync_reply_timeout"
+                t.message?.startsWith("runner_channel_error") == true -> "runner_channel_error"
+                t.message == "worker_cancelled" -> "worker_cancelled"
+                else -> "engine_or_run_error"
+            }
+            withContext(Dispatchers.Main.immediate) {
+                BackgroundEngineHolder.markUnhealthyAndDestroyOnMain(reason)
+            }
+            persistFailureContext(
+                prefs = prefs,
+                failureStage = stage,
+                failureStep = reason,
+                elapsedMs = System.currentTimeMillis() - attemptStartedAt,
+            )
             persistSnapshot(
                 prefs = prefs,
                 outcome = BackgroundRunOutcome.RETRY,
-                reason = "sync_timeout",
+                reason = reason,
                 gateReason = BackgroundGateReason.UNKNOWN,
-                error = "worker_execution_timeout",
+                error = t.message,
             )
             persistStage(prefs, stage)
             WorkResult.retry()
-        }
-
-        withContext(Dispatchers.Main.immediate) {
-            engine?.destroy()
+        } finally {
+            releaseRunLease(runLease)
         }
 
         if (trigger.contains("periodic", ignoreCase = true)) {
@@ -173,73 +167,10 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
             scheduleWatchdogAlarm(context, configuredInterval)
         }
         persistStage(prefs, STAGE_WORKER_FINISHED)
-        Log.i(TAG, "exit result=$workerResult")
+        Log.i(TAG, "exit result=$workerResult runToken=$runToken")
         return workerResult
     }
 
-    private fun invokeRunBackgroundSync(
-        runnerApi: BackgroundSyncRunnerApi,
-        trigger: String,
-        prefs: android.content.SharedPreferences,
-        continuation: kotlin.coroutines.Continuation<WorkResult>,
-        stageProvider: () -> String,
-        stageSetter: (String) -> Unit,
-        isActive: () -> Boolean,
-    ) {
-        stageSetter(STAGE_RUN_SYNC_SENT)
-        val runReturned = AtomicLong(0L)
-        Thread {
-            Thread.sleep(SYNC_REPLY_TIMEOUT_MS)
-            if (runReturned.compareAndSet(0L, 1L) && isActive()) {
-                persistSnapshot(
-                    prefs = prefs,
-                    outcome = BackgroundRunOutcome.RETRY,
-                    reason = "engine_killed_or_no_reply",
-                    gateReason = BackgroundGateReason.UNKNOWN,
-                    error = "sync_reply_timeout",
-                )
-                persistStage(prefs, stageProvider())
-                continuation.resume(WorkResult.retry())
-            }
-        }.start()
-
-        runnerApi.runBackgroundSync(BackgroundRunRequest(trigger, CONTRACT_VERSION.toLong())) { response ->
-            if (!runReturned.compareAndSet(0L, 1L)) {
-                return@runBackgroundSync
-            }
-            response.fold(
-                onSuccess = { runResult ->
-                    stageSetter(STAGE_RUN_SYNC_REPLIED)
-                    val outcome = runResult.outcome
-                    persistSnapshot(
-                        prefs = prefs,
-                        outcome = outcome,
-                        reason = runResult.reason,
-                        gateReason = runResult.gateReason,
-                        error = runResult.error,
-                    )
-                    val mapped = mapOutcomeToWorkerResult(outcome)
-                    Log.i(TAG, "classified outcome=${outcome.name} mapped=$mapped reason=${runResult.reason} gate=${runResult.gateReason.name} version=${runResult.contractVersion}")
-                    if (isActive()) {
-                        continuation.resume(mapped)
-                    }
-                },
-                onFailure = { error ->
-                    stageSetter(STAGE_RUN_SYNC_REPLIED)
-                    persistSnapshot(
-                        prefs = prefs,
-                        outcome = BackgroundRunOutcome.RETRY,
-                        reason = "runner_channel_error",
-                        gateReason = BackgroundGateReason.UNKNOWN,
-                        error = error.message,
-                    )
-                    if (isActive()) {
-                        continuation.resume(WorkResult.retry())
-                    }
-                },
-            )
-        }
-    }
 
     companion object {
         private const val TAG = "CaleeSyncWorker"
@@ -257,17 +188,21 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
         private const val KEY_LAST_STAGE_AT = "last_stage_at"
         private const val KEY_LAST_READY_VERSION = "last_ready_version"
         private const val KEY_LAST_ATTEMPT_AT = "last_attempt_at"
+        private const val KEY_LAST_FAILURE_STAGE = "last_failure_stage"
+        private const val KEY_LAST_FAILURE_ELAPSED_MS = "last_failure_elapsed_ms"
+        private const val KEY_LAST_FAILURE_STEP = "last_failure_step"
 
         private const val STAGE_ENGINE_CREATED = "ENGINE_CREATED"
         private const val STAGE_DART_ENTRYPOINT_STARTED = "DART_ENTRYPOINT_STARTED"
         private const val STAGE_DART_READY_RECEIVED = "DART_READY_RECEIVED"
+        private const val STAGE_DART_READY_TIMEOUT = "DART_READY_TIMEOUT"
         private const val STAGE_RUN_SYNC_SENT = "RUN_SYNC_SENT"
         private const val STAGE_RUN_SYNC_REPLIED = "RUN_SYNC_REPLIED"
+        private const val STAGE_RUN_SYNC_TIMEOUT = "RUN_SYNC_TIMEOUT"
         private const val STAGE_WORKER_FINISHED = "WORKER_FINISHED"
-
-        private const val DART_READY_TIMEOUT_MS = 15_000L
-        private const val SYNC_REPLY_TIMEOUT_MS = 25_000L
-        private const val WORKER_EXEC_TIMEOUT_MS = 90_000L
+        const val DART_READY_TIMEOUT_MS = 60_000L
+        private const val SYNC_REPLY_TIMEOUT_MS = 90_000L
+        private const val WORKER_EXEC_TIMEOUT_MS = 180_000L
         private const val RECENT_ATTEMPT_WINDOW_MS = 30_000L
 
         const val PERIODIC_UNIQUE = "CaleeSyncPeriodicWorker"
@@ -275,6 +210,40 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
         private const val WATCHDOG_INTERVAL_MINUTES = 20L
         private const val WATCHDOG_REQUEST_CODE = 90241
         const val ACTION_WATCHDOG = "com.viso.caleesync.ACTION_BACKGROUND_SYNC_WATCHDOG"
+        private val runLeaseLock = Any()
+        private val runIdCounter = AtomicLong(0L)
+        private var activeRunLease: ActiveRunLease? = null
+
+        private data class ActiveRunLease(
+            val runId: Long,
+            val trigger: String,
+            val startedAt: Long,
+        )
+
+        private fun tryAcquireRunLease(trigger: String): Long? {
+            synchronized(runLeaseLock) {
+                if (activeRunLease != null) {
+                    return null
+                }
+                val runId = runIdCounter.incrementAndGet()
+                activeRunLease = ActiveRunLease(runId = runId, trigger = trigger, startedAt = System.currentTimeMillis())
+                return runId
+            }
+        }
+
+        private fun releaseRunLease(runId: Long?) {
+            synchronized(runLeaseLock) {
+                if (runId != null && activeRunLease?.runId == runId) {
+                    activeRunLease = null
+                }
+            }
+        }
+
+        private fun activeRunLeaseSnapshot(): ActiveRunLease? {
+            synchronized(runLeaseLock) {
+                return activeRunLease
+            }
+        }
 
         private fun networkConnectedConstraints(): Constraints {
             return Constraints.Builder()
@@ -304,6 +273,19 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
                 .putString(KEY_LAST_GATE, gateReason.name.lowercase())
                 .putString(KEY_LAST_ERROR, error ?: "")
                 .putLong(KEY_LAST_ATTEMPT_AT, System.currentTimeMillis())
+                .apply()
+        }
+
+        private fun persistFailureContext(
+            prefs: android.content.SharedPreferences,
+            failureStage: String,
+            failureStep: String,
+            elapsedMs: Long,
+        ) {
+            prefs.edit()
+                .putString(KEY_LAST_FAILURE_STAGE, failureStage)
+                .putLong(KEY_LAST_FAILURE_ELAPSED_MS, elapsedMs)
+                .putString(KEY_LAST_FAILURE_STEP, failureStep)
                 .apply()
         }
 
@@ -338,11 +320,6 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
 
         suspend fun ensurePeriodic(context: Context, intervalMinutes: Int) {
             val bounded = intervalMinutes.coerceAtLeast(15)
-            val infos = awaitFuture(WorkManager.getInstance(context).getWorkInfosForUniqueWork(PERIODIC_UNIQUE))
-            if (infos.any { it.state == WorkInfo.State.ENQUEUED || it.state == WorkInfo.State.RUNNING }) {
-                scheduleWatchdogAlarm(context, bounded)
-                return
-            }
             schedulePeriodic(context, bounded)
         }
 
@@ -356,7 +333,12 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
             return WorkManager.getInstance(context).cancelUniqueWork(PERIODIC_UNIQUE)
         }
 
-        suspend fun enqueueOneOff(context: Context, reason: String, expedited: Boolean): Operation {
+        suspend fun enqueueOneOff(
+            context: Context,
+            reason: String,
+            expedited: Boolean,
+            enqueuePolicy: OneOffEnqueuePolicy = OneOffEnqueuePolicy.KEEP,
+        ): Operation {
             val builder = OneTimeWorkRequestBuilder<CaleeSyncPeriodicWorker>()
                 .setConstraints(networkConnectedConstraints())
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 15, TimeUnit.MINUTES)
@@ -379,8 +361,9 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
                 builder.build()
             }
 
+            val policy = if (enqueuePolicy == OneOffEnqueuePolicy.REPLACE) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP
             return WorkManager.getInstance(context)
-                .enqueueUniqueWork(SYNC_UNIQUE, ExistingWorkPolicy.KEEP, request)
+                .enqueueUniqueWork(SYNC_UNIQUE, policy, request)
         }
 
         fun shouldSkipWatchdogOneOff(context: Context): Boolean {
@@ -423,12 +406,10 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
             return prefs.getInt(KEY_PERIODIC_INTERVAL_MINUTES, 15).coerceAtLeast(15)
         }
 
-
         fun isPeriodicEnabled(context: Context): Boolean {
             val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             return prefs.getBoolean(KEY_PERIODIC_ENABLED, false)
         }
-
 
         private fun parseOutcome(raw: String?): BackgroundRunOutcome? {
             return when (raw?.lowercase()) {
@@ -439,7 +420,6 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
                 else -> null
             }
         }
-
 
         private fun parseGateReason(raw: String?): BackgroundGateReason? {
             return when (raw?.lowercase()) {
@@ -455,12 +435,15 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
             }
         }
 
+        private fun stateName(infos: List<WorkInfo>): String? {
+            return infos.firstOrNull()?.state?.name
+        }
+
         suspend fun readStatus(context: Context): BackgroundStatusDto {
             val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             val periodicInfos = awaitFuture(WorkManager.getInstance(context).getWorkInfosForUniqueWork(PERIODIC_UNIQUE))
             val syncInfos = awaitFuture(WorkManager.getInstance(context).getWorkInfosForUniqueWork(SYNC_UNIQUE))
-            val periodicEnabled = prefs.getBoolean(KEY_PERIODIC_ENABLED, false) &&
-                periodicInfos.any { it.state == WorkInfo.State.ENQUEUED || it.state == WorkInfo.State.RUNNING }
+            val periodicEnabled = prefs.getBoolean(KEY_PERIODIC_ENABLED, false)
             val workerRunning = (periodicInfos + syncInfos).any { it.state == WorkInfo.State.RUNNING }
             val configuredInterval = prefs.getInt(KEY_PERIODIC_INTERVAL_MINUTES, 15).takeIf { it >= 15 } ?: 15
             val nextAt = prefs.getLong(KEY_PERIODIC_NEXT_AT, 0L).takeIf { it > 0 }
@@ -475,6 +458,11 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
                 lastStage = prefs.getString(KEY_LAST_STAGE, ""),
                 lastStageAtMs = prefs.getLong(KEY_LAST_STAGE_AT, 0L).takeIf { it > 0 },
                 nextScheduledAtMs = nextAt,
+                periodicWorkState = stateName(periodicInfos),
+                oneOffWorkState = stateName(syncInfos),
+                lastFailureStage = prefs.getString(KEY_LAST_FAILURE_STAGE, ""),
+                lastFailureElapsedMs = prefs.getLong(KEY_LAST_FAILURE_ELAPSED_MS, 0L).takeIf { it > 0 },
+                lastFailureStep = prefs.getString(KEY_LAST_FAILURE_STEP, ""),
                 workerRunning = workerRunning,
                 intervalMinutes = configuredInterval.toLong(),
                 contractVersion = CONTRACT_VERSION.toLong(),
@@ -492,6 +480,258 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
                 },
                 java.util.concurrent.Executor { runnable -> runnable.run() },
             )
+        }
+    }
+}
+
+private object BackgroundEngineHolder {
+    private const val TAG = "CaleeSyncWorker"
+
+    enum class HolderState {
+        IDLE,
+        STARTING,
+        READY,
+        RUNNING,
+        UNHEALTHY,
+    }
+
+    enum class ReadyResult {
+        READY,
+        NOT_READY_TIMEOUT,
+        CANCELLED,
+    }
+
+    sealed class RunResult {
+        data class REPLY(val payload: BackgroundRunResult) : RunResult()
+        data object NO_REPLY_TIMEOUT : RunResult()
+        data class CHANNEL_ERROR(val message: String?) : RunResult()
+        data object CANCELLED : RunResult()
+    }
+
+    data class EngineHandle(
+        val generation: Long,
+    )
+
+    private val lock = Any()
+    private val holderScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    private var engine: FlutterEngine? = null
+    private var runnerApi: BackgroundSyncRunnerApi? = null
+    private var generation: Long = 0L
+    private var state: HolderState = HolderState.IDLE
+    private var dartReady: Boolean = false
+    private var activeRunToken: String? = null
+    private var readyDeferred: CompletableDeferred<ReadyResult>? = null
+    private var runDeferred: CompletableDeferred<RunResult>? = null
+
+    suspend fun startOrReuseOnMain(context: Context, runToken: String, trigger: String): EngineHandle = runOnMain {
+        requireMainThread("startOrReuseOnMain")
+        val shouldCreate = synchronized(lock) {
+            val unhealthy = state == HolderState.UNHEALTHY
+            state = if (engine != null && dartReady && !unhealthy) HolderState.READY else HolderState.STARTING
+            activeRunToken = runToken
+            readyDeferred = CompletableDeferred()
+            runDeferred = CompletableDeferred()
+            engine == null || unhealthy
+        }
+        if (shouldCreate) {
+            createEngineOnMain(context.applicationContext)
+        }
+
+        synchronized(lock) {
+            if (engine != null && dartReady) {
+                state = HolderState.READY
+                readyDeferred?.takeIf { !it.isCompleted }?.complete(ReadyResult.READY)
+            } else {
+                state = HolderState.STARTING
+            }
+            Log.i(TAG, "startOrReuseOnMain trigger=$trigger runToken=$runToken generation=$generation state=$state")
+            EngineHandle(generation = generation)
+        }
+    }
+
+    suspend fun awaitDartReadyOnWorker(runToken: String, timeoutMs: Long): ReadyResult {
+        requireNotMainThread("awaitDartReadyOnWorker")
+        val deferred = synchronized(lock) {
+            if (activeRunToken != runToken) {
+                return ReadyResult.NOT_READY_TIMEOUT
+            }
+            if (dartReady && engine != null && state != HolderState.UNHEALTHY) {
+                return ReadyResult.READY
+            }
+            readyDeferred ?: CompletableDeferred<ReadyResult>().also { readyDeferred = it }
+        }
+        return try {
+            withTimeout(timeoutMs) { deferred.await() }
+        } catch (_: TimeoutCancellationException) {
+            markUnhealthy("dart_ready_timeout:$runToken")
+            requestDestroyOnMain("dart_ready_timeout:$runToken")
+            ReadyResult.NOT_READY_TIMEOUT
+        } catch (_: kotlinx.coroutines.CancellationException) {
+            markUnhealthy("dart_ready_cancelled:$runToken")
+            requestDestroyOnMain("dart_ready_cancelled:$runToken")
+            ReadyResult.CANCELLED
+        }
+    }
+
+    suspend fun invokeRunOnMain(runToken: String, request: BackgroundRunRequest) = runOnMain {
+        requireMainThread("invokeRunOnMain")
+        val (api, runGen) = synchronized(lock) {
+            check(activeRunToken == runToken) { "invokeRunOnMain token mismatch expected=$activeRunToken actual=$runToken" }
+            check(state == HolderState.READY) { "invokeRunOnMain requires READY state, actual=$state" }
+            state = HolderState.RUNNING
+            Pair(runnerApi ?: error("Runner API unavailable"), generation)
+        }
+
+        api.runBackgroundSync(request) { response ->
+            holderScope.launch(Dispatchers.Main.immediate) {
+                val result = response.fold(
+                    onSuccess = { RunResult.REPLY(it) },
+                    onFailure = { RunResult.CHANNEL_ERROR(it.message) },
+                )
+                onRunReply(runToken = runToken, callbackGeneration = runGen, result = result)
+            }
+        }
+    }
+
+    suspend fun awaitRunReplyOnWorker(runToken: String, timeoutMs: Long): RunResult {
+        requireNotMainThread("awaitRunReplyOnWorker")
+        val deferred = synchronized(lock) {
+            if (activeRunToken != runToken) {
+                return RunResult.NO_REPLY_TIMEOUT
+            }
+            runDeferred ?: CompletableDeferred<RunResult>().also { runDeferred = it }
+        }
+        return try {
+            withTimeout(timeoutMs) { deferred.await() }
+        } catch (_: TimeoutCancellationException) {
+            markUnhealthy("run_reply_timeout:$runToken")
+            requestDestroyOnMain("run_reply_timeout:$runToken")
+            RunResult.NO_REPLY_TIMEOUT
+        } catch (_: kotlinx.coroutines.CancellationException) {
+            markUnhealthy("run_reply_cancelled:$runToken")
+            requestDestroyOnMain("run_reply_cancelled:$runToken")
+            RunResult.CANCELLED
+        }
+    }
+
+    suspend fun destroyOnMain(reason: String) = runOnMain {
+        requireMainThread("destroyOnMain")
+        val engineToDestroy = synchronized(lock) {
+            val toDestroy = engine
+            engine = null
+            runnerApi = null
+            state = HolderState.IDLE
+            dartReady = false
+            activeRunToken = null
+            readyDeferred?.takeIf { !it.isCompleted }?.complete(ReadyResult.NOT_READY_TIMEOUT)
+            runDeferred?.takeIf { !it.isCompleted }?.complete(RunResult.NO_REPLY_TIMEOUT)
+            readyDeferred = null
+            runDeferred = null
+            toDestroy
+        }
+        if (engineToDestroy != null) {
+            Log.w(TAG, "Destroying engine generation=$generation reason=$reason")
+            runCatching { engineToDestroy.destroy() }
+                .onFailure { Log.w(TAG, "engine destroy failed reason=$reason", it) }
+        }
+    }
+
+    fun markUnhealthy(reason: String) {
+        synchronized(lock) {
+            state = HolderState.UNHEALTHY
+            dartReady = false
+            activeRunToken = null
+            readyDeferred?.takeIf { !it.isCompleted }?.complete(ReadyResult.NOT_READY_TIMEOUT)
+            runDeferred?.takeIf { !it.isCompleted }?.complete(RunResult.NO_REPLY_TIMEOUT)
+        }
+        Log.w(TAG, "Engine marked unhealthy reason=$reason generation=$generation")
+    }
+
+    suspend fun markUnhealthyAndDestroyOnMain(reason: String) {
+        markUnhealthy(reason)
+        destroyOnMain(reason)
+    }
+
+    private fun requestDestroyOnMain(reason: String) {
+        holderScope.launch(Dispatchers.Main.immediate) {
+            destroyOnMain(reason)
+        }
+    }
+
+    private fun createEngineOnMain(context: Context) {
+        requireMainThread("createEngineOnMain")
+        val loader = FlutterInjector.instance().flutterLoader()
+        loader.startInitialization(context)
+        loader.ensureInitializationComplete(context, null)
+
+        val nextEngine = FlutterEngine(context)
+        NativeCalendarApi.setUp(nextEngine.dartExecutor.binaryMessenger, CalendarHostApiImpl(context))
+
+        val engineGen = synchronized(lock) {
+            generation += 1
+            engine = nextEngine
+            runnerApi = BackgroundSyncRunnerApi(nextEngine.dartExecutor.binaryMessenger)
+            dartReady = false
+            state = HolderState.STARTING
+            generation
+        }
+
+        BackgroundSyncRunnerHostApi.setUp(
+            nextEngine.dartExecutor.binaryMessenger,
+            object : BackgroundSyncRunnerHostApi {
+                override fun notifyBackgroundIsolateReady(contractVersion: Long, callback: (Result<Unit>) -> Unit) {
+                    holderScope.launch(Dispatchers.Main.immediate) {
+                        onDartReady(engineGen)
+                        callback(Result.success(Unit))
+                    }
+                }
+            },
+        )
+
+        nextEngine.dartExecutor.executeDartEntrypoint(
+            DartExecutor.DartEntrypoint(loader.findAppBundlePath(), "caleeSyncBackgroundEntrypoint"),
+        )
+    }
+
+    private fun onDartReady(callbackGeneration: Long) {
+        requireMainThread("onDartReady")
+        synchronized(lock) {
+            if (callbackGeneration != generation) {
+                Log.w(TAG, "Ignoring stale ready callback callbackGen=$callbackGeneration generation=$generation")
+                return
+            }
+            dartReady = true
+            state = HolderState.READY
+            readyDeferred?.takeIf { !it.isCompleted }?.complete(ReadyResult.READY)
+        }
+    }
+
+    private fun onRunReply(runToken: String, callbackGeneration: Long, result: RunResult) {
+        requireMainThread("onRunReply")
+        synchronized(lock) {
+            if (runToken != activeRunToken || callbackGeneration != generation) {
+                Log.w(TAG, "Ignoring stale run reply token=$runToken active=$activeRunToken callbackGen=$callbackGeneration generation=$generation")
+                return
+            }
+            state = HolderState.READY
+            runDeferred?.takeIf { !it.isCompleted }?.complete(result)
+        }
+    }
+
+    private suspend fun <T> runOnMain(block: () -> T): T {
+        return withContext(Dispatchers.Main.immediate) { block() }
+    }
+
+    private fun requireMainThread(operation: String) {
+        check(Looper.myLooper() == Looper.getMainLooper()) {
+            "$operation must run on the main thread"
+        }
+    }
+
+    private fun requireNotMainThread(operation: String) {
+        check(Looper.myLooper() != Looper.getMainLooper()) {
+            "$operation must never run on main thread"
         }
     }
 }

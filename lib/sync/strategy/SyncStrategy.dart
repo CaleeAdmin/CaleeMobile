@@ -294,7 +294,7 @@ abstract class SyncStrategy {
     final String localCalendarId = ctx.localCalendarId;
     final int remoteCollectionId = ctx.remoteCollectionId;
     final int bindingId = (ctx.extra['binding_id'] as int?) ?? 0;
-    final int origin = (ctx.extra['binding_origin'] as int?) ?? SyncBindingOrigin.remote;
+    final int origin = (ctx.extra['origin_kind'] as int?) ?? SyncBindingOrigin.remote;
 
     final snapshot = await remoteGateway.fetchUnifiedEventsSnapshot(
       calendarPath: ctx.remotePath,
@@ -903,7 +903,7 @@ class UnifiedModeRules {
           onLocalOnlyMapped: SyncItemAction.deleteLocal,
           onLocalOnlyUnmapped: SyncItemAction.skip,
           onRemoteChanged: SyncItemAction.updateLocal,
-          onLocalChanged: SyncItemAction.skip,
+          onLocalChanged: SyncItemAction.updateLocal,
           onConflictLocalWins: SyncItemAction.updateLocal,
           onConflictRemoteWins: SyncItemAction.updateLocal,
         );

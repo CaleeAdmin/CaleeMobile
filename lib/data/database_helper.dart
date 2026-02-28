@@ -32,7 +32,6 @@ class DatabaseHelper {
     );
   }
 
-
   Future _createDB(Database db, int version) async {
     // 1. 远端集合注册表（按账号+类型+路径唯一）
     await db.execute('''
@@ -45,9 +44,10 @@ class DatabaseHelper {
         color TEXT, /* 集合颜色（十六进制或平台定义值） */
         synced_ctag TEXT, /* 最近一次同步时记录的 ctag */
         sync_mode INTEGER DEFAULT 0, /* 同步模式（0 只读，1 双向） */
-        is_enabled INTEGER DEFAULT 0, /* 是否启用同步（0 否 / 1 是） */
         is_subscription INTEGER DEFAULT 0, /* 是否为订阅型集合（0 否 / 1 是） */
-        subscription_url TEXT /* 订阅地址（仅订阅集合使用） */
+        subscription_url TEXT, /* 订阅地址（仅订阅集合使用） */
+        origin_kind INTEGER DEFAULT 1, /* 远端来源（0 本地，1 远端；默认 1） */
+        origin_key TEXT /* 远端来源稳定标识 */
       )
     ''');
 
@@ -56,19 +56,12 @@ class DatabaseHelper {
       ON remote_collections(account_name, collection_type, remote_path)
     ''');
 
-    await db.execute('''
-      CREATE INDEX IF NOT EXISTS idx_rc_account_type_enabled
-      ON remote_collections(account_name, collection_type, is_enabled)
-    ''');
-
     // 2. 远端集合与本地集合绑定关系
     await db.execute('''
       CREATE TABLE IF NOT EXISTS local_bindings (
         id INTEGER PRIMARY KEY AUTOINCREMENT, /* 主键 */
         remote_collection_id INTEGER NOT NULL, /* 关联 remote_collections.id */
         local_collection_id TEXT NOT NULL, /* 本地侧集合 ID（平台返回的日历/任务列表 ID） */
-        sync_gate_reason TEXT, /* 系统门禁原因（NULL 表示可同步） */
-        binding_origin INTEGER DEFAULT 1, /* 绑定来源（0 本地发起，1 远端发起） */
         created_at INTEGER, /* 绑定创建时间（毫秒时间戳） */
         updated_at INTEGER, /* 绑定更新时间（毫秒时间戳） */
         FOREIGN KEY (remote_collection_id) REFERENCES remote_collections(id) ON DELETE CASCADE
@@ -83,6 +76,21 @@ class DatabaseHelper {
     await db.execute('''
       CREATE UNIQUE INDEX IF NOT EXISTS uq_lb_local
       ON local_bindings(local_collection_id)
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS collection_states (
+        remote_collection_id INTEGER PRIMARY KEY,
+        sync_gate_reason TEXT,
+        is_enabled INTEGER DEFAULT 0,
+        updated_at INTEGER,
+        FOREIGN KEY (remote_collection_id) REFERENCES remote_collections(id) ON DELETE CASCADE
+      )
+    ''');
+
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_cs_gate_reason
+      ON collection_states(sync_gate_reason)
     ''');
 
     // 3. 同步条目映射（事件/任务）
@@ -129,7 +137,9 @@ class DatabaseHelper {
       CREATE INDEX IF NOT EXISTS idx_si_coll_uid
       ON sync_items(remote_collection_id, remote_uid)
     ''');
+
   }
+
 
 
   // 物理删除数据库（调试用：调用后需重启 App）

@@ -47,6 +47,8 @@ struct PlatformCalendar {
   var name: String? = nil
   var accountName: String? = nil
   var accountType: String? = nil
+  var ownerAccount: String? = nil
+  var calSync1: String? = nil
   var color: String? = nil
   var isReadOnly: Bool? = nil
   var supportsEvents: Bool? = nil
@@ -60,18 +62,22 @@ struct PlatformCalendar {
     let name: String? = nilOrValue(__pigeon_list[1])
     let accountName: String? = nilOrValue(__pigeon_list[2])
     let accountType: String? = nilOrValue(__pigeon_list[3])
-    let color: String? = nilOrValue(__pigeon_list[4])
-    let isReadOnly: Bool? = nilOrValue(__pigeon_list[5])
-    let supportsEvents: Bool? = nilOrValue(__pigeon_list[6])
-    let supportsTasks: Bool? = nilOrValue(__pigeon_list[7])
-    let isSubscription: Bool? = nilOrValue(__pigeon_list[8])
-    let subscriptionUrl: String? = nilOrValue(__pigeon_list[9])
+    let ownerAccount: String? = nilOrValue(__pigeon_list[4])
+    let calSync1: String? = nilOrValue(__pigeon_list[5])
+    let color: String? = nilOrValue(__pigeon_list[6])
+    let isReadOnly: Bool? = nilOrValue(__pigeon_list[7])
+    let supportsEvents: Bool? = nilOrValue(__pigeon_list[8])
+    let supportsTasks: Bool? = nilOrValue(__pigeon_list[9])
+    let isSubscription: Bool? = nilOrValue(__pigeon_list[10])
+    let subscriptionUrl: String? = nilOrValue(__pigeon_list[11])
 
     return PlatformCalendar(
       id: id,
       name: name,
       accountName: accountName,
       accountType: accountType,
+      ownerAccount: ownerAccount,
+      calSync1: calSync1,
       color: color,
       isReadOnly: isReadOnly,
       supportsEvents: supportsEvents,
@@ -86,6 +92,8 @@ struct PlatformCalendar {
       name,
       accountName,
       accountType,
+      ownerAccount,
+      calSync1,
       color,
       isReadOnly,
       supportsEvents,
