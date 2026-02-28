@@ -646,7 +646,7 @@ private object BackgroundEngineHolder {
         }
     }
 
-    private suspend fun createEngineOnMain(context: Context) {
+    private fun createEngineOnMain(context: Context) {
         requireMainThread("createEngineOnMain")
         val loader = FlutterInjector.instance().flutterLoader()
         loader.startInitialization(context)
