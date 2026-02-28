@@ -846,7 +846,15 @@ class LocalCalendarPageController extends GetxController {
             Text('Relink "${item.name}" to "$remoteDisplayName"?'),
             const SizedBox(height: 12),
             Text('Verification confidence: ${verifyConfidenceScore.clamp(0, 100)}%'),
+            Text(
+              _verificationConfidenceExplanation(verifyConfidenceScore),
+              style: const TextStyle(color: Color(0xFF4B5563), fontSize: 12),
+            ),
             Text('Provider/name match confidence: ${providerHintScore.clamp(0, 100)}%'),
+            Text(
+              _providerHintConfidenceExplanation(providerHintScore),
+              style: const TextStyle(color: Color(0xFF4B5563), fontSize: 12),
+            ),
             const Text('Verification scope: recent 60 days of events'),
             Text('Account: ${item.accountName}'),
             Text('Remote path: $remotePath'),
@@ -890,6 +898,31 @@ class LocalCalendarPageController extends GetxController {
 
     final CalendarPageController dashboardController = Get.find<CalendarPageController>();
     await dashboardController.reloadCalendars();
+  }
+
+  String _verificationConfidenceExplanation(int confidenceScore) {
+    final int score = confidenceScore.clamp(0, 100);
+    if (score == 0) {
+      return '0% means there were no overlapping local/remote events to compare.';
+    }
+    if (score < 50) {
+      return 'Low score: only a small portion of event titles/times match.';
+    }
+    if (score < 90) {
+      return 'Medium score: some events match, but there are notable differences.';
+    }
+    return 'High score: most recent events match closely.';
+  }
+
+  String _providerHintConfidenceExplanation(int confidenceScore) {
+    final int score = confidenceScore.clamp(0, 100);
+    if (score < 40) {
+      return 'Weak hint: account/provider metadata is not very similar.';
+    }
+    if (score < 80) {
+      return 'Moderate hint: account/provider metadata is partially aligned.';
+    }
+    return 'Strong hint: account/provider metadata aligns well.';
   }
 }
 
