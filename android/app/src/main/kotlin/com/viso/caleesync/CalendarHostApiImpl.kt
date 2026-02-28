@@ -73,6 +73,8 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
             CalendarContract.Calendars.CALENDAR_DISPLAY_NAME,
             CalendarContract.Calendars.ACCOUNT_NAME, // 对应 accountName
             CalendarContract.Calendars.ACCOUNT_TYPE, // 对应 accountType
+            CalendarContract.Calendars.OWNER_ACCOUNT,
+            CalendarContract.Calendars.CAL_SYNC1,
             CalendarContract.Calendars.CALENDAR_COLOR,
             CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL,
             CalendarContract.Calendars.VISIBLE,
@@ -167,6 +169,8 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
                 val nameIndex = cursor.getColumnIndex(CalendarContract.Calendars.CALENDAR_DISPLAY_NAME)
                 val accountNameIndex = cursor.getColumnIndex(CalendarContract.Calendars.ACCOUNT_NAME)
                 val accountTypeIndex = cursor.getColumnIndex(CalendarContract.Calendars.ACCOUNT_TYPE)
+                val ownerAccountIndex = cursor.getColumnIndex(CalendarContract.Calendars.OWNER_ACCOUNT)
+                val calSync1Index = cursor.getColumnIndex(CalendarContract.Calendars.CAL_SYNC1)
                 val colorIndex = cursor.getColumnIndex(CalendarContract.Calendars.CALENDAR_COLOR)
                 val accessLevelIndex = cursor.getColumnIndex(CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL)
                 val locationIndex = cursor.getColumnIndex(CalendarContract.Calendars.CALENDAR_LOCATION)
@@ -185,6 +189,8 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
                         val name = if (nameIndex >= 0) cursor.getString(nameIndex) else null
                         val accountName = if (accountNameIndex >= 0) cursor.getString(accountNameIndex) else null
                         val accountType = if (accountTypeIndex >= 0) cursor.getString(accountTypeIndex) else null
+                        val ownerAccount = if (ownerAccountIndex >= 0) cursor.getString(ownerAccountIndex) else null
+                        val calSync1 = if (calSync1Index >= 0) cursor.getString(calSync1Index) else null
 
                         // 处理颜色：Android 日历颜色是 ARGB 格式（0xAARRGGBB）
                         // Flutter 端期望 #RRGGBB 格式（会自动加上 0xFF alpha）
@@ -225,6 +231,8 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
                                 name = name,
                                 accountName = accountName,
                                 accountType = accountType,
+                                ownerAccount = ownerAccount,
+                                calSync1 = calSync1,
                                 color = colorHex,
                                 isReadOnly = isReadOnly,
                                 supportsEvents = true,

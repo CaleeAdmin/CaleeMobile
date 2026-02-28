@@ -16,6 +16,8 @@ class PlatformCalendar {
   String? name;            // 名称
   String? accountName;     // Account name (e.g. "test@gmail.com" or "iCloud")
   String? accountType;     // Account type (e.g. "com.google" or "com.apple.account.icloud")
+  String? ownerAccount;    // Native owner account identity
+  String? calSync1;        // Native sync key candidate
   String? color;           // ARGB 格式颜色: 0xAARRGGBB
   bool? isReadOnly;        // 是否只读（如节假日日历）
   bool? supportsEvents;    // 是否支持活动 (VEVENT)
