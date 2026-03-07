@@ -1,4 +1,4 @@
-package com.viso.caleesync
+package com.calee.caleesync
 
 import android.util.Log
 import io.flutter.embedding.android.FlutterActivity

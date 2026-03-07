@@ -1,4 +1,4 @@
-package com.viso.caleesync
+package com.calee.caleesync
 
 import android.content.BroadcastReceiver
 import android.content.Context

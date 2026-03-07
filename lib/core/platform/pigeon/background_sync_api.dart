@@ -3,9 +3,9 @@ import 'package:pigeon/pigeon.dart';
 @ConfigurePigeon(PigeonOptions(
   dartOut: 'lib/core/platform/pigeon/background_sync_api.g.dart',
   dartOptions: DartOptions(),
-  kotlinOut: 'android/app/src/main/kotlin/com/viso/caleesync/BackgroundSyncApi.g.kt',
+  kotlinOut: 'android/app/src/main/kotlin/com/calee/caleesync/BackgroundSyncApi.g.kt',
   kotlinOptions: KotlinOptions(
-    package: 'com.viso.caleesync',
+    package: 'com.calee.caleesync',
   ),
   swiftOut: 'ios/Runner/BackgroundSyncApi.g.swift',
   swiftOptions: SwiftOptions(),

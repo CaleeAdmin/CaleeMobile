@@ -23,9 +23,9 @@ class CaleeSyncPeriodicWorker {
     static let KEY_LAST_FAILURE_ELAPSED_MS = "last_failure_elapsed_ms"
     static let KEY_LAST_FAILURE_STEP = "last_failure_step"
     
-    static let PERIODIC_TASK_IDENTIFIER = "com.viso.caleesync.periodic"
-    static let SYNC_TASK_IDENTIFIER = "com.viso.caleesync.sync"
-    static let WATCHDOG_TASK_IDENTIFIER = "com.viso.caleesync.watchdog"
+    static let PERIODIC_TASK_IDENTIFIER = "com.calee.caleesync.periodic"
+    static let SYNC_TASK_IDENTIFIER = "com.calee.caleesync.sync"
+    static let WATCHDOG_TASK_IDENTIFIER = "com.calee.caleesync.watchdog"
     
     static let CONTRACT_VERSION: Int64 = 1
     static let DART_READY_TIMEOUT_MS: TimeInterval = 15.0
