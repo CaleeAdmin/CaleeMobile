@@ -44,27 +44,37 @@ import BackgroundTasks
       }
     }
     
-    // Setup BackgroundSyncControlApi when Flutter engine is ready
+    // Setup Pigeon APIs when Flutter engine is ready
     // This will be called after the Flutter view controller is created
     DispatchQueue.main.async {
-      self.setupBackgroundSyncApi()
+      self.setupPigeonApis()
     }
     
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
   
-  private func setupBackgroundSyncApi() {
+  private func setupPigeonApis() {
     guard let controller = window?.rootViewController as? FlutterViewController else {
       // Retry after a short delay if controller is not ready
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-        self.setupBackgroundSyncApi()
+        self.setupPigeonApis()
       }
       return
     }
     
+    let binaryMessenger = controller.engine.binaryMessenger
+    
+    // Setup Calendar API
+    let calendarApi = CalendarHostApiImpl()
+    NativeCalendarApiSetup.setUp(
+      binaryMessenger: binaryMessenger,
+      api: calendarApi
+    )
+    
+    // Setup BackgroundSyncControlApi
     let backgroundSyncApi = BackgroundSyncControlApiImpl()
     BackgroundSyncControlApiSetup.setUp(
-      binaryMessenger: controller.engine.binaryMessenger,
+      binaryMessenger: binaryMessenger,
       api: backgroundSyncApi
     )
   }

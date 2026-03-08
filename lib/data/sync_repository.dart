@@ -91,29 +91,38 @@ class SyncRepository {
   // 1. 日历扫描
   // ==========================================
   Future<void> scanLocalCalendars(String accountId) async {
-    // remote_collections 现在作为“远端中心”注册表使用：
+    // remote_collections 现在作为"远端中心"注册表使用：
     // 本地扫描仅用于触发原生侧读取, 不再向 remote_collections 写入任何本地日历。
-    final List<PlatformCalendar?> calendars = await _nativeApi.getCalendars();
-
-    // 扫描本地日历, 保持 remote-origin 绑定记录的更新时间。
-    final db = await _dbHelper.database;
-    await db.transaction((txn) async {
-      for (final PlatformCalendar calendar in calendars.whereType<PlatformCalendar>()) {
-        final String localId = calendar.id ?? '';
-        if (localId.isEmpty) {
-          continue;
-        }
-
-        await txn.update(
-          'local_bindings',
-          {
-            'updated_at': DateTime.now().millisecondsSinceEpoch,
-          },
-          where: 'local_collection_id = ?',
-          whereArgs: [localId],
-        );
+    try {
+      final bool hasPermission = await _nativeApi.requestPermission(false);
+      if (!hasPermission) {
+        debugPrint('[WARN] Calendar permission not granted, skipping local calendar scan');
+        return;
       }
-    });
+      final List<PlatformCalendar?> calendars = await _nativeApi.getCalendars();
+
+      // 扫描本地日历, 保持 remote-origin 绑定记录的更新时间。
+      final db = await _dbHelper.database;
+      await db.transaction((txn) async {
+        for (final PlatformCalendar calendar in calendars.whereType<PlatformCalendar>()) {
+          final String localId = calendar.id ?? '';
+          if (localId.isEmpty) {
+            continue;
+          }
+
+          await txn.update(
+            'local_bindings',
+            {
+              'updated_at': DateTime.now().millisecondsSinceEpoch,
+            },
+            where: 'local_collection_id = ?',
+            whereArgs: [localId],
+          );
+        }
+      });
+    } catch (e) {
+      debugPrint('[WARN] Failed to scan local calendars: $e');
+    }
   }
 
 
@@ -363,6 +372,10 @@ class SyncRepository {
     }
 
     try {
+      final bool hasPermission = await _nativeApi.requestPermission(false);
+      if (!hasPermission) {
+        return false;
+      }
       final List<PlatformCalendar?> calendars = await _nativeApi.getCalendars();
       PlatformCalendar? target;
       for (final PlatformCalendar? calendar in calendars) {
@@ -582,11 +595,33 @@ class SyncRepository {
       final int existingOriginKind = (remote['origin_kind'] as int?) ?? SyncBindingOrigin.remote;
       bindingOriginForEnableAttempt = existingOriginKind;
 
-      final Set<String> nativeCalendarIds = (await _nativeApi.getCalendars())
-          .whereType<PlatformCalendar>()
-          .map((calendar) => calendar.id ?? '')
-          .where((id) => id.isNotEmpty)
-          .toSet();
+      // Request permission before accessing calendars
+      final bool hasPermission = await _nativeApi.requestPermission(false);
+      if (!hasPermission) {
+        _lastConnectError = 'Calendar access permission is required. Please grant calendar permission in settings.';
+        return EnableCalendarResult.failure(remotePath: persistedRemotePath);
+      }
+
+      // Get calendars with permission error handling
+      Set<String> nativeCalendarIds;
+      try {
+        nativeCalendarIds = (await _nativeApi.getCalendars())
+            .whereType<PlatformCalendar>()
+            .map((calendar) => calendar.id ?? '')
+            .where((id) => id.isNotEmpty)
+            .toSet();
+      } on PlatformException catch (e) {
+        final String msg = '${e.code} ${e.message ?? ''}'.toLowerCase();
+        if (msg.contains('permission') || e.code == 'PERMISSION_DENIED') {
+          _lastConnectError = 'Calendar permission missing. Grant permission in system settings and retry.';
+          return EnableCalendarResult.failure(remotePath: persistedRemotePath);
+        }
+        rethrow;
+      } catch (e) {
+        debugPrint('[ERROR] Failed to get calendars: $e');
+        _lastConnectError = 'Failed to access system calendars. Please check permissions and try again.';
+        return EnableCalendarResult.failure(remotePath: persistedRemotePath);
+      }
 
       if (existingLocalId.isNotEmpty && nativeCalendarIds.contains(existingLocalId)) {
         final int now = DateTime.now().millisecondsSinceEpoch;
@@ -759,15 +794,24 @@ class SyncRepository {
     final String localId = row['local_collection_id']?.toString() ?? '';
     if (localId.isEmpty) return 'Bind to a local calendar to sync';
 
-    final Set<String> nativeCalendarIds = (await _nativeApi.getCalendars())
-        .whereType<PlatformCalendar>()
-        .map((calendar) => calendar.id ?? '')
-        .where((id) => id.isNotEmpty)
-        .toSet();
-    if (!nativeCalendarIds.contains(localId)) {
-      return 'Local calendar not found';
+    try {
+      final bool hasPermission = await _nativeApi.requestPermission(false);
+      if (!hasPermission) {
+        return 'Calendar permission required';
+      }
+      final Set<String> nativeCalendarIds = (await _nativeApi.getCalendars())
+          .whereType<PlatformCalendar>()
+          .map((calendar) => calendar.id ?? '')
+          .where((id) => id.isNotEmpty)
+          .toSet();
+      if (!nativeCalendarIds.contains(localId)) {
+        return 'Local calendar not found';
+      }
+      return 'Remote path mismatch';
+    } catch (e) {
+      debugPrint('[WARN] Failed to check calendar eligibility: $e');
+      return 'Calendar permission required';
     }
-    return 'Remote path mismatch';
   }
 
   /// 创建一个新的远端日历草稿（默认禁用）。
