@@ -3,9 +3,9 @@ import 'package:pigeon/pigeon.dart'; // 必须是这个路径
 @ConfigurePigeon(PigeonOptions(
   dartOut: 'lib/core/platform/pigeon/calendar_api.g.dart',
   dartOptions: DartOptions(),
-  kotlinOut: 'android/app/src/main/kotlin/com/viso/caleesync/CalendarApi.g.kt',
+  kotlinOut: 'android/app/src/main/kotlin/com/calee/caleesync/CalendarApi.g.kt',
   kotlinOptions: KotlinOptions(
-    package: 'com.viso.caleesync',
+    package: 'com.calee.caleesync',
   ),
   swiftOut: 'ios/Runner/CalendarApi.g.swift',
   swiftOptions: SwiftOptions(),

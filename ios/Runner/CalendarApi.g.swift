@@ -280,6 +280,8 @@ protocol NativeCalendarApi {
   /// 根据 ID 删除本地事件（用于同步云端的删除操作）
   func deleteEvent(eventId: String) throws -> Bool
   func modifyCalendarTitle(calendarId: String, newTitle: String, accountName: String, accountType: String, completion: @escaping (Result<Bool, Error>) -> Void)
+  func setCalendarEnabled(calendarId: String, accountName: String, enabled: Bool, completion: @escaping (Result<Bool, Error>) -> Void)
+  func isCalendarAccountSyncEnabled(accountName: String, completion: @escaping (Result<Bool, Error>) -> Void)
 }
 
 /// Generated setup class from Pigeon to handle messages through the `binaryMessenger`.
@@ -471,6 +473,42 @@ class NativeCalendarApiSetup {
       }
     } else {
       modifyCalendarTitleChannel.setMessageHandler(nil)
+    }
+    let setCalendarEnabledChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.caleesync.NativeCalendarApi.setCalendarEnabled\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      setCalendarEnabledChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let calendarIdArg = args[0] as! String
+        let accountNameArg = args[1] as! String
+        let enabledArg = args[2] as! Bool
+        api.setCalendarEnabled(calendarId: calendarIdArg, accountName: accountNameArg, enabled: enabledArg) { result in
+          switch result {
+          case .success(let res):
+            reply(wrapResult(res))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      setCalendarEnabledChannel.setMessageHandler(nil)
+    }
+    let isCalendarAccountSyncEnabledChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.caleesync.NativeCalendarApi.isCalendarAccountSyncEnabled\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      isCalendarAccountSyncEnabledChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let accountNameArg = args[0] as! String
+        api.isCalendarAccountSyncEnabled(accountName: accountNameArg) { result in
+          switch result {
+          case .success(let res):
+            reply(wrapResult(res))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      isCalendarAccountSyncEnabledChannel.setMessageHandler(nil)
     }
   }
 }

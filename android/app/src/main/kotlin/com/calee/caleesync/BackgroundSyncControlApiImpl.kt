@@ -1,4 +1,4 @@
-package com.viso.caleesync
+package com.calee.caleesync
 
 import android.content.Context
 import kotlinx.coroutines.CoroutineScope

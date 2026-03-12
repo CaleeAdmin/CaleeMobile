@@ -4,6 +4,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:caleesync/common/widget/calendar_options_dialog.dart';
 import 'package:caleesync/feature/local_calendars_page.dart';
 import 'package:caleesync/feature/public_subscriptions_page.dart';
+import 'package:caleesync/core/platform/pigeon/calendar_api.g.dart';
 
 import '../controllers/CalendarPageController.dart';
 import '../sync/sync_gate_reason.dart';
@@ -38,10 +39,13 @@ class _CalendarPageState extends State<CalendarPage> {
         status = await calendarPermission.request();
       }
 
-      // try {
-      //   final nativeApi = NativeCalendarApi();
-      //   await nativeApi.requestPermission(false);
-      // } catch (_) {}
+      // Also request native calendar permission (required for iOS EventKit)
+      try {
+        final nativeApi = NativeCalendarApi();
+        await nativeApi.requestPermission(false);
+      } catch (e) {
+        print('[WARN] Failed to request native calendar permission: $e');
+      }
       await controller.refreshDashboard();
     } catch (e) {
       print('[WARN] Error while requesting calendar permission: $e');

@@ -15,6 +15,11 @@
 		97C146FC1CF9000F007C117D /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FA1CF9000F007C117D /* Main.storyboard */; };
 		97C146FE1CF9000F007C117D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FD1CF9000F007C117D /* Assets.xcassets */; };
 		97C147011CF9000F007C117D /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FF1CF9000F007C117D /* LaunchScreen.storyboard */; };
+		C0F9D0012B5C000100000001 /* CaleeSyncPeriodicWorker.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0F9CFFB2B5C000100000001 /* CaleeSyncPeriodicWorker.swift */; };
+		C0F9D0022B5C000100000001 /* BackgroundSyncControlApiImpl.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0F9CFFC2B5C000100000001 /* BackgroundSyncControlApiImpl.swift */; };
+		C0F9D0032B5C000100000001 /* BackgroundSyncApi.g.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0F9CFFD2B5C000100000001 /* BackgroundSyncApi.g.swift */; };
+		E795EF732F51F37000ADF6B5 /* CalendarApi.g.swift in Sources */ = {isa = PBXBuildFile; fileRef = E795EF722F51F37000ADF6B5 /* CalendarApi.g.swift */; };
+		E795EF752F51F64F00ADF6B5 /* CalendarHostApiImpl.swift in Sources */ = {isa = PBXBuildFile; fileRef = E795EF742F51F64F00ADF6B5 /* CalendarHostApiImpl.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -59,6 +64,11 @@
 		97C147001CF9000F007C117D /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		97C147021CF9000F007C117D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A13B7E57108FD5931F9C6980 /* Pods-Runner.profile.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.profile.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.profile.xcconfig"; sourceTree = "<group>"; };
+		C0F9CFFB2B5C000100000001 /* CaleeSyncPeriodicWorker.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CaleeSyncPeriodicWorker.swift; sourceTree = "<group>"; };
+		C0F9CFFC2B5C000100000001 /* BackgroundSyncControlApiImpl.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = BackgroundSyncControlApiImpl.swift; sourceTree = "<group>"; };
+		C0F9CFFD2B5C000100000001 /* BackgroundSyncApi.g.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = BackgroundSyncApi.g.swift; sourceTree = "<group>"; };
+		E795EF722F51F37000ADF6B5 /* CalendarApi.g.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarApi.g.swift; sourceTree = "<group>"; };
+		E795EF742F51F64F00ADF6B5 /* CalendarHostApiImpl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarHostApiImpl.swift; sourceTree = "<group>"; };
 		EC3159F06D8E6FECEE4CC961 /* Pods_Runner.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_Runner.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -142,6 +152,8 @@
 		97C146F01CF9000F007C117D /* Runner */ = {
 			isa = PBXGroup;
 			children = (
+				E795EF742F51F64F00ADF6B5 /* CalendarHostApiImpl.swift */,
+				E795EF722F51F37000ADF6B5 /* CalendarApi.g.swift */,
 				97C146FA1CF9000F007C117D /* Main.storyboard */,
 				97C146FD1CF9000F007C117D /* Assets.xcassets */,
 				97C146FF1CF9000F007C117D /* LaunchScreen.storyboard */,
@@ -150,6 +162,9 @@
 				1498D2331E8E89220040F4C2 /* GeneratedPluginRegistrant.m */,
 				74858FAE1ED2DC5600515810 /* AppDelegate.swift */,
 				74858FAD1ED2DC5600515810 /* Runner-Bridging-Header.h */,
+				C0F9CFFB2B5C000100000001 /* CaleeSyncPeriodicWorker.swift */,
+				C0F9CFFC2B5C000100000001 /* BackgroundSyncControlApiImpl.swift */,
+				C0F9CFFD2B5C000100000001 /* BackgroundSyncApi.g.swift */,
 			);
 			path = Runner;
 			sourceTree = "<group>";
@@ -362,7 +377,12 @@
 			buildActionMask = 2147483647;
 			files = (
 				74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */,
+				E795EF732F51F37000ADF6B5 /* CalendarApi.g.swift in Sources */,
+				C0F9D0012B5C000100000001 /* CaleeSyncPeriodicWorker.swift in Sources */,
+				C0F9D0022B5C000100000001 /* BackgroundSyncControlApiImpl.swift in Sources */,
+				C0F9D0032B5C000100000001 /* BackgroundSyncApi.g.swift in Sources */,
 				1498D2341E8E89220040F4C2 /* GeneratedPluginRegistrant.m in Sources */,
+				E795EF752F51F64F00ADF6B5 /* CalendarHostApiImpl.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -455,7 +475,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
-				DEVELOPMENT_TEAM = 963Z7GZ5F8;
+				DEVELOPMENT_TEAM = WQ3JPT4U3H;
 				ENABLE_BITCODE = NO;
 				INFOPLIST_FILE = Runner/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.6;
@@ -463,7 +483,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.viso.caleesync;
+				PRODUCT_BUNDLE_IDENTIFIER = com.calee.caleesync;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
@@ -639,7 +659,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
-				DEVELOPMENT_TEAM = 963Z7GZ5F8;
+				DEVELOPMENT_TEAM = WQ3JPT4U3H;
 				ENABLE_BITCODE = NO;
 				INFOPLIST_FILE = Runner/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.6;
@@ -647,7 +667,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.viso.caleesync;
+				PRODUCT_BUNDLE_IDENTIFIER = com.calee.caleesync;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
@@ -663,7 +683,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
-				DEVELOPMENT_TEAM = 963Z7GZ5F8;
+				DEVELOPMENT_TEAM = WQ3JPT4U3H;
 				ENABLE_BITCODE = NO;
 				INFOPLIST_FILE = Runner/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.6;
@@ -671,7 +691,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.viso.caleesync;
+				PRODUCT_BUNDLE_IDENTIFIER = com.calee.caleesync;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;

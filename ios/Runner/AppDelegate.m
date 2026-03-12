@@ -1,6 +1,7 @@
 #import "AppDelegate.h"
 #import "GeneratedPluginRegistrant.h"
-#import "CalendarHostApiImpl.h"
+// Expose Swift types (including CalendarHostApiImpl and NativeCalendarApiSetup) to Objective-C.
+#import "Runner-Swift.h"
 
 @implementation AppDelegate
 
@@ -9,7 +10,7 @@
   [GeneratedPluginRegistrant registerWithRegistry:self];
   // Override point for customization after application launch.
 
-  // Register our Calendar API
+  // Register our Calendar API implemented in Swift
   CalendarHostApiImpl *calendarApi = [[CalendarHostApiImpl alloc] init];
   [NativeCalendarApiSetup setUpWithBinaryMessenger:self.binaryMessenger api:calendarApi];
 
