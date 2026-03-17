@@ -1039,7 +1039,7 @@ class CaleeServerService {
         await setRemoteCalendarOriginMetadata(
           userId: userId,
           calendarPath: calendarPath,
-          origin: 'local',
+          origin: 'remote',
           originKey: originKey,
         );
         return calendarPath;
