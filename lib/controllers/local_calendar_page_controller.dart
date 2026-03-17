@@ -316,7 +316,7 @@ class LocalCalendarPageController extends GetxController {
     LocalCalendarItem item,
     List<Map<String, dynamic>> relinkCandidates,
   ) {
-    if (item.isConnected || relinkCandidates.isEmpty) {
+    if (relinkCandidates.isEmpty) {
       item.relinkConfidence = 0;
       item.canRelink = false;
       return Future<void>.value();
@@ -327,7 +327,7 @@ class LocalCalendarPageController extends GetxController {
       relinkCandidates: relinkCandidates,
     );
     item.relinkConfidence = relinkConfidence;
-    item.canRelink = relinkConfidence >= _highConfidenceRelinkThreshold;
+    item.canRelink = !item.isConnected && relinkConfidence >= _highConfidenceRelinkThreshold;
     return Future<void>.value();
   }
 
@@ -854,19 +854,19 @@ class LocalCalendarPageController extends GetxController {
             const SizedBox(height: 12),
             Text(
               verifyConfidenceScore == null
-                  ? 'Verification confidence: Unavailable'
-                  : 'Verification confidence: ${verifyConfidenceScore.clamp(0, 100)}%',
+                  ? 'Event verification confidence (recent window): Unavailable'
+                  : 'Event verification confidence (recent window): ${verifyConfidenceScore.clamp(0, 100)}%',
             ),
             Text(
               _verificationConfidenceExplanation(verifyConfidenceScore),
               style: const TextStyle(color: Color(0xFF4B5563), fontSize: 12),
             ),
-            Text('Collection match confidence: ${providerHintScore.clamp(0, 100)}%'),
+            Text('Collection/provider match confidence: ${providerHintScore.clamp(0, 100)}%'),
             Text(
               _providerHintConfidenceExplanation(providerHintScore),
               style: const TextStyle(color: Color(0xFF4B5563), fontSize: 12),
             ),
-            const Text('Verification scope: recent 60 days of events'),
+            const Text('Verification scope: bounded to the most recent 60 days of events'),
             Text('Account: ${item.accountName}'),
             Text('Remote path: $remotePath'),
             const SizedBox(height: 8),
@@ -916,7 +916,7 @@ class LocalCalendarPageController extends GetxController {
 
   String _verificationConfidenceExplanation(int? confidenceScore) {
     if (confidenceScore == null) {
-      return 'Unavailable: verification could not derive confidence from comparable event evidence.';
+      return 'Unavailable: verification could not derive confidence from comparable events in the recent 60-day window.';
     }
     final int score = confidenceScore.clamp(0, 100);
     if (score < 50) {
