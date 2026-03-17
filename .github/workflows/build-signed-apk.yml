@@ -7,9 +7,6 @@ jobs:
   build-signed-android:
     name: Generate signed release APK and AAB
     runs-on: ubuntu-latest
-    env:
-      BUILD_NAME: "0.0.5"
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -90,41 +87,20 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
 
-      - name: Derive build number from build name
+      - name: Resolve release version from pubspec
         id: build_meta
         shell: bash
         run: |
           set -euo pipefail
 
-          if [[ ! "$BUILD_NAME" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
-            echo "BUILD_NAME must start with X.Y.Z; got '$BUILD_NAME'" >&2
-            exit 1
-          fi
-
-          major="${BASH_REMATCH[1]}"
-          minor="${BASH_REMATCH[2]}"
-          patch="${BASH_REMATCH[3]}"
-
-          if (( minor >= 100 || patch >= 100 )); then
-            echo "Invalid BUILD_NAME '$BUILD_NAME': require minor < 100 and patch < 100" >&2
-            exit 1
-          fi
-
-          build_number=$(( major * 10000 + minor * 100 + patch ))
-
-          sanitized_build_name="$(echo "$BUILD_NAME" | sed -E 's/[^A-Za-z0-9._-]+/-/g; s/^-+//; s/-+$//')"
-          if [[ -z "$sanitized_build_name" ]]; then
-            echo "Sanitized build name is empty for BUILD_NAME '$BUILD_NAME'" >&2
-            exit 1
-          fi
-
-          echo "build_number=$build_number" >> "$GITHUB_OUTPUT"
-          echo "sanitized_build_name=$sanitized_build_name" >> "$GITHUB_OUTPUT"
+          while IFS='=' read -r key value; do
+            echo "$key=$value" >> "$GITHUB_OUTPUT"
+          done < <(scripts/derive_release_version.sh)
 
       - name: Build signed APK
         run: |
           flutter build apk --release \
-            --build-name="$BUILD_NAME" \
+            --build-name="${{ steps.build_meta.outputs.build_name }}" \
             --build-number="${{ steps.build_meta.outputs.build_number }}"
         env:
           ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/upload-keystore.jks
@@ -141,7 +117,7 @@ jobs:
       - name: Build signed Android App Bundle
         run: |
           flutter build appbundle --release \
-            --build-name="$BUILD_NAME" \
+            --build-name="${{ steps.build_meta.outputs.build_name }}" \
             --build-number="${{ steps.build_meta.outputs.build_number }}"
         env:
           ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/upload-keystore.jks

@@ -316,7 +316,7 @@ class LocalCalendarPageController extends GetxController {
     LocalCalendarItem item,
     List<Map<String, dynamic>> relinkCandidates,
   ) {
-    if (item.isConnected || relinkCandidates.isEmpty) {
+    if (relinkCandidates.isEmpty) {
       item.relinkConfidence = 0;
       item.canRelink = false;
       return Future<void>.value();
@@ -327,7 +327,7 @@ class LocalCalendarPageController extends GetxController {
       relinkCandidates: relinkCandidates,
     );
     item.relinkConfidence = relinkConfidence;
-    item.canRelink = relinkConfidence >= _highConfidenceRelinkThreshold;
+    item.canRelink = !item.isConnected && relinkConfidence >= _highConfidenceRelinkThreshold;
     return Future<void>.value();
   }
 
@@ -456,7 +456,8 @@ class LocalCalendarPageController extends GetxController {
                   ? (candidate['display_name'] ?? '').toString().trim()
                   : candidatePath;
 
-              final bool verificationUnavailable = verifyResult.isIndeterminate;
+              final bool verificationUnavailable =
+                  verifyResult.outcome == RelinkVerificationOutcome.unavailable;
               if (verificationUnavailable) {
                 debugPrint(
                   '[RelinkVerifier] verification_unavailable for candidate=${candidate['id']}; prompting user with warning',
@@ -467,10 +468,9 @@ class LocalCalendarPageController extends GetxController {
                 item,
                 remoteDisplayName: remoteDisplayName,
                 remotePath: candidatePath,
-                verifyConfidenceScore: verificationUnavailable ? 0 : verifyResult.confidenceScore,
+                verifyConfidenceScore: verifyResult.confidenceScore,
                 providerHintScore: ranked.providerHintScore,
-                verificationPassed: verificationUnavailable ? false : verifyResult.passed,
-                verificationUnavailable: verificationUnavailable,
+                verificationOutcome: verifyResult.outcome,
               );
 
               if (relinkDecision == _RelinkDecision.cancel) {
@@ -601,7 +601,7 @@ class LocalCalendarPageController extends GetxController {
               'account_name': accountName,
               'color': item.color,
               'sync_mode': 0,
-              'origin_kind': 0,
+              'origin_kind': item.isSubscription ? 1 : 0,
               'is_subscription': item.isSubscription ? 1 : 0,
               'subscription_url': item.subscriptionUrl,
               'remote_path': remotePath,
@@ -620,7 +620,7 @@ class LocalCalendarPageController extends GetxController {
               'display_name': item.name,
               'color': item.color,
               'sync_mode': 0,
-              'origin_kind': 0,
+              'origin_kind': item.isSubscription ? 1 : 0,
               'is_subscription': item.isSubscription ? 1 : 0,
               'subscription_url': item.subscriptionUrl,
               'remote_path': remotePath,
@@ -832,18 +832,19 @@ class LocalCalendarPageController extends GetxController {
     LocalCalendarItem item, {
     required String remoteDisplayName,
     required String remotePath,
-    required int verifyConfidenceScore,
+    required int? verifyConfidenceScore,
     required int providerHintScore,
-    required bool verificationPassed,
-    required bool verificationUnavailable,
+    required RelinkVerificationOutcome verificationOutcome,
   }) async {
     final bool allowRelinkAction = providerHintScore >= _highConfidenceRelinkThreshold;
     final _RelinkDecision? decision = await Get.dialog<_RelinkDecision>(
       AlertDialog(
         title: Text(
-          verificationUnavailable
-              ? 'Verification unavailable'
-              : (verificationPassed ? 'Confirm relink' : 'Possible mismatch'),
+          switch (verificationOutcome) {
+            RelinkVerificationOutcome.unavailable => 'Verification unavailable',
+            RelinkVerificationOutcome.passed => 'Confirm relink',
+            RelinkVerificationOutcome.failed => 'Possible mismatch',
+          },
         ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -851,26 +852,30 @@ class LocalCalendarPageController extends GetxController {
           children: [
             Text('Relink "${item.name}" to "$remoteDisplayName"?'),
             const SizedBox(height: 12),
-            Text('Verification confidence: ${verifyConfidenceScore.clamp(0, 100)}%'),
+            Text(
+              verifyConfidenceScore == null
+                  ? 'Event verification confidence (recent window): Unavailable'
+                  : 'Event verification confidence (recent window): ${verifyConfidenceScore.clamp(0, 100)}%',
+            ),
             Text(
               _verificationConfidenceExplanation(verifyConfidenceScore),
               style: const TextStyle(color: Color(0xFF4B5563), fontSize: 12),
             ),
-            Text('Collection match confidence: ${providerHintScore.clamp(0, 100)}%'),
+            Text('Collection/provider match confidence: ${providerHintScore.clamp(0, 100)}%'),
             Text(
               _providerHintConfidenceExplanation(providerHintScore),
               style: const TextStyle(color: Color(0xFF4B5563), fontSize: 12),
             ),
-            const Text('Verification scope: recent 60 days of events'),
+            const Text('Verification scope: bounded to the most recent 60 days of events'),
             Text('Account: ${item.accountName}'),
             Text('Remote path: $remotePath'),
             const SizedBox(height: 8),
             Text(
-              verificationUnavailable
+              verificationOutcome == RelinkVerificationOutcome.unavailable
                   ? (allowRelinkAction
                         ? 'Event-level verification was unavailable. This candidate still looks like a strong metadata match, so you can link anyway or create a new remote calendar.'
                         : 'Event-level verification was unavailable and collection match confidence is low, so creating a new remote calendar is recommended.')
-                  : verificationPassed
+                  : verificationOutcome == RelinkVerificationOutcome.passed
                       ? 'Confidence is a recommendation only. You can still create a new remote instead.'
                       : allowRelinkAction
                           ? 'Verification did not pass, but this candidate still matches strongly at collection level. You can link anyway or create a new remote calendar.'
@@ -891,7 +896,7 @@ class LocalCalendarPageController extends GetxController {
           if (allowRelinkAction)
             ElevatedButton(
               onPressed: () => Get.back<_RelinkDecision>(result: _RelinkDecision.linkCandidate),
-              child: Text(verificationPassed ? 'Link this remote' : 'Link anyway'),
+              child: Text(verificationOutcome == RelinkVerificationOutcome.passed ? 'Link this remote' : 'Link anyway'),
             ),
         ],
       ),
@@ -909,11 +914,11 @@ class LocalCalendarPageController extends GetxController {
     await dashboardController.reloadCalendars();
   }
 
-  String _verificationConfidenceExplanation(int confidenceScore) {
-    final int score = confidenceScore.clamp(0, 100);
-    if (score == 0) {
-      return '0% means there were no overlapping local/remote events to compare.';
+  String _verificationConfidenceExplanation(int? confidenceScore) {
+    if (confidenceScore == null) {
+      return 'Unavailable: verification could not derive confidence from comparable events in the recent 60-day window.';
     }
+    final int score = confidenceScore.clamp(0, 100);
     if (score < 50) {
       return 'Low score: only a small portion of event titles/times match.';
     }
