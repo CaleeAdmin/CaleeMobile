@@ -92,6 +92,19 @@ void main() {
   });
 
   group('SyncGateReason deterministic set', () {
+
+    test('treats relink-related gate reasons as non-linked state', () {
+      const Set<String> relinkReasons = {
+        SyncGateReason.relinkRequired,
+        SyncGateReason.relinkVerifying,
+        SyncGateReason.relinkMismatch,
+      };
+
+      expect(relinkReasons.contains(SyncGateReason.relinkRequired), isTrue);
+      expect(relinkReasons.contains(SyncGateReason.relinkVerifying), isTrue);
+      expect(relinkReasons.contains(SyncGateReason.relinkMismatch), isTrue);
+      expect(relinkReasons.contains(''), isFalse);
+    });
     test('contains critical calendar-binding reasons', () {
       expect(SyncGateReason.deterministicReasons.contains(SyncGateReason.bindingInvalid), isTrue);
       expect(SyncGateReason.deterministicReasons.contains(SyncGateReason.localCalendarMissing), isTrue);

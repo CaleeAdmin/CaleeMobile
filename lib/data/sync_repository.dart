@@ -673,16 +673,54 @@ class SyncRepository {
       try {
         await db.transaction((txn) async {
           final int now = DateTime.now().millisecondsSinceEpoch;
-          await txn.insert(
+          final List<Map<String, dynamic>> existingByRemote = await txn.query(
             'local_bindings',
-            {
-              'remote_collection_id': remoteCollectionId,
-              'local_collection_id': normalizedLocalId,
-              'created_at': now,
-              'updated_at': now,
-            },
-            conflictAlgorithm: ConflictAlgorithm.replace,
+            columns: ['id', 'local_collection_id'],
+            where: 'remote_collection_id = ?',
+            whereArgs: [remoteCollectionId],
+            limit: 1,
           );
+          final List<Map<String, dynamic>> existingByLocal = await txn.query(
+            'local_bindings',
+            columns: ['id', 'remote_collection_id'],
+            where: 'local_collection_id = ?',
+            whereArgs: [normalizedLocalId],
+            limit: 1,
+          );
+
+          if (existingByRemote.isNotEmpty) {
+            final String boundLocalId = (existingByRemote.first['local_collection_id'] ?? '').toString();
+            if (boundLocalId != normalizedLocalId) {
+              throw StateError('Binding conflict: remote collection already bound to another local calendar');
+            }
+            await txn.update(
+              'local_bindings',
+              {'updated_at': now},
+              where: 'id = ?',
+              whereArgs: [existingByRemote.first['id']],
+            );
+          } else if (existingByLocal.isNotEmpty) {
+            final int boundRemoteId = existingByLocal.first['remote_collection_id'] as int;
+            if (boundRemoteId != remoteCollectionId) {
+              throw StateError('Binding conflict: local calendar already bound to another remote collection');
+            }
+            await txn.update(
+              'local_bindings',
+              {'updated_at': now},
+              where: 'id = ?',
+              whereArgs: [existingByLocal.first['id']],
+            );
+          } else {
+            await txn.insert(
+              'local_bindings',
+              {
+                'remote_collection_id': remoteCollectionId,
+                'local_collection_id': normalizedLocalId,
+                'created_at': now,
+                'updated_at': now,
+              },
+            );
+          }
 
           await txn.insert(
             'collection_states',
@@ -701,13 +739,15 @@ class SyncRepository {
             whereArgs: [remoteCollectionId],
           );
         });
-      } on DatabaseException catch (e) {
+      } catch (e) {
         final String msg = e.toString().toLowerCase();
-        if (msg.contains('database is locked') || msg.contains('locked')) {
+        if (msg.contains('binding conflict')) {
+          _lastConnectError = 'This local/remote calendar is already bound. Unbind first and retry.';
+        } else if (e is DatabaseException && (msg.contains('database is locked') || msg.contains('locked'))) {
           _lastConnectError = 'Local database is busy. Please try again later.';
-        } else if (msg.contains('full') || msg.contains('disk i/o')) {
+        } else if (e is DatabaseException && (msg.contains('full') || msg.contains('disk i/o'))) {
           _lastConnectError = 'Insufficient storage. Please free space and try again.';
-        } else if (msg.contains('unique constraint') || msg.contains('uq_lb_local')) {
+        } else if (e is DatabaseException && (msg.contains('unique constraint') || msg.contains('uq_lb_local'))) {
           _lastConnectError = 'This local calendar is already bound to another remote calendar. Unbind first and retry.';
         } else {
           _lastConnectError = 'Failed to save local binding. Please try again later.';

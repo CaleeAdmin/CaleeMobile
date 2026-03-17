@@ -158,6 +158,8 @@ class CaleeServerService {
 
     String? origin;
     String? originKey;
+    String? providerSyncId;
+    String? providerHints;
     for (final String line in normalizedDescription.split(RegExp(r'[\r\n]+'))) {
       final String normalized = line.trim();
       if (normalized.isEmpty) continue;
@@ -176,6 +178,10 @@ class CaleeServerService {
         }
       } else if (key == 'originkey' || key == 'origin_key') {
         originKey = value;
+      } else if (key == 'providersyncid' || key == 'provider_sync_id') {
+        providerSyncId = value;
+      } else if (key == 'providerhints' || key == 'provider_hints') {
+        providerHints = value;
       }
     }
 
@@ -185,7 +191,12 @@ class CaleeServerService {
     } else if (origin == 'remote') {
       originKind = 1;
     }
-    return {'origin_kind': originKind, 'origin_key': originKey};
+    return {
+      'origin_kind': originKind,
+      'origin_key': originKey,
+      'provider_sync_id': providerSyncId,
+      'provider_hints': providerHints,
+    };
   }
 
   String _classifyCollectionType(xml.XmlElement prop) {
@@ -594,6 +605,8 @@ class CaleeServerService {
     required String color, // 格式应为 #RRGGBB 或 #RRGGBBAA
     String origin = 'remote',
     String? originKey,
+    String? providerSyncId,
+    String? providerHints,
   }) async {
     final server = _activeServerBase;
     final password = MMKVUtils.instance.getString(AppConstant.appPasswordKey);
@@ -605,6 +618,8 @@ class CaleeServerService {
     final String encodedDescription = _buildOriginDescription(
       origin: origin,
       originKey: originKey,
+      providerSyncId: providerSyncId,
+      providerHints: providerHints,
     );
     final String safeCalendarName = const HtmlEscape(HtmlEscapeMode.element).convert(calendarName);
     final String safeColor = const HtmlEscape(HtmlEscapeMode.element).convert(color);
@@ -658,6 +673,8 @@ class CaleeServerService {
     required String calendarPath,
     required String origin,
     String? originKey,
+    String? providerSyncId,
+    String? providerHints,
   }) async {
     final String? password = MMKVUtils.instance.getString(AppConstant.appPasswordKey);
     if (password == null || password.isEmpty) {
@@ -665,7 +682,12 @@ class CaleeServerService {
     }
 
     final Uri uri = Uri.parse('$_activeServerBase$calendarPath');
-    final String encodedDescription = _buildOriginDescription(origin: origin, originKey: originKey);
+    final String encodedDescription = _buildOriginDescription(
+      origin: origin,
+      originKey: originKey,
+      providerSyncId: providerSyncId,
+      providerHints: providerHints,
+    );
     final String xmlBody = '''<?xml version="1.0" encoding="utf-8" ?>
 <d:propertyupdate xmlns:d="DAV:" xmlns:cal="urn:ietf:params:xml:ns:caldav" xmlns:oc="http://owncloud.org/ns">
   <d:set>
@@ -691,13 +713,26 @@ class CaleeServerService {
     }
   }
 
-  String _buildOriginDescription({required String origin, String? originKey}) {
+  String _buildOriginDescription({
+    required String origin,
+    String? originKey,
+    String? providerSyncId,
+    String? providerHints,
+  }) {
     final String safeOrigin = const HtmlEscape(HtmlEscapeMode.element)
         .convert(origin.trim().isEmpty ? 'remote' : origin.trim().toLowerCase());
     final List<String> rows = ['origin=$safeOrigin'];
     final String? key = originKey?.trim();
     if (key != null && key.isNotEmpty) {
       rows.add('originKey=${const HtmlEscape(HtmlEscapeMode.element).convert(key)}');
+    }
+    final String? normalizedSyncId = providerSyncId?.trim();
+    if (normalizedSyncId != null && normalizedSyncId.isNotEmpty) {
+      rows.add('providerSyncId=${const HtmlEscape(HtmlEscapeMode.element).convert(normalizedSyncId)}');
+    }
+    final String? normalizedHints = providerHints?.trim();
+    if (normalizedHints != null && normalizedHints.isNotEmpty) {
+      rows.add('providerHints=${const HtmlEscape(HtmlEscapeMode.element).convert(normalizedHints)}');
     }
     return rows.join('&#10;');
   }
@@ -989,6 +1024,8 @@ class CaleeServerService {
     required String calendarId, // 这里的 ID 建议用 sub_时间戳
     required String icsUrl,     // 外部公共 ICS 链接
     String? originKey,
+    String? providerSyncId,
+    String? providerHints,
   }) async {
     final server = _activeServerBase;
     final password = MMKVUtils.instance.getString(AppConstant.appPasswordKey);
@@ -1041,6 +1078,8 @@ class CaleeServerService {
           calendarPath: calendarPath,
           origin: 'remote',
           originKey: originKey,
+          providerSyncId: providerSyncId,
+          providerHints: providerHints,
         );
         return calendarPath;
       } else {

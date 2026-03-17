@@ -105,6 +105,27 @@ void main() {
       expect(result.passed, isTrue);
     });
 
+
+    test('returns unavailable when remote snapshot fetch fails', () async {
+      final verifier = RelinkVerifier(
+        fetchRemoteSnapshot: (_, __) async => const UnifiedEventsSnapshot(
+          events: <Map<String, dynamic>>[],
+          statusCode: 500,
+          fetchSucceeded: false,
+          parseProducedZeroEvents: false,
+        ),
+        fetchLocalEvents: (_, __, ___) async => <PlatformItem?>[],
+      );
+
+      final result = await verifier.verify(
+        remotePath: '/users/demo/calendar/',
+        localCalendarId: 'local-fetch-fail',
+      );
+
+      expect(result.outcome, RelinkVerificationOutcome.unavailable);
+      expect(result.passed, isFalse);
+      expect(result.confidenceScore, isNull);
+    });
     test('returns unavailable when local sample is empty even if remote has events', () async {
       final verifier = RelinkVerifier(
         fetchRemoteSnapshot: (_, __) async => UnifiedEventsSnapshot(

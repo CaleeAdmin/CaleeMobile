@@ -88,9 +88,17 @@ class LocalCalendarPageController extends GetxController {
       final List<Map<String, dynamic>> rows = await db.rawQuery('''
         SELECT lb.local_collection_id
         FROM local_bindings lb
+        INNER JOIN remote_collections rc ON rc.id = lb.remote_collection_id
+        LEFT JOIN collection_states cs ON cs.remote_collection_id = rc.id
         WHERE lb.local_collection_id IS NOT NULL
           AND lb.local_collection_id != ''
-      ''');
+          AND rc.collection_type = 'calendar'
+          AND (cs.sync_gate_reason IS NULL OR cs.sync_gate_reason NOT IN (?, ?, ?))
+      ''', [
+        SyncGateReason.relinkRequired,
+        SyncGateReason.relinkVerifying,
+        SyncGateReason.relinkMismatch,
+      ]);
       final Set<String> connectedLocalIds = {
         for (final row in rows) _normalizeLocalCollectionId(row['local_collection_id'])
       }..remove('');
@@ -353,10 +361,12 @@ class LocalCalendarPageController extends GetxController {
       String? remotePath;
       String? newRemoteOriginKey;
       final String localOriginKey = _buildLocalOriginKey(item);
+      int? existingBoundRemoteCollectionId;
+      int? acceptedRelinkRemoteCollectionId;
       bool relinkConfirmationDeclined = false;
       if (linkRequested) {
         final List<Map<String, dynamic>> existingRows = await db.rawQuery('''
-          SELECT rc.origin_key, rc.remote_path, cs.sync_gate_reason
+          SELECT rc.id, rc.origin_key, rc.remote_path, cs.sync_gate_reason
           FROM local_bindings lb
           INNER JOIN remote_collections rc ON rc.id = lb.remote_collection_id
           LEFT JOIN collection_states cs ON cs.remote_collection_id = rc.id
@@ -364,9 +374,9 @@ class LocalCalendarPageController extends GetxController {
           LIMIT 1
         ''', [item.id]);
 
-        final String existingOriginKey = existingRows.isNotEmpty
-            ? (existingRows.first['origin_key']?.toString() ?? '')
-            : '';
+        existingBoundRemoteCollectionId = existingRows.isNotEmpty
+            ? existingRows.first['id'] as int?
+            : null;
         final String existingRemotePath = existingRows.isNotEmpty
             ? (existingRows.first['remote_path']?.toString() ?? '')
             : '';
@@ -377,10 +387,7 @@ class LocalCalendarPageController extends GetxController {
             existingSyncGateReason == SyncGateReason.relinkRequired;
 
         final bool shouldBypassRelinkFlow =
-            existingOriginKey.isNotEmpty &&
-            existingOriginKey == localOriginKey &&
-            !item.canRelink &&
-            !existingBindingNeedsRelink;
+            existingBoundRemoteCollectionId != null && !item.canRelink && !existingBindingNeedsRelink;
 
         if (shouldBypassRelinkFlow) {
           remotePath = existingRemotePath;
@@ -407,10 +414,9 @@ class LocalCalendarPageController extends GetxController {
              AND lb.local_collection_id != ''
             WHERE rc.collection_type = 'calendar'
               AND rc.origin_kind = 0
-              AND rc.origin_key = ?
               AND cs.sync_gate_reason = ?
               AND lb.id IS NULL
-          ''', [localOriginKey, SyncGateReason.relinkRequired]);
+          ''', [SyncGateReason.relinkRequired]);
 
           final List<_RankedReuseCandidate> rankedCandidates = reuseCandidates
               .map((candidate) => _RankedReuseCandidate(
@@ -500,6 +506,7 @@ class LocalCalendarPageController extends GetxController {
                 break;
               }
               remotePath = candidatePath;
+              acceptedRelinkRemoteCollectionId = candidate['id'] as int?;
               await db.update(
                 'collection_states',
                 {
@@ -546,6 +553,8 @@ class LocalCalendarPageController extends GetxController {
                 calendarId: subscriptionCalendarId,
                 icsUrl: sourceUrl,
                 originKey: newRemoteOriginKey,
+                providerSyncId: item.calSync1,
+                providerHints: _buildProviderHints(item),
               );
             } else {
               newRemoteOriginKey = localOriginKey;
@@ -558,6 +567,8 @@ class LocalCalendarPageController extends GetxController {
                 color: item.color,
                 origin: 'local',
                 originKey: newRemoteOriginKey,
+                providerSyncId: item.calSync1,
+                providerHints: _buildProviderHints(item),
               );
             }
 
@@ -586,16 +597,8 @@ class LocalCalendarPageController extends GetxController {
         }
 
         await db.transaction((txn) async {
-          final List<Map<String, dynamic>> remoteRows = await txn.query(
-            'remote_collections',
-            columns: ['id'],
-            where: 'collection_type = ? AND origin_key = ?',
-            whereArgs: ['calendar', localOriginKey],
-            limit: 1,
-          );
-
-          if (remoteRows.isNotEmpty) {
-            remoteCollectionId = remoteRows.first['id'] as int;
+          if (existingBoundRemoteCollectionId != null) {
+            remoteCollectionId = existingBoundRemoteCollectionId;
             final Map<String, dynamic> remoteCollectionUpdates = {
               'display_name': item.name,
               'account_name': accountName,
@@ -610,6 +613,24 @@ class LocalCalendarPageController extends GetxController {
             await txn.update(
               'remote_collections',
               remoteCollectionUpdates,
+              where: 'id = ?',
+              whereArgs: [remoteCollectionId],
+            );
+          } else if (acceptedRelinkRemoteCollectionId != null) {
+            remoteCollectionId = acceptedRelinkRemoteCollectionId;
+            await txn.update(
+              'remote_collections',
+              {
+                'display_name': item.name,
+                'account_name': accountName,
+                'color': item.color,
+                'sync_mode': 0,
+                'origin_kind': item.isSubscription ? 1 : 0,
+                'is_subscription': item.isSubscription ? 1 : 0,
+                'subscription_url': item.subscriptionUrl,
+                'remote_path': remotePath,
+                'origin_key': localOriginKey,
+              },
               where: 'id = ?',
               whereArgs: [remoteCollectionId],
             );
@@ -643,23 +664,67 @@ class LocalCalendarPageController extends GetxController {
             'collection_states',
             {
               'sync_gate_reason': null,
-              'is_enabled': 0,
+              if (existingBoundRemoteCollectionId == null && acceptedRelinkRemoteCollectionId == null)
+                'is_enabled': 0,
               'updated_at': now,
             },
             where: 'remote_collection_id = ?',
             whereArgs: [remoteCollectionId],
           );
 
-          await txn.insert(
+          final List<Map<String, dynamic>> existingByRemote = await txn.query(
             'local_bindings',
-            {
-              'remote_collection_id': remoteCollectionId,
-              'local_collection_id': localCollectionId,
-              'created_at': now,
-              'updated_at': now,
-            },
-            conflictAlgorithm: ConflictAlgorithm.replace,
+            columns: ['id', 'local_collection_id'],
+            where: 'remote_collection_id = ?',
+            whereArgs: [remoteCollectionId],
+            limit: 1,
           );
+          final List<Map<String, dynamic>> existingByLocal = await txn.query(
+            'local_bindings',
+            columns: ['id', 'remote_collection_id'],
+            where: 'local_collection_id = ?',
+            whereArgs: [localCollectionId],
+            limit: 1,
+          );
+
+          if (existingByRemote.isNotEmpty) {
+            final int bindingId = existingByRemote.first['id'] as int;
+            final String oldLocalId = (existingByRemote.first['local_collection_id'] ?? '').toString();
+            final bool canRebind = acceptedRelinkRemoteCollectionId != null || oldLocalId == localCollectionId;
+            if (!canRebind) {
+              throw StateError('Binding conflict: remote collection already bound to another local calendar');
+            }
+            await txn.update(
+              'local_bindings',
+              {
+                'local_collection_id': localCollectionId,
+                'updated_at': now,
+              },
+              where: 'id = ?',
+              whereArgs: [bindingId],
+            );
+          } else if (existingByLocal.isNotEmpty) {
+            final int boundRemoteId = existingByLocal.first['remote_collection_id'] as int;
+            if (boundRemoteId != remoteCollectionId) {
+              throw StateError('Binding conflict: local calendar already bound to another remote collection');
+            }
+            await txn.update(
+              'local_bindings',
+              {'updated_at': now},
+              where: 'id = ?',
+              whereArgs: [existingByLocal.first['id']],
+            );
+          } else {
+            await txn.insert(
+              'local_bindings',
+              {
+                'remote_collection_id': remoteCollectionId,
+                'local_collection_id': localCollectionId,
+                'created_at': now,
+                'updated_at': now,
+              },
+            );
+          }
         });
       } else {
         await db.update(
@@ -783,14 +848,28 @@ class LocalCalendarPageController extends GetxController {
     final String calSync1 = _normalizeOriginKeyPart(item.calSync1);
     final String displayName = _normalizeOriginKeyPart(item.name);
 
-    if (ownerAccount.isNotEmpty) {
-      return '$accountType|$accountName|$ownerAccount';
-    }
-    if (calSync1.isNotEmpty) {
-      return '$accountType|$accountName|$calSync1';
-    }
-    return '$accountType|$accountName|$displayName';
+    return [
+      accountType,
+      accountName,
+      ownerAccount,
+      calSync1,
+      displayName,
+      item.isSubscription ? 'sub' : 'normal',
+      _normalizeOriginKeyPart(item.subscriptionUrl),
+    ].join('|');
   }
+
+  String _buildProviderHints(LocalCalendarItem item) {
+    return [
+      _normalizeOriginKeyPart(item.accountType),
+      _normalizeOriginKeyPart(item.accountName),
+      _normalizeOriginKeyPart(item.ownerAccount),
+      _normalizeOriginKeyPart(item.name),
+      item.isSubscription ? 'sub' : 'normal',
+      _normalizeOriginKeyPart(item.subscriptionUrl),
+    ].join('|');
+  }
+
 
   String _calendarFingerprint(LocalCalendarItem item) {
     return [
