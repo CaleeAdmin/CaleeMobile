@@ -1,4 +1,4 @@
-package com.viso.caleesync
+package com.calee.caleesync
 
 import android.Manifest
 import android.accounts.Account

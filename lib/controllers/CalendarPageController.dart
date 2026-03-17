@@ -5,6 +5,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart' show Text, TextButton;
 import 'package:get/get.dart';
 import 'dart:async';
+import 'dart:io';
 
 import '../services/calee_auth_service.dart';
 import '../sync/sync_completed_event_bus.dart';
@@ -166,6 +167,31 @@ class CalendarPageController extends GetxController {
         return;
       }
 
+      // Request permission before enabling calendar
+      try {
+        final bool hasPermission = await _nativeApi.requestPermission(false);
+        if (!hasPermission) {
+          Get.snackbar(
+            'Permission required',
+            'Calendar access permission is required. Please grant calendar permission in settings.',
+            duration: const Duration(seconds: 4),
+          );
+          item.isEnabled = false;
+          calendars.refresh();
+          return;
+        }
+      } catch (e) {
+        debugPrint('[WARN] Failed to request calendar permission: $e');
+        Get.snackbar(
+          'Permission error',
+          'Failed to request calendar permission. Please check settings.',
+          duration: const Duration(seconds: 4),
+        );
+        item.isEnabled = false;
+        calendars.refresh();
+        return;
+      }
+
       final EnableCalendarResult enableResult = await _repo.enableRemoteCalendarFromUserAction(remotePath);
       _applyEnableResultToCalendarItem(item, enableResult);
 
@@ -189,11 +215,14 @@ class CalendarPageController extends GetxController {
       } else if (syncMessage != null && syncMessage.isNotEmpty) {
         Get.snackbar('Sync failed', syncMessage);
       } else {
-        final String accountName = item.accountName;
-        if (accountName.isNotEmpty) {
-          final bool syncEnabled = await _nativeApi.isCalendarAccountSyncEnabled(accountName);
-          if (!syncEnabled) {
-            Get.snackbar('Sync disabled in system', 'Please enable CaleeSync account calendar sync in Android Settings.');
+        // Only check account sync status on Android
+        if (Platform.isAndroid) {
+          final String accountName = item.accountName;
+          if (accountName.isNotEmpty) {
+            final bool syncEnabled = await _nativeApi.isCalendarAccountSyncEnabled(accountName);
+            if (!syncEnabled) {
+              Get.snackbar('Sync disabled in system', 'Please enable CaleeSync account calendar sync in Android Settings.');
+            }
           }
         }
       }
@@ -410,11 +439,17 @@ class CalendarPageController extends GetxController {
       final List<CalendarDisplayItem> nextCloudCalendars = [];
 
       try {
-        final List<PlatformCalendar?> platformCalendars = await _nativeApi.getCalendars();
-        for (final PlatformCalendar calendar in platformCalendars.whereType<PlatformCalendar>()) {
-          final String id = calendar.id ?? '';
-          if (id.isEmpty) continue;
-          localReadOnlyById[id] = calendar.isReadOnly ?? false;
+        // Request permission before accessing calendars
+        final bool hasPermission = await _nativeApi.requestPermission(false);
+        if (!hasPermission) {
+          debugPrint('[WARN] Calendar permission not granted, skipping local calendar read-only status');
+        } else {
+          final List<PlatformCalendar?> platformCalendars = await _nativeApi.getCalendars();
+          for (final PlatformCalendar calendar in platformCalendars.whereType<PlatformCalendar>()) {
+            final String id = calendar.id ?? '';
+            if (id.isEmpty) continue;
+            localReadOnlyById[id] = calendar.isReadOnly ?? false;
+          }
         }
       } catch (e) {
         debugPrint('[WARN] Failed to read local calendar read-only status: $e');

@@ -1,4 +1,4 @@
-package com.viso.caleesync.service
+package com.calee.caleesync.service
 
 import android.app.Service
 import android.content.AbstractThreadedSyncAdapter

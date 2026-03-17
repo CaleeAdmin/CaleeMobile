@@ -1,6 +1,6 @@
 import 'package:caleesync/core/platform/pigeon/background_sync_api.g.dart';
 import 'package:caleesync/sync/background_sync_scheduler.dart';
-import 'package:caleesync/sync/background_sync_worker_bridge.dart';
+import 'package:caleesync/sync/background_sync_worker_bridge.dart' hide kBackgroundSyncContractVersion;
 import 'package:caleesync/sync/sync_completed_event_bus.dart';
 import 'package:flutter_test/flutter_test.dart';
 

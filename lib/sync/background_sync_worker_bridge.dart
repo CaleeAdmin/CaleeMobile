@@ -11,6 +11,11 @@ import 'package:flutter/widgets.dart';
 import 'SyncEngine.dart';
 import '../entity/sync_run_record.dart';
 
+/// 与 iOS `CaleeSyncPeriodicWorker.CONTRACT_VERSION` 保持一致的协议版本号。
+/// 如果修改了 Pigeon 定义或 Background Sync 的数据结构，需要同时更新
+/// Dart 和 iOS 里的版本号。
+const int kBackgroundSyncContractVersion = 1;
+
 class BackgroundSyncWorkerBridge implements BackgroundSyncRunnerApi {
   static Future<void>? _initFuture;
   static final BackgroundSyncRunnerHostApi _runnerHostApi = BackgroundSyncRunnerHostApi();

@@ -1,4 +1,4 @@
-package com.viso.caleesync
+package com.calee.caleesync
 
 import android.app.AlarmManager
 import android.app.PendingIntent
@@ -209,7 +209,7 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
         const val SYNC_UNIQUE = "CaleeSyncSyncWorker"
         private const val WATCHDOG_INTERVAL_MINUTES = 20L
         private const val WATCHDOG_REQUEST_CODE = 90241
-        const val ACTION_WATCHDOG = "com.viso.caleesync.ACTION_BACKGROUND_SYNC_WATCHDOG"
+        const val ACTION_WATCHDOG = "com.calee.caleesync.ACTION_BACKGROUND_SYNC_WATCHDOG"
         private val runLeaseLock = Any()
         private val runIdCounter = AtomicLong(0L)
         private var activeRunLease: ActiveRunLease? = null
