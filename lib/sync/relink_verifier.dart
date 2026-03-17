@@ -44,11 +44,11 @@ class RelinkVerifier {
     bool isSubscription = false,
     int lookbackDays = 60,
   }) async {
-    final int boundedLookbackDays = lookbackDays.clamp(30, 90);
-    final DateTime now = DateTime.now().toUtc();
-    final DateTime startDt = now.subtract(Duration(days: boundedLookbackDays));
-    final int startMs = startDt.millisecondsSinceEpoch;
-    final int endMs = now.millisecondsSinceEpoch;
+    final _VerificationWindow window = _VerificationWindow.bounded(
+      daysBack: lookbackDays,
+      minDays: 30,
+      maxDays: 90,
+    );
 
     final UnifiedEventsSnapshot snapshot =
         await (_fetchRemoteSnapshot?.call(remotePath, isSubscription) ??
@@ -66,10 +66,12 @@ class RelinkVerifier {
     }
 
     final List<PlatformItem?> localItems =
-        await (_fetchLocalEvents?.call(localCalendarId, startMs, endMs) ??
-            _native.getEvents(localCalendarId, startMs, endMs));
+        await (_fetchLocalEvents?.call(localCalendarId, window.startMs, window.endMs) ??
+            _native.getEvents(localCalendarId, window.startMs, window.endMs));
 
-    final List<_RemoteEvent> remoteEvents = _parseRemoteEvents(snapshot.events);
+    final List<_RemoteEvent> remoteEvents = _parseRemoteEvents(snapshot.events)
+        .where((event) => window.contains(event.startMs))
+        .toList();
     final List<_LocalEvent> localEvents = _parseLocalEvents(localItems);
 
     if (remoteEvents.isEmpty || localEvents.isEmpty) {
@@ -107,12 +109,12 @@ class RelinkVerifier {
     int lookbackDays = 30,
     int maxEvents = 20,
   }) async {
-    final int boundedLookbackDays = lookbackDays.clamp(14, 60);
+    final _VerificationWindow window = _VerificationWindow.bounded(
+      daysBack: lookbackDays,
+      minDays: 14,
+      maxDays: 60,
+    );
     final int boundedMaxEvents = maxEvents.clamp(5, 50);
-    final DateTime now = DateTime.now().toUtc();
-    final DateTime startDt = now.subtract(Duration(days: boundedLookbackDays));
-    final int startMs = startDt.millisecondsSinceEpoch;
-    final int endMs = now.millisecondsSinceEpoch;
 
     final UnifiedEventsSnapshot snapshot =
         await (_fetchRemoteSnapshot?.call(remotePath, isSubscription) ??
@@ -128,9 +130,10 @@ class RelinkVerifier {
     }
 
     final List<PlatformItem?> localItems =
-        await (_fetchLocalEvents?.call(localCalendarId, startMs, endMs) ??
-            _native.getEvents(localCalendarId, startMs, endMs));
+        await (_fetchLocalEvents?.call(localCalendarId, window.startMs, window.endMs) ??
+            _native.getEvents(localCalendarId, window.startMs, window.endMs));
     final List<_RemoteEvent> remoteEvents = _parseRemoteEvents(snapshot.events)
+      ..retainWhere((event) => window.contains(event.startMs))
       ..sort((a, b) => b.startMs.compareTo(a.startMs));
     final List<_LocalEvent> localEvents = _parseLocalEvents(localItems)
       ..sort((a, b) => b.startMs.compareTo(a.startMs));
@@ -219,6 +222,28 @@ class RelinkVerifier {
   String _normalizeTitle(String input) {
     return input.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
   }
+}
+
+class _VerificationWindow {
+  final int startMs;
+  final int endMs;
+
+  const _VerificationWindow({required this.startMs, required this.endMs});
+
+  factory _VerificationWindow.bounded({
+    required int daysBack,
+    required int minDays,
+    required int maxDays,
+  }) {
+    final int boundedDays = daysBack.clamp(minDays, maxDays);
+    final DateTime now = DateTime.now().toUtc();
+    return _VerificationWindow(
+      startMs: now.subtract(Duration(days: boundedDays)).millisecondsSinceEpoch,
+      endMs: now.add(Duration(days: boundedDays)).millisecondsSinceEpoch,
+    );
+  }
+
+  bool contains(int eventStartMs) => eventStartMs >= startMs && eventStartMs <= endMs;
 }
 
 class _RemoteEvent {
