@@ -8,7 +8,7 @@ jobs:
     name: Generate signed release APK and AAB
     runs-on: ubuntu-latest
     env:
-      BUILD_NAME: "0.0.5"
+      BUILD_NAME: "0.0.6"
 
     steps:
       - name: Checkout
