@@ -1,0 +1,72 @@
+name: Build Signed iOS Artifacts
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-signed-ios:
+    name: Generate signed release iOS archive and IPA
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.24.0"
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Run automation tests
+        run: flutter test
+
+      - name: Resolve release version from pubspec
+        id: build_meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          while IFS='=' read -r key value; do
+            echo "$key=$value" >> "$GITHUB_OUTPUT"
+          done < <(scripts/derive_release_version.sh)
+
+      - name: Build unsigned iOS archive with shared version metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          flutter build ipa --release --no-codesign \
+            --build-name="${{ steps.build_meta.outputs.build_name }}" \
+            --build-number="${{ steps.build_meta.outputs.build_number }}"
+
+      - name: List generated iOS artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          find build/ios -maxdepth 8 -type f \( -name "*.xcarchive" -o -name "*.ipa" \) -print
+
+      - name: Rename IPA with build name
+        shell: bash
+        run: |
+          set -euo pipefail
+          src="build/ios/ipa/Runner.ipa"
+          dst="build/ios/ipa/caleesync-${{ steps.build_meta.outputs.sanitized_build_name }}.ipa"
+          mv "$src" "$dst"
+          echo "Renamed IPA to $dst"
+
+      - name: Upload iOS IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: caleesync-ios-ipa-${{ steps.build_meta.outputs.sanitized_build_name }}
+          path: build/ios/ipa/caleesync-${{ steps.build_meta.outputs.sanitized_build_name }}.ipa
+          if-no-files-found: error
+
+      - name: Upload iOS archive artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: caleesync-ios-xcarchive-${{ steps.build_meta.outputs.sanitized_build_name }}
+          path: build/ios/archive/Runner.xcarchive
+          if-no-files-found: error
