@@ -634,7 +634,6 @@ class LocalCalendarPageController extends GetxController {
             {
               'remote_collection_id': remoteCollectionId,
               'sync_gate_reason': null,
-              'is_enabled': 0,
               'updated_at': now,
             },
             conflictAlgorithm: ConflictAlgorithm.ignore,
@@ -643,7 +642,6 @@ class LocalCalendarPageController extends GetxController {
             'collection_states',
             {
               'sync_gate_reason': null,
-              'is_enabled': 0,
               'updated_at': now,
             },
             where: 'remote_collection_id = ?',
@@ -675,11 +673,6 @@ class LocalCalendarPageController extends GetxController {
           where: 'id IN (SELECT remote_collection_id FROM local_bindings WHERE local_collection_id = ?)',
           whereArgs: [item.id],
         );
-      }
-
-
-      if (linkRequested) {
-        MMKVUtils.instance.setString(AppConstant.calendarAccountNameKey, accountName);
       }
 
       if (linkRequested && returnToCalendarListAfterConnect) {
