@@ -4,15 +4,22 @@ import '../core/platform/pigeon/calendar_api.g.dart';
 import '../services/calee_server_service.dart';
 
 class RelinkVerificationResult {
-  final bool passed;
-  final int confidenceScore;
-  final bool isIndeterminate;
+  final RelinkVerificationOutcome outcome;
+  final int? confidenceScore;
 
   const RelinkVerificationResult({
-    required this.passed,
-    required this.confidenceScore,
-    this.isIndeterminate = false,
+    required this.outcome,
+    this.confidenceScore,
   });
+
+  bool get passed => outcome == RelinkVerificationOutcome.passed;
+  bool get isIndeterminate => outcome == RelinkVerificationOutcome.unavailable;
+}
+
+enum RelinkVerificationOutcome {
+  passed,
+  failed,
+  unavailable,
 }
 
 class RelinkVerifier {
@@ -54,9 +61,7 @@ class RelinkVerifier {
         snapshot.fetchSucceeded && (snapshot.statusCode == 200 || snapshot.statusCode == 207);
     if (!remoteFetchSucceeded) {
       return RelinkVerificationResult(
-        passed: false,
-        confidenceScore: 0,
-        isIndeterminate: true,
+        outcome: RelinkVerificationOutcome.unavailable,
       );
     }
 
@@ -67,17 +72,15 @@ class RelinkVerifier {
     final List<_RemoteEvent> remoteEvents = _parseRemoteEvents(snapshot.events);
     final List<_LocalEvent> localEvents = _parseLocalEvents(localItems);
 
-    if (remoteEvents.isEmpty && localEvents.isEmpty) {
+    if (remoteEvents.isEmpty || localEvents.isEmpty) {
       return const RelinkVerificationResult(
-        passed: false,
-        confidenceScore: 0,
-        isIndeterminate: true,
+        outcome: RelinkVerificationOutcome.unavailable,
       );
     }
 
     final int baseline = math.max(remoteEvents.length, localEvents.length);
     if (baseline == 0) {
-      return const RelinkVerificationResult(passed: false, confidenceScore: 0);
+      return const RelinkVerificationResult(outcome: RelinkVerificationOutcome.unavailable);
     }
 
     final int matched = _countMatchedEvents(remoteEvents, localEvents);
@@ -86,13 +89,15 @@ class RelinkVerifier {
 
     if (remoteEvents.length < 5 && localEvents.length < 5 && confidence < 98) {
       return RelinkVerificationResult(
-        passed: false,
+        outcome: RelinkVerificationOutcome.unavailable,
         confidenceScore: confidence,
-        isIndeterminate: true,
       );
     }
 
-    return RelinkVerificationResult(passed: confidence >= 90, confidenceScore: confidence);
+    return RelinkVerificationResult(
+      outcome: confidence >= 90 ? RelinkVerificationOutcome.passed : RelinkVerificationOutcome.failed,
+      confidenceScore: confidence,
+    );
   }
 
   Future<int> previewConfidence({
