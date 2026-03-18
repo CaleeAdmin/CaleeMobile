@@ -595,33 +595,106 @@ class SyncRepository {
       final int existingOriginKind = (remote['origin_kind'] as int?) ?? SyncBindingOrigin.remote;
       bindingOriginForEnableAttempt = existingOriginKind;
 
-      // Request permission before accessing calendars (pass true to trigger permission dialog)
-      final bool hasPermission = await _nativeApi.requestPermission(true);
+      // Check and request permission before accessing calendars
+      debugPrint('[REPO] === Starting permission check for enableRemoteCalendar ===');
+      debugPrint('[REPO] Remote path: $persistedRemotePath');
+      
+      bool hasPermission = await _nativeApi.requestPermission(false);
+      debugPrint('[REPO] Initial permission check: $hasPermission');
+      
       if (!hasPermission) {
-        _lastConnectError = 'Calendar access permission denied. Please grant calendar permission in system settings and try again.';
-        return EnableCalendarResult.failure(remotePath: persistedRemotePath);
-      }
-
-      // Get calendars with permission error handling
-      Set<String> nativeCalendarIds;
-      try {
-        nativeCalendarIds = (await _nativeApi.getCalendars())
-            .whereType<PlatformCalendar>()
-            .map((calendar) => calendar.id ?? '')
-            .where((id) => id.isNotEmpty)
-            .toSet();
-      } on PlatformException catch (e) {
-        final String msg = '${e.code} ${e.message ?? ''}'.toLowerCase();
-        if (msg.contains('permission') || e.code == 'PERMISSION_DENIED') {
-          _lastConnectError = 'Calendar permission missing. Grant permission in system settings and retry.';
+        debugPrint('[REPO] No permission, requesting now (will show system dialog)...');
+        hasPermission = await _nativeApi.requestPermission(true);
+        debugPrint('[REPO] Permission request completed: $hasPermission');
+        
+        if (!hasPermission) {
+          _lastConnectError = 'Permission request was denied. Please go to Settings > CaleeSync > Calendars and grant Full Access.';
           return EnableCalendarResult.failure(remotePath: persistedRemotePath);
         }
-        rethrow;
-      } catch (e) {
-        debugPrint('[ERROR] Failed to get calendars: $e');
-        _lastConnectError = 'Failed to access system calendars. Please check permissions and try again.';
+        
+        // CRITICAL: iOS needs significant delay after granting permission
+        debugPrint('[REPO] Permission granted, waiting 2 seconds for iOS EventStore to update...');
+        await Future.delayed(const Duration(milliseconds: 2000));
+        
+        // Verify permission actually took effect
+        final verifyPermission = await _nativeApi.requestPermission(false);
+        debugPrint('[REPO] Permission verification after delay: $verifyPermission');
+        
+        if (!verifyPermission) {
+          debugPrint('[REPO] WARNING: Permission still not effective after 2s delay!');
+        }
+      } else {
+        debugPrint('[REPO] Permission already granted, proceeding...');
+      }
+
+      // Get calendars with robust retry logic
+      Set<String> nativeCalendarIds = {};
+      int retryAttempt = 0;
+      const maxRetries = 4;
+      bool success = false;
+      PlatformException? lastPermissionError;
+      
+      while (retryAttempt < maxRetries && !success) {
+        try {
+          debugPrint('[REPO] ➤ Attempt ${retryAttempt + 1}/$maxRetries: Calling getCalendars()...');
+          final calendars = await _nativeApi.getCalendars();
+          nativeCalendarIds = calendars
+              .whereType<PlatformCalendar>()
+              .map((calendar) => calendar.id ?? '')
+              .where((id) => id.isNotEmpty)
+              .toSet();
+          debugPrint('[REPO] ✓ Success! Retrieved ${nativeCalendarIds.length} calendars');
+          success = true;
+        } on PlatformException catch (e) {
+          debugPrint('[REPO] ✗ PlatformException caught:');
+          debugPrint('[REPO]   - code: ${e.code}');
+          debugPrint('[REPO]   - message: ${e.message}');
+          debugPrint('[REPO]   - details: ${e.details}');
+          
+          final String msg = '${e.code} ${e.message ?? ''}'.toLowerCase();
+          
+          if (msg.contains('permission') || e.code == 'PERMISSION_DENIED') {
+            lastPermissionError = e;
+            retryAttempt++;
+            
+            if (retryAttempt >= maxRetries) {
+              debugPrint('[REPO] ✗ Max retries reached, giving up');
+              _lastConnectError = 'Calendar permission not working after $maxRetries attempts.\n\n'
+                  'Please check:\n'
+                  '1. Settings > CaleeSync > Calendars = "Full Access"\n'
+                  '2. Restart the app\n'
+                  '3. If still failing, restart your device\n\n'
+                  'Error: ${e.code} - ${e.message}';
+              return EnableCalendarResult.failure(remotePath: persistedRemotePath);
+            }
+            
+            // Exponential backoff: 1s, 2s, 4s, 8s
+            final delayMs = 1000 * (1 << (retryAttempt - 1));
+            debugPrint('[REPO] Will retry after ${delayMs}ms delay...');
+            await Future.delayed(Duration(milliseconds: delayMs));
+            
+            // Re-verify permission status
+            final statusCheck = await _nativeApi.requestPermission(false);
+            debugPrint('[REPO] Permission status before retry $retryAttempt: $statusCheck');
+          } else {
+            // Non-permission error
+            debugPrint('[REPO] Non-permission error, aborting retry');
+            rethrow;
+          }
+        } catch (e) {
+          debugPrint('[REPO] ✗ Unexpected error: $e');
+          _lastConnectError = 'Unexpected error accessing calendars: $e';
+          return EnableCalendarResult.failure(remotePath: persistedRemotePath);
+        }
+      }
+      
+      if (!success) {
+        debugPrint('[REPO] ✗ Failed to get calendars after all retries');
+        _lastConnectError = 'Cannot access calendars. Last error: ${lastPermissionError?.message ?? "Unknown"}';
         return EnableCalendarResult.failure(remotePath: persistedRemotePath);
       }
+      
+      debugPrint('[REPO] === Permission check completed successfully ===');
 
       if (existingLocalId.isNotEmpty && nativeCalendarIds.contains(existingLocalId)) {
         final int now = DateTime.now().millisecondsSinceEpoch;

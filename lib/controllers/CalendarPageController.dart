@@ -167,31 +167,9 @@ class CalendarPageController extends GetxController {
         return;
       }
 
-      // Request permission before enabling calendar (pass true to trigger permission dialog)
-      try {
-        final bool hasPermission = await _nativeApi.requestPermission(true);
-        if (!hasPermission) {
-          Get.snackbar(
-            '需要权限',
-            '需要日历访问权限。请在系统设置中授予日历权限。',
-            duration: const Duration(seconds: 4),
-          );
-          item.isEnabled = false;
-          calendars.refresh();
-          return;
-        }
-      } catch (e) {
-        debugPrint('[WARN] Failed to request calendar permission: $e');
-        Get.snackbar(
-          '权限错误',
-          '无法请求日历权限。请检查系统设置。',
-          duration: const Duration(seconds: 4),
-        );
-        item.isEnabled = false;
-        calendars.refresh();
-        return;
-      }
-
+      // Let Repository handle permission checking and requesting
+      // (avoid duplicate permission requests which can confuse iOS)
+      debugPrint('[Controller] Enabling calendar: $remotePath');
       final EnableCalendarResult enableResult = await _repo.enableRemoteCalendarFromUserAction(remotePath);
       _applyEnableResultToCalendarItem(item, enableResult);
 

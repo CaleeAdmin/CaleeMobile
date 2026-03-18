@@ -11,21 +11,68 @@ import EventKit
   func requestPermission(forTask: Bool, completion: @escaping (Result<Bool, Error>) -> Void) {
     // forTask == true: 主动请求权限
     // forTask == false: 仅检查当前权限状态
+    
+    let status = EKEventStore.authorizationStatus(for: .event)
+    print("[iOS] 📱 requestPermission(forTask: \(forTask))")
+    print("[iOS] Current authorization status: \(status.rawValue)")
+    
     if forTask {
       // 主动请求权限
-      eventStore.requestAccess(to: .event) { granted, error in
-        if let error = error {
-          completion(.failure(
-            FlutterError(code: "PERMISSION_ERROR", message: error.localizedDescription, details: nil)
-          ))
-        } else {
-          completion(.success(granted))
+      if #available(iOS 17.0, *) {
+        print("[iOS] System version: iOS 17+, using requestFullAccessToEvents...")
+        
+        // 先检查当前状态，如果已经有完整访问权限就不用再请求
+        if status == .fullAccess {
+          print("[iOS] ✓ Already has fullAccess, returning true immediately")
+          completion(.success(true))
+          return
+        }
+        
+        eventStore.requestFullAccessToEvents { granted, error in
+          print("[iOS] requestFullAccessToEvents callback:")
+          print("[iOS]   - granted: \(granted)")
+          print("[iOS]   - error: \(String(describing: error))")
+          
+          if let error = error {
+            completion(.failure(
+              FlutterError(code: "PERMISSION_ERROR", message: error.localizedDescription, details: nil)
+            ))
+          } else {
+            // 再次检查实际状态
+            let newStatus = EKEventStore.authorizationStatus(for: .event)
+            print("[iOS]   - status after request: \(newStatus.rawValue)")
+            completion(.success(granted))
+          }
+        }
+      } else {
+        print("[iOS] System version: iOS <17, using requestAccess...")
+        eventStore.requestAccess(to: .event) { granted, error in
+          print("[iOS] requestAccess callback:")
+          print("[iOS]   - granted: \(granted)")
+          print("[iOS]   - error: \(String(describing: error))")
+          
+          if let error = error {
+            completion(.failure(
+              FlutterError(code: "PERMISSION_ERROR", message: error.localizedDescription, details: nil)
+            ))
+          } else {
+            completion(.success(granted))
+          }
         }
       }
     } else {
       // 仅检查权限状态，不弹出授权窗口
-      let status = EKEventStore.authorizationStatus(for: .event)
-      completion(.success(status == .authorized))
+      let hasAccess: Bool
+      if #available(iOS 17.0, *) {
+        // iOS 17+ 接受 fullAccess, writeOnly, 或 authorized
+        hasAccess = (status == .fullAccess || status == .writeOnly || status == .authorized)
+        print("[iOS] ✓ Check result (iOS 17+): \(hasAccess) - status=\(status.rawValue)")
+      } else {
+        hasAccess = (status == .authorized)
+        print("[iOS] ✓ Check result (iOS <17): \(hasAccess) - status=\(status.rawValue)")
+      }
+      
+      completion(.success(hasAccess))
     }
   }
 
@@ -33,14 +80,39 @@ import EventKit
 
   func getCalendars() throws -> [PlatformCalendar] {
     let status = EKEventStore.authorizationStatus(for: .event)
-    guard status == .authorized else {
+    print("[iOS] 📅 getCalendars() called")
+    print("[iOS] Authorization status raw value: \(status.rawValue)")
+    
+    // iOS 17+ 支持多种权限级别
+    let hasAccess: Bool
+    if #available(iOS 17.0, *) {
+      let isFullAccess = (status == .fullAccess)
+      let isWriteOnly = (status == .writeOnly)
+      let isAuthorized = (status == .authorized)
+      hasAccess = (isFullAccess || isWriteOnly || isAuthorized)
+      
+      print("[iOS] iOS 17+ detected")
+      print("[iOS]   - fullAccess (.fullAccess): \(isFullAccess)")
+      print("[iOS]   - writeOnly (.writeOnly): \(isWriteOnly)")
+      print("[iOS]   - authorized (.authorized): \(isAuthorized)")
+      print("[iOS]   - RESULT hasAccess: \(hasAccess)")
+    } else {
+      hasAccess = (status == .authorized)
+      print("[iOS] iOS <17 detected")
+      print("[iOS]   - authorized: \(hasAccess)")
+    }
+    
+    guard hasAccess else {
+      let errorMsg = "❌ Calendar permission DENIED. Status=\(status.rawValue). SOLUTION: Settings > CaleeSync > Calendars > Select 'Full Access'"
+      print("[iOS] \(errorMsg)")
       throw FlutterError(
         code: "PERMISSION_DENIED",
-        message: "Calendar access not authorized",
-        details: nil
+        message: errorMsg,
+        details: "\(status.rawValue)"
       )
     }
 
+    print("[iOS] ✓ Permission CHECK PASSED, fetching calendars from EventStore...")
     var calendars: [PlatformCalendar] = []
 
     // iOS grouping: Source (account) -> Calendar
@@ -74,6 +146,7 @@ import EventKit
       }
     }
 
+    print("[iOS] ✓ Successfully fetched \(calendars.count) calendars from EventStore")
     return calendars
   }
 
@@ -256,6 +329,26 @@ import EventKit
     color: Int64,
     completion: @escaping (Result<String?, Error>) -> Void
   ) {
+    // Check permission before creating calendar
+    let status = EKEventStore.authorizationStatus(for: .event)
+    print("[iOS] createCalendar - permission status: \(status.rawValue)")
+    
+    let hasAccess: Bool
+    if #available(iOS 17.0, *) {
+      hasAccess = (status == .fullAccess || status == .writeOnly || status == .authorized)
+    } else {
+      hasAccess = (status == .authorized)
+    }
+    
+    guard hasAccess else {
+      let errorMsg = "Calendar permission required. Current status: \(status.rawValue)"
+      print("[iOS] \(errorMsg)")
+      completion(.failure(
+        FlutterError(code: "PERMISSION_DENIED", message: errorMsg, details: nil)
+      ))
+      return
+    }
+    
     guard let source = findOrCreateSource(forAccountName: accountName) else {
       completion(.failure(
         FlutterError(code: "SOURCE_ERROR", message: "Failed to find or create source", details: nil)
@@ -270,8 +363,10 @@ import EventKit
 
     do {
       try eventStore.saveCalendar(calendar, commit: true)
+      print("[iOS] Calendar created successfully: \(calendar.calendarIdentifier)")
       completion(.success(calendar.calendarIdentifier))
     } catch {
+      print("[iOS] Failed to create calendar: \(error.localizedDescription)")
       completion(.failure(
         FlutterError(code: "SAVE_ERROR", message: error.localizedDescription, details: nil)
       ))
