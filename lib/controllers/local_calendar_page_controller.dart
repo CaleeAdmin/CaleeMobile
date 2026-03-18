@@ -572,7 +572,10 @@ class LocalCalendarPageController extends GetxController {
         }
       }
 
-      final String accountName = item.accountName;
+      final String storedAccountName =
+          MMKVUtils.instance.getString(AppConstant.calendarAccountNameKey) ?? '';
+      final String loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? '';
+      final String accountName = storedAccountName.isNotEmpty ? storedAccountName : loginName;
       int? remoteCollectionId;
 
       if (linkRequested) {
