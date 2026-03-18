@@ -595,10 +595,10 @@ class SyncRepository {
       final int existingOriginKind = (remote['origin_kind'] as int?) ?? SyncBindingOrigin.remote;
       bindingOriginForEnableAttempt = existingOriginKind;
 
-      // Request permission before accessing calendars
-      final bool hasPermission = await _nativeApi.requestPermission(false);
+      // Request permission before accessing calendars (pass true to trigger permission dialog)
+      final bool hasPermission = await _nativeApi.requestPermission(true);
       if (!hasPermission) {
-        _lastConnectError = 'Calendar access permission is required. Please grant calendar permission in settings.';
+        _lastConnectError = 'Calendar access permission denied. Please grant calendar permission in system settings and try again.';
         return EnableCalendarResult.failure(remotePath: persistedRemotePath);
       }
 

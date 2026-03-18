@@ -42,7 +42,7 @@ class _CalendarPageState extends State<CalendarPage> {
       // Also request native calendar permission (required for iOS EventKit)
       try {
         final nativeApi = NativeCalendarApi();
-        await nativeApi.requestPermission(false);
+        await nativeApi.requestPermission(true);
       } catch (e) {
         print('[WARN] Failed to request native calendar permission: $e');
       }

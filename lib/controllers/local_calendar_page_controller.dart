@@ -77,10 +77,11 @@ class LocalCalendarPageController extends GetxController {
     try {
       isLoading.value = true;
 
-      final bool hasPermission = await _nativeApi.requestPermission(false);
+      // Request permission to access calendars (pass true to trigger permission dialog)
+      final bool hasPermission = await _nativeApi.requestPermission(true);
       if (!hasPermission) {
         calendarGroups.clear();
-        Get.snackbar('Permission required', 'Calendar access is required to load local calendars.');
+        Get.snackbar('需要权限', '需要日历访问权限才能加载本地日历。请在系统设置中授予权限。');
         return;
       }
 

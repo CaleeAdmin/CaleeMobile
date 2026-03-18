@@ -167,13 +167,13 @@ class CalendarPageController extends GetxController {
         return;
       }
 
-      // Request permission before enabling calendar
+      // Request permission before enabling calendar (pass true to trigger permission dialog)
       try {
-        final bool hasPermission = await _nativeApi.requestPermission(false);
+        final bool hasPermission = await _nativeApi.requestPermission(true);
         if (!hasPermission) {
           Get.snackbar(
-            'Permission required',
-            'Calendar access permission is required. Please grant calendar permission in settings.',
+            '需要权限',
+            '需要日历访问权限。请在系统设置中授予日历权限。',
             duration: const Duration(seconds: 4),
           );
           item.isEnabled = false;
@@ -183,8 +183,8 @@ class CalendarPageController extends GetxController {
       } catch (e) {
         debugPrint('[WARN] Failed to request calendar permission: $e');
         Get.snackbar(
-          'Permission error',
-          'Failed to request calendar permission. Please check settings.',
+          '权限错误',
+          '无法请求日历权限。请检查系统设置。',
           duration: const Duration(seconds: 4),
         );
         item.isEnabled = false;
