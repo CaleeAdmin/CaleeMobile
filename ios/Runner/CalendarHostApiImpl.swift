@@ -9,14 +9,23 @@ import EventKit
   // MARK: - Permission
 
   func requestPermission(forTask: Bool, completion: @escaping (Result<Bool, Error>) -> Void) {
-    eventStore.requestAccess(to: .event) { granted, error in
-      if let error = error {
-        completion(.failure(
-          FlutterError(code: "PERMISSION_ERROR", message: error.localizedDescription, details: nil)
-        ))
-      } else {
-        completion(.success(granted))
+    // forTask == true: 主动请求权限
+    // forTask == false: 仅检查当前权限状态
+    if forTask {
+      // 主动请求权限
+      eventStore.requestAccess(to: .event) { granted, error in
+        if let error = error {
+          completion(.failure(
+            FlutterError(code: "PERMISSION_ERROR", message: error.localizedDescription, details: nil)
+          ))
+        } else {
+          completion(.success(granted))
+        }
       }
+    } else {
+      // 仅检查权限状态，不弹出授权窗口
+      let status = EKEventStore.authorizationStatus(for: .event)
+      completion(.success(status == .authorized))
     }
   }
 

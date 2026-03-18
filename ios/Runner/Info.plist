@@ -27,7 +27,9 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSCalendarsUsageDescription</key>
-	<string>需要访问您的日历以读取和展示事件。</string>
+	<string>CaleeSync 需要访问您的日历以同步、读取和管理日历事件。</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>CaleeSync 需要完整访问您的日历以实现双向同步功能，包括创建、修改和删除日历事件。</string>
 	<key>NSCameraUsageDescription</key>
 	<string>需要访问相机以扫描二维码并链接设备。</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
