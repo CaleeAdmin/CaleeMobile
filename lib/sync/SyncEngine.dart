@@ -59,7 +59,16 @@ class SyncEngine {
       final summary = SyncSummary(telemetry: _runRecorder);
       final String authUserId = MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? '';
       final String accountName = MMKVUtils.instance.getString(AppConstant.calendarAccountNameKey) ?? '';
-      if (authUserId.isEmpty || accountName.isEmpty) return summary;
+      if (authUserId.isEmpty || accountName.isEmpty) {
+        if (authUserId.isEmpty) {
+          summary.errorLog.add('missing_login_name');
+        }
+        if (accountName.isEmpty) {
+          summary.errorLog.add('missing_calendar_account_name');
+        }
+        onProgress?.call(summary);
+        return summary;
+      }
 
       await _repo.scanLocalCalendars(authUserId);
       final List<Map<String, dynamic>> remoteCalendars = await _serverService.scanRemoteCalendars(
