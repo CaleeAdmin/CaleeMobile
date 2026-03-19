@@ -736,6 +736,12 @@ class SyncRepository {
       final String msg = '${e.code} ${e.message ?? ''}'.toLowerCase();
       if (msg.contains('permission')) {
         _lastConnectError = 'Calendar permission missing. Grant permission in system settings and retry.';
+      } else if (e.code == 'SOURCE_ERROR') {
+        _lastConnectError = 'iPhone calendar account is not available for creating a new calendar.';
+      } else if (e.code == 'SAVE_ERROR') {
+        _lastConnectError = 'iPhone refused to create the calendar. Please check the default calendar account and try again.';
+      } else if (e.code == 'NOT_FOUND') {
+        _lastConnectError = 'The selected iPhone calendar could not be found. Refresh calendars and try again.';
       } else if (msg.contains('provider')) {
         _lastConnectError = 'System calendar provider error. Restart the calendar app and retry.';
       } else if (msg.contains('already')) {
