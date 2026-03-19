@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:caleesync/common/app_constant.dart';
 import 'package:caleesync/common/utils/mmkv_utils.dart';
@@ -9,6 +10,7 @@ import '../data/sync_run_store.dart';
 import '../core/platform/pigeon/background_sync_api.g.dart';
 import '../entity/SyncSummary.dart';
 import '../entity/sync_run_record.dart';
+import 'SyncEngine.dart';
 import 'background_sync_scheduler.dart';
 
 enum SyncTriggerType {
@@ -70,6 +72,15 @@ class SyncTriggerOrchestrator extends GetxService with WidgetsBindingObserver {
     String? reason,
     bool expedited = false,
   }) async {
+    if (_shouldRunInline(trigger)) {
+      final SyncSummary? summary = await SyncEngine().executeFullSync(
+        onProgress: onProgress,
+        trigger: SyncRunTrigger.manual,
+        waitForTurn: true,
+      );
+      return summary ?? SyncSummary();
+    }
+
     final String? baselineRunId = await _loadLatestRunId();
     final String triggerReason = reason ?? _mapReason(trigger);
     final bool isManualOrForce = trigger == SyncTriggerType.manual || trigger == SyncTriggerType.force;
@@ -81,6 +92,10 @@ class SyncTriggerOrchestrator extends GetxService with WidgetsBindingObserver {
     final SyncSummary summary = await _awaitRunCompletion(baselineRunId: baselineRunId);
     onProgress?.call(summary);
     return summary;
+  }
+
+  bool _shouldRunInline(SyncTriggerType trigger) {
+    return Platform.isIOS && _appActive && trigger == SyncTriggerType.manual;
   }
 
   Future<String?> _loadLatestRunId() async {
