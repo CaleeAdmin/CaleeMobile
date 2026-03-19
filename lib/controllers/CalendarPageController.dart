@@ -14,6 +14,7 @@ import '../data/database_helper.dart';
 import '../data/sync_repository.dart';
 import '../feature/local_calendars_page.dart';
 import '../services/calee_server_service.dart';
+import '../sync/sync_gate_reason.dart';
 
 class CalendarDisplayItem {
   // 1. 标识符
@@ -198,17 +199,19 @@ class CalendarPageController extends GetxController {
       final String? syncMessage = _repo.takeLastConnectErrorMessage();
       if (!enableResult.success) {
         final String err = syncMessage ?? 'Enable failed. Please retry.';
-        final bool showRelinkAction = err.contains('needs a quick relink');
+        final bool showReconnectAction =
+            item.syncGateReason == SyncGateReason.reconnectRequired ||
+            err.toLowerCase().contains('needs reconnecting');
         Get.snackbar(
           'Enable failed',
           err,
-          mainButton: showRelinkAction
+          mainButton: showReconnectAction
               ? TextButton(
                   onPressed: () {
                     Get.back();
-                    Get.to(() => const LocalCalendarsPage());
+                    _openReconnectFlow(item);
                   },
-                  child: const Text('Link now'),
+                  child: const Text('Reconnect'),
                 )
               : null,
         );
@@ -240,6 +243,16 @@ class CalendarPageController extends GetxController {
         calendars.refresh();
       }
     }
+  }
+
+  void _openReconnectFlow(CalendarDisplayItem item) {
+    Get.to(
+      () => LocalCalendarsPage(
+        reconnectMode: true,
+        targetRemotePath: item.remotePath,
+        targetOriginKind: item.origin,
+      ),
+    );
   }
 
 

@@ -747,16 +747,29 @@ class _CalendarRow extends StatelessWidget {
                       border: Border.all(color: const Color(0xFFF59E0B)),
                     ),
                     child: Row(
-                      mainAxisSize: MainAxisSize.min,
+                      mainAxisSize: MainAxisSize.max,
                       children: [
                         const Icon(Icons.warning_amber_rounded, size: 14, color: Color(0xFFD97706)),
                         const SizedBox(width: 6),
-                        Flexible(
+                        Expanded(
                           child: Text(
                             _syncGateReasonMessage(item.syncGateReason)!,
                             style: const TextStyle(fontSize: 12, color: Color(0xFFB45309)),
                           ),
                         ),
+                        if (item.syncGateReason == SyncGateReason.reconnectRequired)
+                          TextButton(
+                            onPressed: () {
+                              Get.to(
+                                () => LocalCalendarsPage(
+                                  reconnectMode: true,
+                                  targetRemotePath: item.remotePath,
+                                  targetOriginKind: item.origin,
+                                ),
+                              );
+                            },
+                            child: const Text('Reconnect'),
+                          ),
                       ],
                     ),
                   ),

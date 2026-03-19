@@ -211,7 +211,7 @@ class SyncItemPlanner {
     final String localCollectionId = row['local_collection_id']?.toString() ?? '';
     if (bindingId <= 0 || localCollectionId.isEmpty) {
       if (originKind == SyncBindingOrigin.local) {
-        return {'eligible': false, 'reason': SyncGateReason.relinkRequired};
+        return {'eligible': false, 'reason': SyncGateReason.reconnectRequired};
       }
       return {'eligible': false, 'reason': SyncGateReason.bindingInvalid};
     }

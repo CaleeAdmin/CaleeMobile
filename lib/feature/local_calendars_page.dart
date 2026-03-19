@@ -3,14 +3,52 @@ import 'package:get/get.dart';
 
 import '../controllers/local_calendar_page_controller.dart';
 
-class LocalCalendarsPage extends StatelessWidget {
-  const LocalCalendarsPage({super.key});
+class LocalCalendarsPage extends StatefulWidget {
+  const LocalCalendarsPage({
+    super.key,
+    this.reconnectMode = false,
+    this.targetRemotePath,
+    this.targetOriginKind,
+  });
+
+  final bool reconnectMode;
+  final String? targetRemotePath;
+  final int? targetOriginKind;
+
+  @override
+  State<LocalCalendarsPage> createState() => _LocalCalendarsPageState();
+}
+
+class _LocalCalendarsPageState extends State<LocalCalendarsPage> {
+  late final String _tag;
+  late final LocalCalendarPageController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _tag =
+        'local-cal-${widget.reconnectMode}-${widget.targetRemotePath ?? ''}-${widget.targetOriginKind ?? ''}';
+    _ctrl = Get.put(
+      LocalCalendarPageController(
+        reconnectMode: widget.reconnectMode,
+        targetRemotePath: widget.targetRemotePath,
+        targetOriginKind: widget.targetOriginKind,
+      ),
+      tag: _tag,
+    );
+  }
+
+  @override
+  void dispose() {
+    if (Get.isRegistered<LocalCalendarPageController>(tag: _tag)) {
+      Get.delete<LocalCalendarPageController>(tag: _tag, force: true);
+    }
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final LocalCalendarPageController ctrl = Get.isRegistered<LocalCalendarPageController>()
-        ? Get.find<LocalCalendarPageController>()
-        : Get.put(LocalCalendarPageController());
+    final String title = widget.reconnectMode ? 'Reconnect calendar' : 'Link to Device Calendar';
 
     return Scaffold(
       appBar: AppBar(
@@ -19,27 +57,33 @@ class LocalCalendarsPage extends StatelessWidget {
           icon: const Icon(Icons.arrow_back_ios),
           onPressed: () => Navigator.maybePop(context),
         ),
-        title: const Text(
-          'Link to Device Calendar',
-          style: TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
+        title: Text(
+          title,
+          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
         ),
         elevation: 0,
       ),
       body: Obx(() {
-        if (ctrl.isLoading.value) {
+        if (_ctrl.isLoading.value) {
           return const Center(child: CircularProgressIndicator());
         }
 
-        final groups = ctrl.calendarGroups.toList();
+        final groups = _ctrl.calendarGroups.toList();
         if (groups.isEmpty) {
-          return const Center(child: Text('No device calendars found'));
+          return Center(
+            child: Text(widget.reconnectMode ? 'No reconnect candidates found' : 'No device calendars found'),
+          );
         }
 
         return ListView.builder(
           padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
           itemCount: groups.length,
           itemBuilder: (context, index) {
-            return _AccountSection(group: groups[index]);
+            return _AccountSection(
+              group: groups[index],
+              controllerTag: _tag,
+              reconnectMode: widget.reconnectMode,
+            );
           },
         );
       }),
@@ -49,8 +93,14 @@ class LocalCalendarsPage extends StatelessWidget {
 
 class _AccountSection extends StatelessWidget {
   final LocalCalendarGroup group;
+  final String controllerTag;
+  final bool reconnectMode;
 
-  const _AccountSection({required this.group});
+  const _AccountSection({
+    required this.group,
+    required this.controllerTag,
+    required this.reconnectMode,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -84,7 +134,11 @@ class _AccountSection extends StatelessWidget {
                 .map(
                   (calendar) => Padding(
                     padding: const EdgeInsets.only(bottom: 12),
-                    child: _LocalCalendarCard(calendar: calendar),
+                    child: _LocalCalendarCard(
+                      calendar: calendar,
+                      controllerTag: controllerTag,
+                      reconnectMode: reconnectMode,
+                    ),
                   ),
                 )
                 .toList(),
@@ -97,8 +151,14 @@ class _AccountSection extends StatelessWidget {
 
 class _LocalCalendarCard extends StatelessWidget {
   final LocalCalendarItem calendar;
+  final String controllerTag;
+  final bool reconnectMode;
 
-  const _LocalCalendarCard({required this.calendar});
+  const _LocalCalendarCard({
+    required this.calendar,
+    required this.controllerTag,
+    required this.reconnectMode,
+  });
 
   Color _parseColor(String hex) {
     try {
@@ -112,10 +172,16 @@ class _LocalCalendarCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final controller = Get.find<LocalCalendarPageController>();
+    final controller = Get.find<LocalCalendarPageController>(tag: controllerTag);
 
     return Obx(() {
       final isConnecting = controller.connectingCalendarIds.contains(calendar.id);
+      final bool hideBecauseConnected = reconnectMode && calendar.isConnected;
+      if (hideBecauseConnected) {
+        return const SizedBox.shrink();
+      }
+
+      final String actionLabel = reconnectMode ? 'Reconnect' : (calendar.canRelink ? 'Reconnect' : 'Link');
 
       return Card(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -157,7 +223,7 @@ class _LocalCalendarCard extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(width: 8),
-                        calendar.isConnected
+                        calendar.isConnected && !reconnectMode
                             ? const Text(
                                 'Linked',
                                 style: TextStyle(
@@ -177,7 +243,7 @@ class _LocalCalendarCard extends StatelessWidget {
                                         );
                                       },
                                 style: TextButton.styleFrom(
-                                  backgroundColor: calendar.canRelink
+                                  backgroundColor: reconnectMode || calendar.canRelink
                                       ? const Color(0xFF1D4ED8)
                                       : const Color(0xFF111827),
                                   foregroundColor: Colors.white,
@@ -198,7 +264,7 @@ class _LocalCalendarCard extends StatelessWidget {
                                           valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                                         ),
                                       )
-                                    : Text(calendar.canRelink ? 'Re-link' : 'Link'),
+                                    : Text(actionLabel),
                               ),
                       ],
                     ),
