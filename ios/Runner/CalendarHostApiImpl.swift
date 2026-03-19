@@ -9,13 +9,25 @@ import EventKit
   // MARK: - Permission
 
   func requestPermission(forTask: Bool, completion: @escaping (Result<Bool, Error>) -> Void) {
-    eventStore.requestAccess(to: .event) { granted, error in
-      if let error = error {
-        completion(.failure(
-          FlutterError(code: "PERMISSION_ERROR", message: error.localizedDescription, details: nil)
-        ))
-      } else {
-        completion(.success(granted))
+    if #available(iOS 17.0, *) {
+      eventStore.requestFullAccessToEvents { granted, error in
+        if let error = error {
+          completion(.failure(
+            FlutterError(code: "PERMISSION_ERROR", message: error.localizedDescription, details: nil)
+          ))
+        } else {
+          completion(.success(granted))
+        }
+      }
+    } else {
+      eventStore.requestAccess(to: .event) { granted, error in
+        if let error = error {
+          completion(.failure(
+            FlutterError(code: "PERMISSION_ERROR", message: error.localizedDescription, details: nil)
+          ))
+        } else {
+          completion(.success(granted))
+        }
       }
     }
   }
@@ -23,8 +35,7 @@ import EventKit
   // MARK: - Calendars
 
   func getCalendars() throws -> [PlatformCalendar] {
-    let status = EKEventStore.authorizationStatus(for: .event)
-    guard status == .authorized else {
+    guard hasReadableEventAccess() else {
       throw FlutterError(
         code: "PERMISSION_DENIED",
         message: "Calendar access not authorized",
@@ -66,6 +77,14 @@ import EventKit
     }
 
     return calendars
+  }
+
+  private func hasReadableEventAccess() -> Bool {
+    let status = EKEventStore.authorizationStatus(for: .event)
+    if #available(iOS 17.0, *) {
+      return status == .fullAccess || status == .authorized
+    }
+    return status == .authorized
   }
 
   private func string(from type: EKSourceType) -> String {
@@ -374,5 +393,4 @@ import EventKit
     return UIColor(red: red, green: green, blue: blue, alpha: alpha).cgColor
   }
 }
-
 
