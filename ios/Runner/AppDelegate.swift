@@ -61,8 +61,9 @@ import os.log
     let hasFetch = configuredModes.contains("fetch")
     let hasProcessing = configuredModes.contains("processing")
 
+    let configuredModesSummary = configuredModes.joined(separator: ",")
     Logger.default.info(
-      "UIBackgroundModes configured: \(configuredModes.joined(separator: \",\")); fetch=\(hasFetch, privacy: .public); processing=\(hasProcessing, privacy: .public)"
+      "UIBackgroundModes configured: \(configuredModesSummary, privacy: .public); fetch=\(hasFetch, privacy: .public); processing=\(hasProcessing, privacy: .public)"
     )
   }
   
