@@ -266,9 +266,18 @@ import EventKit
     color: Int64,
     completion: @escaping (Result<String?, Error>) -> Void
   ) {
-    guard let source = findOrCreateSource(forAccountName: accountName) else {
+    guard let source = selectWritableEventSourceForCalendarCreation() else {
       completion(.failure(
-        FlutterError(code: "SOURCE_ERROR", message: "Failed to find or create source", details: nil)
+        FlutterError(
+          code: "SOURCE_ERROR",
+          message: "No writable EventKit source available for calendar creation",
+          details: [
+            "accountName": accountName,
+            "availableSources": eventStore.sources.map {
+              "\($0.title) [\(string(from: $0.sourceType))]"
+            }
+          ]
+        )
       ))
       return
     }
@@ -283,7 +292,16 @@ import EventKit
       completion(.success(calendar.calendarIdentifier))
     } catch {
       completion(.failure(
-        FlutterError(code: "SAVE_ERROR", message: error.localizedDescription, details: nil)
+        FlutterError(
+          code: "SAVE_ERROR",
+          message: "Failed to save calendar to source \(source.title) [\(string(from: source.sourceType))]: \(error.localizedDescription)",
+          details: [
+            "sourceTitle": source.title,
+            "sourceType": string(from: source.sourceType),
+            "underlyingError": error.localizedDescription,
+            "accountName": accountName,
+          ]
+        )
       ))
     }
   }
@@ -364,17 +382,20 @@ import EventKit
 
   // MARK: - Source helpers
 
-  private func findOrCreateSource(forAccountName accountName: String) -> EKSource? {
-    if let existing = findSource(forAccountName: accountName) {
-      return existing
+  private func selectWritableEventSourceForCalendarCreation() -> EKSource? {
+    if let defaultSource = eventStore.defaultCalendarForNewEvents?.source {
+      return defaultSource
     }
 
-    // iOS sources are system-managed; we can't create new ones. Fallback to local or first available.
-    let sources = eventStore.sources
-    if let local = sources.first(where: { $0.sourceType == .local }) {
-      return local
+    let writableEventCalendars = eventStore.calendars(for: .event).filter {
+      $0.allowsContentModifications && $0.type != .subscription
     }
-    return sources.first
+
+    if let existingWritableSource = writableEventCalendars.first?.source {
+      return existingWritableSource
+    }
+
+    return eventStore.sources.first(where: { $0.sourceType == .local })
   }
 
   private func findSource(forAccountName accountName: String) -> EKSource? {
