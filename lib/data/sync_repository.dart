@@ -686,7 +686,10 @@ class SyncRepository {
             (await _nativeApi.getCalendars()).whereType<PlatformCalendar>().toList(growable: false);
       } on PlatformException catch (e) {
         final String msg = '${e.code} ${e.message ?? ''}'.toLowerCase();
-        if (msg.contains('permission') || e.code == 'PERMISSION_DENIED') {
+        if (e.code == 'PERMISSION_DENIED' || e.code == 'PERMISSION_ERROR') {
+          _lastConnectError = 'Calendar permission missing. Grant permission in system settings and retry.';
+          return EnableCalendarResult.failure(remotePath: persistedRemotePath);
+        } else if (msg.contains('permission')) {
           _lastConnectError = 'Calendar permission missing. Grant permission in system settings and retry.';
           return EnableCalendarResult.failure(remotePath: persistedRemotePath);
         }
@@ -892,7 +895,8 @@ class SyncRepository {
       );
     } on PlatformException catch (e) {
       final String msg = '${e.code} ${e.message ?? ''}'.toLowerCase();
-      if (msg.contains('permission')) {
+      debugPrint('[ERROR] enable platform exception code=${e.code} message=${e.message}');
+      if (e.code == 'PERMISSION_DENIED' || e.code == 'PERMISSION_ERROR') {
         _lastConnectError = 'Calendar permission missing. Grant permission in system settings and retry.';
       } else if (e.code == 'SOURCE_ERROR') {
         _lastConnectError = 'iPhone calendar account is not available for creating a new calendar.';
@@ -904,6 +908,8 @@ class SyncRepository {
         _lastConnectError = 'System calendar provider error. Restart the calendar app and retry.';
       } else if (msg.contains('already')) {
         _lastConnectError = 'This calendar is already connected elsewhere. Check binding status.';
+      } else if (msg.contains('permission')) {
+        _lastConnectError = 'Calendar permission missing. Grant permission in system settings and retry.';
       } else {
         _lastConnectError = 'System calendar API error. Please try again later.';
       }
