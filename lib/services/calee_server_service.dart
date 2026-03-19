@@ -319,7 +319,7 @@ class CaleeServerService {
               AND NOT EXISTS (
                 SELECT 1 FROM local_bindings lb
                 WHERE lb.remote_collection_id = rc.id
-              ) THEN 'relink_required'
+              ) THEN 'reconnect_required'
             ELSE NULL
           END,
           0,
@@ -334,7 +334,7 @@ class CaleeServerService {
       await txn.rawUpdate('''
         UPDATE collection_states
         SET sync_gate_reason = CASE
-          WHEN sync_gate_reason IN ('relink_verifying', 'relink_mismatch')
+          WHEN sync_gate_reason IN ('reconnect_verifying', 'reconnect_mismatch')
             THEN sync_gate_reason
           WHEN (
             SELECT rc.origin_kind FROM remote_collections rc
@@ -343,7 +343,7 @@ class CaleeServerService {
           AND NOT EXISTS (
             SELECT 1 FROM local_bindings lb
             WHERE lb.remote_collection_id = collection_states.remote_collection_id
-          ) THEN 'relink_required'
+          ) THEN 'reconnect_required'
           WHEN sync_gate_reason IS NOT NULL AND sync_gate_reason != ''
             THEN sync_gate_reason
           ELSE NULL

@@ -148,14 +148,22 @@ class BackgroundSyncWorkerBridge implements BackgroundSyncRunnerApi {
         message.contains('environment_blocked') ||
         message.contains('auth_invalid') ||
         message.contains('binding_invalid') ||
-        message.contains('repair_required');
+        message.contains('repair_required') ||
+        message.contains('reconnect_required') ||
+        message.contains('reconnect_verifying') ||
+        message.contains('reconnect_mismatch');
   }
 
   static BackgroundGateReason _classifyGate(String message) {
     if (message.contains('no_network') || message.contains('network')) return BackgroundGateReason.noNetwork;
     if (message.contains('auth_invalid') || message.contains('no_account')) return BackgroundGateReason.authInvalid;
     if (message.contains('binding_invalid')) return BackgroundGateReason.bindingInvalid;
-    if (message.contains('repair_required')) return BackgroundGateReason.repairRequired;
+    if (message.contains('repair_required') ||
+        message.contains('reconnect_required') ||
+        message.contains('reconnect_verifying') ||
+        message.contains('reconnect_mismatch')) {
+      return BackgroundGateReason.repairRequired;
+    }
     if (message.contains('environment_blocked')) return BackgroundGateReason.environmentBlocked;
     if (message.contains('local_calendar_missing')) return BackgroundGateReason.localCalendarMissing;
     return BackgroundGateReason.unknown;

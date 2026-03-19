@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:caleesync/common/app_constant.dart';
 import 'package:caleesync/common/utils/mmkv_utils.dart';
@@ -10,6 +11,7 @@ import 'package:uuid/uuid.dart';
 
 import '../sync/SyncEnum.dart';
 import '../sync/SyncEngine.dart';
+import '../sync/ios_remote_mirror_identity.dart';
 import '../sync/sync_gate_reason.dart';
 import '../sync/background_sync_scheduler.dart';
 import '../services/calee_server_service.dart';
@@ -67,6 +69,75 @@ class SyncRepository {
     if (id == null) return false;
     final String normalized = id.trim();
     return normalized.isNotEmpty && normalized.toLowerCase() != 'null';
+  }
+
+  String _expectedIosRemoteMirrorTitle(String displayName, String remotePath) {
+    return IosRemoteMirrorIdentity.expectedTitle(displayName, remotePath);
+  }
+
+  List<PlatformCalendar> _findExactIosRemoteReclaimCandidate({
+    required List<PlatformCalendar> calendars,
+    required Set<String> excludedIds,
+    required String displayName,
+    required String remotePath,
+  }) {
+    return calendars.where((calendar) {
+      final String id = (calendar.id ?? '').trim();
+      return id.isNotEmpty &&
+          !excludedIds.contains(id) &&
+          IosRemoteMirrorIdentity.isExactMatch(calendar, displayName, remotePath);
+    }).toList(growable: false);
+  }
+
+  List<PlatformCalendar> _findLooseIosRemoteReclaimCandidates({
+    required List<PlatformCalendar> calendars,
+    required Set<String> excludedIds,
+    required String displayName,
+  }) {
+    return calendars.where((calendar) {
+      final String id = (calendar.id ?? '').trim();
+      return id.isNotEmpty &&
+          !excludedIds.contains(id) &&
+          IosRemoteMirrorIdentity.isLooseCaleeCandidate(calendar, displayName);
+    }).toList(growable: false);
+  }
+
+  Future<void> _setReconnectGate(Database db, int remoteCollectionId, String reason) async {
+    final int now = DateTime.now().millisecondsSinceEpoch;
+    await db.insert(
+      'collection_states',
+      {
+        'remote_collection_id': remoteCollectionId,
+        'sync_gate_reason': reason,
+        'updated_at': now,
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    await db.update(
+      'collection_states',
+      {'sync_gate_reason': reason, 'updated_at': now},
+      where: 'remote_collection_id = ?',
+      whereArgs: [remoteCollectionId],
+    );
+  }
+
+  Future<void> _clearReconnectGate(DatabaseExecutor db, int remoteCollectionId) async {
+    final int now = DateTime.now().millisecondsSinceEpoch;
+    await db.insert(
+      'collection_states',
+      {
+        'remote_collection_id': remoteCollectionId,
+        'sync_gate_reason': null,
+        'updated_at': now,
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    await db.update(
+      'collection_states',
+      {'sync_gate_reason': null, 'updated_at': now},
+      where: 'remote_collection_id = ?',
+      whereArgs: [remoteCollectionId],
+    );
   }
 
 
@@ -469,9 +540,16 @@ class SyncRepository {
       // 仅当存在 local_id 时尝试系统改名
       final String? resolvedLocalId = cal['local_collection_id']?.toString();
       if (resolvedLocalId != null && resolvedLocalId.isNotEmpty) {
+        final bool useIosRemoteMirrorTitle =
+            Platform.isIOS &&
+            ((cal['origin_kind'] as int?) ?? SyncBindingOrigin.remote) == SyncBindingOrigin.remote &&
+            (path ?? '').trim().isNotEmpty;
+        final String localTitle = useIosRemoteMirrorTitle
+            ? _expectedIosRemoteMirrorTitle(newName, path!)
+            : newName;
         final bool localRenameOk = await _nativeApi.modifyCalendarTitle(
           resolvedLocalId,
-          newName,
+          localTitle,
           accountName,
           AppConstant.calendarAccountType,
         );
@@ -568,12 +646,11 @@ class SyncRepository {
       }
 
       final String syncGateReason = (remote['sync_gate_reason']?.toString() ?? '').trim();
-      if (syncGateReason == SyncGateReason.relinkRequired ||
-          syncGateReason == SyncGateReason.relinkVerifying ||
-          syncGateReason == SyncGateReason.relinkMismatch) {
+      if (syncGateReason == SyncGateReason.reconnectRequired ||
+          syncGateReason == SyncGateReason.reconnectVerifying ||
+          syncGateReason == SyncGateReason.reconnectMismatch) {
         _lastConnectError =
-            'This calendar needs a quick relink. Open "Link to Device Calendar" to relink it, '
-            'or delete the current remote calendar and link again.';
+            'This calendar needs reconnecting on this device. Tap Reconnect to continue.';
         return EnableCalendarResult.failure(remotePath: persistedRemotePath);
       }
 
@@ -603,13 +680,10 @@ class SyncRepository {
       }
 
       // Get calendars with permission error handling
-      Set<String> nativeCalendarIds;
+      List<PlatformCalendar> nativeCalendars;
       try {
-        nativeCalendarIds = (await _nativeApi.getCalendars())
-            .whereType<PlatformCalendar>()
-            .map((calendar) => calendar.id ?? '')
-            .where((id) => id.isNotEmpty)
-            .toSet();
+        nativeCalendars =
+            (await _nativeApi.getCalendars()).whereType<PlatformCalendar>().toList(growable: false);
       } on PlatformException catch (e) {
         final String msg = '${e.code} ${e.message ?? ''}'.toLowerCase();
         if (msg.contains('permission') || e.code == 'PERMISSION_DENIED') {
@@ -623,6 +697,11 @@ class SyncRepository {
         return EnableCalendarResult.failure(remotePath: persistedRemotePath);
       }
 
+      final Set<String> nativeCalendarIds = nativeCalendars
+          .map((calendar) => (calendar.id ?? '').trim())
+          .where((id) => id.isNotEmpty)
+          .toSet();
+
       if (existingLocalId.isNotEmpty && nativeCalendarIds.contains(existingLocalId)) {
         final int now = DateTime.now().millisecondsSinceEpoch;
         await db.insert(
@@ -634,6 +713,7 @@ class SyncRepository {
           },
           conflictAlgorithm: ConflictAlgorithm.ignore,
         );
+        await _clearReconnectGate(db, remoteCollectionId);
         await db.update(
           'collection_states',
           {'is_enabled': 1, 'updated_at': now},
@@ -651,6 +731,80 @@ class SyncRepository {
         );
       }
 
+      if (Platform.isIOS && existingOriginKind == SyncBindingOrigin.remote) {
+        final List<Map<String, dynamic>> boundLocalRows = await db.rawQuery('''
+          SELECT local_collection_id
+          FROM local_bindings
+          WHERE local_collection_id IS NOT NULL
+            AND local_collection_id != ''
+        ''');
+        final Set<String> excludedIds = {
+          for (final row in boundLocalRows) (row['local_collection_id'] ?? '').toString().trim(),
+        }..remove('');
+
+        final List<PlatformCalendar> exactMatches = _findExactIosRemoteReclaimCandidate(
+          calendars: nativeCalendars,
+          excludedIds: excludedIds,
+          displayName: displayName,
+          remotePath: persistedRemotePath,
+        );
+
+        if (exactMatches.length == 1) {
+          final String reclaimedLocalId = (exactMatches.first.id ?? '').trim();
+          final int now = DateTime.now().millisecondsSinceEpoch;
+          await db.transaction((txn) async {
+            await txn.insert(
+              'local_bindings',
+              {
+                'remote_collection_id': remoteCollectionId,
+                'local_collection_id': reclaimedLocalId,
+                'created_at': now,
+                'updated_at': now,
+              },
+              conflictAlgorithm: ConflictAlgorithm.replace,
+            );
+            await txn.insert(
+              'collection_states',
+              {
+                'remote_collection_id': remoteCollectionId,
+                'is_enabled': 1,
+                'updated_at': now,
+              },
+              conflictAlgorithm: ConflictAlgorithm.ignore,
+            );
+            await _clearReconnectGate(txn, remoteCollectionId);
+            await txn.update(
+              'collection_states',
+              {'is_enabled': 1, 'updated_at': now},
+              where: 'remote_collection_id = ?',
+              whereArgs: [remoteCollectionId],
+            );
+          });
+          _triggerOneShotForceSyncInBackground(remoteCollectionId);
+          return EnableCalendarResult(
+            success: true,
+            remotePath: persistedRemotePath,
+            remoteCollectionId: remoteCollectionId,
+            localCalendarId: reclaimedLocalId,
+            didTriggerSync: true,
+            hasFreshEventCount: false,
+          );
+        }
+
+        final List<PlatformCalendar> looseMatches = _findLooseIosRemoteReclaimCandidates(
+          calendars: nativeCalendars,
+          excludedIds: excludedIds,
+          displayName: displayName,
+        );
+
+        if (exactMatches.length > 1 || looseMatches.isNotEmpty) {
+          await _setReconnectGate(db, remoteCollectionId, SyncGateReason.reconnectRequired);
+          _lastConnectError =
+              'This calendar needs reconnecting on this device. Tap Reconnect to continue.';
+          return EnableCalendarResult.failure(remotePath: persistedRemotePath);
+        }
+      }
+
       int colorInt = 0xFF4CAF50;
       final String colorHex = remote['color']?.toString() ?? '';
       if (colorHex.isNotEmpty) {
@@ -662,7 +816,10 @@ class SyncRepository {
         }
       }
 
-      final String? newLocalId = await _nativeApi.createCalendar(displayName, accountName, colorInt);
+      final String calendarTitle = Platform.isIOS && existingOriginKind == SyncBindingOrigin.remote
+          ? _expectedIosRemoteMirrorTitle(displayName, persistedRemotePath)
+          : displayName;
+      final String? newLocalId = await _nativeApi.createCalendar(calendarTitle, accountName, colorInt);
       if (!_isValidLocalCollectionId(newLocalId)) {
         _lastConnectError = 'Failed to create local calendar. Check calendar permissions and try again.';
         return EnableCalendarResult.failure(remotePath: persistedRemotePath);
@@ -694,6 +851,7 @@ class SyncRepository {
             conflictAlgorithm: ConflictAlgorithm.ignore,
           );
 
+          await _clearReconnectGate(txn, remoteCollectionId);
           await txn.update(
             'collection_states',
             {'is_enabled': 1, 'updated_at': now},

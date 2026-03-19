@@ -196,7 +196,8 @@ class CaleeSyncPeriodicWorker {
         case "no_network": return .noNetwork
         case "auth_invalid": return .authInvalid
         case "binding_invalid": return .bindingInvalid
-        case "repair_required": return .repairRequired
+        case "repair_required", "reconnect_required", "reconnect_verifying", "reconnect_mismatch":
+            return .repairRequired
         case "environment_blocked": return .environmentBlocked
         case "local_calendar_missing": return .localCalendarMissing
         case "unknown": return .unknown
@@ -511,4 +512,3 @@ extension os.Logger {
     private static var subsystem = Bundle.main.bundleIdentifier!
     static let `default` = Logger(subsystem: subsystem, category: "CaleeSyncWorker")
 }
-
