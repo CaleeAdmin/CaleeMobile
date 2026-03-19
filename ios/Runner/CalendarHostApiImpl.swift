@@ -140,6 +140,8 @@ import EventKit
     case .restricted: return "restricted"
     case .denied: return "denied"
     case .authorized: return "authorized"
+    case .fullAccess: return "fullAccess"
+    case .writeOnly: return "writeOnly"
     @unknown default: return "unknown"
     }
   }
