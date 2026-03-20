@@ -22,6 +22,12 @@ class CaleeSyncPeriodicWorker {
     static let KEY_LAST_FAILURE_STAGE = "last_failure_stage"
     static let KEY_LAST_FAILURE_ELAPSED_MS = "last_failure_elapsed_ms"
     static let KEY_LAST_FAILURE_STEP = "last_failure_step"
+    static let KEY_LAUNCH_CLASSIFIER_MODE = "launch_classifier_mode"
+    static let KEY_LAUNCH_CLASSIFIER_APP_STATE = "launch_classifier_app_state"
+    static let KEY_LAUNCH_CLASSIFIER_HAS_LAUNCH_OPTIONS = "launch_classifier_has_launch_options"
+    static let KEY_LAUNCH_CLASSIFIER_LAUNCH_OPTION_KEYS = "launch_classifier_launch_option_keys"
+    static let KEY_LAUNCH_CLASSIFIER_DID_USE_BACKGROUND_SAFE_REGISTRANT = "launch_classifier_did_use_background_safe_registrant"
+    static let KEY_LAUNCH_CLASSIFIER_DID_USE_FOREGROUND_REGISTRANT = "launch_classifier_did_use_foreground_registrant"
 
     static let PERIODIC_TASK_IDENTIFIER = "com.calee.caleesync.periodic"
     static let SYNC_TASK_IDENTIFIER = "com.calee.caleesync.sync"
@@ -85,7 +91,13 @@ class CaleeSyncPeriodicWorker {
             KEY_LAST_READY_VERSION: jsonNumber(from: prefs, key: KEY_LAST_READY_VERSION),
             KEY_PERIODIC_ENABLED: jsonBool(from: prefs, key: KEY_PERIODIC_ENABLED),
             KEY_PERIODIC_INTERVAL_MINUTES: jsonNumber(from: prefs, key: KEY_PERIODIC_INTERVAL_MINUTES),
-            KEY_PERIODIC_NEXT_AT: jsonNumber(from: prefs, key: KEY_PERIODIC_NEXT_AT)
+            KEY_PERIODIC_NEXT_AT: jsonNumber(from: prefs, key: KEY_PERIODIC_NEXT_AT),
+            KEY_LAUNCH_CLASSIFIER_MODE: jsonString(from: prefs, key: KEY_LAUNCH_CLASSIFIER_MODE),
+            KEY_LAUNCH_CLASSIFIER_APP_STATE: jsonString(from: prefs, key: KEY_LAUNCH_CLASSIFIER_APP_STATE),
+            KEY_LAUNCH_CLASSIFIER_HAS_LAUNCH_OPTIONS: jsonBool(from: prefs, key: KEY_LAUNCH_CLASSIFIER_HAS_LAUNCH_OPTIONS),
+            KEY_LAUNCH_CLASSIFIER_LAUNCH_OPTION_KEYS: jsonArray(from: prefs, key: KEY_LAUNCH_CLASSIFIER_LAUNCH_OPTION_KEYS),
+            KEY_LAUNCH_CLASSIFIER_DID_USE_BACKGROUND_SAFE_REGISTRANT: jsonBool(from: prefs, key: KEY_LAUNCH_CLASSIFIER_DID_USE_BACKGROUND_SAFE_REGISTRANT),
+            KEY_LAUNCH_CLASSIFIER_DID_USE_FOREGROUND_REGISTRANT: jsonBool(from: prefs, key: KEY_LAUNCH_CLASSIFIER_DID_USE_FOREGROUND_REGISTRANT)
         ]
 
         do {
@@ -269,6 +281,15 @@ class CaleeSyncPeriodicWorker {
         guard let value = prefs.object(forKey: key) else { return NSNull() }
         if let boolValue = value as? Bool {
             return boolValue
+        }
+        return NSNull()
+    }
+
+
+    private static func jsonArray(from prefs: UserDefaults, key: String) -> Any {
+        guard let value = prefs.object(forKey: key) else { return NSNull() }
+        if let arrayValue = value as? [String] {
+            return arrayValue
         }
         return NSNull()
     }
