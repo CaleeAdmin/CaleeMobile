@@ -5,6 +5,7 @@ final class BackgroundSafePluginRegistrant {
   private static let lock = NSLock()
   private static var backgroundRegistered = Set<ObjectIdentifier>()
   private static var foregroundRegistered = Set<ObjectIdentifier>()
+  private static var foregroundRemainderRegistered = Set<ObjectIdentifier>()
 
   static func registerBackgroundPlugins(with registry: FlutterPluginRegistry) {
     register(registry, trackedBy: &backgroundRegistered) {
@@ -30,6 +31,12 @@ final class BackgroundSafePluginRegistrant {
   static func registerForegroundPlugins(with registry: FlutterPluginRegistry) {
     register(registry, trackedBy: &foregroundRegistered) {
       GeneratedPluginRegistrant.register(with: registry)
+    }
+  }
+
+  static func registerForegroundOnlyPlugins(with registry: FlutterPluginRegistry) {
+    register(registry, trackedBy: &foregroundRemainderRegistered) {
+      registerForegroundOnlyRemainder(on: registry)
     }
   }
 
@@ -65,6 +72,34 @@ final class BackgroundSafePluginRegistrant {
     }
 
     pluginType.register(with: registrar)
+  }
+
+  private static func registerForegroundOnlyRemainder(on registry: FlutterPluginRegistry) {
+    registerPlugin(
+      named: "DeviceCalendarPlugin",
+      with: registry,
+      aliases: ["device_calendar.DeviceCalendarPlugin"]
+    )
+    registerPlugin(
+      named: "MobileScannerPlugin",
+      with: registry,
+      aliases: ["mobile_scanner.MobileScannerPlugin"]
+    )
+    registerPlugin(
+      named: "PermissionHandlerPlugin",
+      with: registry,
+      aliases: ["permission_handler_apple.PermissionHandlerPlugin"]
+    )
+    registerPlugin(
+      named: "URLLauncherPlugin",
+      with: registry,
+      aliases: ["url_launcher_ios.URLLauncherPlugin"]
+    )
+    registerPlugin(
+      named: "FWFWebViewFlutterPlugin",
+      with: registry,
+      aliases: ["webview_flutter_wkwebview.FWFWebViewFlutterPlugin"]
+    )
   }
 
   private static func pluginType(
