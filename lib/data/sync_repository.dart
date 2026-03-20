@@ -128,6 +128,33 @@ class SyncRepository {
     return '$displayName $suffix';
   }
 
+  String _buildNativeRenameTitleForCurrentPlatform({
+    required String newName,
+    required int originKind,
+    required String remotePath,
+    String? originKey,
+  }) {
+    if (!Platform.isIOS) {
+      return newName;
+    }
+    if (originKind != SyncBindingOrigin.remote) {
+      return newName;
+    }
+
+    final String marker = _deriveIosRemoteMirrorMarker(
+      remotePath: remotePath,
+      originKey: originKey,
+    ).trim();
+    if (marker.isEmpty) {
+      return newName;
+    }
+
+    return _buildIosRemoteMirrorTitle(
+      displayName: newName,
+      marker: marker,
+    );
+  }
+
   ({String baseName, String marker})? _parseIosRemoteMirrorTitle(String title) {
     final String trimmedTitle = title.trim();
     final RegExpMatch? match = RegExp(r'^(.*) \[([A-Z0-9]{8})\]$').firstMatch(
@@ -524,6 +551,8 @@ class SyncRepository {
     final cal = maps.first;
 // 如果字段可能为空, 用 String?
     final String? path = cal['remote_path'] as String?;
+    final int originKind = (cal['origin_kind'] as int?) ?? SyncBindingOrigin.remote;
+    final String? originKey = cal['origin_key']?.toString();
 
 // 如果你确定 account_name 绝对有值, 用 String
     final String accountName = (cal['account_name'] ?? '').toString();
@@ -546,9 +575,15 @@ class SyncRepository {
       // 仅当存在 local_id 时尝试系统改名
       final String? resolvedLocalId = cal['local_collection_id']?.toString();
       if (resolvedLocalId != null && resolvedLocalId.isNotEmpty) {
+        final String nativeRenameTitle = _buildNativeRenameTitleForCurrentPlatform(
+          newName: newName,
+          originKind: originKind,
+          remotePath: path ?? '',
+          originKey: originKey,
+        );
         final bool localRenameOk = await _nativeApi.modifyCalendarTitle(
           resolvedLocalId,
-          newName,
+          nativeRenameTitle,
           accountName,
           AppConstant.calendarAccountType,
         );
