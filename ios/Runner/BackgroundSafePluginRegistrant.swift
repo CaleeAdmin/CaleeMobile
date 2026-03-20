@@ -1,9 +1,5 @@
 import Flutter
 import Foundation
-import mmkv
-import path_provider_foundation
-import package_info_plus
-import sqflite_darwin
 
 final class BackgroundSafePluginRegistrant {
   private static let lock = NSLock()
@@ -12,10 +8,22 @@ final class BackgroundSafePluginRegistrant {
 
   static func registerBackgroundPlugins(with registry: FlutterPluginRegistry) {
     register(registry, trackedBy: &backgroundRegistered) {
-      MMKVPlugin.register(with: registry.registrar(forPlugin: "MMKVPlugin"))
-      PathProviderPlugin.register(with: registry.registrar(forPlugin: "PathProviderPlugin"))
-      FPPPackageInfoPlusPlugin.register(with: registry.registrar(forPlugin: "FPPPackageInfoPlusPlugin"))
-      SqflitePlugin.register(with: registry.registrar(forPlugin: "SqflitePlugin"))
+      registerPlugin(named: "MMKVPlugin", with: registry, aliases: ["mmkv.MMKVPlugin", "mmkv_ios.MMKVPlugin"])
+      registerPlugin(
+        named: "PathProviderPlugin",
+        with: registry,
+        aliases: ["path_provider_foundation.PathProviderPlugin"]
+      )
+      registerPlugin(
+        named: "FPPPackageInfoPlusPlugin",
+        with: registry,
+        aliases: ["package_info_plus.FPPPackageInfoPlusPlugin"]
+      )
+      registerPlugin(
+        named: "SqflitePlugin",
+        with: registry,
+        aliases: ["sqflite_darwin.SqflitePlugin"]
+      )
     }
   }
 
@@ -41,5 +49,30 @@ final class BackgroundSafePluginRegistrant {
 
     guard !isAlreadyRegistered else { return }
     action()
+  }
+
+  private static func registerPlugin(
+    named registrarKey: String,
+    with registry: FlutterPluginRegistry,
+    aliases: [String] = []
+  ) {
+    guard let pluginType = pluginType(named: registrarKey, aliases: aliases) else {
+      return
+    }
+
+    pluginType.register(with: registry.registrar(forPlugin: registrarKey))
+  }
+
+  private static func pluginType(
+    named name: String,
+    aliases: [String]
+  ) -> FlutterPlugin.Type? {
+    for candidate in [name] + aliases {
+      if let pluginClass = NSClassFromString(candidate) as? FlutterPlugin.Type {
+        return pluginClass
+      }
+    }
+
+    return nil
   }
 }
