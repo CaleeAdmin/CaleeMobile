@@ -8,6 +8,7 @@ import os.log
   private var didRegisterForegroundPlugins = false
   private var didRegisterBackgroundSafePlugins = false
   private var launchedForBackgroundExecution = false
+  private var didChooseBackgroundSafeLaunchMode = false
 
   override func application(
     _ application: UIApplication,
@@ -59,6 +60,15 @@ import os.log
   override func applicationDidBecomeActive(_ application: UIApplication) {
     super.applicationDidBecomeActive(application)
     ensureForegroundPluginsRegisteredIfNeeded()
+
+    let mode = didChooseBackgroundSafeLaunchMode
+      ? "foreground_upgrade_after_background_launch"
+      : "foreground_active"
+    persistLaunchClassificationDiagnostics(
+      mode: mode,
+      application: application,
+      launchOptions: nil
+    )
     setupPigeonApis()
   }
 
@@ -66,26 +76,53 @@ import os.log
     _ application: UIApplication,
     _ launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
-    if application.applicationState == .background {
-      return true
-    }
-
-    guard let launchOptions, !launchOptions.isEmpty else {
+    if application.applicationState == .active {
       return false
     }
 
-    let foregroundKeys: Set<UIApplication.LaunchOptionsKey> = [
+    let explicitForegroundKeys: Set<UIApplication.LaunchOptionsKey> = [
       .url,
       .sourceApplication,
       .annotation,
       .shortcutItem,
       .userActivityDictionary,
-      .remoteNotification,
-      .localNotification,
     ]
 
-    return foregroundKeys.isDisjoint(with: Set(launchOptions.keys))
-      && application.applicationState != .active
+    guard let launchOptions else {
+      return true
+    }
+
+    return explicitForegroundKeys.isDisjoint(with: Set(launchOptions.keys))
+  }
+
+  private func persistLaunchClassificationDiagnostics(
+    mode: String,
+    application: UIApplication,
+    launchOptions: [UIApplication.LaunchOptionsKey: Any]?
+  ) {
+    let prefs = UserDefaults.standard
+    let launchOptionKeys = launchOptions?.keys.map { $0.rawValue }.sorted() ?? []
+
+    let applicationState: String
+    switch application.applicationState {
+    case .active:
+      applicationState = "active"
+    case .inactive:
+      applicationState = "inactive"
+    case .background:
+      applicationState = "background"
+    @unknown default:
+      applicationState = "unknown"
+    }
+
+    prefs.set(mode, forKey: "launch_classifier_mode")
+    prefs.set(applicationState, forKey: "launch_classifier_app_state")
+    prefs.set(launchOptions != nil, forKey: "launch_classifier_has_launch_options")
+    prefs.set(launchOptionKeys, forKey: "launch_classifier_launch_option_keys")
+    prefs.set(didRegisterBackgroundSafePlugins, forKey: "launch_classifier_did_use_background_safe_registrant")
+    prefs.set(didRegisterForegroundPlugins, forKey: "launch_classifier_did_use_foreground_registrant")
+
+    CaleeSyncPeriodicWorker.writeDiagnosticsFile()
   }
 
   private func registerPluginsForLaunch(
@@ -94,13 +131,24 @@ import os.log
   ) {
     if isBackgroundExecutionLaunch(application, launchOptions) {
       launchedForBackgroundExecution = true
+      didChooseBackgroundSafeLaunchMode = true
       BackgroundSafePluginRegistrant.registerBackgroundPlugins(with: self)
       didRegisterBackgroundSafePlugins = true
+      persistLaunchClassificationDiagnostics(
+        mode: "background_safe",
+        application: application,
+        launchOptions: launchOptions
+      )
       return
     }
 
     BackgroundSafePluginRegistrant.registerForegroundPlugins(with: self)
     didRegisterForegroundPlugins = true
+    persistLaunchClassificationDiagnostics(
+      mode: "foreground_full",
+      application: application,
+      launchOptions: launchOptions
+    )
   }
 
   @MainActor
@@ -111,6 +159,11 @@ import os.log
 
     BackgroundSafePluginRegistrant.registerForegroundPlugins(with: self)
     didRegisterForegroundPlugins = true
+    persistLaunchClassificationDiagnostics(
+      mode: "foreground_upgrade_after_background_launch",
+      application: UIApplication.shared,
+      launchOptions: nil
+    )
   }
 
   private func logBackgroundModesConfiguration() {
