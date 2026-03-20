@@ -737,9 +737,9 @@ class SyncRepository {
       if (msg.contains('permission')) {
         _lastConnectError = 'Calendar permission missing. Grant permission in system settings and retry.';
       } else if (e.code == 'SOURCE_ERROR') {
-        _lastConnectError = 'iPhone calendar account is not available for creating a new calendar.';
+        _lastConnectError = 'iCloud calendar account is not available on this iPhone.';
       } else if (e.code == 'SAVE_ERROR') {
-        _lastConnectError = 'iPhone refused to create the calendar. Please check the default calendar account and try again.';
+        _lastConnectError = 'iPhone could not create the calendar in iCloud.';
       } else if (e.code == 'NOT_FOUND') {
         _lastConnectError = 'The selected iPhone calendar could not be found. Refresh calendars and try again.';
       } else if (msg.contains('provider')) {
