@@ -575,7 +575,10 @@ import EventKit
 
     let writableSources = Array(
       Dictionary(
-        writableEventCalendars.map { ($0.source.sourceIdentifier, $0.source) },
+        writableEventCalendars.compactMap { calendar in
+          guard let source = calendar.source else { return nil }
+          return (source.sourceIdentifier, source)
+        },
         uniquingKeysWith: { first, _ in first }
       ).values
     )
