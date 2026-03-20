@@ -157,7 +157,7 @@ import os.log
       return
     }
 
-    BackgroundSafePluginRegistrant.registerForegroundPlugins(with: self)
+    BackgroundSafePluginRegistrant.registerForegroundOnlyPlugins(with: self)
     didRegisterForegroundPlugins = true
     persistLaunchClassificationDiagnostics(
       mode: "foreground_upgrade_after_background_launch",
