@@ -575,28 +575,37 @@ import EventKit
         && calendar.type != .subscription
     }
 
-    let writableSources = Dictionary(grouping: writableCalendars, by: \.source).keys
+    let writableSources = Array(
+      Set(writableCalendars.compactMap { $0.source })
+    )
 
-    if let mobileMeSource = writableSources.first(where: { $0.sourceType == .mobileMe }) {
+    if let mobileMeSource = writableSources.first(where: { source in
+      source.sourceType == .mobileMe
+    }) {
       return mobileMeSource
     }
 
-    if let calDAVICloudSource = writableSources.first(where: {
-      $0.sourceType == .calDAV && $0.title == "iCloud"
+    if let calDAVICloudSource = writableSources.first(where: { source in
+      source.sourceType == .calDAV && source.title == "iCloud"
     }) {
       return calDAVICloudSource
     }
 
-    if let defaultSource = store.defaultCalendarForNewEvents?.source,
-       writableSources.contains(defaultSource),
-       defaultSource.sourceType != .exchange,
-       defaultSource.sourceType != .local,
-       defaultSource.sourceType != .subscribed,
-       defaultSource.sourceType != .birthdays {
-      return defaultSource
+    if let defaultSource = store.defaultCalendarForNewEvents?.source {
+      let isWritableSource = writableSources.contains(defaultSource)
+      let isPreferredSourceType = defaultSource.sourceType != .exchange
+        && defaultSource.sourceType != .local
+        && defaultSource.sourceType != .subscribed
+        && defaultSource.sourceType != .birthdays
+
+      if isWritableSource && isPreferredSourceType {
+        return defaultSource
+      }
     }
 
-    if let titledICloudSource = writableSources.first(where: { $0.title == "iCloud" }) {
+    if let titledICloudSource = writableSources.first(where: { source in
+      source.title == "iCloud"
+    }) {
       return titledICloudSource
     }
 
