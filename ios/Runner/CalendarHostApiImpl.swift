@@ -429,11 +429,11 @@ import EventKit
   ) {
     do {
       let store = try requireReadableEventStore()
-      guard let source = selectWritableEventSourceForCalendarCreation(store: store) else {
+      guard let source = selectWritableICloudEventSource(store: store) else {
         completion(.failure(
           FlutterError(
             code: "SOURCE_ERROR",
-            message: "No writable EventKit source available for calendar creation",
+            message: "No writable iCloud calendar source available",
             details: [
               "accountName": accountName,
               "availableSources": store.sources.map {
@@ -568,20 +568,18 @@ import EventKit
 
   // MARK: - Source helpers
 
-  private func selectWritableEventSourceForCalendarCreation(store: EKEventStore) -> EKSource? {
-    if let defaultSource = store.defaultCalendarForNewEvents?.source {
-      return defaultSource
+  private func selectWritableICloudEventSource(store: EKEventStore) -> EKSource? {
+    let iCloudSources = store.sources.filter { $0.sourceType == .mobileMe }
+
+    if let sourceWithWritableCalendar = iCloudSources.first(where: { source in
+      source.calendars(for: .event).contains { calendar in
+        calendar.allowsContentModifications && calendar.type != .subscription
+      }
+    }) {
+      return sourceWithWritableCalendar
     }
 
-    let writableEventCalendars = store.calendars(for: .event).filter {
-      $0.allowsContentModifications && $0.type != .subscription
-    }
-
-    if let existingWritableSource = writableEventCalendars.first?.source {
-      return existingWritableSource
-    }
-
-    return store.sources.first(where: { $0.sourceType == .local })
+    return iCloudSources.first
   }
 
   private func findSource(forAccountName accountName: String, store: EKEventStore) -> EKSource? {
