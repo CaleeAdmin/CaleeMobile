@@ -460,7 +460,7 @@ class CaleeSyncPeriodicWorker {
 
         currentEngine = engine
         persistStage(STAGE_ENGINE_CREATED)
-        GeneratedPluginRegistrant.register(with: engine)
+        BackgroundSafePluginRegistrant.registerBackgroundPlugins(with: engine)
 
         setupAndRunSync(engine: engine, trigger: trigger, task: task, attemptStartedAt: attemptStartedAt)
     }
