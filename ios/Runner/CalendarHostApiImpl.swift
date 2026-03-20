@@ -584,7 +584,8 @@ import EventKit
       return iCloudSource
     }
 
-    if let defaultSource = store.defaultCalendarForNewEvents?.source,
+    if let defaultCalendar = store.defaultCalendarForNewEvents,
+       let defaultSource = defaultCalendar.source,
        defaultSource.sourceType == .mobileMe || writableSources.contains(where: {
          $0.sourceIdentifier == defaultSource.sourceIdentifier
        }) {
