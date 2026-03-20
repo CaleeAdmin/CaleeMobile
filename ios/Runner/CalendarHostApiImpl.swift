@@ -429,11 +429,11 @@ import EventKit
   ) {
     do {
       let store = try requireReadableEventStore()
-      guard let source = selectWritableICloudEventSource(store: store) else {
+      guard let source = selectPreferredWritableEventSource(store: store) else {
         completion(.failure(
           FlutterError(
             code: "SOURCE_ERROR",
-            message: "No writable iCloud calendar source available",
+            message: "No suitable writable preferred calendar source available",
             details: [
               "accountName": accountName,
               "availableSources": store.sources.map {
@@ -568,18 +568,39 @@ import EventKit
 
   // MARK: - Source helpers
 
-  private func selectWritableICloudEventSource(store: EKEventStore) -> EKSource? {
-    let iCloudSources = store.sources.filter { $0.sourceType == .mobileMe }
-
-    if let sourceWithWritableCalendar = iCloudSources.first(where: { source in
-      source.calendars(for: .event).contains { calendar in
-        calendar.allowsContentModifications && calendar.type != .subscription
-      }
-    }) {
-      return sourceWithWritableCalendar
+  private func selectPreferredWritableEventSource(store: EKEventStore) -> EKSource? {
+    let writableCalendars = store.calendars(for: .event).filter { calendar in
+      calendar.allowsContentModifications
+        && !calendar.isImmutable
+        && calendar.type != .subscription
     }
 
-    return iCloudSources.first
+    let writableSources = Dictionary(grouping: writableCalendars, by: \.source).keys
+
+    if let mobileMeSource = writableSources.first(where: { $0.sourceType == .mobileMe }) {
+      return mobileMeSource
+    }
+
+    if let calDAVICloudSource = writableSources.first(where: {
+      $0.sourceType == .calDAV && $0.title == "iCloud"
+    }) {
+      return calDAVICloudSource
+    }
+
+    if let defaultSource = store.defaultCalendarForNewEvents?.source,
+       writableSources.contains(defaultSource),
+       defaultSource.sourceType != .exchange,
+       defaultSource.sourceType != .local,
+       defaultSource.sourceType != .subscribed,
+       defaultSource.sourceType != .birthdays {
+      return defaultSource
+    }
+
+    if let titledICloudSource = writableSources.first(where: { $0.title == "iCloud" }) {
+      return titledICloudSource
+    }
+
+    return nil
   }
 
   private func findSource(forAccountName accountName: String, store: EKEventStore) -> EKSource? {
