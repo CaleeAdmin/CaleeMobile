@@ -569,16 +569,34 @@ import EventKit
   // MARK: - Source helpers
 
   private func selectWritableEventSourceForCalendarCreation(store: EKEventStore) -> EKSource? {
-    if let defaultSource = store.defaultCalendarForNewEvents?.source {
-      return defaultSource
-    }
-
     let writableEventCalendars = store.calendars(for: .event).filter {
       $0.allowsContentModifications && $0.type != .subscription
     }
 
-    if let existingWritableSource = writableEventCalendars.first?.source {
+    let writableSources = Array(
+      Dictionary(
+        writableEventCalendars.map { ($0.source.sourceIdentifier, $0.source) },
+        uniquingKeysWith: { first, _ in first }
+      ).values
+    )
+
+    if let iCloudSource = writableSources.first(where: { $0.sourceType == .mobileMe }) {
+      return iCloudSource
+    }
+
+    if let defaultSource = store.defaultCalendarForNewEvents?.source,
+       defaultSource.sourceType == .mobileMe || writableSources.contains(where: {
+         $0.sourceIdentifier == defaultSource.sourceIdentifier
+       }) {
+      return defaultSource
+    }
+
+    if let existingWritableSource = writableSources.first {
       return existingWritableSource
+    }
+
+    if let iCloudSource = store.sources.first(where: { $0.sourceType == .mobileMe }) {
+      return iCloudSource
     }
 
     return store.sources.first(where: { $0.sourceType == .local })
