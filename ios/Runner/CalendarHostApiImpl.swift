@@ -598,7 +598,8 @@ import EventKit
     var remainingSourcesByIdentifier: [String: EKSource] = [:]
     var remainingSourcesByFallbackKey: [String: EKSource] = [:]
     for source in allSources {
-      if let sourceIdentifier = source.sourceIdentifier {
+      let sourceIdentifier = source.sourceIdentifier
+      if !sourceIdentifier.isEmpty {
         remainingSourcesByIdentifier[sourceIdentifier] = source
       }
       remainingSourcesByFallbackKey[Self.sourceFallbackKey(title: source.title, sourceType: source.sourceType)] = source
@@ -722,7 +723,8 @@ import EventKit
   }
 
   private func describe(source: EKSource) -> String {
-    if let sourceIdentifier = source.sourceIdentifier, !sourceIdentifier.isEmpty {
+    let sourceIdentifier = source.sourceIdentifier
+    if !sourceIdentifier.isEmpty {
       return "\(source.title) [\(string(from: source.sourceType))] {id=\(sourceIdentifier)}"
     }
     return "\(source.title) [\(string(from: source.sourceType))]"
