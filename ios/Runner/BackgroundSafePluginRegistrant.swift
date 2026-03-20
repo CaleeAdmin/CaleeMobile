@@ -60,7 +60,11 @@ final class BackgroundSafePluginRegistrant {
       return
     }
 
-    pluginType.register(with: registry.registrar(forPlugin: registrarKey))
+    guard let registrar = registry.registrar(forPlugin: registrarKey) else {
+      return
+    }
+
+    pluginType.register(with: registrar)
   }
 
   private static func pluginType(
