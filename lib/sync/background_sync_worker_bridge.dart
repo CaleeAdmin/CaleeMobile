@@ -137,6 +137,7 @@ class BackgroundSyncWorkerBridge implements BackgroundSyncRunnerApi {
 
   static SyncRunTrigger _mapTrigger(String trigger) {
     final normalized = trigger.toLowerCase();
+    if (normalized.contains('watchdog')) return SyncRunTrigger.periodic;
     if (normalized.contains('periodic')) return SyncRunTrigger.periodic;
     if (normalized.contains('force')) return SyncRunTrigger.force;
     if (normalized.contains('auto')) return SyncRunTrigger.autoForeground;

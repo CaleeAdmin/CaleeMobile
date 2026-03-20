@@ -44,6 +44,7 @@ import os.log
         CaleeSyncPeriodicWorker.cancelPeriodic()
         CaleeSyncPeriodicWorker.cancelWatchdogAlarm()
       }
+      CaleeSyncPeriodicWorker.writeDiagnosticsFile()
     }
     
     // Setup Pigeon APIs when Flutter engine is ready

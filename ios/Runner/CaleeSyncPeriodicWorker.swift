@@ -45,6 +45,57 @@ class CaleeSyncPeriodicWorker {
     
     private static var currentEngine: FlutterEngine?
     private static var isRunning = false
+
+    static func diagnosticsDirectoryUrl() -> URL? {
+        guard let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            Logger.default.error("Failed to resolve documents directory for diagnostics export")
+            return nil
+        }
+
+        let diagnosticsDirectory = documentsDirectory.appendingPathComponent("background_sync_diagnostics", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: diagnosticsDirectory, withIntermediateDirectories: true)
+            return diagnosticsDirectory
+        } catch {
+            Logger.default.error("Failed to create diagnostics directory: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    static func diagnosticsFileUrl() -> URL? {
+        diagnosticsDirectoryUrl()?.appendingPathComponent("latest_native_background_state.json", isDirectory: false)
+    }
+
+    static func writeDiagnosticsFile() {
+        let prefs = UserDefaults.standard
+        guard let diagnosticsFileUrl = diagnosticsFileUrl() else { return }
+
+        let payload: [String: Any] = [
+            KEY_LAST_RUN_AT: jsonNumber(from: prefs, key: KEY_LAST_RUN_AT),
+            KEY_LAST_ATTEMPT_AT: jsonNumber(from: prefs, key: KEY_LAST_ATTEMPT_AT),
+            KEY_LAST_OUTCOME: jsonString(from: prefs, key: KEY_LAST_OUTCOME),
+            KEY_LAST_REASON: jsonString(from: prefs, key: KEY_LAST_REASON),
+            KEY_LAST_GATE: jsonString(from: prefs, key: KEY_LAST_GATE),
+            KEY_LAST_ERROR: jsonString(from: prefs, key: KEY_LAST_ERROR),
+            KEY_LAST_STAGE: jsonString(from: prefs, key: KEY_LAST_STAGE),
+            KEY_LAST_STAGE_AT: jsonNumber(from: prefs, key: KEY_LAST_STAGE_AT),
+            KEY_LAST_FAILURE_STAGE: jsonString(from: prefs, key: KEY_LAST_FAILURE_STAGE),
+            KEY_LAST_FAILURE_STEP: jsonString(from: prefs, key: KEY_LAST_FAILURE_STEP),
+            KEY_LAST_FAILURE_ELAPSED_MS: jsonNumber(from: prefs, key: KEY_LAST_FAILURE_ELAPSED_MS),
+            KEY_LAST_READY_VERSION: jsonNumber(from: prefs, key: KEY_LAST_READY_VERSION),
+            KEY_PERIODIC_ENABLED: jsonBool(from: prefs, key: KEY_PERIODIC_ENABLED),
+            KEY_PERIODIC_INTERVAL_MINUTES: jsonNumber(from: prefs, key: KEY_PERIODIC_INTERVAL_MINUTES),
+            KEY_PERIODIC_NEXT_AT: jsonNumber(from: prefs, key: KEY_PERIODIC_NEXT_AT)
+        ]
+
+        do {
+            let data = try JSONSerialization.data(withJSONObject: payload, options: [])
+            try data.write(to: diagnosticsFileUrl, options: .atomic)
+        } catch {
+            Logger.default.error("Failed to write diagnostics file: \(error.localizedDescription)")
+        }
+    }
+
     
     static func schedulePeriodic(intervalMinutes: Int) throws {
         let prefs = UserDefaults.standard
@@ -58,11 +109,15 @@ class CaleeSyncPeriodicWorker {
         let nextAtMs = (request.earliestBeginDate?.timeIntervalSince1970 ?? 0) * 1000
         prefs.set(nextAtMs, forKey: KEY_PERIODIC_NEXT_AT)
         Logger.default.info("Scheduled periodic task with interval: \(bounded) minutes")
+        writeDiagnosticsFile()
     }
     
     static func cancelPeriodic() {
         BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: PERIODIC_TASK_IDENTIFIER)
         Logger.default.info("Cancelled periodic task")
+        let prefs = UserDefaults.standard
+        prefs.removeObject(forKey: KEY_PERIODIC_NEXT_AT)
+        writeDiagnosticsFile()
     }
     
     static func isPeriodicScheduled() -> Bool {
@@ -106,6 +161,7 @@ class CaleeSyncPeriodicWorker {
         do {
             try BGTaskScheduler.shared.submit(request)
             Logger.default.info("Scheduled watchdog alarm")
+            writeDiagnosticsFile()
         } catch {
             Logger.default.error("Failed to schedule watchdog alarm: \(error.localizedDescription)")
         }
@@ -114,6 +170,7 @@ class CaleeSyncPeriodicWorker {
     static func cancelWatchdogAlarm() {
         BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: WATCHDOG_TASK_IDENTIFIER)
         Logger.default.info("Cancelled watchdog alarm")
+        writeDiagnosticsFile()
     }
     
     static func shouldSkipWatchdogOneOff() -> Bool {
@@ -183,6 +240,39 @@ class CaleeSyncPeriodicWorker {
         )
     }
     
+    private static func jsonString(from prefs: UserDefaults, key: String) -> Any {
+        guard let value = prefs.object(forKey: key) else { return NSNull() }
+        if let stringValue = value as? String {
+            return stringValue.isEmpty ? NSNull() : stringValue
+        }
+        return String(describing: value)
+    }
+
+    private static func jsonNumber(from prefs: UserDefaults, key: String) -> Any {
+        guard let value = prefs.object(forKey: key) else { return NSNull() }
+        if let number = value as? NSNumber {
+            return number
+        }
+        if let doubleValue = value as? Double {
+            return NSNumber(value: doubleValue)
+        }
+        if let intValue = value as? Int {
+            return NSNumber(value: intValue)
+        }
+        if let int64Value = value as? Int64 {
+            return NSNumber(value: int64Value)
+        }
+        return NSNull()
+    }
+
+    private static func jsonBool(from prefs: UserDefaults, key: String) -> Any {
+        guard let value = prefs.object(forKey: key) else { return NSNull() }
+        if let boolValue = value as? Bool {
+            return boolValue
+        }
+        return NSNull()
+    }
+
     private static func parseOutcome(_ raw: String?) -> BackgroundRunOutcome? {
         guard let raw = raw?.lowercased() else { return nil }
         switch raw {
@@ -223,6 +313,7 @@ class CaleeSyncPeriodicWorker {
         prefs.set(gateReason.rawValue, forKey: KEY_LAST_GATE)
         prefs.set(error ?? "", forKey: KEY_LAST_ERROR)
         prefs.set(now, forKey: KEY_LAST_ATTEMPT_AT)
+        writeDiagnosticsFile()
     }
     
     static func persistFailureContext(
@@ -234,6 +325,7 @@ class CaleeSyncPeriodicWorker {
         prefs.set(failureStage, forKey: KEY_LAST_FAILURE_STAGE)
         prefs.set(elapsedMs * 1000, forKey: KEY_LAST_FAILURE_ELAPSED_MS)
         prefs.set(failureStep, forKey: KEY_LAST_FAILURE_STEP)
+        writeDiagnosticsFile()
     }
     
     static func persistStage(_ stage: String) {
@@ -241,6 +333,7 @@ class CaleeSyncPeriodicWorker {
         let now = Date().timeIntervalSince1970 * 1000
         prefs.set(stage, forKey: KEY_LAST_STAGE)
         prefs.set(now, forKey: KEY_LAST_STAGE_AT)
+        writeDiagnosticsFile()
     }
     
     static func handleTask(task: BGTask) {
@@ -254,20 +347,24 @@ class CaleeSyncPeriodicWorker {
         } else if task.identifier == WATCHDOG_TASK_IDENTIFIER {
             if !isPeriodicEnabled() {
                 cancelWatchdogAlarm()
+                persistFailureContext(
+                    failureStage: STAGE_WORKER_FINISHED,
+                    failureStep: "watchdog_periodic_disabled",
+                    elapsedMs: 0
+                )
+                persistSnapshot(
+                    outcome: .failure,
+                    reason: "watchdog_ignored_periodic_disabled",
+                    gateReason: .environmentBlocked,
+                    error: "periodic_disabled"
+                )
+                persistStage(STAGE_WORKER_FINISHED)
                 task.setTaskCompleted(success: false)
                 return
             }
             let interval = readConfiguredIntervalMinutes()
+            trigger = "watchdog"
             ensurePeriodic(intervalMinutes: interval)
-            if !shouldSkipWatchdogOneOff() {
-                do {
-                    try enqueueOneOff(reason: "watchdog", expedited: false, enqueuePolicy: .replace)
-                } catch {
-                    Logger.default.error("Failed to enqueue watchdog one-off: \(error.localizedDescription)")
-                }
-            }
-            task.setTaskCompleted(success: true)
-            return
         }
         
         Logger.default.info("Enter trigger=\(trigger)")
@@ -322,7 +419,9 @@ class CaleeSyncPeriodicWorker {
             scheduleWatchdogAlarm(intervalMinutes: intervalMinutes)
         } catch {
             Logger.default.error("Failed to ensure periodic: \(error.localizedDescription)")
+            return
         }
+        writeDiagnosticsFile()
     }
     
     private static func runSyncTask(trigger: String, task: BGTask, attemptStartedAt: TimeInterval) {
