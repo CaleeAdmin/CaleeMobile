@@ -9,11 +9,9 @@ class BackgroundSyncControlApiImpl: BackgroundSyncControlApi {
         DispatchQueue.global(qos: .default).async {
             do {
                 let bounded = max(intervalMinutes, 15)
-                try CaleeSyncPeriodicWorker.schedulePeriodic(intervalMinutes: Int(bounded))
                 UserDefaults.standard.set(true, forKey: CaleeSyncPeriodicWorker.KEY_PERIODIC_ENABLED)
                 UserDefaults.standard.set(Int(bounded), forKey: CaleeSyncPeriodicWorker.KEY_PERIODIC_INTERVAL_MINUTES)
-                let nextAt = Date().addingTimeInterval(TimeInterval(bounded * 60))
-                UserDefaults.standard.set(nextAt.timeIntervalSince1970 * 1000, forKey: CaleeSyncPeriodicWorker.KEY_PERIODIC_NEXT_AT)
+                try CaleeSyncPeriodicWorker.schedulePeriodic(intervalMinutes: Int(bounded))
                 CaleeSyncPeriodicWorker.scheduleWatchdogAlarm(intervalMinutes: Int(bounded))
                 DispatchQueue.main.async {
                     completion(.success(()))
@@ -46,20 +44,10 @@ class BackgroundSyncControlApiImpl: BackgroundSyncControlApi {
     
     func ensurePeriodicScheduled(intervalMinutes: Int64, completion: @escaping (Result<Void, Error>) -> Void) {
         DispatchQueue.global(qos: .default).async {
-            do {
-                let bounded = max(intervalMinutes, 15)
-                let isScheduled = CaleeSyncPeriodicWorker.isPeriodicScheduled()
-                if !isScheduled {
-                    try CaleeSyncPeriodicWorker.schedulePeriodic(intervalMinutes: Int(bounded))
-                }
-                CaleeSyncPeriodicWorker.scheduleWatchdogAlarm(intervalMinutes: Int(bounded))
-                DispatchQueue.main.async {
-                    completion(.success(()))
-                }
-            } catch {
-                DispatchQueue.main.async {
-                    completion(.failure(error))
-                }
+            let bounded = max(intervalMinutes, 15)
+            CaleeSyncPeriodicWorker.ensurePeriodic(intervalMinutes: Int(bounded))
+            DispatchQueue.main.async {
+                completion(.success(()))
             }
         }
     }
@@ -94,4 +82,3 @@ class BackgroundSyncControlApiImpl: BackgroundSyncControlApi {
         }
     }
 }
-

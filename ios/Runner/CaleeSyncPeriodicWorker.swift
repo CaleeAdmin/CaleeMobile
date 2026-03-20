@@ -47,11 +47,16 @@ class CaleeSyncPeriodicWorker {
     private static var isRunning = false
     
     static func schedulePeriodic(intervalMinutes: Int) throws {
+        let prefs = UserDefaults.standard
         let bounded = max(intervalMinutes, 15)
+        BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: PERIODIC_TASK_IDENTIFIER)
         let request = BGAppRefreshTaskRequest(identifier: PERIODIC_TASK_IDENTIFIER)
         request.earliestBeginDate = Date(timeIntervalSinceNow: TimeInterval(bounded * 60))
         
         try BGTaskScheduler.shared.submit(request)
+        prefs.set(bounded, forKey: KEY_PERIODIC_INTERVAL_MINUTES)
+        let nextAtMs = (request.earliestBeginDate?.timeIntervalSince1970 ?? 0) * 1000
+        prefs.set(nextAtMs, forKey: KEY_PERIODIC_NEXT_AT)
         Logger.default.info("Scheduled periodic task with interval: \(bounded) minutes")
     }
     
@@ -61,7 +66,7 @@ class CaleeSyncPeriodicWorker {
     }
     
     static func isPeriodicScheduled() -> Bool {
-        // Check if periodic is enabled in preferences
+        // Non-authoritative helper retained for legacy call sites.
         return UserDefaults.standard.bool(forKey: KEY_PERIODIC_ENABLED)
     }
     
@@ -94,6 +99,7 @@ class CaleeSyncPeriodicWorker {
         let bounded = max(intervalMinutes, 15)
         let watchdogInterval = max(Int64(bounded), WATCHDOG_INTERVAL_MINUTES)
         
+        BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: WATCHDOG_TASK_IDENTIFIER)
         let request = BGAppRefreshTaskRequest(identifier: WATCHDOG_TASK_IDENTIFIER)
         request.earliestBeginDate = Date(timeIntervalSinceNow: TimeInterval(watchdogInterval * 60))
         
@@ -135,7 +141,7 @@ class CaleeSyncPeriodicWorker {
     
     static func readStatus() -> BackgroundStatusDto {
         let prefs = UserDefaults.standard
-        let periodicEnabled = prefs.bool(forKey: KEY_PERIODIC_ENABLED) && isPeriodicScheduled()
+        let periodicEnabled = prefs.bool(forKey: KEY_PERIODIC_ENABLED)
         let configuredInterval = max(prefs.integer(forKey: KEY_PERIODIC_INTERVAL_MINUTES), 15)
         let nextAt = prefs.double(forKey: KEY_PERIODIC_NEXT_AT)
         let lastRunAt = prefs.double(forKey: KEY_LAST_RUN_AT)
@@ -146,9 +152,8 @@ class CaleeSyncPeriodicWorker {
         let lastGateRaw = prefs.string(forKey: KEY_LAST_GATE)
         let lastGateReason = parseGateReason(lastGateRaw)
         
-        // iOS doesn't have WorkManager states, so we use nil for work states
-        // but we can check if tasks are scheduled
-        let periodicWorkState: String? = isPeriodicScheduled() ? "ENQUEUED" : nil
+        // iOS does not expose authoritative BGTaskScheduler queue state.
+        let periodicWorkState: String? = nil
         let oneOffWorkState: String? = isRunning ? "RUNNING" : nil
         
         return BackgroundStatusDto(
@@ -261,7 +266,6 @@ class CaleeSyncPeriodicWorker {
                     Logger.default.error("Failed to enqueue watchdog one-off: \(error.localizedDescription)")
                 }
             }
-            scheduleWatchdogAlarm(intervalMinutes: interval)
             task.setTaskCompleted(success: true)
             return
         }
@@ -304,11 +308,6 @@ class CaleeSyncPeriodicWorker {
     }
     
     private static func scheduleNextPeriodicTask(intervalMinutes: Int) {
-        let prefs = UserDefaults.standard
-        let nextAt = Date().addingTimeInterval(TimeInterval(intervalMinutes * 60))
-        prefs.set(nextAt.timeIntervalSince1970 * 1000, forKey: KEY_PERIODIC_NEXT_AT)
-        prefs.set(intervalMinutes, forKey: KEY_PERIODIC_INTERVAL_MINUTES)
-        
         do {
             try schedulePeriodic(intervalMinutes: intervalMinutes)
             scheduleWatchdogAlarm(intervalMinutes: intervalMinutes)
@@ -318,12 +317,11 @@ class CaleeSyncPeriodicWorker {
     }
     
     static func ensurePeriodic(intervalMinutes: Int) {
-        if !isPeriodicScheduled() {
-            do {
-                try schedulePeriodic(intervalMinutes: intervalMinutes)
-            } catch {
-                Logger.default.error("Failed to ensure periodic: \(error.localizedDescription)")
-            }
+        do {
+            try schedulePeriodic(intervalMinutes: intervalMinutes)
+            scheduleWatchdogAlarm(intervalMinutes: intervalMinutes)
+        } catch {
+            Logger.default.error("Failed to ensure periodic: \(error.localizedDescription)")
         }
     }
     
@@ -332,7 +330,7 @@ class CaleeSyncPeriodicWorker {
               let rootViewController = window?.rootViewController,
               let flutterViewController = rootViewController as? FlutterViewController else {
             // If no Flutter view controller, create a new engine
-            createAndRunEngine(trigger: trigger, task: task)
+            createAndRunEngine(trigger: trigger, task: task, attemptStartedAt: attemptStartedAt)
             return
         }
         
@@ -341,8 +339,7 @@ class CaleeSyncPeriodicWorker {
         setupAndRunSync(engine: engine, trigger: trigger, task: task, attemptStartedAt: attemptStartedAt)
     }
     
-    private static func createAndRunEngine(trigger: String, task: BGTask) {
-        let attemptStartedAt = Date().timeIntervalSince1970 * 1000
+    private static func createAndRunEngine(trigger: String, task: BGTask, attemptStartedAt: TimeInterval) {
         let engine = FlutterEngine(name: "backgroundSyncEngine")
         guard engine.run(withEntrypoint: "caleeSyncBackgroundEntrypoint") else {
             let elapsedMs = (Date().timeIntervalSince1970 * 1000) - attemptStartedAt
@@ -364,6 +361,7 @@ class CaleeSyncPeriodicWorker {
         
         currentEngine = engine
         persistStage(STAGE_ENGINE_CREATED)
+        GeneratedPluginRegistrant.register(with: engine)
         
         setupAndRunSync(engine: engine, trigger: trigger, task: task, attemptStartedAt: attemptStartedAt)
     }
@@ -509,4 +507,3 @@ extension os.Logger {
     private static var subsystem = Bundle.main.bundleIdentifier!
     static let `default` = Logger(subsystem: subsystem, category: "CaleeSyncWorker")
 }
-

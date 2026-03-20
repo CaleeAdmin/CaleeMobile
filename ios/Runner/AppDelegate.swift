@@ -40,8 +40,8 @@ import os.log
       if CaleeSyncPeriodicWorker.isPeriodicEnabled() {
         let interval = CaleeSyncPeriodicWorker.readConfiguredIntervalMinutes()
         CaleeSyncPeriodicWorker.ensurePeriodic(intervalMinutes: interval)
-        CaleeSyncPeriodicWorker.scheduleWatchdogAlarm(intervalMinutes: interval)
       } else {
+        CaleeSyncPeriodicWorker.cancelPeriodic()
         CaleeSyncPeriodicWorker.cancelWatchdogAlarm()
       }
     }
