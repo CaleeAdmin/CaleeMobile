@@ -429,7 +429,8 @@ import EventKit
   ) {
     do {
       let store = try requireReadableEventStore()
-      guard let source = selectWritableEventSourceForCalendarCreation(store: store) else {
+      let candidateSources = orderedCandidateSourcesForCalendarCreation(store: store)
+      guard !candidateSources.isEmpty else {
         completion(.failure(
           FlutterError(
             code: "SOURCE_ERROR",
@@ -445,28 +446,38 @@ import EventKit
         return
       }
 
-      let calendar = EKCalendar(for: .event, eventStore: store)
-      calendar.title = displayName
-      calendar.source = source
-      calendar.cgColor = colorFromInt64(color)
+      let calendarColor = colorFromInt64(color)
+      var attemptedSources: [String] = []
+      var failureReasons: [String] = []
 
-      do {
-        try store.saveCalendar(calendar, commit: true)
-        completion(.success(calendar.calendarIdentifier))
-      } catch {
-        completion(.failure(
-          FlutterError(
-            code: "SAVE_ERROR",
-            message: "Failed to save calendar to source \(source.title) [\(string(from: source.sourceType))]: \(error.localizedDescription)",
-            details: [
-              "sourceTitle": source.title,
-              "sourceType": string(from: source.sourceType),
-              "underlyingError": error.localizedDescription,
-              "accountName": accountName,
-            ]
-          )
-        ))
+      for source in candidateSources {
+        attemptedSources.append(describe(source: source))
+
+        let calendar = EKCalendar(for: .event, eventStore: store)
+        calendar.title = displayName
+        calendar.source = source
+        calendar.cgColor = calendarColor
+
+        do {
+          try store.saveCalendar(calendar, commit: true)
+          completion(.success(calendar.calendarIdentifier))
+          return
+        } catch {
+          failureReasons.append("\(describe(source: source)): \(error.localizedDescription)")
+        }
       }
+
+      completion(.failure(
+        FlutterError(
+          code: "SAVE_ERROR",
+          message: "Failed to save calendar to all candidate EventKit sources",
+          details: [
+            "attemptedSources": attemptedSources,
+            "failureReasons": failureReasons,
+            "accountName": accountName,
+          ]
+        )
+      ))
     } catch {
       completion(.failure(error))
     }
@@ -568,20 +579,153 @@ import EventKit
 
   // MARK: - Source helpers
 
-  private func selectWritableEventSourceForCalendarCreation(store: EKEventStore) -> EKSource? {
-    if let defaultSource = store.defaultCalendarForNewEvents?.source {
-      return defaultSource
+  struct CalendarCreationSourceDescriptor: Equatable {
+    let sourceIdentifier: String?
+    let title: String
+    let sourceType: EKSourceType
+  }
+
+  private func orderedCandidateSourcesForCalendarCreation(store: EKEventStore) -> [EKSource] {
+    let allSources = store.sources
+    let descriptors = Self.orderedCandidateSourceDescriptors(
+      allSources: allSources.map(sourceDescriptor(from:)),
+      defaultSource: store.defaultCalendarForNewEvents?.source.map(sourceDescriptor(from:)),
+      writableEventCalendarSources: store.calendars(for: .event)
+        .filter { $0.allowsContentModifications && $0.type != .subscription && $0.type != .birthday }
+        .map { sourceDescriptor(from: $0.source) }
+    )
+
+    var remainingSourcesByIdentifier: [String: EKSource] = [:]
+    var remainingSourcesByFallbackKey: [String: EKSource] = [:]
+    for source in allSources {
+      if let sourceIdentifier = source.sourceIdentifier {
+        remainingSourcesByIdentifier[sourceIdentifier] = source
+      }
+      remainingSourcesByFallbackKey[Self.sourceFallbackKey(title: source.title, sourceType: source.sourceType)] = source
     }
 
-    let writableEventCalendars = store.calendars(for: .event).filter {
-      $0.allowsContentModifications && $0.type != .subscription
+    var orderedSources: [EKSource] = []
+    for descriptor in descriptors {
+      if let sourceIdentifier = descriptor.sourceIdentifier,
+         let source = remainingSourcesByIdentifier.removeValue(forKey: sourceIdentifier) {
+        orderedSources.append(source)
+        remainingSourcesByFallbackKey.removeValue(
+          forKey: Self.sourceFallbackKey(title: source.title, sourceType: source.sourceType)
+        )
+      } else if let source = remainingSourcesByFallbackKey.removeValue(
+        forKey: Self.sourceFallbackKey(title: descriptor.title, sourceType: descriptor.sourceType)
+      ) {
+        orderedSources.append(source)
+      }
     }
 
-    if let existingWritableSource = writableEventCalendars.first?.source {
-      return existingWritableSource
+    return orderedSources
+  }
+
+  static func orderedCandidateSourceDescriptors(
+    allSources: [CalendarCreationSourceDescriptor],
+    defaultSource: CalendarCreationSourceDescriptor?,
+    writableEventCalendarSources: [CalendarCreationSourceDescriptor]
+  ) -> [CalendarCreationSourceDescriptor] {
+    var candidates: [CalendarCreationSourceDescriptor] = []
+
+    candidates.append(contentsOf: allSources.filter {
+      Self.isPreferredICloudSource($0) && Self.isEligibleCalendarCreationSource($0)
+    }.map {
+      CalendarCreationSourceDescriptor(
+        sourceIdentifier: $0.sourceIdentifier,
+        title: $0.title,
+        sourceType: $0.sourceType
+      )
+    })
+
+    if let defaultSource, Self.isEligibleCalendarCreationSource(defaultSource) {
+      candidates.append(
+        CalendarCreationSourceDescriptor(
+          sourceIdentifier: defaultSource.sourceIdentifier,
+          title: defaultSource.title,
+          sourceType: defaultSource.sourceType
+        )
+      )
     }
 
-    return store.sources.first(where: { $0.sourceType == .local })
+    candidates.append(contentsOf: writableEventCalendarSources.filter(Self.isEligibleCalendarCreationSource).map {
+      CalendarCreationSourceDescriptor(
+        sourceIdentifier: $0.sourceIdentifier,
+        title: $0.title,
+        sourceType: $0.sourceType
+      )
+    })
+
+    candidates.append(contentsOf: allSources.filter {
+      $0.sourceType == .local && Self.isEligibleCalendarCreationSource($0)
+    }.map {
+      CalendarCreationSourceDescriptor(
+        sourceIdentifier: $0.sourceIdentifier,
+        title: $0.title,
+        sourceType: $0.sourceType
+      )
+    })
+
+    return Self.dedupeSources(candidates)
+  }
+
+  static func isPreferredICloudSource(_ source: CalendarCreationSourceDescriptor) -> Bool {
+    source.sourceType == .mobileMe
+  }
+
+  static func isEligibleCalendarCreationSource(_ source: CalendarCreationSourceDescriptor) -> Bool {
+    switch source.sourceType {
+    case .subscribed, .birthdays:
+      return false
+    default:
+      return true
+    }
+  }
+
+  static func dedupeSources(
+    _ sources: [CalendarCreationSourceDescriptor]
+  ) -> [CalendarCreationSourceDescriptor] {
+    var seenIdentifiers = Set<String>()
+    var seenFallbackKeys = Set<String>()
+    var deduped: [CalendarCreationSourceDescriptor] = []
+
+    for source in sources {
+      if let sourceIdentifier = source.sourceIdentifier {
+        if seenIdentifiers.contains(sourceIdentifier) {
+          continue
+        }
+        seenIdentifiers.insert(sourceIdentifier)
+      } else {
+        let fallbackKey = Self.sourceFallbackKey(title: source.title, sourceType: source.sourceType)
+        if seenFallbackKeys.contains(fallbackKey) {
+          continue
+        }
+        seenFallbackKeys.insert(fallbackKey)
+      }
+      deduped.append(source)
+    }
+
+    return deduped
+  }
+
+  private func sourceDescriptor(from source: EKSource) -> CalendarCreationSourceDescriptor {
+    CalendarCreationSourceDescriptor(
+      sourceIdentifier: source.sourceIdentifier,
+      title: source.title,
+      sourceType: source.sourceType,
+    )
+  }
+
+  static func sourceFallbackKey(title: String, sourceType: EKSourceType) -> String {
+    "\(title)::\(sourceType.rawValue)"
+  }
+
+  private func describe(source: EKSource) -> String {
+    if let sourceIdentifier = source.sourceIdentifier, !sourceIdentifier.isEmpty {
+      return "\(source.title) [\(string(from: source.sourceType))] {id=\(sourceIdentifier)}"
+    }
+    return "\(source.title) [\(string(from: source.sourceType))]"
   }
 
   private func findSource(forAccountName accountName: String, store: EKEventStore) -> EKSource? {
