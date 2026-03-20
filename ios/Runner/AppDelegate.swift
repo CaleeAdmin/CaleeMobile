@@ -1,6 +1,7 @@
 import UIKit
 import Flutter
 import BackgroundTasks
+import os.log
 
 @main
 @objc class AppDelegate: FlutterAppDelegate {
@@ -31,6 +32,7 @@ import BackgroundTasks
     ) { task in
       CaleeSyncPeriodicWorker.handleTask(task: task)
     }
+    logBackgroundModesConfiguration()
     
     // Restore periodic sync task on app launch (equivalent to Android's BOOT_COMPLETED)
     // This ensures periodic tasks are restored after app restart or update
@@ -51,6 +53,18 @@ import BackgroundTasks
     }
     
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+  }
+
+  private func logBackgroundModesConfiguration() {
+    let configuredModes =
+      (Bundle.main.object(forInfoDictionaryKey: "UIBackgroundModes") as? [String]) ?? []
+    let hasFetch = configuredModes.contains("fetch")
+    let hasProcessing = configuredModes.contains("processing")
+
+    let configuredModesSummary = configuredModes.joined(separator: ",")
+    Logger.default.info(
+      "UIBackgroundModes configured: \(configuredModesSummary, privacy: .public); fetch=\(hasFetch, privacy: .public); processing=\(hasProcessing, privacy: .public)"
+    )
   }
   
   private func setupPigeonApis() {

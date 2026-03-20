@@ -192,7 +192,7 @@ class CaleeSyncPeriodicWorker {
     private static func parseGateReason(_ raw: String?) -> BackgroundGateReason? {
         guard let raw = raw?.lowercased() else { return nil }
         switch raw {
-        case "none": return .none
+        case "none": return BackgroundGateReason.none
         case "no_network": return .noNetwork
         case "auth_invalid": return .authInvalid
         case "binding_invalid": return .bindingInvalid
@@ -328,8 +328,6 @@ class CaleeSyncPeriodicWorker {
     }
     
     private static func runSyncTask(trigger: String, task: BGTask, attemptStartedAt: TimeInterval) {
-        let prefs = UserDefaults.standard
-        
         guard let window = UIApplication.shared.delegate?.window,
               let rootViewController = window?.rootViewController,
               let flutterViewController = rootViewController as? FlutterViewController else {
