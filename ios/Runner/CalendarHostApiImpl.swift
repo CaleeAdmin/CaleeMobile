@@ -4,6 +4,7 @@ import EventKit
 /// Swift implementation of the Pigeon-generated `NativeCalendarApi` protocol,
 /// backed by EventKit. This replaces the older Objective-C implementation.
 @objc class CalendarHostApiImpl: NSObject, NativeCalendarApi {
+  private let caleeUidMarkerPattern = #"\n?\[CALEE_UID:([^\]]+)\]"#
   private var eventStore = EKEventStore()
   private var lastKnownEventAuthorizationStatus = EKEventStore.authorizationStatus(for: .event)
 
@@ -182,14 +183,13 @@ import EventKit
 
     var items: [PlatformItem] = []
     for event in events {
+      let localId = stableLocalIdentifier(for: event)
       var item = PlatformItem()
-      item.localId = event.eventIdentifier
-
-      // Stable UID: prefer calendarItemExternalIdentifier, else local_<id>
-      item.uid = resolveStableUid(for: event, localId: event.eventIdentifier)
+      item.localId = localId
+      item.uid = extractCaleeUid(from: event) ?? derivedUidFromExternalIdentifier(event) ?? "local_\(localId)"
 
       item.title = event.title ?? ""
-      item.notes = event.notes
+      item.notes = stripCaleeMetadata(from: event.notes)
       item.location = event.location
       item.startTime = Int64(event.startDate.timeIntervalSince1970 * 1000.0)
 
@@ -216,11 +216,92 @@ import EventKit
     return items
   }
 
-  private func resolveStableUid(for event: EKEvent, localId: String) -> String {
-    if let externalId = event.calendarItemExternalIdentifier, !externalId.isEmpty {
-      return externalId
+  private func embedCaleeUid(into event: EKEvent, uid: String, originalNotes: String?) {
+    let cleanNotes = stripCaleeMetadata(from: originalNotes)
+    let trimmedUid = uid.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmedUid.isEmpty else {
+      event.notes = cleanNotes
+      return
     }
-    return "local_\(localId)"
+
+    let marker = "[CALEE_UID:\(trimmedUid)]"
+    if let cleanNotes, !cleanNotes.isEmpty {
+      event.notes = "\(cleanNotes)\n\(marker)"
+    } else {
+      event.notes = marker
+    }
+  }
+
+  private func extractCaleeUid(from event: EKEvent) -> String? {
+    guard let notes = event.notes, !notes.isEmpty,
+          let regex = try? NSRegularExpression(pattern: caleeUidMarkerPattern) else {
+      return nil
+    }
+
+    let nsNotes = notes as NSString
+    let range = NSRange(location: 0, length: nsNotes.length)
+    guard let match = regex.firstMatch(in: notes, options: [], range: range), match.numberOfRanges > 1 else {
+      return nil
+    }
+
+    let uid = nsNotes.substring(with: match.range(at: 1)).trimmingCharacters(in: .whitespacesAndNewlines)
+    return uid.isEmpty ? nil : uid
+  }
+
+  private func stripCaleeMetadata(from notes: String?) -> String? {
+    guard let notes, !notes.isEmpty,
+          let regex = try? NSRegularExpression(pattern: caleeUidMarkerPattern) else {
+      return notes
+    }
+
+    let fullRange = NSRange(location: 0, length: (notes as NSString).length)
+    let stripped = regex.stringByReplacingMatches(in: notes, options: [], range: fullRange, withTemplate: "")
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    return stripped.isEmpty ? nil : stripped
+  }
+
+  private func stableLocalIdentifier(for event: EKEvent) -> String {
+    if !event.calendarItemIdentifier.isEmpty {
+      return event.calendarItemIdentifier
+    }
+    if let eventIdentifier = event.eventIdentifier, !eventIdentifier.isEmpty {
+      return eventIdentifier
+    }
+    if let externalIdentifier = event.calendarItemExternalIdentifier, !externalIdentifier.isEmpty {
+      return externalIdentifier
+    }
+    return UUID().uuidString
+  }
+
+  private func derivedUidFromExternalIdentifier(_ event: EKEvent) -> String? {
+    guard let externalId = event.calendarItemExternalIdentifier, !externalId.isEmpty else {
+      return nil
+    }
+    return externalId
+  }
+
+  private func findEvent(calendarId: String, matchingCaleeUid uid: String, store: EKEventStore) -> EKEvent? {
+    let trimmedUid = uid.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmedUid.isEmpty, let calendar = store.calendar(withIdentifier: calendarId) else {
+      return nil
+    }
+
+    let now = Date()
+    let startDate = now.addingTimeInterval(-20 * 365 * 24 * 3600)
+    let endDate = now.addingTimeInterval(20 * 365 * 24 * 3600)
+    let predicate = store.predicateForEvents(withStart: startDate, end: endDate, calendars: [calendar])
+    return store.events(matching: predicate).first { extractCaleeUid(from: $0) == trimmedUid }
+  }
+
+  private func resolveEvent(byStableLocalId eventId: String?, store: EKEventStore) -> EKEvent? {
+    guard let eventId, !eventId.isEmpty else {
+      return nil
+    }
+
+    if let calendarItem = store.calendarItem(withIdentifier: eventId) as? EKEvent {
+      return calendarItem
+    }
+    return store.event(withIdentifier: eventId)
   }
 
   func createEvent(
@@ -244,13 +325,13 @@ import EventKit
       let event = EKEvent(eventStore: store)
       event.calendar = calendar
       event.title = title
-      event.notes = notes
       event.startDate = Date(timeIntervalSince1970: TimeInterval(start) / 1000.0)
       event.endDate = Date(timeIntervalSince1970: TimeInterval(end) / 1000.0)
+      embedCaleeUid(into: event, uid: uid ?? "", originalNotes: notes)
 
       do {
         try store.save(event, span: .thisEvent, commit: true)
-        completion(.success(event.eventIdentifier))
+        completion(.success(stableLocalIdentifier(for: event)))
       } catch {
         completion(.failure(
           FlutterError(code: "SAVE_ERROR", message: error.localizedDescription, details: nil)
@@ -274,14 +355,14 @@ import EventKit
         return
       }
 
-      var event: EKEvent?
-      if let eventId = request.eventId, !eventId.isEmpty {
-        event = store.event(withIdentifier: eventId)
+      var event = resolveEvent(byStableLocalId: request.eventId, store: store)
+      if event == nil {
+        event = findEvent(calendarId: request.calendarId, matchingCaleeUid: request.uid, store: store)
       }
       if event == nil {
         event = EKEvent(eventStore: store)
-        event?.calendar = calendar
       }
+      event?.calendar = calendar
 
       guard let event else {
         completion(.failure(
@@ -291,13 +372,13 @@ import EventKit
       }
 
       event.title = request.title
-      event.notes = request.notes
       event.startDate = Date(timeIntervalSince1970: TimeInterval(request.start) / 1000.0)
       event.endDate = Date(timeIntervalSince1970: TimeInterval(request.end) / 1000.0)
+      embedCaleeUid(into: event, uid: request.uid, originalNotes: request.notes)
 
       do {
         try store.save(event, span: .thisEvent, commit: true)
-        completion(.success(event.eventIdentifier))
+        completion(.success(stableLocalIdentifier(for: event)))
       } catch {
         completion(.failure(
           FlutterError(code: "SAVE_ERROR", message: error.localizedDescription, details: nil)
@@ -321,12 +402,12 @@ import EventKit
 
     let predicate = store.predicateForEvents(withStart: startDate, end: endDate, calendars: [calendar])
     let events = store.events(matching: predicate)
-    return events.compactMap { $0.eventIdentifier }
+    return events.map { stableLocalIdentifier(for: $0) }
   }
 
   func deleteEvent(eventId: String) throws -> Bool {
     let store = try requireReadableEventStore()
-    guard let event = store.event(withIdentifier: eventId) else {
+    guard let event = resolveEvent(byStableLocalId: eventId, store: store) else {
       return false
     }
 

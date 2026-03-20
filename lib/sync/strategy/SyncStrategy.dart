@@ -416,7 +416,7 @@ abstract class SyncStrategy {
           final pulled = await pullRemoteEventToLocal(
             remote: operation.remote!,
             localCalendarId: localCalendarId,
-            existingLocalId: operation.mapping?['local_item_id']?.toString(),
+            existingLocalId: operation.local?.localId ?? operation.mapping?['local_item_id']?.toString(),
             isSubscription: ctx.isSubscription ?? false,
           );
           if (pulled == null) {
@@ -466,7 +466,7 @@ abstract class SyncStrategy {
             skip++;
             return;
           }
-          final localId = operation.mapping?['local_item_id']?.toString() ?? operation.local?.localId ?? '';
+          final localId = operation.local?.localId ?? operation.mapping?['local_item_id']?.toString() ?? '';
           if (localId.isNotEmpty) {
             await localGateway.deleteEvent(localId);
           }
@@ -527,9 +527,16 @@ abstract class SyncStrategy {
             return;
           }
           if (mapping != null) {
+            final Map<String, Object?> updates = {
+              'sync_status': SyncItemStatus.synced,
+            };
+            final String liveLocalId = operation.local?.localId ?? '';
+            if (liveLocalId.isNotEmpty) {
+              updates['local_item_id'] = liveLocalId;
+            }
             await db.update(
               'sync_items',
-              {'sync_status': SyncItemStatus.synced},
+              updates,
               where: 'id = ?',
               whereArgs: [mapping['id']],
             );
