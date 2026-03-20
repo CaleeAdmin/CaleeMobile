@@ -128,10 +128,22 @@ class SyncRepository {
     return '$displayName $suffix';
   }
 
-  String _extractIosRemoteMirrorMarker(String title) {
-    final RegExpMatch? match =
-        RegExp(r'\[([A-Z0-9]{6,8})\]\s*$').firstMatch(title);
-    return match?.group(1)?.trim() ?? '';
+  ({String baseName, String marker})? _parseIosRemoteMirrorTitle(String title) {
+    final String trimmedTitle = title.trim();
+    final RegExpMatch? match = RegExp(r'^(.*) \[([A-Z0-9]{8})\]$').firstMatch(
+      trimmedTitle,
+    );
+    if (match == null) {
+      return null;
+    }
+
+    final String baseName = (match.group(1) ?? '').trim();
+    final String marker = (match.group(2) ?? '').trim();
+    if (baseName.isEmpty || marker.isEmpty) {
+      return null;
+    }
+
+    return (baseName: baseName, marker: marker);
   }
 
   Future<bool> _isLocalCalendarIdBoundElsewhere({
@@ -728,10 +740,15 @@ class SyncRepository {
           existingOriginKind == SyncBindingOrigin.remote &&
           (existingLocalId.isEmpty || !nativeCalendarIds.contains(existingLocalId)) &&
           iosMirrorMarker.isNotEmpty) {
+        final String expectedMarker = iosMirrorMarker;
+        final String expectedBaseName = displayName.trim();
         final List<PlatformCalendar> reclaimCandidates =
             nativeCalendars.where((PlatformCalendar calendar) {
-          return _extractIosRemoteMirrorMarker(calendar.name ?? '') ==
-              iosMirrorMarker;
+          final ({String baseName, String marker})? parsedTitle =
+              _parseIosRemoteMirrorTitle(calendar.name ?? '');
+          return parsedTitle != null &&
+              parsedTitle.marker == expectedMarker &&
+              parsedTitle.baseName == expectedBaseName;
         }).toList();
 
         if (reclaimCandidates.length == 1) {
