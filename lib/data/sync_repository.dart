@@ -108,8 +108,8 @@ class SyncRepository {
         .toUnsigned(32)
         .toRadixString(16)
         .toUpperCase()
-        .padLeft(6, '0')
-        .substring(0, 6);
+        .padLeft(8, '0')
+        .substring(0, 8);
     return marker.replaceAll(RegExp(r'[^A-Z0-9]'), '');
   }
 
