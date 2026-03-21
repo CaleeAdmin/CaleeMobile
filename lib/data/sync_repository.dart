@@ -559,13 +559,23 @@ class SyncRepository {
     required String newName,
   }) async {
     final db = await _dbHelper.database;
+    final String normalizedNewName = newName.trim();
+    if (normalizedNewName.isEmpty) {
+      throw Exception('Calendar name is required');
+    }
 
-    final String? sanitizedLocalId = (localId != null && localId.trim().isNotEmpty && localId.trim().toLowerCase() != 'null')
-        ? localId.trim()
-        : null;
-    final String? sanitizedRemotePath = (remotePath != null && remotePath.trim().isNotEmpty && remotePath.trim().toLowerCase() != 'null')
-        ? remotePath.trim()
-        : null;
+    final String? sanitizedLocalId =
+        (localId != null &&
+                localId.trim().isNotEmpty &&
+                localId.trim().toLowerCase() != 'null')
+            ? localId.trim()
+            : null;
+    final String? sanitizedRemotePath =
+        (remotePath != null &&
+                remotePath.trim().isNotEmpty &&
+                remotePath.trim().toLowerCase() != 'null')
+            ? remotePath.trim()
+            : null;
 
     if (sanitizedLocalId == null && sanitizedRemotePath == null) {
       throw Exception('Missing calendar identifier; unable to rename');
@@ -603,34 +613,44 @@ class SyncRepository {
       throw Exception('Target calendar record not found');
     }
     final cal = maps.first;
-// 如果字段可能为空, 用 String?
-    final String? path = cal['remote_path'] as String?;
-    final int bindingRole = (cal['binding_role'] as int?) ?? SyncBindingRole.mirror;
-    final String? originKey = cal['origin_key']?.toString();
+    final String existingDisplayName =
+        (cal['display_name'] ?? '').toString().trim();
+    if (existingDisplayName.isNotEmpty &&
+        existingDisplayName == normalizedNewName) {
+      return;
+    }
 
-// 如果你确定 account_name 绝对有值, 用 String
+    final String? path = cal['remote_path'] as String?;
+    final int bindingRole =
+        (cal['binding_role'] as int?) ?? SyncBindingRole.mirror;
+    final String? originKey = cal['origin_key']?.toString();
     final String accountName = (cal['account_name'] ?? '').toString();
-    final String authUserId = MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? '';
+    final String? resolvedLocalId = cal['local_collection_id']?.toString();
+    final bool shouldRenameLocalMirror =
+        resolvedLocalId != null &&
+        resolvedLocalId.isNotEmpty &&
+        bindingRole == SyncBindingRole.mirror;
+    final String authUserId =
+        MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? '';
     if (authUserId.isEmpty) {
       throw Exception('Not logged in');
     }
     try {
       // 2. 先改云端 (如果failed, 建议直接抛exception, 不改本地)
       if (path != null) {
-        bool isCloudOk = await CaleeServerService().renameRemoteCalendar(
-            userId: authUserId,
-            calendarPath: path,
-            newName: newName
+        final bool isCloudOk = await CaleeServerService().renameRemoteCalendar(
+          userId: authUserId,
+          calendarPath: path,
+          newName: normalizedNewName,
         );
-        if (!isCloudOk) throw Exception("Remote rename failed");
+        if (!isCloudOk) throw Exception('Remote rename failed');
       }
 
       // 3. 修改手机系统日历 (Android/iOS 系统层)
-      // 仅当存在 local_id 时尝试系统改名
-      final String? resolvedLocalId = cal['local_collection_id']?.toString();
-      if (resolvedLocalId != null && resolvedLocalId.isNotEmpty) {
-        final String nativeRenameTitle = _buildNativeRenameTitleForCurrentPlatform(
-          newName: newName,
+      if (shouldRenameLocalMirror) {
+        final String nativeRenameTitle =
+            _buildNativeRenameTitleForCurrentPlatform(
+          newName: normalizedNewName,
           bindingRole: bindingRole,
           remotePath: path ?? '',
           originKey: originKey,
@@ -650,23 +670,28 @@ class SyncRepository {
       if (resolvedLocalId != null && resolvedLocalId.isNotEmpty) {
         await db.update(
           'remote_collections',
-          {'display_name': newName},
+          {'display_name': normalizedNewName},
           where: 'id = ?',
           whereArgs: [cal['id']],
         );
       } else {
         await db.update(
           'remote_collections',
-          {'display_name': newName},
+          {'display_name': normalizedNewName},
           where: 'remote_path = ?',
           whereArgs: [path],
         );
       }
 
-      print("[OK] Calendar ${resolvedLocalId ?? path} renamed across all three sides to: $newName");
-
+      final String renameScope = shouldRenameLocalMirror
+          ? 'remote + local mirror + DB'
+          : 'remote + DB only';
+      print(
+        '[OK] Calendar ${resolvedLocalId ?? path} renamed via $renameScope to: '
+        '$normalizedNewName',
+      );
     } catch (e) {
-      print("[ERROR] Rename workflow interrupted: $e");
+      print('[ERROR] Rename workflow interrupted: $e');
       rethrow;
     }
   }
