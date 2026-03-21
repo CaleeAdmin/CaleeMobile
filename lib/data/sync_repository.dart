@@ -651,7 +651,7 @@ class SyncRepository {
 
     final db = await _dbHelper.database;
     String? createdLocalIdForEnableAttempt;
-    int bindingOriginForEnableAttempt = SyncBindingOrigin.remote;
+    int? createdBindingRoleForEnableAttempt;
 
     try {
       final List<Map<String, dynamic>> remoteRows = await db.rawQuery('''
@@ -706,7 +706,6 @@ class SyncRepository {
           ? (bindingRows.first['local_collection_id']?.toString() ?? '')
           : '';
       final int existingOriginKind = (remote['origin_kind'] as int?) ?? SyncBindingOrigin.remote;
-      bindingOriginForEnableAttempt = existingOriginKind;
 
       // Request permission before accessing calendars
       final bool hasPermission = await _nativeApi.requestPermission(false);
@@ -802,6 +801,7 @@ class SyncRepository {
                 {
                   'remote_collection_id': remoteCollectionId,
                   'local_collection_id': reclaimedLocalId,
+                  'binding_role': SyncBindingRole.mirror,
                   'created_at': now,
                   'updated_at': now,
                 },
@@ -865,6 +865,7 @@ class SyncRepository {
       }
       final String normalizedLocalId = newLocalId!.trim();
       createdLocalIdForEnableAttempt = normalizedLocalId;
+      createdBindingRoleForEnableAttempt = SyncBindingRole.mirror;
 
       try {
         await db.transaction((txn) async {
@@ -874,6 +875,7 @@ class SyncRepository {
             {
               'remote_collection_id': remoteCollectionId,
               'local_collection_id': normalizedLocalId,
+              'binding_role': SyncBindingRole.mirror,
               'created_at': now,
               'updated_at': now,
             },
@@ -910,7 +912,7 @@ class SyncRepository {
         }
         if (createdLocalIdForEnableAttempt != null &&
             createdLocalIdForEnableAttempt!.isNotEmpty &&
-            bindingOriginForEnableAttempt != SyncBindingOrigin.local) {
+            createdBindingRoleForEnableAttempt == SyncBindingRole.mirror) {
           try {
             await _nativeApi.deleteCalendar(createdLocalIdForEnableAttempt!, accountName);
           } catch (_) {}
@@ -919,6 +921,7 @@ class SyncRepository {
       }
 
       createdLocalIdForEnableAttempt = null;
+      createdBindingRoleForEnableAttempt = null;
       _triggerOneShotForceSyncInBackground(remoteCollectionId);
       return EnableCalendarResult(
         success: true,
@@ -948,7 +951,7 @@ class SyncRepository {
       debugPrint('[ERROR] enableRemoteCalendarFromUserAction platform exception: $e');
       if (createdLocalIdForEnableAttempt != null &&
           createdLocalIdForEnableAttempt!.isNotEmpty &&
-          bindingOriginForEnableAttempt != SyncBindingOrigin.local) {
+          createdBindingRoleForEnableAttempt == SyncBindingRole.mirror) {
         try {
           await _nativeApi.deleteCalendar(createdLocalIdForEnableAttempt!, accountName);
         } catch (_) {}
@@ -959,7 +962,7 @@ class SyncRepository {
       debugPrint('[ERROR] enableRemoteCalendarFromUserAction failed: $e');
       if (createdLocalIdForEnableAttempt != null &&
           createdLocalIdForEnableAttempt!.isNotEmpty &&
-          bindingOriginForEnableAttempt != SyncBindingOrigin.local) {
+          createdBindingRoleForEnableAttempt == SyncBindingRole.mirror) {
         try {
           await _nativeApi.deleteCalendar(createdLocalIdForEnableAttempt!, accountName);
         } catch (_) {}
