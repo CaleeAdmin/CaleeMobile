@@ -3,15 +3,52 @@ import 'package:get/get.dart';
 
 import '../controllers/local_calendar_page_controller.dart';
 
-class LocalCalendarsPage extends StatelessWidget {
-  const LocalCalendarsPage({super.key});
+class LocalCalendarsPage extends StatefulWidget {
+  const LocalCalendarsPage({
+    super.key,
+    this.remotePath,
+    this.remoteDisplayName,
+    this.remoteOriginKind,
+  });
+
+  final String? remotePath;
+  final String? remoteDisplayName;
+  final int? remoteOriginKind;
+
+  bool get isRemoteScoped => remotePath != null && remotePath!.isNotEmpty;
+
+  @override
+  State<LocalCalendarsPage> createState() => _LocalCalendarsPageState();
+}
+
+class _LocalCalendarsPageState extends State<LocalCalendarsPage> {
+  late final String _controllerTag;
+  late final LocalCalendarPageController ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _controllerTag = 'local-calendar-page-${DateTime.now().microsecondsSinceEpoch}';
+    ctrl = Get.put(
+      LocalCalendarPageController(
+        remotePath: widget.remotePath,
+        remoteDisplayName: widget.remoteDisplayName,
+        remoteOriginKind: widget.remoteOriginKind,
+      ),
+      tag: _controllerTag,
+    );
+  }
+
+  @override
+  void dispose() {
+    if (Get.isRegistered<LocalCalendarPageController>(tag: _controllerTag)) {
+      Get.delete<LocalCalendarPageController>(tag: _controllerTag);
+    }
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final LocalCalendarPageController ctrl = Get.isRegistered<LocalCalendarPageController>()
-        ? Get.find<LocalCalendarPageController>()
-        : Get.put(LocalCalendarPageController());
-
     return Scaffold(
       appBar: AppBar(
         centerTitle: true,
@@ -19,9 +56,9 @@ class LocalCalendarsPage extends StatelessWidget {
           icon: const Icon(Icons.arrow_back_ios),
           onPressed: () => Navigator.maybePop(context),
         ),
-        title: const Text(
-          'Link to Device Calendar',
-          style: TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
+        title: Text(
+          widget.isRemoteScoped ? 'Link Device Calendar' : 'Link to Device Calendar',
+          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
         ),
         elevation: 0,
       ),
@@ -35,22 +72,78 @@ class LocalCalendarsPage extends StatelessWidget {
           return const Center(child: Text('No device calendars found'));
         }
 
-        return ListView.builder(
+        return ListView(
           padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
-          itemCount: groups.length,
-          itemBuilder: (context, index) {
-            return _AccountSection(group: groups[index]);
-          },
+          children: [
+            if (ctrl.isRemoteScoped) ...[
+              _RemoteScopedActionCard(controllerTag: _controllerTag),
+              const SizedBox(height: 16),
+            ],
+            ...groups.map((group) => _AccountSection(group: group, controllerTag: _controllerTag)),
+          ],
         );
       }),
     );
   }
 }
 
+class _RemoteScopedActionCard extends StatelessWidget {
+  const _RemoteScopedActionCard({required this.controllerTag});
+
+  final String controllerTag;
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = Get.find<LocalCalendarPageController>(tag: controllerTag);
+
+    return Card(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      elevation: 0,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              controller.remoteDisplayName?.trim().isNotEmpty == true
+                  ? 'Selected remote: ${controller.remoteDisplayName!.trim()}'
+                  : 'Selected remote calendar',
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Choose an existing device calendar to bind, or create a new local calendar for this remote.',
+              style: TextStyle(fontSize: 13, color: Color(0xFF4B5563)),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: controller.isCreatingLocalCalendar.value
+                    ? null
+                    : controller.createLocalForSelectedRemote,
+                icon: controller.isCreatingLocalCalendar.value
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      )
+                    : const Icon(Icons.add),
+                label: const Text('Create Local Calendar'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _AccountSection extends StatelessWidget {
   final LocalCalendarGroup group;
+  final String controllerTag;
 
-  const _AccountSection({required this.group});
+  const _AccountSection({required this.group, required this.controllerTag});
 
   @override
   Widget build(BuildContext context) {
@@ -84,7 +177,7 @@ class _AccountSection extends StatelessWidget {
                 .map(
                   (calendar) => Padding(
                     padding: const EdgeInsets.only(bottom: 12),
-                    child: _LocalCalendarCard(calendar: calendar),
+                    child: _LocalCalendarCard(calendar: calendar, controllerTag: controllerTag),
                   ),
                 )
                 .toList(),
@@ -97,8 +190,9 @@ class _AccountSection extends StatelessWidget {
 
 class _LocalCalendarCard extends StatelessWidget {
   final LocalCalendarItem calendar;
+  final String controllerTag;
 
-  const _LocalCalendarCard({required this.calendar});
+  const _LocalCalendarCard({required this.calendar, required this.controllerTag});
 
   Color _parseColor(String hex) {
     try {
@@ -112,7 +206,7 @@ class _LocalCalendarCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final controller = Get.find<LocalCalendarPageController>();
+    final controller = Get.find<LocalCalendarPageController>(tag: controllerTag);
 
     return Obx(() {
       final isConnecting = controller.connectingCalendarIds.contains(calendar.id);
@@ -170,6 +264,10 @@ class _LocalCalendarCard extends StatelessWidget {
                                 onPressed: isConnecting
                                     ? null
                                     : () async {
+                                        if (controller.isRemoteScoped) {
+                                          await controller.bindRemoteToSelectedLocal(calendar);
+                                          return;
+                                        }
                                         await controller.linkCalendar(
                                           calendar,
                                           true,
@@ -198,7 +296,9 @@ class _LocalCalendarCard extends StatelessWidget {
                                           valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                                         ),
                                       )
-                                    : Text(calendar.canRelink ? 'Re-link' : 'Link'),
+                                    : Text(controller.isRemoteScoped
+                                        ? 'Bind'
+                                        : (calendar.canRelink ? 'Re-link' : 'Link')),
                               ),
                       ],
                     ),

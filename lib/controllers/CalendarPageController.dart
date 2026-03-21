@@ -14,6 +14,7 @@ import '../data/database_helper.dart';
 import '../data/sync_repository.dart';
 import '../feature/local_calendars_page.dart';
 import '../services/calee_server_service.dart';
+import '../sync/SyncEnum.dart';
 
 class CalendarDisplayItem {
   // 1. 标识符
@@ -206,7 +207,17 @@ class CalendarPageController extends GetxController {
               ? TextButton(
                   onPressed: () {
                     Get.back();
-                    Get.to(() => const LocalCalendarsPage());
+                    if (item.origin == SyncBindingOrigin.local) {
+                      Get.to(
+                        () => LocalCalendarsPage(
+                          remotePath: item.remotePath!,
+                          remoteDisplayName: item.name,
+                          remoteOriginKind: item.origin,
+                        ),
+                      );
+                    } else {
+                      Get.to(() => const LocalCalendarsPage());
+                    }
                   },
                   child: const Text('Link now'),
                 )

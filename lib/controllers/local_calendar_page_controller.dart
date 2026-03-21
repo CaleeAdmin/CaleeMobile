@@ -8,7 +8,9 @@ import 'package:get/get.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../data/database_helper.dart';
+import '../data/sync_repository.dart';
 import '../services/calee_server_service.dart';
+import '../sync/SyncEnum.dart';
 import '../sync/relink_verifier.dart';
 import '../sync/sync_gate_reason.dart';
 import 'CalendarPageController.dart';
@@ -55,13 +57,29 @@ class LocalCalendarItem {
 }
 
 class LocalCalendarPageController extends GetxController {
+  LocalCalendarPageController({
+    this.remotePath,
+    this.remoteDisplayName,
+    this.remoteOriginKind,
+  });
+
+  final String? remotePath;
+  final String? remoteDisplayName;
+  final int? remoteOriginKind;
+
   final NativeCalendarApi _nativeApi = NativeCalendarApi();
+  final SyncRepository _repo = Get.find<SyncRepository>();
   final CaleeServerService _caleeService = CaleeServerService();
   final RelinkVerifier _relinkVerifier = RelinkVerifier();
+
+  bool get isRemoteScoped => remotePath != null && remotePath!.isNotEmpty;
+  bool get _isRemoteScopedLocalOriginFlow =>
+      isRemoteScoped && remoteOriginKind == SyncBindingOrigin.local;
 
   final calendarGroups = <LocalCalendarGroup>[].obs;
   final isLoading = false.obs;
   final connectingCalendarIds = <String>{}.obs;
+  final isCreatingLocalCalendar = false.obs;
   static const int _highConfidenceRelinkThreshold = 70;
   static const int _metadataBatchSize = 4;
   int _refreshVersion = 0;
@@ -95,26 +113,42 @@ class LocalCalendarPageController extends GetxController {
         for (final row in rows) _normalizeLocalCollectionId(row['local_collection_id'])
       }..remove('');
 
-      final List<Map<String, dynamic>> relinkCandidates = await db.rawQuery('''
-        SELECT
-          rc.id,
-          rc.remote_path,
-          rc.display_name,
-          rc.origin_key,
-          rc.is_subscription,
-          rc.subscription_url,
-          COALESCE(NULLIF(TRIM(rc.account_name), ''), 'Local') AS account_name
-        FROM remote_collections rc
-        INNER JOIN collection_states cs ON cs.remote_collection_id = rc.id
-        LEFT JOIN local_bindings lb
-          ON lb.remote_collection_id = rc.id
-         AND lb.local_collection_id IS NOT NULL
-         AND lb.local_collection_id != ''
-        WHERE rc.collection_type = 'calendar'
-          AND rc.origin_kind = 0
-          AND cs.sync_gate_reason = ?
-          AND lb.id IS NULL
-      ''', [SyncGateReason.relinkRequired]);
+      String currentRemoteBoundLocalId = '';
+      if (isRemoteScoped) {
+        final List<Map<String, dynamic>> currentBindingRows = await db.rawQuery('''
+          SELECT lb.local_collection_id
+          FROM local_bindings lb
+          INNER JOIN remote_collections rc ON rc.id = lb.remote_collection_id
+          WHERE rc.remote_path = ?
+          LIMIT 1
+        ''', [remotePath]);
+        currentRemoteBoundLocalId = currentBindingRows.isNotEmpty
+            ? _normalizeLocalCollectionId(currentBindingRows.first['local_collection_id'])
+            : '';
+      }
+
+      final List<Map<String, dynamic>> relinkCandidates = isRemoteScoped
+          ? const <Map<String, dynamic>>[]
+          : await db.rawQuery('''
+              SELECT
+                rc.id,
+                rc.remote_path,
+                rc.display_name,
+                rc.origin_key,
+                rc.is_subscription,
+                rc.subscription_url,
+                COALESCE(NULLIF(TRIM(rc.account_name), ''), 'Local') AS account_name
+              FROM remote_collections rc
+              INNER JOIN collection_states cs ON cs.remote_collection_id = rc.id
+              LEFT JOIN local_bindings lb
+                ON lb.remote_collection_id = rc.id
+               AND lb.local_collection_id IS NOT NULL
+               AND lb.local_collection_id != ''
+              WHERE rc.collection_type = 'calendar'
+                AND rc.origin_kind = 0
+                AND cs.sync_gate_reason = ?
+                AND lb.id IS NULL
+            ''', [SyncGateReason.relinkRequired]);
 
       final List<Map<String, dynamic>> remoteProvisionedRows = await db.rawQuery('''
         SELECT lb.local_collection_id
@@ -152,11 +186,15 @@ class LocalCalendarPageController extends GetxController {
           continue;
         }
 
+        if (isRemoteScoped && connectedLocalIds.contains(id) && id != currentRemoteBoundLocalId) {
+          continue;
+        }
+
         final String accountName = _normalizeAccountName(calendar.accountName);
 
         final String normalizedName =
             (calendar.name != null && calendar.name!.isNotEmpty) ? calendar.name! : 'Untitled calendar';
-        final bool isConnected = connectedLocalIds.contains(id);
+        final bool isConnected = isRemoteScoped ? false : connectedLocalIds.contains(id);
         final item = LocalCalendarItem(
           id: id,
           name: normalizedName,
@@ -329,6 +367,85 @@ class LocalCalendarPageController extends GetxController {
     item.relinkConfidence = relinkConfidence;
     item.canRelink = !item.isConnected && relinkConfidence >= _highConfidenceRelinkThreshold;
     return Future<void>.value();
+  }
+
+
+  Future<void> bindRemoteToSelectedLocal(LocalCalendarItem item) async {
+    if (!isRemoteScoped || !_isRemoteScopedLocalOriginFlow || remotePath == null) {
+      Get.snackbar('Link failed', 'Remote calendar context is missing. Please reopen this page.');
+      return;
+    }
+    if (connectingCalendarIds.contains(item.id)) {
+      return;
+    }
+
+    connectingCalendarIds.add(item.id);
+    final bool previousConnectionState = item.isConnected;
+    item.isConnected = true;
+    calendarGroups.refresh();
+
+    try {
+      final result = await _repo.bindExistingRemoteToLocalFromUserAction(
+        remotePath: remotePath!,
+        localCalendarId: item.id,
+      );
+      if (!result.success) {
+        item.isConnected = previousConnectionState;
+        calendarGroups.refresh();
+        final String err = _repo.takeLastConnectErrorMessage() ??
+            'Unable to bind the selected device calendar. Please try again.';
+        Get.snackbar('Link failed', err);
+        return;
+      }
+
+      await CalendarPageController.to.refreshDashboard();
+      if (Get.isOverlaysOpen) {
+        Get.back();
+      }
+    } catch (e) {
+      item.isConnected = previousConnectionState;
+      calendarGroups.refresh();
+      final String err = _repo.takeLastConnectErrorMessage() ??
+          'Unable to bind the selected device calendar. Please try again.';
+      Get.snackbar('Link failed', err);
+    } finally {
+      connectingCalendarIds.remove(item.id);
+      calendarGroups.refresh();
+    }
+  }
+
+  Future<void> createLocalForSelectedRemote() async {
+    if (!isRemoteScoped || !_isRemoteScopedLocalOriginFlow || remotePath == null) {
+      Get.snackbar('Create failed', 'Remote calendar context is missing. Please reopen this page.');
+      return;
+    }
+    if (isCreatingLocalCalendar.value) {
+      return;
+    }
+
+    try {
+      isCreatingLocalCalendar.value = true;
+      final result = await _repo.createLocalCalendarForExistingRemoteFromUserAction(
+        remotePath: remotePath!,
+      );
+      if (!result.success) {
+        final String err = _repo.takeLastConnectErrorMessage() ??
+            'Unable to create a local calendar for this remote. Please try again.';
+        Get.snackbar('Create failed', err);
+        return;
+      }
+
+      await CalendarPageController.to.refreshDashboard();
+      if (Get.isOverlaysOpen) {
+        Get.back();
+      }
+    } catch (e) {
+      final String err = _repo.takeLastConnectErrorMessage() ??
+          'Unable to create a local calendar for this remote. Please try again.';
+      Get.snackbar('Create failed', err);
+    } finally {
+      isCreatingLocalCalendar.value = false;
+    }
   }
 
   Future<void> linkCalendar(

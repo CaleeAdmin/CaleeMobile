@@ -967,6 +967,263 @@ class SyncRepository {
     }
   }
 
+
+  Future<Map<String, dynamic>?> _loadRemoteCalendarProvisioningRow(
+    DatabaseExecutor db,
+    String accountName,
+    String remotePath,
+  ) async {
+    final List<Map<String, dynamic>> remoteRows = await db.rawQuery('''
+      SELECT rc.id, rc.display_name, rc.color, rc.remote_path, rc.origin_kind,
+             rc.origin_key, cs.sync_gate_reason
+      FROM remote_collections rc
+      LEFT JOIN collection_states cs ON cs.remote_collection_id = rc.id
+      WHERE rc.account_name = ?
+        AND rc.collection_type = 'calendar'
+        AND rc.remote_path = ?
+      LIMIT 1
+    ''', [accountName, remotePath]);
+    return remoteRows.isEmpty ? null : remoteRows.first;
+  }
+
+  Future<void> _upsertBindingAndEnableState({
+    required DatabaseExecutor txn,
+    required int remoteCollectionId,
+    required String localCollectionId,
+  }) async {
+    final int now = DateTime.now().millisecondsSinceEpoch;
+    await txn.insert(
+      'local_bindings',
+      {
+        'remote_collection_id': remoteCollectionId,
+        'local_collection_id': localCollectionId,
+        'created_at': now,
+        'updated_at': now,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+
+    await txn.insert(
+      'collection_states',
+      {
+        'remote_collection_id': remoteCollectionId,
+        'sync_gate_reason': null,
+        'is_enabled': 1,
+        'updated_at': now,
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+
+    await txn.update(
+      'collection_states',
+      {
+        'sync_gate_reason': null,
+        'is_enabled': 1,
+        'updated_at': now,
+      },
+      where: 'remote_collection_id = ?',
+      whereArgs: [remoteCollectionId],
+    );
+  }
+
+  Future<EnableCalendarResult> bindExistingRemoteToLocalFromUserAction({
+    required String remotePath,
+    required String localCalendarId,
+  }) async {
+    _lastConnectError = null;
+    final String normalizedRemotePath = CaleeServerService.normalizeRemotePath(remotePath);
+    final String normalizedLocalCalendarId = localCalendarId.trim();
+    final String accountName = MMKVUtils.instance.getString(AppConstant.calendarAccountNameKey) ?? '';
+    if (normalizedRemotePath.isEmpty || normalizedLocalCalendarId.isEmpty || accountName.isEmpty) {
+      _lastConnectError = 'Missing calendar information. Please refresh and try again.';
+      return EnableCalendarResult.failure(remotePath: normalizedRemotePath);
+    }
+
+    final db = await _dbHelper.database;
+    try {
+      final Map<String, dynamic>? remote = await _loadRemoteCalendarProvisioningRow(
+        db,
+        accountName,
+        normalizedRemotePath,
+      );
+      if (remote == null) {
+        _lastConnectError = 'Remote calendar not found. Pull to refresh and try again.';
+        return EnableCalendarResult.failure(remotePath: normalizedRemotePath);
+      }
+
+      final int remoteCollectionId = remote['id'] as int;
+      final int originKind = (remote['origin_kind'] as int?) ?? SyncBindingOrigin.remote;
+      if (originKind != SyncBindingOrigin.local) {
+        _lastConnectError = 'This calendar cannot be rebound from the device picker.';
+        return EnableCalendarResult.failure(remotePath: normalizedRemotePath);
+      }
+
+      final bool hasPermission = await _nativeApi.requestPermission(false);
+      if (!hasPermission) {
+        _lastConnectError = 'Calendar access permission is required. Please grant calendar permission in settings.';
+        return EnableCalendarResult.failure(remotePath: normalizedRemotePath);
+      }
+
+      final List<PlatformCalendar> nativeCalendars = (await _nativeApi.getCalendars())
+          .whereType<PlatformCalendar>()
+          .toList();
+      final Set<String> nativeCalendarIds = nativeCalendars
+          .map((calendar) => (calendar.id ?? '').trim())
+          .where((id) => id.isNotEmpty)
+          .toSet();
+      if (!nativeCalendarIds.contains(normalizedLocalCalendarId)) {
+        _lastConnectError = 'The selected device calendar no longer exists. Refresh and try again.';
+        return EnableCalendarResult.failure(remotePath: normalizedRemotePath);
+      }
+
+      if (await _isLocalCalendarIdBoundElsewhere(
+        db: db,
+        remoteCollectionId: remoteCollectionId,
+        localCalendarId: normalizedLocalCalendarId,
+      )) {
+        _lastConnectError = 'This local calendar is already bound to another remote calendar. Unbind first and retry.';
+        return EnableCalendarResult.failure(remotePath: normalizedRemotePath);
+      }
+
+      await db.transaction((txn) async {
+        await _upsertBindingAndEnableState(
+          txn: txn,
+          remoteCollectionId: remoteCollectionId,
+          localCollectionId: normalizedLocalCalendarId,
+        );
+      });
+
+      _triggerOneShotForceSyncInBackground(remoteCollectionId);
+      return EnableCalendarResult(
+        success: true,
+        remotePath: normalizedRemotePath,
+        remoteCollectionId: remoteCollectionId,
+        localCalendarId: normalizedLocalCalendarId,
+        didTriggerSync: true,
+        hasFreshEventCount: false,
+      );
+    } on PlatformException catch (e) {
+      final String msg = '${e.code} ${e.message ?? ''}'.toLowerCase();
+      _lastConnectError = msg.contains('permission')
+          ? 'Calendar permission missing. Grant permission in system settings and retry.'
+          : 'System calendar API error. Please try again later.';
+      return EnableCalendarResult.failure(remotePath: normalizedRemotePath);
+    } catch (e) {
+      debugPrint('[ERROR] bindExistingRemoteToLocalFromUserAction failed: $e');
+      _lastConnectError = 'Unable to bind the selected device calendar. Please try again later.';
+      return EnableCalendarResult.failure(remotePath: normalizedRemotePath);
+    }
+  }
+
+  Future<EnableCalendarResult> createLocalCalendarForExistingRemoteFromUserAction({
+    required String remotePath,
+  }) async {
+    _lastConnectError = null;
+    final String normalizedRemotePath = CaleeServerService.normalizeRemotePath(remotePath);
+    final String accountName = MMKVUtils.instance.getString(AppConstant.calendarAccountNameKey) ?? '';
+    if (normalizedRemotePath.isEmpty || accountName.isEmpty) {
+      _lastConnectError = 'Missing calendar information. Please refresh and try again.';
+      return EnableCalendarResult.failure(remotePath: normalizedRemotePath);
+    }
+
+    final db = await _dbHelper.database;
+    String? createdLocalId;
+    try {
+      final Map<String, dynamic>? remote = await _loadRemoteCalendarProvisioningRow(
+        db,
+        accountName,
+        normalizedRemotePath,
+      );
+      if (remote == null) {
+        _lastConnectError = 'Remote calendar not found. Pull to refresh and try again.';
+        return EnableCalendarResult.failure(remotePath: normalizedRemotePath);
+      }
+
+      final int remoteCollectionId = remote['id'] as int;
+      final int originKind = (remote['origin_kind'] as int?) ?? SyncBindingOrigin.remote;
+      if (originKind != SyncBindingOrigin.local) {
+        _lastConnectError = 'This calendar cannot create a device calendar from this flow.';
+        return EnableCalendarResult.failure(remotePath: normalizedRemotePath);
+      }
+
+      final bool hasPermission = await _nativeApi.requestPermission(false);
+      if (!hasPermission) {
+        _lastConnectError = 'Calendar access permission is required. Please grant calendar permission in settings.';
+        return EnableCalendarResult.failure(remotePath: normalizedRemotePath);
+      }
+
+      int colorInt = 0xFF4CAF50;
+      final String colorHex = remote['color']?.toString() ?? '';
+      if (colorHex.isNotEmpty) {
+        final String normalized = colorHex.replaceAll('#', '');
+        final String argb = normalized.length == 6 ? 'FF$normalized' : normalized;
+        final int? parsed = int.tryParse(argb, radix: 16);
+        if (parsed != null) {
+          colorInt = parsed;
+        }
+      }
+
+      final String displayName = (remote['display_name']?.toString().trim().isNotEmpty ?? false)
+          ? remote['display_name'].toString().trim()
+          : 'Untitled calendar';
+      final String? newLocalId = await _nativeApi.createCalendar(displayName, accountName, colorInt);
+      if (!_isValidLocalCollectionId(newLocalId)) {
+        _lastConnectError = 'Failed to create local calendar. Check calendar permissions and try again.';
+        return EnableCalendarResult.failure(remotePath: normalizedRemotePath);
+      }
+      createdLocalId = newLocalId!.trim();
+
+      await db.transaction((txn) async {
+        await _upsertBindingAndEnableState(
+          txn: txn,
+          remoteCollectionId: remoteCollectionId,
+          localCollectionId: createdLocalId!,
+        );
+      });
+
+      _triggerOneShotForceSyncInBackground(remoteCollectionId);
+      return EnableCalendarResult(
+        success: true,
+        remotePath: normalizedRemotePath,
+        remoteCollectionId: remoteCollectionId,
+        localCalendarId: createdLocalId,
+        didTriggerSync: true,
+        hasFreshEventCount: false,
+      );
+    } on DatabaseException catch (e) {
+      final String msg = e.toString().toLowerCase();
+      _lastConnectError = msg.contains('unique constraint') || msg.contains('uq_lb_local')
+          ? 'This local calendar is already bound to another remote calendar. Unbind first and retry.'
+          : 'Failed to save local binding. Please try again later.';
+      if (createdLocalId != null && createdLocalId!.isNotEmpty) {
+        try {
+          await _nativeApi.deleteCalendar(createdLocalId!, accountName);
+        } catch (_) {}
+      }
+      return EnableCalendarResult.failure(remotePath: normalizedRemotePath);
+    } on PlatformException catch (e) {
+      final String msg = '${e.code} ${e.message ?? ''}'.toLowerCase();
+      _lastConnectError = msg.contains('permission')
+          ? 'Calendar permission missing. Grant permission in system settings and retry.'
+          : 'System calendar API error. Please try again later.';
+      if (createdLocalId != null && createdLocalId!.isNotEmpty) {
+        try {
+          await _nativeApi.deleteCalendar(createdLocalId!, accountName);
+        } catch (_) {}
+      }
+      return EnableCalendarResult.failure(remotePath: normalizedRemotePath);
+    } catch (e) {
+      debugPrint('[ERROR] createLocalCalendarForExistingRemoteFromUserAction failed: $e');
+      _lastConnectError = 'Unable to create a local calendar for this remote. Please try again later.';
+      if (createdLocalId != null && createdLocalId!.isNotEmpty) {
+        try {
+          await _nativeApi.deleteCalendar(createdLocalId!, accountName);
+        } catch (_) {}
+      }
+      return EnableCalendarResult.failure(remotePath: normalizedRemotePath);
+    }
+  }
+
   void _triggerOneShotForceSyncInBackground(int remoteCollectionId) {
     unawaited(_triggerOneShotForceSync(remoteCollectionId));
   }
