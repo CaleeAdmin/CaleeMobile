@@ -10,6 +10,7 @@ import 'package:sqflite/sqflite.dart';
 import '../data/database_helper.dart';
 import '../services/calee_server_service.dart';
 import '../sync/SyncEnum.dart';
+import '../sync/ios_mirror_identity.dart';
 import '../sync/relink_verifier.dart';
 import '../sync/sync_gate_reason.dart';
 import 'CalendarPageController.dart';
@@ -728,8 +729,11 @@ class LocalCalendarPageController extends GetxController {
 
 
   String _normalizeOriginKeyPart(String? value) {
-    final String normalized = (value ?? '').trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
-    return normalized;
+    final String rawValue = (value ?? '').trim();
+    final String normalizedSource = looksLikeIosMirrorTitle(rawValue)
+        ? (parseIosMirrorTitle(rawValue)?.baseName ?? rawValue)
+        : rawValue;
+    return normalizedSource.toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
   }
 
   String _buildLocalOriginKey(LocalCalendarItem item) {
