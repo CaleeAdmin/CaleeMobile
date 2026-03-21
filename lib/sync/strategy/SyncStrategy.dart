@@ -11,6 +11,7 @@ import '../../entity/sync_run_record.dart';
 import '../../services/calee_auth_service.dart';
 import '../../services/calee_server_service.dart';
 import '../SyncEnum.dart';
+import '../sync_gate_reason.dart';
 import '../sync_run_telemetry.dart';
 import 'package:sqflite/sqflite.dart';
 
@@ -295,6 +296,8 @@ abstract class SyncStrategy {
     final int remoteCollectionId = ctx.remoteCollectionId;
     final int bindingId = (ctx.extra['binding_id'] as int?) ?? 0;
     final int bindingRole = (ctx.extra['binding_role'] as int?) ?? SyncBindingRole.mirror;
+    final String? syncGateReason = ctx.extra['sync_gate_reason']?.toString();
+    final bool safeFirstSync = syncGateReason == SyncGateReason.safeFirstSync;
 
     final snapshot = await remoteGateway.fetchUnifiedEventsSnapshot(
       calendarPath: ctx.remotePath,
@@ -387,7 +390,7 @@ abstract class SyncStrategy {
     final bool massDeletionSafetyTripped =
         localDeleteCandidates >= SyncStrategy.massDeletionAbsoluteThreshold ||
             remoteDeleteCandidates >= SyncStrategy.massDeletionAbsoluteThreshold;
-    final bool blockDeletes = massDeletionSafetyTripped && !allowMassDeletion;
+    final bool blockDeletes = safeFirstSync || (massDeletionSafetyTripped && !allowMassDeletion);
 
     if (blockDeletes) {
       summary.recordBindingOutcome(bindingId, SyncOutcomeStatus.safetyGateBlockedDeletions);
@@ -579,6 +582,15 @@ abstract class SyncStrategy {
       where: 'id = ?',
       whereArgs: [remoteCollectionId],
     );
+
+    if (safeFirstSync) {
+      await db.update(
+        'collection_states',
+        {'sync_gate_reason': null},
+        where: 'remote_collection_id = ?',
+        whereArgs: [remoteCollectionId],
+      );
+    }
 
     if (!blockDeletes) {
       summary.success++;

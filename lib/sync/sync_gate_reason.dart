@@ -12,6 +12,7 @@ class SyncGateReason {
   static const String relinkRequired = 'relink_required';
   static const String relinkVerifying = 'relink_verifying';
   static const String relinkMismatch = 'relink_mismatch';
+  static const String safeFirstSync = 'safe_first_sync';
 
   static const Set<String> deterministicReasons = {
     ok,
@@ -25,6 +26,7 @@ class SyncGateReason {
     relinkRequired,
     relinkVerifying,
     relinkMismatch,
+    safeFirstSync,
   };
 
   static String? toUiMessage(String? reason) {
@@ -49,6 +51,8 @@ class SyncGateReason {
         return 'Relink verification in progress.';
       case relinkMismatch:
         return 'Relink verification failed. Pick another calendar.';
+      case safeFirstSync:
+        return 'First sync after reconnect is running in safe mode. Deletes are temporarily blocked.';
       default:
         if (reason == null || reason.isEmpty) return null;
         return 'Sync paused (${reason.replaceAll('_', ' ')}).';

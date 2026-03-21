@@ -102,7 +102,13 @@ class SyncItemPlanner {
     final bool forceRequested = ForceSyncRegistry.consumeForceSyncForCollection(remoteCollectionId);
 
     final String? explicitGate = local['sync_gate_reason']?.toString();
-    if (explicitGate != null && explicitGate.isNotEmpty) {
+    if (explicitGate == SyncGateReason.safeFirstSync) {
+      await _setCollectionGateReason(
+        db: db,
+        remoteCollectionId: remoteCollectionId,
+        nextReason: SyncGateReason.safeFirstSync,
+      );
+    } else if (explicitGate != null && explicitGate.isNotEmpty) {
       await _setCollectionGateReason(db: db, remoteCollectionId: remoteCollectionId, nextReason: explicitGate);
       debugPrint('[SYNC_GATE][remote_collection_id=$remoteCollectionId][path=$path][origin=$originKind] skipped reason=$explicitGate');
       return null;
@@ -129,7 +135,13 @@ class SyncItemPlanner {
       return null;
     }
 
-    await _setCollectionGateReason(db: db, remoteCollectionId: remoteCollectionId, nextReason: null);
+    await _setCollectionGateReason(
+      db: db,
+      remoteCollectionId: remoteCollectionId,
+      nextReason: explicitGate == SyncGateReason.safeFirstSync
+          ? SyncGateReason.safeFirstSync
+          : null,
+    );
 
     final int mode = (local['sync_mode'] as int?) ?? SyncBindingMode.readOnly;
     final String? dbCtag = local['synced_ctag']?.toString();
@@ -288,6 +300,7 @@ class SyncItemPlanner {
         'binding_id': local['binding_id'] ?? 0,
         'binding_role': bindingRole,
         'origin_kind': local['origin_kind'] ?? SyncBindingOrigin.remote,
+        'sync_gate_reason': local['sync_gate_reason']?.toString(),
       },
     );
   }

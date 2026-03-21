@@ -12,6 +12,7 @@ import 'package:uuid/uuid.dart';
 import '../sync/SyncEnum.dart';
 import '../sync/SyncEngine.dart';
 import '../sync/background_sync_scheduler.dart';
+import '../sync/sync_gate_reason.dart';
 import '../services/calee_server_service.dart';
 import 'database_helper.dart';
 
@@ -843,6 +844,7 @@ class SyncRepository {
               {
                 'remote_collection_id': remoteCollectionId,
                 'is_enabled': 1,
+                'sync_gate_reason': SyncGateReason.safeFirstSync,
                 'updated_at': now,
               },
               conflictAlgorithm: ConflictAlgorithm.ignore,
@@ -850,7 +852,11 @@ class SyncRepository {
 
             await txn.update(
               'collection_states',
-              {'is_enabled': 1, 'updated_at': now},
+              {
+                'is_enabled': 1,
+                'sync_gate_reason': SyncGateReason.safeFirstSync,
+                'updated_at': now,
+              },
               where: 'remote_collection_id = ?',
               whereArgs: [remoteCollectionId],
             );
@@ -916,6 +922,7 @@ class SyncRepository {
             {
               'remote_collection_id': remoteCollectionId,
               'is_enabled': 1,
+              'sync_gate_reason': SyncGateReason.safeFirstSync,
               'updated_at': now,
             },
             conflictAlgorithm: ConflictAlgorithm.ignore,
@@ -923,7 +930,11 @@ class SyncRepository {
 
           await txn.update(
             'collection_states',
-            {'is_enabled': 1, 'updated_at': now},
+            {
+              'is_enabled': 1,
+              'sync_gate_reason': SyncGateReason.safeFirstSync,
+              'updated_at': now,
+            },
             where: 'remote_collection_id = ?',
             whereArgs: [remoteCollectionId],
           );
