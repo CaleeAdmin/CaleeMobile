@@ -2,7 +2,7 @@ import 'package:caleesync/common/app_constant.dart';
 import 'package:caleesync/common/utils/mmkv_utils.dart';
 import 'package:caleesync/core/platform/pigeon/calendar_api.g.dart';
 import 'package:flutter/cupertino.dart';
-import 'package:flutter/material.dart' show Text, TextButton;
+import 'package:flutter/material.dart' show Text;
 import 'package:get/get.dart';
 import 'dart:async';
 import 'dart:io';
@@ -12,7 +12,6 @@ import '../sync/sync_completed_event_bus.dart';
 import '../sync/sync_trigger_orchestrator.dart';
 import '../data/database_helper.dart';
 import '../data/sync_repository.dart';
-import '../feature/local_calendars_page.dart';
 import '../services/calee_server_service.dart';
 
 class CalendarDisplayItem {
@@ -176,20 +175,10 @@ class CalendarPageController extends GetxController {
 
       final String? syncMessage = _repo.takeLastConnectErrorMessage();
       if (!enableResult.success) {
-        final String err = syncMessage ?? 'Enable failed. Please retry.';
-        final bool showRelinkAction = err.contains('needs a quick relink');
+        final String err = syncMessage ?? 'Unable to enable this calendar on this device. Please retry.';
         Get.snackbar(
           'Enable failed',
           err,
-          mainButton: showRelinkAction
-              ? TextButton(
-                  onPressed: () {
-                    Get.back();
-                    Get.to(() => const LocalCalendarsPage());
-                  },
-                  child: const Text('Link now'),
-                )
-              : null,
         );
       } else if (syncMessage != null && syncMessage.isNotEmpty) {
         Get.snackbar('Sync failed', syncMessage);
