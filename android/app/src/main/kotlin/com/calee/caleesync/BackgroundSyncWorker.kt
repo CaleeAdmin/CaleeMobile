@@ -71,7 +71,7 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
         val runToken = UUID.randomUUID().toString()
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         prefs.edit().putLong(KEY_LAST_RUN_AT, System.currentTimeMillis()).apply()
-        Log.i(TAG, "enter trigger=$trigger runToken=$runToken")
+        Log.i(TAG, "Worker start trigger=$trigger runToken=$runToken")
 
         var stage = STAGE_ENGINE_CREATED
         val attemptStartedAt = System.currentTimeMillis()
@@ -128,6 +128,7 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
                 }
             }
         } catch (t: Throwable) {
+            val elapsedMs = System.currentTimeMillis() - attemptStartedAt
             val reason = when {
                 t is TimeoutCancellationException -> "worker_execution_timeout"
                 t.message == "dart_not_ready" -> "dart_not_ready"
@@ -136,6 +137,7 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
                 t.message == "worker_cancelled" -> "worker_cancelled"
                 else -> "engine_or_run_error"
             }
+            Log.e(TAG, "Worker failure message=${t.message} stage=$stage elapsedMs=$elapsedMs reason=$reason", t)
             withContext(Dispatchers.Main.immediate) {
                 BackgroundEngineHolder.markUnhealthyAndDestroyOnMain(reason)
             }
@@ -143,7 +145,7 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
                 prefs = prefs,
                 failureStage = stage,
                 failureStep = reason,
-                elapsedMs = System.currentTimeMillis() - attemptStartedAt,
+                elapsedMs = elapsedMs,
             )
             persistSnapshot(
                 prefs = prefs,
@@ -155,6 +157,8 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
             persistStage(prefs, stage)
             WorkResult.retry()
         } finally {
+            val elapsedMs = System.currentTimeMillis() - attemptStartedAt
+            Log.i(TAG, "Worker finished trigger=$trigger runToken=$runToken stage=$stage elapsedMs=$elapsedMs")
             releaseRunLease(runLease)
         }
 
@@ -535,6 +539,8 @@ private object BackgroundEngineHolder {
             engine == null || unhealthy
         }
         if (shouldCreate) {
+            val nextGeneration = synchronized(lock) { generation + 1 }
+            Log.i(TAG, "Creating new engine gen=$nextGeneration trigger=$trigger runToken=$runToken")
             createEngineOnMain(context.applicationContext)
         }
 
@@ -542,10 +548,10 @@ private object BackgroundEngineHolder {
             if (engine != null && dartReady) {
                 state = HolderState.READY
                 readyDeferred?.takeIf { !it.isCompleted }?.complete(ReadyResult.READY)
+                Log.i(TAG, "Reusing existing engine gen=$generation trigger=$trigger runToken=$runToken")
             } else {
                 state = HolderState.STARTING
             }
-            Log.i(TAG, "startOrReuseOnMain trigger=$trigger runToken=$runToken generation=$generation state=$state")
             EngineHandle(generation = generation)
         }
     }
@@ -554,6 +560,7 @@ private object BackgroundEngineHolder {
         requireNotMainThread("awaitDartReadyOnWorker")
         val deferred = synchronized(lock) {
             if (activeRunToken != runToken) {
+                Log.w(TAG, "dart_not_ready: token mismatch expected=$activeRunToken actual=$runToken generation=$generation")
                 return ReadyResult.NOT_READY_TIMEOUT
             }
             if (dartReady && engine != null && state != HolderState.UNHEALTHY) {
@@ -564,6 +571,7 @@ private object BackgroundEngineHolder {
         return try {
             withTimeout(timeoutMs) { deferred.await() }
         } catch (_: TimeoutCancellationException) {
+            Log.e(TAG, "dart_not_ready: timeout timeoutMs=$timeoutMs runToken=$runToken generation=$generation")
             markUnhealthy("dart_ready_timeout:$runToken")
             requestDestroyOnMain("dart_ready_timeout:$runToken")
             ReadyResult.NOT_READY_TIMEOUT
@@ -676,6 +684,7 @@ private object BackgroundEngineHolder {
             state = HolderState.STARTING
             generation
         }
+        Log.i(TAG, "Engine created gen=$engineGen")
 
         BackgroundSyncRunnerHostApi.setUp(
             nextEngine.dartExecutor.binaryMessenger,
@@ -696,7 +705,7 @@ private object BackgroundEngineHolder {
         requireMainThread("onDartReady")
         synchronized(lock) {
             if (callbackGeneration != generation) {
-                Log.w(TAG, "Ignoring stale ready callback callbackGen=$callbackGeneration generation=$generation")
+                Log.w(TAG, "Ignoring stale dart ready callback callbackGen=$callbackGeneration generation=$generation")
                 return
             }
             dartReady = true
