@@ -12,6 +12,7 @@ import 'package:uuid/uuid.dart';
 import '../sync/SyncEnum.dart';
 import '../sync/SyncEngine.dart';
 import '../sync/background_sync_scheduler.dart';
+import '../sync/sync_gate_reason.dart';
 import '../services/calee_server_service.dart';
 import 'database_helper.dart';
 
@@ -170,6 +171,58 @@ class SyncRepository {
     }
 
     return (baseName: baseName, marker: marker);
+  }
+
+  Future<String?> _tryReclaimIosMirrorBinding({
+    required DatabaseExecutor db,
+    required int remoteCollectionId,
+    required String remotePath,
+    required String displayName,
+    String? originKey,
+    required List<PlatformCalendar> nativeCalendars,
+  }) async {
+    final String expectedMarker = _deriveIosRemoteMirrorMarker(
+      remotePath: remotePath,
+      originKey: originKey,
+    ).trim();
+    final String expectedBaseName = displayName.trim();
+    if (expectedMarker.isEmpty || expectedBaseName.isEmpty) {
+      return null;
+    }
+
+    final List<PlatformCalendar> reclaimCandidates = nativeCalendars.where((PlatformCalendar calendar) {
+      final String calendarId = (calendar.id ?? '').trim();
+      if (calendarId.isEmpty) {
+        return false;
+      }
+      if ((calendar.accountType ?? '').trim().toLowerCase() != AppConstant.calendarAccountType) {
+        return false;
+      }
+
+      final ({String baseName, String marker})? parsedTitle =
+          _parseIosRemoteMirrorTitle(calendar.name ?? '');
+      return parsedTitle != null &&
+          parsedTitle.marker == expectedMarker &&
+          parsedTitle.baseName == expectedBaseName;
+    }).toList();
+
+    final List<String> eligibleIds = <String>[];
+    for (final PlatformCalendar calendar in reclaimCandidates) {
+      final String localCalendarId = (calendar.id ?? '').trim();
+      if (await _isLocalCalendarIdBoundElsewhere(
+        db: db,
+        remoteCollectionId: remoteCollectionId,
+        localCalendarId: localCalendarId,
+      )) {
+        continue;
+      }
+      eligibleIds.add(localCalendarId);
+    }
+
+    if (eligibleIds.length == 1) {
+      return eligibleIds.single;
+    }
+    return null;
   }
 
   Future<bool> _isLocalCalendarIdBoundElsewhere({
@@ -762,69 +815,62 @@ class SyncRepository {
       );
 
       if (Platform.isIOS &&
-          (existingLocalId.isEmpty || !nativeCalendarIds.contains(existingLocalId)) &&
-          iosMirrorMarker.isNotEmpty) {
-        final String expectedMarker = iosMirrorMarker;
-        final String expectedBaseName = displayName.trim();
-        final List<PlatformCalendar> reclaimCandidates =
-            nativeCalendars.where((PlatformCalendar calendar) {
-          final ({String baseName, String marker})? parsedTitle =
-              _parseIosRemoteMirrorTitle(calendar.name ?? '');
-          return parsedTitle != null &&
-              parsedTitle.marker == expectedMarker &&
-              parsedTitle.baseName == expectedBaseName;
-        }).toList();
-
-        if (reclaimCandidates.length == 1) {
-          final String reclaimedLocalId = (reclaimCandidates.first.id ?? '').trim();
-          if (reclaimedLocalId.isNotEmpty &&
-              !await _isLocalCalendarIdBoundElsewhere(
-                db: db,
-                remoteCollectionId: remoteCollectionId,
-                localCalendarId: reclaimedLocalId,
-              )) {
-            final int now = DateTime.now().millisecondsSinceEpoch;
-            await db.transaction((txn) async {
-              await txn.insert(
-                'local_bindings',
-                {
-                  'remote_collection_id': remoteCollectionId,
-                  'local_collection_id': reclaimedLocalId,
-                  'binding_role': SyncBindingRole.mirror,
-                  'created_at': now,
-                  'updated_at': now,
-                },
-                conflictAlgorithm: ConflictAlgorithm.replace,
-              );
-
-              await txn.insert(
-                'collection_states',
-                {
-                  'remote_collection_id': remoteCollectionId,
-                  'is_enabled': 1,
-                  'updated_at': now,
-                },
-                conflictAlgorithm: ConflictAlgorithm.ignore,
-              );
-
-              await txn.update(
-                'collection_states',
-                {'is_enabled': 1, 'updated_at': now},
-                where: 'remote_collection_id = ?',
-                whereArgs: [remoteCollectionId],
-              );
-            });
-
-            _triggerOneShotForceSyncInBackground(remoteCollectionId);
-            return EnableCalendarResult(
-              success: true,
-              remotePath: persistedRemotePath,
-              remoteCollectionId: remoteCollectionId,
-              localCalendarId: reclaimedLocalId,
-              didTriggerSync: true,
-              hasFreshEventCount: false,
+          (existingLocalId.isEmpty || !nativeCalendarIds.contains(existingLocalId))) {
+        final String? reclaimedLocalId = await _tryReclaimIosMirrorBinding(
+          db: db,
+          remoteCollectionId: remoteCollectionId,
+          remotePath: persistedRemotePath,
+          displayName: displayName,
+          originKey: remote['origin_key']?.toString(),
+          nativeCalendars: nativeCalendars,
+        );
+        if (reclaimedLocalId != null) {
+          final int now = DateTime.now().millisecondsSinceEpoch;
+          await db.transaction((txn) async {
+            await txn.insert(
+              'local_bindings',
+              {
+                'remote_collection_id': remoteCollectionId,
+                'local_collection_id': reclaimedLocalId,
+                'binding_role': SyncBindingRole.mirror,
+                'created_at': now,
+                'updated_at': now,
+              },
+              conflictAlgorithm: ConflictAlgorithm.replace,
             );
-          }
+
+            await txn.insert(
+              'collection_states',
+              {
+                'remote_collection_id': remoteCollectionId,
+                'is_enabled': 1,
+                'sync_gate_reason': SyncGateReason.safeFirstSync,
+                'updated_at': now,
+              },
+              conflictAlgorithm: ConflictAlgorithm.ignore,
+            );
+
+            await txn.update(
+              'collection_states',
+              {
+                'is_enabled': 1,
+                'sync_gate_reason': SyncGateReason.safeFirstSync,
+                'updated_at': now,
+              },
+              where: 'remote_collection_id = ?',
+              whereArgs: [remoteCollectionId],
+            );
+          });
+
+          _triggerOneShotForceSyncInBackground(remoteCollectionId);
+          return EnableCalendarResult(
+            success: true,
+            remotePath: persistedRemotePath,
+            remoteCollectionId: remoteCollectionId,
+            localCalendarId: reclaimedLocalId,
+            didTriggerSync: true,
+            hasFreshEventCount: false,
+          );
         }
       }
 
@@ -876,6 +922,7 @@ class SyncRepository {
             {
               'remote_collection_id': remoteCollectionId,
               'is_enabled': 1,
+              'sync_gate_reason': SyncGateReason.safeFirstSync,
               'updated_at': now,
             },
             conflictAlgorithm: ConflictAlgorithm.ignore,
@@ -883,7 +930,11 @@ class SyncRepository {
 
           await txn.update(
             'collection_states',
-            {'is_enabled': 1, 'updated_at': now},
+            {
+              'is_enabled': 1,
+              'sync_gate_reason': SyncGateReason.safeFirstSync,
+              'updated_at': now,
+            },
             where: 'remote_collection_id = ?',
             whereArgs: [remoteCollectionId],
           );

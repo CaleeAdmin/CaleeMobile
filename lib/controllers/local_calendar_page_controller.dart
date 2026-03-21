@@ -96,24 +96,29 @@ class LocalCalendarPageController extends GetxController {
         for (final row in rows) _normalizeLocalCollectionId(row['local_collection_id'])
       }..remove('');
 
-      final List<Map<String, dynamic>> relinkCandidates = await db.rawQuery('''
-        SELECT
-          rc.id,
-          rc.remote_path,
-          rc.display_name,
-          rc.origin_key,
-          rc.is_subscription,
-          rc.subscription_url,
-          COALESCE(NULLIF(TRIM(rc.account_name), ''), 'Local') AS account_name
-        FROM remote_collections rc
-        LEFT JOIN local_bindings lb
-          ON lb.remote_collection_id = rc.id
-         AND lb.local_collection_id IS NOT NULL
-         AND lb.local_collection_id != ''
-        WHERE rc.collection_type = 'calendar'
-          AND rc.origin_kind = 0
-          AND lb.id IS NULL
-      ''');
+      final String? loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey);
+      final List<Map<String, dynamic>> relinkCandidates =
+          (loginName == null || loginName.trim().isEmpty)
+          ? <Map<String, dynamic>>[]
+          : await db.rawQuery('''
+              SELECT
+                rc.id,
+                rc.remote_path,
+                rc.display_name,
+                rc.origin_key,
+                rc.is_subscription,
+                rc.subscription_url,
+                COALESCE(NULLIF(TRIM(rc.account_name), ''), 'Local') AS account_name
+              FROM remote_collections rc
+              LEFT JOIN local_bindings lb
+                ON lb.remote_collection_id = rc.id
+               AND lb.local_collection_id IS NOT NULL
+               AND lb.local_collection_id != ''
+              WHERE rc.collection_type = 'calendar'
+                AND rc.origin_kind = 0
+                AND lb.id IS NULL
+                AND COALESCE(NULLIF(TRIM(rc.account_name), ''), '') = ?
+            ''', [loginName.trim()]);
 
       final List<Map<String, dynamic>> remoteProvisionedRows = await db.rawQuery('''
         SELECT lb.local_collection_id
@@ -354,10 +359,9 @@ class LocalCalendarPageController extends GetxController {
       bool relinkConfirmationDeclined = false;
       if (linkRequested) {
         final List<Map<String, dynamic>> existingRows = await db.rawQuery('''
-          SELECT rc.origin_key, rc.remote_path, cs.sync_gate_reason
+          SELECT rc.origin_key, rc.remote_path
           FROM local_bindings lb
           INNER JOIN remote_collections rc ON rc.id = lb.remote_collection_id
-          LEFT JOIN collection_states cs ON cs.remote_collection_id = rc.id
           WHERE lb.local_collection_id = ?
           LIMIT 1
         ''', [item.id]);
@@ -368,23 +372,14 @@ class LocalCalendarPageController extends GetxController {
         final String existingRemotePath = existingRows.isNotEmpty
             ? (existingRows.first['remote_path']?.toString() ?? '')
             : '';
-        final String existingSyncGateReason = existingRows.isNotEmpty
-            ? (existingRows.first['sync_gate_reason']?.toString() ?? '')
-            : '';
-        final bool existingBindingNeedsRelink =
-            existingSyncGateReason == SyncGateReason.relinkRequired;
-
-        final bool shouldBypassRelinkFlow =
+        if (existingRemotePath.isNotEmpty &&
             existingOriginKey.isNotEmpty &&
             existingOriginKey == localOriginKey &&
-            !item.canRelink &&
-            !existingBindingNeedsRelink;
-
-        if (shouldBypassRelinkFlow) {
+            !item.canRelink) {
           remotePath = existingRemotePath;
         } else {
           final String? loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey);
-          if (loginName == null || loginName.isEmpty) {
+          if (loginName == null || loginName.trim().isEmpty) {
             throw Exception('Not logged in to Calee');
           }
 
@@ -406,7 +401,8 @@ class LocalCalendarPageController extends GetxController {
               AND rc.origin_kind = 0
               AND rc.origin_key = ?
               AND lb.id IS NULL
-          ''', [localOriginKey]);
+              AND COALESCE(NULLIF(TRIM(rc.account_name), ''), '') = ?
+          ''', [localOriginKey, loginName.trim()]);
 
           final List<_RankedReuseCandidate> rankedCandidates = reuseCandidates
               .map((candidate) => _RankedReuseCandidate(
@@ -426,16 +422,6 @@ class LocalCalendarPageController extends GetxController {
             if (ranked.providerHintScore < _highConfidenceRelinkThreshold) {
               continue;
             }
-
-            await db.update(
-              'collection_states',
-              {
-                'sync_gate_reason': SyncGateReason.relinkVerifying,
-                'updated_at': DateTime.now().millisecondsSinceEpoch,
-              },
-              where: 'remote_collection_id = ?',
-              whereArgs: [candidate['id']],
-            );
 
             try {
               final bool candidateIsSubscription =
@@ -470,36 +456,22 @@ class LocalCalendarPageController extends GetxController {
               );
 
               if (relinkDecision == _RelinkDecision.cancel) {
-                await db.update(
-                  'collection_states',
-                  {
-                    'sync_gate_reason': SyncGateReason.relinkRequired,
-                    'updated_at': DateTime.now().millisecondsSinceEpoch,
-                  },
-                  where: 'remote_collection_id = ?',
-                  whereArgs: [candidate['id']],
-                );
                 relinkConfirmationDeclined = true;
                 break;
               }
 
               if (relinkDecision == _RelinkDecision.createNewRemote) {
-                await db.update(
-                  'collection_states',
-                  {
-                    'sync_gate_reason': SyncGateReason.relinkRequired,
-                    'updated_at': DateTime.now().millisecondsSinceEpoch,
-                  },
-                  where: 'remote_collection_id = ?',
-                  whereArgs: [candidate['id']],
-                );
                 break;
+              }
+
+              if (verifyResult.outcome != RelinkVerificationOutcome.passed) {
+                continue;
               }
               remotePath = candidatePath;
               await db.update(
                 'collection_states',
                 {
-                  'sync_gate_reason': null,
+                  'sync_gate_reason': SyncGateReason.safeFirstSync,
                   'updated_at': DateTime.now().millisecondsSinceEpoch,
                 },
                 where: 'remote_collection_id = ?',
@@ -508,15 +480,6 @@ class LocalCalendarPageController extends GetxController {
 
               break;
             } catch (e) {
-              await db.update(
-                'collection_states',
-                {
-                  'sync_gate_reason': SyncGateReason.relinkRequired,
-                  'updated_at': DateTime.now().millisecondsSinceEpoch,
-                },
-                where: 'remote_collection_id = ?',
-                whereArgs: [candidate['id']],
-              );
               debugPrint('[RelinkVerifier] verify_failed_transient for candidate=${candidate['id']}: $e');
               continue;
             }
@@ -632,7 +595,7 @@ class LocalCalendarPageController extends GetxController {
             'collection_states',
             {
               'remote_collection_id': remoteCollectionId,
-              'sync_gate_reason': null,
+              'sync_gate_reason': SyncGateReason.safeFirstSync,
               'updated_at': now,
             },
             conflictAlgorithm: ConflictAlgorithm.ignore,
@@ -640,7 +603,7 @@ class LocalCalendarPageController extends GetxController {
           await txn.update(
             'collection_states',
             {
-              'sync_gate_reason': null,
+              'sync_gate_reason': SyncGateReason.safeFirstSync,
               'updated_at': now,
             },
             where: 'remote_collection_id = ?',
@@ -829,7 +792,7 @@ class LocalCalendarPageController extends GetxController {
     required int providerHintScore,
     required RelinkVerificationOutcome verificationOutcome,
   }) async {
-    final bool allowRelinkAction = providerHintScore >= _highConfidenceRelinkThreshold;
+    final bool canRelink = verificationOutcome == RelinkVerificationOutcome.passed;
     final _RelinkDecision? decision = await Get.dialog<_RelinkDecision>(
       AlertDialog(
         title: Text(
@@ -864,15 +827,11 @@ class LocalCalendarPageController extends GetxController {
             Text('Remote path: $remotePath'),
             const SizedBox(height: 8),
             Text(
-              verificationOutcome == RelinkVerificationOutcome.unavailable
-                  ? (allowRelinkAction
-                        ? 'Event-level verification was unavailable. This candidate still looks like a strong metadata match, so you can link anyway or create a new remote calendar.'
-                        : 'Event-level verification was unavailable and collection match confidence is low, so creating a new remote calendar is recommended.')
-                  : verificationOutcome == RelinkVerificationOutcome.passed
-                      ? 'Confidence is a recommendation only. You can still create a new remote instead.'
-                      : allowRelinkAction
-                          ? 'Verification did not pass, but this candidate still matches strongly at collection level. You can link anyway or create a new remote calendar.'
-                          : 'Collection match confidence is low, so creating a new remote calendar is recommended.',
+              verificationOutcome == RelinkVerificationOutcome.passed
+                  ? 'Verification passed, so relinking can proceed. You can still create a new remote instead.'
+                  : verificationOutcome == RelinkVerificationOutcome.unavailable
+                  ? 'Relinking cannot proceed because event verification did not complete. Create a new remote calendar instead.'
+                  : 'Relinking cannot proceed because verification did not pass. Create a new remote calendar instead.',
               style: const TextStyle(color: Color(0xFF4B5563), fontSize: 12),
             ),
           ],
@@ -886,10 +845,10 @@ class LocalCalendarPageController extends GetxController {
             onPressed: () => Get.back<_RelinkDecision>(result: _RelinkDecision.createNewRemote),
             child: const Text('Create new remote'),
           ),
-          if (allowRelinkAction)
+          if (canRelink)
             ElevatedButton(
               onPressed: () => Get.back<_RelinkDecision>(result: _RelinkDecision.linkCandidate),
-              child: Text(verificationOutcome == RelinkVerificationOutcome.passed ? 'Link this remote' : 'Link anyway'),
+              child: const Text('Link this remote'),
             ),
         ],
       ),
