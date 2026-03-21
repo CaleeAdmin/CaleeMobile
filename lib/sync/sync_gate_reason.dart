@@ -9,6 +9,8 @@ class SyncGateReason {
   static const String environmentBlocked = 'environment_blocked';
   static const String subscriptionReadonlyViolation = 'subscription_readonly_violation';
   static const String repairRequired = 'repair_required';
+  static const String relinkRequired = 'relink_required';
+  static const String relinkMismatch = 'relink_mismatch';
   static const String safeFirstSync = 'safe_first_sync';
 
   static const Set<String> deterministicReasons = {
@@ -20,6 +22,8 @@ class SyncGateReason {
     environmentBlocked,
     subscriptionReadonlyViolation,
     repairRequired,
+    relinkRequired,
+    relinkMismatch,
     safeFirstSync,
   };
 
@@ -38,7 +42,10 @@ class SyncGateReason {
       case subscriptionReadonlyViolation:
         return 'Subscription is read-only. Update sync mode to resume.';
       case repairRequired:
+      case relinkRequired:
         return 'Reconnect required to repair calendar binding.';
+      case relinkMismatch:
+        return 'Calendar binding no longer matches this device. Reconnect to resume.';
       case safeFirstSync:
         return 'First sync after reconnect is running in safe mode. Deletes are temporarily blocked.';
       default:
