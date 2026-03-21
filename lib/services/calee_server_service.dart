@@ -910,6 +910,15 @@ class CaleeServerService {
     }
   }
 
+  String _escapeXmlText(String value) {
+    return value
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('\"', '&quot;')
+        .replaceAll("'", '&apos;');
+  }
+
   Future<bool> renameRemoteCalendar({
     required String userId,
     required String calendarPath,
@@ -918,13 +927,14 @@ class CaleeServerService {
     final server = _activeServerBase;
     final password = MMKVUtils.instance.getString(AppConstant.appPasswordKey);
     final uri = Uri.parse('$server$calendarPath');
+    final String escapedNewName = _escapeXmlText(newName);
 
     // 使用 PROPPATCH 修改 displayname
     final xmlBody = '''<?xml version="1.0" encoding="utf-8" ?>
 <d:propertyupdate xmlns:d="DAV:">
   <d:set>
     <d:prop>
-      <d:displayname>$newName</d:displayname>
+      <d:displayname>$escapedNewName</d:displayname>
     </d:prop>
   </d:set>
 </d:propertyupdate>''';

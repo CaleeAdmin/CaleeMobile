@@ -506,6 +506,11 @@ extension on _CalendarRow {
                   ),
                   const SizedBox(height: 8),
                   const Text('Enter a new name for this calendar', style: TextStyle(color: Colors.black54)),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Renaming affects the Calee/remote calendar. Depending on how this calendar is linked, your device calendar name may stay unchanged.',
+                    style: TextStyle(color: Colors.black54, fontSize: 12),
+                  ),
                   const SizedBox(height: 12),
                   Align(
                     alignment: Alignment.centerLeft,
@@ -532,7 +537,17 @@ extension on _CalendarRow {
                           ? null
                           : () async {
                               final newName = _nameCtrl.text.trim();
-                              if (newName.isEmpty) return;
+                              final String? invalidReason = Get.find<CalendarPageController>().validateNewCalendarName(newName);
+                              if (invalidReason != null) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text(invalidReason)),
+                                );
+                                return;
+                              }
+                              if (newName == item.name.trim()) {
+                                Navigator.of(context).pop(false);
+                                return;
+                              }
                               setState(() => isRenaming = true);
                               try {
                                 await Get.find<CalendarPageController>().renameCalendar(item.localId, item.remotePath, newName);
