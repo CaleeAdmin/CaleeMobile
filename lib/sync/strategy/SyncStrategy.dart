@@ -294,7 +294,7 @@ abstract class SyncStrategy {
     final String localCalendarId = ctx.localCalendarId;
     final int remoteCollectionId = ctx.remoteCollectionId;
     final int bindingId = (ctx.extra['binding_id'] as int?) ?? 0;
-    final int origin = (ctx.extra['origin_kind'] as int?) ?? SyncBindingOrigin.remote;
+    final int bindingRole = (ctx.extra['binding_role'] as int?) ?? SyncBindingRole.mirror;
 
     final snapshot = await remoteGateway.fetchUnifiedEventsSnapshot(
       calendarPath: ctx.remotePath,
@@ -355,7 +355,15 @@ abstract class SyncStrategy {
       final PlatformItem? local = localByUid[uid] ??
           (mapping != null ? localById[mapping['local_item_id']?.toString() ?? ''] : null);
 
-      final action = _decideCanonicalAction(uid: uid, remote: remote, mapping: mapping, local: local, origin: origin, rules: rules, bootstrap: bootstrap);
+      final action = _decideCanonicalAction(
+        uid: uid,
+        remote: remote,
+        mapping: mapping,
+        local: local,
+        bindingRole: bindingRole,
+        rules: rules,
+        bootstrap: bootstrap,
+      );
       plans.add(_PlannedAction(
         uid: uid,
         action: action,
@@ -681,7 +689,7 @@ abstract class SyncStrategy {
     required Map<String, dynamic>? remote,
     required Map<String, dynamic>? mapping,
     required PlatformItem? local,
-    required int origin,
+    required int bindingRole,
     required UnifiedModeRules rules,
     required bool bootstrap,
   }) {
@@ -714,7 +722,9 @@ abstract class SyncStrategy {
     } else if (!remoteChanged && localChanged) {
       action = rules.onLocalChanged;
     } else {
-      action = origin == SyncBindingOrigin.local ? rules.onConflictLocalWins : rules.onConflictRemoteWins;
+      action = bindingRole == SyncBindingRole.ownerLink
+          ? rules.onConflictLocalWins
+          : rules.onConflictRemoteWins;
     }
 
     if (bootstrap && action == SyncItemAction.skip && localExists && !mapped) {

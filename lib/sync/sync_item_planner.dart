@@ -166,7 +166,7 @@ class SyncItemPlanner {
             ? SyncAction.fullSyncPush
             : SyncAction.fullSyncPull;
 
-    return _buildContext(remote ?? {}, local, action);
+    return _buildContext(remote ?? {}, local, action, bindingRole: bindingRole);
   }
 
   Future<void> _setCollectionGateReason({
@@ -267,7 +267,12 @@ class SyncItemPlanner {
     return count == 0;
   }
 
-  SyncContext _buildContext(Map remote, Map local, SyncAction action) {
+  SyncContext _buildContext(
+    Map remote,
+    Map local,
+    SyncAction action, {
+    required int bindingRole,
+  }) {
     return SyncContext(
       remoteCollectionId: (local['id'] as int?) ?? 0,
       localCalendarId: local['local_collection_id']?.toString() ?? '',
@@ -281,6 +286,7 @@ class SyncItemPlanner {
       isSubscription: remote['is_subscription'] ?? local['is_subscription'] ?? false,
       extra: {
         'binding_id': local['binding_id'] ?? 0,
+        'binding_role': bindingRole,
         'origin_kind': local['origin_kind'] ?? SyncBindingOrigin.remote,
       },
     );
