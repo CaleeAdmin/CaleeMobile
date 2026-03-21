@@ -1,7 +1,6 @@
 import Foundation
 import BackgroundTasks
 import Flutter
-import UIKit
 import os.log
 
 class CaleeSyncPeriodicWorker {
@@ -18,6 +17,7 @@ class CaleeSyncPeriodicWorker {
     static let KEY_LAST_STAGE = "last_stage"
     static let KEY_LAST_STAGE_AT = "last_stage_at"
     static let KEY_LAST_READY_VERSION = "last_ready_version"
+    static let KEY_LAST_ENGINE_KIND = "last_engine_kind"
     static let KEY_LAST_ATTEMPT_AT = "last_attempt_at"
     static let KEY_LAST_FAILURE_STAGE = "last_failure_stage"
     static let KEY_LAST_FAILURE_ELAPSED_MS = "last_failure_elapsed_ms"
@@ -89,6 +89,7 @@ class CaleeSyncPeriodicWorker {
             KEY_LAST_FAILURE_STEP: jsonString(from: prefs, key: KEY_LAST_FAILURE_STEP),
             KEY_LAST_FAILURE_ELAPSED_MS: jsonNumber(from: prefs, key: KEY_LAST_FAILURE_ELAPSED_MS),
             KEY_LAST_READY_VERSION: jsonNumber(from: prefs, key: KEY_LAST_READY_VERSION),
+            KEY_LAST_ENGINE_KIND: jsonString(from: prefs, key: KEY_LAST_ENGINE_KIND),
             KEY_PERIODIC_ENABLED: jsonBool(from: prefs, key: KEY_PERIODIC_ENABLED),
             KEY_PERIODIC_INTERVAL_MINUTES: jsonNumber(from: prefs, key: KEY_PERIODIC_INTERVAL_MINUTES),
             KEY_PERIODIC_NEXT_AT: jsonNumber(from: prefs, key: KEY_PERIODIC_NEXT_AT),
@@ -357,6 +358,11 @@ class CaleeSyncPeriodicWorker {
         writeDiagnosticsFile()
     }
 
+    private static func persistEngineKind(_ value: String) {
+        UserDefaults.standard.set(value, forKey: KEY_LAST_ENGINE_KIND)
+        writeDiagnosticsFile()
+    }
+
     static func handleTask(task: BGTask) {
         let prefs = UserDefaults.standard
         let attemptStartedAt = Date().timeIntervalSince1970 * 1000
@@ -446,20 +452,12 @@ class CaleeSyncPeriodicWorker {
     }
 
     private static func runSyncTask(trigger: String, task: BGTask, attemptStartedAt: TimeInterval) {
-        guard let window = UIApplication.shared.delegate?.window,
-              let rootViewController = window?.rootViewController,
-              let flutterViewController = rootViewController as? FlutterViewController else {
-            // If no Flutter view controller, create a new engine
-            createAndRunEngine(trigger: trigger, task: task, attemptStartedAt: attemptStartedAt)
-            return
-        }
-
-        // Use existing Flutter engine
-        let engine = flutterViewController.engine
-        setupAndRunSync(engine: engine, trigger: trigger, task: task, attemptStartedAt: attemptStartedAt)
+        persistEngineKind("dedicated_background_engine")
+        createAndRunEngine(trigger: trigger, task: task, attemptStartedAt: attemptStartedAt)
     }
 
     private static func createAndRunEngine(trigger: String, task: BGTask, attemptStartedAt: TimeInterval) {
+        persistEngineKind("dedicated_background_engine")
         let engine = FlutterEngine(name: "backgroundSyncEngine")
         guard engine.run(withEntrypoint: "caleeSyncBackgroundEntrypoint") else {
             let elapsedMs = (Date().timeIntervalSince1970 * 1000) - attemptStartedAt
