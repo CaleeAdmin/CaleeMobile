@@ -510,10 +510,17 @@ class CalendarPageController extends GetxController {
 
   /// 重命名日历（委托给仓库并刷新）
   Future<void> renameCalendar(String? localId, String? remotePath, String newName) async {
+    final String normalized = newName.trim();
+    final String? invalidReason = validateNewCalendarName(normalized);
+    if (invalidReason != null) {
+      Get.snackbar('Invalid calendar name', invalidReason);
+      throw Exception(invalidReason);
+    }
+
     try {
       if ((localId == null || localId.isEmpty) && (remotePath == null || remotePath.isEmpty)) return;
       isLoading.value = true;
-      await _repo.renameCalendar(localId: localId, remotePath: remotePath, newName: newName);
+      await _repo.renameCalendar(localId: localId, remotePath: remotePath, newName: normalized);
       await reloadCalendars();
       _notifyMeaningfulChange();
     } catch (e) {
