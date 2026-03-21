@@ -92,7 +92,7 @@ class _CalendarOptionsDialogState extends State<CalendarOptionsDialog> {
             ),
             ListTile(
               title: Text(
-                'Rename',
+                'Rename calendar',
                 style: const TextStyle(color: Colors.black),
               ),
               onTap: () => Navigator.of(context).pop('rename'),

@@ -507,11 +507,9 @@ extension on _CalendarRow {
                   const SizedBox(height: 8),
                   const Text('Enter a new name for this calendar', style: TextStyle(color: Colors.black54)),
                   const SizedBox(height: 6),
-                  Text(
-                    item.bindingRole == SyncBindingRole.mirror
-                        ? 'Renaming affects the remote calendar and this device mirror.'
-                        : 'Renaming affects the Calee/remote calendar only; your device calendar name stays unchanged.',
-                    style: const TextStyle(color: Colors.black54, fontSize: 12),
+                  const Text(
+                    'Renaming affects the Calee/remote calendar. Depending on how this calendar is linked, your device calendar name may stay unchanged.',
+                    style: TextStyle(color: Colors.black54, fontSize: 12),
                   ),
                   const SizedBox(height: 12),
                   Align(
