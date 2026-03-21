@@ -59,30 +59,6 @@ class CalendarDisplayItem {
     required this.allowMassDeletionDangerous,
   });
 
-  // 方便从数据库 Map 转换
-  factory CalendarDisplayItem.fromMap(Map<String, dynamic> map) {
-    bool toBool(dynamic value) => value == true || value == 1 || value == '1';
-
-    return CalendarDisplayItem(
-      localId: map['local_collection_id']?.toString(), // 转为 String 处理
-      remotePath: map['remote_path'] ?? '',
-      name: map['display_name'] ?? 'Untitled',
-      color: map['color'] ?? '#000000',
-      eventCount: (map['event_count'] as int?) ?? 0, // 可由查询结果直接带入
-      isReadOnly: (map['sync_mode'] as int?) == 0,
-      isSubscription: toBool(map['is_subscription']),
-      isLocalReadOnly: toBool(map['is_local_read_only']),
-      subscriptionUrl: map['subscription_url']?.toString(),
-      accountName: map['account_name']?.toString() ?? '',
-      isEnabled: toBool(map['state_is_enabled']),
-      syncGateReason: map['sync_gate_reason']?.toString(),
-      origin: (map['origin_kind'] as int?) ?? 2,
-      originKey: map['origin_key']?.toString(),
-      bindingId: (map['binding_id'] as int?) ?? 0,
-      bindingRole: (map['binding_role'] as int?) ?? 0,
-      allowMassDeletionDangerous: false,
-    );
-  }
 }
 
 // 2. Controller 实现

@@ -87,7 +87,7 @@ class LocalCalendarPageController extends GetxController {
 
       final db = await DatabaseHelper.instance.database;
       final List<Map<String, dynamic>> rows = await db.rawQuery('''
-        SELECT lb.local_collection_id, lb.binding_role AS binding_role
+        SELECT lb.local_collection_id
         FROM local_bindings lb
         WHERE lb.local_collection_id IS NOT NULL
           AND lb.local_collection_id != ''
@@ -104,7 +104,6 @@ class LocalCalendarPageController extends GetxController {
           rc.origin_key,
           rc.is_subscription,
           rc.subscription_url,
-          lb.binding_role AS binding_role,
           COALESCE(NULLIF(TRIM(rc.account_name), ''), 'Local') AS account_name
         FROM remote_collections rc
         LEFT JOIN local_bindings lb
@@ -117,7 +116,7 @@ class LocalCalendarPageController extends GetxController {
       ''');
 
       final List<Map<String, dynamic>> remoteProvisionedRows = await db.rawQuery('''
-        SELECT lb.local_collection_id, lb.binding_role AS binding_role
+        SELECT lb.local_collection_id
         FROM local_bindings lb
         WHERE lb.binding_role = ?
           AND lb.local_collection_id IS NOT NULL
@@ -355,7 +354,7 @@ class LocalCalendarPageController extends GetxController {
       bool relinkConfirmationDeclined = false;
       if (linkRequested) {
         final List<Map<String, dynamic>> existingRows = await db.rawQuery('''
-          SELECT rc.origin_key, rc.remote_path, lb.binding_role AS binding_role, cs.sync_gate_reason
+          SELECT rc.origin_key, rc.remote_path, cs.sync_gate_reason
           FROM local_bindings lb
           INNER JOIN remote_collections rc ON rc.id = lb.remote_collection_id
           LEFT JOIN collection_states cs ON cs.remote_collection_id = rc.id
@@ -397,7 +396,6 @@ class LocalCalendarPageController extends GetxController {
               rc.origin_key,
               rc.is_subscription,
               rc.subscription_url,
-              lb.binding_role AS binding_role,
               COALESCE(NULLIF(TRIM(rc.account_name), ''), 'Local') AS account_name
             FROM remote_collections rc
             LEFT JOIN local_bindings lb
