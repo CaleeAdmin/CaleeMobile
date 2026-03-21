@@ -40,6 +40,7 @@ class SyncItemPlanner {
         rc.is_subscription,
         rc.origin_kind,
         lb.id AS binding_id,
+        lb.binding_role AS binding_role,
         lb.local_collection_id,
         cs.sync_gate_reason
       FROM remote_collections rc
