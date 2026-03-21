@@ -62,6 +62,7 @@ class DatabaseHelper {
         id INTEGER PRIMARY KEY AUTOINCREMENT, /* 主键 */
         remote_collection_id INTEGER NOT NULL, /* 关联 remote_collections.id */
         local_collection_id TEXT NOT NULL, /* 本地侧集合 ID（平台返回的日历/任务列表 ID） */
+        binding_role INTEGER NOT NULL DEFAULT 0, /* 绑定角色（默认 mirror） */
         created_at INTEGER, /* 绑定创建时间（毫秒时间戳） */
         updated_at INTEGER, /* 绑定更新时间（毫秒时间戳） */
         FOREIGN KEY (remote_collection_id) REFERENCES remote_collections(id) ON DELETE CASCADE

@@ -33,9 +33,10 @@ class CalendarDisplayItem {
   final String accountName;
   bool isEnabled;            // 对应数据库 collection_states.is_enabled
   final String? syncGateReason;
-  final int origin;          // 0: 本地创建, 1: 云端同步
+  final int origin;          // Shared provenance only: where the remote calendar came from, not this-device sync behavior.
   final String? originKey;
   final int bindingId;
+  final int bindingRole;     // This-device role: mirror vs ownerLink, and it drives runtime behavior.
   bool allowMassDeletionDangerous;
 
   CalendarDisplayItem({
@@ -54,32 +55,10 @@ class CalendarDisplayItem {
     required this.origin,
     this.originKey,
     required this.bindingId,
+    required this.bindingRole,
     required this.allowMassDeletionDangerous,
   });
 
-  // 方便从数据库 Map 转换
-  factory CalendarDisplayItem.fromMap(Map<String, dynamic> map) {
-    bool toBool(dynamic value) => value == true || value == 1 || value == '1';
-
-    return CalendarDisplayItem(
-      localId: map['local_collection_id']?.toString(), // 转为 String 处理
-      remotePath: map['remote_path'] ?? '',
-      name: map['display_name'] ?? 'Untitled',
-      color: map['color'] ?? '#000000',
-      eventCount: (map['event_count'] as int?) ?? 0, // 可由查询结果直接带入
-      isReadOnly: (map['sync_mode'] as int?) == 0,
-      isSubscription: toBool(map['is_subscription']),
-      isLocalReadOnly: toBool(map['is_local_read_only']),
-      subscriptionUrl: map['subscription_url']?.toString(),
-      accountName: map['account_name']?.toString() ?? '',
-      isEnabled: toBool(map['state_is_enabled']),
-      syncGateReason: map['sync_gate_reason']?.toString(),
-      origin: (map['origin_kind'] as int?) ?? 2,
-      originKey: map['origin_key']?.toString(),
-      bindingId: (map['binding_id'] as int?) ?? 0,
-      allowMassDeletionDangerous: false,
-    );
-  }
 }
 
 // 2. Controller 实现
@@ -287,6 +266,7 @@ class CalendarPageController extends GetxController {
       syncGateReason: item.syncGateReason,
       origin: item.origin,
       bindingId: item.bindingId,
+      bindingRole: item.bindingRole,
       allowMassDeletionDangerous: item.allowMassDeletionDangerous,
     );
     calendars.refresh();
@@ -424,7 +404,7 @@ class CalendarPageController extends GetxController {
       // 2. 查询本地 remote_collections 的所有日历记录
       final db = await DatabaseHelper.instance.database;
       final List<Map<String, dynamic>> calendarMaps = await db.rawQuery('''
-        SELECT rc.*, lb.local_collection_id, lb.id AS binding_id, cs.sync_gate_reason, cs.is_enabled AS state_is_enabled
+        SELECT rc.*, lb.local_collection_id, lb.id AS binding_id, lb.binding_role AS binding_role, cs.sync_gate_reason, cs.is_enabled AS state_is_enabled
         FROM remote_collections rc
         LEFT JOIN local_bindings lb ON lb.remote_collection_id = rc.id
         LEFT JOIN collection_states cs ON cs.remote_collection_id = rc.id
@@ -496,6 +476,7 @@ class CalendarPageController extends GetxController {
           origin: origin,
           originKey: cal['origin_key']?.toString(),
           bindingId: bindingId,
+          bindingRole: (cal['binding_role'] as int?) ?? 0,
           allowMassDeletionDangerous: allowMassDeletionDangerous,
         );
 

@@ -7,6 +7,7 @@ import 'package:caleesync/feature/public_subscriptions_page.dart';
 import 'package:caleesync/core/platform/pigeon/calendar_api.g.dart';
 
 import '../controllers/CalendarPageController.dart';
+import '../sync/SyncEnum.dart';
 import '../sync/sync_gate_reason.dart';
 
 class CalendarPage extends StatefulWidget {
@@ -333,14 +334,25 @@ extension on _CalendarRow {
     return error.toString().replaceFirst('Exception: ', '');
   }
 
-  String _originKindLabel(int originKind) {
+  String _provenanceLabel(int originKind) {
     switch (originKind) {
-      case 0:
-        return 'Local';
-      case 1:
-        return 'Remote';
+      case SyncBindingOrigin.local:
+        return 'Local-seeded';
+      case SyncBindingOrigin.remote:
+        return 'Remote-created';
       default:
-        return 'Unknown ($originKind)';
+        return 'Unknown';
+    }
+  }
+
+  String _bindingRoleLabel(int bindingRole) {
+    switch (bindingRole) {
+      case SyncBindingRole.ownerLink:
+        return 'Owner link';
+      case SyncBindingRole.mirror:
+        return 'Mirror';
+      default:
+        return 'Unknown';
     }
   }
 
@@ -394,7 +406,8 @@ extension on _CalendarRow {
                 _propertyRow('Sync Mode', item.isReadOnly ? 'Read-only' : 'Two-way sync'),
                 _propertyRow('Enabled', item.isEnabled ? 'Yes' : 'No'),
                 _propertyRow('Color', item.color),
-                _propertyRow('Origin Kind', _originKindLabel(item.origin)),
+                _propertyRow('Provenance', _provenanceLabel(item.origin)),
+                _propertyRow('This Device Role', _bindingRoleLabel(item.bindingRole)),
                 if ((item.originKey ?? '').isNotEmpty)
                   _propertyRow('Origin Key', item.originKey!),
                 if ((item.remotePath ?? '').isNotEmpty)
