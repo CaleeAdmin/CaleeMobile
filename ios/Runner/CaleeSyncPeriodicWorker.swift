@@ -358,6 +358,28 @@ class CaleeSyncPeriodicWorker {
         writeDiagnosticsFile()
     }
 
+    private static func describeRunnerError(_ error: Error) -> String {
+        if let flutterError = error as? FlutterError {
+            let code = flutterError.code
+            let message = flutterError.message ?? "nil"
+            let details = String(describing: flutterError.details)
+            return "code=\(code), message=\(message), details=\(details)"
+        }
+        return error.localizedDescription
+    }
+
+    private static func pingRunnerApi(engine: FlutterEngine, completion: @escaping (Bool, String?) -> Void) {
+        let runnerApi = BackgroundSyncRunnerApi(binaryMessenger: engine.binaryMessenger)
+        runnerApi.pingBackgroundIsolate { result in
+            switch result {
+            case .success(let isReady):
+                completion(isReady, isReady ? nil : "pingBackgroundIsolate returned false")
+            case .failure(let error):
+                completion(false, describeRunnerError(error))
+            }
+        }
+    }
+
     private static func persistEngineKind(_ value: String) {
         UserDefaults.standard.set(value, forKey: KEY_LAST_ENGINE_KIND)
         writeDiagnosticsFile()
@@ -529,77 +551,100 @@ class CaleeSyncPeriodicWorker {
                 return
             }
 
-            // Invoke runBackgroundSync
-            let runnerApi = BackgroundSyncRunnerApi(binaryMessenger: engine.binaryMessenger)
-            persistStage(STAGE_RUN_SYNC_SENT)
-
-            let request = BackgroundRunRequest(trigger: trigger, contractVersion: CONTRACT_VERSION)
-            var hasReplied = false
-
-            // Timeout handler
-            DispatchQueue.global(qos: .default).asyncAfter(deadline: .now() + SYNC_REPLY_TIMEOUT_MS) {
-                if !hasReplied {
-                    hasReplied = true
-                    let elapsedMs = (Date().timeIntervalSince1970 * 1000) - attemptStartedAt
-                    currentStage = STAGE_RUN_SYNC_TIMEOUT
-                    persistFailureContext(
-                        failureStage: currentStage,
-                        failureStep: "sync_reply_timeout",
-                        elapsedMs: elapsedMs / 1000.0
-                    )
-                    persistSnapshot(
-                        outcome: .retry,
-                        reason: "engine_killed_or_no_reply",
-                        gateReason: .unknown,
-                        error: "sync_reply_timeout"
-                    )
-                    persistStage(currentStage)
-                    task.setTaskCompleted(success: false)
-                    isRunning = false
-                    currentEngine = nil
-                }
-            }
-
-            runnerApi.runBackgroundSync(request: request) { result in
-                guard !hasReplied else { return }
-                hasReplied = true
-
-                switch result {
-                case .success(let runResult):
-                    persistStage(STAGE_RUN_SYNC_REPLIED)
-                    let outcome = runResult.outcome
-                    persistSnapshot(
-                        outcome: outcome,
-                        reason: runResult.reason,
-                        gateReason: runResult.gateReason,
-                        error: runResult.error
-                    )
-                    Logger.default.info("Classified outcome=\(outcome.rawValue) mapped=\(outcome == .success || outcome == .gated ? "success" : "retry") reason=\(runResult.reason) gate=\(runResult.gateReason.rawValue) version=\(runResult.contractVersion)")
-
-                    let success = (outcome == .success || outcome == .gated)
-                    persistStage(STAGE_WORKER_FINISHED)
-                    task.setTaskCompleted(success: success)
-                    isRunning = false
-                    currentEngine = nil
-
-                case .failure(let error):
+            pingRunnerApi(engine: engine) { pingSucceeded, pingError in
+                guard pingSucceeded else {
                     let elapsedMs = (Date().timeIntervalSince1970 * 1000) - attemptStartedAt
                     currentStage = STAGE_RUN_SYNC_REPLIED
                     persistFailureContext(
                         failureStage: currentStage,
-                        failureStep: "runner_channel_error",
+                        failureStep: "runner_ping_failed",
                         elapsedMs: elapsedMs / 1000.0
                     )
                     persistStage(currentStage)
                     persistSnapshot(
                         outcome: .retry,
-                        reason: "runner_channel_error",
+                        reason: "runner_ping_failed",
                         gateReason: .unknown,
-                        error: error.localizedDescription
+                        error: pingError
                     )
                     task.setTaskCompleted(success: false)
                     isRunning = false
                     currentEngine = nil
+                    return
+                }
+
+                // Invoke runBackgroundSync
+                let runnerApi = BackgroundSyncRunnerApi(binaryMessenger: engine.binaryMessenger)
+                persistStage(STAGE_RUN_SYNC_SENT)
+
+                let request = BackgroundRunRequest(trigger: trigger, contractVersion: CONTRACT_VERSION)
+                var hasReplied = false
+
+                // Timeout handler
+                DispatchQueue.global(qos: .default).asyncAfter(deadline: .now() + SYNC_REPLY_TIMEOUT_MS) {
+                    if !hasReplied {
+                        hasReplied = true
+                        let elapsedMs = (Date().timeIntervalSince1970 * 1000) - attemptStartedAt
+                        currentStage = STAGE_RUN_SYNC_TIMEOUT
+                        persistFailureContext(
+                            failureStage: currentStage,
+                            failureStep: "sync_reply_timeout",
+                            elapsedMs: elapsedMs / 1000.0
+                        )
+                        persistSnapshot(
+                            outcome: .retry,
+                            reason: "engine_killed_or_no_reply",
+                            gateReason: .unknown,
+                            error: "sync_reply_timeout"
+                        )
+                        persistStage(currentStage)
+                        task.setTaskCompleted(success: false)
+                        isRunning = false
+                        currentEngine = nil
+                    }
+                }
+
+                runnerApi.runBackgroundSync(request: request) { result in
+                    guard !hasReplied else { return }
+                    hasReplied = true
+
+                    switch result {
+                    case .success(let runResult):
+                        persistStage(STAGE_RUN_SYNC_REPLIED)
+                        let outcome = runResult.outcome
+                        persistSnapshot(
+                            outcome: outcome,
+                            reason: runResult.reason,
+                            gateReason: runResult.gateReason,
+                            error: runResult.error
+                        )
+                        Logger.default.info("Classified outcome=\(outcome.rawValue) mapped=\(outcome == .success || outcome == .gated ? "success" : "retry") reason=\(runResult.reason) gate=\(runResult.gateReason.rawValue) version=\(runResult.contractVersion)")
+
+                        let success = (outcome == .success || outcome == .gated)
+                        persistStage(STAGE_WORKER_FINISHED)
+                        task.setTaskCompleted(success: success)
+                        isRunning = false
+                        currentEngine = nil
+
+                    case .failure(let error):
+                        let elapsedMs = (Date().timeIntervalSince1970 * 1000) - attemptStartedAt
+                        currentStage = STAGE_RUN_SYNC_REPLIED
+                        persistFailureContext(
+                            failureStage: currentStage,
+                            failureStep: "runner_channel_error",
+                            elapsedMs: elapsedMs / 1000.0
+                        )
+                        persistStage(currentStage)
+                        persistSnapshot(
+                            outcome: .retry,
+                            reason: "runner_channel_error",
+                            gateReason: .unknown,
+                            error: describeRunnerError(error)
+                        )
+                        task.setTaskCompleted(success: false)
+                        isRunning = false
+                        currentEngine = nil
+                    }
                 }
             }
         }
