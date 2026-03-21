@@ -26,16 +26,23 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Calendar access is required to read and display your events.</string>
 	<key>NSCalendarsUsageDescription</key>
-	<string>需要访问您的日历以读取和展示事件。</string>
+	<string>Calendar access is required to read and display your events.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>需要访问相机以扫描二维码并链接设备。</string>
+	<string>Camera access is required to scan QR codes and link devices.</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>
 	<string>Main</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+		<string>processing</string>
+	</array>
 	<key>UIStatusBarStyle</key>
 	<string></string>
 	<key>UISupportedInterfaceOrientations</key>

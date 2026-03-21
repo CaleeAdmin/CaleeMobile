@@ -4,38 +4,61 @@ import EventKit
 /// Swift implementation of the Pigeon-generated `NativeCalendarApi` protocol,
 /// backed by EventKit. This replaces the older Objective-C implementation.
 @objc class CalendarHostApiImpl: NSObject, NativeCalendarApi {
-  private let eventStore = EKEventStore()
+  private let caleeUidMarkerPattern = #"\n?\[CALEE_UID:([^\]]+)\]"#
+  private var eventStore = EKEventStore()
+  private var lastKnownEventAuthorizationStatus = EKEventStore.authorizationStatus(for: .event)
 
   // MARK: - Permission
 
   func requestPermission(forTask: Bool, completion: @escaping (Result<Bool, Error>) -> Void) {
-    eventStore.requestAccess(to: .event) { granted, error in
-      if let error = error {
-        completion(.failure(
-          FlutterError(code: "PERMISSION_ERROR", message: error.localizedDescription, details: nil)
-        ))
-      } else {
-        completion(.success(granted))
+    refreshEventStore()
+
+    if hasReadableEventAccess() {
+      DispatchQueue.main.async {
+        completion(.success(true))
       }
+      return
+    }
+
+    let permissionCompletion: (Bool, Error?) -> Void = { [weak self] granted, error in
+      guard let self else { return }
+
+      if let error = error {
+        DispatchQueue.main.async {
+          completion(.failure(
+            FlutterError(code: "PERMISSION_ERROR", message: error.localizedDescription, details: nil)
+          ))
+        }
+        return
+      }
+
+      if granted {
+        self.refreshEventStore(force: true)
+      } else {
+        self.refreshEventStore()
+      }
+
+      let readable = self.hasReadableEventAccess()
+      DispatchQueue.main.async {
+        completion(.success(readable))
+      }
+    }
+
+    if #available(iOS 17.0, *) {
+      eventStore.requestFullAccessToEvents(completion: permissionCompletion)
+    } else {
+      eventStore.requestAccess(to: .event, completion: permissionCompletion)
     }
   }
 
   // MARK: - Calendars
 
   func getCalendars() throws -> [PlatformCalendar] {
-    let status = EKEventStore.authorizationStatus(for: .event)
-    guard status == .authorized else {
-      throw FlutterError(
-        code: "PERMISSION_DENIED",
-        message: "Calendar access not authorized",
-        details: nil
-      )
-    }
-
+    let store = try requireReadableEventStore()
     var calendars: [PlatformCalendar] = []
 
     // iOS grouping: Source (account) -> Calendar
-    for source in eventStore.sources {
+    for source in store.sources {
       let ekCalendars = source.calendars(for: .event)
       for ekCalendar in ekCalendars {
         var pc = PlatformCalendar()
@@ -68,6 +91,70 @@ import EventKit
     return calendars
   }
 
+  private func requireReadableEventStore() throws -> EKEventStore {
+    refreshEventStore()
+    if hasReadableEventAccess() {
+      return eventStore
+    }
+
+    refreshEventStore(force: true)
+    if hasReadableEventAccess() {
+      return eventStore
+    }
+
+    throw FlutterError(
+      code: "PERMISSION_DENIED",
+      message: "Calendar access not authorized",
+      details: ["authorizationStatus": authorizationStatusDescription()]
+    )
+  }
+
+  private func refreshEventStore(force: Bool = false) {
+    let currentStatus = EKEventStore.authorizationStatus(for: .event)
+    let statusChanged = currentStatus != lastKnownEventAuthorizationStatus
+
+    eventStore.reset()
+
+    if force || statusChanged {
+      eventStore = EKEventStore()
+    }
+
+    lastKnownEventAuthorizationStatus = currentStatus
+  }
+
+  private func authorizationStatusDescription() -> String {
+    let status = EKEventStore.authorizationStatus(for: .event)
+    if #available(iOS 17.0, *) {
+      switch status {
+      case .notDetermined: return "notDetermined"
+      case .restricted: return "restricted"
+      case .denied: return "denied"
+      case .authorized: return "authorized"
+      case .fullAccess: return "fullAccess"
+      case .writeOnly: return "writeOnly"
+      @unknown default: return "unknown"
+      }
+    }
+
+    switch status {
+    case .notDetermined: return "notDetermined"
+    case .restricted: return "restricted"
+    case .denied: return "denied"
+    case .authorized: return "authorized"
+    case .fullAccess: return "fullAccess"
+    case .writeOnly: return "writeOnly"
+    @unknown default: return "unknown"
+    }
+  }
+
+  private func hasReadableEventAccess() -> Bool {
+    let status = EKEventStore.authorizationStatus(for: .event)
+    if #available(iOS 17.0, *) {
+      return status == .fullAccess || status == .authorized
+    }
+    return status == .authorized
+  }
+
   private func string(from type: EKSourceType) -> String {
     switch type {
     case .local: return "Local"
@@ -83,26 +170,26 @@ import EventKit
   // MARK: - Events
 
   func getEvents(calendarId: String, startMs: Int64, endMs: Int64) throws -> [PlatformItem] {
-    guard let calendar = eventStore.calendar(withIdentifier: calendarId) else {
+    let store = try requireReadableEventStore()
+    guard let calendar = store.calendar(withIdentifier: calendarId) else {
       return []
     }
 
     let startDate = Date(timeIntervalSince1970: TimeInterval(startMs) / 1000.0)
     let endDate = Date(timeIntervalSince1970: TimeInterval(endMs) / 1000.0)
 
-    let predicate = eventStore.predicateForEvents(withStart: startDate, end: endDate, calendars: [calendar])
-    let events = eventStore.events(matching: predicate)
+    let predicate = store.predicateForEvents(withStart: startDate, end: endDate, calendars: [calendar])
+    let events = store.events(matching: predicate)
 
     var items: [PlatformItem] = []
     for event in events {
+      let localId = stableLocalIdentifier(for: event)
       var item = PlatformItem()
-      item.localId = event.eventIdentifier
-
-      // Stable UID: prefer calendarItemExternalIdentifier, else local_<id>
-      item.uid = resolveStableUid(for: event, localId: event.eventIdentifier)
+      item.localId = localId
+      item.uid = extractCaleeUid(from: event) ?? derivedUidFromExternalIdentifier(event) ?? "local_\(localId)"
 
       item.title = event.title ?? ""
-      item.notes = event.notes
+      item.notes = stripCaleeMetadata(from: event.notes)
       item.location = event.location
       item.startTime = Int64(event.startDate.timeIntervalSince1970 * 1000.0)
 
@@ -129,11 +216,92 @@ import EventKit
     return items
   }
 
-  private func resolveStableUid(for event: EKEvent, localId: String) -> String {
-    if let externalId = event.calendarItemExternalIdentifier, !externalId.isEmpty {
-      return externalId
+  private func embedCaleeUid(into event: EKEvent, uid: String, originalNotes: String?) {
+    let cleanNotes = stripCaleeMetadata(from: originalNotes)
+    let trimmedUid = uid.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmedUid.isEmpty else {
+      event.notes = cleanNotes
+      return
     }
-    return "local_\(localId)"
+
+    let marker = "[CALEE_UID:\(trimmedUid)]"
+    if let cleanNotes, !cleanNotes.isEmpty {
+      event.notes = "\(cleanNotes)\n\(marker)"
+    } else {
+      event.notes = marker
+    }
+  }
+
+  private func extractCaleeUid(from event: EKEvent) -> String? {
+    guard let notes = event.notes, !notes.isEmpty,
+          let regex = try? NSRegularExpression(pattern: caleeUidMarkerPattern) else {
+      return nil
+    }
+
+    let nsNotes = notes as NSString
+    let range = NSRange(location: 0, length: nsNotes.length)
+    guard let match = regex.firstMatch(in: notes, options: [], range: range), match.numberOfRanges > 1 else {
+      return nil
+    }
+
+    let uid = nsNotes.substring(with: match.range(at: 1)).trimmingCharacters(in: .whitespacesAndNewlines)
+    return uid.isEmpty ? nil : uid
+  }
+
+  private func stripCaleeMetadata(from notes: String?) -> String? {
+    guard let notes, !notes.isEmpty,
+          let regex = try? NSRegularExpression(pattern: caleeUidMarkerPattern) else {
+      return notes
+    }
+
+    let fullRange = NSRange(location: 0, length: (notes as NSString).length)
+    let stripped = regex.stringByReplacingMatches(in: notes, options: [], range: fullRange, withTemplate: "")
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    return stripped.isEmpty ? nil : stripped
+  }
+
+  private func stableLocalIdentifier(for event: EKEvent) -> String {
+    if !event.calendarItemIdentifier.isEmpty {
+      return event.calendarItemIdentifier
+    }
+    if let eventIdentifier = event.eventIdentifier, !eventIdentifier.isEmpty {
+      return eventIdentifier
+    }
+    if let externalIdentifier = event.calendarItemExternalIdentifier, !externalIdentifier.isEmpty {
+      return externalIdentifier
+    }
+    return UUID().uuidString
+  }
+
+  private func derivedUidFromExternalIdentifier(_ event: EKEvent) -> String? {
+    guard let externalId = event.calendarItemExternalIdentifier, !externalId.isEmpty else {
+      return nil
+    }
+    return externalId
+  }
+
+  private func findEvent(calendarId: String, matchingCaleeUid uid: String, store: EKEventStore) -> EKEvent? {
+    let trimmedUid = uid.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmedUid.isEmpty, let calendar = store.calendar(withIdentifier: calendarId) else {
+      return nil
+    }
+
+    let now = Date()
+    let startDate = now.addingTimeInterval(-20 * 365 * 24 * 3600)
+    let endDate = now.addingTimeInterval(20 * 365 * 24 * 3600)
+    let predicate = store.predicateForEvents(withStart: startDate, end: endDate, calendars: [calendar])
+    return store.events(matching: predicate).first { extractCaleeUid(from: $0) == trimmedUid }
+  }
+
+  private func resolveEvent(byStableLocalId eventId: String?, store: EKEventStore) -> EKEvent? {
+    guard let eventId, !eventId.isEmpty else {
+      return nil
+    }
+
+    if let calendarItem = store.calendarItem(withIdentifier: eventId) as? EKEvent {
+      return calendarItem
+    }
+    return store.event(withIdentifier: eventId)
   }
 
   func createEvent(
@@ -145,27 +313,32 @@ import EventKit
     uid: String?,
     completion: @escaping (Result<String?, Error>) -> Void
   ) {
-    guard let calendar = eventStore.calendar(withIdentifier: calendarId) else {
-      completion(.failure(
-        FlutterError(code: "NOT_FOUND", message: "Calendar not found", details: nil)
-      ))
-      return
-    }
-
-    let event = EKEvent(eventStore: eventStore)
-    event.calendar = calendar
-    event.title = title
-    event.notes = notes
-    event.startDate = Date(timeIntervalSince1970: TimeInterval(start) / 1000.0)
-    event.endDate = Date(timeIntervalSince1970: TimeInterval(end) / 1000.0)
-
     do {
-      try eventStore.save(event, span: .thisEvent, commit: true)
-      completion(.success(event.eventIdentifier))
+      let store = try requireReadableEventStore()
+      guard let calendar = store.calendar(withIdentifier: calendarId) else {
+        completion(.failure(
+          FlutterError(code: "NOT_FOUND", message: "Calendar not found", details: nil)
+        ))
+        return
+      }
+
+      let event = EKEvent(eventStore: store)
+      event.calendar = calendar
+      event.title = title
+      event.startDate = Date(timeIntervalSince1970: TimeInterval(start) / 1000.0)
+      event.endDate = Date(timeIntervalSince1970: TimeInterval(end) / 1000.0)
+      embedCaleeUid(into: event, uid: uid ?? "", originalNotes: notes)
+
+      do {
+        try store.save(event, span: .thisEvent, commit: true)
+        completion(.success(stableLocalIdentifier(for: event)))
+      } catch {
+        completion(.failure(
+          FlutterError(code: "SAVE_ERROR", message: error.localizedDescription, details: nil)
+        ))
+      }
     } catch {
-      completion(.failure(
-        FlutterError(code: "SAVE_ERROR", message: error.localizedDescription, details: nil)
-      ))
+      completion(.failure(error))
     }
   }
 
@@ -173,46 +346,52 @@ import EventKit
     request: CalendarEventRequest,
     completion: @escaping (Result<String?, Error>) -> Void
   ) {
-    guard let calendar = eventStore.calendar(withIdentifier: request.calendarId) else {
-      completion(.failure(
-        FlutterError(code: "NOT_FOUND", message: "Calendar not found", details: nil)
-      ))
-      return
-    }
-
-    var event: EKEvent?
-    if let eventId = request.eventId, !eventId.isEmpty {
-      event = eventStore.event(withIdentifier: eventId)
-    }
-    if event == nil {
-      event = EKEvent(eventStore: eventStore)
-      event?.calendar = calendar
-    }
-
-    guard let event else {
-      completion(.failure(
-        FlutterError(code: "SAVE_ERROR", message: "Failed to create EKEvent", details: nil)
-      ))
-      return
-    }
-
-    event.title = request.title
-    event.notes = request.notes
-    event.startDate = Date(timeIntervalSince1970: TimeInterval(request.start) / 1000.0)
-    event.endDate = Date(timeIntervalSince1970: TimeInterval(request.end) / 1000.0)
-
     do {
-      try eventStore.save(event, span: .thisEvent, commit: true)
-      completion(.success(event.eventIdentifier))
+      let store = try requireReadableEventStore()
+      guard let calendar = store.calendar(withIdentifier: request.calendarId) else {
+        completion(.failure(
+          FlutterError(code: "NOT_FOUND", message: "Calendar not found", details: nil)
+        ))
+        return
+      }
+
+      var event = resolveEvent(byStableLocalId: request.eventId, store: store)
+      if event == nil {
+        event = findEvent(calendarId: request.calendarId, matchingCaleeUid: request.uid, store: store)
+      }
+      if event == nil {
+        event = EKEvent(eventStore: store)
+      }
+      event?.calendar = calendar
+
+      guard let event else {
+        completion(.failure(
+          FlutterError(code: "SAVE_ERROR", message: "Failed to create EKEvent", details: nil)
+        ))
+        return
+      }
+
+      event.title = request.title
+      event.startDate = Date(timeIntervalSince1970: TimeInterval(request.start) / 1000.0)
+      event.endDate = Date(timeIntervalSince1970: TimeInterval(request.end) / 1000.0)
+      embedCaleeUid(into: event, uid: request.uid, originalNotes: request.notes)
+
+      do {
+        try store.save(event, span: .thisEvent, commit: true)
+        completion(.success(stableLocalIdentifier(for: event)))
+      } catch {
+        completion(.failure(
+          FlutterError(code: "SAVE_ERROR", message: error.localizedDescription, details: nil)
+        ))
+      }
     } catch {
-      completion(.failure(
-        FlutterError(code: "SAVE_ERROR", message: error.localizedDescription, details: nil)
-      ))
+      completion(.failure(error))
     }
   }
 
   func getSystemEventIds(calendarId: String) throws -> [String] {
-    guard let calendar = eventStore.calendar(withIdentifier: calendarId) else {
+    let store = try requireReadableEventStore()
+    guard let calendar = store.calendar(withIdentifier: calendarId) else {
       return []
     }
 
@@ -221,18 +400,19 @@ import EventKit
     let startDate = now.addingTimeInterval(-365 * 24 * 3600)
     let endDate = now.addingTimeInterval(365 * 24 * 3600)
 
-    let predicate = eventStore.predicateForEvents(withStart: startDate, end: endDate, calendars: [calendar])
-    let events = eventStore.events(matching: predicate)
-    return events.compactMap { $0.eventIdentifier }
+    let predicate = store.predicateForEvents(withStart: startDate, end: endDate, calendars: [calendar])
+    let events = store.events(matching: predicate)
+    return events.map { stableLocalIdentifier(for: $0) }
   }
 
   func deleteEvent(eventId: String) throws -> Bool {
-    guard let event = eventStore.event(withIdentifier: eventId) else {
+    let store = try requireReadableEventStore()
+    guard let event = resolveEvent(byStableLocalId: eventId, store: store) else {
       return false
     }
 
     do {
-      try eventStore.remove(event, span: .thisEvent, commit: true)
+      try store.remove(event, span: .thisEvent, commit: true)
       return true
     } catch {
       throw FlutterError(code: "DELETE_ERROR", message: error.localizedDescription, details: nil)
@@ -247,25 +427,48 @@ import EventKit
     color: Int64,
     completion: @escaping (Result<String?, Error>) -> Void
   ) {
-    guard let source = findOrCreateSource(forAccountName: accountName) else {
-      completion(.failure(
-        FlutterError(code: "SOURCE_ERROR", message: "Failed to find or create source", details: nil)
-      ))
-      return
-    }
-
-    let calendar = EKCalendar(for: .event, eventStore: eventStore)
-    calendar.title = displayName
-    calendar.source = source
-    calendar.cgColor = colorFromInt64(color)
-
     do {
-      try eventStore.saveCalendar(calendar, commit: true)
-      completion(.success(calendar.calendarIdentifier))
+      let store = try requireReadableEventStore()
+      guard let source = selectPreferredWritableEventSource(store: store) else {
+        completion(.failure(
+          FlutterError(
+            code: "SOURCE_ERROR",
+            message: "No suitable writable preferred calendar source available",
+            details: [
+              "accountName": accountName,
+              "availableSources": store.sources.map {
+                "\($0.title) [\(string(from: $0.sourceType))]"
+              }
+            ]
+          )
+        ))
+        return
+      }
+
+      let calendar = EKCalendar(for: .event, eventStore: store)
+      calendar.title = displayName
+      calendar.source = source
+      calendar.cgColor = colorFromInt64(color)
+
+      do {
+        try store.saveCalendar(calendar, commit: true)
+        completion(.success(calendar.calendarIdentifier))
+      } catch {
+        completion(.failure(
+          FlutterError(
+            code: "SAVE_ERROR",
+            message: "Failed to save calendar to source \(source.title) [\(string(from: source.sourceType))]: \(error.localizedDescription)",
+            details: [
+              "sourceTitle": source.title,
+              "sourceType": string(from: source.sourceType),
+              "underlyingError": error.localizedDescription,
+              "accountName": accountName,
+            ]
+          )
+        ))
+      }
     } catch {
-      completion(.failure(
-        FlutterError(code: "SAVE_ERROR", message: error.localizedDescription, details: nil)
-      ))
+      completion(.failure(error))
     }
   }
 
@@ -274,17 +477,22 @@ import EventKit
     accountName: String,
     completion: @escaping (Result<Bool, Error>) -> Void
   ) {
-    guard let calendar = eventStore.calendar(withIdentifier: calendarId) else {
-      completion(.success(false))
-      return
-    }
     do {
-      try eventStore.removeCalendar(calendar, commit: true)
-      completion(.success(true))
+      let store = try requireReadableEventStore()
+      guard let calendar = store.calendar(withIdentifier: calendarId) else {
+        completion(.success(false))
+        return
+      }
+      do {
+        try store.removeCalendar(calendar, commit: true)
+        completion(.success(true))
+      } catch {
+        completion(.failure(
+          FlutterError(code: "DELETE_ERROR", message: error.localizedDescription, details: nil)
+        ))
+      }
     } catch {
-      completion(.failure(
-        FlutterError(code: "DELETE_ERROR", message: error.localizedDescription, details: nil)
-      ))
+      completion(.failure(error))
     }
   }
 
@@ -295,21 +503,26 @@ import EventKit
     accountType: String,
     completion: @escaping (Result<Bool, Error>) -> Void
   ) {
-    guard let calendar = eventStore.calendar(withIdentifier: calendarId) else {
-      completion(.failure(
-        FlutterError(code: "NOT_FOUND", message: "Calendar not found", details: nil)
-      ))
-      return
-    }
-
-    calendar.title = newTitle
     do {
-      try eventStore.saveCalendar(calendar, commit: true)
-      completion(.success(true))
+      let store = try requireReadableEventStore()
+      guard let calendar = store.calendar(withIdentifier: calendarId) else {
+        completion(.failure(
+          FlutterError(code: "NOT_FOUND", message: "Calendar not found", details: nil)
+        ))
+        return
+      }
+
+      calendar.title = newTitle
+      do {
+        try store.saveCalendar(calendar, commit: true)
+        completion(.success(true))
+      } catch {
+        completion(.failure(
+          FlutterError(code: "SAVE_ERROR", message: error.localizedDescription, details: nil)
+        ))
+      }
     } catch {
-      completion(.failure(
-        FlutterError(code: "SAVE_ERROR", message: error.localizedDescription, details: nil)
-      ))
+      completion(.failure(error))
     }
   }
 
@@ -319,47 +532,88 @@ import EventKit
     enabled: Bool,
     completion: @escaping (Result<Bool, Error>) -> Void
   ) {
-    // iOS does not have a direct "enable/disable" flag; visibility is managed by the system UI.
-    // We keep this as a no-op that just checks calendar existence and returns success.
-    guard eventStore.calendar(withIdentifier: calendarId) != nil else {
-      completion(.failure(
-        FlutterError(code: "NOT_FOUND", message: "Calendar not found", details: nil)
-      ))
-      return
-    }
+    do {
+      let store = try requireReadableEventStore()
+      // iOS does not have a direct "enable/disable" flag; visibility is managed by the system UI.
+      // We keep this as a no-op that just checks calendar existence and returns success.
+      guard store.calendar(withIdentifier: calendarId) != nil else {
+        completion(.failure(
+          FlutterError(code: "NOT_FOUND", message: "Calendar not found", details: nil)
+        ))
+        return
+      }
 
-    // Nothing to persist; report success.
-    completion(.success(true))
+      // Nothing to persist; report success.
+      completion(.success(true))
+    } catch {
+      completion(.failure(error))
+    }
   }
 
   func isCalendarAccountSyncEnabled(
     accountName: String,
     completion: @escaping (Result<Bool, Error>) -> Void
   ) {
-    if findSource(forAccountName: accountName) != nil {
-      completion(.success(true))
-    } else {
-      completion(.success(false))
+    do {
+      let store = try requireReadableEventStore()
+      if findSource(forAccountName: accountName, store: store) != nil {
+        completion(.success(true))
+      } else {
+        completion(.success(false))
+      }
+    } catch {
+      completion(.failure(error))
     }
   }
 
   // MARK: - Source helpers
 
-  private func findOrCreateSource(forAccountName accountName: String) -> EKSource? {
-    if let existing = findSource(forAccountName: accountName) {
-      return existing
+  private func selectPreferredWritableEventSource(store: EKEventStore) -> EKSource? {
+    let writableCalendars = store.calendars(for: .event).filter { calendar in
+      calendar.allowsContentModifications
+        && !calendar.isImmutable
+        && calendar.type != .subscription
     }
 
-    // iOS sources are system-managed; we can't create new ones. Fallback to local or first available.
-    let sources = eventStore.sources
-    if let local = sources.first(where: { $0.sourceType == .local }) {
-      return local
+    let writableSources = Array(
+      Set(writableCalendars.compactMap { $0.source })
+    )
+
+    if let mobileMeSource = writableSources.first(where: { source in
+      source.sourceType == .mobileMe
+    }) {
+      return mobileMeSource
     }
-    return sources.first
+
+    if let calDAVICloudSource = writableSources.first(where: { source in
+      source.sourceType == .calDAV && source.title == "iCloud"
+    }) {
+      return calDAVICloudSource
+    }
+
+    if let defaultSource = store.defaultCalendarForNewEvents?.source {
+      let isWritableSource = writableSources.contains(defaultSource)
+      let isPreferredSourceType = defaultSource.sourceType != .exchange
+        && defaultSource.sourceType != .local
+        && defaultSource.sourceType != .subscribed
+        && defaultSource.sourceType != .birthdays
+
+      if isWritableSource && isPreferredSourceType {
+        return defaultSource
+      }
+    }
+
+    if let titledICloudSource = writableSources.first(where: { source in
+      source.title == "iCloud"
+    }) {
+      return titledICloudSource
+    }
+
+    return nil
   }
 
-  private func findSource(forAccountName accountName: String) -> EKSource? {
-    return eventStore.sources.first(where: { $0.title == accountName })
+  private func findSource(forAccountName accountName: String, store: EKEventStore) -> EKSource? {
+    return store.sources.first(where: { $0.title == accountName })
   }
 
   // MARK: - Color helper
@@ -374,5 +628,3 @@ import EventKit
     return UIColor(red: red, green: green, blue: blue, alpha: alpha).cgColor
   }
 }
-
-

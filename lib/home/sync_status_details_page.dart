@@ -143,8 +143,8 @@ String _formatTimestamp(DateTime time) {
 String _triggerLabel(SyncRunTrigger trigger) {
   return switch (trigger) {
     SyncRunTrigger.manual => 'manual',
-    SyncRunTrigger.autoForeground => 'auto',
-    SyncRunTrigger.periodic => 'periodic',
+    SyncRunTrigger.autoForeground => 'auto (foreground)',
+    SyncRunTrigger.periodic => 'background',
     SyncRunTrigger.force => 'force',
   };
 }

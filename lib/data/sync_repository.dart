@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:caleesync/common/app_constant.dart';
 import 'package:caleesync/common/utils/mmkv_utils.dart';
@@ -85,6 +86,109 @@ class SyncRepository {
     if (value is int) return value;
     if (value is String) return int.tryParse(value);
     return null;
+  }
+
+  String _deriveIosRemoteMirrorMarker({
+    required String remotePath,
+    String? originKey,
+  }) {
+    final String trimmedOriginKey = (originKey ?? '').trim();
+    final String normalizedRemotePath =
+        CaleeServerService.normalizeRemotePath(remotePath).trim();
+    final String seed = trimmedOriginKey.isNotEmpty ? trimmedOriginKey : normalizedRemotePath;
+    if (seed.isEmpty) return '';
+
+    int hash = 0x811C9DC5;
+    for (final int codeUnit in seed.codeUnits) {
+      hash ^= codeUnit;
+      hash = (hash * 0x01000193) & 0xFFFFFFFF;
+    }
+
+    final String marker = hash
+        .toUnsigned(32)
+        .toRadixString(16)
+        .toUpperCase()
+        .padLeft(8, '0')
+        .substring(0, 5);
+    return marker.replaceAll(RegExp(r'[^A-Z0-9]'), '');
+  }
+
+  String _buildIosRemoteMirrorTitle({
+    required String displayName,
+    required String marker,
+  }) {
+    final String trimmedMarker = marker.trim();
+    if (trimmedMarker.isEmpty) return displayName;
+
+    final String suffix = '[$trimmedMarker]';
+    final String trimmedTitle = displayName.trimRight();
+    if (trimmedTitle.endsWith(' $suffix') || trimmedTitle.endsWith(suffix)) {
+      return trimmedTitle;
+    }
+    return '$displayName $suffix';
+  }
+
+  String _buildNativeRenameTitleForCurrentPlatform({
+    required String newName,
+    required int originKind,
+    required String remotePath,
+    String? originKey,
+  }) {
+    if (!Platform.isIOS) {
+      return newName;
+    }
+    if (originKind != SyncBindingOrigin.remote) {
+      return newName;
+    }
+
+    final String marker = _deriveIosRemoteMirrorMarker(
+      remotePath: remotePath,
+      originKey: originKey,
+    ).trim();
+    if (marker.isEmpty) {
+      return newName;
+    }
+
+    return _buildIosRemoteMirrorTitle(
+      displayName: newName,
+      marker: marker,
+    );
+  }
+
+  ({String baseName, String marker})? _parseIosRemoteMirrorTitle(String title) {
+    final String trimmedTitle = title.trim();
+    final RegExpMatch? match = RegExp(r'^(.*) \[([A-Z0-9]{5})\]$').firstMatch(
+      trimmedTitle,
+    );
+    if (match == null) {
+      return null;
+    }
+
+    final String baseName = (match.group(1) ?? '').trim();
+    final String marker = (match.group(2) ?? '').trim();
+    if (baseName.isEmpty || marker.isEmpty) {
+      return null;
+    }
+
+    return (baseName: baseName, marker: marker);
+  }
+
+  Future<bool> _isLocalCalendarIdBoundElsewhere({
+    required DatabaseExecutor db,
+    required int remoteCollectionId,
+    required String localCalendarId,
+  }) async {
+    final String normalizedLocalId = localCalendarId.trim();
+    if (normalizedLocalId.isEmpty) return false;
+
+    final List<Map<String, dynamic>> rows = await db.query(
+      'local_bindings',
+      columns: ['remote_collection_id'],
+      where: 'local_collection_id = ? AND remote_collection_id != ?',
+      whereArgs: [normalizedLocalId, remoteCollectionId],
+      limit: 1,
+    );
+    return rows.isNotEmpty;
   }
 
 // ==========================================
@@ -447,6 +551,8 @@ class SyncRepository {
     final cal = maps.first;
 // 如果字段可能为空, 用 String?
     final String? path = cal['remote_path'] as String?;
+    final int originKind = (cal['origin_kind'] as int?) ?? SyncBindingOrigin.remote;
+    final String? originKey = cal['origin_key']?.toString();
 
 // 如果你确定 account_name 绝对有值, 用 String
     final String accountName = (cal['account_name'] ?? '').toString();
@@ -469,9 +575,15 @@ class SyncRepository {
       // 仅当存在 local_id 时尝试系统改名
       final String? resolvedLocalId = cal['local_collection_id']?.toString();
       if (resolvedLocalId != null && resolvedLocalId.isNotEmpty) {
+        final String nativeRenameTitle = _buildNativeRenameTitleForCurrentPlatform(
+          newName: newName,
+          originKind: originKind,
+          remotePath: path ?? '',
+          originKey: originKey,
+        );
         final bool localRenameOk = await _nativeApi.modifyCalendarTitle(
           resolvedLocalId,
-          newName,
+          nativeRenameTitle,
           accountName,
           AppConstant.calendarAccountType,
         );
@@ -544,7 +656,7 @@ class SyncRepository {
     try {
       final List<Map<String, dynamic>> remoteRows = await db.rawQuery('''
         SELECT rc.id, rc.display_name, rc.color, rc.remote_path, rc.origin_kind,
-               cs.sync_gate_reason
+               rc.origin_key, cs.sync_gate_reason
         FROM remote_collections rc
         LEFT JOIN collection_states cs ON cs.remote_collection_id = rc.id
         WHERE rc.account_name = ?
@@ -603,10 +715,13 @@ class SyncRepository {
       }
 
       // Get calendars with permission error handling
+      List<PlatformCalendar> nativeCalendars;
       Set<String> nativeCalendarIds;
       try {
-        nativeCalendarIds = (await _nativeApi.getCalendars())
+        nativeCalendars = (await _nativeApi.getCalendars())
             .whereType<PlatformCalendar>()
+            .toList();
+        nativeCalendarIds = nativeCalendars
             .map((calendar) => calendar.id ?? '')
             .where((id) => id.isNotEmpty)
             .toSet();
@@ -651,6 +766,78 @@ class SyncRepository {
         );
       }
 
+      final String iosMirrorMarker = _deriveIosRemoteMirrorMarker(
+        remotePath: persistedRemotePath,
+        originKey: remote['origin_key']?.toString(),
+      );
+
+      if (Platform.isIOS &&
+          existingOriginKind == SyncBindingOrigin.remote &&
+          (existingLocalId.isEmpty || !nativeCalendarIds.contains(existingLocalId)) &&
+          iosMirrorMarker.isNotEmpty) {
+        final String expectedMarker = iosMirrorMarker;
+        final String expectedBaseName = displayName.trim();
+        final List<PlatformCalendar> reclaimCandidates =
+            nativeCalendars.where((PlatformCalendar calendar) {
+          final ({String baseName, String marker})? parsedTitle =
+              _parseIosRemoteMirrorTitle(calendar.name ?? '');
+          return parsedTitle != null &&
+              parsedTitle.marker == expectedMarker &&
+              parsedTitle.baseName == expectedBaseName;
+        }).toList();
+
+        if (reclaimCandidates.length == 1) {
+          final String reclaimedLocalId = (reclaimCandidates.first.id ?? '').trim();
+          if (reclaimedLocalId.isNotEmpty &&
+              !await _isLocalCalendarIdBoundElsewhere(
+                db: db,
+                remoteCollectionId: remoteCollectionId,
+                localCalendarId: reclaimedLocalId,
+              )) {
+            final int now = DateTime.now().millisecondsSinceEpoch;
+            await db.transaction((txn) async {
+              await txn.insert(
+                'local_bindings',
+                {
+                  'remote_collection_id': remoteCollectionId,
+                  'local_collection_id': reclaimedLocalId,
+                  'created_at': now,
+                  'updated_at': now,
+                },
+                conflictAlgorithm: ConflictAlgorithm.replace,
+              );
+
+              await txn.insert(
+                'collection_states',
+                {
+                  'remote_collection_id': remoteCollectionId,
+                  'is_enabled': 1,
+                  'updated_at': now,
+                },
+                conflictAlgorithm: ConflictAlgorithm.ignore,
+              );
+
+              await txn.update(
+                'collection_states',
+                {'is_enabled': 1, 'updated_at': now},
+                where: 'remote_collection_id = ?',
+                whereArgs: [remoteCollectionId],
+              );
+            });
+
+            _triggerOneShotForceSyncInBackground(remoteCollectionId);
+            return EnableCalendarResult(
+              success: true,
+              remotePath: persistedRemotePath,
+              remoteCollectionId: remoteCollectionId,
+              localCalendarId: reclaimedLocalId,
+              didTriggerSync: true,
+              hasFreshEventCount: false,
+            );
+          }
+        }
+      }
+
       int colorInt = 0xFF4CAF50;
       final String colorHex = remote['color']?.toString() ?? '';
       if (colorHex.isNotEmpty) {
@@ -662,7 +849,15 @@ class SyncRepository {
         }
       }
 
-      final String? newLocalId = await _nativeApi.createCalendar(displayName, accountName, colorInt);
+      final String nativeCalendarTitle = _buildIosRemoteMirrorTitle(
+        displayName: displayName,
+        marker: Platform.isIOS ? iosMirrorMarker : '',
+      );
+      final String? newLocalId = await _nativeApi.createCalendar(
+        nativeCalendarTitle,
+        accountName,
+        colorInt,
+      );
       if (!_isValidLocalCollectionId(newLocalId)) {
         _lastConnectError = 'Failed to create local calendar. Check calendar permissions and try again.';
         return EnableCalendarResult.failure(remotePath: persistedRemotePath);
@@ -736,6 +931,12 @@ class SyncRepository {
       final String msg = '${e.code} ${e.message ?? ''}'.toLowerCase();
       if (msg.contains('permission')) {
         _lastConnectError = 'Calendar permission missing. Grant permission in system settings and retry.';
+      } else if (e.code == 'SOURCE_ERROR') {
+        _lastConnectError = 'iCloud calendar account is not available on this iPhone.';
+      } else if (e.code == 'SAVE_ERROR') {
+        _lastConnectError = 'iPhone could not create the calendar in iCloud.';
+      } else if (e.code == 'NOT_FOUND') {
+        _lastConnectError = 'The selected iPhone calendar could not be found. Refresh calendars and try again.';
       } else if (msg.contains('provider')) {
         _lastConnectError = 'System calendar provider error. Restart the calendar app and retry.';
       } else if (msg.contains('already')) {
