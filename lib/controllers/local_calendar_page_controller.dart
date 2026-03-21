@@ -508,7 +508,7 @@ class LocalCalendarPageController extends GetxController {
               await db.update(
                 'collection_states',
                 {
-                  'sync_gate_reason': null,
+                  'sync_gate_reason': SyncGateReason.safeFirstSync,
                   'updated_at': DateTime.now().millisecondsSinceEpoch,
                 },
                 where: 'remote_collection_id = ?',
@@ -641,7 +641,7 @@ class LocalCalendarPageController extends GetxController {
             'collection_states',
             {
               'remote_collection_id': remoteCollectionId,
-              'sync_gate_reason': null,
+              'sync_gate_reason': SyncGateReason.safeFirstSync,
               'updated_at': now,
             },
             conflictAlgorithm: ConflictAlgorithm.ignore,
@@ -649,7 +649,7 @@ class LocalCalendarPageController extends GetxController {
           await txn.update(
             'collection_states',
             {
-              'sync_gate_reason': null,
+              'sync_gate_reason': SyncGateReason.safeFirstSync,
               'updated_at': now,
             },
             where: 'remote_collection_id = ?',
