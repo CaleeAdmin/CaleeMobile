@@ -9,6 +9,7 @@ import '../entity/SyncContext.dart';
 import '../services/calee_server_service.dart';
 import 'SyncEnum.dart';
 import 'force_sync_registry.dart';
+import 'binding_role_resolver.dart';
 import 'sync_gate_reason.dart';
 
 class SyncItemPlanner {
@@ -139,17 +140,18 @@ class SyncItemPlanner {
         (remote?['display_name']?.toString() ?? '') != (local['display_name']?.toString() ?? '') ||
             (remote?['color']?.toString() ?? '') != (local['color']?.toString() ?? '');
 
+    final int bindingRole = BindingRoleResolver.resolveBindingRole(local);
     final bool isTwoWay = mode == SyncBindingMode.twoWay;
-    final bool isOneWayLocalOrigin = !isTwoWay && originKind == SyncBindingOrigin.local;
-    final bool isPullOnlyMode = !isTwoWay && !isOneWayLocalOrigin;
+    final bool isOwnerLink = bindingRole == SyncBindingRole.ownerLink;
+    final bool isMirror = bindingRole == SyncBindingRole.mirror;
 
     final bool shouldSync = isTwoWay
         ? true
-        : isOneWayLocalOrigin
+        : isOwnerLink
             ? (localChanged || metaChanged)
-            : isPullOnlyMode
+            : isMirror
                 ? (remoteChanged || localChanged || metaChanged)
-                : (remoteChanged || metaChanged);
+                : (remoteChanged || localChanged || metaChanged);
     final bool bootstrapRequired = await _isBootstrapRequired(db, remoteCollectionId);
     final bool forceMode = forceRequested || bootstrapRequired;
 
@@ -160,7 +162,7 @@ class SyncItemPlanner {
 
     final SyncAction action = isTwoWay
         ? SyncAction.fullSyncBidi
-        : isOneWayLocalOrigin
+        : isOwnerLink
             ? SyncAction.fullSyncPush
             : SyncAction.fullSyncPull;
 
@@ -207,13 +209,9 @@ class SyncItemPlanner {
       return {'eligible': false, 'reason': SyncGateReason.bindingInvalid};
     }
 
-    final int originKind = (row['origin_kind'] as int?) ?? SyncBindingOrigin.remote;
     final int bindingId = (row['binding_id'] as int?) ?? 0;
     final String localCollectionId = row['local_collection_id']?.toString() ?? '';
     if (bindingId <= 0 || localCollectionId.isEmpty) {
-      if (originKind == SyncBindingOrigin.local) {
-        return {'eligible': false, 'reason': SyncGateReason.relinkRequired};
-      }
       return {'eligible': false, 'reason': SyncGateReason.bindingInvalid};
     }
 
