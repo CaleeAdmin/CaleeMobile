@@ -681,10 +681,8 @@ private object BackgroundEngineHolder {
             nextEngine.dartExecutor.binaryMessenger,
             object : BackgroundSyncRunnerHostApi {
                 override fun notifyBackgroundIsolateReady(contractVersion: Long, callback: (Result<Unit>) -> Unit) {
-                    holderScope.launch(Dispatchers.Main.immediate) {
-                        onDartReady(engineGen)
-                        callback(Result.success(Unit))
-                    }
+                    callback(Result.success(Unit))
+                    onDartReady(engineGen)
                 }
             },
         )
