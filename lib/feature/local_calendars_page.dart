@@ -198,7 +198,7 @@ class _LocalCalendarCard extends StatelessWidget {
                                           valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                                         ),
                                       )
-                                    : Text(calendar.canRelink ? 'Re-link' : 'Link'),
+                                    : Text(calendar.canRelink ? 'Re-link to Calee' : 'Link to Calee'),
                               ),
                       ],
                     ),
