@@ -140,7 +140,7 @@ class SyncRepository {
       if (calendarId.isEmpty) {
         return false;
       }
-      if ((calendar.accountType ?? '').trim().toLowerCase() != AppConstant.calendarAccountType) {
+      if (calendar.isSubscription == true) {
         return false;
       }
 
@@ -390,12 +390,21 @@ class SyncRepository {
     final String accountName = cal['account_name'] ?? '';
     final String resolvedLocalId = cal['local_collection_id']?.toString() ?? sanitizedLocalId ?? '';
     final String? resolvedRemotePath = cal['remote_path']?.toString() ?? sanitizedRemotePath;
+    final String displayName = (cal['display_name'] ?? '').toString();
+    final String? originKey = cal['origin_key']?.toString();
     final int bindingRole = (cal['binding_role'] as int?) ?? SyncBindingRole.mirror;
-    final bool isCaleeSyncAccountType = await _isCaleeSyncCalendarAccountType(resolvedLocalId);
-    final bool shouldDeleteLocalCalendar =
-        bindingRole == SyncBindingRole.mirror &&
+    final bool isAppManagedMirror =
         resolvedLocalId.isNotEmpty &&
-        isCaleeSyncAccountType;
+        resolvedRemotePath != null &&
+        resolvedRemotePath.isNotEmpty &&
+        await _isAppManagedMirrorCalendar(
+          localCalendarId: resolvedLocalId,
+          bindingRole: bindingRole,
+          remotePath: resolvedRemotePath,
+          displayName: displayName,
+          originKey: originKey,
+        );
+    final bool shouldDeleteLocalCalendar = isAppManagedMirror;
 
     debugPrint("[INFO] Starting hard delete workflow: ID $resolvedLocalId, Path: $resolvedRemotePath");
 
@@ -425,7 +434,7 @@ class SyncRepository {
           debugPrint("[OK] Mobile system calendar removed");
         } else if (!shouldDeleteLocalCalendar) {
           debugPrint(
-            "[INFO] Skipping local system calendar deletion (bindingRole=$bindingRole, isCaleeSyncAccountType=$isCaleeSyncAccountType)",
+            "[INFO] Skipping local system calendar deletion (bindingRole=$bindingRole, isAppManagedMirror=$isAppManagedMirror)",
           );
         }
 
@@ -470,8 +479,19 @@ class SyncRepository {
     }
   }
 
-  Future<bool> _isCaleeSyncCalendarAccountType(String localCalendarId) async {
-    if (localCalendarId.trim().isEmpty) {
+  Future<bool> _isAppManagedMirrorCalendar({
+    required String localCalendarId,
+    required int bindingRole,
+    required String remotePath,
+    required String displayName,
+    String? originKey,
+  }) async {
+    final String normalizedLocalId = localCalendarId.trim();
+    if (normalizedLocalId.isEmpty) {
+      return false;
+    }
+
+    if (bindingRole != SyncBindingRole.mirror) {
       return false;
     }
 
@@ -486,15 +506,35 @@ class SyncRepository {
         if (calendar == null) {
           continue;
         }
-        if ((calendar.id ?? '').trim() == localCalendarId.trim()) {
+        if ((calendar.id ?? '').trim() == normalizedLocalId) {
           target = calendar;
           break;
         }
       }
+      if (target == null) {
+        return false;
+      }
 
-      return (target?.accountType ?? '').trim().toLowerCase() == AppConstant.calendarAccountType;
+      if (Platform.isAndroid) {
+        return (target.accountType ?? '').trim().toLowerCase() == AppConstant.calendarAccountType;
+      }
+
+      if (!Platform.isIOS) {
+        return false;
+      }
+
+      if (target.isSubscription == true) {
+        return false;
+      }
+
+      return matchesExpectedIosMirrorTitle(
+        title: target.name ?? '',
+        displayName: displayName,
+        remotePath: remotePath,
+        originKey: originKey,
+      );
     } catch (e) {
-      debugPrint('[WARN] Unable to verify calendar accountType for deletion: $e');
+      debugPrint('[WARN] Unable to verify app-managed mirror calendar: $e');
       return false;
     }
   }
