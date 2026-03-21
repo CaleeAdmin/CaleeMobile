@@ -100,121 +100,173 @@ class LocalCalendarPageController extends GetxController {
 
     try {
       isLoading.value = true;
-
-      final bool hasPermission = await _nativeApi.requestPermission(false);
-      if (!hasPermission) {
-        Get.snackbar('Permission required', 'Calendar access is required to load local calendars.');
-        return;
-      }
-
-      final db = await DatabaseHelper.instance.database;
-      final List<PlatformCalendar?> rawCalendars = await _nativeApi.getCalendars();
-      final Set<String> nativeCalendarIds = {
-        for (final calendar in rawCalendars.whereType<PlatformCalendar>())
-          _normalizeLocalCollectionId(calendar.id),
-      }..remove('');
-
-      final List<Map<String, dynamic>> remoteRows = await db.query(
-        'remote_collections',
-        columns: ['id', 'display_name', 'remote_path', 'origin_key', 'account_name'],
-        where: 'id = ? AND collection_type = ? AND origin_kind = ?',
-        whereArgs: [remoteCollectionId, 'calendar', 0],
-        limit: 1,
+      final List<LocalCalendarItem> candidates = await _findHighConfidenceRelinkCandidatesForRemote(
+        remoteCollectionId: remoteCollectionId,
+        remoteDisplayName: remoteDisplayName,
+        remotePath: remotePath,
       );
-      if (remoteRows.isEmpty) {
-        reviewCandidates.clear();
-        return;
-      }
-
-      final Map<String, dynamic> remoteRow = remoteRows.first;
-
-      final List<Map<String, dynamic>> existingBindingRows = await db.query(
-        'local_bindings',
-        columns: ['local_collection_id'],
-        where: 'remote_collection_id = ?',
-        whereArgs: [remoteCollectionId],
-      );
-      for (final row in existingBindingRows) {
-        final String boundLocalId = _normalizeLocalCollectionId(row['local_collection_id']);
-        if (boundLocalId.isNotEmpty && nativeCalendarIds.contains(boundLocalId)) {
-          reviewCandidates.clear();
-          return;
-        }
-      }
-
-      final String loginName = (MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? '').trim();
-      if (loginName.isEmpty) {
-        reviewCandidates.clear();
-        return;
-      }
-
-      final String remoteAccountName = _normalizeAccountName(remoteRow['account_name']);
-      if (remoteAccountName.trim() != loginName) {
-        reviewCandidates.clear();
-        return;
-      }
-
-      final List<Map<String, dynamic>> connectedRows = await db.rawQuery('''
-        SELECT lb.local_collection_id
-        FROM local_bindings lb
-        WHERE lb.local_collection_id IS NOT NULL
-          AND lb.local_collection_id != ''
-      ''');
-      final Set<String> connectedLocalIds = {
-        for (final row in connectedRows) _normalizeLocalCollectionId(row['local_collection_id'])
-      }..remove('');
-
-      final List<LocalCalendarItem> sortedCandidates = rawCalendars
-          .whereType<PlatformCalendar>()
-          .where((calendar) => calendar.supportsEvents != false)
-          .map((calendar) {
-            final String id = _normalizeLocalCollectionId(calendar.id);
-            if (id.isEmpty) {
-              return null;
-            }
-            if (connectedLocalIds.contains(id)) {
-              return null;
-            }
-
-            final String normalizedAccountType = (calendar.accountType ?? '').trim().toLowerCase();
-            if (normalizedAccountType == AppConstant.calendarAccountType) {
-              return null;
-            }
-            if (calendar.isSubscription == true) {
-              return null;
-            }
-            if (calendar.isReadOnly == true) {
-              return null;
-            }
-
-            final String accountName = _normalizeAccountName(calendar.accountName);
-            final String name =
-                (calendar.name != null && calendar.name!.isNotEmpty) ? calendar.name! : 'Untitled calendar';
-            final LocalCalendarItem item = _asScoringItem(id, name, accountName, calendar);
-            final int providerHintScore = _scoreCandidateProviderHint(remoteRow, item);
-            if (providerHintScore < _highConfidenceRelinkThreshold) {
-              return null;
-            }
-            item.relinkConfidence = providerHintScore;
-            return item;
-          })
-          .whereType<LocalCalendarItem>()
-          .toList()
-        ..sort((a, b) {
-          final int confidenceCompare = b.relinkConfidence.compareTo(a.relinkConfidence);
-          if (confidenceCompare != 0) {
-            return confidenceCompare;
-          }
-          return a.name.toLowerCase().compareTo(b.name.toLowerCase());
-        });
-
-      reviewCandidates.assignAll(sortedCandidates);
+      reviewCandidates.assignAll(candidates);
     } catch (e) {
       debugPrint('[ERROR] Failed to load relink review candidates: $e');
-      Get.snackbar('Error', 'Failed to load local calendars');
+      final String errorMessage = e.toString();
+      if (errorMessage.contains('Calendar access is required')) {
+        Get.snackbar('Permission required', 'Calendar access is required to load local calendars.');
+      } else {
+        Get.snackbar('Error', 'Failed to load local calendars');
+      }
     } finally {
       isLoading.value = false;
     }
+  }
+
+  Future<int> getHighConfidenceRelinkCandidateCountForRemote({
+    required int remoteCollectionId,
+    required String remoteDisplayName,
+    required String remotePath,
+  }) async {
+    final List<LocalCalendarItem> candidates = await _findHighConfidenceRelinkCandidatesForRemote(
+      remoteCollectionId: remoteCollectionId,
+      remoteDisplayName: remoteDisplayName,
+      remotePath: remotePath,
+    );
+    return candidates.length;
+  }
+
+  Future<List<LocalCalendarItem>> _findHighConfidenceRelinkCandidatesForRemote({
+    required int remoteCollectionId,
+    required String remoteDisplayName,
+    required String remotePath,
+  }) async {
+    final bool hasPermission = await _nativeApi.requestPermission(false);
+    if (!hasPermission) {
+      throw Exception('Calendar access is required to load local calendars.');
+    }
+
+    final db = await DatabaseHelper.instance.database;
+    final List<PlatformCalendar?> rawCalendars = await _nativeApi.getCalendars();
+    final Set<String> nativeCalendarIds = {
+      for (final calendar in rawCalendars.whereType<PlatformCalendar>())
+        _normalizeLocalCollectionId(calendar.id),
+    }..remove('');
+
+    final List<Map<String, dynamic>> remoteRows = await db.query(
+      'remote_collections',
+      columns: ['id', 'display_name', 'remote_path', 'origin_key', 'account_name'],
+      where: 'id = ? AND collection_type = ? AND origin_kind = ?',
+      whereArgs: [remoteCollectionId, 'calendar', 0],
+      limit: 1,
+    );
+    if (remoteRows.isEmpty) {
+      return <LocalCalendarItem>[];
+    }
+
+    final Map<String, dynamic> remoteRow = remoteRows.first;
+    final String normalizedRequestedRemotePath = CaleeServerService.normalizeRemotePath(remotePath);
+    final String normalizedStoredRemotePath =
+        CaleeServerService.normalizeRemotePath(remoteRow['remote_path']?.toString() ?? '');
+    if (normalizedRequestedRemotePath.isNotEmpty &&
+        normalizedStoredRemotePath.isNotEmpty &&
+        normalizedRequestedRemotePath != normalizedStoredRemotePath) {
+      return <LocalCalendarItem>[];
+    }
+
+    final String requestedDisplayName = remoteDisplayName.trim();
+    final String storedDisplayName = (remoteRow['display_name']?.toString() ?? '').trim();
+    if (requestedDisplayName.isNotEmpty &&
+        storedDisplayName.isNotEmpty &&
+        requestedDisplayName != storedDisplayName) {
+      return <LocalCalendarItem>[];
+    }
+
+    final List<Map<String, dynamic>> existingBindingRows = await db.query(
+      'local_bindings',
+      columns: ['local_collection_id'],
+      where: 'remote_collection_id = ?',
+      whereArgs: [remoteCollectionId],
+    );
+    for (final row in existingBindingRows) {
+      final String boundLocalId = _normalizeLocalCollectionId(row['local_collection_id']);
+      if (boundLocalId.isNotEmpty && nativeCalendarIds.contains(boundLocalId)) {
+        return <LocalCalendarItem>[];
+      }
+    }
+
+    final String loginName = (MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? '').trim();
+    if (loginName.isEmpty) {
+      return <LocalCalendarItem>[];
+    }
+
+    final String remoteAccountName = _normalizeAccountName(remoteRow['account_name']);
+    if (remoteAccountName.trim() != loginName) {
+      return <LocalCalendarItem>[];
+    }
+
+    final List<Map<String, dynamic>> connectedRows = await db.rawQuery('''
+      SELECT lb.local_collection_id
+      FROM local_bindings lb
+      WHERE lb.local_collection_id IS NOT NULL
+        AND lb.local_collection_id != ''
+    ''');
+    final Set<String> connectedLocalIds = {
+      for (final row in connectedRows) _normalizeLocalCollectionId(row['local_collection_id'])
+    }..remove('');
+
+    final List<Map<String, dynamic>> remoteProvisionedRows = await db.rawQuery('''
+      SELECT lb.local_collection_id
+      FROM local_bindings lb
+      WHERE lb.binding_role = ?
+        AND lb.local_collection_id IS NOT NULL
+        AND lb.local_collection_id != ''
+    ''', [SyncBindingRole.mirror]);
+    final Set<String> remoteProvisionedLocalIds = {
+      for (final row in remoteProvisionedRows) _normalizeLocalCollectionId(row['local_collection_id'])
+    }..remove('');
+
+    final List<LocalCalendarItem> sortedCandidates = rawCalendars
+        .whereType<PlatformCalendar>()
+        .where((calendar) => calendar.supportsEvents != false)
+        .map((calendar) {
+          final String id = _normalizeLocalCollectionId(calendar.id);
+          if (id.isEmpty) {
+            return null;
+          }
+          if (connectedLocalIds.contains(id) || remoteProvisionedLocalIds.contains(id)) {
+            return null;
+          }
+
+          final String normalizedAccountType = (calendar.accountType ?? '').trim().toLowerCase();
+          if (normalizedAccountType == AppConstant.calendarAccountType) {
+            return null;
+          }
+          if (calendar.isSubscription == true) {
+            return null;
+          }
+          if (calendar.isReadOnly == true) {
+            return null;
+          }
+
+          final String accountName = _normalizeAccountName(calendar.accountName);
+          final String name =
+              (calendar.name != null && calendar.name!.isNotEmpty) ? calendar.name! : 'Untitled calendar';
+          final LocalCalendarItem item = _asScoringItem(id, name, accountName, calendar);
+          final int providerHintScore = _scoreCandidateProviderHint(remoteRow, item);
+          if (providerHintScore < _highConfidenceRelinkThreshold) {
+            return null;
+          }
+          item.relinkConfidence = providerHintScore;
+          return item;
+        })
+        .whereType<LocalCalendarItem>()
+        .toList()
+      ..sort((a, b) {
+        final int confidenceCompare = b.relinkConfidence.compareTo(a.relinkConfidence);
+        if (confidenceCompare != 0) {
+          return confidenceCompare;
+        }
+        return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+      });
+
+    return sortedCandidates;
   }
 
   Future<void> refreshLocalCalendars() async {

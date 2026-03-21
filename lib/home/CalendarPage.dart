@@ -765,6 +765,38 @@ class _CalendarRow extends StatelessWidget {
                     style: const TextStyle(fontSize: 12, color: Colors.black54),
                   ),
                 ),
+                if (item.hasRelinkSuggestion)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Possible reconnection on this device',
+                          style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+                        ),
+                        TextButton(
+                          style: TextButton.styleFrom(
+                            padding: EdgeInsets.zero,
+                            minimumSize: const Size(0, 0),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            alignment: Alignment.centerLeft,
+                          ),
+                          onPressed: () {
+                            Get.to(
+                              () => LocalCalendarsPage(
+                                mode: LocalCalendarsPageMode.relinkReview,
+                                remoteCollectionId: item.remoteCollectionId,
+                                remoteDisplayName: item.name,
+                                remotePath: item.remotePath,
+                              ),
+                            );
+                          },
+                          child: const Text('Review Re-link'),
+                        ),
+                      ],
+                    ),
+                  ),
                 if (item.isEnabled && (_syncGateReasonMessage(item.syncGateReason) ?? '').isNotEmpty)
                   Container(
                     margin: const EdgeInsets.only(top: 4),
