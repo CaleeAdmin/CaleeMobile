@@ -36,6 +36,7 @@ class CalendarDisplayItem {
   final int origin;          // 0: 本地创建, 1: 云端同步
   final String? originKey;
   final int bindingId;
+  final int bindingRole;
   bool allowMassDeletionDangerous;
 
   CalendarDisplayItem({
@@ -54,6 +55,7 @@ class CalendarDisplayItem {
     required this.origin,
     this.originKey,
     required this.bindingId,
+    required this.bindingRole,
     required this.allowMassDeletionDangerous,
   });
 
@@ -77,6 +79,7 @@ class CalendarDisplayItem {
       origin: (map['origin_kind'] as int?) ?? 2,
       originKey: map['origin_key']?.toString(),
       bindingId: (map['binding_id'] as int?) ?? 0,
+      bindingRole: (map['binding_role'] as int?) ?? 0,
       allowMassDeletionDangerous: false,
     );
   }
@@ -287,6 +290,7 @@ class CalendarPageController extends GetxController {
       syncGateReason: item.syncGateReason,
       origin: item.origin,
       bindingId: item.bindingId,
+      bindingRole: item.bindingRole,
       allowMassDeletionDangerous: item.allowMassDeletionDangerous,
     );
     calendars.refresh();
@@ -424,7 +428,7 @@ class CalendarPageController extends GetxController {
       // 2. 查询本地 remote_collections 的所有日历记录
       final db = await DatabaseHelper.instance.database;
       final List<Map<String, dynamic>> calendarMaps = await db.rawQuery('''
-        SELECT rc.*, lb.local_collection_id, lb.id AS binding_id, cs.sync_gate_reason, cs.is_enabled AS state_is_enabled
+        SELECT rc.*, lb.local_collection_id, lb.id AS binding_id, lb.binding_role AS binding_role, cs.sync_gate_reason, cs.is_enabled AS state_is_enabled
         FROM remote_collections rc
         LEFT JOIN local_bindings lb ON lb.remote_collection_id = rc.id
         LEFT JOIN collection_states cs ON cs.remote_collection_id = rc.id
@@ -496,6 +500,7 @@ class CalendarPageController extends GetxController {
           origin: origin,
           originKey: cal['origin_key']?.toString(),
           bindingId: bindingId,
+          bindingRole: (cal['binding_role'] as int?) ?? 0,
           allowMassDeletionDangerous: allowMassDeletionDangerous,
         );
 

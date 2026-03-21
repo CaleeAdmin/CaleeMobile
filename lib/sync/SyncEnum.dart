@@ -1,7 +1,7 @@
 // 仅用于 SyncEngine worker 的动作类型（项目级别同步，不含日历创建/删除）
 enum SyncAction {
   // --- 同步阶段 (数据交换) ---
-  // sync_mode 约定：0 = 单向（由 remote_collections.origin_kind 决定 Pull/Push），1 = 双向同步（Pull + Push）
+  // sync_mode 约定：0 = 单向，1 = 双向同步（Pull + Push）；运行时方向后续将由 binding role 解析
   fullSyncBidi,   // 双向流：允许 Pull 和 Push (个人日历)
   fullSyncPull,   // 单向流：远端 -> 本地
   fullSyncPush,   // 单向流：本地 -> 远端
@@ -12,8 +12,13 @@ class SyncBindingMode {
   static const int twoWay = 1;
 }
 
+class SyncBindingRole {
+  static const int mirror = 0;
+  static const int ownerLink = 1;
+}
+
 class SyncBindingOrigin {
-  // 与 remote_collections.origin_kind 保持一致：0=本地起源，1=远端起源（默认）
+  // remote provenance only
   static const int local = 0;
   static const int remote = 1;
 }
