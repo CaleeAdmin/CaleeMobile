@@ -327,8 +327,6 @@ class CaleeServerService {
       await txn.rawUpdate('''
         UPDATE collection_states
         SET sync_gate_reason = CASE
-          WHEN sync_gate_reason IN ('relink_verifying', 'relink_mismatch')
-            THEN sync_gate_reason
           WHEN sync_gate_reason IS NOT NULL AND sync_gate_reason != ''
             THEN sync_gate_reason
           ELSE NULL

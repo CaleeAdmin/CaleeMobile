@@ -423,16 +423,6 @@ class LocalCalendarPageController extends GetxController {
               continue;
             }
 
-            await db.update(
-              'collection_states',
-              {
-                'sync_gate_reason': SyncGateReason.relinkVerifying,
-                'updated_at': DateTime.now().millisecondsSinceEpoch,
-              },
-              where: 'remote_collection_id = ?',
-              whereArgs: [candidate['id']],
-            );
-
             try {
               final bool candidateIsSubscription =
                   candidate['is_subscription'] == 1 || candidate['is_subscription'] == true;
@@ -466,42 +456,15 @@ class LocalCalendarPageController extends GetxController {
               );
 
               if (relinkDecision == _RelinkDecision.cancel) {
-                await db.update(
-                  'collection_states',
-                  {
-                    'sync_gate_reason': SyncGateReason.relinkRequired,
-                    'updated_at': DateTime.now().millisecondsSinceEpoch,
-                  },
-                  where: 'remote_collection_id = ?',
-                  whereArgs: [candidate['id']],
-                );
                 relinkConfirmationDeclined = true;
                 break;
               }
 
               if (relinkDecision == _RelinkDecision.createNewRemote) {
-                await db.update(
-                  'collection_states',
-                  {
-                    'sync_gate_reason': SyncGateReason.relinkRequired,
-                    'updated_at': DateTime.now().millisecondsSinceEpoch,
-                  },
-                  where: 'remote_collection_id = ?',
-                  whereArgs: [candidate['id']],
-                );
                 break;
               }
 
               if (verifyResult.outcome != RelinkVerificationOutcome.passed) {
-                await db.update(
-                  'collection_states',
-                  {
-                    'sync_gate_reason': SyncGateReason.relinkRequired,
-                    'updated_at': DateTime.now().millisecondsSinceEpoch,
-                  },
-                  where: 'remote_collection_id = ?',
-                  whereArgs: [candidate['id']],
-                );
                 continue;
               }
               remotePath = candidatePath;
@@ -517,15 +480,6 @@ class LocalCalendarPageController extends GetxController {
 
               break;
             } catch (e) {
-              await db.update(
-                'collection_states',
-                {
-                  'sync_gate_reason': SyncGateReason.relinkRequired,
-                  'updated_at': DateTime.now().millisecondsSinceEpoch,
-                },
-                where: 'remote_collection_id = ?',
-                whereArgs: [candidate['id']],
-              );
               debugPrint('[RelinkVerifier] verify_failed_transient for candidate=${candidate['id']}: $e');
               continue;
             }
