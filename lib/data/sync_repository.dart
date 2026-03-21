@@ -12,6 +12,7 @@ import 'package:uuid/uuid.dart';
 import '../sync/SyncEnum.dart';
 import '../sync/SyncEngine.dart';
 import '../sync/background_sync_scheduler.dart';
+import '../sync/ios_mirror_identity.dart';
 import '../sync/sync_gate_reason.dart';
 import '../services/calee_server_service.dart';
 import 'database_helper.dart';
@@ -88,46 +89,6 @@ class SyncRepository {
     return null;
   }
 
-  String _deriveIosRemoteMirrorMarker({
-    required String remotePath,
-    String? originKey,
-  }) {
-    final String trimmedOriginKey = (originKey ?? '').trim();
-    final String normalizedRemotePath =
-        CaleeServerService.normalizeRemotePath(remotePath).trim();
-    final String seed = trimmedOriginKey.isNotEmpty ? trimmedOriginKey : normalizedRemotePath;
-    if (seed.isEmpty) return '';
-
-    int hash = 0x811C9DC5;
-    for (final int codeUnit in seed.codeUnits) {
-      hash ^= codeUnit;
-      hash = (hash * 0x01000193) & 0xFFFFFFFF;
-    }
-
-    final String marker = hash
-        .toUnsigned(32)
-        .toRadixString(16)
-        .toUpperCase()
-        .padLeft(8, '0')
-        .substring(0, 5);
-    return marker.replaceAll(RegExp(r'[^A-Z0-9]'), '');
-  }
-
-  String _buildIosRemoteMirrorTitle({
-    required String displayName,
-    required String marker,
-  }) {
-    final String trimmedMarker = marker.trim();
-    if (trimmedMarker.isEmpty) return displayName;
-
-    final String suffix = '[$trimmedMarker]';
-    final String trimmedTitle = displayName.trimRight();
-    if (trimmedTitle.endsWith(' $suffix') || trimmedTitle.endsWith(suffix)) {
-      return trimmedTitle;
-    }
-    return '$displayName $suffix';
-  }
-
   String _buildNativeRenameTitleForCurrentPlatform({
     required String newName,
     required int bindingRole,
@@ -141,7 +102,7 @@ class SyncRepository {
       return newName;
     }
 
-    final String marker = _deriveIosRemoteMirrorMarker(
+    final String marker = deriveIosMirrorMarker(
       remotePath: remotePath,
       originKey: originKey,
     ).trim();
@@ -149,28 +110,10 @@ class SyncRepository {
       return newName;
     }
 
-    return _buildIosRemoteMirrorTitle(
+    return buildIosMirrorTitle(
       displayName: newName,
       marker: marker,
     );
-  }
-
-  ({String baseName, String marker})? _parseIosRemoteMirrorTitle(String title) {
-    final String trimmedTitle = title.trim();
-    final RegExpMatch? match = RegExp(r'^(.*) \[([A-Z0-9]{5})\]$').firstMatch(
-      trimmedTitle,
-    );
-    if (match == null) {
-      return null;
-    }
-
-    final String baseName = (match.group(1) ?? '').trim();
-    final String marker = (match.group(2) ?? '').trim();
-    if (baseName.isEmpty || marker.isEmpty) {
-      return null;
-    }
-
-    return (baseName: baseName, marker: marker);
   }
 
   Future<String?> _tryReclaimIosMirrorBinding({
@@ -181,12 +124,14 @@ class SyncRepository {
     String? originKey,
     required List<PlatformCalendar> nativeCalendars,
   }) async {
-    final String expectedMarker = _deriveIosRemoteMirrorMarker(
-      remotePath: remotePath,
-      originKey: originKey,
+    final String expectedTitle = buildIosMirrorTitle(
+      displayName: displayName,
+      marker: deriveIosMirrorMarker(
+        remotePath: remotePath,
+        originKey: originKey,
+      ).trim(),
     ).trim();
-    final String expectedBaseName = displayName.trim();
-    if (expectedMarker.isEmpty || expectedBaseName.isEmpty) {
+    if (!looksLikeIosMirrorTitle(expectedTitle)) {
       return null;
     }
 
@@ -199,11 +144,12 @@ class SyncRepository {
         return false;
       }
 
-      final ({String baseName, String marker})? parsedTitle =
-          _parseIosRemoteMirrorTitle(calendar.name ?? '');
-      return parsedTitle != null &&
-          parsedTitle.marker == expectedMarker &&
-          parsedTitle.baseName == expectedBaseName;
+      return matchesExpectedIosMirrorTitle(
+        title: calendar.name ?? '',
+        displayName: displayName,
+        remotePath: remotePath,
+        originKey: originKey,
+      );
     }).toList();
 
     final List<String> eligibleIds = <String>[];
@@ -834,7 +780,7 @@ class SyncRepository {
         );
       }
 
-      final String iosMirrorMarker = _deriveIosRemoteMirrorMarker(
+      final String iosMirrorMarker = deriveIosMirrorMarker(
         remotePath: persistedRemotePath,
         originKey: remote['origin_key']?.toString(),
       );
@@ -910,7 +856,7 @@ class SyncRepository {
         }
       }
 
-      final String nativeCalendarTitle = _buildIosRemoteMirrorTitle(
+      final String nativeCalendarTitle = buildIosMirrorTitle(
         displayName: displayName,
         marker: Platform.isIOS ? iosMirrorMarker : '',
       );
