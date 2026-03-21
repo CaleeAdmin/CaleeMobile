@@ -11,7 +11,6 @@ import 'package:uuid/uuid.dart';
 
 import '../sync/SyncEnum.dart';
 import '../sync/SyncEngine.dart';
-import '../sync/sync_gate_reason.dart';
 import '../sync/background_sync_scheduler.dart';
 import '../services/calee_server_service.dart';
 import 'database_helper.dart';
@@ -680,15 +679,6 @@ class SyncRepository {
         return EnableCalendarResult.failure(remotePath: remotePath);
       }
 
-      final String syncGateReason = (remote['sync_gate_reason']?.toString() ?? '').trim();
-      if (syncGateReason == SyncGateReason.relinkRequired ||
-          syncGateReason == SyncGateReason.relinkVerifying ||
-          syncGateReason == SyncGateReason.relinkMismatch) {
-        _lastConnectError =
-            'This calendar needs a quick relink. Open "Link to Device Calendar" to relink it, '
-            'or delete the current remote calendar and link again.';
-        return EnableCalendarResult.failure(remotePath: persistedRemotePath);
-      }
 
       final String displayName = (remote['display_name']?.toString().isNotEmpty ?? false)
           ? remote['display_name'].toString()

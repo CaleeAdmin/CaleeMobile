@@ -107,25 +107,22 @@ class LocalCalendarPageController extends GetxController {
           lb.binding_role AS binding_role,
           COALESCE(NULLIF(TRIM(rc.account_name), ''), 'Local') AS account_name
         FROM remote_collections rc
-        INNER JOIN collection_states cs ON cs.remote_collection_id = rc.id
         LEFT JOIN local_bindings lb
           ON lb.remote_collection_id = rc.id
          AND lb.local_collection_id IS NOT NULL
          AND lb.local_collection_id != ''
         WHERE rc.collection_type = 'calendar'
           AND rc.origin_kind = 0
-          AND cs.sync_gate_reason = ?
           AND lb.id IS NULL
-      ''', [SyncGateReason.relinkRequired]);
+      ''');
 
       final List<Map<String, dynamic>> remoteProvisionedRows = await db.rawQuery('''
         SELECT lb.local_collection_id, lb.binding_role AS binding_role
         FROM local_bindings lb
-        INNER JOIN remote_collections rc ON rc.id = lb.remote_collection_id
-        WHERE rc.origin_kind != 0
+        WHERE lb.binding_role = ?
           AND lb.local_collection_id IS NOT NULL
           AND lb.local_collection_id != ''
-      ''');
+      ''', [SyncBindingRole.mirror]);
       final Set<String> remoteProvisionedLocalIds = {
         for (final row in remoteProvisionedRows) _normalizeLocalCollectionId(row['local_collection_id'])
       }..remove('');
@@ -403,7 +400,6 @@ class LocalCalendarPageController extends GetxController {
               lb.binding_role AS binding_role,
               COALESCE(NULLIF(TRIM(rc.account_name), ''), 'Local') AS account_name
             FROM remote_collections rc
-            INNER JOIN collection_states cs ON cs.remote_collection_id = rc.id
             LEFT JOIN local_bindings lb
               ON lb.remote_collection_id = rc.id
              AND lb.local_collection_id IS NOT NULL
@@ -411,9 +407,8 @@ class LocalCalendarPageController extends GetxController {
             WHERE rc.collection_type = 'calendar'
               AND rc.origin_kind = 0
               AND rc.origin_key = ?
-              AND cs.sync_gate_reason = ?
               AND lb.id IS NULL
-          ''', [localOriginKey, SyncGateReason.relinkRequired]);
+          ''', [localOriginKey]);
 
           final List<_RankedReuseCandidate> rankedCandidates = reuseCandidates
               .map((candidate) => _RankedReuseCandidate(
