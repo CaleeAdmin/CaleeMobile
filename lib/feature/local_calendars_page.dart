@@ -64,9 +64,11 @@ class _LocalCalendarsPageState extends State<LocalCalendarsPage> {
           icon: const Icon(Icons.arrow_back_ios),
           onPressed: () => Navigator.maybePop(context),
         ),
-        title: const Text(
-          'Link to Device Calendar',
-          style: TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
+        title: Text(
+          widget.mode == LocalCalendarsPageMode.normal
+              ? 'Link to Device Calendar'
+              : 'Review Re-link',
+          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
         ),
         elevation: 0,
       ),
@@ -75,15 +77,55 @@ class _LocalCalendarsPageState extends State<LocalCalendarsPage> {
           return const Center(child: CircularProgressIndicator());
         }
 
+        final bool isReviewMode = ctrl.isReviewMode;
         final groups = ctrl.calendarGroups.toList();
-        if (groups.isEmpty) {
+        final candidates = ctrl.reviewCandidates.toList();
+        final String reviewTargetName =
+            ctrl.reviewRemoteDisplayName.value ?? widget.remoteDisplayName ?? 'this calendar';
+
+        if (isReviewMode && candidates.isEmpty) {
+          return const Center(
+            child: Text('No high-confidence device calendar matches found on this device.'),
+          );
+        }
+
+        if (!isReviewMode && groups.isEmpty) {
           return const Center(child: Text('No device calendars found'));
         }
 
         return ListView.builder(
           padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
-          itemCount: groups.length,
+          itemCount: isReviewMode ? candidates.length + 1 : groups.length,
           itemBuilder: (context, index) {
+            if (isReviewMode) {
+              if (index == 0) {
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.surface,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.grey.shade200),
+                    ),
+                    child: Text(
+                      'Choose which device calendar should reconnect to $reviewTargetName.',
+                      style: const TextStyle(fontSize: 13, color: Color(0xFF4B5563), height: 1.35),
+                    ),
+                  ),
+                );
+              }
+
+              final calendar = candidates[index - 1];
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: _LocalCalendarCard(
+                  calendar: calendar,
+                  mode: LocalCalendarsPageMode.relinkReview,
+                ),
+              );
+            }
+
             return _AccountSection(group: groups[index]);
           },
         );
@@ -129,7 +171,7 @@ class _AccountSection extends StatelessWidget {
                 .map(
                   (calendar) => Padding(
                     padding: const EdgeInsets.only(bottom: 12),
-                    child: _LocalCalendarCard(calendar: calendar),
+                    child: _LocalCalendarCard(calendar: calendar, mode: LocalCalendarsPageMode.normal),
                   ),
                 )
                 .toList(),
@@ -142,8 +184,9 @@ class _AccountSection extends StatelessWidget {
 
 class _LocalCalendarCard extends StatelessWidget {
   final LocalCalendarItem calendar;
+  final LocalCalendarsPageMode mode;
 
-  const _LocalCalendarCard({required this.calendar});
+  const _LocalCalendarCard({required this.calendar, required this.mode});
 
   Color _parseColor(String hex) {
     try {
@@ -161,6 +204,10 @@ class _LocalCalendarCard extends StatelessWidget {
 
     return Obx(() {
       final isConnecting = controller.connectingCalendarIds.contains(calendar.id);
+      final bool isReviewMode = mode == LocalCalendarsPageMode.relinkReview;
+      final String actionLabel = isReviewMode
+          ? 'Re-link this calendar'
+          : (calendar.canRelink ? 'Re-link to Calee' : 'Link to Calee');
 
       return Card(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -212,15 +259,17 @@ class _LocalCalendarCard extends StatelessWidget {
                                 ),
                               )
                             : TextButton(
-                                onPressed: isConnecting
+                                onPressed: isReviewMode
                                     ? null
-                                    : () async {
-                                        await controller.linkCalendar(
-                                          calendar,
-                                          true,
-                                          returnToCalendarListAfterConnect: true,
-                                        );
-                                      },
+                                    : isConnecting
+                                        ? null
+                                        : () async {
+                                            await controller.linkCalendar(
+                                              calendar,
+                                              true,
+                                              returnToCalendarListAfterConnect: true,
+                                            );
+                                          },
                                 style: TextButton.styleFrom(
                                   backgroundColor: calendar.canRelink
                                       ? const Color(0xFF1D4ED8)
@@ -243,7 +292,7 @@ class _LocalCalendarCard extends StatelessWidget {
                                           valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                                         ),
                                       )
-                                    : Text(calendar.canRelink ? 'Re-link to Calee' : 'Link to Calee'),
+                                    : Text(actionLabel),
                               ),
                       ],
                     ),
@@ -257,6 +306,13 @@ class _LocalCalendarCard extends StatelessWidget {
                       'Events: ${calendar.eventCount}',
                       style: const TextStyle(fontSize: 12, color: Color(0xFF4B5563)),
                     ),
+                    if (isReviewMode && calendar.relinkConfidence > 0) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        'Match confidence: ${calendar.relinkConfidence}%',
+                        style: const TextStyle(fontSize: 12, color: Color(0xFF4B5563)),
+                      ),
+                    ],
                   ],
                 ),
               ),
