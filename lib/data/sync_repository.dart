@@ -129,14 +129,14 @@ class SyncRepository {
 
   String _buildNativeRenameTitleForCurrentPlatform({
     required String newName,
-    required int originKind,
+    required int bindingRole,
     required String remotePath,
     String? originKey,
   }) {
     if (!Platform.isIOS) {
       return newName;
     }
-    if (originKind != SyncBindingOrigin.remote) {
+    if (bindingRole != SyncBindingRole.mirror) {
       return newName;
     }
 
@@ -363,7 +363,7 @@ class SyncRepository {
     final List<Map<String, dynamic>> maps = sanitizedLocalId != null
         ? await db.rawQuery(
             '''
-            SELECT rc.*, lb.local_collection_id, lb.binding_role AS binding_role, rc.origin_kind
+            SELECT rc.*, lb.local_collection_id, lb.binding_role AS binding_role
             FROM remote_collections rc
             INNER JOIN local_bindings lb ON lb.remote_collection_id = rc.id
             WHERE lb.local_collection_id = ?
@@ -373,7 +373,7 @@ class SyncRepository {
           )
         : await db.rawQuery(
             '''
-            SELECT rc.*, lb.local_collection_id, lb.binding_role AS binding_role, rc.origin_kind
+            SELECT rc.*, lb.local_collection_id, lb.binding_role AS binding_role
             FROM remote_collections rc
             LEFT JOIN local_bindings lb ON lb.remote_collection_id = rc.id
             WHERE rc.remote_path = ?
@@ -391,10 +391,12 @@ class SyncRepository {
     final String accountName = cal['account_name'] ?? '';
     final String resolvedLocalId = cal['local_collection_id']?.toString() ?? sanitizedLocalId ?? '';
     final String? resolvedRemotePath = cal['remote_path']?.toString() ?? sanitizedRemotePath;
-    final int origin = (cal['origin_kind'] as int?) ?? SyncBindingOrigin.remote;
-    final bool isRemoteOrigin = origin == SyncBindingOrigin.remote;
+    final int bindingRole = (cal['binding_role'] as int?) ?? SyncBindingRole.mirror;
     final bool isCaleeSyncAccountType = await _isCaleeSyncCalendarAccountType(resolvedLocalId);
-    final bool shouldDeleteLocalCalendar = isRemoteOrigin && isCaleeSyncAccountType;
+    final bool shouldDeleteLocalCalendar =
+        bindingRole == SyncBindingRole.mirror &&
+        resolvedLocalId.isNotEmpty &&
+        isCaleeSyncAccountType;
 
     debugPrint("[INFO] Starting hard delete workflow: ID $resolvedLocalId, Path: $resolvedRemotePath");
 
@@ -424,7 +426,7 @@ class SyncRepository {
           debugPrint("[OK] Mobile system calendar removed");
         } else if (!shouldDeleteLocalCalendar) {
           debugPrint(
-            "[INFO] Skipping local system calendar deletion (origin=$origin, isCaleeSyncAccountType=$isCaleeSyncAccountType)",
+            "[INFO] Skipping local system calendar deletion (bindingRole=$bindingRole, isCaleeSyncAccountType=$isCaleeSyncAccountType)",
           );
         }
 
@@ -550,7 +552,7 @@ class SyncRepository {
     final cal = maps.first;
 // 如果字段可能为空, 用 String?
     final String? path = cal['remote_path'] as String?;
-    final int originKind = (cal['origin_kind'] as int?) ?? SyncBindingOrigin.remote;
+    final int bindingRole = (cal['binding_role'] as int?) ?? SyncBindingRole.mirror;
     final String? originKey = cal['origin_key']?.toString();
 
 // 如果你确定 account_name 绝对有值, 用 String
@@ -576,7 +578,7 @@ class SyncRepository {
       if (resolvedLocalId != null && resolvedLocalId.isNotEmpty) {
         final String nativeRenameTitle = _buildNativeRenameTitleForCurrentPlatform(
           newName: newName,
-          originKind: originKind,
+          bindingRole: bindingRole,
           remotePath: path ?? '',
           originKey: originKey,
         );
@@ -654,7 +656,7 @@ class SyncRepository {
 
     try {
       final List<Map<String, dynamic>> remoteRows = await db.rawQuery('''
-        SELECT rc.id, rc.display_name, rc.color, rc.remote_path, rc.origin_kind,
+        SELECT rc.id, rc.display_name, rc.color, rc.remote_path,
                rc.origin_key, lb.binding_role AS binding_role, cs.sync_gate_reason
         FROM remote_collections rc
         LEFT JOIN local_bindings lb ON lb.remote_collection_id = rc.id
@@ -695,8 +697,6 @@ class SyncRepository {
       final String existingLocalId = bindingRows.isNotEmpty
           ? (bindingRows.first['local_collection_id']?.toString() ?? '')
           : '';
-      final int existingOriginKind = (remote['origin_kind'] as int?) ?? SyncBindingOrigin.remote;
-
       // Request permission before accessing calendars
       final bool hasPermission = await _nativeApi.requestPermission(false);
       if (!hasPermission) {
@@ -762,7 +762,6 @@ class SyncRepository {
       );
 
       if (Platform.isIOS &&
-          existingOriginKind == SyncBindingOrigin.remote &&
           (existingLocalId.isEmpty || !nativeCalendarIds.contains(existingLocalId)) &&
           iosMirrorMarker.isNotEmpty) {
         final String expectedMarker = iosMirrorMarker;
