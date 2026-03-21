@@ -96,24 +96,29 @@ class LocalCalendarPageController extends GetxController {
         for (final row in rows) _normalizeLocalCollectionId(row['local_collection_id'])
       }..remove('');
 
-      final List<Map<String, dynamic>> relinkCandidates = await db.rawQuery('''
-        SELECT
-          rc.id,
-          rc.remote_path,
-          rc.display_name,
-          rc.origin_key,
-          rc.is_subscription,
-          rc.subscription_url,
-          COALESCE(NULLIF(TRIM(rc.account_name), ''), 'Local') AS account_name
-        FROM remote_collections rc
-        LEFT JOIN local_bindings lb
-          ON lb.remote_collection_id = rc.id
-         AND lb.local_collection_id IS NOT NULL
-         AND lb.local_collection_id != ''
-        WHERE rc.collection_type = 'calendar'
-          AND rc.origin_kind = 0
-          AND lb.id IS NULL
-      ''');
+      final String? loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey);
+      final List<Map<String, dynamic>> relinkCandidates =
+          (loginName == null || loginName.trim().isEmpty)
+          ? <Map<String, dynamic>>[]
+          : await db.rawQuery('''
+              SELECT
+                rc.id,
+                rc.remote_path,
+                rc.display_name,
+                rc.origin_key,
+                rc.is_subscription,
+                rc.subscription_url,
+                COALESCE(NULLIF(TRIM(rc.account_name), ''), 'Local') AS account_name
+              FROM remote_collections rc
+              LEFT JOIN local_bindings lb
+                ON lb.remote_collection_id = rc.id
+               AND lb.local_collection_id IS NOT NULL
+               AND lb.local_collection_id != ''
+              WHERE rc.collection_type = 'calendar'
+                AND rc.origin_kind = 0
+                AND lb.id IS NULL
+                AND COALESCE(NULLIF(TRIM(rc.account_name), ''), '') = ?
+            ''', [loginName.trim()]);
 
       final List<Map<String, dynamic>> remoteProvisionedRows = await db.rawQuery('''
         SELECT lb.local_collection_id
@@ -354,10 +359,9 @@ class LocalCalendarPageController extends GetxController {
       bool relinkConfirmationDeclined = false;
       if (linkRequested) {
         final List<Map<String, dynamic>> existingRows = await db.rawQuery('''
-          SELECT rc.origin_key, rc.remote_path, cs.sync_gate_reason
+          SELECT rc.origin_key, rc.remote_path
           FROM local_bindings lb
           INNER JOIN remote_collections rc ON rc.id = lb.remote_collection_id
-          LEFT JOIN collection_states cs ON cs.remote_collection_id = rc.id
           WHERE lb.local_collection_id = ?
           LIMIT 1
         ''', [item.id]);
@@ -368,23 +372,14 @@ class LocalCalendarPageController extends GetxController {
         final String existingRemotePath = existingRows.isNotEmpty
             ? (existingRows.first['remote_path']?.toString() ?? '')
             : '';
-        final String existingSyncGateReason = existingRows.isNotEmpty
-            ? (existingRows.first['sync_gate_reason']?.toString() ?? '')
-            : '';
-        final bool existingBindingNeedsRelink =
-            existingSyncGateReason == SyncGateReason.relinkRequired;
-
-        final bool shouldBypassRelinkFlow =
+        if (existingRemotePath.isNotEmpty &&
             existingOriginKey.isNotEmpty &&
             existingOriginKey == localOriginKey &&
-            !item.canRelink &&
-            !existingBindingNeedsRelink;
-
-        if (shouldBypassRelinkFlow) {
+            !item.canRelink) {
           remotePath = existingRemotePath;
         } else {
           final String? loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey);
-          if (loginName == null || loginName.isEmpty) {
+          if (loginName == null || loginName.trim().isEmpty) {
             throw Exception('Not logged in to Calee');
           }
 
@@ -406,7 +401,8 @@ class LocalCalendarPageController extends GetxController {
               AND rc.origin_kind = 0
               AND rc.origin_key = ?
               AND lb.id IS NULL
-          ''', [localOriginKey]);
+              AND COALESCE(NULLIF(TRIM(rc.account_name), ''), '') = ?
+          ''', [localOriginKey, loginName.trim()]);
 
           final List<_RankedReuseCandidate> rankedCandidates = reuseCandidates
               .map((candidate) => _RankedReuseCandidate(
