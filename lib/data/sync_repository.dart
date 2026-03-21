@@ -109,7 +109,7 @@ class SyncRepository {
         .toRadixString(16)
         .toUpperCase()
         .padLeft(8, '0')
-        .substring(0, 8);
+        .substring(0, 5);
     return marker.replaceAll(RegExp(r'[^A-Z0-9]'), '');
   }
 
@@ -157,7 +157,7 @@ class SyncRepository {
 
   ({String baseName, String marker})? _parseIosRemoteMirrorTitle(String title) {
     final String trimmedTitle = title.trim();
-    final RegExpMatch? match = RegExp(r'^(.*) \[([A-Z0-9]{8})\]$').firstMatch(
+    final RegExpMatch? match = RegExp(r'^(.*) \[([A-Z0-9]{5})\]$').firstMatch(
       trimmedTitle,
     );
     if (match == null) {
