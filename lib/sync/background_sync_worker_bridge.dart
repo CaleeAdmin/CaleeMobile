@@ -19,27 +19,68 @@ const int kBackgroundSyncContractVersion = 1;
 class BackgroundSyncWorkerBridge implements BackgroundSyncRunnerApi {
   static Future<void>? _initFuture;
   static final BackgroundSyncRunnerHostApi _runnerHostApi = BackgroundSyncRunnerHostApi();
+  static bool _readyDelivered = false;
+  static Completer<void>? _runStartedCompleter;
+  static Completer<void>? _runFinishedCompleter;
+  static bool _backgroundCycleActive = false;
+
   static const Duration _initTimeout = Duration(seconds: 12);
-  static const Duration _readyNotifyWindow = Duration(seconds: 14);
+  static const Duration _readyNotifyWindow = Duration(seconds: 20);
   static const Duration _readyNotifyRetryDelay = Duration(milliseconds: 350);
+  static const Duration _backgroundLifecycleTimeout = Duration(seconds: 50);
 
   static Future<void> start() async {
     WidgetsFlutterBinding.ensureInitialized();
     DartPluginRegistrant.ensureInitialized();
+    _prepareBackgroundCycle();
     BackgroundSyncRunnerApi.setUp(BackgroundSyncWorkerBridge());
-    unawaited(_notifyReadyWithRetry());
     _initFuture ??= _heavyInit();
+
+    try {
+      await _notifyReadyWithRetry();
+      if (!_readyDelivered) {
+        return;
+      }
+      await _runFinishedCompleter!.future.timeout(_backgroundLifecycleTimeout);
+    } on TimeoutException {
+      _finishBackgroundCycle();
+    } catch (_) {
+      _finishBackgroundCycle();
+      rethrow;
+    } finally {
+      _finishBackgroundCycle();
+    }
   }
 
-  static Future<void> _notifyReadyWithRetry() async {
+  static void _prepareBackgroundCycle() {
+    _readyDelivered = false;
+    _runStartedCompleter = Completer<void>();
+    _runFinishedCompleter = Completer<void>();
+    _backgroundCycleActive = true;
+  }
+
+  static void _finishBackgroundCycle() {
+    if (_backgroundCycleActive) {
+      if (!(_runStartedCompleter?.isCompleted ?? true)) {
+        _runStartedCompleter!.complete();
+      }
+      if (!(_runFinishedCompleter?.isCompleted ?? true)) {
+        _runFinishedCompleter!.complete();
+      }
+    }
+    _backgroundCycleActive = false;
+  }
+
+  static Future<bool> _notifyReadyWithRetry() async {
     final DateTime deadline = DateTime.now().add(_readyNotifyWindow);
     while (true) {
       try {
         await _runnerHostApi.notifyBackgroundIsolateReady(kBackgroundSyncContractVersion);
-        return;
+        _readyDelivered = true;
+        return true;
       } catch (_) {
         if (DateTime.now().isAfter(deadline)) {
-          return;
+          return false;
         }
         await Future<void>.delayed(_readyNotifyRetryDelay);
       }
@@ -59,48 +100,39 @@ class BackgroundSyncWorkerBridge implements BackgroundSyncRunnerApi {
   @override
   Future<BackgroundRunResult> runBackgroundSync(BackgroundRunRequest request) async {
     final String trigger = request.trigger;
-    if (request.contractVersion != kBackgroundSyncContractVersion) {
-      return BackgroundRunResult(
-        outcome: BackgroundRunOutcome.failure,
-        reason: "contract_mismatch",
-        gateReason: BackgroundGateReason.unknown,
-        error: "expected=${kBackgroundSyncContractVersion}, actual=${request.contractVersion}",
-        contractVersion: kBackgroundSyncContractVersion,
-      );
-    }
-    try {
-      final Future<void> initFuture = _initFuture ?? (_initFuture = _heavyInit());
-      await initFuture.timeout(_initTimeout);
-    } on TimeoutException {
-      return BackgroundRunResult(
-        outcome: BackgroundRunOutcome.retry,
-        reason: 'init_not_ready',
-        gateReason: BackgroundGateReason.environmentBlocked,
-        error: 'background_init_timeout',
-        contractVersion: kBackgroundSyncContractVersion,
-      );
-    }
-
-    final String? loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey);
-    if (loginName == null || loginName.isEmpty) {
-      return BackgroundRunResult(outcome: BackgroundRunOutcome.failure, reason: 'no_account', gateReason: BackgroundGateReason.authInvalid, error: 'missing_login_name', contractVersion: kBackgroundSyncContractVersion);
-    }
-
-    if (SyncEngine.isSyncInProgress) {
-      return BackgroundRunResult(
-        outcome: BackgroundRunOutcome.success,
-        reason: 'already_syncing',
-        gateReason: BackgroundGateReason.none,
-        contractVersion: kBackgroundSyncContractVersion,
-      );
+    if (!(_runStartedCompleter?.isCompleted ?? true)) {
+      _runStartedCompleter!.complete();
     }
 
     try {
-      final summary = await SyncEngine().executeFullSync(
-        trigger: _mapTrigger(trigger),
-        waitForTurn: false,
-      );
-      if (summary == null) {
+      if (request.contractVersion != kBackgroundSyncContractVersion) {
+        return BackgroundRunResult(
+          outcome: BackgroundRunOutcome.failure,
+          reason: "contract_mismatch",
+          gateReason: BackgroundGateReason.unknown,
+          error: "expected=${kBackgroundSyncContractVersion}, actual=${request.contractVersion}",
+          contractVersion: kBackgroundSyncContractVersion,
+        );
+      }
+      try {
+        final Future<void> initFuture = _initFuture ?? (_initFuture = _heavyInit());
+        await initFuture.timeout(_initTimeout);
+      } on TimeoutException {
+        return BackgroundRunResult(
+          outcome: BackgroundRunOutcome.retry,
+          reason: 'init_not_ready',
+          gateReason: BackgroundGateReason.environmentBlocked,
+          error: 'background_init_timeout',
+          contractVersion: kBackgroundSyncContractVersion,
+        );
+      }
+
+      final String? loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey);
+      if (loginName == null || loginName.isEmpty) {
+        return BackgroundRunResult(outcome: BackgroundRunOutcome.failure, reason: 'no_account', gateReason: BackgroundGateReason.authInvalid, error: 'missing_login_name', contractVersion: kBackgroundSyncContractVersion);
+      }
+
+      if (SyncEngine.isSyncInProgress) {
         return BackgroundRunResult(
           outcome: BackgroundRunOutcome.success,
           reason: 'already_syncing',
@@ -108,35 +140,55 @@ class BackgroundSyncWorkerBridge implements BackgroundSyncRunnerApi {
           contractVersion: kBackgroundSyncContractVersion,
         );
       }
-      if (summary.failed == 0) {
-        return BackgroundRunResult(outcome: BackgroundRunOutcome.success, reason: trigger, gateReason: BackgroundGateReason.none, contractVersion: kBackgroundSyncContractVersion);
+
+      try {
+        final summary = await SyncEngine().executeFullSync(
+          trigger: _mapTrigger(trigger),
+          waitForTurn: false,
+        );
+        if (summary == null) {
+          return BackgroundRunResult(
+            outcome: BackgroundRunOutcome.success,
+            reason: 'already_syncing',
+            gateReason: BackgroundGateReason.none,
+            contractVersion: kBackgroundSyncContractVersion,
+          );
+        }
+        if (summary.failed == 0) {
+          return BackgroundRunResult(outcome: BackgroundRunOutcome.success, reason: trigger, gateReason: BackgroundGateReason.none, contractVersion: kBackgroundSyncContractVersion);
+        }
+        final String details = summary.errorLog.join(';').toLowerCase();
+        if (_isGate(details)) {
+          return BackgroundRunResult(outcome: BackgroundRunOutcome.gated, reason: 'gated', gateReason: _classifyGate(details), error: details.isEmpty ? null : details, contractVersion: kBackgroundSyncContractVersion);
+        }
+        if (_isTransient(details)) {
+          return BackgroundRunResult(outcome: BackgroundRunOutcome.retry, reason: details.isEmpty ? 'transient' : details, gateReason: BackgroundGateReason.none, error: details, contractVersion: kBackgroundSyncContractVersion);
+        }
+        return BackgroundRunResult(outcome: BackgroundRunOutcome.failure, reason: details.isEmpty ? 'sync_failed' : details, gateReason: BackgroundGateReason.none, error: details, contractVersion: kBackgroundSyncContractVersion);
+      } on SocketException catch (e) {
+        return BackgroundRunResult(outcome: BackgroundRunOutcome.retry, reason: 'socket_exception', gateReason: BackgroundGateReason.noNetwork, error: e.message, contractVersion: kBackgroundSyncContractVersion);
+      } on TimeoutException catch (e) {
+        return BackgroundRunResult(outcome: BackgroundRunOutcome.retry, reason: 'timeout', gateReason: BackgroundGateReason.none, error: e.message ?? 'timeout', contractVersion: kBackgroundSyncContractVersion);
+      } catch (e) {
+        final reason = e.toString().toLowerCase();
+        if (_isGate(reason)) {
+          return BackgroundRunResult(outcome: BackgroundRunOutcome.gated, reason: 'gated_exception', gateReason: _classifyGate(reason), error: reason, contractVersion: kBackgroundSyncContractVersion);
+        }
+        if (_isTransient(reason)) {
+          return BackgroundRunResult(outcome: BackgroundRunOutcome.retry, reason: 'transient_exception', gateReason: BackgroundGateReason.none, error: reason, contractVersion: kBackgroundSyncContractVersion);
+        }
+        return BackgroundRunResult(outcome: BackgroundRunOutcome.failure, reason: 'exception', gateReason: BackgroundGateReason.none, error: reason, contractVersion: kBackgroundSyncContractVersion);
       }
-      final String details = summary.errorLog.join(';').toLowerCase();
-      if (_isGate(details)) {
-        return BackgroundRunResult(outcome: BackgroundRunOutcome.gated, reason: 'gated', gateReason: _classifyGate(details), error: details.isEmpty ? null : details, contractVersion: kBackgroundSyncContractVersion);
+    } finally {
+      if (!(_runFinishedCompleter?.isCompleted ?? true)) {
+        _runFinishedCompleter!.complete();
       }
-      if (_isTransient(details)) {
-        return BackgroundRunResult(outcome: BackgroundRunOutcome.retry, reason: details.isEmpty ? 'transient' : details, gateReason: BackgroundGateReason.none, error: details, contractVersion: kBackgroundSyncContractVersion);
-      }
-      return BackgroundRunResult(outcome: BackgroundRunOutcome.failure, reason: details.isEmpty ? 'sync_failed' : details, gateReason: BackgroundGateReason.none, error: details, contractVersion: kBackgroundSyncContractVersion);
-    } on SocketException catch (e) {
-      return BackgroundRunResult(outcome: BackgroundRunOutcome.retry, reason: 'socket_exception', gateReason: BackgroundGateReason.noNetwork, error: e.message, contractVersion: kBackgroundSyncContractVersion);
-    } on TimeoutException catch (e) {
-      return BackgroundRunResult(outcome: BackgroundRunOutcome.retry, reason: 'timeout', gateReason: BackgroundGateReason.none, error: e.message ?? 'timeout', contractVersion: kBackgroundSyncContractVersion);
-    } catch (e) {
-      final reason = e.toString().toLowerCase();
-      if (_isGate(reason)) {
-        return BackgroundRunResult(outcome: BackgroundRunOutcome.gated, reason: 'gated_exception', gateReason: _classifyGate(reason), error: reason, contractVersion: kBackgroundSyncContractVersion);
-      }
-      if (_isTransient(reason)) {
-        return BackgroundRunResult(outcome: BackgroundRunOutcome.retry, reason: 'transient_exception', gateReason: BackgroundGateReason.none, error: reason, contractVersion: kBackgroundSyncContractVersion);
-      }
-      return BackgroundRunResult(outcome: BackgroundRunOutcome.failure, reason: 'exception', gateReason: BackgroundGateReason.none, error: reason, contractVersion: kBackgroundSyncContractVersion);
     }
   }
 
   static SyncRunTrigger _mapTrigger(String trigger) {
     final normalized = trigger.toLowerCase();
+    if (normalized.contains('watchdog')) return SyncRunTrigger.periodic;
     if (normalized.contains('periodic')) return SyncRunTrigger.periodic;
     if (normalized.contains('force')) return SyncRunTrigger.force;
     if (normalized.contains('auto')) return SyncRunTrigger.autoForeground;

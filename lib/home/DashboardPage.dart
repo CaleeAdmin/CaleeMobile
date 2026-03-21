@@ -1,5 +1,7 @@
 import 'package:caleesync/core/platform/pigeon/background_sync_api.g.dart';
 import 'package:caleesync/sync/background_sync_scheduler.dart';
+import 'dart:io' show Platform;
+
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
@@ -103,8 +105,9 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
     final enabled = backgroundStatus?.periodicEnabled == true;
     final interval = backgroundStatus?.intervalMinutes != null ? 'Every ${backgroundStatus!.intervalMinutes}m' : 'Every 15m';
     final next = _clock(backgroundStatus?.nextScheduledAt);
-    final periodicState = backgroundStatus?.periodicWorkState ?? 'unknown';
-    return '${enabled ? 'Enabled' : 'Disabled'} · $interval · Next $next · $periodicState';
+    final periodicState = backgroundStatus?.periodicWorkState;
+    final periodicStateLabel = periodicState ?? (Platform.isIOS && enabled ? 'iOS-managed' : 'unknown');
+    return '${enabled ? 'Enabled' : 'Disabled'} · $interval · Next $next · $periodicStateLabel';
   }
 
   bool _showSchedulerWarning(BackgroundSyncStatus? backgroundStatus) {
