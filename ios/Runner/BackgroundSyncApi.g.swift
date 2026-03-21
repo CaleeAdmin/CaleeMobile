@@ -428,6 +428,7 @@ class BackgroundSyncRunnerApiCodec: FlutterStandardMessageCodec {
 
 /// Generated protocol from Pigeon that represents Flutter messages that can be called from Swift.
 protocol BackgroundSyncRunnerApiProtocol {
+  func pingBackgroundIsolate(completion: @escaping (Result<Bool, FlutterError>) -> Void)
   func runBackgroundSync(request requestArg: BackgroundRunRequest, completion: @escaping (Result<BackgroundRunResult, FlutterError>) -> Void)
 }
 class BackgroundSyncRunnerApi: BackgroundSyncRunnerApiProtocol {
@@ -439,6 +440,27 @@ class BackgroundSyncRunnerApi: BackgroundSyncRunnerApiProtocol {
   }
   var codec: FlutterStandardMessageCodec {
     return BackgroundSyncRunnerApiCodec.shared
+  }
+  func pingBackgroundIsolate(completion: @escaping (Result<Bool, FlutterError>) -> Void) {
+    let channelName: String = "dev.flutter.pigeon.caleesync.BackgroundSyncRunnerApi.pingBackgroundIsolate\(messageChannelSuffix)"
+    let channel = FlutterBasicMessageChannel(name: channelName, binaryMessenger: binaryMessenger, codec: codec)
+    channel.sendMessage(nil) { response in
+      guard let listResponse = response as? [Any?] else {
+        completion(.failure(createConnectionError(withChannelName: channelName)))
+        return
+      }
+      if listResponse.count > 1 {
+        let code: String = listResponse[0] as! String
+        let message: String? = nilOrValue(listResponse[1])
+        let details: String? = nilOrValue(listResponse[2])
+        completion(.failure(FlutterError(code: code, message: message, details: details)))
+      } else if listResponse[0] == nil {
+        completion(.failure(FlutterError(code: "null-error", message: "Flutter api returned null value for non-null return value.", details: "")))
+      } else {
+        let result = listResponse[0] as! Bool
+        completion(.success(result))
+      }
+    }
   }
   func runBackgroundSync(request requestArg: BackgroundRunRequest, completion: @escaping (Result<BackgroundRunResult, FlutterError>) -> Void) {
     let channelName: String = "dev.flutter.pigeon.caleesync.BackgroundSyncRunnerApi.runBackgroundSync\(messageChannelSuffix)"
