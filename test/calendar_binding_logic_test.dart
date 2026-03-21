@@ -97,8 +97,10 @@ void main() {
       expect(SyncGateReason.deterministicReasons.contains(SyncGateReason.localCalendarMissing), isTrue);
       expect(SyncGateReason.deterministicReasons.contains(SyncGateReason.remoteCollectionMissing), isTrue);
       expect(SyncGateReason.deterministicReasons.contains(SyncGateReason.repairRequired), isTrue);
-      expect(SyncGateReason.deterministicReasons.contains(SyncGateReason.relinkRequired), isTrue);
-      expect(SyncGateReason.deterministicReasons.contains(SyncGateReason.relinkMismatch), isTrue);
+      expect(SyncGateReason.deterministicReasons.contains(SyncGateReason.authInvalid), isTrue);
+      expect(SyncGateReason.deterministicReasons.contains(SyncGateReason.environmentBlocked), isTrue);
+      expect(SyncGateReason.deterministicReasons.contains(SyncGateReason.subscriptionReadonlyViolation), isTrue);
+      expect(SyncGateReason.deterministicReasons.contains(SyncGateReason.safeFirstSync), isTrue);
     });
   });
 }
