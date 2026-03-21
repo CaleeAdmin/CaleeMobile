@@ -3,14 +3,59 @@ import 'package:get/get.dart';
 
 import '../controllers/local_calendar_page_controller.dart';
 
-class LocalCalendarsPage extends StatelessWidget {
-  const LocalCalendarsPage({super.key});
+class LocalCalendarsPage extends StatefulWidget {
+  const LocalCalendarsPage({
+    super.key,
+    this.mode = LocalCalendarsPageMode.normal,
+    this.remoteCollectionId,
+    this.remoteDisplayName,
+    this.remotePath,
+  });
+
+  final LocalCalendarsPageMode mode;
+  final int? remoteCollectionId;
+  final String? remoteDisplayName;
+  final String? remotePath;
+
+  @override
+  State<LocalCalendarsPage> createState() => _LocalCalendarsPageState();
+}
+
+class _LocalCalendarsPageState extends State<LocalCalendarsPage> {
+  bool _didScheduleLoad = false;
 
   @override
   Widget build(BuildContext context) {
     final LocalCalendarPageController ctrl = Get.isRegistered<LocalCalendarPageController>()
         ? Get.find<LocalCalendarPageController>()
         : Get.put(LocalCalendarPageController());
+
+    if (!_didScheduleLoad) {
+      _didScheduleLoad = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        if (!mounted) {
+          return;
+        }
+
+        if (widget.mode == LocalCalendarsPageMode.normal) {
+          await ctrl.enterNormalMode();
+          return;
+        }
+
+        final int? remoteCollectionId = widget.remoteCollectionId;
+        final String? remoteDisplayName = widget.remoteDisplayName;
+        final String? remotePath = widget.remotePath;
+        if (remoteCollectionId == null || remoteDisplayName == null || remotePath == null) {
+          return;
+        }
+
+        await ctrl.loadRelinkReviewCandidates(
+          remoteCollectionId: remoteCollectionId,
+          remoteDisplayName: remoteDisplayName,
+          remotePath: remotePath,
+        );
+      });
+    }
 
     return Scaffold(
       appBar: AppBar(
