@@ -33,10 +33,10 @@ class CalendarDisplayItem {
   final String accountName;
   bool isEnabled;            // 对应数据库 collection_states.is_enabled
   final String? syncGateReason;
-  final int origin;          // 0: 本地创建, 1: 云端同步
+  final int origin;          // Shared provenance only: where the remote calendar came from, not this-device sync behavior.
   final String? originKey;
   final int bindingId;
-  final int bindingRole;
+  final int bindingRole;     // This-device role: mirror vs ownerLink, and it drives runtime behavior.
   bool allowMassDeletionDangerous;
 
   CalendarDisplayItem({
