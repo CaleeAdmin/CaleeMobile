@@ -491,6 +491,19 @@ class LocalCalendarPageController extends GetxController {
                 );
                 break;
               }
+
+              if (verifyResult.outcome != RelinkVerificationOutcome.passed) {
+                await db.update(
+                  'collection_states',
+                  {
+                    'sync_gate_reason': SyncGateReason.relinkRequired,
+                    'updated_at': DateTime.now().millisecondsSinceEpoch,
+                  },
+                  where: 'remote_collection_id = ?',
+                  whereArgs: [candidate['id']],
+                );
+                continue;
+              }
               remotePath = candidatePath;
               await db.update(
                 'collection_states',
@@ -825,7 +838,7 @@ class LocalCalendarPageController extends GetxController {
     required int providerHintScore,
     required RelinkVerificationOutcome verificationOutcome,
   }) async {
-    final bool allowRelinkAction = providerHintScore >= _highConfidenceRelinkThreshold;
+    final bool canRelink = verificationOutcome == RelinkVerificationOutcome.passed;
     final _RelinkDecision? decision = await Get.dialog<_RelinkDecision>(
       AlertDialog(
         title: Text(
@@ -860,15 +873,11 @@ class LocalCalendarPageController extends GetxController {
             Text('Remote path: $remotePath'),
             const SizedBox(height: 8),
             Text(
-              verificationOutcome == RelinkVerificationOutcome.unavailable
-                  ? (allowRelinkAction
-                        ? 'Event-level verification was unavailable. This candidate still looks like a strong metadata match, so you can link anyway or create a new remote calendar.'
-                        : 'Event-level verification was unavailable and collection match confidence is low, so creating a new remote calendar is recommended.')
-                  : verificationOutcome == RelinkVerificationOutcome.passed
-                      ? 'Confidence is a recommendation only. You can still create a new remote instead.'
-                      : allowRelinkAction
-                          ? 'Verification did not pass, but this candidate still matches strongly at collection level. You can link anyway or create a new remote calendar.'
-                          : 'Collection match confidence is low, so creating a new remote calendar is recommended.',
+              verificationOutcome == RelinkVerificationOutcome.passed
+                  ? 'Verification passed, so relinking can proceed. You can still create a new remote instead.'
+                  : verificationOutcome == RelinkVerificationOutcome.unavailable
+                  ? 'Relinking cannot proceed because event verification did not complete. Create a new remote calendar instead.'
+                  : 'Relinking cannot proceed because verification did not pass. Create a new remote calendar instead.',
               style: const TextStyle(color: Color(0xFF4B5563), fontSize: 12),
             ),
           ],
@@ -882,10 +891,10 @@ class LocalCalendarPageController extends GetxController {
             onPressed: () => Get.back<_RelinkDecision>(result: _RelinkDecision.createNewRemote),
             child: const Text('Create new remote'),
           ),
-          if (allowRelinkAction)
+          if (canRelink)
             ElevatedButton(
               onPressed: () => Get.back<_RelinkDecision>(result: _RelinkDecision.linkCandidate),
-              child: Text(verificationOutcome == RelinkVerificationOutcome.passed ? 'Link this remote' : 'Link anyway'),
+              child: const Text('Link this remote'),
             ),
         ],
       ),
