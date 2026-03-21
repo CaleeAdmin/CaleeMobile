@@ -657,7 +657,7 @@ class SyncRepository {
     try {
       final List<Map<String, dynamic>> remoteRows = await db.rawQuery('''
         SELECT rc.id, rc.display_name, rc.color, rc.remote_path,
-               rc.origin_key, lb.binding_role AS binding_role, cs.sync_gate_reason
+               rc.origin_key, cs.sync_gate_reason
         FROM remote_collections rc
         LEFT JOIN local_bindings lb ON lb.remote_collection_id = rc.id
         LEFT JOIN collection_states cs ON cs.remote_collection_id = rc.id
@@ -688,7 +688,7 @@ class SyncRepository {
 
       final List<Map<String, dynamic>> bindingRows = await db.query(
         'local_bindings',
-        columns: ['id', 'local_collection_id', 'binding_role'],
+        columns: ['local_collection_id'],
         where: 'remote_collection_id = ?',
         whereArgs: [remoteCollectionId],
         limit: 1,
@@ -973,7 +973,7 @@ class SyncRepository {
   Future<String?> _deriveEligibilityHint(int remoteCollectionId) async {
     final db = await _dbHelper.database;
     final rows = await db.rawQuery('''
-      SELECT rc.remote_path, cs.is_enabled AS state_is_enabled, lb.local_collection_id, lb.binding_role AS binding_role
+      SELECT rc.remote_path, cs.is_enabled AS state_is_enabled, lb.local_collection_id
       FROM remote_collections rc
       LEFT JOIN collection_states cs ON cs.remote_collection_id = rc.id
       LEFT JOIN local_bindings lb ON lb.remote_collection_id = rc.id
