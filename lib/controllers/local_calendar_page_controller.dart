@@ -9,6 +9,7 @@ import 'package:sqflite/sqflite.dart';
 
 import '../data/database_helper.dart';
 import '../services/calee_server_service.dart';
+import '../sync/SyncEnum.dart';
 import '../sync/relink_verifier.dart';
 import '../sync/sync_gate_reason.dart';
 import 'CalendarPageController.dart';
@@ -658,6 +659,7 @@ class LocalCalendarPageController extends GetxController {
             {
               'remote_collection_id': remoteCollectionId,
               'local_collection_id': localCollectionId,
+              'binding_role': SyncBindingRole.ownerLink,
               'created_at': now,
               'updated_at': now,
             },
