@@ -1,10 +1,7 @@
 import '../services/calee_server_service.dart';
 
-String deriveIosMirrorMarker({required String remotePath, String? originKey}) {
-  final String trimmedOriginKey = (originKey ?? '').trim();
-  final String normalizedRemotePath =
-      CaleeServerService.normalizeRemotePath(remotePath).trim();
-  final String seed = trimmedOriginKey.isNotEmpty ? trimmedOriginKey : normalizedRemotePath;
+String deriveIosMirrorMarker({required String remotePath}) {
+  final String seed = CaleeServerService.normalizeRemotePath(remotePath).trim();
   if (seed.isEmpty) return '';
 
   int hash = 0x811C9DC5;
@@ -60,7 +57,6 @@ bool matchesExpectedIosMirrorTitle({
   required String title,
   required String displayName,
   required String remotePath,
-  String? originKey,
 }) {
   final ({String baseName, String marker})? parsedTitle = parseIosMirrorTitle(title);
   if (parsedTitle == null) {
@@ -68,10 +64,8 @@ bool matchesExpectedIosMirrorTitle({
   }
 
   final String expectedBaseName = displayName.trim();
-  final String expectedMarker = deriveIosMirrorMarker(
-    remotePath: remotePath,
-    originKey: originKey,
-  ).trim();
+  final String expectedMarker =
+      deriveIosMirrorMarker(remotePath: remotePath).trim();
   if (expectedBaseName.isEmpty || expectedMarker.isEmpty) {
     return false;
   }
