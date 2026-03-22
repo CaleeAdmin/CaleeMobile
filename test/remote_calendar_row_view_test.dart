@@ -128,7 +128,11 @@ void main() {
       );
       expect(disableButton.onPressed, isNull);
 
-      final IconButton moreButton = tester.widget<IconButton>(find.byIcon(Icons.more_vert));
+      final Finder moreButtonFinder = find.ancestor(
+        of: find.byIcon(Icons.more_vert),
+        matching: find.byType(IconButton),
+      );
+      final IconButton moreButton = tester.widget<IconButton>(moreButtonFinder);
       expect(moreButton.onPressed, isNull);
     });
 
