@@ -260,7 +260,11 @@ class _LocalCalendarCard extends StatelessWidget {
                               )
                             : TextButton(
                                 onPressed: isReviewMode
-                                    ? null
+                                    ? isConnecting
+                                          ? null
+                                          : () async {
+                                              await controller.relinkRemoteToSelectedLocal(calendar);
+                                            }
                                     : isConnecting
                                         ? null
                                         : () async {
