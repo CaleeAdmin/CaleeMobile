@@ -109,7 +109,7 @@ class CalendarPageController extends GetxController {
     super.onClose();
   }
 
-  /// 处理 Checkbox 点击事件
+  /// Handles remote calendar enable/disable actions from the remote list UI.
   Future<void> handleCalendarEnableToggle(CalendarDisplayItem item, bool? newValue) async {
     if (newValue == null) return;
 

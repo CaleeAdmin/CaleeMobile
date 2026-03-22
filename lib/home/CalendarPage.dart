@@ -9,6 +9,7 @@ import '../controllers/CalendarPageController.dart';
 import '../controllers/local_calendar_page_controller.dart';
 import '../sync/SyncEnum.dart';
 import '../sync/sync_gate_reason.dart';
+import 'widgets/remote_calendar_row_view.dart';
 
 class CalendarPage extends StatefulWidget {
   const CalendarPage({super.key});
@@ -672,216 +673,64 @@ class _CalendarRow extends StatelessWidget {
         ? item.remotePath!
         : (item.localId ?? '');
     final bool isToggling = key.isNotEmpty && controller.togglingCalendarIds.contains(key);
-    final bool showRelinkAction = !item.isEnabled && item.hasRelinkSuggestion;
-    final bool showEnableAction = !item.isEnabled && !item.hasRelinkSuggestion;
-    final VoidCallback? onEnablePressed = isToggling
-        ? null
-        : () {
-            controller.enableRemoteCalendar(item);
-          };
-    final VoidCallback? onDisablePressed = isToggling
-        ? null
-        : () {
-            controller.disableRemoteCalendar(item);
-          };
-    final VoidCallback? onReviewRelinkPressed = isToggling
-        ? null
-        : () {
-            controller.openRemoteRelinkReview(item);
-          };
-    final VoidCallback? onEnableAnywayPressed = isToggling
-        ? null
-        : () {
-            controller.enableRemoteCalendar(item);
-          };
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
-        children: [
-          // 使用固定宽度占位，保持远程日历行对齐
-          const SizedBox(width: 48),
-          Container(
-            width: 12,
-            height: 12,
-            decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(3)),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SizedBox(
-                  height: 44,
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          item.name,
-                          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+
+    return RemoteCalendarRowView(
+      item: item,
+      isToggling: isToggling,
+      color: color,
+      onEnablePressed: isToggling ? null : () => controller.enableRemoteCalendar(item),
+      onDisablePressed: isToggling ? null : () => controller.disableRemoteCalendar(item),
+      onReviewRelinkPressed: isToggling ? null : () => controller.openRemoteRelinkReview(item),
+      onEnableAnywayPressed: isToggling ? null : () => controller.enableRemoteCalendar(item),
+      onMorePressed: isToggling
+          ? null
+          : () async {
+              final result = await showDialog<String>(
+                context: context,
+                builder: (c) => CalendarOptionsDialog(
+                  item: item,
+                  onTwoWayChanged: (isTwoWay) async {
+                    await controller.updateCalendarSyncMode(item, isTwoWay);
+                  },
+                  onAllowMassDeletionChanged: (enabled) async {
+                    if (!enabled) {
+                      await controller.setAllowMassDeletionDangerous(item, false);
+                      return true;
+                    }
+
+                    final bool? confirmed = await showDialog<bool>(
+                      context: c,
+                      builder: (dialogContext) => AlertDialog(
+                        title: const Text('Enable mass deletion?'),
+                        content: const Text(
+                          'This can permanently delete large amounts of data on your phone and/or server if the snapshot is incomplete.',
                         ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.of(dialogContext).pop(false),
+                            child: const Text('Cancel'),
+                          ),
+                          FilledButton(
+                            onPressed: () => Navigator.of(dialogContext).pop(true),
+                            child: const Text('I understand, enable'),
+                          ),
+                        ],
                       ),
-                      if (item.isEnabled) ...[
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: Colors.green.withOpacity(0.12),
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                          child: const Text(
-                            'Connected',
-                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        TextButton(
-                          onPressed: onDisablePressed,
-                          child: isToggling
-                              ? const SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
-                                )
-                              : const Text('Disable'),
-                        ),
-                        const SizedBox(width: 4),
-                      ] else if (showRelinkAction) ...[
-                        FilledButton(
-                          onPressed: onReviewRelinkPressed,
-                          child: const Text('Review Re-link'),
-                        ),
-                        const SizedBox(width: 4),
-                      ] else if (showEnableAction) ...[
-                        FilledButton.tonal(
-                          onPressed: onEnablePressed,
-                          child: isToggling
-                              ? const SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
-                                )
-                              : const Text('Enable'),
-                        ),
-                        const SizedBox(width: 4),
-                      ],
-                      IconButton(
-                        icon: const Icon(Icons.more_vert, size: 18),
-                        onPressed: isToggling
-                            ? null
-                            : () async {
-                                final result = await showDialog<String>(
-                                  context: context,
-                                  builder: (c) => CalendarOptionsDialog(
-                                    item: item,
-                                    onTwoWayChanged: (isTwoWay) async {
-                                      await controller.updateCalendarSyncMode(item, isTwoWay);
-                                    },
-                                    onAllowMassDeletionChanged: (enabled) async {
-                                      if (!enabled) {
-                                        await controller.setAllowMassDeletionDangerous(item, false);
-                                        return true;
-                                      }
+                    );
 
-                                      final bool? confirmed = await showDialog<bool>(
-                                        context: c,
-                                        builder: (dialogContext) => AlertDialog(
-                                          title: const Text('Enable mass deletion?'),
-                                          content: const Text(
-                                            'This can permanently delete large amounts of data on your phone and/or server if the snapshot is incomplete.',
-                                          ),
-                                          actions: [
-                                            TextButton(
-                                              onPressed: () => Navigator.of(dialogContext).pop(false),
-                                              child: const Text('Cancel'),
-                                            ),
-                                            FilledButton(
-                                              onPressed: () => Navigator.of(dialogContext).pop(true),
-                                              child: const Text('I understand, enable'),
-                                            ),
-                                          ],
-                                        ),
-                                      );
-
-                                      if (confirmed == true) {
-                                        await controller.setAllowMassDeletionDangerous(item, true);
-                                        return true;
-                                      }
-                                      return false;
-                                    },
-                                  ),
-                                );
-
-                                if (result == null) return;
-                                await _handleOptionResult(result, context, item, controller);
-                              },
-                      ),
-                    ],
-                  ),
+                    if (confirmed == true) {
+                      await controller.setAllowMassDeletionDangerous(item, true);
+                      return true;
+                    }
+                    return false;
+                  },
                 ),
-                if (isToggling)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 4),
-                    child: Text(
-                      'Updating...',
-                      style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-                    ),
-                  ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.grey.shade300,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    item.isReadOnly ? 'Read-only' : 'Two-way sync',
-                    style: const TextStyle(fontSize: 12, color: Colors.black54),
-                  ),
-                ),
-                if (!item.isEnabled && item.hasRelinkSuggestion)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Possible reconnection on this device',
-                          style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
-                        ),
-                        TextButton(
-                          onPressed: onEnableAnywayPressed,
-                          child: const Text('Enable anyway'),
-                        ),
-                      ],
-                    ),
-                  ),
-                if (item.isEnabled && (_syncGateReasonMessage(item.syncGateReason) ?? '').isNotEmpty)
-                  Container(
-                    margin: const EdgeInsets.only(top: 4),
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFFF7ED),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: const Color(0xFFF59E0B)),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.warning_amber_rounded, size: 14, color: Color(0xFFD97706)),
-                        const SizedBox(width: 6),
-                        Flexible(
-                          child: Text(
-                            _syncGateReasonMessage(item.syncGateReason)!,
-                            style: const TextStyle(fontSize: 12, color: Color(0xFFB45309)),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                Text('${item.eventCount} events', style: const TextStyle(fontSize: 12, color: Colors.black54)),
-              ],
-            ),
-          ),
-        ],
-      ),
+              );
+
+              if (result == null) return;
+              await _handleOptionResult(result, context, item, controller);
+            },
+      syncGateMessage: _syncGateReasonMessage(item.syncGateReason),
     );
   }
 }
