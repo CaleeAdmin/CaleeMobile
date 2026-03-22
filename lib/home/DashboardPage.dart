@@ -289,7 +289,7 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
                         child: OutlinedButton.icon(
                           onPressed: () => Get.to(() => const LocalCalendarsPage()),
                           icon: const Icon(Icons.link),
-                          label: const Text('Link to Device Calendar'),
+                          label: const Text('Local Calendars'),
                         ),
                       ),
                     ],

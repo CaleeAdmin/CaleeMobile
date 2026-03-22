@@ -274,7 +274,7 @@ class _CalendarPageState extends State<CalendarPage> {
               ),
               ListTile(
                 leading: const Icon(Icons.link),
-                title: const Text('Link to Device Calendar'),
+                title: const Text('Local Calendars'),
                 onTap: () {
                   Navigator.of(sheetContext).pop();
                   Get.to(() => const LocalCalendarsPage());

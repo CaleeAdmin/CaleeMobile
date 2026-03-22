@@ -66,7 +66,7 @@ class _LocalCalendarsPageState extends State<LocalCalendarsPage> {
         ),
         title: Text(
           widget.mode == LocalCalendarsPageMode.normal
-              ? 'Link to Device Calendar'
+              ? 'Local Calendars'
               : 'Review Re-link',
           style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
         ),
@@ -95,7 +95,7 @@ class _LocalCalendarsPageState extends State<LocalCalendarsPage> {
 
         return ListView.builder(
           padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
-          itemCount: isReviewMode ? candidates.length + 1 : groups.length,
+          itemCount: isReviewMode ? candidates.length + 1 : groups.length + 1,
           itemBuilder: (context, index) {
             if (isReviewMode) {
               if (index == 0) {
@@ -126,7 +126,25 @@ class _LocalCalendarsPageState extends State<LocalCalendarsPage> {
               );
             }
 
-            return _AccountSection(group: groups[index]);
+            if (index == 0) {
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surface,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.grey.shade200),
+                  ),
+                  child: const Text(
+                    'Connect or reconnect a device calendar to Calee.',
+                    style: TextStyle(fontSize: 13, color: Color(0xFF4B5563), height: 1.35),
+                  ),
+                ),
+              );
+            }
+
+            return _AccountSection(group: groups[index - 1]);
           },
         );
       }),
@@ -180,6 +198,16 @@ class _AccountSection extends StatelessWidget {
       ),
     );
   }
+}
+
+String _reviewMatchHint(int confidence) {
+  if (confidence >= 95) {
+    return 'Strongest match on this device';
+  }
+  if (confidence >= 90) {
+    return 'High-confidence match on this device';
+  }
+  return 'Possible match on this device';
 }
 
 class _LocalCalendarCard extends StatelessWidget {
@@ -313,7 +341,7 @@ class _LocalCalendarCard extends StatelessWidget {
                     if (isReviewMode && calendar.relinkConfidence > 0) ...[
                       const SizedBox(height: 8),
                       Text(
-                        'Match confidence: ${calendar.relinkConfidence}%',
+                        _reviewMatchHint(calendar.relinkConfidence),
                         style: const TextStyle(fontSize: 12, color: Color(0xFF4B5563)),
                       ),
                     ],
