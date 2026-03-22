@@ -180,9 +180,18 @@ class LinkDeviceController {
     final status = await Permission.camera.request();
     if (!status.isGranted) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Camera permission is required to scan QR codes')),
-        );
+        if (status.isPermanentlyDenied || status.isRestricted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Camera access is disabled. Enable it in iOS Settings to scan QR codes.'),
+            ),
+          );
+          await openAppSettings();
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Camera permission is required to scan QR codes')),
+          );
+        }
       }
       return;
     }
