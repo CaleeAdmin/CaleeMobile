@@ -677,14 +677,16 @@ class _CalendarRow extends StatelessWidget {
       child: Row(
         children: [
           // 使用 item.isSelected（非response式）, 由外层列表刷新驱动 UI 更新
-          Checkbox(
-            value: item.isEnabled,
-            onChanged: isToggling
-                ? null
-                : (bool? newValue) {
-                    controller.handleCalendarEnableToggle(item, newValue);
-                  },
-          ),
+          item.isEnabled
+              ? Checkbox(
+                  value: item.isEnabled,
+                  onChanged: isToggling
+                      ? null
+                      : (bool? newValue) {
+                          controller.handleCalendarEnableToggle(item, newValue);
+                        },
+                )
+              : const SizedBox(width: 48),
           Container(
             width: 12,
             height: 12,
@@ -765,7 +767,25 @@ class _CalendarRow extends StatelessWidget {
                     style: const TextStyle(fontSize: 12, color: Colors.black54),
                   ),
                 ),
-                if (item.hasRelinkSuggestion)
+                if (!item.isEnabled && !item.hasRelinkSuggestion)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: FilledButton.tonal(
+                      onPressed: isToggling
+                          ? null
+                          : () {
+                              controller.enableRemoteCalendar(item);
+                            },
+                      child: isToggling
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Text('Enable'),
+                    ),
+                  ),
+                if (!item.isEnabled && item.hasRelinkSuggestion)
                   Padding(
                     padding: const EdgeInsets.only(top: 6),
                     child: Column(
@@ -775,17 +795,27 @@ class _CalendarRow extends StatelessWidget {
                           'Possible reconnection on this device',
                           style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
                         ),
-                        TextButton(
-                          style: TextButton.styleFrom(
-                            padding: EdgeInsets.zero,
-                            minimumSize: const Size(0, 0),
-                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            alignment: Alignment.centerLeft,
-                          ),
-                          onPressed: () {
-                            controller.openRemoteRelinkReview(item);
-                          },
-                          child: const Text('Review Re-link'),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 4,
+                          children: [
+                            FilledButton.tonal(
+                              onPressed: isToggling
+                                  ? null
+                                  : () {
+                                      controller.openRemoteRelinkReview(item);
+                                    },
+                              child: const Text('Review Re-link'),
+                            ),
+                            TextButton(
+                              onPressed: isToggling
+                                  ? null
+                                  : () {
+                                      controller.enableRemoteCalendar(item);
+                                    },
+                              child: const Text('Enable anyway'),
+                            ),
+                          ],
                         ),
                       ],
                     ),
