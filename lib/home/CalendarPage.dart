@@ -2,14 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:caleesync/common/widget/calendar_options_dialog.dart';
-import 'package:caleesync/feature/local_calendars_page.dart';
 import 'package:caleesync/feature/public_subscriptions_page.dart';
+import 'package:caleesync/feature/local_calendars_page.dart';
 import 'package:caleesync/core/platform/pigeon/calendar_api.g.dart';
 
 import '../controllers/CalendarPageController.dart';
 import '../controllers/local_calendar_page_controller.dart';
+import '../models/calendar_display_item.dart';
 import '../sync/SyncEnum.dart';
 import '../sync/sync_gate_reason.dart';
+import 'widgets/remote_calendar_row_view.dart';
 
 class CalendarPage extends StatefulWidget {
   const CalendarPage({super.key});
@@ -278,7 +280,7 @@ class _CalendarPageState extends State<CalendarPage> {
                 title: const Text('Local Calendars'),
                 onTap: () {
                   Navigator.of(sheetContext).pop();
-                  Get.to(() => const LocalCalendarsPage());
+                  Get.to(() => LocalCalendarsPage());
                 },
               ),
             ],
@@ -673,161 +675,64 @@ class _CalendarRow extends StatelessWidget {
         ? item.remotePath!
         : (item.localId ?? '');
     final bool isToggling = key.isNotEmpty && controller.togglingCalendarIds.contains(key);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
-        children: [
-          // 使用 item.isSelected（非response式）, 由外层列表刷新驱动 UI 更新
-          Checkbox(
-            value: item.isEnabled,
-            onChanged: isToggling
-                ? null
-                : (bool? newValue) {
-                    controller.handleCalendarEnableToggle(item, newValue);
+
+    return RemoteCalendarRowView(
+      item: item,
+      isToggling: isToggling,
+      color: color,
+      onEnablePressed: isToggling ? null : () => controller.enableRemoteCalendar(item),
+      onDisablePressed: isToggling ? null : () => controller.disableRemoteCalendar(item),
+      onReviewRelinkPressed: isToggling ? null : () => controller.openRemoteRelinkReview(item),
+      onEnableAnywayPressed: isToggling ? null : () => controller.enableRemoteCalendar(item),
+      onMorePressed: isToggling
+          ? null
+          : () async {
+              final result = await showDialog<String>(
+                context: context,
+                builder: (c) => CalendarOptionsDialog(
+                  item: item,
+                  onTwoWayChanged: (isTwoWay) async {
+                    await controller.updateCalendarSyncMode(item, isTwoWay);
                   },
-          ),
-          Container(
-            width: 12,
-            height: 12,
-            decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(3)),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SizedBox(height: 44, child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        item.name,
-                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                  onAllowMassDeletionChanged: (enabled) async {
+                    if (!enabled) {
+                      await controller.setAllowMassDeletionDangerous(item, false);
+                      return true;
+                    }
+
+                    final bool? confirmed = await showDialog<bool>(
+                      context: c,
+                      builder: (dialogContext) => AlertDialog(
+                        title: const Text('Enable mass deletion?'),
+                        content: const Text(
+                          'This can permanently delete large amounts of data on your phone and/or server if the snapshot is incomplete.',
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.of(dialogContext).pop(false),
+                            child: const Text('Cancel'),
+                          ),
+                          FilledButton(
+                            onPressed: () => Navigator.of(dialogContext).pop(true),
+                            child: const Text('I understand, enable'),
+                          ),
+                        ],
                       ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.more_vert, size: 18),
-                      onPressed: () async {
-                        final result = await showDialog<String>(
-                          context: context,
-                          builder: (c) => CalendarOptionsDialog(
-                            item: item,
-                            onTwoWayChanged: (isTwoWay) async {
-                              await controller.updateCalendarSyncMode(item, isTwoWay);
-                            },
-                            onAllowMassDeletionChanged: (enabled) async {
-                              if (!enabled) {
-                                await controller.setAllowMassDeletionDangerous(item, false);
-                                return true;
-                              }
+                    );
 
-                              final bool? confirmed = await showDialog<bool>(
-                                context: c,
-                                builder: (dialogContext) => AlertDialog(
-                                  title: const Text('Enable mass deletion?'),
-                                  content: const Text(
-                                    'This can permanently delete large amounts of data on your phone and/or server if the snapshot is incomplete.',
-                                  ),
-                                  actions: [
-                                    TextButton(
-                                      onPressed: () => Navigator.of(dialogContext).pop(false),
-                                      child: const Text('Cancel'),
-                                    ),
-                                    FilledButton(
-                                      onPressed: () => Navigator.of(dialogContext).pop(true),
-                                      child: const Text('I understand, enable'),
-                                    ),
-                                  ],
-                                ),
-                              );
-
-                              if (confirmed == true) {
-                                await controller.setAllowMassDeletionDangerous(item, true);
-                                return true;
-                              }
-                              return false;
-                            },
-                          ),
-                        );
-
-                        if (result == null) return;
-                        await _handleOptionResult(result, context, item, controller);
-                      },
-                    ),
-                  ],
-                )),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.grey.shade300,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    item.isReadOnly ? 'Read-only' : 'Two-way sync',
-                    style: const TextStyle(fontSize: 12, color: Colors.black54),
-                  ),
+                    if (confirmed == true) {
+                      await controller.setAllowMassDeletionDangerous(item, true);
+                      return true;
+                    }
+                    return false;
+                  },
                 ),
-                if (item.hasRelinkSuggestion)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Possible reconnection on this device',
-                          style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
-                        ),
-                        TextButton(
-                          style: TextButton.styleFrom(
-                            padding: EdgeInsets.zero,
-                            minimumSize: const Size(0, 0),
-                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            alignment: Alignment.centerLeft,
-                          ),
-                          onPressed: () {
-                            Get.to(
-                              () => LocalCalendarsPage(
-                                mode: LocalCalendarsPageMode.relinkReview,
-                                remoteCollectionId: item.remoteCollectionId,
-                                remoteDisplayName: item.name,
-                                remotePath: item.remotePath,
-                              ),
-                            );
-                          },
-                          child: const Text('Review Re-link'),
-                        ),
-                      ],
-                    ),
-                  ),
-                if (item.isEnabled && (_syncGateReasonMessage(item.syncGateReason) ?? '').isNotEmpty)
-                  Container(
-                    margin: const EdgeInsets.only(top: 4),
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFFF7ED),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: const Color(0xFFF59E0B)),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.warning_amber_rounded, size: 14, color: Color(0xFFD97706)),
-                        const SizedBox(width: 6),
-                        Flexible(
-                          child: Text(
-                            _syncGateReasonMessage(item.syncGateReason)!,
-                            style: const TextStyle(fontSize: 12, color: Color(0xFFB45309)),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                Text('${item.eventCount} events', style: const TextStyle(fontSize: 12, color: Colors.black54)),
+              );
 
-              ],
-            ),
-          ),
-        ],
-      ),
+              if (result == null) return;
+              await _handleOptionResult(result, context, item, controller);
+            },
+      syncGateMessage: _syncGateReasonMessage(item.syncGateReason),
     );
   }
 }
