@@ -93,7 +93,6 @@ class SyncRepository {
     required String newName,
     required int bindingRole,
     required String remotePath,
-    String? originKey,
   }) {
     if (!Platform.isIOS) {
       return newName;
@@ -102,10 +101,7 @@ class SyncRepository {
       return newName;
     }
 
-    final String marker = deriveIosMirrorMarker(
-      remotePath: remotePath,
-      originKey: originKey,
-    ).trim();
+    final String marker = deriveIosMirrorMarker(remotePath: remotePath).trim();
     if (marker.isEmpty) {
       return newName;
     }
@@ -121,15 +117,11 @@ class SyncRepository {
     required int remoteCollectionId,
     required String remotePath,
     required String displayName,
-    String? originKey,
     required List<PlatformCalendar> nativeCalendars,
   }) async {
     final String expectedTitle = buildIosMirrorTitle(
       displayName: displayName,
-      marker: deriveIosMirrorMarker(
-        remotePath: remotePath,
-        originKey: originKey,
-      ).trim(),
+      marker: deriveIosMirrorMarker(remotePath: remotePath).trim(),
     ).trim();
     if (!looksLikeIosMirrorTitle(expectedTitle)) {
       return null;
@@ -148,7 +140,6 @@ class SyncRepository {
         title: calendar.name ?? '',
         displayName: displayName,
         remotePath: remotePath,
-        originKey: originKey,
       );
     }).toList();
 
@@ -391,7 +382,6 @@ class SyncRepository {
     final String resolvedLocalId = cal['local_collection_id']?.toString() ?? sanitizedLocalId ?? '';
     final String? resolvedRemotePath = cal['remote_path']?.toString() ?? sanitizedRemotePath;
     final String displayName = (cal['display_name'] ?? '').toString();
-    final String? originKey = cal['origin_key']?.toString();
     final int bindingRole = (cal['binding_role'] as int?) ?? SyncBindingRole.mirror;
     final bool isAppManagedMirror =
         resolvedLocalId.isNotEmpty &&
@@ -402,7 +392,6 @@ class SyncRepository {
           bindingRole: bindingRole,
           remotePath: resolvedRemotePath,
           displayName: displayName,
-          originKey: originKey,
         );
     final bool shouldDeleteLocalCalendar = isAppManagedMirror;
 
@@ -484,7 +473,6 @@ class SyncRepository {
     required int bindingRole,
     required String remotePath,
     required String displayName,
-    String? originKey,
   }) async {
     final String normalizedLocalId = localCalendarId.trim();
     if (normalizedLocalId.isEmpty) {
@@ -531,7 +519,6 @@ class SyncRepository {
         title: target.name ?? '',
         displayName: displayName,
         remotePath: remotePath,
-        originKey: originKey,
       );
     } catch (e) {
       debugPrint('[WARN] Unable to verify app-managed mirror calendar: $e');
@@ -609,7 +596,6 @@ class SyncRepository {
     final String? path = cal['remote_path'] as String?;
     final int bindingRole =
         (cal['binding_role'] as int?) ?? SyncBindingRole.mirror;
-    final String? originKey = cal['origin_key']?.toString();
     final String accountName = (cal['account_name'] ?? '').toString();
     final String? resolvedLocalId = cal['local_collection_id']?.toString();
     final bool shouldRenameLocalMirror =
@@ -639,7 +625,6 @@ class SyncRepository {
           newName: normalizedNewName,
           bindingRole: bindingRole,
           remotePath: path ?? '',
-          originKey: originKey,
         );
         final bool localRenameOk = await _nativeApi.modifyCalendarTitle(
           resolvedLocalId,
@@ -822,7 +807,6 @@ class SyncRepository {
 
       final String iosMirrorMarker = deriveIosMirrorMarker(
         remotePath: persistedRemotePath,
-        originKey: remote['origin_key']?.toString(),
       );
 
       if (Platform.isIOS &&
@@ -832,7 +816,6 @@ class SyncRepository {
           remoteCollectionId: remoteCollectionId,
           remotePath: persistedRemotePath,
           displayName: displayName,
-          originKey: remote['origin_key']?.toString(),
           nativeCalendars: nativeCalendars,
         );
         if (reclaimedLocalId != null) {
