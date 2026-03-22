@@ -39,7 +39,6 @@ class CalendarDisplayItem {
   final int bindingRole;     // This-device role: mirror vs ownerLink, and it drives runtime behavior.
   final int remoteCollectionId;
   bool hasRelinkSuggestion;
-  int relinkCandidateCount;
   bool allowMassDeletionDangerous;
 
   CalendarDisplayItem({
@@ -61,7 +60,6 @@ class CalendarDisplayItem {
     required this.bindingRole,
     required this.remoteCollectionId,
     this.hasRelinkSuggestion = false,
-    this.relinkCandidateCount = 0,
     required this.allowMassDeletionDangerous,
   });
 
@@ -265,7 +263,6 @@ class CalendarPageController extends GetxController {
       bindingRole: item.bindingRole,
       remoteCollectionId: item.remoteCollectionId,
       hasRelinkSuggestion: item.hasRelinkSuggestion,
-      relinkCandidateCount: item.relinkCandidateCount,
       allowMassDeletionDangerous: item.allowMassDeletionDangerous,
     );
     calendars.refresh();
@@ -386,7 +383,6 @@ class CalendarPageController extends GetxController {
 
     for (final item in items) {
       item.hasRelinkSuggestion = false;
-      item.relinkCandidateCount = 0;
 
       if (loginName.isEmpty ||
           item.origin != SyncBindingOrigin.local ||
@@ -406,7 +402,6 @@ class CalendarPageController extends GetxController {
         );
         if (count > 0) {
           item.hasRelinkSuggestion = true;
-          item.relinkCandidateCount = count;
         }
       } catch (e) {
         debugPrint('[WARN] Failed to populate relink suggestions for ${item.remoteCollectionId}: $e');
