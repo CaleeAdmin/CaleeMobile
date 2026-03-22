@@ -120,9 +120,11 @@ void main() {
 
       expect(find.text('Updating...'), findsOneWidget);
       expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      expect(find.text('Disable'), findsNothing);
+      expect(find.byType(OutlinedButton), findsOneWidget);
 
       final OutlinedButton disableButton = tester.widget<OutlinedButton>(
-        find.widgetWithText(OutlinedButton, 'Disable'),
+        find.byType(OutlinedButton),
       );
       expect(disableButton.onPressed, isNull);
 
