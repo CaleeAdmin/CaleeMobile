@@ -78,7 +78,7 @@ class RemoteCalendarRowView extends StatelessWidget {
               ),
               IconButton(
                 icon: const Icon(Icons.more_vert, size: 18),
-                onPressed: onMorePressed,
+                onPressed: isToggling ? null : onMorePressed,
               ),
             ],
           ),
@@ -171,24 +171,24 @@ class RemoteCalendarRowView extends StatelessWidget {
               children: [
                 if (item.isEnabled)
                   OutlinedButton(
-                    onPressed: onDisablePressed,
+                    onPressed: isToggling ? null : onDisablePressed,
                     style: compactOutlinedStyle,
                     child: isToggling ? buildLoadingSpinner() : const Text('Disable'),
                   ),
                 if (showEnableAction)
                   FilledButton.tonal(
-                    onPressed: onEnablePressed,
+                    onPressed: isToggling ? null : onEnablePressed,
                     style: compactTonalStyle,
                     child: isToggling ? buildLoadingSpinner() : const Text('Enable'),
                   ),
                 if (showRelinkAction) ...[
                   FilledButton.tonal(
-                    onPressed: onReviewRelinkPressed,
+                    onPressed: isToggling ? null : onReviewRelinkPressed,
                     style: compactTonalStyle,
                     child: const Text('Review Re-link'),
                   ),
                   TextButton(
-                    onPressed: onEnableAnywayPressed,
+                    onPressed: isToggling ? null : onEnableAnywayPressed,
                     style: compactTextStyle,
                     child: const Text('Enable anyway'),
                   ),
