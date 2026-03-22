@@ -530,6 +530,130 @@ class LocalCalendarPageController extends GetxController {
     return Future<void>.value();
   }
 
+  Future<void> relinkRemoteToSelectedLocal(LocalCalendarItem item) async {
+    final String? reviewPath = reviewRemotePath.value;
+    if (!isReviewMode ||
+        reviewRemoteCollectionId.value == null ||
+        reviewPath == null ||
+        reviewPath.trim().isEmpty ||
+        reviewRemoteDisplayName.value == null) {
+      Get.snackbar('Error', 'Re-link review context is unavailable');
+      return;
+    }
+
+    if (connectingCalendarIds.contains(item.id)) {
+      return;
+    }
+
+    connectingCalendarIds.add(item.id);
+    calendarGroups.refresh();
+    reviewCandidates.refresh();
+
+    try {
+      final int remoteCollectionId = reviewRemoteCollectionId.value!;
+      final String remotePath = reviewPath.trim();
+      final String remoteDisplayName = (reviewRemoteDisplayName.value ?? '').trim();
+
+      final RelinkVerificationResult verifyResult = await _relinkVerifier.verify(
+        remotePath: remotePath,
+        localCalendarId: item.id,
+        isSubscription: false,
+      );
+      if (verifyResult.outcome != RelinkVerificationOutcome.passed) {
+        Get.snackbar(
+          'Unable to re-link',
+          'Verification did not pass for this device calendar.',
+        );
+        return;
+      }
+
+      final bool confirmed = await _confirmReviewModeRelinkTarget(
+        item,
+        remoteDisplayName: remoteDisplayName,
+        remotePath: remotePath,
+        verifyConfidenceScore: verifyResult.confidenceScore,
+        providerHintScore: item.relinkConfidence,
+      );
+      if (!confirmed) {
+        return;
+      }
+
+      final db = await DatabaseHelper.instance.database;
+      await db.transaction((txn) async {
+        final String localOriginKey = _buildLocalOriginKey(item);
+        final String storedAccountName =
+            MMKVUtils.instance.getString(AppConstant.calendarAccountNameKey) ?? '';
+        final String loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? '';
+        final String accountName = storedAccountName.isNotEmpty ? storedAccountName : loginName;
+        final int now = DateTime.now().millisecondsSinceEpoch;
+
+        await txn.update(
+          'remote_collections',
+          {
+            'display_name': item.name,
+            'account_name': accountName,
+            'color': item.color,
+            'sync_mode': 0,
+            'origin_kind': item.isSubscription ? 1 : 0,
+            'is_subscription': item.isSubscription ? 1 : 0,
+            'subscription_url': item.subscriptionUrl,
+            'remote_path': remotePath,
+            'origin_key': localOriginKey,
+          },
+          where: 'id = ?',
+          whereArgs: [remoteCollectionId],
+        );
+
+        await txn.insert(
+          'collection_states',
+          {
+            'remote_collection_id': remoteCollectionId,
+            'sync_gate_reason': SyncGateReason.safeFirstSync,
+            'updated_at': now,
+          },
+          conflictAlgorithm: ConflictAlgorithm.ignore,
+        );
+        await txn.update(
+          'collection_states',
+          {
+            'remote_collection_id': remoteCollectionId,
+            'sync_gate_reason': SyncGateReason.safeFirstSync,
+            'updated_at': now,
+          },
+          where: 'remote_collection_id = ?',
+          whereArgs: [remoteCollectionId],
+        );
+
+        await txn.insert(
+          'local_bindings',
+          {
+            'remote_collection_id': remoteCollectionId,
+            'local_collection_id': item.id.trim(),
+            'binding_role': SyncBindingRole.ownerLink,
+            'created_at': now,
+            'updated_at': now,
+          },
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+      });
+
+      await _refreshMainCalendarList();
+      if (Get.isOverlaysOpen == true) {
+        Get.closeAllSnackbars();
+      }
+      if (Get.key.currentState?.canPop() == true) {
+        Get.back<void>();
+      }
+    } catch (e) {
+      debugPrint('[ERROR] Failed to relink selected local calendar to remote: $e');
+      Get.snackbar('Error', 'Unable to re-link this calendar');
+    } finally {
+      connectingCalendarIds.remove(item.id);
+      calendarGroups.refresh();
+      reviewCandidates.refresh();
+    }
+  }
+
   Future<void> linkCalendar(
     LocalCalendarItem item,
     bool linkRequested, {
@@ -1054,6 +1178,61 @@ class LocalCalendarPageController extends GetxController {
       barrierDismissible: false,
     );
     return decision ?? _RelinkDecision.cancel;
+  }
+
+  Future<bool> _confirmReviewModeRelinkTarget(
+    LocalCalendarItem item, {
+    required String remoteDisplayName,
+    required String remotePath,
+    required int? verifyConfidenceScore,
+    required int providerHintScore,
+  }) async {
+    final bool? confirmed = await Get.dialog<bool>(
+      AlertDialog(
+        title: const Text('Confirm re-link'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Re-link "${item.name}" to "$remoteDisplayName"?'),
+            const SizedBox(height: 12),
+            Text(
+              verifyConfidenceScore == null
+                  ? 'Event verification confidence (recent window): Unavailable'
+                  : 'Event verification confidence (recent window): ${verifyConfidenceScore.clamp(0, 100)}%',
+            ),
+            Text(
+              _verificationConfidenceExplanation(verifyConfidenceScore),
+              style: const TextStyle(color: Color(0xFF4B5563), fontSize: 12),
+            ),
+            Text('Collection/provider match confidence: ${providerHintScore.clamp(0, 100)}%'),
+            Text(
+              _providerHintConfidenceExplanation(providerHintScore),
+              style: const TextStyle(color: Color(0xFF4B5563), fontSize: 12),
+            ),
+            Text('Account: ${item.accountName}'),
+            Text('Remote path: $remotePath'),
+            const SizedBox(height: 8),
+            const Text(
+              'Verification passed, so re-link can proceed.',
+              style: TextStyle(color: Color(0xFF4B5563), fontSize: 12),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Get.back<bool>(result: false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Get.back<bool>(result: true),
+            child: const Text('Re-link this calendar'),
+          ),
+        ],
+      ),
+      barrierDismissible: false,
+    );
+    return confirmed == true;
   }
 
   Future<void> _refreshMainCalendarList() async {
