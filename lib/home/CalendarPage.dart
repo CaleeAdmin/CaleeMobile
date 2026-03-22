@@ -674,6 +674,26 @@ class _CalendarRow extends StatelessWidget {
     final bool isToggling = key.isNotEmpty && controller.togglingCalendarIds.contains(key);
     final bool showRelinkAction = !item.isEnabled && item.hasRelinkSuggestion;
     final bool showEnableAction = !item.isEnabled && !item.hasRelinkSuggestion;
+    final VoidCallback? onEnablePressed = isToggling
+        ? null
+        : () {
+            controller.enableRemoteCalendar(item);
+          };
+    final VoidCallback? onDisablePressed = isToggling
+        ? null
+        : () {
+            controller.disableRemoteCalendar(item);
+          };
+    final VoidCallback? onReviewRelinkPressed = isToggling
+        ? null
+        : () {
+            controller.openRemoteRelinkReview(item);
+          };
+    final VoidCallback? onEnableAnywayPressed = isToggling
+        ? null
+        : () {
+            controller.enableRemoteCalendar(item);
+          };
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
@@ -714,11 +734,7 @@ class _CalendarRow extends StatelessWidget {
                         ),
                         const SizedBox(width: 8),
                         TextButton(
-                          onPressed: isToggling
-                              ? null
-                              : () {
-                                  controller.disableRemoteCalendar(item);
-                                },
+                          onPressed: onDisablePressed,
                           child: isToggling
                               ? const SizedBox(
                                   width: 16,
@@ -730,27 +746,13 @@ class _CalendarRow extends StatelessWidget {
                         const SizedBox(width: 4),
                       ] else if (showRelinkAction) ...[
                         FilledButton(
-                          onPressed: isToggling
-                              ? null
-                              : () {
-                                  controller.openRemoteRelinkReview(item);
-                                },
-                          child: isToggling
-                              ? const SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
-                                )
-                              : const Text('Review Re-link'),
+                          onPressed: onReviewRelinkPressed,
+                          child: const Text('Review Re-link'),
                         ),
                         const SizedBox(width: 4),
                       ] else if (showEnableAction) ...[
                         FilledButton.tonal(
-                          onPressed: isToggling
-                              ? null
-                              : () {
-                                  controller.enableRemoteCalendar(item);
-                                },
+                          onPressed: onEnablePressed,
                           child: isToggling
                               ? const SizedBox(
                                   width: 16,
@@ -763,56 +765,66 @@ class _CalendarRow extends StatelessWidget {
                       ],
                       IconButton(
                         icon: const Icon(Icons.more_vert, size: 18),
-                        onPressed: () async {
-                          final result = await showDialog<String>(
-                            context: context,
-                            builder: (c) => CalendarOptionsDialog(
-                              item: item,
-                              onTwoWayChanged: (isTwoWay) async {
-                                await controller.updateCalendarSyncMode(item, isTwoWay);
-                              },
-                              onAllowMassDeletionChanged: (enabled) async {
-                                if (!enabled) {
-                                  await controller.setAllowMassDeletionDangerous(item, false);
-                                  return true;
-                                }
+                        onPressed: isToggling
+                            ? null
+                            : () async {
+                                final result = await showDialog<String>(
+                                  context: context,
+                                  builder: (c) => CalendarOptionsDialog(
+                                    item: item,
+                                    onTwoWayChanged: (isTwoWay) async {
+                                      await controller.updateCalendarSyncMode(item, isTwoWay);
+                                    },
+                                    onAllowMassDeletionChanged: (enabled) async {
+                                      if (!enabled) {
+                                        await controller.setAllowMassDeletionDangerous(item, false);
+                                        return true;
+                                      }
 
-                                final bool? confirmed = await showDialog<bool>(
-                                  context: c,
-                                  builder: (dialogContext) => AlertDialog(
-                                    title: const Text('Enable mass deletion?'),
-                                    content: const Text(
-                                      'This can permanently delete large amounts of data on your phone and/or server if the snapshot is incomplete.',
-                                    ),
-                                    actions: [
-                                      TextButton(
-                                        onPressed: () => Navigator.of(dialogContext).pop(false),
-                                        child: const Text('Cancel'),
-                                      ),
-                                      FilledButton(
-                                        onPressed: () => Navigator.of(dialogContext).pop(true),
-                                        child: const Text('I understand, enable'),
-                                      ),
-                                    ],
+                                      final bool? confirmed = await showDialog<bool>(
+                                        context: c,
+                                        builder: (dialogContext) => AlertDialog(
+                                          title: const Text('Enable mass deletion?'),
+                                          content: const Text(
+                                            'This can permanently delete large amounts of data on your phone and/or server if the snapshot is incomplete.',
+                                          ),
+                                          actions: [
+                                            TextButton(
+                                              onPressed: () => Navigator.of(dialogContext).pop(false),
+                                              child: const Text('Cancel'),
+                                            ),
+                                            FilledButton(
+                                              onPressed: () => Navigator.of(dialogContext).pop(true),
+                                              child: const Text('I understand, enable'),
+                                            ),
+                                          ],
+                                        ),
+                                      );
+
+                                      if (confirmed == true) {
+                                        await controller.setAllowMassDeletionDangerous(item, true);
+                                        return true;
+                                      }
+                                      return false;
+                                    },
                                   ),
                                 );
 
-                                if (confirmed == true) {
-                                  await controller.setAllowMassDeletionDangerous(item, true);
-                                  return true;
-                                }
-                                return false;
+                                if (result == null) return;
+                                await _handleOptionResult(result, context, item, controller);
                               },
-                            ),
-                          );
-
-                          if (result == null) return;
-                          await _handleOptionResult(result, context, item, controller);
-                        },
                       ),
                     ],
                   ),
                 ),
+                if (isToggling)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      'Updating...',
+                      style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                    ),
+                  ),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
                   decoration: BoxDecoration(
@@ -835,11 +847,7 @@ class _CalendarRow extends StatelessWidget {
                           style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
                         ),
                         TextButton(
-                          onPressed: isToggling
-                              ? null
-                              : () {
-                                  controller.enableRemoteCalendar(item);
-                                },
+                          onPressed: onEnableAnywayPressed,
                           child: const Text('Enable anyway'),
                         ),
                       ],
