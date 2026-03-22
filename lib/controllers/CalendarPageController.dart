@@ -405,6 +405,7 @@ class CalendarPageController extends GetxController {
         }
       } catch (e) {
         debugPrint('[WARN] Failed to populate relink suggestions for ${item.remoteCollectionId}: $e');
+        item.hasRelinkSuggestion = false;
       }
     }
   }

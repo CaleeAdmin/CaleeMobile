@@ -104,6 +104,8 @@ class LocalCalendarPageController extends GetxController {
         remoteCollectionId: remoteCollectionId,
         remoteDisplayName: remoteDisplayName,
         remotePath: remotePath,
+        requestPermission: true,
+        silentOnPermissionFailure: false,
       );
       reviewCandidates.assignAll(candidates);
     } catch (e) {
@@ -128,6 +130,8 @@ class LocalCalendarPageController extends GetxController {
       remoteCollectionId: remoteCollectionId,
       remoteDisplayName: remoteDisplayName,
       remotePath: remotePath,
+      requestPermission: false,
+      silentOnPermissionFailure: true,
     );
     return candidates.length;
   }
@@ -136,9 +140,14 @@ class LocalCalendarPageController extends GetxController {
     required int remoteCollectionId,
     required String remoteDisplayName,
     required String remotePath,
+    bool requestPermission = true,
+    bool silentOnPermissionFailure = false,
   }) async {
     final bool hasPermission = await _nativeApi.requestPermission(false);
     if (!hasPermission) {
+      if (!requestPermission || silentOnPermissionFailure) {
+        return <LocalCalendarItem>[];
+      }
       throw Exception('Calendar access is required to load local calendars.');
     }
 
@@ -551,11 +560,10 @@ class LocalCalendarPageController extends GetxController {
 
     try {
       final int remoteCollectionId = reviewRemoteCollectionId.value!;
-      final String remotePath = reviewPath.trim();
       final String remoteDisplayName = (reviewRemoteDisplayName.value ?? '').trim();
 
       final RelinkVerificationResult verifyResult = await _relinkVerifier.verify(
-        remotePath: remotePath,
+        remotePath: reviewPath.trim(),
         localCalendarId: item.id,
         isSubscription: false,
       );
@@ -587,15 +595,9 @@ class LocalCalendarPageController extends GetxController {
         await txn.update(
           'remote_collections',
           {
-            'display_name': item.name,
             'account_name': accountName,
-            'color': item.color,
-            'sync_mode': 0,
-            'origin_kind': item.isSubscription ? 1 : 0,
-            'is_subscription': item.isSubscription ? 1 : 0,
-            'subscription_url': item.subscriptionUrl,
-            'remote_path': remotePath,
             'origin_key': localOriginKey,
+            'updated_at': now,
           },
           where: 'id = ?',
           whereArgs: [remoteCollectionId],
@@ -1190,10 +1192,17 @@ class LocalCalendarPageController extends GetxController {
           children: [
             Text('Re-link "${item.name}" to "$remoteDisplayName"?'),
             const SizedBox(height: 12),
+            Text('Device calendar: ${item.name}'),
+            Text('Calee calendar: $remoteDisplayName'),
             Text('Account: ${item.accountName}'),
             const SizedBox(height: 12),
             const Text(
               'Verification passed for this device calendar.',
+              style: TextStyle(color: Color(0xFF4B5563), fontSize: 12),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'This looks like the strongest match on this device.',
               style: TextStyle(color: Color(0xFF4B5563), fontSize: 12),
             ),
             const SizedBox(height: 4),

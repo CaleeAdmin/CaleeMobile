@@ -202,12 +202,9 @@ class _AccountSection extends StatelessWidget {
 
 String _reviewMatchHint(int confidence) {
   if (confidence >= 95) {
-    return 'Strongest match on this device';
+    return 'strongest match on this device';
   }
-  if (confidence >= 90) {
-    return 'High-confidence match on this device';
-  }
-  return 'Possible match on this device';
+  return 'high-confidence match on this device';
 }
 
 class _LocalCalendarCard extends StatelessWidget {
