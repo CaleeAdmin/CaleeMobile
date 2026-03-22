@@ -12,6 +12,7 @@ import '../sync/sync_completed_event_bus.dart';
 import '../sync/sync_trigger_orchestrator.dart';
 import '../data/database_helper.dart';
 import '../data/sync_repository.dart';
+import '../feature/local_calendars_page.dart';
 import '../services/calee_server_service.dart';
 import '../sync/SyncEnum.dart';
 import 'local_calendar_page_controller.dart';
@@ -106,6 +107,25 @@ class CalendarPageController extends GetxController {
   void onClose() {
     _syncCompletedSub?.cancel();
     super.onClose();
+  }
+
+  Future<void> enableRemoteCalendar(CalendarDisplayItem item) {
+    return handleCalendarEnableToggle(item, true);
+  }
+
+  Future<void> disableRemoteCalendar(CalendarDisplayItem item) {
+    return handleCalendarEnableToggle(item, false);
+  }
+
+  void openRemoteRelinkReview(CalendarDisplayItem item) {
+    Get.to(
+      () => LocalCalendarsPage(
+        mode: LocalCalendarsPageMode.relinkReview,
+        remoteCollectionId: item.remoteCollectionId,
+        remoteDisplayName: item.name,
+        remotePath: item.remotePath,
+      ),
+    );
   }
 
   /// 处理 Checkbox 点击事件

@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:caleesync/common/widget/calendar_options_dialog.dart';
-import 'package:caleesync/feature/local_calendars_page.dart';
 import 'package:caleesync/feature/public_subscriptions_page.dart';
 import 'package:caleesync/core/platform/pigeon/calendar_api.g.dart';
 
@@ -651,6 +650,135 @@ String? _syncGateReasonMessage(String? reason) {
   return SyncGateReason.toUiMessage(reason);
 }
 
+class _RemoteCalendarActionArea extends StatelessWidget {
+  final CalendarDisplayItem item;
+  final CalendarPageController controller;
+  final bool isToggling;
+
+  const _RemoteCalendarActionArea({
+    required this.item,
+    required this.controller,
+    required this.isToggling,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (item.isEnabled) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: Colors.green.shade50,
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(color: Colors.green.shade200),
+            ),
+            child: Text(
+              'Connected',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: Colors.green.shade700,
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          _RemoteActionButton(
+            label: 'Disable',
+            isBusy: isToggling,
+            onPressed: isToggling ? null : () => controller.disableRemoteCalendar(item),
+            isPrimary: false,
+          ),
+        ],
+      );
+    }
+
+    if (item.hasRelinkSuggestion) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          _RemoteActionButton(
+            label: 'Review Re-link',
+            isBusy: false,
+            onPressed: isToggling ? null : () => controller.openRemoteRelinkReview(item),
+          ),
+          const SizedBox(height: 4),
+          TextButton(
+            onPressed: isToggling ? null : () => controller.enableRemoteCalendar(item),
+            style: TextButton.styleFrom(
+              padding: EdgeInsets.zero,
+              minimumSize: const Size(0, 0),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              alignment: Alignment.centerRight,
+            ),
+            child: isToggling
+                ? const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Text('Enable anyway'),
+          ),
+        ],
+      );
+    }
+
+    return _RemoteActionButton(
+      label: 'Enable',
+      isBusy: isToggling,
+      onPressed: isToggling ? null : () => controller.enableRemoteCalendar(item),
+    );
+  }
+}
+
+class _RemoteActionButton extends StatelessWidget {
+  final String label;
+  final VoidCallback? onPressed;
+  final bool isBusy;
+  final bool isPrimary;
+
+  const _RemoteActionButton({
+    required this.label,
+    required this.onPressed,
+    required this.isBusy,
+    this.isPrimary = true,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final ButtonStyle style = isPrimary
+        ? ElevatedButton.styleFrom(
+            minimumSize: const Size(0, 36),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+          )
+        : OutlinedButton.styleFrom(
+            minimumSize: const Size(0, 36),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+          );
+
+    final Widget child = isBusy
+        ? const SizedBox(
+            width: 16,
+            height: 16,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          )
+        : Text(label);
+
+    return isPrimary
+        ? ElevatedButton(
+            onPressed: onPressed,
+            style: style,
+            child: child,
+          )
+        : OutlinedButton(
+            onPressed: onPressed,
+            style: style,
+            child: child,
+          );
+  }
+}
+
 class _CalendarRow extends StatelessWidget {
   final CalendarDisplayItem item;
   const _CalendarRow({Key? key, required this.item}) : super(key: key);
@@ -676,19 +804,12 @@ class _CalendarRow extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 使用 item.isSelected（非response式）, 由外层列表刷新驱动 UI 更新
-          Checkbox(
-            value: item.isEnabled,
-            onChanged: isToggling
-                ? null
-                : (bool? newValue) {
-                    controller.handleCalendarEnableToggle(item, newValue);
-                  },
-          ),
           Container(
             width: 12,
             height: 12,
+            margin: const EdgeInsets.only(top: 8),
             decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(3)),
           ),
           const SizedBox(width: 10),
@@ -696,13 +817,23 @@ class _CalendarRow extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                SizedBox(height: 44, child: Row(
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Expanded(
-                      child: Text(
-                        item.name,
-                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                      child: Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(
+                          item.name,
+                          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                        ),
                       ),
+                    ),
+                    const SizedBox(width: 12),
+                    _RemoteCalendarActionArea(
+                      item: item,
+                      controller: controller,
+                      isToggling: isToggling,
                     ),
                     IconButton(
                       icon: const Icon(Icons.more_vert, size: 18),
@@ -754,7 +885,7 @@ class _CalendarRow extends StatelessWidget {
                       },
                     ),
                   ],
-                )),
+                ),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
                   decoration: BoxDecoration(
@@ -769,33 +900,9 @@ class _CalendarRow extends StatelessWidget {
                 if (item.hasRelinkSuggestion)
                   Padding(
                     padding: const EdgeInsets.only(top: 6),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Possible reconnection on this device',
-                          style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
-                        ),
-                        TextButton(
-                          style: TextButton.styleFrom(
-                            padding: EdgeInsets.zero,
-                            minimumSize: const Size(0, 0),
-                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            alignment: Alignment.centerLeft,
-                          ),
-                          onPressed: () {
-                            Get.to(
-                              () => LocalCalendarsPage(
-                                mode: LocalCalendarsPageMode.relinkReview,
-                                remoteCollectionId: item.remoteCollectionId,
-                                remoteDisplayName: item.name,
-                                remotePath: item.remotePath,
-                              ),
-                            );
-                          },
-                          child: const Text('Review Re-link'),
-                        ),
-                      ],
+                    child: Text(
+                      'Possible reconnection on this device',
+                      style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
                     ),
                   ),
                 if (item.isEnabled && (_syncGateReasonMessage(item.syncGateReason) ?? '').isNotEmpty)
@@ -822,7 +929,6 @@ class _CalendarRow extends StatelessWidget {
                     ),
                   ),
                 Text('${item.eventCount} events', style: const TextStyle(fontSize: 12, color: Colors.black54)),
-
               ],
             ),
           ),
