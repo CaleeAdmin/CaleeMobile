@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
-import '../controllers/CalendarPageController.dart';
 import '../controllers/public_subscriptions_controller.dart';
 import '../entity/public_subscription.dart';
 

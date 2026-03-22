@@ -7,6 +7,7 @@ import 'package:caleesync/core/platform/pigeon/calendar_api.g.dart';
 
 import '../controllers/CalendarPageController.dart';
 import '../controllers/local_calendar_page_controller.dart';
+import '../models/calendar_display_item.dart';
 import '../sync/SyncEnum.dart';
 import '../sync/sync_gate_reason.dart';
 import 'widgets/remote_calendar_row_view.dart';

@@ -1,4 +1,4 @@
-import 'package:caleesync/controllers/CalendarPageController.dart';
+import 'package:caleesync/models/calendar_display_item.dart';
 import 'package:caleesync/home/widgets/remote_calendar_row_view.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';

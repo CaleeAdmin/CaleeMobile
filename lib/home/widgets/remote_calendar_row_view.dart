@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../controllers/CalendarPageController.dart';
+import '../../models/calendar_display_item.dart';
 
 class RemoteCalendarRowView extends StatelessWidget {
   final CalendarDisplayItem item;
