@@ -570,9 +570,6 @@ class LocalCalendarPageController extends GetxController {
       final bool confirmed = await _confirmReviewModeRelinkTarget(
         item,
         remoteDisplayName: remoteDisplayName,
-        remotePath: remotePath,
-        verifyConfidenceScore: verifyResult.confidenceScore,
-        providerHintScore: item.relinkConfidence,
       );
       if (!confirmed) {
         return;
@@ -1183,9 +1180,6 @@ class LocalCalendarPageController extends GetxController {
   Future<bool> _confirmReviewModeRelinkTarget(
     LocalCalendarItem item, {
     required String remoteDisplayName,
-    required String remotePath,
-    required int? verifyConfidenceScore,
-    required int providerHintScore,
   }) async {
     final bool? confirmed = await Get.dialog<bool>(
       AlertDialog(
