@@ -7,6 +7,7 @@ import 'package:caleesync/feature/public_subscriptions_page.dart';
 import 'package:caleesync/core/platform/pigeon/calendar_api.g.dart';
 
 import '../controllers/CalendarPageController.dart';
+import '../controllers/local_calendar_page_controller.dart';
 import '../sync/SyncEnum.dart';
 import '../sync/sync_gate_reason.dart';
 
