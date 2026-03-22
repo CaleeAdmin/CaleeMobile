@@ -366,7 +366,7 @@ class CalendarPageController extends GetxController {
       }
 
       try {
-        final int count = await localCtrl.getHighConfidenceRelinkCandidateCountForRemote(
+        final int count = await localCtrl.getReviewableRelinkCandidateCountForRemote(
           remoteCollectionId: item.remoteCollectionId,
           remoteDisplayName: item.name,
           remotePath: item.remotePath!,
