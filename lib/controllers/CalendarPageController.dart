@@ -14,6 +14,7 @@ import '../data/database_helper.dart';
 import '../data/sync_repository.dart';
 import '../services/calee_server_service.dart';
 import '../sync/SyncEnum.dart';
+import '../feature/local_calendars_page.dart';
 import 'local_calendar_page_controller.dart';
 
 class CalendarDisplayItem {
@@ -216,6 +217,24 @@ class CalendarPageController extends GetxController {
     }
   }
 
+  Future<void> enableRemoteCalendar(CalendarDisplayItem item) async {
+    await handleCalendarEnableToggle(item, true);
+  }
+
+  Future<void> disableRemoteCalendar(CalendarDisplayItem item) async {
+    await handleCalendarEnableToggle(item, false);
+  }
+
+  void openRemoteRelinkReview(CalendarDisplayItem item) {
+    Get.to(
+      () => LocalCalendarsPage(
+        mode: LocalCalendarsPageMode.relinkReview,
+        remoteCollectionId: item.remoteCollectionId,
+        remoteDisplayName: item.name,
+        remotePath: item.remotePath,
+      ),
+    );
+  }
 
   void _applyEnableResultToCalendarItem(CalendarDisplayItem item, EnableCalendarResult result) {
     final String normalizedRemotePath = CaleeServerService.normalizeRemotePath(item.remotePath ?? '');
