@@ -43,6 +43,12 @@ class RemoteCalendarRowView extends StatelessWidget {
       minimumSize: Size.zero,
       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
     );
+    final ButtonStyle compactTonalStyle = FilledButton.styleFrom(
+      visualDensity: VisualDensity.compact,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      minimumSize: Size.zero,
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    );
 
     Widget buildLoadingSpinner() {
       return const SizedBox(
@@ -170,15 +176,15 @@ class RemoteCalendarRowView extends StatelessWidget {
                     child: isToggling ? buildLoadingSpinner() : const Text('Disable'),
                   ),
                 if (showEnableAction)
-                  OutlinedButton(
+                  FilledButton.tonal(
                     onPressed: onEnablePressed,
-                    style: compactOutlinedStyle,
+                    style: compactTonalStyle,
                     child: isToggling ? buildLoadingSpinner() : const Text('Enable'),
                   ),
                 if (showRelinkAction) ...[
-                  OutlinedButton(
+                  FilledButton.tonal(
                     onPressed: onReviewRelinkPressed,
-                    style: compactOutlinedStyle,
+                    style: compactTonalStyle,
                     child: const Text('Review Re-link'),
                   ),
                   TextButton(

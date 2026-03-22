@@ -74,7 +74,7 @@ void main() {
       );
 
       expect(find.text('Connected'), findsOneWidget);
-      expect(find.text('Disable'), findsOneWidget);
+      expect(find.widgetWithText(OutlinedButton, 'Disable'), findsOneWidget);
       expect(find.text('Enable'), findsNothing);
       expect(find.text('Review Re-link'), findsNothing);
       expect(find.text('Enable anyway'), findsNothing);
@@ -88,7 +88,7 @@ void main() {
         onMorePressed: () {},
       );
 
-      expect(find.text('Enable'), findsOneWidget);
+      expect(find.widgetWithText(FilledButton, 'Enable'), findsOneWidget);
       expect(find.text('Connected'), findsNothing);
       expect(find.text('Disable'), findsNothing);
       expect(find.text('Review Re-link'), findsNothing);
@@ -104,8 +104,8 @@ void main() {
         onMorePressed: () {},
       );
 
-      expect(find.text('Review Re-link'), findsOneWidget);
-      expect(find.text('Enable anyway'), findsOneWidget);
+      expect(find.widgetWithText(FilledButton, 'Review Re-link'), findsOneWidget);
+      expect(find.widgetWithText(TextButton, 'Enable anyway'), findsOneWidget);
       expect(find.text('Possible reconnection on this device'), findsOneWidget);
       expect(find.text('Enable'), findsNothing);
       expect(find.text('Connected'), findsNothing);
@@ -121,7 +121,9 @@ void main() {
       expect(find.text('Updating...'), findsOneWidget);
       expect(find.byType(CircularProgressIndicator), findsOneWidget);
 
-      final TextButton disableButton = tester.widget<TextButton>(find.byType(TextButton).first);
+      final OutlinedButton disableButton = tester.widget<OutlinedButton>(
+        find.widgetWithText(OutlinedButton, 'Disable'),
+      );
       expect(disableButton.onPressed, isNull);
 
       final IconButton moreButton = tester.widget<IconButton>(find.byIcon(Icons.more_vert));
