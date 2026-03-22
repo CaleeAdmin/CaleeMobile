@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:caleesync/common/widget/calendar_options_dialog.dart';
-import 'package:caleesync/feature/local_calendars_page.dart';
 import 'package:caleesync/feature/public_subscriptions_page.dart';
 import 'package:caleesync/core/platform/pigeon/calendar_api.g.dart';
 
@@ -784,14 +783,7 @@ class _CalendarRow extends StatelessWidget {
                             alignment: Alignment.centerLeft,
                           ),
                           onPressed: () {
-                            Get.to(
-                              () => LocalCalendarsPage(
-                                mode: LocalCalendarsPageMode.relinkReview,
-                                remoteCollectionId: item.remoteCollectionId,
-                                remoteDisplayName: item.name,
-                                remotePath: item.remotePath,
-                              ),
-                            );
+                            controller.openRemoteRelinkReview(item);
                           },
                           child: const Text('Review Re-link'),
                         ),
