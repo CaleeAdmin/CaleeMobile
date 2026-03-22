@@ -676,17 +676,8 @@ class _CalendarRow extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
         children: [
-          // 使用 item.isSelected（非response式）, 由外层列表刷新驱动 UI 更新
-          item.isEnabled
-              ? Checkbox(
-                  value: item.isEnabled,
-                  onChanged: isToggling
-                      ? null
-                      : (bool? newValue) {
-                          controller.handleCalendarEnableToggle(item, newValue);
-                        },
-                )
-              : const SizedBox(width: 48),
+          // 使用固定宽度占位，保持远程日历行对齐
+          const SizedBox(width: 48),
           Container(
             width: 12,
             height: 12,
@@ -697,65 +688,97 @@ class _CalendarRow extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                SizedBox(height: 44, child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        item.name,
-                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                SizedBox(
+                  height: 44,
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          item.name,
+                          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                        ),
                       ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.more_vert, size: 18),
-                      onPressed: () async {
-                        final result = await showDialog<String>(
-                          context: context,
-                          builder: (c) => CalendarOptionsDialog(
-                            item: item,
-                            onTwoWayChanged: (isTwoWay) async {
-                              await controller.updateCalendarSyncMode(item, isTwoWay);
-                            },
-                            onAllowMassDeletionChanged: (enabled) async {
-                              if (!enabled) {
-                                await controller.setAllowMassDeletionDangerous(item, false);
-                                return true;
-                              }
-
-                              final bool? confirmed = await showDialog<bool>(
-                                context: c,
-                                builder: (dialogContext) => AlertDialog(
-                                  title: const Text('Enable mass deletion?'),
-                                  content: const Text(
-                                    'This can permanently delete large amounts of data on your phone and/or server if the snapshot is incomplete.',
-                                  ),
-                                  actions: [
-                                    TextButton(
-                                      onPressed: () => Navigator.of(dialogContext).pop(false),
-                                      child: const Text('Cancel'),
-                                    ),
-                                    FilledButton(
-                                      onPressed: () => Navigator.of(dialogContext).pop(true),
-                                      child: const Text('I understand, enable'),
-                                    ),
-                                  ],
-                                ),
-                              );
-
-                              if (confirmed == true) {
-                                await controller.setAllowMassDeletionDangerous(item, true);
-                                return true;
-                              }
-                              return false;
-                            },
+                      if (item.isEnabled) ...[
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.green.withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(999),
                           ),
-                        );
+                          child: const Text(
+                            'Connected',
+                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        TextButton(
+                          onPressed: isToggling
+                              ? null
+                              : () {
+                                  controller.disableRemoteCalendar(item);
+                                },
+                          child: isToggling
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : const Text('Disable'),
+                        ),
+                        const SizedBox(width: 4),
+                      ],
+                      IconButton(
+                        icon: const Icon(Icons.more_vert, size: 18),
+                        onPressed: () async {
+                          final result = await showDialog<String>(
+                            context: context,
+                            builder: (c) => CalendarOptionsDialog(
+                              item: item,
+                              onTwoWayChanged: (isTwoWay) async {
+                                await controller.updateCalendarSyncMode(item, isTwoWay);
+                              },
+                              onAllowMassDeletionChanged: (enabled) async {
+                                if (!enabled) {
+                                  await controller.setAllowMassDeletionDangerous(item, false);
+                                  return true;
+                                }
 
-                        if (result == null) return;
-                        await _handleOptionResult(result, context, item, controller);
-                      },
-                    ),
-                  ],
-                )),
+                                final bool? confirmed = await showDialog<bool>(
+                                  context: c,
+                                  builder: (dialogContext) => AlertDialog(
+                                    title: const Text('Enable mass deletion?'),
+                                    content: const Text(
+                                      'This can permanently delete large amounts of data on your phone and/or server if the snapshot is incomplete.',
+                                    ),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () => Navigator.of(dialogContext).pop(false),
+                                        child: const Text('Cancel'),
+                                      ),
+                                      FilledButton(
+                                        onPressed: () => Navigator.of(dialogContext).pop(true),
+                                        child: const Text('I understand, enable'),
+                                      ),
+                                    ],
+                                  ),
+                                );
+
+                                if (confirmed == true) {
+                                  await controller.setAllowMassDeletionDangerous(item, true);
+                                  return true;
+                                }
+                                return false;
+                              },
+                            ),
+                          );
+
+                          if (result == null) return;
+                          await _handleOptionResult(result, context, item, controller);
+                        },
+                      ),
+                    ],
+                  ),
+                ),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
                   decoration: BoxDecoration(
