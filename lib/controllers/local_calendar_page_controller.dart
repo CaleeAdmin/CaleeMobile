@@ -1196,25 +1196,15 @@ class LocalCalendarPageController extends GetxController {
           children: [
             Text('Re-link "${item.name}" to "$remoteDisplayName"?'),
             const SizedBox(height: 12),
-            Text(
-              verifyConfidenceScore == null
-                  ? 'Event verification confidence (recent window): Unavailable'
-                  : 'Event verification confidence (recent window): ${verifyConfidenceScore.clamp(0, 100)}%',
-            ),
-            Text(
-              _verificationConfidenceExplanation(verifyConfidenceScore),
-              style: const TextStyle(color: Color(0xFF4B5563), fontSize: 12),
-            ),
-            Text('Collection/provider match confidence: ${providerHintScore.clamp(0, 100)}%'),
-            Text(
-              _providerHintConfidenceExplanation(providerHintScore),
-              style: const TextStyle(color: Color(0xFF4B5563), fontSize: 12),
-            ),
             Text('Account: ${item.accountName}'),
-            Text('Remote path: $remotePath'),
-            const SizedBox(height: 8),
+            const SizedBox(height: 12),
             const Text(
-              'Verification passed, so re-link can proceed.',
+              'Verification passed for this device calendar.',
+              style: TextStyle(color: Color(0xFF4B5563), fontSize: 12),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'This will reconnect the selected device calendar to the existing Calee calendar.',
               style: TextStyle(color: Color(0xFF4B5563), fontSize: 12),
             ),
           ],
