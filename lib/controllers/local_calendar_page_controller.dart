@@ -100,7 +100,7 @@ class LocalCalendarPageController extends GetxController {
 
     try {
       isLoading.value = true;
-      final List<LocalCalendarItem> candidates = await _findHighConfidenceRelinkCandidatesForRemote(
+      final List<LocalCalendarItem> candidates = await _findPossibleRelinkCandidatesForRemote(
         remoteCollectionId: remoteCollectionId,
         remoteDisplayName: remoteDisplayName,
         remotePath: remotePath,
@@ -114,6 +114,7 @@ class LocalCalendarPageController extends GetxController {
           preferredRemoteCollectionId: remoteCollectionId,
           preferredRemotePath: remotePath,
           allowFallback: false,
+          minimumProviderHintScore: 0,
         );
         if (resolvedTarget != null) {
           verifiedCandidates.add(candidate);
@@ -160,7 +161,35 @@ class LocalCalendarPageController extends GetxController {
     return verifiedCount;
   }
 
-  Future<List<LocalCalendarItem>> _findHighConfidenceRelinkCandidatesForRemote({
+  Future<int> getReviewableRelinkCandidateCountForRemote({
+    required int remoteCollectionId,
+    required String remoteDisplayName,
+    required String remotePath,
+  }) async {
+    final List<LocalCalendarItem> candidates = await _findPossibleRelinkCandidatesForRemote(
+      remoteCollectionId: remoteCollectionId,
+      remoteDisplayName: remoteDisplayName,
+      remotePath: remotePath,
+      requestPermission: false,
+      silentOnPermissionFailure: true,
+    );
+    int verifiedCount = 0;
+    for (final LocalCalendarItem candidate in candidates) {
+      final _ResolvedRelinkTarget? resolvedTarget = await _resolveVerifiedRelinkTargetForLocal(
+        candidate,
+        preferredRemoteCollectionId: remoteCollectionId,
+        preferredRemotePath: remotePath,
+        allowFallback: false,
+        minimumProviderHintScore: 0,
+      );
+      if (resolvedTarget != null) {
+        verifiedCount += 1;
+      }
+    }
+    return verifiedCount;
+  }
+
+  Future<List<LocalCalendarItem>> _findPossibleRelinkCandidatesForRemote({
     required int remoteCollectionId,
     required String remoteDisplayName,
     required String remotePath,
@@ -282,11 +311,7 @@ class LocalCalendarPageController extends GetxController {
           final String name =
               (calendar.name != null && calendar.name!.isNotEmpty) ? calendar.name! : 'Untitled calendar';
           final LocalCalendarItem item = _asScoringItem(id, name, accountName, calendar);
-          final int providerHintScore = _scoreCandidateProviderHint(remoteRow, item);
-          if (providerHintScore < _highConfidenceRelinkThreshold) {
-            return null;
-          }
-          item.relinkConfidence = providerHintScore;
+          item.relinkConfidence = _scoreCandidateProviderHint(remoteRow, item);
           return item;
         })
         .whereType<LocalCalendarItem>()
@@ -300,6 +325,26 @@ class LocalCalendarPageController extends GetxController {
       });
 
     return sortedCandidates;
+  }
+
+  Future<List<LocalCalendarItem>> _findHighConfidenceRelinkCandidatesForRemote({
+    required int remoteCollectionId,
+    required String remoteDisplayName,
+    required String remotePath,
+    bool requestPermission = true,
+    bool silentOnPermissionFailure = false,
+  }) async {
+    final List<LocalCalendarItem> candidates = await _findPossibleRelinkCandidatesForRemote(
+      remoteCollectionId: remoteCollectionId,
+      remoteDisplayName: remoteDisplayName,
+      remotePath: remotePath,
+      requestPermission: requestPermission,
+      silentOnPermissionFailure: silentOnPermissionFailure,
+    );
+
+    return candidates
+        .where((candidate) => candidate.relinkConfidence >= _highConfidenceRelinkThreshold)
+        .toList();
   }
 
   Future<List<Map<String, dynamic>>> _queryReusableRemoteCandidatesForLocal(
@@ -339,6 +384,7 @@ class LocalCalendarPageController extends GetxController {
     int? preferredRemoteCollectionId,
     String? preferredRemotePath,
     bool allowFallback = true,
+    int minimumProviderHintScore = _highConfidenceRelinkThreshold,
   }) async {
     final List<Map<String, dynamic>> reuseCandidates = await _queryReusableRemoteCandidatesForLocal(item);
     if (reuseCandidates.isEmpty) {
@@ -394,7 +440,7 @@ class LocalCalendarPageController extends GetxController {
         }
         continue;
       }
-      if (ranked.providerHintScore < _highConfidenceRelinkThreshold) {
+      if (ranked.providerHintScore < minimumProviderHintScore) {
         if (identical(ranked, preferredCandidate)) {
           preferredCheckedAndFailed = true;
           if (!allowFallback) {
