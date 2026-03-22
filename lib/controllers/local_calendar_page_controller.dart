@@ -107,7 +107,19 @@ class LocalCalendarPageController extends GetxController {
         requestPermission: true,
         silentOnPermissionFailure: false,
       );
-      reviewCandidates.assignAll(candidates);
+      final List<LocalCalendarItem> verifiedCandidates = <LocalCalendarItem>[];
+      for (final LocalCalendarItem candidate in candidates) {
+        final _ResolvedRelinkTarget? resolvedTarget = await _resolveVerifiedRelinkTargetForLocal(
+          candidate,
+          preferredRemoteCollectionId: remoteCollectionId,
+          preferredRemotePath: remotePath,
+          allowFallback: false,
+        );
+        if (resolvedTarget != null) {
+          verifiedCandidates.add(candidate);
+        }
+      }
+      reviewCandidates.assignAll(verifiedCandidates);
     } catch (e) {
       debugPrint('[ERROR] Failed to load relink review candidates: $e');
       final String errorMessage = e.toString();
@@ -133,7 +145,19 @@ class LocalCalendarPageController extends GetxController {
       requestPermission: false,
       silentOnPermissionFailure: true,
     );
-    return candidates.length;
+    int verifiedCount = 0;
+    for (final LocalCalendarItem candidate in candidates) {
+      final _ResolvedRelinkTarget? resolvedTarget = await _resolveVerifiedRelinkTargetForLocal(
+        candidate,
+        preferredRemoteCollectionId: remoteCollectionId,
+        preferredRemotePath: remotePath,
+        allowFallback: false,
+      );
+      if (resolvedTarget != null) {
+        verifiedCount += 1;
+      }
+    }
+    return verifiedCount;
   }
 
   Future<List<LocalCalendarItem>> _findHighConfidenceRelinkCandidatesForRemote({
@@ -276,6 +300,143 @@ class LocalCalendarPageController extends GetxController {
       });
 
     return sortedCandidates;
+  }
+
+  Future<List<Map<String, dynamic>>> _queryReusableRemoteCandidatesForLocal(
+    LocalCalendarItem item,
+  ) async {
+    final String? loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey);
+    if (loginName == null || loginName.trim().isEmpty) {
+      throw Exception('Not logged in to Calee');
+    }
+
+    final db = await DatabaseHelper.instance.database;
+    final String localOriginKey = _buildLocalOriginKey(item);
+    return db.rawQuery('''
+      SELECT
+        rc.id,
+        rc.remote_path,
+        rc.display_name,
+        rc.origin_key,
+        rc.is_subscription,
+        rc.subscription_url,
+        COALESCE(NULLIF(TRIM(rc.account_name), ''), 'Local') AS account_name
+      FROM remote_collections rc
+      LEFT JOIN local_bindings lb
+        ON lb.remote_collection_id = rc.id
+       AND lb.local_collection_id IS NOT NULL
+       AND lb.local_collection_id != ''
+      WHERE rc.collection_type = 'calendar'
+        AND rc.origin_kind = 0
+        AND rc.origin_key = ?
+        AND lb.id IS NULL
+        AND COALESCE(NULLIF(TRIM(rc.account_name), ''), '') = ?
+    ''', [localOriginKey, loginName.trim()]);
+  }
+
+  Future<_ResolvedRelinkTarget?> _resolveVerifiedRelinkTargetForLocal(
+    LocalCalendarItem item, {
+    int? preferredRemoteCollectionId,
+    String? preferredRemotePath,
+    bool allowFallback = true,
+  }) async {
+    final List<Map<String, dynamic>> reuseCandidates = await _queryReusableRemoteCandidatesForLocal(item);
+    if (reuseCandidates.isEmpty) {
+      return null;
+    }
+
+    final String normalizedPreferredRemotePath = CaleeServerService.normalizeRemotePath(preferredRemotePath ?? '');
+    final bool hasPreferredRemote =
+        preferredRemoteCollectionId != null || normalizedPreferredRemotePath.isNotEmpty;
+    final List<_RankedReuseCandidate> rankedCandidates = reuseCandidates
+        .map((candidate) => _RankedReuseCandidate(
+              raw: candidate,
+              providerHintScore: _scoreCandidateProviderHint(candidate, item),
+            ))
+        .toList()
+      ..sort((a, b) => b.providerHintScore.compareTo(a.providerHintScore));
+
+    _RankedReuseCandidate? preferredCandidate;
+    for (final _RankedReuseCandidate ranked in rankedCandidates) {
+      final Map<String, dynamic> candidate = ranked.raw;
+      final int? candidateId = candidate['id'] as int?;
+      final String normalizedCandidatePath =
+          CaleeServerService.normalizeRemotePath(candidate['remote_path']?.toString() ?? '');
+      final bool matchesPreferred =
+          (preferredRemoteCollectionId != null && candidateId == preferredRemoteCollectionId) ||
+          (normalizedPreferredRemotePath.isNotEmpty &&
+              normalizedCandidatePath.isNotEmpty &&
+              normalizedCandidatePath == normalizedPreferredRemotePath);
+      if (matchesPreferred) {
+        preferredCandidate = ranked;
+        break;
+      }
+    }
+
+    if (hasPreferredRemote && preferredCandidate == null) {
+      return null;
+    }
+    if (preferredCandidate != null) {
+      rankedCandidates.remove(preferredCandidate);
+      rankedCandidates.insert(0, preferredCandidate);
+    }
+
+    bool preferredCheckedAndFailed = false;
+    for (final _RankedReuseCandidate ranked in rankedCandidates) {
+      final Map<String, dynamic> candidate = ranked.raw;
+      final String candidatePath = (candidate['remote_path'] ?? '').toString();
+      if (candidatePath.isEmpty) {
+        if (identical(ranked, preferredCandidate)) {
+          preferredCheckedAndFailed = true;
+          if (!allowFallback) {
+            return null;
+          }
+        }
+        continue;
+      }
+      if (ranked.providerHintScore < _highConfidenceRelinkThreshold) {
+        if (identical(ranked, preferredCandidate)) {
+          preferredCheckedAndFailed = true;
+          if (!allowFallback) {
+            return null;
+          }
+        }
+        continue;
+      }
+
+      final bool candidateIsSubscription =
+          candidate['is_subscription'] == 1 || candidate['is_subscription'] == true;
+      final RelinkVerificationResult verifyResult = await _relinkVerifier.verify(
+        remotePath: candidatePath,
+        localCalendarId: item.id,
+        isSubscription: candidateIsSubscription,
+      );
+      if (verifyResult.outcome == RelinkVerificationOutcome.passed) {
+        final String remoteDisplayName = (candidate['display_name'] ?? '').toString().trim().isNotEmpty
+            ? (candidate['display_name'] ?? '').toString().trim()
+            : candidatePath;
+        return _ResolvedRelinkTarget(
+          remoteCollectionId: candidate['id'] as int,
+          remotePath: candidatePath,
+          remoteDisplayName: remoteDisplayName,
+          providerHintScore: ranked.providerHintScore,
+          verificationOutcome: verifyResult.outcome,
+          verificationConfidenceScore: verifyResult.confidenceScore,
+        );
+      }
+
+      if (identical(ranked, preferredCandidate)) {
+        preferredCheckedAndFailed = true;
+        if (!allowFallback) {
+          return null;
+        }
+      }
+    }
+
+    if (preferredCheckedAndFailed && !allowFallback) {
+      return null;
+    }
+    return null;
   }
 
   Future<void> refreshLocalCalendars() async {
@@ -559,25 +720,43 @@ class LocalCalendarPageController extends GetxController {
     reviewCandidates.refresh();
 
     try {
-      final int remoteCollectionId = reviewRemoteCollectionId.value!;
-      final String remoteDisplayName = (reviewRemoteDisplayName.value ?? '').trim();
+      final int currentReviewRemoteCollectionId = reviewRemoteCollectionId.value!;
+      final String currentReviewPath = reviewPath.trim();
+      final String currentReviewRemoteDisplayName = (reviewRemoteDisplayName.value ?? '').trim();
 
-      final RelinkVerificationResult verifyResult = await _relinkVerifier.verify(
-        remotePath: reviewPath.trim(),
-        localCalendarId: item.id,
-        isSubscription: false,
+      final _ResolvedRelinkTarget? resolvedTarget = await _resolveVerifiedRelinkTargetForLocal(
+        item,
+        preferredRemoteCollectionId: currentReviewRemoteCollectionId,
+        preferredRemotePath: currentReviewPath,
+        allowFallback: true,
       );
-      if (verifyResult.outcome != RelinkVerificationOutcome.passed) {
+      if (resolvedTarget == null) {
         Get.snackbar(
           'Unable to re-link',
-          'Verification did not pass for this device calendar.',
+          'No verified Calee calendar match was found for this device calendar.',
         );
         return;
       }
 
+      final bool matchesCurrentReviewRemote =
+          resolvedTarget.remoteCollectionId == currentReviewRemoteCollectionId ||
+          CaleeServerService.normalizeRemotePath(resolvedTarget.remotePath) ==
+              CaleeServerService.normalizeRemotePath(currentReviewPath);
+
+      if (!matchesCurrentReviewRemote) {
+        final bool redirected = await _confirmReviewModeRedirectedRelinkTarget(
+          item,
+          currentReviewRemoteDisplayName: currentReviewRemoteDisplayName,
+          resolvedRemoteDisplayName: resolvedTarget.remoteDisplayName,
+        );
+        if (!redirected) {
+          return;
+        }
+      }
+
       final bool confirmed = await _confirmReviewModeRelinkTarget(
         item,
-        remoteDisplayName: remoteDisplayName,
+        remoteDisplayName: resolvedTarget.remoteDisplayName,
       );
       if (!confirmed) {
         return;
@@ -597,16 +776,17 @@ class LocalCalendarPageController extends GetxController {
           {
             'account_name': accountName,
             'origin_key': localOriginKey,
-            'updated_at': now,
+            'remote_path': resolvedTarget.remotePath,
+            'display_name': resolvedTarget.remoteDisplayName,
           },
           where: 'id = ?',
-          whereArgs: [remoteCollectionId],
+          whereArgs: [resolvedTarget.remoteCollectionId],
         );
 
         await txn.insert(
           'collection_states',
           {
-            'remote_collection_id': remoteCollectionId,
+            'remote_collection_id': resolvedTarget.remoteCollectionId,
             'sync_gate_reason': SyncGateReason.safeFirstSync,
             'updated_at': now,
           },
@@ -615,18 +795,18 @@ class LocalCalendarPageController extends GetxController {
         await txn.update(
           'collection_states',
           {
-            'remote_collection_id': remoteCollectionId,
+            'remote_collection_id': resolvedTarget.remoteCollectionId,
             'sync_gate_reason': SyncGateReason.safeFirstSync,
             'updated_at': now,
           },
           where: 'remote_collection_id = ?',
-          whereArgs: [remoteCollectionId],
+          whereArgs: [resolvedTarget.remoteCollectionId],
         );
 
         await txn.insert(
           'local_bindings',
           {
-            'remote_collection_id': remoteCollectionId,
+            'remote_collection_id': resolvedTarget.remoteCollectionId,
             'local_collection_id': item.id.trim(),
             'binding_role': SyncBindingRole.ownerLink,
             'created_at': now,
@@ -702,106 +882,35 @@ class LocalCalendarPageController extends GetxController {
             throw Exception('Not logged in to Calee');
           }
 
-          final List<Map<String, dynamic>> reuseCandidates = await db.rawQuery('''
-            SELECT
-              rc.id,
-              rc.remote_path,
-              rc.display_name,
-              rc.origin_key,
-              rc.is_subscription,
-              rc.subscription_url,
-              COALESCE(NULLIF(TRIM(rc.account_name), ''), 'Local') AS account_name
-            FROM remote_collections rc
-            LEFT JOIN local_bindings lb
-              ON lb.remote_collection_id = rc.id
-             AND lb.local_collection_id IS NOT NULL
-             AND lb.local_collection_id != ''
-            WHERE rc.collection_type = 'calendar'
-              AND rc.origin_kind = 0
-              AND rc.origin_key = ?
-              AND lb.id IS NULL
-              AND COALESCE(NULLIF(TRIM(rc.account_name), ''), '') = ?
-          ''', [localOriginKey, loginName.trim()]);
-
-          final List<_RankedReuseCandidate> rankedCandidates = reuseCandidates
-              .map((candidate) => _RankedReuseCandidate(
-                    raw: candidate,
-                    providerHintScore: _scoreCandidateProviderHint(candidate, item),
-                  ))
-              .toList()
-            ..sort((a, b) => b.providerHintScore.compareTo(a.providerHintScore));
-
-          for (final ranked in rankedCandidates) {
-            final Map<String, dynamic> candidate = ranked.raw;
-            final String candidatePath = (candidate['remote_path'] ?? '').toString();
-            if (candidatePath.isEmpty) {
-              continue;
-            }
-
-            if (ranked.providerHintScore < _highConfidenceRelinkThreshold) {
-              continue;
-            }
-
-            try {
-              final bool candidateIsSubscription =
-                  candidate['is_subscription'] == 1 || candidate['is_subscription'] == true;
-
-              final RelinkVerificationResult verifyResult = await _relinkVerifier.verify(
-                remotePath: candidatePath,
-                localCalendarId: item.id,
-                isSubscription: candidateIsSubscription,
-              );
-
-              final String remoteDisplayName =
-                  (candidate['display_name'] ?? '').toString().trim().isNotEmpty
-                  ? (candidate['display_name'] ?? '').toString().trim()
-                  : candidatePath;
-
-              final bool verificationUnavailable =
-                  verifyResult.outcome == RelinkVerificationOutcome.unavailable;
-              if (verificationUnavailable) {
-                debugPrint(
-                  '[RelinkVerifier] verification_unavailable for candidate=${candidate['id']}; prompting user with warning',
-                );
-              }
-
+          try {
+            final _ResolvedRelinkTarget? resolvedTarget = await _resolveVerifiedRelinkTargetForLocal(item);
+            if (resolvedTarget != null) {
               final _RelinkDecision relinkDecision = await _confirmRelinkTarget(
                 item,
-                remoteDisplayName: remoteDisplayName,
-                remotePath: candidatePath,
-                verifyConfidenceScore: verifyResult.confidenceScore,
-                providerHintScore: ranked.providerHintScore,
-                verificationOutcome: verifyResult.outcome,
+                remoteDisplayName: resolvedTarget.remoteDisplayName,
+                remotePath: resolvedTarget.remotePath,
+                verifyConfidenceScore: resolvedTarget.verificationConfidenceScore,
+                providerHintScore: resolvedTarget.providerHintScore,
+                verificationOutcome: resolvedTarget.verificationOutcome,
               );
 
               if (relinkDecision == _RelinkDecision.cancel) {
                 relinkConfirmationDeclined = true;
-                break;
+              } else if (relinkDecision == _RelinkDecision.linkCandidate) {
+                remotePath = resolvedTarget.remotePath;
+                await db.update(
+                  'collection_states',
+                  {
+                    'sync_gate_reason': SyncGateReason.safeFirstSync,
+                    'updated_at': DateTime.now().millisecondsSinceEpoch,
+                  },
+                  where: 'remote_collection_id = ?',
+                  whereArgs: [resolvedTarget.remoteCollectionId],
+                );
               }
-
-              if (relinkDecision == _RelinkDecision.createNewRemote) {
-                break;
-              }
-
-              if (verifyResult.outcome != RelinkVerificationOutcome.passed) {
-                continue;
-              }
-              remotePath = candidatePath;
-              await db.update(
-                'collection_states',
-                {
-                  'sync_gate_reason': SyncGateReason.safeFirstSync,
-                  'updated_at': DateTime.now().millisecondsSinceEpoch,
-                },
-                where: 'remote_collection_id = ?',
-                whereArgs: [candidate['id']],
-              );
-
-              break;
-            } catch (e) {
-              debugPrint('[RelinkVerifier] verify_failed_transient for candidate=${candidate['id']}: $e');
-              continue;
             }
+          } catch (e) {
+            debugPrint('[RelinkVerifier] resolve_failed_transient for local=${item.id}: $e');
           }
 
           if (relinkConfirmationDeclined) {
@@ -1228,6 +1337,43 @@ class LocalCalendarPageController extends GetxController {
     return confirmed == true;
   }
 
+  Future<bool> _confirmReviewModeRedirectedRelinkTarget(
+    LocalCalendarItem item, {
+    required String currentReviewRemoteDisplayName,
+    required String resolvedRemoteDisplayName,
+  }) async {
+    final bool? confirmed = await Get.dialog<bool>(
+      AlertDialog(
+        title: const Text('Use verified calendar?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('This device calendar did not verify against "$currentReviewRemoteDisplayName".'),
+            const SizedBox(height: 8),
+            Text('It did verify against "$resolvedRemoteDisplayName".'),
+            const SizedBox(height: 8),
+            const Text('Re-link to the verified Calee calendar instead?'),
+            const SizedBox(height: 12),
+            Text('Device calendar: ${item.name}'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Get.back<bool>(result: false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Get.back<bool>(result: true),
+            child: const Text('Re-link to verified calendar'),
+          ),
+        ],
+      ),
+      barrierDismissible: false,
+    );
+    return confirmed == true;
+  }
+
   Future<void> _refreshMainCalendarList() async {
     if (!Get.isRegistered<CalendarPageController>()) {
       return;
@@ -1261,6 +1407,24 @@ class LocalCalendarPageController extends GetxController {
     }
     return 'Strong match: collection metadata aligns well.';
   }
+}
+
+class _ResolvedRelinkTarget {
+  final int remoteCollectionId;
+  final String remotePath;
+  final String remoteDisplayName;
+  final int providerHintScore;
+  final RelinkVerificationOutcome verificationOutcome;
+  final int? verificationConfidenceScore;
+
+  const _ResolvedRelinkTarget({
+    required this.remoteCollectionId,
+    required this.remotePath,
+    required this.remoteDisplayName,
+    required this.providerHintScore,
+    required this.verificationOutcome,
+    required this.verificationConfidenceScore,
+  });
 }
 
 class _RankedReuseCandidate {
