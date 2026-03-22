@@ -7,6 +7,8 @@ import 'package:caleesync/feature/public_subscriptions_page.dart';
 import 'package:caleesync/core/platform/pigeon/calendar_api.g.dart';
 
 import '../controllers/CalendarPageController.dart';
+import '../controllers/local_calendar_page_controller.dart';
+import '../sync/SyncEnum.dart';
 import '../sync/sync_gate_reason.dart';
 
 class CalendarPage extends StatefulWidget {
@@ -273,7 +275,7 @@ class _CalendarPageState extends State<CalendarPage> {
               ),
               ListTile(
                 leading: const Icon(Icons.link),
-                title: const Text('Link to Device Calendar'),
+                title: const Text('Local Calendars'),
                 onTap: () {
                   Navigator.of(sheetContext).pop();
                   Get.to(() => const LocalCalendarsPage());
@@ -333,14 +335,25 @@ extension on _CalendarRow {
     return error.toString().replaceFirst('Exception: ', '');
   }
 
-  String _originKindLabel(int originKind) {
+  String _provenanceLabel(int originKind) {
     switch (originKind) {
-      case 0:
-        return 'Local';
-      case 1:
-        return 'Remote';
+      case SyncBindingOrigin.local:
+        return 'Local-seeded';
+      case SyncBindingOrigin.remote:
+        return 'Remote-created';
       default:
-        return 'Unknown ($originKind)';
+        return 'Unknown';
+    }
+  }
+
+  String _bindingRoleLabel(int bindingRole) {
+    switch (bindingRole) {
+      case SyncBindingRole.ownerLink:
+        return 'Owner link';
+      case SyncBindingRole.mirror:
+        return 'Mirror';
+      default:
+        return 'Unknown';
     }
   }
 
@@ -394,7 +407,8 @@ extension on _CalendarRow {
                 _propertyRow('Sync Mode', item.isReadOnly ? 'Read-only' : 'Two-way sync'),
                 _propertyRow('Enabled', item.isEnabled ? 'Yes' : 'No'),
                 _propertyRow('Color', item.color),
-                _propertyRow('Origin Kind', _originKindLabel(item.origin)),
+                _propertyRow('Provenance', _provenanceLabel(item.origin)),
+                _propertyRow('This Device Role', _bindingRoleLabel(item.bindingRole)),
                 if ((item.originKey ?? '').isNotEmpty)
                   _propertyRow('Origin Key', item.originKey!),
                 if ((item.remotePath ?? '').isNotEmpty)
@@ -493,6 +507,11 @@ extension on _CalendarRow {
                   ),
                   const SizedBox(height: 8),
                   const Text('Enter a new name for this calendar', style: TextStyle(color: Colors.black54)),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Renaming affects the Calee/remote calendar. Depending on how this calendar is linked, your device calendar name may stay unchanged.',
+                    style: TextStyle(color: Colors.black54, fontSize: 12),
+                  ),
                   const SizedBox(height: 12),
                   Align(
                     alignment: Alignment.centerLeft,
@@ -519,7 +538,17 @@ extension on _CalendarRow {
                           ? null
                           : () async {
                               final newName = _nameCtrl.text.trim();
-                              if (newName.isEmpty) return;
+                              final String? invalidReason = Get.find<CalendarPageController>().validateNewCalendarName(newName);
+                              if (invalidReason != null) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text(invalidReason)),
+                                );
+                                return;
+                              }
+                              if (newName == item.name.trim()) {
+                                Navigator.of(context).pop(false);
+                                return;
+                              }
                               setState(() => isRenaming = true);
                               try {
                                 await Get.find<CalendarPageController>().renameCalendar(item.localId, item.remotePath, newName);
@@ -737,6 +766,38 @@ class _CalendarRow extends StatelessWidget {
                     style: const TextStyle(fontSize: 12, color: Colors.black54),
                   ),
                 ),
+                if (item.hasRelinkSuggestion)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Possible reconnection on this device',
+                          style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+                        ),
+                        TextButton(
+                          style: TextButton.styleFrom(
+                            padding: EdgeInsets.zero,
+                            minimumSize: const Size(0, 0),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            alignment: Alignment.centerLeft,
+                          ),
+                          onPressed: () {
+                            Get.to(
+                              () => LocalCalendarsPage(
+                                mode: LocalCalendarsPageMode.relinkReview,
+                                remoteCollectionId: item.remoteCollectionId,
+                                remoteDisplayName: item.name,
+                                remotePath: item.remotePath,
+                              ),
+                            );
+                          },
+                          child: const Text('Review Re-link'),
+                        ),
+                      ],
+                    ),
+                  ),
                 if (item.isEnabled && (_syncGateReasonMessage(item.syncGateReason) ?? '').isNotEmpty)
                   Container(
                     margin: const EdgeInsets.only(top: 4),

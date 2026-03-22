@@ -2,7 +2,7 @@ import 'package:caleesync/common/app_constant.dart';
 import 'package:caleesync/common/utils/mmkv_utils.dart';
 import 'package:caleesync/core/platform/pigeon/calendar_api.g.dart';
 import 'package:flutter/cupertino.dart';
-import 'package:flutter/material.dart' show Text, TextButton;
+import 'package:flutter/material.dart' show Text;
 import 'package:get/get.dart';
 import 'dart:async';
 import 'dart:io';
@@ -12,8 +12,9 @@ import '../sync/sync_completed_event_bus.dart';
 import '../sync/sync_trigger_orchestrator.dart';
 import '../data/database_helper.dart';
 import '../data/sync_repository.dart';
-import '../feature/local_calendars_page.dart';
 import '../services/calee_server_service.dart';
+import '../sync/SyncEnum.dart';
+import 'local_calendar_page_controller.dart';
 
 class CalendarDisplayItem {
   // 1. 标识符
@@ -33,9 +34,12 @@ class CalendarDisplayItem {
   final String accountName;
   bool isEnabled;            // 对应数据库 collection_states.is_enabled
   final String? syncGateReason;
-  final int origin;          // 0: 本地创建, 1: 云端同步
+  final int origin;          // Shared provenance only: where the remote calendar came from, not this-device sync behavior.
   final String? originKey;
   final int bindingId;
+  final int bindingRole;     // This-device role: mirror vs ownerLink, and it drives runtime behavior.
+  final int remoteCollectionId;
+  bool hasRelinkSuggestion;
   bool allowMassDeletionDangerous;
 
   CalendarDisplayItem({
@@ -54,32 +58,12 @@ class CalendarDisplayItem {
     required this.origin,
     this.originKey,
     required this.bindingId,
+    required this.bindingRole,
+    required this.remoteCollectionId,
+    this.hasRelinkSuggestion = false,
     required this.allowMassDeletionDangerous,
   });
 
-  // 方便从数据库 Map 转换
-  factory CalendarDisplayItem.fromMap(Map<String, dynamic> map) {
-    bool toBool(dynamic value) => value == true || value == 1 || value == '1';
-
-    return CalendarDisplayItem(
-      localId: map['local_collection_id']?.toString(), // 转为 String 处理
-      remotePath: map['remote_path'] ?? '',
-      name: map['display_name'] ?? 'Untitled',
-      color: map['color'] ?? '#000000',
-      eventCount: (map['event_count'] as int?) ?? 0, // 可由查询结果直接带入
-      isReadOnly: (map['sync_mode'] as int?) == 0,
-      isSubscription: toBool(map['is_subscription']),
-      isLocalReadOnly: toBool(map['is_local_read_only']),
-      subscriptionUrl: map['subscription_url']?.toString(),
-      accountName: map['account_name']?.toString() ?? '',
-      isEnabled: toBool(map['state_is_enabled']),
-      syncGateReason: map['sync_gate_reason']?.toString(),
-      origin: (map['origin_kind'] as int?) ?? 2,
-      originKey: map['origin_key']?.toString(),
-      bindingId: (map['binding_id'] as int?) ?? 0,
-      allowMassDeletionDangerous: false,
-    );
-  }
 }
 
 // 2. Controller 实现
@@ -197,20 +181,10 @@ class CalendarPageController extends GetxController {
 
       final String? syncMessage = _repo.takeLastConnectErrorMessage();
       if (!enableResult.success) {
-        final String err = syncMessage ?? 'Enable failed. Please retry.';
-        final bool showRelinkAction = err.contains('needs a quick relink');
+        final String err = syncMessage ?? 'Unable to enable this calendar on this device. Please retry.';
         Get.snackbar(
           'Enable failed',
           err,
-          mainButton: showRelinkAction
-              ? TextButton(
-                  onPressed: () {
-                    Get.back();
-                    Get.to(() => const LocalCalendarsPage());
-                  },
-                  child: const Text('Link now'),
-                )
-              : null,
         );
       } else if (syncMessage != null && syncMessage.isNotEmpty) {
         Get.snackbar('Sync failed', syncMessage);
@@ -287,6 +261,9 @@ class CalendarPageController extends GetxController {
       syncGateReason: item.syncGateReason,
       origin: item.origin,
       bindingId: item.bindingId,
+      bindingRole: item.bindingRole,
+      remoteCollectionId: item.remoteCollectionId,
+      hasRelinkSuggestion: item.hasRelinkSuggestion,
       allowMassDeletionDangerous: item.allowMassDeletionDangerous,
     );
     calendars.refresh();
@@ -399,6 +376,41 @@ class CalendarPageController extends GetxController {
     await reloadCalendars();
   }
 
+  Future<void> _populateRelinkSuggestions(List<CalendarDisplayItem> items) async {
+    final String loginName = (MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? '').trim();
+    final LocalCalendarPageController localCtrl = Get.isRegistered<LocalCalendarPageController>()
+        ? Get.find<LocalCalendarPageController>()
+        : Get.put(LocalCalendarPageController());
+
+    for (final item in items) {
+      item.hasRelinkSuggestion = false;
+
+      if (loginName.isEmpty ||
+          item.origin != SyncBindingOrigin.local ||
+          item.remoteCollectionId <= 0 ||
+          item.bindingId != 0 ||
+          item.remotePath == null ||
+          item.remotePath!.isEmpty ||
+          item.accountName.trim() != loginName.trim()) {
+        continue;
+      }
+
+      try {
+        final int count = await localCtrl.getHighConfidenceRelinkCandidateCountForRemote(
+          remoteCollectionId: item.remoteCollectionId,
+          remoteDisplayName: item.name,
+          remotePath: item.remotePath!,
+        );
+        if (count > 0) {
+          item.hasRelinkSuggestion = true;
+        }
+      } catch (e) {
+        debugPrint('[WARN] Failed to populate relink suggestions for ${item.remoteCollectionId}: $e');
+        item.hasRelinkSuggestion = false;
+      }
+    }
+  }
+
   Future<void> _reloadCalendarsImpl() async {
     try {
       isLoading.value = true;
@@ -424,7 +436,7 @@ class CalendarPageController extends GetxController {
       // 2. 查询本地 remote_collections 的所有日历记录
       final db = await DatabaseHelper.instance.database;
       final List<Map<String, dynamic>> calendarMaps = await db.rawQuery('''
-        SELECT rc.*, lb.local_collection_id, lb.id AS binding_id, cs.sync_gate_reason, cs.is_enabled AS state_is_enabled
+        SELECT rc.*, lb.local_collection_id, lb.id AS binding_id, lb.binding_role AS binding_role, cs.sync_gate_reason, cs.is_enabled AS state_is_enabled
         FROM remote_collections rc
         LEFT JOIN local_bindings lb ON lb.remote_collection_id = rc.id
         LEFT JOIN collection_states cs ON cs.remote_collection_id = rc.id
@@ -482,6 +494,7 @@ class CalendarPageController extends GetxController {
 
         var displayItem = CalendarDisplayItem(
           localId: localId,
+          remoteCollectionId: (cal['id'] as int?) ?? 0,
           name: cal['display_name'] ?? 'Unknown',
           color: cal['color'] ?? '#808080',
           eventCount: realCount,
@@ -496,12 +509,14 @@ class CalendarPageController extends GetxController {
           origin: origin,
           originKey: cal['origin_key']?.toString(),
           bindingId: bindingId,
+          bindingRole: (cal['binding_role'] as int?) ?? 0,
           allowMassDeletionDangerous: allowMassDeletionDangerous,
         );
 
         nextCloudCalendars.add(displayItem);
       }
 
+      await _populateRelinkSuggestions(nextCloudCalendars);
       calendars.assignAll(nextCloudCalendars);
 
     } catch (e) {
@@ -540,10 +555,17 @@ class CalendarPageController extends GetxController {
 
   /// 重命名日历（委托给仓库并刷新）
   Future<void> renameCalendar(String? localId, String? remotePath, String newName) async {
+    final String normalized = newName.trim();
+    final String? invalidReason = validateNewCalendarName(normalized);
+    if (invalidReason != null) {
+      Get.snackbar('Invalid calendar name', invalidReason);
+      throw Exception(invalidReason);
+    }
+
     try {
       if ((localId == null || localId.isEmpty) && (remotePath == null || remotePath.isEmpty)) return;
       isLoading.value = true;
-      await _repo.renameCalendar(localId: localId, remotePath: remotePath, newName: newName);
+      await _repo.renameCalendar(localId: localId, remotePath: remotePath, newName: normalized);
       await reloadCalendars();
       _notifyMeaningfulChange();
     } catch (e) {

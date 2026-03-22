@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 class QRScannerPage extends StatefulWidget {
@@ -63,7 +62,7 @@ class _QRScannerPageState extends State<QRScannerPage> {
         leading: SafeArea(
           child: IconButton(
             icon: const Icon(Icons.close, color: Colors.white),
-            onPressed: () => context.pop(),
+            onPressed: () => Navigator.of(context).pop(),
           ),
         ),
       ),

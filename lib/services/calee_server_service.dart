@@ -314,14 +314,7 @@ class CaleeServerService {
         INSERT INTO collection_states (remote_collection_id, sync_gate_reason, is_enabled, updated_at)
         SELECT
           rc.id,
-          CASE
-            WHEN rc.origin_kind = 0
-              AND NOT EXISTS (
-                SELECT 1 FROM local_bindings lb
-                WHERE lb.remote_collection_id = rc.id
-              ) THEN 'relink_required'
-            ELSE NULL
-          END,
+          NULL,
           0,
           ?
         FROM remote_collections rc
@@ -334,16 +327,6 @@ class CaleeServerService {
       await txn.rawUpdate('''
         UPDATE collection_states
         SET sync_gate_reason = CASE
-          WHEN sync_gate_reason IN ('relink_verifying', 'relink_mismatch')
-            THEN sync_gate_reason
-          WHEN (
-            SELECT rc.origin_kind FROM remote_collections rc
-            WHERE rc.id = collection_states.remote_collection_id
-          ) = 0
-          AND NOT EXISTS (
-            SELECT 1 FROM local_bindings lb
-            WHERE lb.remote_collection_id = collection_states.remote_collection_id
-          ) THEN 'relink_required'
           WHEN sync_gate_reason IS NOT NULL AND sync_gate_reason != ''
             THEN sync_gate_reason
           ELSE NULL
@@ -927,6 +910,15 @@ class CaleeServerService {
     }
   }
 
+  String _escapeXmlText(String value) {
+    return value
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('\"', '&quot;')
+        .replaceAll("'", '&apos;');
+  }
+
   Future<bool> renameRemoteCalendar({
     required String userId,
     required String calendarPath,
@@ -935,13 +927,14 @@ class CaleeServerService {
     final server = _activeServerBase;
     final password = MMKVUtils.instance.getString(AppConstant.appPasswordKey);
     final uri = Uri.parse('$server$calendarPath');
+    final String escapedNewName = _escapeXmlText(newName);
 
     // 使用 PROPPATCH 修改 displayname
     final xmlBody = '''<?xml version="1.0" encoding="utf-8" ?>
 <d:propertyupdate xmlns:d="DAV:">
   <d:set>
     <d:prop>
-      <d:displayname>$newName</d:displayname>
+      <d:displayname>$escapedNewName</d:displayname>
     </d:prop>
   </d:set>
 </d:propertyupdate>''';

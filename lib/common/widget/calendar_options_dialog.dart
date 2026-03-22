@@ -19,7 +19,6 @@ class CalendarOptionsDialog extends StatefulWidget {
 
 class _CalendarOptionsDialogState extends State<CalendarOptionsDialog> {
   late bool isTwoWay;
-  late bool isRenameDisabled;
   late bool isTwoWayDisabled;
   late bool allowMassDeletionDangerous;
 
@@ -28,9 +27,6 @@ class _CalendarOptionsDialogState extends State<CalendarOptionsDialog> {
     super.initState();
     isTwoWay = !widget.item.isReadOnly;
     isTwoWayDisabled = widget.item.isSubscription || widget.item.isLocalReadOnly;
-    // origin: 0 = 本地初始化, 1 = 云端同步
-    // 本地初始化的映射不允许在主日历页重命名
-    isRenameDisabled = widget.item.origin == 0;
     allowMassDeletionDangerous = widget.item.allowMassDeletionDangerous;
   }
 
@@ -96,13 +92,10 @@ class _CalendarOptionsDialogState extends State<CalendarOptionsDialog> {
             ),
             ListTile(
               title: Text(
-                'Rename',
-                style: TextStyle(
-                  color: isRenameDisabled ? Colors.black38 : Colors.black,
-                ),
+                'Rename calendar',
+                style: const TextStyle(color: Colors.black),
               ),
-              enabled: !isRenameDisabled,
-              onTap: isRenameDisabled ? null : () => Navigator.of(context).pop('rename'),
+              onTap: () => Navigator.of(context).pop('rename'),
             ),
             ListTile(
               title: const Text('Delete', style: TextStyle(color: Colors.red)),
