@@ -776,7 +776,6 @@ class LocalCalendarPageController extends GetxController {
           {
             'account_name': accountName,
             'origin_key': localOriginKey,
-            'updated_at': now,
             'remote_path': resolvedTarget.remotePath,
             'display_name': resolvedTarget.remoteDisplayName,
           },
