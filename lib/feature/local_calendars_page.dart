@@ -3,14 +3,59 @@ import 'package:get/get.dart';
 
 import '../controllers/local_calendar_page_controller.dart';
 
-class LocalCalendarsPage extends StatelessWidget {
-  const LocalCalendarsPage({super.key});
+class LocalCalendarsPage extends StatefulWidget {
+  const LocalCalendarsPage({
+    super.key,
+    this.mode = LocalCalendarsPageMode.normal,
+    this.remoteCollectionId,
+    this.remoteDisplayName,
+    this.remotePath,
+  });
+
+  final LocalCalendarsPageMode mode;
+  final int? remoteCollectionId;
+  final String? remoteDisplayName;
+  final String? remotePath;
+
+  @override
+  State<LocalCalendarsPage> createState() => _LocalCalendarsPageState();
+}
+
+class _LocalCalendarsPageState extends State<LocalCalendarsPage> {
+  bool _didScheduleLoad = false;
 
   @override
   Widget build(BuildContext context) {
     final LocalCalendarPageController ctrl = Get.isRegistered<LocalCalendarPageController>()
         ? Get.find<LocalCalendarPageController>()
         : Get.put(LocalCalendarPageController());
+
+    if (!_didScheduleLoad) {
+      _didScheduleLoad = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        if (!mounted) {
+          return;
+        }
+
+        if (widget.mode == LocalCalendarsPageMode.normal) {
+          await ctrl.enterNormalMode();
+          return;
+        }
+
+        final int? remoteCollectionId = widget.remoteCollectionId;
+        final String? remoteDisplayName = widget.remoteDisplayName;
+        final String? remotePath = widget.remotePath;
+        if (remoteCollectionId == null || remoteDisplayName == null || remotePath == null) {
+          return;
+        }
+
+        await ctrl.loadRelinkReviewCandidates(
+          remoteCollectionId: remoteCollectionId,
+          remoteDisplayName: remoteDisplayName,
+          remotePath: remotePath,
+        );
+      });
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -19,9 +64,11 @@ class LocalCalendarsPage extends StatelessWidget {
           icon: const Icon(Icons.arrow_back_ios),
           onPressed: () => Navigator.maybePop(context),
         ),
-        title: const Text(
-          'Link to Device Calendar',
-          style: TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
+        title: Text(
+          widget.mode == LocalCalendarsPageMode.normal
+              ? 'Local Calendars'
+              : 'Review Re-link',
+          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
         ),
         elevation: 0,
       ),
@@ -30,16 +77,74 @@ class LocalCalendarsPage extends StatelessWidget {
           return const Center(child: CircularProgressIndicator());
         }
 
+        final bool isReviewMode = ctrl.isReviewMode;
         final groups = ctrl.calendarGroups.toList();
-        if (groups.isEmpty) {
+        final candidates = ctrl.reviewCandidates.toList();
+        final String reviewTargetName =
+            ctrl.reviewRemoteDisplayName.value ?? widget.remoteDisplayName ?? 'this calendar';
+
+        if (isReviewMode && candidates.isEmpty) {
+          return const Center(
+            child: Text('No high-confidence device calendar matches found on this device.'),
+          );
+        }
+
+        if (!isReviewMode && groups.isEmpty) {
           return const Center(child: Text('No device calendars found'));
         }
 
         return ListView.builder(
           padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
-          itemCount: groups.length,
+          itemCount: isReviewMode ? candidates.length + 1 : groups.length + 1,
           itemBuilder: (context, index) {
-            return _AccountSection(group: groups[index]);
+            if (isReviewMode) {
+              if (index == 0) {
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.surface,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.grey.shade200),
+                    ),
+                    child: Text(
+                      'Choose which device calendar should reconnect to $reviewTargetName.',
+                      style: const TextStyle(fontSize: 13, color: Color(0xFF4B5563), height: 1.35),
+                    ),
+                  ),
+                );
+              }
+
+              final calendar = candidates[index - 1];
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: _LocalCalendarCard(
+                  calendar: calendar,
+                  mode: LocalCalendarsPageMode.relinkReview,
+                ),
+              );
+            }
+
+            if (index == 0) {
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surface,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.grey.shade200),
+                  ),
+                  child: const Text(
+                    'Connect or reconnect a device calendar to Calee.',
+                    style: TextStyle(fontSize: 13, color: Color(0xFF4B5563), height: 1.35),
+                  ),
+                ),
+              );
+            }
+
+            return _AccountSection(group: groups[index - 1]);
           },
         );
       }),
@@ -84,7 +189,7 @@ class _AccountSection extends StatelessWidget {
                 .map(
                   (calendar) => Padding(
                     padding: const EdgeInsets.only(bottom: 12),
-                    child: _LocalCalendarCard(calendar: calendar),
+                    child: _LocalCalendarCard(calendar: calendar, mode: LocalCalendarsPageMode.normal),
                   ),
                 )
                 .toList(),
@@ -95,10 +200,18 @@ class _AccountSection extends StatelessWidget {
   }
 }
 
+String _reviewMatchHint(int confidence) {
+  if (confidence >= 95) {
+    return 'strongest match on this device';
+  }
+  return 'high-confidence match on this device';
+}
+
 class _LocalCalendarCard extends StatelessWidget {
   final LocalCalendarItem calendar;
+  final LocalCalendarsPageMode mode;
 
-  const _LocalCalendarCard({required this.calendar});
+  const _LocalCalendarCard({required this.calendar, required this.mode});
 
   Color _parseColor(String hex) {
     try {
@@ -116,6 +229,10 @@ class _LocalCalendarCard extends StatelessWidget {
 
     return Obx(() {
       final isConnecting = controller.connectingCalendarIds.contains(calendar.id);
+      final bool isReviewMode = mode == LocalCalendarsPageMode.relinkReview;
+      final String actionLabel = isReviewMode
+          ? 'Re-link this calendar'
+          : (calendar.canRelink ? 'Re-link to Calee' : 'Link to Calee');
 
       return Card(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -167,15 +284,21 @@ class _LocalCalendarCard extends StatelessWidget {
                                 ),
                               )
                             : TextButton(
-                                onPressed: isConnecting
-                                    ? null
-                                    : () async {
-                                        await controller.linkCalendar(
-                                          calendar,
-                                          true,
-                                          returnToCalendarListAfterConnect: true,
-                                        );
-                                      },
+                                onPressed: isReviewMode
+                                    ? isConnecting
+                                          ? null
+                                          : () async {
+                                              await controller.relinkRemoteToSelectedLocal(calendar);
+                                            }
+                                    : isConnecting
+                                        ? null
+                                        : () async {
+                                            await controller.linkCalendar(
+                                              calendar,
+                                              true,
+                                              returnToCalendarListAfterConnect: true,
+                                            );
+                                          },
                                 style: TextButton.styleFrom(
                                   backgroundColor: calendar.canRelink
                                       ? const Color(0xFF1D4ED8)
@@ -198,7 +321,7 @@ class _LocalCalendarCard extends StatelessWidget {
                                           valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                                         ),
                                       )
-                                    : Text(calendar.canRelink ? 'Re-link to Calee' : 'Link to Calee'),
+                                    : Text(actionLabel),
                               ),
                       ],
                     ),
@@ -212,6 +335,13 @@ class _LocalCalendarCard extends StatelessWidget {
                       'Events: ${calendar.eventCount}',
                       style: const TextStyle(fontSize: 12, color: Color(0xFF4B5563)),
                     ),
+                    if (isReviewMode && calendar.relinkConfidence > 0) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        _reviewMatchHint(calendar.relinkConfidence),
+                        style: const TextStyle(fontSize: 12, color: Color(0xFF4B5563)),
+                      ),
+                    ],
                   ],
                 ),
               ),

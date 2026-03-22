@@ -13,6 +13,8 @@ import '../sync/sync_trigger_orchestrator.dart';
 import '../data/database_helper.dart';
 import '../data/sync_repository.dart';
 import '../services/calee_server_service.dart';
+import '../sync/SyncEnum.dart';
+import 'local_calendar_page_controller.dart';
 
 class CalendarDisplayItem {
   // 1. 标识符
@@ -36,6 +38,8 @@ class CalendarDisplayItem {
   final String? originKey;
   final int bindingId;
   final int bindingRole;     // This-device role: mirror vs ownerLink, and it drives runtime behavior.
+  final int remoteCollectionId;
+  bool hasRelinkSuggestion;
   bool allowMassDeletionDangerous;
 
   CalendarDisplayItem({
@@ -55,6 +59,8 @@ class CalendarDisplayItem {
     this.originKey,
     required this.bindingId,
     required this.bindingRole,
+    required this.remoteCollectionId,
+    this.hasRelinkSuggestion = false,
     required this.allowMassDeletionDangerous,
   });
 
@@ -256,6 +262,8 @@ class CalendarPageController extends GetxController {
       origin: item.origin,
       bindingId: item.bindingId,
       bindingRole: item.bindingRole,
+      remoteCollectionId: item.remoteCollectionId,
+      hasRelinkSuggestion: item.hasRelinkSuggestion,
       allowMassDeletionDangerous: item.allowMassDeletionDangerous,
     );
     calendars.refresh();
@@ -368,6 +376,41 @@ class CalendarPageController extends GetxController {
     await reloadCalendars();
   }
 
+  Future<void> _populateRelinkSuggestions(List<CalendarDisplayItem> items) async {
+    final String loginName = (MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? '').trim();
+    final LocalCalendarPageController localCtrl = Get.isRegistered<LocalCalendarPageController>()
+        ? Get.find<LocalCalendarPageController>()
+        : Get.put(LocalCalendarPageController());
+
+    for (final item in items) {
+      item.hasRelinkSuggestion = false;
+
+      if (loginName.isEmpty ||
+          item.origin != SyncBindingOrigin.local ||
+          item.remoteCollectionId <= 0 ||
+          item.bindingId != 0 ||
+          item.remotePath == null ||
+          item.remotePath!.isEmpty ||
+          item.accountName.trim() != loginName.trim()) {
+        continue;
+      }
+
+      try {
+        final int count = await localCtrl.getHighConfidenceRelinkCandidateCountForRemote(
+          remoteCollectionId: item.remoteCollectionId,
+          remoteDisplayName: item.name,
+          remotePath: item.remotePath!,
+        );
+        if (count > 0) {
+          item.hasRelinkSuggestion = true;
+        }
+      } catch (e) {
+        debugPrint('[WARN] Failed to populate relink suggestions for ${item.remoteCollectionId}: $e');
+        item.hasRelinkSuggestion = false;
+      }
+    }
+  }
+
   Future<void> _reloadCalendarsImpl() async {
     try {
       isLoading.value = true;
@@ -451,6 +494,7 @@ class CalendarPageController extends GetxController {
 
         var displayItem = CalendarDisplayItem(
           localId: localId,
+          remoteCollectionId: (cal['id'] as int?) ?? 0,
           name: cal['display_name'] ?? 'Unknown',
           color: cal['color'] ?? '#808080',
           eventCount: realCount,
@@ -472,6 +516,7 @@ class CalendarPageController extends GetxController {
         nextCloudCalendars.add(displayItem);
       }
 
+      await _populateRelinkSuggestions(nextCloudCalendars);
       calendars.assignAll(nextCloudCalendars);
 
     } catch (e) {
