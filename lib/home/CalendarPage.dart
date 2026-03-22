@@ -3,6 +3,7 @@ import 'package:get/get.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:caleesync/common/widget/calendar_options_dialog.dart';
 import 'package:caleesync/feature/public_subscriptions_page.dart';
+import 'package:caleesync/feature/local_calendars_page.dart';
 import 'package:caleesync/core/platform/pigeon/calendar_api.g.dart';
 
 import '../controllers/CalendarPageController.dart';
@@ -279,7 +280,7 @@ class _CalendarPageState extends State<CalendarPage> {
                 title: const Text('Local Calendars'),
                 onTap: () {
                   Navigator.of(sheetContext).pop();
-                  Get.to(() => const LocalCalendarsPage());
+                  Get.to(() => LocalCalendarsPage());
                 },
               ),
             ],
