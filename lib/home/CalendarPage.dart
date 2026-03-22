@@ -672,6 +672,8 @@ class _CalendarRow extends StatelessWidget {
         ? item.remotePath!
         : (item.localId ?? '');
     final bool isToggling = key.isNotEmpty && controller.togglingCalendarIds.contains(key);
+    final bool showRelinkAction = !item.isEnabled && item.hasRelinkSuggestion;
+    final bool showEnableAction = !item.isEnabled && !item.hasRelinkSuggestion;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
@@ -724,6 +726,38 @@ class _CalendarRow extends StatelessWidget {
                                   child: CircularProgressIndicator(strokeWidth: 2),
                                 )
                               : const Text('Disable'),
+                        ),
+                        const SizedBox(width: 4),
+                      ] else if (showRelinkAction) ...[
+                        FilledButton(
+                          onPressed: isToggling
+                              ? null
+                              : () {
+                                  controller.openRemoteRelinkReview(item);
+                                },
+                          child: isToggling
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : const Text('Review Re-link'),
+                        ),
+                        const SizedBox(width: 4),
+                      ] else if (showEnableAction) ...[
+                        FilledButton.tonal(
+                          onPressed: isToggling
+                              ? null
+                              : () {
+                                  controller.enableRemoteCalendar(item);
+                                },
+                          child: isToggling
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : const Text('Enable'),
                         ),
                         const SizedBox(width: 4),
                       ],
@@ -790,24 +824,6 @@ class _CalendarRow extends StatelessWidget {
                     style: const TextStyle(fontSize: 12, color: Colors.black54),
                   ),
                 ),
-                if (!item.isEnabled && !item.hasRelinkSuggestion)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: FilledButton.tonal(
-                      onPressed: isToggling
-                          ? null
-                          : () {
-                              controller.enableRemoteCalendar(item);
-                            },
-                      child: isToggling
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Text('Enable'),
-                    ),
-                  ),
                 if (!item.isEnabled && item.hasRelinkSuggestion)
                   Padding(
                     padding: const EdgeInsets.only(top: 6),
@@ -818,27 +834,13 @@ class _CalendarRow extends StatelessWidget {
                           'Possible reconnection on this device',
                           style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
                         ),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 4,
-                          children: [
-                            FilledButton.tonal(
-                              onPressed: isToggling
-                                  ? null
-                                  : () {
-                                      controller.openRemoteRelinkReview(item);
-                                    },
-                              child: const Text('Review Re-link'),
-                            ),
-                            TextButton(
-                              onPressed: isToggling
-                                  ? null
-                                  : () {
-                                      controller.enableRemoteCalendar(item);
-                                    },
-                              child: const Text('Enable anyway'),
-                            ),
-                          ],
+                        TextButton(
+                          onPressed: isToggling
+                              ? null
+                              : () {
+                                  controller.enableRemoteCalendar(item);
+                                },
+                          child: const Text('Enable anyway'),
                         ),
                       ],
                     ),
@@ -867,7 +869,6 @@ class _CalendarRow extends StatelessWidget {
                     ),
                   ),
                 Text('${item.eventCount} events', style: const TextStyle(fontSize: 12, color: Colors.black54)),
-
               ],
             ),
           ),
