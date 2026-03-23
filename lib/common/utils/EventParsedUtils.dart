@@ -7,22 +7,35 @@ import '../app_constant.dart';
 import 'IcsParser.dart';
 import 'mmkv_utils.dart';
 
-/// 定义统一的事件数据包
 class ParsedEvent {
   final String uid;
+  final String identityKey;
   final String summary;
   final int dtstart;
   final int dtend;
   final String? description;
   final String? href;
+  final String? recurrenceId;
+  final String? location;
+  final String? url;
+  final String parseSource;
+  final Map<String, dynamic>? dtstartMeta;
+  final Map<String, dynamic>? dtendMeta;
 
   ParsedEvent({
     required this.uid,
+    required this.identityKey,
     required this.summary,
     required this.dtstart,
     required this.dtend,
+    required this.parseSource,
     this.description,
     this.href,
+    this.recurrenceId,
+    this.location,
+    this.url,
+    this.dtstartMeta,
+    this.dtendMeta,
   });
 }
 
@@ -33,54 +46,46 @@ class Eventparsedutils {
     return int.tryParse(value.toString());
   }
 
-  /// 兼容处理普通与Subscribed calendar的详情获取
   static Future<ParsedEvent?> resolveEventData({
     required Map<String, dynamic> remote,
     required bool isSubscription,
   }) async {
-    // 1. 内部配置与资源准备
     final String baseUrl = _activeServerBase();
-    final String loginName = MMKVUtils.instance.getString(
-        AppConstant.loginNameKey) ?? '';
-    final String password = MMKVUtils.instance.getString(
-        AppConstant.appPasswordKey) ?? '';
-
-    // 内部生成 Auth Header
-    final String authHeader = 'Basic ${base64Encode(
-        utf8.encode('$loginName:$password'))}';
-
+    final String loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? '';
+    final String password = MMKVUtils.instance.getString(AppConstant.appPasswordKey) ?? '';
+    final String authHeader = 'Basic ${base64Encode(utf8.encode('$loginName:$password'))}';
     final http.Client client = http.Client();
 
     try {
-      // --- 场景 1：Subscribed calendar (直接从内存读取, 不走网络) ---
       if (isSubscription) {
-        final String uid =
-            ((remote['uid'] ?? remote['remote_uid']) ?? '').toString().trim();
+        final String uid = ((remote['uid'] ?? remote['remote_uid']) ?? '').toString().trim();
         final int? dtstart = _toInt(remote['dtstart'] ?? remote['start']);
         final int? dtend = _toInt(remote['dtend'] ?? remote['end']);
-
         if (uid.isEmpty || dtstart == null || dtend == null) {
           return null;
         }
 
         return ParsedEvent(
           uid: uid,
+          identityKey: (remote['instance_key'] ?? remote['remote_uid'] ?? uid).toString(),
           summary: remote['summary'] ?? 'Untitled',
           dtstart: dtstart,
           dtend: dtend,
           description: remote['description'],
           href: remote['href'],
+          recurrenceId: remote['recurrence_id']?.toString(),
+          location: remote['location']?.toString(),
+          url: remote['url']?.toString(),
+          parseSource: (remote['parse_source'] ?? 'VEVENT').toString(),
+          dtstartMeta: remote['dtstart_meta'] as Map<String, dynamic>?,
+          dtendMeta: remote['dtend_meta'] as Map<String, dynamic>?,
         );
       }
 
-      // --- 场景 2：普通日历 (内部发起请求) ---
       final String href = remote['href'] ?? '';
       if (href.isEmpty) return null;
 
-      // 规范化 URL 拼接：处理可能出现的重复斜杠
-      final String url = "${baseUrl.replaceAll(RegExp(r'/$'), '')}${href
-          .startsWith('/') ? '' : '/'}$href";
-
+      final String url = "${baseUrl.replaceAll(RegExp(r'/$'), '')}${href.startsWith('/') ? '' : '/'}$href";
       final response = await client.get(
         Uri.parse(url),
         headers: {
@@ -90,26 +95,36 @@ class Eventparsedutils {
         },
       ).timeout(const Duration(seconds: 15));
 
-      if (response.statusCode == 200) {
-        // 使用 IcsParser 解析单条 ICS 文本
-        final parsedMap = IcsParser.parse(response.body, remote['uid'] ?? href);
-        return ParsedEvent(
-          uid: parsedMap['uid'] ?? remote['uid'] ?? href,
-          summary: parsedMap['summary'] ?? 'Untitled event',
-          dtstart: parsedMap['dtstart'],
-          dtend: parsedMap['dtend'],
-          description: parsedMap['description'],
-          href: href,
-        );
-      } else {
+      if (response.statusCode != 200) {
         debugPrint('[WARN] Failed to fetch event details [$href]: ${response.statusCode}');
         return null;
       }
+
+      final Map<String, dynamic> parsedMap = IcsParser.parse(response.body, remote['uid'] ?? href);
+      if (parsedMap.isEmpty) {
+        return null;
+      }
+
+      return ParsedEvent(
+        uid: parsedMap['uid'] ?? remote['uid'] ?? href,
+        identityKey: (parsedMap['instance_key'] ?? parsedMap['uid'] ?? remote['uid'] ?? href).toString(),
+        summary: parsedMap['summary'] ?? 'Untitled event',
+        dtstart: parsedMap['dtstart'],
+        dtend: parsedMap['dtend'],
+        description: parsedMap['description'],
+        href: href,
+        recurrenceId: parsedMap['recurrence_id']?.toString(),
+        location: parsedMap['location']?.toString(),
+        url: parsedMap['url']?.toString(),
+        parseSource: (parsedMap['parse_source'] ?? 'VEVENT').toString(),
+        dtstartMeta: parsedMap['dtstart_meta'] as Map<String, dynamic>?,
+        dtendMeta: parsedMap['dtend_meta'] as Map<String, dynamic>?,
+      );
     } catch (e) {
       debugPrint('[ERROR] resolveEventData exception: $e');
       return null;
     } finally {
-      client.close(); // 释放连接资源
+      client.close();
     }
   }
 
