@@ -522,7 +522,7 @@ abstract class SyncStrategy {
             await upsertSyncedItem(
               db: db,
               remoteCollectionId: remoteCollectionId,
-              uid: pulled.identityKey,
+              uid: pulled.uid,
               localItemId: pulled.localEventId,
               etag: normalizeRemoteToken(operation.remote?['etag']),
               lastMtime: DateTime.now().millisecondsSinceEpoch,
