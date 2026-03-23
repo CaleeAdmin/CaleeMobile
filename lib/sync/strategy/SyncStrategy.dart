@@ -102,6 +102,7 @@ abstract class SyncStrategy {
     required PlatformItem local,
     required String remotePath,
     required String localCalendarId,
+    Map<String, dynamic>? remoteSnapshot,
     String? targetRemoteHref,
   }) async {
     if (loginName == null || loginName!.isEmpty) {
@@ -127,6 +128,16 @@ abstract class SyncStrategy {
       calendarPath: remotePath,
       uid: uid,
       title: local.title ?? 'Untitled',
+      description: local.notes,
+      location: remoteSnapshot?['location']?.toString(),
+      url: remoteSnapshot?['url']?.toString(),
+      recurrenceId: remoteSnapshot?['recurrence_id']?.toString(),
+      rrule: remoteSnapshot?['rrule']?.toString(),
+      created: remoteSnapshot?['created']?.toString(),
+      lastModified: remoteSnapshot?['last_modified']?.toString(),
+      parseSource: remoteSnapshot?['parse_source']?.toString(),
+      dtstartMeta: remoteSnapshot?['dtstart_meta'] as Map<String, dynamic>?,
+      dtendMeta: remoteSnapshot?['dtend_meta'] as Map<String, dynamic>?,
       start: DateTime.fromMillisecondsSinceEpoch(local.startTime ?? 0),
       end: DateTime.fromMillisecondsSinceEpoch(local.endTime ?? 0),
       targetEventPath: targetRemoteHref,
@@ -315,7 +326,7 @@ abstract class SyncStrategy {
     final Map<String, PlatformItem> localByUid = {};
     final Map<String, PlatformItem> localById = mapLocalEventsById(localEvents);
     for (final event in localEvents) {
-      final uid = (event.uid ?? '').trim();
+      final String uid = (event.uid ?? '').trim();
       if (uid.isNotEmpty) localByUid[uid] = event;
     }
 
@@ -331,7 +342,8 @@ abstract class SyncStrategy {
 
     final Map<String, Map<String, dynamic>> remoteByUid = {
       for (final remote in snapshot.events)
-        if ((remote['remote_uid']?.toString() ?? '').trim().isNotEmpty) (remote['remote_uid']?.toString() ?? '').trim(): remote,
+        if ((remote['instance_key']?.toString() ?? remote['remote_uid']?.toString() ?? '').trim().isNotEmpty)
+          (remote['instance_key']?.toString() ?? remote['remote_uid']?.toString() ?? '').trim(): remote,
     };
 
     final Set<String> allUids = {
@@ -454,6 +466,7 @@ abstract class SyncStrategy {
             local: operation.local!,
             remotePath: ctx.remotePath,
             localCalendarId: localCalendarId,
+            remoteSnapshot: operation.remote,
             targetRemoteHref: operation.type == _CanonicalOperationType.remoteUpdate
                 ? (operation.mapping?['remote_href']?.toString() ?? operation.remote?['href']?.toString())
                 : null,
@@ -509,7 +522,7 @@ abstract class SyncStrategy {
             await upsertSyncedItem(
               db: db,
               remoteCollectionId: remoteCollectionId,
-              uid: pulled.uid,
+              uid: pulled.identityKey,
               localItemId: pulled.localEventId,
               etag: normalizeRemoteToken(operation.remote?['etag']),
               lastMtime: DateTime.now().millisecondsSinceEpoch,
@@ -850,6 +863,16 @@ abstract class RemoteItemGateway {
     required String title,
     DateTime? start,
     DateTime? end,
+    String? description,
+    String? location,
+    String? url,
+    String? recurrenceId,
+    String? rrule,
+    String? created,
+    String? lastModified,
+    String? parseSource,
+    Map<String, dynamic>? dtstartMeta,
+    Map<String, dynamic>? dtendMeta,
     String? targetEventPath,
   });
 
@@ -877,6 +900,16 @@ class CaleeRemoteItemGateway extends RemoteItemGateway {
     required String title,
     DateTime? start,
     DateTime? end,
+    String? description,
+    String? location,
+    String? url,
+    String? recurrenceId,
+    String? rrule,
+    String? created,
+    String? lastModified,
+    String? parseSource,
+    Map<String, dynamic>? dtstartMeta,
+    Map<String, dynamic>? dtendMeta,
     String? targetEventPath,
   }) => _service.uploadEventData(
         userId: userId,
@@ -885,6 +918,16 @@ class CaleeRemoteItemGateway extends RemoteItemGateway {
         title: title,
         start: start,
         end: end,
+        description: description,
+        location: location,
+        url: url,
+        recurrenceId: recurrenceId,
+        rrule: rrule,
+        created: created,
+        lastModified: lastModified,
+        parseSource: parseSource,
+        dtstartMeta: dtstartMeta,
+        dtendMeta: dtendMeta,
         targetEventPath: targetEventPath,
       );
 
