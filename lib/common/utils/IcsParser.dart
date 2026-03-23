@@ -1,84 +1,184 @@
 import 'package:flutter/cupertino.dart';
 
+class IcsPropertyValue {
+  final String name;
+  final String rawValue;
+  final Map<String, String> params;
+
+  const IcsPropertyValue({
+    required this.name,
+    required this.rawValue,
+    this.params = const {},
+  });
+
+  bool get isEmpty => rawValue.trim().isEmpty;
+}
+
 class IcsParser {
   static Map<String, dynamic> parse(String icsString, String fallbackUid) {
-    // 1. 处理折叠行（注意：ICS 标准换行可能是 \r\n 或 \n）
-    final content = icsString.replaceAll(RegExp(r'\r?\n\s+'), '');
-
-    String extract(String key) {
-      // 修正点：增加 ^ 匹配行首, 以及 $ 匹配行尾, multiLine 设为 true
-      // 修正点：匹配 key 后面跟着 [冒号] 或 [分号...冒号]
-      final reg = RegExp('^$key(?:;[^:]*)?:(.*)\$', multiLine: true, caseSensitive: false);
-      final match = reg.firstMatch(content);
-      if (match == null) return "";
-
-      return match.group(1)!.trim();
-    }
-
-    // 优先取 ICS 内部的 UID, 没有再用传进来的
-    final String internalUid = extract('UID');
-    final String finalUid = internalUid.isNotEmpty ? internalUid : fallbackUid;
-
-    final startValue = extract('DTSTART');
-    final endValue = extract('DTEND');
-
-    final startMillis = _parseIcsDate(startValue);
-    final endMillis = _parseIcsDate(endValue);
-
-    if (startMillis == null) {
-      debugPrint("[WARN] Parse failed: DTSTART is empty or malformed ($startValue)");
+    final String content = _unfoldLines(icsString);
+    final String? veventBlock = _extractVeventBlock(content);
+    if (veventBlock == null || veventBlock.isEmpty) {
+      debugPrint('[ICS] No VEVENT block found for fallbackUid=$fallbackUid');
       return {};
     }
 
+    final IcsPropertyValue? uidProperty = _extractFieldFromBlock(veventBlock, 'UID');
+    final IcsPropertyValue? summaryProperty = _extractFieldFromBlock(veventBlock, 'SUMMARY');
+    final IcsPropertyValue? descriptionProperty = _extractFieldFromBlock(veventBlock, 'DESCRIPTION');
+    final IcsPropertyValue? startProperty = _extractFieldFromBlock(veventBlock, 'DTSTART');
+    final IcsPropertyValue? endProperty = _extractFieldFromBlock(veventBlock, 'DTEND');
+    final IcsPropertyValue? recurrenceIdProperty = _extractFieldFromBlock(veventBlock, 'RECURRENCE-ID');
+    final IcsPropertyValue? rruleProperty = _extractFieldFromBlock(veventBlock, 'RRULE');
+    final IcsPropertyValue? createdProperty = _extractFieldFromBlock(veventBlock, 'CREATED');
+    final IcsPropertyValue? lastModifiedProperty = _extractFieldFromBlock(veventBlock, 'LAST-MODIFIED');
+    final IcsPropertyValue? locationProperty = _extractFieldFromBlock(veventBlock, 'LOCATION');
+    final IcsPropertyValue? urlProperty = _extractFieldFromBlock(veventBlock, 'URL');
+    final IcsPropertyValue? dtstampProperty = _extractFieldFromBlock(veventBlock, 'DTSTAMP');
+
+    final String internalUid = uidProperty?.rawValue.trim() ?? '';
+    final String finalUid = internalUid.isNotEmpty ? internalUid : fallbackUid;
+
+    final int? startMillis = _parseIcsDate(startProperty);
+    final int? endMillis = _parseIcsDate(endProperty);
+    if (startMillis == null) {
+      debugPrint('[ICS] Parse failed: VEVENT DTSTART missing/malformed for uid=$finalUid value=${startProperty?.rawValue}');
+      return {};
+    }
+
+    final String? recurrenceId = recurrenceIdProperty?.rawValue.trim().isNotEmpty == true
+        ? recurrenceIdProperty!.rawValue.trim()
+        : null;
+    final int resolvedEndMillis = endMillis ?? (startMillis + 3600000);
+
+    debugPrint(
+      '[ICS] Parsed VEVENT uid=$finalUid recurrenceId=${recurrenceId ?? ''} '
+      'start=$startMillis end=$resolvedEndMillis source=VEVENT',
+    );
+
     return {
       'uid': finalUid,
-      'summary': _decodeIcsText(extract('SUMMARY').isEmpty ? "Untitled event" : extract('SUMMARY')),
-      'description': _decodeIcsText(extract('DESCRIPTION')),
+      'summary': _decodeIcsText(
+        summaryProperty?.rawValue.trim().isNotEmpty == true
+            ? summaryProperty!.rawValue
+            : 'Untitled event',
+      ),
+      'description': _decodeIcsText(descriptionProperty?.rawValue ?? ''),
       'dtstart': startMillis,
-      'dtend': endMillis ?? (startMillis + 3600000),
-      'dtstamp': extract('DTSTAMP'), // 建议存一下这个, 同步对比有用
+      'dtend': resolvedEndMillis,
+      'dtstamp': dtstampProperty?.rawValue ?? '',
+      'created': createdProperty?.rawValue,
+      'last_modified': lastModifiedProperty?.rawValue,
+      'location': _decodeIcsText(locationProperty?.rawValue ?? ''),
+      'url': urlProperty?.rawValue,
+      'rrule': rruleProperty?.rawValue,
+      'recurrence_id': recurrenceId,
+      'instance_key': _buildInstanceKey(finalUid, recurrenceId),
+      'dtstart_meta': _buildDateMeta(startProperty, 'VEVENT'),
+      'dtend_meta': _buildDateMeta(endProperty, 'VEVENT'),
+      'recurrence_id_meta': _buildDateMeta(recurrenceIdProperty, 'VEVENT'),
+      'vevent_block': veventBlock,
+      'parse_source': 'VEVENT',
     };
   }
 
-// 辅助方法：处理 ICS 转义字符
+  static String _unfoldLines(String icsString) =>
+      icsString.replaceAll(RegExp(r'\r?\n[ \t]'), '');
+
+  static String? _extractVeventBlock(String ics) {
+    final RegExpMatch? match = RegExp(
+      r'BEGIN:VEVENT[\s\S]*?END:VEVENT',
+      caseSensitive: false,
+    ).firstMatch(ics);
+    return match?.group(0);
+  }
+
+  static IcsPropertyValue? _extractFieldFromBlock(String block, String name) {
+    final RegExp reg = RegExp(
+      '^' + RegExp.escape(name) + r'((?:;[^:]*)?):(.*)$',
+      multiLine: true,
+      caseSensitive: false,
+    );
+    final RegExpMatch? match = reg.firstMatch(block);
+    if (match == null) return null;
+
+    final String rawParams = match.group(1) ?? '';
+    final String rawValue = (match.group(2) ?? '').trim();
+    final Map<String, String> params = <String, String>{};
+    if (rawParams.isNotEmpty) {
+      for (final String piece in rawParams.split(';')) {
+        final String normalizedPiece = piece.trim();
+        if (normalizedPiece.isEmpty) continue;
+        final int idx = normalizedPiece.indexOf('=');
+        if (idx <= 0) {
+          params[normalizedPiece.toUpperCase()] = '';
+          continue;
+        }
+        params[normalizedPiece.substring(0, idx).trim().toUpperCase()] =
+            normalizedPiece.substring(idx + 1).trim();
+      }
+    }
+
+    return IcsPropertyValue(
+      name: name.toUpperCase(),
+      rawValue: rawValue,
+      params: params,
+    );
+  }
+
+  static Map<String, dynamic>? _buildDateMeta(IcsPropertyValue? property, String source) {
+    if (property == null || property.isEmpty) return null;
+    return {
+      'rawValue': property.rawValue,
+      'params': property.params,
+      'source': source,
+      'isUtc': property.rawValue.endsWith('Z'),
+      'isDateOnly': (property.params['VALUE'] ?? '').toUpperCase() == 'DATE',
+      'tzid': property.params['TZID'],
+    };
+  }
+
+  static String _buildInstanceKey(String uid, String? recurrenceId) {
+    final String normalizedRecurrence = recurrenceId?.trim() ?? '';
+    return normalizedRecurrence.isEmpty ? uid : '$uid::$normalizedRecurrence';
+  }
+
   static String _decodeIcsText(String input) {
     return input
         .replaceAll(r'\,', ',')
         .replaceAll(r'\;', ';')
         .replaceAll(r'\n', '\n')
-        .replaceAll(r'\\', r'\');
+        .replaceAll('\\\\', '\\');
   }
 
-  static int? _parseIcsDate(String dateStr) {
+  static int? _parseIcsDate(IcsPropertyValue? property) {
     try {
-      if (dateStr.isEmpty) return null;
-
-      // 过滤掉非数字字符, 只保留数字和 T
-      final compact = dateStr.replaceAll(RegExp(r'[^0-9T]'), '');
+      if (property == null || property.rawValue.isEmpty) return null;
+      final String dateStr = property.rawValue.trim();
+      final bool isDateOnly = (property.params['VALUE'] ?? '').toUpperCase() == 'DATE';
+      final String compact = dateStr.replaceAll(RegExp(r'[^0-9T]'), '');
       if (compact.length < 8) return null;
 
-      final year = int.parse(compact.substring(0, 4));
-      final month = int.parse(compact.substring(4, 6));
-      final day = int.parse(compact.substring(6, 8));
+      final int year = int.parse(compact.substring(0, 4));
+      final int month = int.parse(compact.substring(4, 6));
+      final int day = int.parse(compact.substring(6, 8));
 
-      int hour = 0, minute = 0, second = 0;
-
-      // 处理带具体时间的格式 20260114T103000
-      if (compact.contains('T') && compact.length >= 15) {
+      int hour = 0;
+      int minute = 0;
+      int second = 0;
+      if (!isDateOnly && compact.contains('T') && compact.length >= 15) {
         hour = int.parse(compact.substring(9, 11));
         minute = int.parse(compact.substring(11, 13));
         second = int.parse(compact.substring(13, 15));
       }
 
-      // 🌟 判断时区
       if (dateStr.endsWith('Z')) {
-        // UTC 时间
-        return DateTime.utc(year, month, day, hour, minute, second).millisecondsSinceEpoch;
-      } else {
-        // 本地时间
-        return DateTime(year, month, day, hour, minute, second).millisecondsSinceEpoch;
+        return DateTime.utc(year, month, day, hour, minute, second)
+            .millisecondsSinceEpoch;
       }
-    } catch (e) {
+      return DateTime(year, month, day, hour, minute, second)
+          .millisecondsSinceEpoch;
+    } catch (_) {
       return null;
     }
   }

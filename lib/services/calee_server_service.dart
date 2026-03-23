@@ -433,21 +433,31 @@ class CaleeServerService {
                 uid: parsedUid,
               );
 
+        final String instanceKey = (parsed['instance_key'] ?? parsedUid).toString();
+        debugPrint('[ICS] Snapshot parsed uid=$parsedUid instanceKey=$instanceKey source=${parsed['parse_source']} start=${parsed['dtstart']} end=${parsed['dtend']}');
+
         return {
-          // Canonical event keys shared by subscription and normal remote events.
           'uid': parsedUid,
+          'instance_key': instanceKey,
+          'recurrence_id': parsed['recurrence_id'],
           'dtstart': parsed['dtstart'],
           'dtend': parsed['dtend'],
+          'dtstart_meta': parsed['dtstart_meta'],
+          'dtend_meta': parsed['dtend_meta'],
+          'description': parsed['description'],
+          'location': parsed['location'],
+          'url': parsed['url'],
+          'rrule': parsed['rrule'],
+          'created': parsed['created'],
+          'last_modified': parsed['last_modified'],
+          'parse_source': parsed['parse_source'],
 
-          // Backward-compatible aliases for existing sync pipeline consumers.
-          'remote_uid': parsedUid,
+          'remote_uid': instanceKey,
           'start': parsed['dtstart'],
           'end': parsed['dtend'],
 
           'summary': parsed['summary'],
           'href': isSubscription ? '$calendarPath$parsedUid.ics' : item['href'],
-          // Some CalDAV servers omit ETag. Mark as unknown/pending with a
-          // volatile token so sync planner treats it as remoteChanged.
           'etag': resolvedEtag,
           'calendar_data': icsString,
         };
@@ -694,17 +704,60 @@ class CaleeServerService {
     required String title,
     DateTime? start,
     DateTime? end,
+    String? description,
+    String? location,
+    String? url,
+    String? recurrenceId,
+    String? rrule,
+    String? created,
+    String? lastModified,
+    String? parseSource,
+    Map<String, dynamic>? dtstartMeta,
+    Map<String, dynamic>? dtendMeta,
     String? targetEventPath,
   }) async {
-    // 1. 调用工具类生成标准的 ICS 文本
-    final icsString = IcsSerializer.toIcs(
+    final DateTime? resolvedStart = start;
+    final DateTime? resolvedEnd = end;
+    final List<String> blockers = <String>[];
+    final DateTime now = DateTime.now();
+
+    if (parseSource != null && parseSource.isNotEmpty && parseSource != 'VEVENT') {
+      blockers.add('parsed event start came from non-VEVENT source: $parseSource');
+    }
+    if (resolvedStart != null && resolvedEnd != null) {
+      final Duration span = resolvedEnd.difference(resolvedStart);
+      if (resolvedStart.year < 2010 && resolvedEnd.year >= 2020) {
+        blockers.add('implausible event window start=${resolvedStart.toIso8601String()} end=${resolvedEnd.toIso8601String()}');
+      }
+      if ((recurrenceId == null || recurrenceId.trim().isEmpty) && span.inDays > 366) {
+        blockers.add('absurd non-recurring duration=${span.inDays}d');
+      }
+      if (resolvedStart.year < now.year - 20 && resolvedEnd.year >= now.year - 1) {
+        blockers.add('ancient start year ${resolvedStart.year} relative to end/current year ${resolvedEnd.year}/${now.year}');
+      }
+    }
+
+    if (blockers.isNotEmpty) {
+      debugPrint('[ICS] Upload skipped uid=$uid summary=$title reason=${blockers.join('; ')}');
+      return null;
+    }
+
+    final String icsString = IcsSerializer.toIcs(
       uid: uid,
       summary: title,
-      start: start,
-      end: end,
+      description: description,
+      location: location,
+      url: url,
+      recurrenceId: recurrenceId,
+      rrule: rrule,
+      created: created,
+      lastModified: lastModified,
+      dtstartMeta: dtstartMeta,
+      dtendMeta: dtendMeta,
+      start: resolvedStart,
+      end: resolvedEnd,
     );
 
-    // 2. 调用原有的 putEvent 或 uploadEvent 方法执行底层网络请求
     return await putEvent(
       calendarPath: calendarPath,
       uid: uid,
