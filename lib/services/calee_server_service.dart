@@ -716,6 +716,7 @@ class CaleeServerService {
     Map<String, dynamic>? dtendMeta,
     String? targetEventPath,
     String? originalVeventBlock,
+    bool allowMinimalUpdateFallback = false,
   }) async {
     final DateTime? resolvedStart = start;
     final DateTime? resolvedEnd = end;
@@ -743,43 +744,63 @@ class CaleeServerService {
       return null;
     }
 
-    // Create path depends on caller-supplied synthesized local meta;
-    // merge path depends on caller-selected effective meta.
-    final String icsString = (targetEventPath != null &&
-            targetEventPath.trim().isNotEmpty &&
-            originalVeventBlock != null &&
-            originalVeventBlock.trim().isNotEmpty)
-        ? IcsSerializer.mergeIntoExistingVevent(
-            originalVeventBlock: originalVeventBlock,
-            uid: uid,
-            summary: title,
-            description: description,
-            location: location,
-            url: url,
-            recurrenceId: recurrenceId,
-            rrule: rrule,
-            created: created,
-            lastModified: lastModified,
-            dtstartMeta: dtstartMeta,
-            dtendMeta: dtendMeta,
-            start: resolvedStart,
-            end: resolvedEnd,
-          )
-        : IcsSerializer.toIcs(
-            uid: uid,
-            summary: title,
-            description: description,
-            location: location,
-            url: url,
-            recurrenceId: recurrenceId,
-            rrule: rrule,
-            created: created,
-            lastModified: lastModified,
-            dtstartMeta: dtstartMeta,
-            dtendMeta: dtendMeta,
-            start: resolvedStart,
-            end: resolvedEnd,
-          );
+    final bool hasTarget = targetEventPath != null && targetEventPath.trim().isNotEmpty;
+    final bool hasOriginalBlock = originalVeventBlock != null && originalVeventBlock.trim().isNotEmpty;
+
+    late final String icsString;
+    if (hasTarget && hasOriginalBlock) {
+      icsString = IcsSerializer.mergeIntoExistingVevent(
+        originalVeventBlock: originalVeventBlock!,
+        uid: uid,
+        summary: title,
+        description: description,
+        location: location,
+        url: url,
+        recurrenceId: recurrenceId,
+        rrule: rrule,
+        created: created,
+        lastModified: lastModified,
+        dtstartMeta: dtstartMeta,
+        dtendMeta: dtendMeta,
+        start: resolvedStart,
+        end: resolvedEnd,
+      );
+    } else if (hasTarget && allowMinimalUpdateFallback) {
+      icsString = IcsSerializer.toIcs(
+        uid: uid,
+        summary: title,
+        description: description,
+        location: location,
+        url: url,
+        recurrenceId: recurrenceId,
+        rrule: rrule,
+        created: created,
+        lastModified: lastModified,
+        dtstartMeta: dtstartMeta,
+        dtendMeta: dtendMeta,
+        start: resolvedStart,
+        end: resolvedEnd,
+      );
+    } else if (hasTarget) {
+      debugPrint('[ICS] Existing remote update blocked because original VEVENT block is unavailable');
+      return null;
+    } else {
+      icsString = IcsSerializer.toIcs(
+        uid: uid,
+        summary: title,
+        description: description,
+        location: location,
+        url: url,
+        recurrenceId: recurrenceId,
+        rrule: rrule,
+        created: created,
+        lastModified: lastModified,
+        dtstartMeta: dtstartMeta,
+        dtendMeta: dtendMeta,
+        start: resolvedStart,
+        end: resolvedEnd,
+      );
+    }
 
     return await putEvent(
       calendarPath: calendarPath,
