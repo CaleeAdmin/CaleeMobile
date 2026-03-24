@@ -1,11 +1,11 @@
-import 'package:caleesync/common/app_constant.dart';
-import 'package:caleesync/common/utils/mmkv_utils.dart';
 import 'package:caleesync/core/platform/pigeon/calendar_api.g.dart';
 import 'package:caleesync/entity/SyncContext.dart';
 import 'package:caleesync/entity/SyncSummary.dart';
 import 'package:caleesync/services/calee_server_service.dart';
 import 'package:caleesync/sync/strategy/SyncStrategy.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'test_bootstrap.dart';
 
 class _RecordingRemoteGateway extends RemoteItemGateway {
   Map<String, dynamic>? lastUploadArgs;
@@ -123,9 +123,7 @@ class _TestSyncStrategy extends SyncStrategy {
 
 void main() {
   setUpAll(() async {
-    TestWidgetsFlutterBinding.ensureInitialized();
-    await MMKVUtils.instance.init(id: 'sync_strategy_exchange_merge_test');
-    MMKVUtils.instance.setString(AppConstant.loginNameKey, 'tester');
+    await bootstrapTestStorage();
   });
 
   test('remote update passes vevent_block into upload path', () async {

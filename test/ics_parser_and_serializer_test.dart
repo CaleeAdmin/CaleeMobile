@@ -48,8 +48,8 @@ void main() {
 
       expect(parsed['uid'], 'royal-cruise');
       expect(parsed['parse_source'], 'VEVENT');
-      expect(parsed['dtstart'], DateTime(2026, 12, 12, 16, 0).millisecondsSinceEpoch);
-      expect(parsed['dtend'], DateTime(2026, 12, 20, 6, 30).millisecondsSinceEpoch);
+      expect(parsed['dtstart'], DateTime.utc(2026, 12, 12, 8, 0).millisecondsSinceEpoch);
+      expect(parsed['dtend'], DateTime.utc(2026, 12, 19, 22, 30).millisecondsSinceEpoch);
       expect((parsed['dtstart_meta'] as Map<String, dynamic>)['tzid'], 'Australia/Perth');
     });
 
@@ -103,7 +103,7 @@ void main() {
 
       expect(parsed['recurrence_id'], '20261214T160000');
       expect(parsed['instance_key'], 'series-1::20261214T160000');
-      expect(parsed['dtstart'], DateTime(2026, 12, 15, 17).millisecondsSinceEpoch);
+      expect(parsed['dtstart'], DateTime.utc(2026, 12, 15, 9).millisecondsSinceEpoch);
     });
   });
 
@@ -156,6 +156,8 @@ void main() {
         summary: 'New Summary',
         start: DateTime.utc(2026, 12, 13, 16),
         end: DateTime.utc(2026, 12, 13, 17),
+        dtstartMeta: const {'isUtc': true, 'params': {}, 'tzid': null, 'isDateOnly': false},
+        dtendMeta: const {'isUtc': true, 'params': {}, 'tzid': null, 'isDateOnly': false},
       );
 
       expect(merged, contains('ATTENDEE:mailto:a@example.com'));
