@@ -171,12 +171,16 @@ void main() {
   });
 
   group('SyncItemPlanner two-way planner gate', () {
-    setUp(() {
+    Future<void> requireMmkv() async {
       if (!mmkvReady) {
         markTestSkipped('MMKV platform plugin is unavailable in this test environment.');
       }
-    });
+    }
+
     test('skips unchanged two-way calendar when not forced and no bootstrap', () async {
+      await requireMmkv();
+      if (!mmkvReady) return;
+
       final contexts = await _planTwoWay(
         remoteChanged: false,
         localChanged: false,
@@ -189,6 +193,9 @@ void main() {
     });
 
     test('syncs when remoteChanged for two-way calendar', () async {
+      await requireMmkv();
+      if (!mmkvReady) return;
+
       final contexts = await _planTwoWay(
         remoteChanged: true,
         localChanged: false,
@@ -202,6 +209,9 @@ void main() {
     });
 
     test('syncs when localChanged for two-way calendar', () async {
+      await requireMmkv();
+      if (!mmkvReady) return;
+
       final contexts = await _planTwoWay(
         remoteChanged: false,
         localChanged: true,
@@ -215,6 +225,9 @@ void main() {
     });
 
     test('syncs when metaChanged for two-way calendar', () async {
+      await requireMmkv();
+      if (!mmkvReady) return;
+
       final contexts = await _planTwoWay(
         remoteChanged: false,
         localChanged: false,
@@ -228,6 +241,9 @@ void main() {
     });
 
     test('syncs unchanged two-way calendar when force is requested', () async {
+      await requireMmkv();
+      if (!mmkvReady) return;
+
       final contexts = await _planTwoWay(
         remoteChanged: false,
         localChanged: false,
@@ -241,6 +257,9 @@ void main() {
     });
 
     test('syncs unchanged two-way calendar when bootstrap is required', () async {
+      await requireMmkv();
+      if (!mmkvReady) return;
+
       final contexts = await _planTwoWay(
         remoteChanged: false,
         localChanged: false,
