@@ -82,8 +82,12 @@ abstract class SyncStrategy {
     const int clampSpanMs = 1000 * 60 * 60 * 24 * 365 * 8; // 8 years
     const int fallbackPastMs = 1000 * 60 * 60 * 24 * 365 * 2; // 2 years
     const int fallbackFutureMs = 1000 * 60 * 60 * 24 * 365 * 3; // 3 years
+    const int livePastMs = 1000 * 60 * 60 * 24 * 365; // 365 days
+    const int liveFutureMs = 1000 * 60 * 60 * 24 * 730; // 730 days
 
     final int nowMs = (now ?? DateTime.now()).millisecondsSinceEpoch;
+    final int liveStartMs = nowMs - livePastMs;
+    final int liveEndMs = nowMs + liveFutureMs;
     final List<int> timestamps = [];
 
     void addIfPositive(dynamic value) {
@@ -126,9 +130,12 @@ abstract class SyncStrategy {
       maxTs = center + (clampSpanMs ~/ 2);
     }
 
+    final int finalStartMs = minTs < liveStartMs ? minTs : liveStartMs;
+    final int finalEndMs = maxTs > liveEndMs ? maxTs : liveEndMs;
+
     return AdaptiveLocalFetchWindow(
-      rangeStartMs: minTs,
-      rangeEndMs: maxTs,
+      rangeStartMs: finalStartMs,
+      rangeEndMs: finalEndMs,
     );
   }
 
