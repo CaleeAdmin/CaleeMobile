@@ -743,6 +743,8 @@ class CaleeServerService {
       return null;
     }
 
+    // Create path depends on caller-supplied synthesized local meta;
+    // merge path depends on caller-selected effective meta.
     final String icsString = (targetEventPath != null &&
             targetEventPath.trim().isNotEmpty &&
             originalVeventBlock != null &&
