@@ -171,6 +171,13 @@ abstract class SyncStrategy {
     String? description,
     int? dtstart,
     int? dtend,
+    bool? isExchangeRisk,
+    bool? hasAttendees,
+    bool? hasOrganizer,
+    bool? hasAlarm,
+    bool? hasXAppleExchangeMarkers,
+    String? uidKind,
+    String? rawVevent,
   }) async {
     final payload = {
       'remote_uid': uid,
@@ -184,6 +191,13 @@ abstract class SyncStrategy {
       'last_mtime': lastMtime,
       'remote_href': remoteHref,
       'sync_status': SyncItemStatus.synced,
+      'is_exchange_risk': (isExchangeRisk ?? false) ? 1 : 0,
+      'has_attendees': (hasAttendees ?? false) ? 1 : 0,
+      'has_organizer': (hasOrganizer ?? false) ? 1 : 0,
+      'has_alarm': (hasAlarm ?? false) ? 1 : 0,
+      'has_x_apple_exchange_markers': (hasXAppleExchangeMarkers ?? false) ? 1 : 0,
+      'uid_kind': uidKind,
+      'raw_vevent': rawVevent,
     };
 
     final bool hasLocalItemId = localItemId.trim().isNotEmpty;
@@ -519,6 +533,16 @@ abstract class SyncStrategy {
           final pushed = state.pushed;
           final mapping = operation.mapping;
           if (pulled != null) {
+            final bool remoteIsExchangeRisk =
+                operation.remote?['is_exchange_risk'] == true || operation.remote?['is_exchange_risk'] == 1;
+            final bool remoteHasAttendees =
+                operation.remote?['has_attendees'] == true || operation.remote?['has_attendees'] == 1;
+            final bool remoteHasOrganizer =
+                operation.remote?['has_organizer'] == true || operation.remote?['has_organizer'] == 1;
+            final bool remoteHasAlarm =
+                operation.remote?['has_alarm'] == true || operation.remote?['has_alarm'] == 1;
+            final bool remoteHasXAppleExchangeMarkers = operation.remote?['has_x_apple_exchange_markers'] == true ||
+                operation.remote?['has_x_apple_exchange_markers'] == 1;
             await upsertSyncedItem(
               db: db,
               remoteCollectionId: remoteCollectionId,
@@ -531,10 +555,27 @@ abstract class SyncStrategy {
               description: pulled.description,
               dtstart: pulled.dtstart,
               dtend: pulled.dtend,
+              isExchangeRisk: remoteIsExchangeRisk,
+              hasAttendees: remoteHasAttendees,
+              hasOrganizer: remoteHasOrganizer,
+              hasAlarm: remoteHasAlarm,
+              hasXAppleExchangeMarkers: remoteHasXAppleExchangeMarkers,
+              uidKind: operation.remote?['uid_kind']?.toString(),
+              rawVevent: operation.remote?['raw_vevent']?.toString(),
             );
             return;
           }
           if (pushed != null) {
+            final bool remoteIsExchangeRisk =
+                operation.remote?['is_exchange_risk'] == true || operation.remote?['is_exchange_risk'] == 1;
+            final bool remoteHasAttendees =
+                operation.remote?['has_attendees'] == true || operation.remote?['has_attendees'] == 1;
+            final bool remoteHasOrganizer =
+                operation.remote?['has_organizer'] == true || operation.remote?['has_organizer'] == 1;
+            final bool remoteHasAlarm =
+                operation.remote?['has_alarm'] == true || operation.remote?['has_alarm'] == 1;
+            final bool remoteHasXAppleExchangeMarkers = operation.remote?['has_x_apple_exchange_markers'] == true ||
+                operation.remote?['has_x_apple_exchange_markers'] == 1;
             await upsertSyncedItem(
               db: db,
               remoteCollectionId: remoteCollectionId,
@@ -547,6 +588,13 @@ abstract class SyncStrategy {
               description: operation.local?.notes,
               dtstart: operation.local?.startTime,
               dtend: operation.local?.endTime,
+              isExchangeRisk: operation.remote != null ? remoteIsExchangeRisk : false,
+              hasAttendees: operation.remote != null ? remoteHasAttendees : false,
+              hasOrganizer: operation.remote != null ? remoteHasOrganizer : false,
+              hasAlarm: operation.remote != null ? remoteHasAlarm : false,
+              hasXAppleExchangeMarkers: operation.remote != null ? remoteHasXAppleExchangeMarkers : false,
+              uidKind: operation.remote != null ? operation.remote?['uid_kind']?.toString() : null,
+              rawVevent: operation.remote != null ? operation.remote?['raw_vevent']?.toString() : null,
             );
             return;
           }

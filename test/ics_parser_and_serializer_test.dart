@@ -85,6 +85,134 @@ void main() {
       expect(parsed['instance_key'], 'series-1::20261214T160000');
       expect(parsed['dtstart'], DateTime(2026, 12, 15, 17).millisecondsSinceEpoch);
     });
+
+    test('parses Outlook-style UID and returns uid_kind = outlook', () {
+      const String ics = 'BEGIN:VCALENDAR\n'
+          'BEGIN:VEVENT\n'
+          'UID:040000008200E00074C5B7101A82E00800000000A1B2C3D4E5F60708\n'
+          'DTSTART:20261212T080000Z\n'
+          'DTEND:20261212T090000Z\n'
+          'SUMMARY:Outlook Event\n'
+          'END:VEVENT\n'
+          'END:VCALENDAR\n';
+
+      final parsed = IcsParser.parse(ics, 'fallback');
+      expect(parsed['uid_kind'], 'outlook');
+      expect(parsed['is_exchange_risk'], isTrue);
+    });
+
+    test('marks Exchange-risk when ATTENDEE exists', () {
+      const String ics = 'BEGIN:VCALENDAR\n'
+          'BEGIN:VEVENT\n'
+          'UID:attendee-risk\n'
+          'DTSTART:20261212T080000Z\n'
+          'DTEND:20261212T090000Z\n'
+          'SUMMARY:Attendee Risk\n'
+          'ATTENDEE:mailto:test@example.com\n'
+          'END:VEVENT\n'
+          'END:VCALENDAR\n';
+
+      final parsed = IcsParser.parse(ics, 'fallback');
+      expect(parsed['has_attendees'], isTrue);
+      expect(parsed['is_exchange_risk'], isTrue);
+    });
+
+    test('marks Exchange-risk when ORGANIZER exists', () {
+      const String ics = 'BEGIN:VCALENDAR\n'
+          'BEGIN:VEVENT\n'
+          'UID:organizer-risk\n'
+          'DTSTART:20261212T080000Z\n'
+          'DTEND:20261212T090000Z\n'
+          'SUMMARY:Organizer Risk\n'
+          'ORGANIZER:mailto:test@example.com\n'
+          'END:VEVENT\n'
+          'END:VCALENDAR\n';
+
+      final parsed = IcsParser.parse(ics, 'fallback');
+      expect(parsed['has_organizer'], isTrue);
+      expect(parsed['is_exchange_risk'], isTrue);
+    });
+
+    test('marks Exchange-risk when BEGIN:VALARM exists', () {
+      const String ics = 'BEGIN:VCALENDAR\n'
+          'BEGIN:VEVENT\n'
+          'UID:alarm-risk\n'
+          'DTSTART:20261212T080000Z\n'
+          'DTEND:20261212T090000Z\n'
+          'SUMMARY:Alarm Risk\n'
+          'BEGIN:VALARM\n'
+          'TRIGGER:-PT15M\n'
+          'ACTION:DISPLAY\n'
+          'DESCRIPTION:Reminder\n'
+          'END:VALARM\n'
+          'END:VEVENT\n'
+          'END:VCALENDAR\n';
+
+      final parsed = IcsParser.parse(ics, 'fallback');
+      expect(parsed['has_alarm'], isTrue);
+      expect(parsed['is_exchange_risk'], isTrue);
+    });
+
+    test('marks Exchange-risk when Apple Exchange marker exists', () {
+      const String ics = 'BEGIN:VCALENDAR\n'
+          'BEGIN:VEVENT\n'
+          'UID:apple-marker-risk\n'
+          'DTSTART:20261212T080000Z\n'
+          'DTEND:20261212T090000Z\n'
+          'SUMMARY:Apple Marker Risk\n'
+          'X-APPLE-CREATOR-IDENTITY:com.apple.exchangesync.exchangesyncd\n'
+          'END:VEVENT\n'
+          'END:VCALENDAR\n';
+
+      final parsed = IcsParser.parse(ics, 'fallback');
+      expect(parsed['has_x_apple_exchange_markers'], isTrue);
+      expect(parsed['is_exchange_risk'], isTrue);
+    });
+
+    test('marks Exchange-risk when DTSTART has TZID', () {
+      const String ics = 'BEGIN:VCALENDAR\n'
+          'BEGIN:VEVENT\n'
+          'UID:tzid-risk\n'
+          'DTSTART;TZID=Asia/Tokyo:20261212T160000\n'
+          'DTEND;TZID=Asia/Tokyo:20261212T170000\n'
+          'SUMMARY:TZID Risk\n'
+          'END:VEVENT\n'
+          'END:VCALENDAR\n';
+
+      final parsed = IcsParser.parse(ics, 'fallback');
+      expect(parsed['is_exchange_risk'], isTrue);
+    });
+
+    test('does not mark plain simple event as Exchange-risk', () {
+      const String ics = 'BEGIN:VCALENDAR\n'
+          'BEGIN:VEVENT\n'
+          'UID:simple-uid\n'
+          'DTSTART:20261212T080000Z\n'
+          'DTEND:20261212T090000Z\n'
+          'SUMMARY:Simple Event\n'
+          'END:VEVENT\n'
+          'END:VCALENDAR\n';
+
+      final parsed = IcsParser.parse(ics, 'fallback');
+      expect(parsed['is_exchange_risk'], isFalse);
+      expect(parsed['uid_kind'], 'other');
+    });
+
+    test('returns raw_vevent containing BEGIN:VEVENT and END:VEVENT', () {
+      const String ics = 'BEGIN:VCALENDAR\n'
+          'BEGIN:VEVENT\n'
+          'UID:raw-vevent\n'
+          'DTSTART:20261212T080000Z\n'
+          'DTEND:20261212T090000Z\n'
+          'SUMMARY:Raw VEVENT\n'
+          'END:VEVENT\n'
+          'END:VCALENDAR\n';
+
+      final parsed = IcsParser.parse(ics, 'fallback');
+      final rawVevent = parsed['raw_vevent']?.toString() ?? '';
+      expect(rawVevent, contains('BEGIN:VEVENT'));
+      expect(rawVevent, contains('END:VEVENT'));
+    });
   });
 
   group('IcsSerializer', () {

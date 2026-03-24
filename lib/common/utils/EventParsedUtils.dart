@@ -21,6 +21,13 @@ class ParsedEvent {
   final String parseSource;
   final Map<String, dynamic>? dtstartMeta;
   final Map<String, dynamic>? dtendMeta;
+  final bool isExchangeRisk;
+  final bool hasAttendees;
+  final bool hasOrganizer;
+  final bool hasAlarm;
+  final bool hasXAppleExchangeMarkers;
+  final String uidKind;
+  final String? rawVevent;
 
   ParsedEvent({
     required this.uid,
@@ -36,6 +43,13 @@ class ParsedEvent {
     this.url,
     this.dtstartMeta,
     this.dtendMeta,
+    this.isExchangeRisk = false,
+    this.hasAttendees = false,
+    this.hasOrganizer = false,
+    this.hasAlarm = false,
+    this.hasXAppleExchangeMarkers = false,
+    this.uidKind = 'other',
+    this.rawVevent,
   });
 }
 
@@ -79,6 +93,14 @@ class Eventparsedutils {
           parseSource: (remote['parse_source'] ?? 'VEVENT').toString(),
           dtstartMeta: remote['dtstart_meta'] as Map<String, dynamic>?,
           dtendMeta: remote['dtend_meta'] as Map<String, dynamic>?,
+          isExchangeRisk: remote['is_exchange_risk'] == true || remote['is_exchange_risk'] == 1,
+          hasAttendees: remote['has_attendees'] == true || remote['has_attendees'] == 1,
+          hasOrganizer: remote['has_organizer'] == true || remote['has_organizer'] == 1,
+          hasAlarm: remote['has_alarm'] == true || remote['has_alarm'] == 1,
+          hasXAppleExchangeMarkers:
+              remote['has_x_apple_exchange_markers'] == true || remote['has_x_apple_exchange_markers'] == 1,
+          uidKind: (remote['uid_kind'] ?? 'other').toString(),
+          rawVevent: remote['raw_vevent']?.toString(),
         );
       }
 
@@ -119,6 +141,14 @@ class Eventparsedutils {
         parseSource: (parsedMap['parse_source'] ?? 'VEVENT').toString(),
         dtstartMeta: parsedMap['dtstart_meta'] as Map<String, dynamic>?,
         dtendMeta: parsedMap['dtend_meta'] as Map<String, dynamic>?,
+        isExchangeRisk: parsedMap['is_exchange_risk'] == true || parsedMap['is_exchange_risk'] == 1,
+        hasAttendees: parsedMap['has_attendees'] == true || parsedMap['has_attendees'] == 1,
+        hasOrganizer: parsedMap['has_organizer'] == true || parsedMap['has_organizer'] == 1,
+        hasAlarm: parsedMap['has_alarm'] == true || parsedMap['has_alarm'] == 1,
+        hasXAppleExchangeMarkers:
+            parsedMap['has_x_apple_exchange_markers'] == true || parsedMap['has_x_apple_exchange_markers'] == 1,
+        uidKind: (parsedMap['uid_kind'] ?? 'other').toString(),
+        rawVevent: parsedMap['raw_vevent']?.toString(),
       );
     } catch (e) {
       debugPrint('[ERROR] resolveEventData exception: $e');

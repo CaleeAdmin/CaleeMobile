@@ -435,6 +435,9 @@ class CaleeServerService {
 
         final String instanceKey = (parsed['instance_key'] ?? parsedUid).toString();
         debugPrint('[ICS] Snapshot parsed uid=$parsedUid instanceKey=$instanceKey source=${parsed['parse_source']} start=${parsed['dtstart']} end=${parsed['dtend']}');
+        debugPrint(
+          '[ICS] Risk metadata uid=$parsedUid instanceKey=$instanceKey is_exchange_risk=${parsed['is_exchange_risk']} uid_kind=${parsed['uid_kind']}',
+        );
 
         return {
           'uid': parsedUid,
@@ -451,6 +454,13 @@ class CaleeServerService {
           'created': parsed['created'],
           'last_modified': parsed['last_modified'],
           'parse_source': parsed['parse_source'],
+          'is_exchange_risk': parsed['is_exchange_risk'],
+          'has_attendees': parsed['has_attendees'],
+          'has_organizer': parsed['has_organizer'],
+          'has_alarm': parsed['has_alarm'],
+          'has_x_apple_exchange_markers': parsed['has_x_apple_exchange_markers'],
+          'uid_kind': parsed['uid_kind'],
+          'raw_vevent': parsed['raw_vevent'],
 
           'remote_uid': instanceKey,
           'start': parsed['dtstart'],
