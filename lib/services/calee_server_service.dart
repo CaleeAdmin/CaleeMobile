@@ -725,7 +725,14 @@ class CaleeServerService {
     Map<String, dynamic>? dtstartMeta,
     Map<String, dynamic>? dtendMeta,
     String? targetEventPath,
+    bool? isExchangeRisk,
+    String? uidKind,
   }) async {
+    if (isExchangeRisk == true) {
+      debugPrint('[ICS] Upload blocked uid=$uid summary=$title reason=exchange_safe_mode uid_kind=$uidKind');
+      return null;
+    }
+
     final DateTime? resolvedStart = start;
     final DateTime? resolvedEnd = end;
     final List<String> blockers = <String>[];

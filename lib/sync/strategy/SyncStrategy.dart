@@ -105,6 +105,11 @@ abstract class SyncStrategy {
     Map<String, dynamic>? remoteSnapshot,
     String? targetRemoteHref,
   }) async {
+    if (remoteSnapshot != null && _isExchangeRiskRemote(remoteSnapshot)) {
+      print('[SYNC] Exchange-safe push blocked uid=${(local.uid ?? '').trim()}');
+      return null;
+    }
+
     if (loginName == null || loginName!.isEmpty) {
       return null;
     }
@@ -141,6 +146,8 @@ abstract class SyncStrategy {
       start: DateTime.fromMillisecondsSinceEpoch(local.startTime ?? 0),
       end: DateTime.fromMillisecondsSinceEpoch(local.endTime ?? 0),
       targetEventPath: targetRemoteHref,
+      isExchangeRisk: remoteSnapshot?['is_exchange_risk'] == true || remoteSnapshot?['is_exchange_risk'] == 1,
+      uidKind: remoteSnapshot?['uid_kind']?.toString(),
     );
 
     if (newEtag == null) {
@@ -476,6 +483,11 @@ abstract class SyncStrategy {
             skip++;
             return;
           }
+          if (_isExchangeRiskItem(remote: operation.remote, mapping: operation.mapping)) {
+            skip++;
+            print('[SYNC] Exchange-safe ${operation.type.name} blocked uid=${operation.uid}');
+            return;
+          }
           final pushed = await pushLocalEventToRemote(
             local: operation.local!,
             remotePath: ctx.remotePath,
@@ -515,6 +527,11 @@ abstract class SyncStrategy {
         case _CanonicalOperationType.remoteDelete:
           if (blockDeletes || !remoteTrusted || !localTrusted) {
             skip++;
+            return;
+          }
+          if (_isExchangeRiskItem(remote: operation.remote, mapping: operation.mapping)) {
+            skip++;
+            print('[SYNC] Exchange-safe remoteDelete blocked uid=${operation.uid}');
             return;
           }
           final href = operation.mapping?['remote_href']?.toString() ?? operation.remote?['href']?.toString() ?? '';
@@ -757,6 +774,23 @@ abstract class SyncStrategy {
     return localEnd != mappedEnd;
   }
 
+  bool _isExchangeRiskRemote(Map<String, dynamic>? remote) {
+    if (remote == null) return false;
+    return remote['is_exchange_risk'] == true || remote['is_exchange_risk'] == 1;
+  }
+
+  bool _isExchangeRiskMapping(Map<String, dynamic>? mapping) {
+    if (mapping == null) return false;
+    return mapping['is_exchange_risk'] == true || mapping['is_exchange_risk'] == 1;
+  }
+
+  bool _isExchangeRiskItem({
+    Map<String, dynamic>? remote,
+    Map<String, dynamic>? mapping,
+  }) {
+    return _isExchangeRiskRemote(remote) || _isExchangeRiskMapping(mapping);
+  }
+
   SyncItemAction _decideCanonicalAction({
     required String uid,
     required Map<String, dynamic>? remote,
@@ -782,6 +816,28 @@ abstract class SyncStrategy {
     final bool mapped = mapping != null;
 
     SyncItemAction action;
+    if (_isExchangeRiskItem(remote: remote, mapping: mapping)) {
+      if (remoteExists && !localExists) {
+        action = SyncItemAction.createLocal;
+      } else if (remoteExists && localExists) {
+        if (remoteChanged) {
+          action = SyncItemAction.updateLocal;
+        } else if (localChanged) {
+          action = SyncItemAction.skip;
+        } else {
+          action = SyncItemAction.skip;
+        }
+      } else if (!remoteExists && localExists && mapped) {
+        action = SyncItemAction.deleteLocal;
+      } else {
+        action = SyncItemAction.skip;
+      }
+      if (!rules.allowedActions.contains(action)) {
+        return SyncItemAction.skip;
+      }
+      return action;
+    }
+
     if (remoteExists && !localExists) {
       action = mapped ? rules.onRemoteOnlyMapped : rules.onRemoteOnlyUnmapped;
     } else if (!remoteExists && localExists) {
@@ -808,6 +864,26 @@ abstract class SyncStrategy {
       return SyncItemAction.skip;
     }
     return action;
+  }
+
+  SyncItemAction decideCanonicalActionForTesting({
+    required String uid,
+    required Map<String, dynamic>? remote,
+    required Map<String, dynamic>? mapping,
+    required PlatformItem? local,
+    required int bindingRole,
+    required UnifiedModeRules rules,
+    required bool bootstrap,
+  }) {
+    return _decideCanonicalAction(
+      uid: uid,
+      remote: remote,
+      mapping: mapping,
+      local: local,
+      bindingRole: bindingRole,
+      rules: rules,
+      bootstrap: bootstrap,
+    );
   }
 }
 
@@ -922,6 +998,8 @@ abstract class RemoteItemGateway {
     Map<String, dynamic>? dtstartMeta,
     Map<String, dynamic>? dtendMeta,
     String? targetEventPath,
+    bool? isExchangeRisk,
+    String? uidKind,
   });
 
   Future<bool> deleteEvent({
@@ -959,6 +1037,8 @@ class CaleeRemoteItemGateway extends RemoteItemGateway {
     Map<String, dynamic>? dtstartMeta,
     Map<String, dynamic>? dtendMeta,
     String? targetEventPath,
+    bool? isExchangeRisk,
+    String? uidKind,
   }) => _service.uploadEventData(
         userId: userId,
         calendarPath: calendarPath,
@@ -977,6 +1057,8 @@ class CaleeRemoteItemGateway extends RemoteItemGateway {
         dtstartMeta: dtstartMeta,
         dtendMeta: dtendMeta,
         targetEventPath: targetEventPath,
+        isExchangeRisk: isExchangeRisk,
+        uidKind: uidKind,
       );
 
   @override

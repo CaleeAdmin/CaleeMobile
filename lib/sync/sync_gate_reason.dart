@@ -10,6 +10,7 @@ class SyncGateReason {
   static const String subscriptionReadonlyViolation = 'subscription_readonly_violation';
   static const String repairRequired = 'repair_required';
   static const String safeFirstSync = 'safe_first_sync';
+  static const String exchangeReadOnly = 'exchange_read_only';
 
   static const Set<String> deterministicReasons = {
     ok,
@@ -21,6 +22,7 @@ class SyncGateReason {
     subscriptionReadonlyViolation,
     repairRequired,
     safeFirstSync,
+    exchangeReadOnly,
   };
 
   static String? toUiMessage(String? reason) {
@@ -41,6 +43,8 @@ class SyncGateReason {
         return 'Reconnect required to repair calendar binding.';
       case safeFirstSync:
         return 'First sync after reconnect is running in safe mode. Deletes are temporarily blocked.';
+      case exchangeReadOnly:
+        return 'Exchange-safe mode: this event is mirrored from remote and local edits will not push back.';
       default:
         if (reason == null || reason.isEmpty) return null;
         return 'Sync paused (${reason.replaceAll('_', ' ')}).';
