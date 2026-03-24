@@ -25,11 +25,18 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: _createDB,
+      onUpgrade: _onUpgrade,
       // 开启外键支持
       onConfigure: (db) async => await db.execute('PRAGMA foreign_keys = ON'),
     );
+  }
+
+  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      await _migrateToV2(db);
+    }
   }
 
   Future _createDB(Database db, int version) async {
@@ -110,6 +117,13 @@ class DatabaseHelper {
         last_etag TEXT, /* 最近同步到的 etag */
         last_mtime INTEGER, /* 最近同步时记录的修改时间（毫秒时间戳） */
         sync_status INTEGER NOT NULL DEFAULT 3 CHECK(sync_status IN (0,1,2,3)), /* 同步状态（0 待上传，1 待下载，2 兼容保留，3 已同步） */
+        is_exchange_risk INTEGER DEFAULT 0,
+        has_attendees INTEGER DEFAULT 0,
+        has_organizer INTEGER DEFAULT 0,
+        has_alarm INTEGER DEFAULT 0,
+        has_x_apple_exchange_markers INTEGER DEFAULT 0,
+        uid_kind TEXT,
+        raw_vevent TEXT,
         FOREIGN KEY (remote_collection_id) REFERENCES remote_collections(id) ON DELETE CASCADE
       )
     ''');
@@ -139,6 +153,30 @@ class DatabaseHelper {
       ON sync_items(remote_collection_id, remote_uid)
     ''');
 
+  }
+
+  Future<void> _migrateToV2(Database db) async {
+    await db.execute(
+      'ALTER TABLE sync_items ADD COLUMN is_exchange_risk INTEGER DEFAULT 0',
+    );
+    await db.execute(
+      'ALTER TABLE sync_items ADD COLUMN has_attendees INTEGER DEFAULT 0',
+    );
+    await db.execute(
+      'ALTER TABLE sync_items ADD COLUMN has_organizer INTEGER DEFAULT 0',
+    );
+    await db.execute(
+      'ALTER TABLE sync_items ADD COLUMN has_alarm INTEGER DEFAULT 0',
+    );
+    await db.execute(
+      'ALTER TABLE sync_items ADD COLUMN has_x_apple_exchange_markers INTEGER DEFAULT 0',
+    );
+    await db.execute(
+      'ALTER TABLE sync_items ADD COLUMN uid_kind TEXT',
+    );
+    await db.execute(
+      'ALTER TABLE sync_items ADD COLUMN raw_vevent TEXT',
+    );
   }
 
 

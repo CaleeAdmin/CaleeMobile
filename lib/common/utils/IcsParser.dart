@@ -50,6 +50,20 @@ class IcsParser {
         ? recurrenceIdProperty!.rawValue.trim()
         : null;
     final int resolvedEndMillis = endMillis ?? (startMillis + 3600000);
+    final Map<String, dynamic>? dtstartMeta = _buildDateMeta(startProperty, 'VEVENT');
+    final Map<String, dynamic>? dtendMeta = _buildDateMeta(endProperty, 'VEVENT');
+    final bool hasAttendees = _hasPropertyInBlock(veventBlock, 'ATTENDEE');
+    final bool hasOrganizer = _hasPropertyInBlock(veventBlock, 'ORGANIZER');
+    final bool hasAlarm = _hasPropertyInBlock(veventBlock, 'BEGIN:VALARM');
+    final bool hasXAppleExchangeMarkers = _hasAppleExchangeMarkers(veventBlock);
+    final String uidKind = _classifyUidKind(finalUid);
+    final bool isExchangeRisk = hasAttendees ||
+        hasOrganizer ||
+        hasAlarm ||
+        hasXAppleExchangeMarkers ||
+        uidKind == 'outlook' ||
+        dtstartMeta?['tzid'] != null ||
+        dtendMeta?['tzid'] != null;
 
     debugPrint(
       '[ICS] Parsed VEVENT uid=$finalUid recurrenceId=${recurrenceId ?? ''} '
@@ -74,11 +88,18 @@ class IcsParser {
       'rrule': rruleProperty?.rawValue,
       'recurrence_id': recurrenceId,
       'instance_key': _buildInstanceKey(finalUid, recurrenceId),
-      'dtstart_meta': _buildDateMeta(startProperty, 'VEVENT'),
-      'dtend_meta': _buildDateMeta(endProperty, 'VEVENT'),
+      'dtstart_meta': dtstartMeta,
+      'dtend_meta': dtendMeta,
       'recurrence_id_meta': _buildDateMeta(recurrenceIdProperty, 'VEVENT'),
       'vevent_block': veventBlock,
+      'raw_vevent': veventBlock,
       'parse_source': 'VEVENT',
+      'is_exchange_risk': isExchangeRisk,
+      'has_attendees': hasAttendees,
+      'has_organizer': hasOrganizer,
+      'has_alarm': hasAlarm,
+      'has_x_apple_exchange_markers': hasXAppleExchangeMarkers,
+      'uid_kind': uidKind,
     };
   }
 
@@ -124,6 +145,47 @@ class IcsParser {
       rawValue: rawValue,
       params: params,
     );
+  }
+
+  static bool _hasPropertyInBlock(String block, String name) {
+    final RegExp reg = RegExp(
+      '^${RegExp.escape(name)}(?:;|:|$)',
+      multiLine: true,
+      caseSensitive: false,
+    );
+    return reg.hasMatch(block);
+  }
+
+  static bool _hasAnyPropertyPrefixInBlock(String block, String prefix) {
+    final RegExp reg = RegExp(
+      '^${RegExp.escape(prefix)}',
+      multiLine: true,
+      caseSensitive: false,
+    );
+    return reg.hasMatch(block);
+  }
+
+  static String _classifyUidKind(String uid) {
+    final String normalized = uid.trim();
+    if (normalized.toUpperCase().startsWith('040000008200E000')) {
+      return 'outlook';
+    }
+
+    final RegExp uuidReg = RegExp(
+      r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$',
+    );
+    if (uuidReg.hasMatch(normalized)) {
+      return 'uuid';
+    }
+    return 'other';
+  }
+
+  static bool _hasAppleExchangeMarkers(String block) {
+    return _hasAnyPropertyPrefixInBlock(
+          block,
+          'X-APPLE-CREATOR-IDENTITY:com.apple.exchangesync.exchangesyncd',
+        ) ||
+        _hasAnyPropertyPrefixInBlock(block, 'X-APPLE-NEEDS-REPLY');
   }
 
   static Map<String, dynamic>? _buildDateMeta(IcsPropertyValue? property, String source) {
