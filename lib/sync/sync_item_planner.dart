@@ -158,7 +158,7 @@ class SyncItemPlanner {
     final bool isMirror = bindingRole == SyncBindingRole.mirror;
 
     final bool shouldSync = isTwoWay
-        ? true
+        ? (remoteChanged || localChanged || metaChanged)
         : isOwnerLink
             ? (localChanged || metaChanged)
             : isMirror
