@@ -3,7 +3,6 @@ import 'package:caleesync/entity/SyncContext.dart';
 import 'package:caleesync/entity/SyncSummary.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'test_bootstrap.dart';
 
 class _TestSyncStrategy extends SyncStrategy {
   @override
@@ -11,10 +10,6 @@ class _TestSyncStrategy extends SyncStrategy {
 }
 
 void main() {
-  setUpAll(() async {
-    await bootstrapTestStorage();
-  });
-
   group('SyncStrategy adaptive local fetch window', () {
 
     test('uses fallback window when no usable timestamps exist', () {
