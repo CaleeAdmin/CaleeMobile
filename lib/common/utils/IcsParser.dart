@@ -169,8 +169,14 @@ class IcsParser {
 
       if (dateStr.endsWith('Z')) {
         final ({int hour, int minute, int second}) time = _parseFloatingDateTime(compact);
-        return DateTime.utc(year, month, day, hour, minute, second)
-            .millisecondsSinceEpoch;
+        return DateTime.utc(
+          year,
+          month,
+          day,
+          time.hour,
+          time.minute,
+          time.second,
+        ).millisecondsSinceEpoch;
       }
 
       final ({int hour, int minute, int second}) time = _parseFloatingDateTime(compact);
