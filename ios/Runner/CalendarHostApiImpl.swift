@@ -281,6 +281,11 @@ import EventKit
     return externalId
   }
 
+  private func isSyntheticLocalUid(_ uid: String) -> Bool {
+    let trimmedUid = uid.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmedUid.hasPrefix("local_")
+  }
+
   private func findEvent(calendarId: String, matchingCaleeUid uid: String, store: EKEventStore) -> EKEvent? {
     let trimmedUid = uid.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmedUid.isEmpty, let calendar = store.calendar(withIdentifier: calendarId) else {
@@ -292,6 +297,21 @@ import EventKit
     let endDate = now.addingTimeInterval(20 * 365 * 24 * 3600)
     let predicate = store.predicateForEvents(withStart: startDate, end: endDate, calendars: [calendar])
     return store.events(matching: predicate).first { extractCaleeUid(from: $0) == trimmedUid }
+  }
+
+  private func findEvent(
+    calendarId: String,
+    matchingExternalIdentifier externalId: String,
+    store: EKEventStore
+  ) -> EKEvent? {
+    let trimmedExternalId = externalId.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmedExternalId.isEmpty, !isSyntheticLocalUid(trimmedExternalId) else {
+      return nil
+    }
+
+    return store.calendarItems(withExternalIdentifier: trimmedExternalId)
+      .compactMap { $0 as? EKEvent }
+      .first { $0.calendar.calendarIdentifier == calendarId }
   }
 
   private func resolveEvent(byStableLocalId eventId: String?, store: EKEventStore) -> EKEvent? {
@@ -369,6 +389,9 @@ import EventKit
       var event = resolveEvent(byStableLocalId: request.eventId, store: store)
       if event == nil {
         event = findEvent(calendarId: request.calendarId, matchingCaleeUid: request.uid, store: store)
+      }
+      if event == nil {
+        event = findEvent(calendarId: request.calendarId, matchingExternalIdentifier: request.uid, store: store)
       }
       if event == nil {
         event = EKEvent(eventStore: store)
