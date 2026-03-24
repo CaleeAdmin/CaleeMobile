@@ -107,6 +107,7 @@ data class PlatformItem (
   val title: String? = null,
   val notes: String? = null,
   val location: String? = null,
+  val eventTimezone: String? = null,
   val startTime: Long? = null,
   val endTime: Long? = null,
   val lastModified: Long? = null,
@@ -124,14 +125,15 @@ data class PlatformItem (
       val title = __pigeon_list[2] as String?
       val notes = __pigeon_list[3] as String?
       val location = __pigeon_list[4] as String?
-      val startTime = __pigeon_list[5].let { num -> if (num is Int) num.toLong() else num as Long? }
-      val endTime = __pigeon_list[6].let { num -> if (num is Int) num.toLong() else num as Long? }
-      val lastModified = __pigeon_list[7].let { num -> if (num is Int) num.toLong() else num as Long? }
-      val isTask = __pigeon_list[8] as Boolean?
-      val isAllDay = __pigeon_list[9] as Boolean?
-      val status = __pigeon_list[10].let { num -> if (num is Int) num.toLong() else num as Long? }
-      val priority = __pigeon_list[11].let { num -> if (num is Int) num.toLong() else num as Long? }
-      return PlatformItem(localId, uid, title, notes, location, startTime, endTime, lastModified, isTask, isAllDay, status, priority)
+      val eventTimezone = __pigeon_list[5] as String?
+      val startTime = __pigeon_list[6].let { num -> if (num is Int) num.toLong() else num as Long? }
+      val endTime = __pigeon_list[7].let { num -> if (num is Int) num.toLong() else num as Long? }
+      val lastModified = __pigeon_list[8].let { num -> if (num is Int) num.toLong() else num as Long? }
+      val isTask = __pigeon_list[9] as Boolean?
+      val isAllDay = __pigeon_list[10] as Boolean?
+      val status = __pigeon_list[11].let { num -> if (num is Int) num.toLong() else num as Long? }
+      val priority = __pigeon_list[12].let { num -> if (num is Int) num.toLong() else num as Long? }
+      return PlatformItem(localId, uid, title, notes, location, eventTimezone, startTime, endTime, lastModified, isTask, isAllDay, status, priority)
     }
   }
   fun toList(): List<Any?> {
@@ -141,6 +143,7 @@ data class PlatformItem (
       title,
       notes,
       location,
+      eventTimezone,
       startTime,
       endTime,
       lastModified,
@@ -160,7 +163,10 @@ data class CalendarEventRequest (
   val end: Long,
   val notes: String? = null,
   val uid: String,
-  val eventId: String? = null
+  val eventId: String? = null,
+  val eventTimezone: String? = null,
+  val location: String? = null,
+  val isAllDay: Boolean? = null
 
 ) {
   companion object {
@@ -173,7 +179,10 @@ data class CalendarEventRequest (
       val notes = __pigeon_list[4] as String?
       val uid = __pigeon_list[5] as String
       val eventId = __pigeon_list[6] as String?
-      return CalendarEventRequest(calendarId, title, start, end, notes, uid, eventId)
+      val eventTimezone = __pigeon_list[7] as String?
+      val location = __pigeon_list[8] as String?
+      val isAllDay = __pigeon_list[9] as Boolean?
+      return CalendarEventRequest(calendarId, title, start, end, notes, uid, eventId, eventTimezone, location, isAllDay)
     }
   }
   fun toList(): List<Any?> {
@@ -185,6 +194,9 @@ data class CalendarEventRequest (
       notes,
       uid,
       eventId,
+      eventTimezone,
+      location,
+      isAllDay,
     )
   }
 }
@@ -254,10 +266,10 @@ interface NativeCalendarApi {
    * Android 上删除日历会自动联级删除该日历下的所有事件 (Events)
    */
   fun deleteCalendar(calendarId: String, accountName: String, callback: (Result<Boolean>) -> Unit)
-  fun createEvent(calendarId: String, title: String, start: Long, end: Long, notes: String?, uid: String?, callback: (Result<String?>) -> Unit)
+  fun createEvent(calendarId: String, title: String, start: Long, end: Long, notes: String?, uid: String?, location: String?, eventTimezone: String?, isAllDay: Boolean?, callback: (Result<String?>) -> Unit)
   fun createOrUpdateEvent(request: CalendarEventRequest, callback: (Result<String?>) -> Unit)
   /** 获取指定日历下所有事件的 ID 列表（用于检测本地删除了哪些） */
-  fun getSystemEventIds(calendarId: String): List<String>
+  fun getSystemEventIds(calendarId: String, startMs: Long, endMs: Long): List<String>
   /** 根据 ID 删除本地事件（用于同步云端的删除操作） */
   fun deleteEvent(eventId: String): Boolean
   fun modifyCalendarTitle(calendarId: String, newTitle: String, accountName: String, accountType: String, callback: (Result<Boolean>) -> Unit)
@@ -380,7 +392,10 @@ interface NativeCalendarApi {
             val endArg = args[3].let { num -> if (num is Int) num.toLong() else num as Long }
             val notesArg = args[4] as String?
             val uidArg = args[5] as String?
-            api.createEvent(calendarIdArg, titleArg, startArg, endArg, notesArg, uidArg) { result: Result<String?> ->
+            val locationArg = args[6] as String?
+            val eventTimezoneArg = args[7] as String?
+            val isAllDayArg = args[8] as Boolean?
+            api.createEvent(calendarIdArg, titleArg, startArg, endArg, notesArg, uidArg, locationArg, eventTimezoneArg, isAllDayArg) { result: Result<String?> ->
               val error = result.exceptionOrNull()
               if (error != null) {
                 reply.reply(wrapError(error))
@@ -420,8 +435,10 @@ interface NativeCalendarApi {
           channel.setMessageHandler { message, reply ->
             val args = message as List<Any?>
             val calendarIdArg = args[0] as String
+            val startMsArg = args[1] as Long
+            val endMsArg = args[2] as Long
             val wrapped: List<Any?> = try {
-              listOf<Any?>(api.getSystemEventIds(calendarIdArg))
+              listOf<Any?>(api.getSystemEventIds(calendarIdArg, startMsArg, endMsArg))
             } catch (exception: Throwable) {
               wrapError(exception)
             }
