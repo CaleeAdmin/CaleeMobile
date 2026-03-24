@@ -46,11 +46,18 @@ abstract class SyncStrategy {
     required int rangeEndMs,
   }) async {
     final events = await localGateway.getEvents(localCalendarId, rangeStartMs, rangeEndMs);
+    bool canInferDeletesFromLocalAbsence = false;
+    try {
+      await localGateway.getSystemEventIds(localCalendarId, rangeStartMs, rangeEndMs);
+      canInferDeletesFromLocalAbsence = true;
+    } catch (_) {
+      canInferDeletesFromLocalAbsence = false;
+    }
     return LocalEventsSnapshot(
       events: events,
       rangeStartMs: rangeStartMs,
       rangeEndMs: rangeEndMs,
-      canInferDeletesFromLocalAbsence: false,
+      canInferDeletesFromLocalAbsence: canInferDeletesFromLocalAbsence,
     );
   }
 
@@ -1068,6 +1075,7 @@ class AdaptiveLocalFetchWindow {
 
 abstract class LocalItemGateway {
   Future<List<PlatformItem>> getEvents(String localCalendarId, int start, int end);
+  Future<List<String>> getSystemEventIds(String localCalendarId, int startMs, int endMs);
 
   Future<String?> createOrUpdateEvent({
     required String calendarId,
@@ -1094,6 +1102,12 @@ class NativeLocalItemGateway extends LocalItemGateway {
   Future<List<PlatformItem>> getEvents(String localCalendarId, int start, int end) async {
     final List<PlatformItem?> items = await _nativeApi.getEvents(localCalendarId, start, end);
     return items.whereType<PlatformItem>().toList();
+  }
+
+  @override
+  Future<List<String>> getSystemEventIds(String localCalendarId, int startMs, int endMs) async {
+    final List<String?> ids = await _nativeApi.getSystemEventIds(localCalendarId, startMs, endMs);
+    return ids.whereType<String>().toList();
   }
 
   @override

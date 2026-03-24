@@ -112,7 +112,7 @@ abstract class NativeCalendarApi {
   String? createOrUpdateEvent(CalendarEventRequest request);
 
   /// 获取指定日历下所有事件的 ID 列表（用于检测本地删除了哪些）
-  List<String> getSystemEventIds(String calendarId);
+  List<String> getSystemEventIds(String calendarId, int startMs, int endMs);
 
   /// 根据 ID 删除本地事件（用于同步云端的删除操作）
   bool deleteEvent(String eventId);

@@ -408,16 +408,14 @@ import EventKit
     }
   }
 
-  func getSystemEventIds(calendarId: String) throws -> [String] {
+  func getSystemEventIds(calendarId: String, startMs: Int64, endMs: Int64) throws -> [String] {
     let store = try requireReadableEventStore()
     guard let calendar = store.calendar(withIdentifier: calendarId) else {
       return []
     }
 
-    // There is no API for "all" events, so use a wide window (±1 year from now).
-    let now = Date()
-    let startDate = now.addingTimeInterval(-365 * 24 * 3600)
-    let endDate = now.addingTimeInterval(365 * 24 * 3600)
+    let startDate = Date(timeIntervalSince1970: TimeInterval(startMs) / 1000.0)
+    let endDate = Date(timeIntervalSince1970: TimeInterval(endMs) / 1000.0)
 
     let predicate = store.predicateForEvents(withStart: startDate, end: endDate, calendars: [calendar])
     let events = store.events(matching: predicate)

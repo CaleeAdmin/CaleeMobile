@@ -604,12 +604,17 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
         }
     }
 
-    override fun getSystemEventIds(calendarId: String): List<String> {
+    override fun getSystemEventIds(calendarId: String, startMs: Long, endMs: Long): List<String> {
         val eventIds = mutableListOf<String>()
         val uri = CalendarContract.Events.CONTENT_URI
         val projection = arrayOf(CalendarContract.Events._ID)
+        val selection = "${CalendarContract.Events.CALENDAR_ID} = ? AND " +
+            "${CalendarContract.Events.DELETED} = 0 AND " +
+            "${CalendarContract.Events.DTSTART} < ? AND " +
+            "${CalendarContract.Events.DTEND} > ?"
+        val selectionArgs = arrayOf(calendarId, endMs.toString(), startMs.toString())
         try {
-            context.contentResolver.query(uri, projection, "${CalendarContract.Events.CALENDAR_ID} = ? AND ${CalendarContract.Events.DELETED} = 0", arrayOf(calendarId), null)?.use { cursor ->
+            context.contentResolver.query(uri, projection, selection, selectionArgs, null)?.use { cursor ->
                 while (cursor.moveToNext()) {
                     eventIds.add(cursor.getLong(0).toString())
                 }

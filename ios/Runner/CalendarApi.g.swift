@@ -292,7 +292,7 @@ protocol NativeCalendarApi {
   func createEvent(calendarId: String, title: String, start: Int64, end: Int64, notes: String?, uid: String?, location: String?, eventTimezone: String?, isAllDay: Bool?, completion: @escaping (Result<String?, Error>) -> Void)
   func createOrUpdateEvent(request: CalendarEventRequest, completion: @escaping (Result<String?, Error>) -> Void)
   /// 获取指定日历下所有事件的 ID 列表（用于检测本地删除了哪些）
-  func getSystemEventIds(calendarId: String) throws -> [String]
+  func getSystemEventIds(calendarId: String, startMs: Int64, endMs: Int64) throws -> [String]
   /// 根据 ID 删除本地事件（用于同步云端的删除操作）
   func deleteEvent(eventId: String) throws -> Bool
   func modifyCalendarTitle(calendarId: String, newTitle: String, accountName: String, accountType: String, completion: @escaping (Result<Bool, Error>) -> Void)
@@ -447,8 +447,10 @@ class NativeCalendarApiSetup {
       getSystemEventIdsChannel.setMessageHandler { message, reply in
         let args = message as! [Any?]
         let calendarIdArg = args[0] as! String
+        let startMsArg = args[1] as! Int64
+        let endMsArg = args[2] as! Int64
         do {
-          let result = try api.getSystemEventIds(calendarId: calendarIdArg)
+          let result = try api.getSystemEventIds(calendarId: calendarIdArg, startMs: startMsArg, endMs: endMsArg)
           reply(wrapResult(result))
         } catch {
           reply(wrapError(error))

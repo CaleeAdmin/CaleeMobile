@@ -96,6 +96,9 @@ class _NoopLocalGateway extends LocalItemGateway {
 
   @override
   Future<List<PlatformItem>> getEvents(String localCalendarId, int start, int end) async => <PlatformItem>[];
+
+  @override
+  Future<List<String>> getSystemEventIds(String localCalendarId, int startMs, int endMs) async => <String>[];
 }
 
 class _TestSyncStrategy extends SyncStrategy {

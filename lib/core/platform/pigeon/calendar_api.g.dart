@@ -489,7 +489,7 @@ class NativeCalendarApi {
   }
 
   /// 获取指定日历下所有事件的 ID 列表（用于检测本地删除了哪些）
-  Future<List<String?>> getSystemEventIds(String calendarId) async {
+  Future<List<String?>> getSystemEventIds(String calendarId, int startMs, int endMs) async {
     final String __pigeon_channelName = 'dev.flutter.pigeon.caleesync.NativeCalendarApi.getSystemEventIds$__pigeon_messageChannelSuffix';
     final BasicMessageChannel<Object?> __pigeon_channel = BasicMessageChannel<Object?>(
       __pigeon_channelName,
@@ -497,7 +497,7 @@ class NativeCalendarApi {
       binaryMessenger: __pigeon_binaryMessenger,
     );
     final List<Object?>? __pigeon_replyList =
-        await __pigeon_channel.send(<Object?>[calendarId]) as List<Object?>?;
+        await __pigeon_channel.send(<Object?>[calendarId, startMs, endMs]) as List<Object?>?;
     if (__pigeon_replyList == null) {
       throw _createConnectionError(__pigeon_channelName);
     } else if (__pigeon_replyList.length > 1) {
