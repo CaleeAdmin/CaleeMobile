@@ -5,7 +5,6 @@ import 'package:caleesync/sync/SyncEnum.dart';
 import 'package:caleesync/sync/strategy/SyncStrategy.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'test_bootstrap.dart';
 
 class _TestSyncStrategy extends SyncStrategy {
   _TestSyncStrategy({LocalItemGateway? gateway}) : _localGateway = gateway ?? _FakeLocalItemGateway(events: const []);
@@ -66,10 +65,6 @@ class _FakeLocalItemGateway extends LocalItemGateway {
 }
 
 void main() {
-  setUpAll(() async {
-    await bootstrapTestStorage();
-  });
-
   group('SyncStrategy delete inference authority', () {
     final rules = UnifiedModeRules.forMode(UnifiedSyncMode.bidi);
 

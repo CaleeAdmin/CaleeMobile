@@ -5,7 +5,6 @@ import 'package:caleesync/services/calee_server_service.dart';
 import 'package:caleesync/sync/strategy/SyncStrategy.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'test_bootstrap.dart';
 
 class _RecordingRemoteGateway extends RemoteItemGateway {
   Map<String, dynamic>? lastUploadArgs;
@@ -112,6 +111,12 @@ class _TestSyncStrategy extends SyncStrategy {
   final LocalItemGateway _localGateway;
 
   @override
+  String? get loginName => 'tester';
+
+  @override
+  String? get password => 'test-password';
+
+  @override
   RemoteItemGateway get remoteGateway => _remoteGateway;
 
   @override
@@ -122,10 +127,6 @@ class _TestSyncStrategy extends SyncStrategy {
 }
 
 void main() {
-  setUpAll(() async {
-    await bootstrapTestStorage();
-  });
-
   test('remote update passes vevent_block into upload path', () async {
     final gateway = _RecordingRemoteGateway();
     final strategy = _TestSyncStrategy(remote: gateway);
