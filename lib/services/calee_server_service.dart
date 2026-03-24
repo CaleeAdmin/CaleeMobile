@@ -715,6 +715,7 @@ class CaleeServerService {
     Map<String, dynamic>? dtstartMeta,
     Map<String, dynamic>? dtendMeta,
     String? targetEventPath,
+    String? originalVeventBlock,
   }) async {
     final DateTime? resolvedStart = start;
     final DateTime? resolvedEnd = end;
@@ -742,21 +743,41 @@ class CaleeServerService {
       return null;
     }
 
-    final String icsString = IcsSerializer.toIcs(
-      uid: uid,
-      summary: title,
-      description: description,
-      location: location,
-      url: url,
-      recurrenceId: recurrenceId,
-      rrule: rrule,
-      created: created,
-      lastModified: lastModified,
-      dtstartMeta: dtstartMeta,
-      dtendMeta: dtendMeta,
-      start: resolvedStart,
-      end: resolvedEnd,
-    );
+    final String icsString = (targetEventPath != null &&
+            targetEventPath.trim().isNotEmpty &&
+            originalVeventBlock != null &&
+            originalVeventBlock.trim().isNotEmpty)
+        ? IcsSerializer.mergeIntoExistingVevent(
+            originalVeventBlock: originalVeventBlock,
+            uid: uid,
+            summary: title,
+            description: description,
+            location: location,
+            url: url,
+            recurrenceId: recurrenceId,
+            rrule: rrule,
+            created: created,
+            lastModified: lastModified,
+            dtstartMeta: dtstartMeta,
+            dtendMeta: dtendMeta,
+            start: resolvedStart,
+            end: resolvedEnd,
+          )
+        : IcsSerializer.toIcs(
+            uid: uid,
+            summary: title,
+            description: description,
+            location: location,
+            url: url,
+            recurrenceId: recurrenceId,
+            rrule: rrule,
+            created: created,
+            lastModified: lastModified,
+            dtstartMeta: dtstartMeta,
+            dtendMeta: dtendMeta,
+            start: resolvedStart,
+            end: resolvedEnd,
+          );
 
     return await putEvent(
       calendarPath: calendarPath,
