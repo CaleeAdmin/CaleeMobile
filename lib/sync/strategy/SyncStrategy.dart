@@ -228,7 +228,9 @@ abstract class SyncStrategy {
       uid: uid,
       title: local.title ?? 'Untitled',
       description: local.notes,
-      location: remoteSnapshot?['location']?.toString(),
+      location: (local.location?.trim().isNotEmpty == true)
+          ? local.location
+          : remoteSnapshot?['location']?.toString(),
       url: remoteSnapshot?['url']?.toString(),
       recurrenceId: remoteSnapshot?['recurrence_id']?.toString(),
       rrule: remoteSnapshot?['rrule']?.toString(),
@@ -240,6 +242,7 @@ abstract class SyncStrategy {
       start: DateTime.fromMillisecondsSinceEpoch(local.startTime ?? 0),
       end: DateTime.fromMillisecondsSinceEpoch(local.endTime ?? 0),
       targetEventPath: targetRemoteHref,
+      originalVeventBlock: remoteSnapshot?['vevent_block']?.toString(),
     );
 
     if (newEtag == null) {
@@ -1060,6 +1063,7 @@ abstract class RemoteItemGateway {
     Map<String, dynamic>? dtstartMeta,
     Map<String, dynamic>? dtendMeta,
     String? targetEventPath,
+    String? originalVeventBlock,
   });
 
   Future<bool> deleteEvent({
@@ -1097,6 +1101,7 @@ class CaleeRemoteItemGateway extends RemoteItemGateway {
     Map<String, dynamic>? dtstartMeta,
     Map<String, dynamic>? dtendMeta,
     String? targetEventPath,
+    String? originalVeventBlock,
   }) => _service.uploadEventData(
         userId: userId,
         calendarPath: calendarPath,
@@ -1115,6 +1120,7 @@ class CaleeRemoteItemGateway extends RemoteItemGateway {
         dtstartMeta: dtstartMeta,
         dtendMeta: dtendMeta,
         targetEventPath: targetEventPath,
+        originalVeventBlock: originalVeventBlock,
       );
 
   @override
