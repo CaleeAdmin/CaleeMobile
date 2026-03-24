@@ -219,8 +219,24 @@ abstract class SyncStrategy {
         start: local.startTime ?? 0,
         end: local.endTime ?? 0,
         notes: local.notes,
+        location: local.location,
+        eventTimezone: local.eventTimezone,
+        isAllDay: local.isAllDay,
       );
     }
+
+    final Map<String, dynamic>? effectiveDtstartMeta = _resolvePushDateMeta(
+      local: local,
+      remoteMeta: remoteSnapshot?['dtstart_meta'] as Map<String, dynamic>?,
+      isEnd: false,
+    );
+    final Map<String, dynamic>? effectiveDtendMeta = _resolvePushDateMeta(
+      local: local,
+      remoteMeta: remoteSnapshot?['dtend_meta'] as Map<String, dynamic>?,
+      isEnd: true,
+    );
+    final DateTime effectiveStart = _resolvePushDateTime(local: local, isEnd: false);
+    final DateTime effectiveEnd = _resolvePushDateTime(local: local, isEnd: true);
 
     final String? newEtag = await remoteGateway.uploadEventData(
       userId: loginName!,
@@ -237,10 +253,10 @@ abstract class SyncStrategy {
       created: remoteSnapshot?['created']?.toString(),
       lastModified: remoteSnapshot?['last_modified']?.toString(),
       parseSource: remoteSnapshot?['parse_source']?.toString(),
-      dtstartMeta: remoteSnapshot?['dtstart_meta'] as Map<String, dynamic>?,
-      dtendMeta: remoteSnapshot?['dtend_meta'] as Map<String, dynamic>?,
-      start: DateTime.fromMillisecondsSinceEpoch(local.startTime ?? 0),
-      end: DateTime.fromMillisecondsSinceEpoch(local.endTime ?? 0),
+      dtstartMeta: effectiveDtstartMeta,
+      dtendMeta: effectiveDtendMeta,
+      start: effectiveStart,
+      end: effectiveEnd,
       targetEventPath: targetRemoteHref,
       originalVeventBlock: remoteSnapshot?['vevent_block']?.toString(),
     );
@@ -259,6 +275,80 @@ abstract class SyncStrategy {
       remoteHref: remoteHref,
       lastMtime: local.lastModified ?? DateTime.now().millisecondsSinceEpoch,
     );
+  }
+
+  Map<String, dynamic>? _resolvePushDateMeta({
+    required PlatformItem local,
+    required Map<String, dynamic>? remoteMeta,
+    required bool isEnd,
+  }) {
+    if (_hasMeaningfulDateMeta(remoteMeta)) {
+      return Map<String, dynamic>.from(remoteMeta!);
+    }
+    return _synthesizeLocalDateMeta(local: local, isEnd: isEnd);
+  }
+
+  bool _hasMeaningfulDateMeta(Map<String, dynamic>? meta) {
+    if (meta == null) return false;
+    if (meta['isDateOnly'] == true) return true;
+    if (meta['isUtc'] == true) return true;
+    final String tzid = (meta['tzid']?.toString() ?? '').trim();
+    if (tzid.isNotEmpty) return true;
+    final dynamic params = meta['params'];
+    return params is Map && params.isNotEmpty;
+  }
+
+  Map<String, dynamic>? _synthesizeLocalDateMeta({
+    required PlatformItem local,
+    required bool isEnd,
+  }) {
+    if (local.isAllDay == true) {
+      return <String, dynamic>{
+        'rawValue': null,
+        'params': <String, dynamic>{'VALUE': 'DATE'},
+        'source': 'LOCAL_SYNTH',
+        'isUtc': false,
+        'isDateOnly': true,
+        'tzid': null,
+      };
+    }
+
+    final String timezone = (local.eventTimezone ?? '').trim();
+    if (timezone.isNotEmpty) {
+      return <String, dynamic>{
+        'rawValue': null,
+        'params': <String, dynamic>{'TZID': timezone},
+        'source': 'LOCAL_SYNTH',
+        'isUtc': false,
+        'isDateOnly': false,
+        'tzid': timezone,
+      };
+    }
+
+    return null;
+  }
+
+  DateTime _resolvePushDateTime({
+    required PlatformItem local,
+    required bool isEnd,
+  }) {
+    final int rawMs = isEnd ? (local.endTime ?? 0) : (local.startTime ?? 0);
+    final DateTime base = DateTime.fromMillisecondsSinceEpoch(rawMs);
+    if (local.isAllDay != true) {
+      return base;
+    }
+
+    if (!isEnd) {
+      return DateTime(base.year, base.month, base.day);
+    }
+
+    final DateTime dateOnly = DateTime(base.year, base.month, base.day);
+    final bool isMidnight =
+        base.hour == 0 && base.minute == 0 && base.second == 0 && base.millisecond == 0 && base.microsecond == 0;
+    if (isMidnight) {
+      return dateOnly;
+    }
+    return dateOnly.add(const Duration(days: 1));
   }
 
   Future<void> upsertSyncedItem({

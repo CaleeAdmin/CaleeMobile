@@ -44,8 +44,12 @@ class _RecordingRemoteGateway extends RemoteItemGateway {
       'calendarPath': calendarPath,
       'uid': uid,
       'title': title,
+      'start': start,
+      'end': end,
       'description': description,
       'location': location,
+      'dtstartMeta': dtstartMeta,
+      'dtendMeta': dtendMeta,
       'targetEventPath': targetEventPath,
       'originalVeventBlock': originalVeventBlock,
     };
@@ -57,6 +61,8 @@ class _RecordingRemoteGateway extends RemoteItemGateway {
 }
 
 class _NoopLocalGateway extends LocalItemGateway {
+  Map<String, dynamic>? lastCreateOrUpdateArgs;
+
   @override
   Future<String?> createOrUpdateEvent({
     required String calendarId,
@@ -69,7 +75,21 @@ class _NoopLocalGateway extends LocalItemGateway {
     String? location,
     String? eventTimezone,
     bool? isAllDay,
-  }) async => eventId ?? 'local-1';
+  }) async {
+    lastCreateOrUpdateArgs = {
+      'calendarId': calendarId,
+      'eventId': eventId,
+      'uid': uid,
+      'title': title,
+      'start': start,
+      'end': end,
+      'notes': notes,
+      'location': location,
+      'eventTimezone': eventTimezone,
+      'isAllDay': isAllDay,
+    };
+    return eventId ?? 'local-1';
+  }
 
   @override
   Future<bool> deleteEvent(String eventId) async => true;
@@ -79,9 +99,9 @@ class _NoopLocalGateway extends LocalItemGateway {
 }
 
 class _TestSyncStrategy extends SyncStrategy {
-  _TestSyncStrategy({required RemoteItemGateway remote}) {
+  _TestSyncStrategy({required RemoteItemGateway remote, LocalItemGateway? local}) {
     remoteGateway = remote;
-    localGateway = _NoopLocalGateway();
+    localGateway = local ?? _NoopLocalGateway();
   }
 
   @override
@@ -145,5 +165,160 @@ void main() {
     );
 
     expect(gateway.lastUploadArgs?['originalVeventBlock'], isNull);
+  });
+
+  test('pushLocalEventToRemote synthesizes VALUE=DATE for local all-day create', () async {
+    final gateway = _RecordingRemoteGateway();
+    final strategy = _TestSyncStrategy(remote: gateway);
+
+    final DateTime start = DateTime(2026, 3, 25, 0, 0, 0);
+    final DateTime end = DateTime(2026, 3, 25, 23, 59, 59);
+    final local = PlatformItem(
+      uid: 'uid-allday',
+      title: 'All-day',
+      isAllDay: true,
+      startTime: start.millisecondsSinceEpoch,
+      endTime: end.millisecondsSinceEpoch,
+    );
+
+    await strategy.pushLocalEventToRemote(
+      local: local,
+      remotePath: '/remote.php/dav/calendars/tester/work/',
+      localCalendarId: 'cal-1',
+      remoteSnapshot: null,
+      targetRemoteHref: null,
+    );
+
+    final Map<String, dynamic>? dtstartMeta = gateway.lastUploadArgs?['dtstartMeta'] as Map<String, dynamic>?;
+    final Map<String, dynamic>? dtendMeta = gateway.lastUploadArgs?['dtendMeta'] as Map<String, dynamic>?;
+    expect(dtstartMeta, isNotNull);
+    expect(dtendMeta, isNotNull);
+    expect(dtstartMeta?['isDateOnly'], isTrue);
+    expect(dtendMeta?['isDateOnly'], isTrue);
+    expect((dtstartMeta?['params'] as Map?)?['VALUE'], 'DATE');
+    expect((dtendMeta?['params'] as Map?)?['VALUE'], 'DATE');
+    expect(gateway.lastUploadArgs?['start'], DateTime(2026, 3, 25));
+    expect(gateway.lastUploadArgs?['end'], DateTime(2026, 3, 26));
+  });
+
+  test('pushLocalEventToRemote synthesizes TZID for local timed create', () async {
+    final gateway = _RecordingRemoteGateway();
+    final strategy = _TestSyncStrategy(remote: gateway);
+
+    final local = PlatformItem(
+      uid: 'uid-tz',
+      title: 'Timed',
+      isAllDay: false,
+      eventTimezone: 'Asia/Tokyo',
+      startTime: DateTime(2026, 3, 25, 9).millisecondsSinceEpoch,
+      endTime: DateTime(2026, 3, 25, 10).millisecondsSinceEpoch,
+    );
+
+    await strategy.pushLocalEventToRemote(
+      local: local,
+      remotePath: '/remote.php/dav/calendars/tester/work/',
+      localCalendarId: 'cal-1',
+      remoteSnapshot: null,
+      targetRemoteHref: null,
+    );
+
+    final Map<String, dynamic>? dtstartMeta = gateway.lastUploadArgs?['dtstartMeta'] as Map<String, dynamic>?;
+    final Map<String, dynamic>? dtendMeta = gateway.lastUploadArgs?['dtendMeta'] as Map<String, dynamic>?;
+    expect(dtstartMeta?['tzid'], 'Asia/Tokyo');
+    expect(dtendMeta?['tzid'], 'Asia/Tokyo');
+    expect(dtstartMeta?['isDateOnly'], isFalse);
+    expect(dtendMeta?['isDateOnly'], isFalse);
+  });
+
+  test('pushLocalEventToRemote prefers meaningful remote meta over local synth', () async {
+    final gateway = _RecordingRemoteGateway();
+    final strategy = _TestSyncStrategy(remote: gateway);
+
+    final local = PlatformItem(
+      uid: 'uid-remote-meta',
+      title: 'Timed',
+      isAllDay: false,
+      eventTimezone: 'Australia/Perth',
+      startTime: DateTime(2026, 3, 25, 9).millisecondsSinceEpoch,
+      endTime: DateTime(2026, 3, 25, 10).millisecondsSinceEpoch,
+    );
+
+    await strategy.pushLocalEventToRemote(
+      local: local,
+      remotePath: '/remote.php/dav/calendars/tester/work/',
+      localCalendarId: 'cal-1',
+      remoteSnapshot: {
+        'dtstart_meta': {'isUtc': true, 'params': <String, dynamic>{}, 'tzid': null},
+        'dtend_meta': {'isUtc': true, 'params': <String, dynamic>{}, 'tzid': null},
+      },
+      targetRemoteHref: null,
+    );
+
+    final Map<String, dynamic>? dtstartMeta = gateway.lastUploadArgs?['dtstartMeta'] as Map<String, dynamic>?;
+    final Map<String, dynamic>? dtendMeta = gateway.lastUploadArgs?['dtendMeta'] as Map<String, dynamic>?;
+    expect(dtstartMeta?['isUtc'], isTrue);
+    expect(dtendMeta?['isUtc'], isTrue);
+    expect(dtstartMeta?['tzid'], isNull);
+    expect(dtendMeta?['tzid'], isNull);
+  });
+
+  test('pushLocalEventToRemote falls back to local synth when remote meta missing', () async {
+    final gateway = _RecordingRemoteGateway();
+    final strategy = _TestSyncStrategy(remote: gateway);
+
+    final local = PlatformItem(
+      uid: 'uid-remote-missing-meta',
+      title: 'Timed',
+      isAllDay: false,
+      eventTimezone: 'Australia/Perth',
+      startTime: DateTime(2026, 3, 25, 9).millisecondsSinceEpoch,
+      endTime: DateTime(2026, 3, 25, 10).millisecondsSinceEpoch,
+    );
+
+    await strategy.pushLocalEventToRemote(
+      local: local,
+      remotePath: '/remote.php/dav/calendars/tester/work/',
+      localCalendarId: 'cal-1',
+      remoteSnapshot: {
+        'dtstart_meta': null,
+        'dtend_meta': null,
+      },
+      targetRemoteHref: null,
+    );
+
+    final Map<String, dynamic>? dtstartMeta = gateway.lastUploadArgs?['dtstartMeta'] as Map<String, dynamic>?;
+    final Map<String, dynamic>? dtendMeta = gateway.lastUploadArgs?['dtendMeta'] as Map<String, dynamic>?;
+    expect(dtstartMeta?['tzid'], 'Australia/Perth');
+    expect(dtendMeta?['tzid'], 'Australia/Perth');
+  });
+
+  test('uid backfill local rewrite preserves location timezone allDay', () async {
+    final gateway = _RecordingRemoteGateway();
+    final localGateway = _NoopLocalGateway();
+    final strategy = _TestSyncStrategy(remote: gateway, local: localGateway);
+
+    final local = PlatformItem(
+      uid: '',
+      localId: 'evt-1',
+      title: 'No uid',
+      notes: 'notes',
+      location: 'Room 7',
+      eventTimezone: 'Asia/Tokyo',
+      isAllDay: true,
+      startTime: DateTime(2026, 3, 25).millisecondsSinceEpoch,
+      endTime: DateTime(2026, 3, 26).millisecondsSinceEpoch,
+    );
+
+    await strategy.pushLocalEventToRemote(
+      local: local,
+      remotePath: '/remote.php/dav/calendars/tester/work/',
+      localCalendarId: 'cal-1',
+      remoteSnapshot: null,
+      targetRemoteHref: null,
+    );
+
+    expect(localGateway.lastCreateOrUpdateArgs?['location'], 'Room 7');
+    expect(localGateway.lastCreateOrUpdateArgs?['eventTimezone'], 'Asia/Tokyo');
+    expect(localGateway.lastCreateOrUpdateArgs?['isAllDay'], isTrue);
   });
 }
