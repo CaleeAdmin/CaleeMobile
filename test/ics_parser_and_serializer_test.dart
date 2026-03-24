@@ -250,6 +250,22 @@ void main() {
   });
 
   group('CaleeServerService.uploadEventData', () {
+    test('returns null when exchange-safe mode blocks upload', () async {
+      final service = CaleeServerService();
+      final result = await service.uploadEventData(
+        userId: 'user',
+        calendarPath: '/remote.php/dav/calendars/user/test/',
+        uid: 'exchange-risk-event',
+        title: 'Exchange Risk Event',
+        isExchangeRisk: true,
+        uidKind: 'exchange_like',
+        start: DateTime.utc(2026, 12, 12, 16),
+        end: DateTime.utc(2026, 12, 12, 17),
+      );
+
+      expect(result, isNull);
+    });
+
     test('blocks implausible ancient-start modern-end payloads before upload', () async {
       final service = CaleeServerService();
       final result = await service.uploadEventData(
