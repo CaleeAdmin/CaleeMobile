@@ -161,6 +161,9 @@ abstract class SyncStrategy {
       uid: eventData.uid,
       notes: eventData.description,
       eventId: existingLocalId,
+      location: eventData.location,
+      eventTimezone: _resolveEventTimezone(remote),
+      isAllDay: _isAllDayRemoteEvent(remote),
     );
 
     if (localEventId == null) {
@@ -175,6 +178,23 @@ abstract class SyncStrategy {
       dtstart: eventData.dtstart,
       dtend: eventData.dtend,
     );
+  }
+
+  String? _resolveEventTimezone(Map<String, dynamic> remote) {
+    final String? startTzid = (remote['dtstart_meta'] as Map<String, dynamic>?)?['tzid']?.toString();
+    if (startTzid != null && startTzid.isNotEmpty) {
+      return startTzid;
+    }
+
+    final String? endTzid = (remote['dtend_meta'] as Map<String, dynamic>?)?['tzid']?.toString();
+    if (endTzid != null && endTzid.isNotEmpty) {
+      return endTzid;
+    }
+    return null;
+  }
+
+  bool _isAllDayRemoteEvent(Map<String, dynamic> remote) {
+    return (remote['dtstart_meta'] as Map<String, dynamic>?)?['isDateOnly'] == true;
   }
 
   Future<RemotePushResult?> pushLocalEventToRemote({
@@ -964,6 +984,9 @@ abstract class LocalItemGateway {
     required int start,
     required int end,
     String? notes,
+    String? location,
+    String? eventTimezone,
+    bool? isAllDay,
   });
 
   Future<bool> deleteEvent(String eventId);
@@ -989,6 +1012,9 @@ class NativeLocalItemGateway extends LocalItemGateway {
     required int start,
     required int end,
     String? notes,
+    String? location,
+    String? eventTimezone,
+    bool? isAllDay,
   }) async {
     return _nativeApi.createOrUpdateEvent(
       CalendarEventRequest(
@@ -999,6 +1025,9 @@ class NativeLocalItemGateway extends LocalItemGateway {
         start: start,
         end: end,
         notes: notes,
+        location: location,
+        eventTimezone: eventTimezone,
+        isAllDay: isAllDay,
       ),
     );
   }

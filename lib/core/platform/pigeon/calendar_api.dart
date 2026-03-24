@@ -32,6 +32,7 @@ class PlatformItem {
   String? title;
   String? notes;
   String? location;
+  String? eventTimezone;
   int? startTime;
   int? endTime;
   int? lastModified;
@@ -50,6 +51,9 @@ class CalendarEventRequest {
   String? notes;
   String uid;
   String? eventId; // 更新时有值，新建时为 null
+  String? eventTimezone;
+  String? location;
+  bool? isAllDay;
 
   // Pigeon 会根据这个类生成 Dart 端对应的构造函数
   CalendarEventRequest({
@@ -60,6 +64,9 @@ class CalendarEventRequest {
     this.notes,
     required this.uid,
     this.eventId,
+    this.eventTimezone,
+    this.location,
+    this.isAllDay,
   });
 }
 
@@ -95,7 +102,10 @@ abstract class NativeCalendarApi {
       int start,
       int end,
       String? notes,
-      String? uid // 传入生成的 UUID
+      String? uid, // 传入生成的 UUID
+      String? location,
+      String? eventTimezone,
+      bool? isAllDay,
       );
 
   @async

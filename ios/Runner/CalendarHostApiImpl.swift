@@ -191,6 +191,7 @@ import EventKit
       item.title = event.title ?? ""
       item.notes = stripCaleeMetadata(from: event.notes)
       item.location = event.location
+      item.eventTimezone = event.timeZone?.identifier
       item.startTime = Int64(event.startDate.timeIntervalSince1970 * 1000.0)
 
       // End time: ensure it is after start, otherwise default to +1 hour
@@ -311,6 +312,9 @@ import EventKit
     end: Int64,
     notes: String?,
     uid: String?,
+    location: String?,
+    eventTimezone: String?,
+    isAllDay: Bool?,
     completion: @escaping (Result<String?, Error>) -> Void
   ) {
     do {
@@ -327,6 +331,13 @@ import EventKit
       event.title = title
       event.startDate = Date(timeIntervalSince1970: TimeInterval(start) / 1000.0)
       event.endDate = Date(timeIntervalSince1970: TimeInterval(end) / 1000.0)
+      event.location = location
+      event.isAllDay = isAllDay ?? false
+      if let eventTimezone, !eventTimezone.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        event.timeZone = TimeZone(identifier: eventTimezone)
+      } else if event.isAllDay {
+        event.timeZone = nil
+      }
       embedCaleeUid(into: event, uid: uid ?? "", originalNotes: notes)
 
       do {
@@ -374,6 +385,14 @@ import EventKit
       event.title = request.title
       event.startDate = Date(timeIntervalSince1970: TimeInterval(request.start) / 1000.0)
       event.endDate = Date(timeIntervalSince1970: TimeInterval(request.end) / 1000.0)
+      event.location = request.location
+      event.isAllDay = request.isAllDay ?? false
+      if let requestTimezone = request.eventTimezone,
+         !requestTimezone.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        event.timeZone = TimeZone(identifier: requestTimezone)
+      } else if event.isAllDay {
+        event.timeZone = nil
+      }
       embedCaleeUid(into: event, uid: request.uid, originalNotes: request.notes)
 
       do {

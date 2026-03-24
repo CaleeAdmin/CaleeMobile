@@ -111,6 +111,7 @@ struct PlatformItem {
   var title: String? = nil
   var notes: String? = nil
   var location: String? = nil
+  var eventTimezone: String? = nil
   var startTime: Int64? = nil
   var endTime: Int64? = nil
   var lastModified: Int64? = nil
@@ -126,13 +127,14 @@ struct PlatformItem {
     let title: String? = nilOrValue(__pigeon_list[2])
     let notes: String? = nilOrValue(__pigeon_list[3])
     let location: String? = nilOrValue(__pigeon_list[4])
-    let startTime: Int64? = isNullish(__pigeon_list[5]) ? nil : (__pigeon_list[5] is Int64? ? __pigeon_list[5] as! Int64? : Int64(__pigeon_list[5] as! Int32))
-    let endTime: Int64? = isNullish(__pigeon_list[6]) ? nil : (__pigeon_list[6] is Int64? ? __pigeon_list[6] as! Int64? : Int64(__pigeon_list[6] as! Int32))
-    let lastModified: Int64? = isNullish(__pigeon_list[7]) ? nil : (__pigeon_list[7] is Int64? ? __pigeon_list[7] as! Int64? : Int64(__pigeon_list[7] as! Int32))
-    let isTask: Bool? = nilOrValue(__pigeon_list[8])
-    let isAllDay: Bool? = nilOrValue(__pigeon_list[9])
-    let status: Int64? = isNullish(__pigeon_list[10]) ? nil : (__pigeon_list[10] is Int64? ? __pigeon_list[10] as! Int64? : Int64(__pigeon_list[10] as! Int32))
-    let priority: Int64? = isNullish(__pigeon_list[11]) ? nil : (__pigeon_list[11] is Int64? ? __pigeon_list[11] as! Int64? : Int64(__pigeon_list[11] as! Int32))
+    let eventTimezone: String? = nilOrValue(__pigeon_list[5])
+    let startTime: Int64? = isNullish(__pigeon_list[6]) ? nil : (__pigeon_list[6] is Int64? ? __pigeon_list[6] as! Int64? : Int64(__pigeon_list[6] as! Int32))
+    let endTime: Int64? = isNullish(__pigeon_list[7]) ? nil : (__pigeon_list[7] is Int64? ? __pigeon_list[7] as! Int64? : Int64(__pigeon_list[7] as! Int32))
+    let lastModified: Int64? = isNullish(__pigeon_list[8]) ? nil : (__pigeon_list[8] is Int64? ? __pigeon_list[8] as! Int64? : Int64(__pigeon_list[8] as! Int32))
+    let isTask: Bool? = nilOrValue(__pigeon_list[9])
+    let isAllDay: Bool? = nilOrValue(__pigeon_list[10])
+    let status: Int64? = isNullish(__pigeon_list[11]) ? nil : (__pigeon_list[11] is Int64? ? __pigeon_list[11] as! Int64? : Int64(__pigeon_list[11] as! Int32))
+    let priority: Int64? = isNullish(__pigeon_list[12]) ? nil : (__pigeon_list[12] is Int64? ? __pigeon_list[12] as! Int64? : Int64(__pigeon_list[12] as! Int32))
 
     return PlatformItem(
       localId: localId,
@@ -140,6 +142,7 @@ struct PlatformItem {
       title: title,
       notes: notes,
       location: location,
+      eventTimezone: eventTimezone,
       startTime: startTime,
       endTime: endTime,
       lastModified: lastModified,
@@ -156,6 +159,7 @@ struct PlatformItem {
       title,
       notes,
       location,
+      eventTimezone,
       startTime,
       endTime,
       lastModified,
@@ -176,6 +180,9 @@ struct CalendarEventRequest {
   var notes: String? = nil
   var uid: String
   var eventId: String? = nil
+  var eventTimezone: String? = nil
+  var location: String? = nil
+  var isAllDay: Bool? = nil
 
   // swift-format-ignore: AlwaysUseLowerCamelCase
   static func fromList(_ __pigeon_list: [Any?]) -> CalendarEventRequest? {
@@ -186,6 +193,9 @@ struct CalendarEventRequest {
     let notes: String? = nilOrValue(__pigeon_list[4])
     let uid = __pigeon_list[5] as! String
     let eventId: String? = nilOrValue(__pigeon_list[6])
+    let eventTimezone: String? = nilOrValue(__pigeon_list[7])
+    let location: String? = nilOrValue(__pigeon_list[8])
+    let isAllDay: Bool? = nilOrValue(__pigeon_list[9])
 
     return CalendarEventRequest(
       calendarId: calendarId,
@@ -194,7 +204,10 @@ struct CalendarEventRequest {
       end: end,
       notes: notes,
       uid: uid,
-      eventId: eventId
+      eventId: eventId,
+      eventTimezone: eventTimezone,
+      location: location,
+      isAllDay: isAllDay
     )
   }
   func toList() -> [Any?] {
@@ -206,6 +219,9 @@ struct CalendarEventRequest {
       notes,
       uid,
       eventId,
+      eventTimezone,
+      location,
+      isAllDay,
     ]
   }
 }
@@ -273,7 +289,7 @@ protocol NativeCalendarApi {
   /// 🚀 关键新增：根据 ID 删除整个日历账簿
   /// Android 上删除日历会自动联级删除该日历下的所有事件 (Events)
   func deleteCalendar(calendarId: String, accountName: String, completion: @escaping (Result<Bool, Error>) -> Void)
-  func createEvent(calendarId: String, title: String, start: Int64, end: Int64, notes: String?, uid: String?, completion: @escaping (Result<String?, Error>) -> Void)
+  func createEvent(calendarId: String, title: String, start: Int64, end: Int64, notes: String?, uid: String?, location: String?, eventTimezone: String?, isAllDay: Bool?, completion: @escaping (Result<String?, Error>) -> Void)
   func createOrUpdateEvent(request: CalendarEventRequest, completion: @escaping (Result<String?, Error>) -> Void)
   /// 获取指定日历下所有事件的 ID 列表（用于检测本地删除了哪些）
   func getSystemEventIds(calendarId: String) throws -> [String]
@@ -393,7 +409,10 @@ class NativeCalendarApiSetup {
         let endArg = args[3] is Int64 ? args[3] as! Int64 : Int64(args[3] as! Int32)
         let notesArg: String? = nilOrValue(args[4])
         let uidArg: String? = nilOrValue(args[5])
-        api.createEvent(calendarId: calendarIdArg, title: titleArg, start: startArg, end: endArg, notes: notesArg, uid: uidArg) { result in
+        let locationArg: String? = nilOrValue(args[6])
+        let eventTimezoneArg: String? = nilOrValue(args[7])
+        let isAllDayArg: Bool? = nilOrValue(args[8])
+        api.createEvent(calendarId: calendarIdArg, title: titleArg, start: startArg, end: endArg, notes: notesArg, uid: uidArg, location: locationArg, eventTimezone: eventTimezoneArg, isAllDay: isAllDayArg) { result in
           switch result {
           case .success(let res):
             reply(wrapResult(res))
