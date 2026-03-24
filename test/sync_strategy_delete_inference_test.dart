@@ -5,6 +5,8 @@ import 'package:caleesync/sync/SyncEnum.dart';
 import 'package:caleesync/sync/strategy/SyncStrategy.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'test_bootstrap.dart';
+
 class _TestSyncStrategy extends SyncStrategy {
   _TestSyncStrategy({LocalItemGateway? gateway}) : _localGateway = gateway ?? _FakeLocalItemGateway(events: const []);
 
@@ -64,11 +66,15 @@ class _FakeLocalItemGateway extends LocalItemGateway {
 }
 
 void main() {
+  setUpAll(() async {
+    await bootstrapTestStorage();
+  });
+
   group('SyncStrategy delete inference authority', () {
-    final strategy = _TestSyncStrategy();
     final rules = UnifiedModeRules.forMode(UnifiedSyncMode.bidi);
 
     test('skips remote delete when local absence is not trusted', () {
+      final strategy = _TestSyncStrategy();
       final action = strategy.decideCanonicalActionForTesting(
         uid: 'uid-1',
         remote: {'etag': 'r1'},
@@ -85,6 +91,7 @@ void main() {
     });
 
     test('keeps remote delete when local absence is trusted', () {
+      final strategy = _TestSyncStrategy();
       final action = strategy.decideCanonicalActionForTesting(
         uid: 'uid-1',
         remote: {'etag': 'r1'},
@@ -101,6 +108,7 @@ void main() {
     });
 
     test('skips local delete when remote absence is not trusted', () {
+      final strategy = _TestSyncStrategy();
       final action = strategy.decideCanonicalActionForTesting(
         uid: 'uid-2',
         remote: null,
@@ -117,6 +125,7 @@ void main() {
     });
 
     test('keeps local delete when remote snapshot is trusted', () {
+      final strategy = _TestSyncStrategy();
       final action = strategy.decideCanonicalActionForTesting(
         uid: 'uid-2',
         remote: null,
