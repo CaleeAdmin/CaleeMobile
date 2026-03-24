@@ -40,10 +40,89 @@ abstract class SyncStrategy {
 
   String normalizeRemoteToken(dynamic token) => (token ?? '').toString().replaceAll('"', '');
 
-  Future<List<PlatformItem>> loadLocalEvents(String localCalendarId) async {
-    final int start = DateTime.now().subtract(const Duration(days: 365)).millisecondsSinceEpoch;
-    final int end = DateTime.now().add(const Duration(days: 730)).millisecondsSinceEpoch;
-    return localGateway.getEvents(localCalendarId, start, end);
+  Future<LocalEventsSnapshot> loadLocalEvents(
+    String localCalendarId, {
+    required int rangeStartMs,
+    required int rangeEndMs,
+  }) async {
+    final events = await localGateway.getEvents(localCalendarId, rangeStartMs, rangeEndMs);
+    return LocalEventsSnapshot(
+      events: events,
+      rangeStartMs: rangeStartMs,
+      rangeEndMs: rangeEndMs,
+      canInferDeletesFromLocalAbsence: false,
+    );
+  }
+
+  AdaptiveLocalFetchWindow computeAdaptiveLocalFetchWindow({
+    required List<Map<String, dynamic>> remoteEvents,
+    required List<Map<String, dynamic>> mappedRecords,
+    DateTime? now,
+  }) {
+    return _computeAdaptiveLocalFetchWindow(
+      remoteEvents: remoteEvents,
+      mappedRecords: mappedRecords,
+      now: now,
+    );
+  }
+
+  AdaptiveLocalFetchWindow _computeAdaptiveLocalFetchWindow({
+    required List<Map<String, dynamic>> remoteEvents,
+    required List<Map<String, dynamic>> mappedRecords,
+    DateTime? now,
+  }) {
+    const int paddingMs = 1000 * 60 * 60 * 24 * 30; // 30 days
+    const int clampSpanMs = 1000 * 60 * 60 * 24 * 365 * 8; // 8 years
+    const int fallbackPastMs = 1000 * 60 * 60 * 24 * 365 * 2; // 2 years
+    const int fallbackFutureMs = 1000 * 60 * 60 * 24 * 365 * 3; // 3 years
+
+    final int nowMs = (now ?? DateTime.now()).millisecondsSinceEpoch;
+    final List<int> timestamps = [];
+
+    void addIfPositive(dynamic value) {
+      final int? parsed = value is int ? value : int.tryParse((value ?? '').toString());
+      if (parsed != null && parsed > 0) {
+        timestamps.add(parsed);
+      }
+    }
+
+    for (final event in remoteEvents) {
+      addIfPositive(event['dtstart']);
+      addIfPositive(event['dtend']);
+    }
+    for (final mapping in mappedRecords) {
+      addIfPositive(mapping['dtstart']);
+      addIfPositive(mapping['dtend']);
+    }
+
+    if (timestamps.isEmpty) {
+      return AdaptiveLocalFetchWindow(
+        rangeStartMs: nowMs - fallbackPastMs,
+        rangeEndMs: nowMs + fallbackFutureMs,
+      );
+    }
+
+    int minTs = timestamps.reduce((a, b) => a < b ? a : b);
+    int maxTs = timestamps.reduce((a, b) => a > b ? a : b);
+
+    minTs -= paddingMs;
+    maxTs += paddingMs;
+
+    if (maxTs <= minTs) {
+      maxTs = minTs + (1000 * 60 * 60 * 24);
+    }
+
+    final int span = maxTs - minTs;
+    if (span > clampSpanMs) {
+      final int center = minTs + (span ~/ 2);
+      minTs = center - (clampSpanMs ~/ 2);
+      maxTs = center + (clampSpanMs ~/ 2);
+    }
+
+    return AdaptiveLocalFetchWindow(
+      rangeStartMs: minTs,
+      rangeEndMs: maxTs,
+    );
   }
 
   Map<String, PlatformItem> mapLocalEventsByUid(List<PlatformItem> localEvents) {
@@ -322,7 +401,16 @@ abstract class SyncStrategy {
     );
     final dedup = await repairDuplicateMappings(db, remoteCollectionId, mappedRecords);
 
-    final localEvents = await loadLocalEvents(localCalendarId);
+    final adaptiveWindow = computeAdaptiveLocalFetchWindow(
+      remoteEvents: snapshot.events,
+      mappedRecords: dedup.records,
+    );
+    final localSnapshot = await loadLocalEvents(
+      localCalendarId,
+      rangeStartMs: adaptiveWindow.rangeStartMs,
+      rangeEndMs: adaptiveWindow.rangeEndMs,
+    );
+    final localEvents = localSnapshot.events;
     final Map<String, PlatformItem> localByUid = {};
     final Map<String, PlatformItem> localById = mapLocalEventsById(localEvents);
     for (final event in localEvents) {
@@ -361,7 +449,8 @@ abstract class SyncStrategy {
 
     final bool remoteTrusted = snapshot.fetchSucceeded &&
         (snapshot.statusCode == 200 || snapshot.statusCode == 207);
-    const bool localTrusted = true;
+    final bool canDeleteRemoteFromMissingLocal = localSnapshot.canInferDeletesFromLocalAbsence;
+    final bool canDeleteLocalFromMissingRemote = remoteTrusted;
 
     final List<_PlannedAction> plans = [];
     for (final uid in allUids) {
@@ -378,6 +467,8 @@ abstract class SyncStrategy {
         bindingRole: bindingRole,
         rules: rules,
         bootstrap: bootstrap,
+        canDeleteRemoteFromMissingLocal: canDeleteRemoteFromMissingLocal,
+        canDeleteLocalFromMissingRemote: canDeleteLocalFromMissingRemote,
       );
       plans.add(_PlannedAction(
         uid: uid,
@@ -486,7 +577,7 @@ abstract class SyncStrategy {
           }
           return;
         case _CanonicalOperationType.localDelete:
-          if (blockDeletes || !remoteTrusted || !localTrusted) {
+          if (blockDeletes || !remoteTrusted) {
             skip++;
             return;
           }
@@ -499,7 +590,7 @@ abstract class SyncStrategy {
           summary.telemetry?.onOperation(ctx: ctx, target: SyncOperationTarget.local, type: SyncOperationType.deleted);
           return;
         case _CanonicalOperationType.remoteDelete:
-          if (blockDeletes || !remoteTrusted || !localTrusted) {
+          if (blockDeletes || !canDeleteRemoteFromMissingLocal) {
             skip++;
             return;
           }
@@ -717,6 +808,8 @@ abstract class SyncStrategy {
     required int bindingRole,
     required UnifiedModeRules rules,
     required bool bootstrap,
+    required bool canDeleteRemoteFromMissingLocal,
+    required bool canDeleteLocalFromMissingRemote,
   }) {
     final bool remoteExists = remote != null;
     final bool localExists = local != null;
@@ -756,10 +849,50 @@ abstract class SyncStrategy {
       action = SyncItemAction.createRemote;
     }
 
+    if (remoteExists &&
+        !localExists &&
+        mapped &&
+        action == SyncItemAction.deleteRemote &&
+        !canDeleteRemoteFromMissingLocal) {
+      action = SyncItemAction.skip;
+    }
+
+    if (!remoteExists &&
+        localExists &&
+        mapped &&
+        action == SyncItemAction.deleteLocal &&
+        !canDeleteLocalFromMissingRemote) {
+      action = SyncItemAction.skip;
+    }
+
     if (!rules.allowedActions.contains(action)) {
       return SyncItemAction.skip;
     }
     return action;
+  }
+
+  SyncItemAction decideCanonicalActionForTesting({
+    required String uid,
+    required Map<String, dynamic>? remote,
+    required Map<String, dynamic>? mapping,
+    required PlatformItem? local,
+    required int bindingRole,
+    required UnifiedModeRules rules,
+    required bool bootstrap,
+    required bool canDeleteRemoteFromMissingLocal,
+    required bool canDeleteLocalFromMissingRemote,
+  }) {
+    return _decideCanonicalAction(
+      uid: uid,
+      remote: remote,
+      mapping: mapping,
+      local: local,
+      bindingRole: bindingRole,
+      rules: rules,
+      bootstrap: bootstrap,
+      canDeleteRemoteFromMissingLocal: canDeleteRemoteFromMissingLocal,
+      canDeleteLocalFromMissingRemote: canDeleteLocalFromMissingRemote,
+    );
   }
 }
 
@@ -792,6 +925,30 @@ class RemotePushResult {
     required this.etag,
     required this.remoteHref,
     required this.lastMtime,
+  });
+}
+
+class LocalEventsSnapshot {
+  final List<PlatformItem> events;
+  final int rangeStartMs;
+  final int rangeEndMs;
+  final bool canInferDeletesFromLocalAbsence;
+
+  const LocalEventsSnapshot({
+    required this.events,
+    required this.rangeStartMs,
+    required this.rangeEndMs,
+    required this.canInferDeletesFromLocalAbsence,
+  });
+}
+
+class AdaptiveLocalFetchWindow {
+  final int rangeStartMs;
+  final int rangeEndMs;
+
+  const AdaptiveLocalFetchWindow({
+    required this.rangeStartMs,
+    required this.rangeEndMs,
   });
 }
 
