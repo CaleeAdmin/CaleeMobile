@@ -269,7 +269,7 @@ interface NativeCalendarApi {
   fun createEvent(calendarId: String, title: String, start: Long, end: Long, notes: String?, uid: String?, location: String?, eventTimezone: String?, isAllDay: Boolean?, callback: (Result<String?>) -> Unit)
   fun createOrUpdateEvent(request: CalendarEventRequest, callback: (Result<String?>) -> Unit)
   /** 获取指定日历下所有事件的 ID 列表（用于检测本地删除了哪些） */
-  fun getSystemEventIds(calendarId: String): List<String>
+  fun getSystemEventIds(calendarId: String, startMs: Long, endMs: Long): List<String>
   /** 根据 ID 删除本地事件（用于同步云端的删除操作） */
   fun deleteEvent(eventId: String): Boolean
   fun modifyCalendarTitle(calendarId: String, newTitle: String, accountName: String, accountType: String, callback: (Result<Boolean>) -> Unit)
@@ -435,8 +435,10 @@ interface NativeCalendarApi {
           channel.setMessageHandler { message, reply ->
             val args = message as List<Any?>
             val calendarIdArg = args[0] as String
+            val startMsArg = args[1] as Long
+            val endMsArg = args[2] as Long
             val wrapped: List<Any?> = try {
-              listOf<Any?>(api.getSystemEventIds(calendarIdArg))
+              listOf<Any?>(api.getSystemEventIds(calendarIdArg, startMsArg, endMsArg))
             } catch (exception: Throwable) {
               wrapError(exception)
             }
