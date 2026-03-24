@@ -6,11 +6,12 @@ import 'package:caleesync/sync/strategy/SyncStrategy.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 class _TestSyncStrategy extends SyncStrategy {
-  _TestSyncStrategy({LocalItemGateway? gateway}) {
-    if (gateway != null) {
-      localGateway = gateway;
-    }
-  }
+  _TestSyncStrategy({LocalItemGateway? gateway}) : _localGateway = gateway ?? _FakeLocalItemGateway(events: const []);
+
+  final LocalItemGateway _localGateway;
+
+  @override
+  LocalItemGateway get localGateway => _localGateway;
 
   @override
   Future<void> execute(SyncContext ctx, SyncSummary summary) async {}

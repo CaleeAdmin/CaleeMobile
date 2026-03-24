@@ -104,10 +104,18 @@ class _NoopLocalGateway extends LocalItemGateway {
 }
 
 class _TestSyncStrategy extends SyncStrategy {
-  _TestSyncStrategy({required RemoteItemGateway remote, LocalItemGateway? local}) {
-    remoteGateway = remote;
-    localGateway = local ?? _NoopLocalGateway();
-  }
+  _TestSyncStrategy({required RemoteItemGateway remote, LocalItemGateway? local})
+    : _remoteGateway = remote,
+      _localGateway = local ?? _NoopLocalGateway();
+
+  final RemoteItemGateway _remoteGateway;
+  final LocalItemGateway _localGateway;
+
+  @override
+  RemoteItemGateway get remoteGateway => _remoteGateway;
+
+  @override
+  LocalItemGateway get localGateway => _localGateway;
 
   @override
   Future<void> execute(SyncContext ctx, SyncSummary summary) async {}
