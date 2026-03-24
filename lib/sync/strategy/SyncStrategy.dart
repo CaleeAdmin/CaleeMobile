@@ -25,8 +25,8 @@ abstract class SyncStrategy {
   late final RemoteItemGateway remoteGateway = CaleeRemoteItemGateway(nc);
   final CaleeAuthService authService = CaleeAuthService(serverBaseUrl: AppConstant.caleeServer);
   final DatabaseHelper dbHelper = DatabaseHelper.instance;
-  final String? loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey);
-  final String? password = MMKVUtils.instance.getString(AppConstant.appPasswordKey);
+  String? get loginName => MMKVUtils.instance.getString(AppConstant.loginNameKey);
+  String? get password => MMKVUtils.instance.getString(AppConstant.appPasswordKey);
 
   Future<void> execute(SyncContext ctx, SyncSummary summary);
 
