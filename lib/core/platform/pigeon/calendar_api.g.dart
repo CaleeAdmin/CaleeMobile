@@ -99,6 +99,7 @@ class PlatformItem {
     this.title,
     this.notes,
     this.location,
+    this.eventTimezone,
     this.startTime,
     this.endTime,
     this.lastModified,
@@ -117,6 +118,8 @@ class PlatformItem {
   String? notes;
 
   String? location;
+
+  String? eventTimezone;
 
   int? startTime;
 
@@ -139,6 +142,7 @@ class PlatformItem {
       title,
       notes,
       location,
+      eventTimezone,
       startTime,
       endTime,
       lastModified,
@@ -157,13 +161,14 @@ class PlatformItem {
       title: result[2] as String?,
       notes: result[3] as String?,
       location: result[4] as String?,
-      startTime: result[5] as int?,
-      endTime: result[6] as int?,
-      lastModified: result[7] as int?,
-      isTask: result[8] as bool?,
-      isAllDay: result[9] as bool?,
-      status: result[10] as int?,
-      priority: result[11] as int?,
+      eventTimezone: result[5] as String?,
+      startTime: result[6] as int?,
+      endTime: result[7] as int?,
+      lastModified: result[8] as int?,
+      isTask: result[9] as bool?,
+      isAllDay: result[10] as bool?,
+      status: result[11] as int?,
+      priority: result[12] as int?,
     );
   }
 }
@@ -177,6 +182,9 @@ class CalendarEventRequest {
     this.notes,
     required this.uid,
     this.eventId,
+    this.eventTimezone,
+    this.location,
+    this.isAllDay,
   });
 
   String calendarId;
@@ -193,6 +201,12 @@ class CalendarEventRequest {
 
   String? eventId;
 
+  String? eventTimezone;
+
+  String? location;
+
+  bool? isAllDay;
+
   Object encode() {
     return <Object?>[
       calendarId,
@@ -202,6 +216,9 @@ class CalendarEventRequest {
       notes,
       uid,
       eventId,
+      eventTimezone,
+      location,
+      isAllDay,
     ];
   }
 
@@ -215,6 +232,9 @@ class CalendarEventRequest {
       notes: result[4] as String?,
       uid: result[5]! as String,
       eventId: result[6] as String?,
+      eventTimezone: result[7] as String?,
+      location: result[8] as String?,
+      isAllDay: result[9] as bool?,
     );
   }
 }
@@ -404,7 +424,17 @@ class NativeCalendarApi {
     }
   }
 
-  Future<String?> createEvent(String calendarId, String title, int start, int end, String? notes, String? uid) async {
+  Future<String?> createEvent(
+    String calendarId,
+    String title,
+    int start,
+    int end,
+    String? notes,
+    String? uid,
+    String? location,
+    String? eventTimezone,
+    bool? isAllDay,
+  ) async {
     final String __pigeon_channelName = 'dev.flutter.pigeon.caleesync.NativeCalendarApi.createEvent$__pigeon_messageChannelSuffix';
     final BasicMessageChannel<Object?> __pigeon_channel = BasicMessageChannel<Object?>(
       __pigeon_channelName,
@@ -412,7 +442,17 @@ class NativeCalendarApi {
       binaryMessenger: __pigeon_binaryMessenger,
     );
     final List<Object?>? __pigeon_replyList =
-        await __pigeon_channel.send(<Object?>[calendarId, title, start, end, notes, uid]) as List<Object?>?;
+        await __pigeon_channel.send(<Object?>[
+      calendarId,
+      title,
+      start,
+      end,
+      notes,
+      uid,
+      location,
+      eventTimezone,
+      isAllDay,
+    ]) as List<Object?>?;
     if (__pigeon_replyList == null) {
       throw _createConnectionError(__pigeon_channelName);
     } else if (__pigeon_replyList.length > 1) {

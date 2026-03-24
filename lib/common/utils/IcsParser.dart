@@ -163,23 +163,78 @@ class IcsParser {
       final int month = int.parse(compact.substring(4, 6));
       final int day = int.parse(compact.substring(6, 8));
 
-      int hour = 0;
-      int minute = 0;
-      int second = 0;
-      if (!isDateOnly && compact.contains('T') && compact.length >= 15) {
-        hour = int.parse(compact.substring(9, 11));
-        minute = int.parse(compact.substring(11, 13));
-        second = int.parse(compact.substring(13, 15));
+      if (isDateOnly) {
+        return DateTime(year, month, day).millisecondsSinceEpoch;
       }
 
       if (dateStr.endsWith('Z')) {
+        final ({int hour, int minute, int second}) time = _parseFloatingDateTime(compact);
         return DateTime.utc(year, month, day, hour, minute, second)
             .millisecondsSinceEpoch;
       }
-      return DateTime(year, month, day, hour, minute, second)
-          .millisecondsSinceEpoch;
+
+      final ({int hour, int minute, int second}) time = _parseFloatingDateTime(compact);
+      final String? tzid = property.params['TZID']?.trim();
+      if (tzid != null && tzid.isNotEmpty) {
+        final int? fixedOffsetMillis = _resolveFixedOffsetTzMillis(
+          tzid,
+          year,
+          month,
+          day,
+          time.hour,
+          time.minute,
+          time.second,
+        );
+        if (fixedOffsetMillis != null) {
+          return fixedOffsetMillis;
+        }
+      }
+
+      return DateTime(year, month, day, time.hour, time.minute, time.second).millisecondsSinceEpoch;
     } catch (_) {
       return null;
+    }
+  }
+
+  static ({int hour, int minute, int second}) _parseFloatingDateTime(String compact) {
+    if (!compact.contains('T') || compact.length < 15) {
+      return (hour: 0, minute: 0, second: 0);
+    }
+    return (
+      hour: int.parse(compact.substring(9, 11)),
+      minute: int.parse(compact.substring(11, 13)),
+      second: int.parse(compact.substring(13, 15)),
+    );
+  }
+
+  static int? _resolveFixedOffsetTzMillis(
+    String tzid,
+    int year,
+    int month,
+    int day,
+    int hour,
+    int minute,
+    int second,
+  ) {
+    if (tzid == 'UTC' || tzid == 'Etc/UTC') {
+      return DateTime.utc(year, month, day, hour, minute, second).millisecondsSinceEpoch;
+    }
+    final int? offsetMinutes = _fixedOffsetMinutesForTzid(tzid);
+    if (offsetMinutes == null) {
+      return null;
+    }
+    return DateTime.utc(year, month, day, hour, minute - offsetMinutes, second)
+        .millisecondsSinceEpoch;
+  }
+
+  static int? _fixedOffsetMinutesForTzid(String tzid) {
+    switch (tzid) {
+      case 'Australia/Perth':
+        return 8 * 60;
+      case 'Asia/Tokyo':
+        return 9 * 60;
+      default:
+        return null;
     }
   }
 }
