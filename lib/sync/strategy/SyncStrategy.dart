@@ -244,6 +244,17 @@ abstract class SyncStrategy {
     );
     final DateTime effectiveStart = _resolvePushDateTime(local: local, isEnd: false);
     final DateTime effectiveEnd = _resolvePushDateTime(local: local, isEnd: true);
+    final bool existingRemoteUpdate = targetRemoteHref != null && targetRemoteHref.trim().isNotEmpty;
+    final String originalVeventBlock = (remoteSnapshot?['vevent_block']?.toString() ?? '').trim();
+    final bool hasOriginalVeventBlock = originalVeventBlock.isNotEmpty;
+    final bool allowMinimalUpdateFallback =
+        existingRemoteUpdate &&
+        !hasOriginalVeventBlock &&
+        _canFallbackToMinimalExistingRemoteRebuild(remoteSnapshot);
+
+    if (existingRemoteUpdate && !hasOriginalVeventBlock && !allowMinimalUpdateFallback) {
+      return null;
+    }
 
     final String? newEtag = await remoteGateway.uploadEventData(
       userId: loginName!,
@@ -266,6 +277,7 @@ abstract class SyncStrategy {
       end: effectiveEnd,
       targetEventPath: targetRemoteHref,
       originalVeventBlock: remoteSnapshot?['vevent_block']?.toString(),
+      allowMinimalUpdateFallback: allowMinimalUpdateFallback,
     );
 
     if (newEtag == null) {
@@ -282,6 +294,62 @@ abstract class SyncStrategy {
       remoteHref: remoteHref,
       lastMtime: local.lastModified ?? DateTime.now().millisecondsSinceEpoch,
     );
+  }
+
+  bool _canFallbackToMinimalExistingRemoteRebuild(Map<String, dynamic>? remoteSnapshot) {
+    if (remoteSnapshot == null) return false;
+    if ((remoteSnapshot['parse_source']?.toString() ?? '').trim().toUpperCase() != 'VEVENT') {
+      return false;
+    }
+    if (!_looksLikeSimpleGeneratedUid(remoteSnapshot['uid']?.toString())) {
+      return false;
+    }
+    if (_hasRichRemoteIndicators(remoteSnapshot)) {
+      return false;
+    }
+
+    final String rrule = (remoteSnapshot['rrule']?.toString() ?? '').trim();
+    final String recurrenceId = (remoteSnapshot['recurrence_id']?.toString() ?? '').trim();
+    if (rrule.isNotEmpty || recurrenceId.isNotEmpty) {
+      return false;
+    }
+
+    return true;
+  }
+
+  bool _hasRichRemoteIndicators(Map<String, dynamic>? remoteSnapshot) {
+    if (remoteSnapshot == null) return false;
+    final String rawText = ((remoteSnapshot['vevent_block'] ?? remoteSnapshot['calendar_data'] ?? '').toString())
+        .toUpperCase();
+    const List<String> richMarkers = <String>[
+      'ATTENDEE',
+      'ORGANIZER',
+      'BEGIN:VALARM',
+      'X-',
+      'EXDATE',
+      'RDATE',
+      'RELATED-TO',
+      'REQUEST-STATUS',
+    ];
+    for (final marker in richMarkers) {
+      if (rawText.contains(marker)) {
+        return true;
+      }
+    }
+
+    final String rrule = (remoteSnapshot['rrule']?.toString() ?? '').trim();
+    final String recurrenceId = (remoteSnapshot['recurrence_id']?.toString() ?? '').trim();
+    return rrule.isNotEmpty || recurrenceId.isNotEmpty;
+  }
+
+  bool _looksLikeSimpleGeneratedUid(String? uid) {
+    final String normalized = (uid ?? '').trim();
+    if (normalized.isEmpty) return false;
+    final RegExp uuidShape = RegExp(
+      r'^[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}$',
+      caseSensitive: false,
+    );
+    return uuidShape.hasMatch(normalized);
   }
 
   Map<String, dynamic>? _resolvePushDateMeta({
@@ -1168,6 +1236,7 @@ abstract class RemoteItemGateway {
     Map<String, dynamic>? dtendMeta,
     String? targetEventPath,
     String? originalVeventBlock,
+    bool allowMinimalUpdateFallback = false,
   });
 
   Future<bool> deleteEvent({
@@ -1206,6 +1275,7 @@ class CaleeRemoteItemGateway extends RemoteItemGateway {
     Map<String, dynamic>? dtendMeta,
     String? targetEventPath,
     String? originalVeventBlock,
+    bool allowMinimalUpdateFallback = false,
   }) => _service.uploadEventData(
         userId: userId,
         calendarPath: calendarPath,
@@ -1225,6 +1295,7 @@ class CaleeRemoteItemGateway extends RemoteItemGateway {
         dtendMeta: dtendMeta,
         targetEventPath: targetEventPath,
         originalVeventBlock: originalVeventBlock,
+        allowMinimalUpdateFallback: allowMinimalUpdateFallback,
       );
 
   @override

@@ -3,6 +3,26 @@ import 'package:caleesync/common/utils/IcsSerializer.dart';
 import 'package:caleesync/services/calee_server_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+class _RecordingCaleeServerService extends CaleeServerService {
+  String? lastPutIcsData;
+  String? lastPutTargetEventPath;
+  int putCallCount = 0;
+
+  @override
+  Future<String?> putEvent({
+    required String calendarPath,
+    required String uid,
+    required String icsData,
+    required String userId,
+    String? targetEventPath,
+  }) async {
+    putCallCount += 1;
+    lastPutIcsData = icsData;
+    lastPutTargetEventPath = targetEventPath;
+    return 'etag-test';
+  }
+}
+
 void main() {
   group('IcsParser.parse', () {
     test('parses VEVENT DTSTART instead of VTIMEZONE DTSTART', () {
@@ -256,6 +276,46 @@ void main() {
       );
 
       expect(result, isNull);
+    });
+
+    test('existing remote update without original block is refused by default', () async {
+      final service = _RecordingCaleeServerService();
+      final result = await service.uploadEventData(
+        userId: 'user',
+        calendarPath: '/remote.php/dav/calendars/user/test/',
+        uid: 'evt-default-blocked',
+        title: 'Guarded Event',
+        parseSource: 'VEVENT',
+        start: DateTime.utc(2026, 12, 12, 10),
+        end: DateTime.utc(2026, 12, 12, 11),
+        targetEventPath: '/remote.php/dav/calendars/user/test/evt-default-blocked.ics',
+        originalVeventBlock: null,
+        allowMinimalUpdateFallback: false,
+      );
+
+      expect(result, isNull);
+      expect(service.putCallCount, 0);
+    });
+
+    test('existing remote update without original block may use minimal fallback when explicitly allowed', () async {
+      final service = _RecordingCaleeServerService();
+      final result = await service.uploadEventData(
+        userId: 'user',
+        calendarPath: '/remote.php/dav/calendars/user/test/',
+        uid: 'evt-fallback-allowed',
+        title: 'Fallback Event',
+        parseSource: 'VEVENT',
+        start: DateTime.utc(2026, 12, 12, 10),
+        end: DateTime.utc(2026, 12, 12, 11),
+        targetEventPath: '/remote.php/dav/calendars/user/test/evt-fallback-allowed.ics',
+        originalVeventBlock: null,
+        allowMinimalUpdateFallback: true,
+      );
+
+      expect(result, isNotNull);
+      expect(service.putCallCount, 1);
+      expect(service.lastPutTargetEventPath, '/remote.php/dav/calendars/user/test/evt-fallback-allowed.ics');
+      expect(service.lastPutIcsData, contains('BEGIN:VEVENT'));
     });
   });
 }
