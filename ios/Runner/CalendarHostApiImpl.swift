@@ -280,6 +280,29 @@ import EventKit
     return externalId
   }
 
+  private func normalizedAllDayBounds(startMs: Int64, endMs: Int64) -> (Date, Date) {
+    let calendar = Calendar(identifier: .gregorian)
+    let utc = TimeZone(secondsFromGMT: 0) ?? .gmt
+    var utcCalendar = calendar
+    utcCalendar.timeZone = utc
+
+    let rawStart = Date(timeIntervalSince1970: TimeInterval(startMs) / 1000.0)
+    let rawEnd = Date(timeIntervalSince1970: TimeInterval(endMs) / 1000.0)
+    let startDay = utcCalendar.startOfDay(for: rawStart)
+    let endDay = utcCalendar.startOfDay(for: rawEnd)
+    let effectiveEnd = endDay > startDay
+      ? endDay
+      : (utcCalendar.date(byAdding: .day, value: 1, to: startDay) ?? startDay.addingTimeInterval(86400))
+    return (startDay, effectiveEnd)
+  }
+
+  private func validTimeZone(from identifier: String?) -> TimeZone? {
+    guard let identifier, !identifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+      return nil
+    }
+    return TimeZone(identifier: identifier)
+  }
+
   private func findEvent(calendarId: String, matchingCaleeUid uid: String, store: EKEventStore) -> EKEvent? {
     let trimmedUid = uid.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmedUid.isEmpty, let calendar = store.calendar(withIdentifier: calendarId) else {
@@ -372,8 +395,18 @@ import EventKit
       }
 
       event.title = request.title
-      event.startDate = Date(timeIntervalSince1970: TimeInterval(request.start) / 1000.0)
-      event.endDate = Date(timeIntervalSince1970: TimeInterval(request.end) / 1000.0)
+      event.isAllDay = request.isAllDay ?? false
+      if event.isAllDay {
+        let bounds = normalizedAllDayBounds(startMs: request.start, endMs: request.end)
+        event.startDate = bounds.0
+        event.endDate = bounds.1
+      } else {
+        event.startDate = Date(timeIntervalSince1970: TimeInterval(request.start) / 1000.0)
+        event.endDate = Date(timeIntervalSince1970: TimeInterval(request.end) / 1000.0)
+        if let eventTimeZone = validTimeZone(from: request.eventTimeZone) {
+          event.timeZone = eventTimeZone
+        }
+      }
       embedCaleeUid(into: event, uid: request.uid, originalNotes: request.notes)
 
       do {

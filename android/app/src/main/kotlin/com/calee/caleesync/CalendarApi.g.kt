@@ -160,7 +160,12 @@ data class CalendarEventRequest (
   val end: Long,
   val notes: String? = null,
   val uid: String,
-  val eventId: String? = null
+  val eventId: String? = null,
+  val isAllDay: Boolean? = null,
+  val eventTimeZone: String? = null,
+  val eventEndTimeZone: String? = null,
+  val startIsUtc: Boolean? = null,
+  val endIsUtc: Boolean? = null
 
 ) {
   companion object {
@@ -173,7 +178,25 @@ data class CalendarEventRequest (
       val notes = __pigeon_list[4] as String?
       val uid = __pigeon_list[5] as String
       val eventId = __pigeon_list[6] as String?
-      return CalendarEventRequest(calendarId, title, start, end, notes, uid, eventId)
+      val isAllDay = __pigeon_list[7] as Boolean?
+      val eventTimeZone = __pigeon_list[8] as String?
+      val eventEndTimeZone = __pigeon_list[9] as String?
+      val startIsUtc = __pigeon_list[10] as Boolean?
+      val endIsUtc = __pigeon_list[11] as Boolean?
+      return CalendarEventRequest(
+        calendarId,
+        title,
+        start,
+        end,
+        notes,
+        uid,
+        eventId,
+        isAllDay,
+        eventTimeZone,
+        eventEndTimeZone,
+        startIsUtc,
+        endIsUtc
+      )
     }
   }
   fun toList(): List<Any?> {
@@ -185,6 +208,11 @@ data class CalendarEventRequest (
       notes,
       uid,
       eventId,
+      isAllDay,
+      eventTimeZone,
+      eventEndTimeZone,
+      startIsUtc,
+      endIsUtc,
     )
   }
 }

@@ -176,6 +176,11 @@ struct CalendarEventRequest {
   var notes: String? = nil
   var uid: String
   var eventId: String? = nil
+  var isAllDay: Bool? = nil
+  var eventTimeZone: String? = nil
+  var eventEndTimeZone: String? = nil
+  var startIsUtc: Bool? = nil
+  var endIsUtc: Bool? = nil
 
   // swift-format-ignore: AlwaysUseLowerCamelCase
   static func fromList(_ __pigeon_list: [Any?]) -> CalendarEventRequest? {
@@ -186,6 +191,11 @@ struct CalendarEventRequest {
     let notes: String? = nilOrValue(__pigeon_list[4])
     let uid = __pigeon_list[5] as! String
     let eventId: String? = nilOrValue(__pigeon_list[6])
+    let isAllDay: Bool? = nilOrValue(__pigeon_list[7])
+    let eventTimeZone: String? = nilOrValue(__pigeon_list[8])
+    let eventEndTimeZone: String? = nilOrValue(__pigeon_list[9])
+    let startIsUtc: Bool? = nilOrValue(__pigeon_list[10])
+    let endIsUtc: Bool? = nilOrValue(__pigeon_list[11])
 
     return CalendarEventRequest(
       calendarId: calendarId,
@@ -194,7 +204,12 @@ struct CalendarEventRequest {
       end: end,
       notes: notes,
       uid: uid,
-      eventId: eventId
+      eventId: eventId,
+      isAllDay: isAllDay,
+      eventTimeZone: eventTimeZone,
+      eventEndTimeZone: eventEndTimeZone,
+      startIsUtc: startIsUtc,
+      endIsUtc: endIsUtc
     )
   }
   func toList() -> [Any?] {
@@ -206,6 +221,11 @@ struct CalendarEventRequest {
       notes,
       uid,
       eventId,
+      isAllDay,
+      eventTimeZone,
+      eventEndTimeZone,
+      startIsUtc,
+      endIsUtc,
     ]
   }
 }

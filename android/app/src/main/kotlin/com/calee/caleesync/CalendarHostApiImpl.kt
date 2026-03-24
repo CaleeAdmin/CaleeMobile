@@ -460,6 +460,21 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
         } else 0L
     }
 
+    private fun normalizeAllDayUtcStart(timeMs: Long): Long {
+        val utcCalendar = java.util.Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+            timeInMillis = timeMs
+            set(java.util.Calendar.HOUR_OF_DAY, 0)
+            set(java.util.Calendar.MINUTE, 0)
+            set(java.util.Calendar.SECOND, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }
+        return utcCalendar.timeInMillis
+    }
+
+    private fun normalizeAllDayUtcEnd(timeMs: Long): Long {
+        return normalizeAllDayUtcStart(timeMs)
+    }
+
     override fun createEvent(
         calendarId: String,
         title: String,
@@ -538,13 +553,31 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
     ) {
         try {
             val contentResolver = context.contentResolver
+            val isAllDay = request.isAllDay == true
+            val normalizedStart = if (isAllDay) normalizeAllDayUtcStart(request.start) else request.start
+            val normalizedEnd = if (isAllDay) normalizeAllDayUtcEnd(request.end) else request.end
+            val resolvedEventTimeZone = if (isAllDay) {
+                "UTC"
+            } else {
+                request.eventTimeZone?.takeIf { it.isNotBlank() }
+                    ?: if (request.startIsUtc == true) "UTC" else TimeZone.getDefault().id
+            }
+            val resolvedEventEndTimeZone = if (isAllDay) {
+                "UTC"
+            } else {
+                request.eventEndTimeZone?.takeIf { it.isNotBlank() }
+                    ?: if (request.endIsUtc == true) "UTC" else resolvedEventTimeZone
+            }
+
             val baseValues = ContentValues().apply {
-                put(CalendarContract.Events.DTSTART, request.start)
-                put(CalendarContract.Events.DTEND, request.end)
+                put(CalendarContract.Events.DTSTART, normalizedStart)
+                put(CalendarContract.Events.DTEND, normalizedEnd)
                 put(CalendarContract.Events.TITLE, request.title)
                 put(CalendarContract.Events.DESCRIPTION, request.notes)
                 put(CalendarContract.Events.CALENDAR_ID, request.calendarId.toLong())
-                put(CalendarContract.Events.EVENT_TIMEZONE, TimeZone.getDefault().id)
+                put(CalendarContract.Events.ALL_DAY, if (isAllDay) 1 else 0)
+                put(CalendarContract.Events.EVENT_TIMEZONE, resolvedEventTimeZone)
+                put(CalendarContract.Events.EVENT_END_TIMEZONE, resolvedEventEndTimeZone)
             }
 
             val values = ContentValues().apply {

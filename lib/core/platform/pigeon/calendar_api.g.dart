@@ -177,6 +177,11 @@ class CalendarEventRequest {
     this.notes,
     required this.uid,
     this.eventId,
+    this.isAllDay,
+    this.eventTimeZone,
+    this.eventEndTimeZone,
+    this.startIsUtc,
+    this.endIsUtc,
   });
 
   String calendarId;
@@ -193,6 +198,16 @@ class CalendarEventRequest {
 
   String? eventId;
 
+  bool? isAllDay;
+
+  String? eventTimeZone;
+
+  String? eventEndTimeZone;
+
+  bool? startIsUtc;
+
+  bool? endIsUtc;
+
   Object encode() {
     return <Object?>[
       calendarId,
@@ -202,6 +217,11 @@ class CalendarEventRequest {
       notes,
       uid,
       eventId,
+      isAllDay,
+      eventTimeZone,
+      eventEndTimeZone,
+      startIsUtc,
+      endIsUtc,
     ];
   }
 
@@ -215,6 +235,11 @@ class CalendarEventRequest {
       notes: result[4] as String?,
       uid: result[5]! as String,
       eventId: result[6] as String?,
+      isAllDay: result[7] as bool?,
+      eventTimeZone: result[8] as String?,
+      eventEndTimeZone: result[9] as String?,
+      startIsUtc: result[10] as bool?,
+      endIsUtc: result[11] as bool?,
     );
   }
 }

@@ -73,6 +73,12 @@ abstract class SyncStrategy {
     if (eventData == null) {
       return null;
     }
+    final bool isAllDay =
+        eventData.dtstartMeta?['isDateOnly'] == true && eventData.dtendMeta?['isDateOnly'] == true;
+    final String? eventTimeZone = eventData.dtstartMeta?['tzid']?.toString();
+    final String? eventEndTimeZone = eventData.dtendMeta?['tzid']?.toString();
+    final bool startIsUtc = eventData.dtstartMeta?['isUtc'] == true;
+    final bool endIsUtc = eventData.dtendMeta?['isUtc'] == true;
 
     final String? localEventId = await localGateway.createOrUpdateEvent(
       calendarId: localCalendarId,
@@ -82,6 +88,11 @@ abstract class SyncStrategy {
       uid: eventData.uid,
       notes: eventData.description,
       eventId: existingLocalId,
+      isAllDay: isAllDay,
+      eventTimeZone: eventTimeZone,
+      eventEndTimeZone: eventEndTimeZone,
+      startIsUtc: startIsUtc,
+      endIsUtc: endIsUtc,
     );
 
     if (localEventId == null) {
@@ -931,6 +942,11 @@ abstract class LocalItemGateway {
     required int start,
     required int end,
     String? notes,
+    bool? isAllDay,
+    String? eventTimeZone,
+    String? eventEndTimeZone,
+    bool? startIsUtc,
+    bool? endIsUtc,
   });
 
   Future<bool> deleteEvent(String eventId);
@@ -956,6 +972,11 @@ class NativeLocalItemGateway extends LocalItemGateway {
     required int start,
     required int end,
     String? notes,
+    bool? isAllDay,
+    String? eventTimeZone,
+    String? eventEndTimeZone,
+    bool? startIsUtc,
+    bool? endIsUtc,
   }) async {
     return _nativeApi.createOrUpdateEvent(
       CalendarEventRequest(
@@ -966,6 +987,11 @@ class NativeLocalItemGateway extends LocalItemGateway {
         start: start,
         end: end,
         notes: notes,
+        isAllDay: isAllDay,
+        eventTimeZone: eventTimeZone,
+        eventEndTimeZone: eventEndTimeZone,
+        startIsUtc: startIsUtc,
+        endIsUtc: endIsUtc,
       ),
     );
   }
