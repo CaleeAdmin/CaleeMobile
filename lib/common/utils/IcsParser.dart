@@ -1,5 +1,7 @@
 import 'package:flutter/cupertino.dart';
 
+import 'IcsTimezoneResolver.dart';
+
 class IcsPropertyValue {
   final String name;
   final String rawValue;
@@ -16,6 +18,8 @@ class IcsPropertyValue {
 
 class IcsParser {
   static Map<String, dynamic> parse(String icsString, String fallbackUid) {
+    IcsTimezoneResolver.ensureInitialized();
+
     final String content = _unfoldLines(icsString);
     final String? veventBlock = _extractVeventBlock(content);
     if (veventBlock == null || veventBlock.isEmpty) {
@@ -39,17 +43,24 @@ class IcsParser {
     final String internalUid = uidProperty?.rawValue.trim() ?? '';
     final String finalUid = internalUid.isNotEmpty ? internalUid : fallbackUid;
 
-    final int? startMillis = _parseIcsDate(startProperty);
-    final int? endMillis = _parseIcsDate(endProperty);
-    if (startMillis == null) {
+    final _ParsedDateResult? parsedStart = _parseIcsDate(startProperty);
+    final _ParsedDateResult? parsedEnd = _parseIcsDate(endProperty);
+    if (parsedStart?.millis == null) {
       debugPrint('[ICS] Parse failed: VEVENT DTSTART missing/malformed for uid=$finalUid value=${startProperty?.rawValue}');
       return {};
     }
 
+    final int startMillis = parsedStart!.millis!;
+    final int? parsedEndMillis = parsedEnd?.millis;
+    final int? normalizedDateOnlyEnd = _normalizeDateOnlyEndMillis(
+      parsedStart: parsedStart,
+      parsedEnd: parsedEnd,
+    );
+
     final String? recurrenceId = recurrenceIdProperty?.rawValue.trim().isNotEmpty == true
         ? recurrenceIdProperty!.rawValue.trim()
         : null;
-    final int resolvedEndMillis = endMillis ?? (startMillis + 3600000);
+    final int resolvedEndMillis = normalizedDateOnlyEnd ?? parsedEndMillis ?? (startMillis + 3600000);
 
     debugPrint(
       '[ICS] Parsed VEVENT uid=$finalUid recurrenceId=${recurrenceId ?? ''} '
@@ -74,8 +85,8 @@ class IcsParser {
       'rrule': rruleProperty?.rawValue,
       'recurrence_id': recurrenceId,
       'instance_key': _buildInstanceKey(finalUid, recurrenceId),
-      'dtstart_meta': _buildDateMeta(startProperty, 'VEVENT'),
-      'dtend_meta': _buildDateMeta(endProperty, 'VEVENT'),
+      'dtstart_meta': parsedStart.meta,
+      'dtend_meta': parsedEnd?.meta,
       'recurrence_id_meta': _buildDateMeta(recurrenceIdProperty, 'VEVENT'),
       'vevent_block': veventBlock,
       'parse_source': 'VEVENT',
@@ -128,13 +139,18 @@ class IcsParser {
 
   static Map<String, dynamic>? _buildDateMeta(IcsPropertyValue? property, String source) {
     if (property == null || property.isEmpty) return null;
+    final bool isUtc = property.rawValue.trim().endsWith('Z');
+    final bool isDateOnly = (property.params['VALUE'] ?? '').toUpperCase() == 'DATE';
+    final String? tzid = property.params['TZID'];
     return {
+      'raw': property.rawValue,
       'rawValue': property.rawValue,
       'params': property.params,
       'source': source,
-      'isUtc': property.rawValue.endsWith('Z'),
-      'isDateOnly': (property.params['VALUE'] ?? '').toUpperCase() == 'DATE',
-      'tzid': property.params['TZID'],
+      'isUtc': isUtc,
+      'isDateOnly': isDateOnly,
+      'tzid': tzid,
+      'isDateEndExclusive': false,
     };
   }
 
@@ -151,35 +167,134 @@ class IcsParser {
         .replaceAll('\\\\', '\\');
   }
 
-  static int? _parseIcsDate(IcsPropertyValue? property) {
+  static _ParsedDateResult? _parseIcsDate(IcsPropertyValue? property) {
     try {
       if (property == null || property.rawValue.isEmpty) return null;
-      final String dateStr = property.rawValue.trim();
+
       final bool isDateOnly = (property.params['VALUE'] ?? '').toUpperCase() == 'DATE';
-      final String compact = dateStr.replaceAll(RegExp(r'[^0-9T]'), '');
-      if (compact.length < 8) return null;
+      final String rawValue = property.rawValue.trim();
+      final String? tzid = property.params['TZID']?.trim().isNotEmpty == true
+          ? property.params['TZID']!.trim()
+          : null;
 
-      final int year = int.parse(compact.substring(0, 4));
-      final int month = int.parse(compact.substring(4, 6));
-      final int day = int.parse(compact.substring(6, 8));
-
-      int hour = 0;
-      int minute = 0;
-      int second = 0;
-      if (!isDateOnly && compact.contains('T') && compact.length >= 15) {
-        hour = int.parse(compact.substring(9, 11));
-        minute = int.parse(compact.substring(11, 13));
-        second = int.parse(compact.substring(13, 15));
+      if (isDateOnly) {
+        return _parseFloatingOrDateOnly(property, isDateOnly: true);
       }
 
-      if (dateStr.endsWith('Z')) {
-        return DateTime.utc(year, month, day, hour, minute, second)
-            .millisecondsSinceEpoch;
+      if (rawValue.endsWith('Z')) {
+        final DateTime parsedUtc = IcsTimezoneResolver.parseUtcDateTime(rawValue);
+        return _ParsedDateResult(
+          millis: parsedUtc.millisecondsSinceEpoch,
+          meta: {
+            'raw': property.rawValue,
+            'rawValue': property.rawValue,
+            'isUtc': true,
+            'isDateOnly': false,
+            'tzid': null,
+            'params': property.params,
+            'source': 'VEVENT',
+            'isDateEndExclusive': false,
+          },
+        );
       }
-      return DateTime(year, month, day, hour, minute, second)
-          .millisecondsSinceEpoch;
+
+      if (tzid != null) {
+        return _parseIcsDateWithTimezone(property, rawValue: rawValue, tzid: tzid);
+      }
+
+      return _parseFloatingOrDateOnly(property, isDateOnly: false);
     } catch (_) {
       return null;
     }
   }
+
+  static _ParsedDateResult _parseIcsDateWithTimezone(
+    IcsPropertyValue property, {
+    required String rawValue,
+    required String tzid,
+  }) {
+    final DateTime parsed = IcsTimezoneResolver.parseIcsDateInTimezone(rawValue, tzid);
+    return _ParsedDateResult(
+      millis: parsed.millisecondsSinceEpoch,
+      meta: {
+        'raw': property.rawValue,
+        'rawValue': property.rawValue,
+        'isUtc': false,
+        'isDateOnly': false,
+        'tzid': tzid,
+        'params': property.params,
+        'source': 'VEVENT',
+        'isDateEndExclusive': false,
+      },
+    );
+  }
+
+  static _ParsedDateResult _parseFloatingOrDateOnly(
+    IcsPropertyValue property, {
+    required bool isDateOnly,
+  }) {
+    final String rawValue = property.rawValue.trim();
+
+    if (isDateOnly) {
+      final String compact = rawValue.replaceAll(RegExp(r'[^0-9]'), '');
+      final int year = int.parse(compact.substring(0, 4));
+      final int month = int.parse(compact.substring(4, 6));
+      final int day = int.parse(compact.substring(6, 8));
+      final DateTime parsedDate = DateTime.utc(year, month, day);
+      return _ParsedDateResult(
+        millis: parsedDate.millisecondsSinceEpoch,
+        meta: {
+          'raw': property.rawValue,
+          'rawValue': property.rawValue,
+          'isUtc': false,
+          'isDateOnly': true,
+          'tzid': null,
+          'params': property.params,
+          'source': 'VEVENT',
+          'isDateEndExclusive': property.name == 'DTEND',
+        },
+      );
+    }
+
+    final DateTime parsedFloating = IcsTimezoneResolver.parseFloatingDateTime(rawValue);
+    return _ParsedDateResult(
+      millis: parsedFloating.millisecondsSinceEpoch,
+      meta: {
+        'raw': property.rawValue,
+        'rawValue': property.rawValue,
+        'isUtc': false,
+        'isDateOnly': false,
+        'tzid': null,
+        'params': property.params,
+        'source': 'VEVENT',
+        'isDateEndExclusive': false,
+      },
+    );
+  }
+
+  static int? _normalizeDateOnlyEndMillis({
+    required _ParsedDateResult parsedStart,
+    required _ParsedDateResult? parsedEnd,
+  }) {
+    if (parsedEnd == null) return null;
+    final bool endIsDateOnly = parsedEnd.meta['isDateOnly'] == true;
+    if (!endIsDateOnly) return parsedEnd.millis;
+
+    final bool startIsDateOnly = parsedStart.meta['isDateOnly'] == true;
+    if (startIsDateOnly) {
+      return parsedEnd.millis;
+    }
+
+    return parsedEnd.millis;
+  }
+}
+
+class _ParsedDateResult {
+  final int? millis;
+  final Map<String, dynamic> meta;
+
+  const _ParsedDateResult({
+    required this.millis,
+    required this.meta,
+  });
 }
