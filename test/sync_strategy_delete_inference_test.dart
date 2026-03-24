@@ -5,17 +5,76 @@ import 'package:caleesync/sync/SyncEnum.dart';
 import 'package:caleesync/sync/strategy/SyncStrategy.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'test_bootstrap.dart';
+
 class _TestSyncStrategy extends SyncStrategy {
+  _TestSyncStrategy({LocalItemGateway? gateway}) : _localGateway = gateway ?? _FakeLocalItemGateway(events: const []);
+
+  final LocalItemGateway _localGateway;
+
+  @override
+  LocalItemGateway get localGateway => _localGateway;
+
   @override
   Future<void> execute(SyncContext ctx, SyncSummary summary) async {}
 }
 
+class _FakeLocalItemGateway extends LocalItemGateway {
+  _FakeLocalItemGateway({
+    required this.events,
+    this.systemIds = const <String>[],
+    this.shouldThrowOnGetSystemIds = false,
+  });
+
+  final List<PlatformItem> events;
+  final List<String> systemIds;
+  final bool shouldThrowOnGetSystemIds;
+  String? lastCalendarId;
+  int? lastStartMs;
+  int? lastEndMs;
+
+  @override
+  Future<List<PlatformItem>> getEvents(String localCalendarId, int start, int end) async => events;
+
+  @override
+  Future<List<String>> getSystemEventIds(String localCalendarId, int startMs, int endMs) async {
+    lastCalendarId = localCalendarId;
+    lastStartMs = startMs;
+    lastEndMs = endMs;
+    if (shouldThrowOnGetSystemIds) {
+      throw Exception('system id enumeration failed');
+    }
+    return systemIds;
+  }
+
+  @override
+  Future<String?> createOrUpdateEvent({
+    required String calendarId,
+    String? eventId,
+    required String uid,
+    required String title,
+    required int start,
+    required int end,
+    String? notes,
+    String? location,
+    String? eventTimezone,
+    bool? isAllDay,
+  }) async => null;
+
+  @override
+  Future<bool> deleteEvent(String eventId) async => false;
+}
+
 void main() {
+  setUpAll(() async {
+    await bootstrapTestStorage();
+  });
+
   group('SyncStrategy delete inference authority', () {
-    final strategy = _TestSyncStrategy();
     final rules = UnifiedModeRules.forMode(UnifiedSyncMode.bidi);
 
     test('skips remote delete when local absence is not trusted', () {
+      final strategy = _TestSyncStrategy();
       final action = strategy.decideCanonicalActionForTesting(
         uid: 'uid-1',
         remote: {'etag': 'r1'},
@@ -32,6 +91,7 @@ void main() {
     });
 
     test('keeps remote delete when local absence is trusted', () {
+      final strategy = _TestSyncStrategy();
       final action = strategy.decideCanonicalActionForTesting(
         uid: 'uid-1',
         remote: {'etag': 'r1'},
@@ -48,6 +108,7 @@ void main() {
     });
 
     test('skips local delete when remote absence is not trusted', () {
+      final strategy = _TestSyncStrategy();
       final action = strategy.decideCanonicalActionForTesting(
         uid: 'uid-2',
         remote: null,
@@ -64,6 +125,7 @@ void main() {
     });
 
     test('keeps local delete when remote snapshot is trusted', () {
+      final strategy = _TestSyncStrategy();
       final action = strategy.decideCanonicalActionForTesting(
         uid: 'uid-2',
         remote: null,
@@ -77,6 +139,58 @@ void main() {
       );
 
       expect(action, SyncItemAction.deleteLocal);
+    });
+  });
+
+  group('SyncStrategy loadLocalEvents trust flag', () {
+    test('marks local absence trusted when ranged system ID enumeration succeeds', () async {
+      final gateway = _FakeLocalItemGateway(
+        events: [PlatformItem(localId: 'l-1', uid: 'uid-1')],
+        systemIds: ['l-1'],
+      );
+      final strategy = _TestSyncStrategy(gateway: gateway);
+
+      final snapshot = await strategy.loadLocalEvents(
+        'cal-1',
+        rangeStartMs: 1000,
+        rangeEndMs: 2000,
+      );
+
+      expect(snapshot.canInferDeletesFromLocalAbsence, isTrue);
+    });
+
+    test('marks local absence untrusted when ranged system ID enumeration throws', () async {
+      final gateway = _FakeLocalItemGateway(
+        events: [PlatformItem(localId: 'l-1', uid: 'uid-1')],
+        shouldThrowOnGetSystemIds: true,
+      );
+      final strategy = _TestSyncStrategy(gateway: gateway);
+
+      final snapshot = await strategy.loadLocalEvents(
+        'cal-1',
+        rangeStartMs: 1000,
+        rangeEndMs: 2000,
+      );
+
+      expect(snapshot.canInferDeletesFromLocalAbsence, isFalse);
+    });
+
+    test('passes exact sync window to ranged system ID enumeration', () async {
+      final gateway = _FakeLocalItemGateway(
+        events: [PlatformItem(localId: 'l-1', uid: 'uid-1')],
+        systemIds: ['l-1'],
+      );
+      final strategy = _TestSyncStrategy(gateway: gateway);
+
+      await strategy.loadLocalEvents(
+        'cal-window',
+        rangeStartMs: 1111,
+        rangeEndMs: 2222,
+      );
+
+      expect(gateway.lastCalendarId, 'cal-window');
+      expect(gateway.lastStartMs, 1111);
+      expect(gateway.lastEndMs, 2222);
     });
   });
 }

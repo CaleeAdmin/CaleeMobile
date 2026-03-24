@@ -3,17 +3,23 @@ import 'package:caleesync/entity/SyncContext.dart';
 import 'package:caleesync/entity/SyncSummary.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'test_bootstrap.dart';
+
 class _TestSyncStrategy extends SyncStrategy {
   @override
   Future<void> execute(SyncContext ctx, SyncSummary summary) async {}
 }
 
 void main() {
+  setUpAll(() async {
+    await bootstrapTestStorage();
+  });
+
   group('SyncStrategy adaptive local fetch window', () {
-    final strategy = _TestSyncStrategy();
 
     test('uses fallback window when no usable timestamps exist', () {
       final now = DateTime.utc(2026, 1, 1);
+      final strategy = _TestSyncStrategy();
       final window = strategy.computeAdaptiveLocalFetchWindow(
         remoteEvents: const [],
         mappedRecords: const [],
@@ -27,6 +33,7 @@ void main() {
     });
 
     test('builds from remote and mapped ranges with padding', () {
+      final strategy = _TestSyncStrategy();
       final window = strategy.computeAdaptiveLocalFetchWindow(
         remoteEvents: [
           {'dtstart': DateTime.utc(2020, 1, 10).millisecondsSinceEpoch},
@@ -45,6 +52,7 @@ void main() {
     });
 
     test('clamps very large spans', () {
+      final strategy = _TestSyncStrategy();
       final window = strategy.computeAdaptiveLocalFetchWindow(
         remoteEvents: [
           {'dtstart': DateTime.utc(2000, 1, 1).millisecondsSinceEpoch},

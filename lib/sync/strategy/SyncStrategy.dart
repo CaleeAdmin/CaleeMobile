@@ -46,11 +46,18 @@ abstract class SyncStrategy {
     required int rangeEndMs,
   }) async {
     final events = await localGateway.getEvents(localCalendarId, rangeStartMs, rangeEndMs);
+    bool canInferDeletesFromLocalAbsence = false;
+    try {
+      await localGateway.getSystemEventIds(localCalendarId, rangeStartMs, rangeEndMs);
+      canInferDeletesFromLocalAbsence = true;
+    } catch (_) {
+      canInferDeletesFromLocalAbsence = false;
+    }
     return LocalEventsSnapshot(
       events: events,
       rangeStartMs: rangeStartMs,
       rangeEndMs: rangeEndMs,
-      canInferDeletesFromLocalAbsence: false,
+      canInferDeletesFromLocalAbsence: canInferDeletesFromLocalAbsence,
     );
   }
 
@@ -161,6 +168,9 @@ abstract class SyncStrategy {
       uid: eventData.uid,
       notes: eventData.description,
       eventId: existingLocalId,
+      location: eventData.location,
+      eventTimezone: _resolveEventTimezone(remote),
+      isAllDay: _isAllDayRemoteEvent(remote),
     );
 
     if (localEventId == null) {
@@ -175,6 +185,23 @@ abstract class SyncStrategy {
       dtstart: eventData.dtstart,
       dtend: eventData.dtend,
     );
+  }
+
+  String? _resolveEventTimezone(Map<String, dynamic> remote) {
+    final String? startTzid = (remote['dtstart_meta'] as Map<String, dynamic>?)?['tzid']?.toString();
+    if (startTzid != null && startTzid.isNotEmpty) {
+      return startTzid;
+    }
+
+    final String? endTzid = (remote['dtend_meta'] as Map<String, dynamic>?)?['tzid']?.toString();
+    if (endTzid != null && endTzid.isNotEmpty) {
+      return endTzid;
+    }
+    return null;
+  }
+
+  bool _isAllDayRemoteEvent(Map<String, dynamic> remote) {
+    return (remote['dtstart_meta'] as Map<String, dynamic>?)?['isDateOnly'] == true;
   }
 
   Future<RemotePushResult?> pushLocalEventToRemote({
@@ -199,7 +226,34 @@ abstract class SyncStrategy {
         start: local.startTime ?? 0,
         end: local.endTime ?? 0,
         notes: local.notes,
+        location: local.location,
+        eventTimezone: local.eventTimezone,
+        isAllDay: local.isAllDay,
       );
+    }
+
+    final Map<String, dynamic>? effectiveDtstartMeta = _resolvePushDateMeta(
+      local: local,
+      remoteMeta: remoteSnapshot?['dtstart_meta'] as Map<String, dynamic>?,
+      isEnd: false,
+    );
+    final Map<String, dynamic>? effectiveDtendMeta = _resolvePushDateMeta(
+      local: local,
+      remoteMeta: remoteSnapshot?['dtend_meta'] as Map<String, dynamic>?,
+      isEnd: true,
+    );
+    final DateTime effectiveStart = _resolvePushDateTime(local: local, isEnd: false);
+    final DateTime effectiveEnd = _resolvePushDateTime(local: local, isEnd: true);
+    final bool existingRemoteUpdate = targetRemoteHref != null && targetRemoteHref.trim().isNotEmpty;
+    final String originalVeventBlock = (remoteSnapshot?['vevent_block']?.toString() ?? '').trim();
+    final bool hasOriginalVeventBlock = originalVeventBlock.isNotEmpty;
+    final bool allowMinimalUpdateFallback =
+        existingRemoteUpdate &&
+        !hasOriginalVeventBlock &&
+        _canFallbackToMinimalExistingRemoteRebuild(remoteSnapshot);
+
+    if (existingRemoteUpdate && !hasOriginalVeventBlock && !allowMinimalUpdateFallback) {
+      return null;
     }
 
     final String? newEtag = await remoteGateway.uploadEventData(
@@ -208,18 +262,22 @@ abstract class SyncStrategy {
       uid: uid,
       title: local.title ?? 'Untitled',
       description: local.notes,
-      location: remoteSnapshot?['location']?.toString(),
+      location: (local.location?.trim().isNotEmpty == true)
+          ? local.location
+          : remoteSnapshot?['location']?.toString(),
       url: remoteSnapshot?['url']?.toString(),
       recurrenceId: remoteSnapshot?['recurrence_id']?.toString(),
       rrule: remoteSnapshot?['rrule']?.toString(),
       created: remoteSnapshot?['created']?.toString(),
       lastModified: remoteSnapshot?['last_modified']?.toString(),
       parseSource: remoteSnapshot?['parse_source']?.toString(),
-      dtstartMeta: remoteSnapshot?['dtstart_meta'] as Map<String, dynamic>?,
-      dtendMeta: remoteSnapshot?['dtend_meta'] as Map<String, dynamic>?,
-      start: DateTime.fromMillisecondsSinceEpoch(local.startTime ?? 0),
-      end: DateTime.fromMillisecondsSinceEpoch(local.endTime ?? 0),
+      dtstartMeta: effectiveDtstartMeta,
+      dtendMeta: effectiveDtendMeta,
+      start: effectiveStart,
+      end: effectiveEnd,
       targetEventPath: targetRemoteHref,
+      originalVeventBlock: remoteSnapshot?['vevent_block']?.toString(),
+      allowMinimalUpdateFallback: allowMinimalUpdateFallback,
     );
 
     if (newEtag == null) {
@@ -236,6 +294,136 @@ abstract class SyncStrategy {
       remoteHref: remoteHref,
       lastMtime: local.lastModified ?? DateTime.now().millisecondsSinceEpoch,
     );
+  }
+
+  bool _canFallbackToMinimalExistingRemoteRebuild(Map<String, dynamic>? remoteSnapshot) {
+    if (remoteSnapshot == null) return false;
+    if ((remoteSnapshot['parse_source']?.toString() ?? '').trim().toUpperCase() != 'VEVENT') {
+      return false;
+    }
+    if (!_looksLikeSimpleGeneratedUid(remoteSnapshot['uid']?.toString())) {
+      return false;
+    }
+    if (_hasRichRemoteIndicators(remoteSnapshot)) {
+      return false;
+    }
+
+    final String rrule = (remoteSnapshot['rrule']?.toString() ?? '').trim();
+    final String recurrenceId = (remoteSnapshot['recurrence_id']?.toString() ?? '').trim();
+    if (rrule.isNotEmpty || recurrenceId.isNotEmpty) {
+      return false;
+    }
+
+    return true;
+  }
+
+  bool _hasRichRemoteIndicators(Map<String, dynamic>? remoteSnapshot) {
+    if (remoteSnapshot == null) return false;
+    final String rawText = ((remoteSnapshot['vevent_block'] ?? remoteSnapshot['calendar_data'] ?? '').toString())
+        .toUpperCase();
+    const List<String> richMarkers = <String>[
+      'ATTENDEE',
+      'ORGANIZER',
+      'BEGIN:VALARM',
+      'X-',
+      'EXDATE',
+      'RDATE',
+      'RELATED-TO',
+      'REQUEST-STATUS',
+    ];
+    for (final marker in richMarkers) {
+      if (rawText.contains(marker)) {
+        return true;
+      }
+    }
+
+    final String rrule = (remoteSnapshot['rrule']?.toString() ?? '').trim();
+    final String recurrenceId = (remoteSnapshot['recurrence_id']?.toString() ?? '').trim();
+    return rrule.isNotEmpty || recurrenceId.isNotEmpty;
+  }
+
+  bool _looksLikeSimpleGeneratedUid(String? uid) {
+    final String normalized = (uid ?? '').trim();
+    if (normalized.isEmpty) return false;
+    final RegExp uuidShape = RegExp(
+      r'^[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}$',
+      caseSensitive: false,
+    );
+    return uuidShape.hasMatch(normalized);
+  }
+
+  Map<String, dynamic>? _resolvePushDateMeta({
+    required PlatformItem local,
+    required Map<String, dynamic>? remoteMeta,
+    required bool isEnd,
+  }) {
+    if (_hasMeaningfulDateMeta(remoteMeta)) {
+      return Map<String, dynamic>.from(remoteMeta!);
+    }
+    return _synthesizeLocalDateMeta(local: local, isEnd: isEnd);
+  }
+
+  bool _hasMeaningfulDateMeta(Map<String, dynamic>? meta) {
+    if (meta == null) return false;
+    if (meta['isDateOnly'] == true) return true;
+    if (meta['isUtc'] == true) return true;
+    final String tzid = (meta['tzid']?.toString() ?? '').trim();
+    if (tzid.isNotEmpty) return true;
+    final dynamic params = meta['params'];
+    return params is Map && params.isNotEmpty;
+  }
+
+  Map<String, dynamic>? _synthesizeLocalDateMeta({
+    required PlatformItem local,
+    required bool isEnd,
+  }) {
+    if (local.isAllDay == true) {
+      return <String, dynamic>{
+        'rawValue': null,
+        'params': <String, dynamic>{'VALUE': 'DATE'},
+        'source': 'LOCAL_SYNTH',
+        'isUtc': false,
+        'isDateOnly': true,
+        'tzid': null,
+      };
+    }
+
+    final String timezone = (local.eventTimezone ?? '').trim();
+    if (timezone.isNotEmpty) {
+      return <String, dynamic>{
+        'rawValue': null,
+        'params': <String, dynamic>{'TZID': timezone},
+        'source': 'LOCAL_SYNTH',
+        'isUtc': false,
+        'isDateOnly': false,
+        'tzid': timezone,
+      };
+    }
+
+    return null;
+  }
+
+  DateTime _resolvePushDateTime({
+    required PlatformItem local,
+    required bool isEnd,
+  }) {
+    final int rawMs = isEnd ? (local.endTime ?? 0) : (local.startTime ?? 0);
+    final DateTime base = DateTime.fromMillisecondsSinceEpoch(rawMs);
+    if (local.isAllDay != true) {
+      return base;
+    }
+
+    if (!isEnd) {
+      return DateTime(base.year, base.month, base.day);
+    }
+
+    final DateTime dateOnly = DateTime(base.year, base.month, base.day);
+    final bool isMidnight =
+        base.hour == 0 && base.minute == 0 && base.second == 0 && base.millisecond == 0 && base.microsecond == 0;
+    if (isMidnight) {
+      return dateOnly;
+    }
+    return dateOnly.add(const Duration(days: 1));
   }
 
   Future<void> upsertSyncedItem({
@@ -955,6 +1143,7 @@ class AdaptiveLocalFetchWindow {
 
 abstract class LocalItemGateway {
   Future<List<PlatformItem>> getEvents(String localCalendarId, int start, int end);
+  Future<List<String>> getSystemEventIds(String localCalendarId, int startMs, int endMs);
 
   Future<String?> createOrUpdateEvent({
     required String calendarId,
@@ -964,6 +1153,9 @@ abstract class LocalItemGateway {
     required int start,
     required int end,
     String? notes,
+    String? location,
+    String? eventTimezone,
+    bool? isAllDay,
   });
 
   Future<bool> deleteEvent(String eventId);
@@ -981,6 +1173,12 @@ class NativeLocalItemGateway extends LocalItemGateway {
   }
 
   @override
+  Future<List<String>> getSystemEventIds(String localCalendarId, int startMs, int endMs) async {
+    final List<String?> ids = await _nativeApi.getSystemEventIds(localCalendarId, startMs, endMs);
+    return ids.whereType<String>().toList();
+  }
+
+  @override
   Future<String?> createOrUpdateEvent({
     required String calendarId,
     String? eventId,
@@ -989,6 +1187,9 @@ class NativeLocalItemGateway extends LocalItemGateway {
     required int start,
     required int end,
     String? notes,
+    String? location,
+    String? eventTimezone,
+    bool? isAllDay,
   }) async {
     return _nativeApi.createOrUpdateEvent(
       CalendarEventRequest(
@@ -999,6 +1200,9 @@ class NativeLocalItemGateway extends LocalItemGateway {
         start: start,
         end: end,
         notes: notes,
+        location: location,
+        eventTimezone: eventTimezone,
+        isAllDay: isAllDay,
       ),
     );
   }
@@ -1031,6 +1235,8 @@ abstract class RemoteItemGateway {
     Map<String, dynamic>? dtstartMeta,
     Map<String, dynamic>? dtendMeta,
     String? targetEventPath,
+    String? originalVeventBlock,
+    bool allowMinimalUpdateFallback = false,
   });
 
   Future<bool> deleteEvent({
@@ -1068,6 +1274,8 @@ class CaleeRemoteItemGateway extends RemoteItemGateway {
     Map<String, dynamic>? dtstartMeta,
     Map<String, dynamic>? dtendMeta,
     String? targetEventPath,
+    String? originalVeventBlock,
+    bool allowMinimalUpdateFallback = false,
   }) => _service.uploadEventData(
         userId: userId,
         calendarPath: calendarPath,
@@ -1086,6 +1294,8 @@ class CaleeRemoteItemGateway extends RemoteItemGateway {
         dtstartMeta: dtstartMeta,
         dtendMeta: dtendMeta,
         targetEventPath: targetEventPath,
+        originalVeventBlock: originalVeventBlock,
+        allowMinimalUpdateFallback: allowMinimalUpdateFallback,
       );
 
   @override

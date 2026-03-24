@@ -191,6 +191,7 @@ import EventKit
       item.title = event.title ?? ""
       item.notes = stripCaleeMetadata(from: event.notes)
       item.location = event.location
+      item.eventTimezone = event.timeZone?.identifier
       item.startTime = Int64(event.startDate.timeIntervalSince1970 * 1000.0)
 
       // End time: ensure it is after start, otherwise default to +1 hour
@@ -280,6 +281,11 @@ import EventKit
     return externalId
   }
 
+  private func isSyntheticLocalUid(_ uid: String) -> Bool {
+    let trimmedUid = uid.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmedUid.hasPrefix("local_")
+  }
+
   private func findEvent(calendarId: String, matchingCaleeUid uid: String, store: EKEventStore) -> EKEvent? {
     let trimmedUid = uid.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmedUid.isEmpty, let calendar = store.calendar(withIdentifier: calendarId) else {
@@ -291,6 +297,21 @@ import EventKit
     let endDate = now.addingTimeInterval(20 * 365 * 24 * 3600)
     let predicate = store.predicateForEvents(withStart: startDate, end: endDate, calendars: [calendar])
     return store.events(matching: predicate).first { extractCaleeUid(from: $0) == trimmedUid }
+  }
+
+  private func findEvent(
+    calendarId: String,
+    matchingExternalIdentifier externalId: String,
+    store: EKEventStore
+  ) -> EKEvent? {
+    let trimmedExternalId = externalId.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmedExternalId.isEmpty, !isSyntheticLocalUid(trimmedExternalId) else {
+      return nil
+    }
+
+    return store.calendarItems(withExternalIdentifier: trimmedExternalId)
+      .compactMap { $0 as? EKEvent }
+      .first { $0.calendar.calendarIdentifier == calendarId }
   }
 
   private func resolveEvent(byStableLocalId eventId: String?, store: EKEventStore) -> EKEvent? {
@@ -311,6 +332,9 @@ import EventKit
     end: Int64,
     notes: String?,
     uid: String?,
+    location: String?,
+    eventTimezone: String?,
+    isAllDay: Bool?,
     completion: @escaping (Result<String?, Error>) -> Void
   ) {
     do {
@@ -327,6 +351,13 @@ import EventKit
       event.title = title
       event.startDate = Date(timeIntervalSince1970: TimeInterval(start) / 1000.0)
       event.endDate = Date(timeIntervalSince1970: TimeInterval(end) / 1000.0)
+      event.location = location
+      event.isAllDay = isAllDay ?? false
+      if let eventTimezone, !eventTimezone.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        event.timeZone = TimeZone(identifier: eventTimezone)
+      } else if event.isAllDay {
+        event.timeZone = nil
+      }
       embedCaleeUid(into: event, uid: uid ?? "", originalNotes: notes)
 
       do {
@@ -360,6 +391,9 @@ import EventKit
         event = findEvent(calendarId: request.calendarId, matchingCaleeUid: request.uid, store: store)
       }
       if event == nil {
+        event = findEvent(calendarId: request.calendarId, matchingExternalIdentifier: request.uid, store: store)
+      }
+      if event == nil {
         event = EKEvent(eventStore: store)
       }
       event?.calendar = calendar
@@ -374,6 +408,14 @@ import EventKit
       event.title = request.title
       event.startDate = Date(timeIntervalSince1970: TimeInterval(request.start) / 1000.0)
       event.endDate = Date(timeIntervalSince1970: TimeInterval(request.end) / 1000.0)
+      event.location = request.location
+      event.isAllDay = request.isAllDay ?? false
+      if let requestTimezone = request.eventTimezone,
+         !requestTimezone.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        event.timeZone = TimeZone(identifier: requestTimezone)
+      } else if event.isAllDay {
+        event.timeZone = nil
+      }
       embedCaleeUid(into: event, uid: request.uid, originalNotes: request.notes)
 
       do {
@@ -389,16 +431,14 @@ import EventKit
     }
   }
 
-  func getSystemEventIds(calendarId: String) throws -> [String] {
+  func getSystemEventIds(calendarId: String, startMs: Int64, endMs: Int64) throws -> [String] {
     let store = try requireReadableEventStore()
     guard let calendar = store.calendar(withIdentifier: calendarId) else {
       return []
     }
 
-    // There is no API for "all" events, so use a wide window (±1 year from now).
-    let now = Date()
-    let startDate = now.addingTimeInterval(-365 * 24 * 3600)
-    let endDate = now.addingTimeInterval(365 * 24 * 3600)
+    let startDate = Date(timeIntervalSince1970: TimeInterval(startMs) / 1000.0)
+    let endDate = Date(timeIntervalSince1970: TimeInterval(endMs) / 1000.0)
 
     let predicate = store.predicateForEvents(withStart: startDate, end: endDate, calendars: [calendar])
     let events = store.events(matching: predicate)

@@ -368,6 +368,7 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
             CalendarContract.Events._ID,
             CalendarContract.Events.TITLE,
             CalendarContract.Events.DESCRIPTION,
+            CalendarContract.Events.EVENT_LOCATION,
             CalendarContract.Events.DTSTART,
             CalendarContract.Events.DTEND,
             CalendarContract.Events.DURATION,
@@ -404,6 +405,8 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
                     uid = uid,
                     title = cursor.getString(cursor.getColumnIndexOrThrow(CalendarContract.Events.TITLE)) ?: "",
                     notes = cursor.getString(cursor.getColumnIndexOrThrow(CalendarContract.Events.DESCRIPTION)),
+                    location = cursor.getString(cursor.getColumnIndexOrThrow(CalendarContract.Events.EVENT_LOCATION)),
+                    eventTimezone = cursor.getString(cursor.getColumnIndexOrThrow(CalendarContract.Events.EVENT_TIMEZONE)),
                     startTime = startTime,
                     endTime = endTime,
                     isAllDay = cursor.getInt(cursor.getColumnIndexOrThrow(CalendarContract.Events.ALL_DAY)) == 1,
@@ -467,6 +470,9 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
         end: Long,
         notes: String?,
         uid: String?,
+        location: String?,
+        eventTimezone: String?,
+        isAllDay: Boolean?,
         callback: (Result<String?>) -> Unit
     ) {
         try {
@@ -503,7 +509,9 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
                 put(CalendarContract.Events.TITLE, title)
                 put(CalendarContract.Events.DESCRIPTION, notes)
                 put(CalendarContract.Events.CALENDAR_ID, calendarId.toLong())
-                put(CalendarContract.Events.EVENT_TIMEZONE, TimeZone.getDefault().id)
+                put(CalendarContract.Events.EVENT_TIMEZONE, eventTimezone ?: TimeZone.getDefault().id)
+                put(CalendarContract.Events.EVENT_LOCATION, location)
+                put(CalendarContract.Events.ALL_DAY, if (isAllDay == true) 1 else 0)
 
                 // 将 UID 写入安全字段，兼容不同 ROM/Provider 的读取行为。
                 uid?.let {
@@ -544,7 +552,9 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
                 put(CalendarContract.Events.TITLE, request.title)
                 put(CalendarContract.Events.DESCRIPTION, request.notes)
                 put(CalendarContract.Events.CALENDAR_ID, request.calendarId.toLong())
-                put(CalendarContract.Events.EVENT_TIMEZONE, TimeZone.getDefault().id)
+                put(CalendarContract.Events.EVENT_TIMEZONE, request.eventTimezone ?: TimeZone.getDefault().id)
+                put(CalendarContract.Events.EVENT_LOCATION, request.location)
+                put(CalendarContract.Events.ALL_DAY, if (request.isAllDay == true) 1 else 0)
             }
 
             val values = ContentValues().apply {
@@ -594,12 +604,17 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
         }
     }
 
-    override fun getSystemEventIds(calendarId: String): List<String> {
+    override fun getSystemEventIds(calendarId: String, startMs: Long, endMs: Long): List<String> {
         val eventIds = mutableListOf<String>()
         val uri = CalendarContract.Events.CONTENT_URI
         val projection = arrayOf(CalendarContract.Events._ID)
+        val selection = "${CalendarContract.Events.CALENDAR_ID} = ? AND " +
+            "${CalendarContract.Events.DELETED} = 0 AND " +
+            "${CalendarContract.Events.DTSTART} < ? AND " +
+            "${CalendarContract.Events.DTEND} > ?"
+        val selectionArgs = arrayOf(calendarId, endMs.toString(), startMs.toString())
         try {
-            context.contentResolver.query(uri, projection, "${CalendarContract.Events.CALENDAR_ID} = ? AND ${CalendarContract.Events.DELETED} = 0", arrayOf(calendarId), null)?.use { cursor ->
+            context.contentResolver.query(uri, projection, selection, selectionArgs, null)?.use { cursor ->
                 while (cursor.moveToNext()) {
                     eventIds.add(cursor.getLong(0).toString())
                 }
