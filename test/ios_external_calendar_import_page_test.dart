@@ -21,7 +21,10 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Import Google Calendar'), findsOneWidget);
-    expect(find.textContaining('Secret address in iCal format'), findsOneWidget);
+    expect(
+      find.textContaining('Use the calendar\'s Secret address in iCal format'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('empty URL blocks submit', (tester) async {
@@ -29,7 +32,9 @@ void main() {
       const GetMaterialApp(home: IosExternalCalendarImportPage()),
     );
 
-    await tester.tap(find.text('Import iCloud Calendar'));
+    final submitButton = find.text('Import iCloud Calendar');
+    await tester.ensureVisible(submitButton);
+    await tester.tap(submitButton);
     await tester.pumpAndSettle();
 
     expect(find.text('Subscription URL is required.'), findsOneWidget);
