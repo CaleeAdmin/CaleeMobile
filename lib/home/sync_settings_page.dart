@@ -7,6 +7,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../common/utils/mmkv_utils.dart';
 import '../feature/ios_caldav_setup_page.dart';
+import '../feature/ios_external_calendar_import_page.dart';
 import '../common/app_constant.dart';
 import '../controllers/calendar_probe_controller.dart';
 import '../sync/background_sync_scheduler.dart';
@@ -212,11 +213,13 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> with WidgetsBinding
                       trailing: const Icon(Icons.chevron_right),
                       onTap: () => Get.to(() => const IosCalDavSetupPage()),
                     ),
-                    const ListTile(
+                    ListTile(
                       contentPadding: EdgeInsets.zero,
-                      leading: Icon(Icons.cloud_outlined),
-                      title: Text('Import iCloud / Google / Outlook into Calee'),
-                      subtitle: Text('Coming next phase'),
+                      leading: const Icon(Icons.cloud_outlined),
+                      title: const Text('Import iCloud / Google / Outlook into Calee'),
+                      subtitle: const Text('Import a read-only iCloud, Google, or Outlook calendar into Calee'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => Get.to(() => const IosExternalCalendarImportPage()),
                     ),
                     const SizedBox(height: 12),
                     SizedBox(
