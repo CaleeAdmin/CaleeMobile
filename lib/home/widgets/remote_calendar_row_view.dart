@@ -114,6 +114,30 @@ class RemoteCalendarRowView extends StatelessWidget {
                   style: const TextStyle(fontSize: 12, color: Colors.black54),
                 ),
               ),
+              if (item.isImportedSubscription)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.blueGrey.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Text(
+                    'Imported',
+                    style: TextStyle(fontSize: 12, color: Colors.black54),
+                  ),
+                ),
+              if (item.isImportedSubscription && (item.importedProviderHint?.isNotEmpty ?? false))
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade200,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    item.importedProviderHint!,
+                    style: const TextStyle(fontSize: 12, color: Colors.black54),
+                  ),
+                ),
               Text(
                 '${item.eventCount} events',
                 style: const TextStyle(fontSize: 12, color: Colors.black54),

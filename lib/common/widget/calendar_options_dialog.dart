@@ -59,7 +59,12 @@ class _CalendarOptionsDialogState extends State<CalendarOptionsDialog> {
                       }
                     },
                     title: const Text('Two-way sync', style: TextStyle(fontWeight: FontWeight.w600)),
-                    subtitle: const Text('Sync bidirectionally between Calee Online and Local device', style: TextStyle(fontSize: 12)),
+                    subtitle: Text(
+                      widget.item.isImportedSubscription
+                          ? 'Imported subscription calendars are read-only.'
+                          : 'Sync bidirectionally between Calee Online and Local device',
+                      style: const TextStyle(fontSize: 12),
+                    ),
                     controlAffinity: ListTileControlAffinity.leading,
                   ),
 
@@ -90,15 +95,19 @@ class _CalendarOptionsDialogState extends State<CalendarOptionsDialog> {
               title: const Text('Properties'),
               onTap: () => Navigator.of(context).pop('properties'),
             ),
+            if (!widget.item.isImportedSubscription)
+              ListTile(
+                title: Text(
+                  'Rename calendar',
+                  style: const TextStyle(color: Colors.black),
+                ),
+                onTap: () => Navigator.of(context).pop('rename'),
+              ),
             ListTile(
               title: Text(
-                'Rename calendar',
-                style: const TextStyle(color: Colors.black),
+                widget.item.isImportedSubscription ? 'Remove imported calendar' : 'Delete',
+                style: const TextStyle(color: Colors.red),
               ),
-              onTap: () => Navigator.of(context).pop('rename'),
-            ),
-            ListTile(
-              title: const Text('Delete', style: TextStyle(color: Colors.red)),
               onTap: () => Navigator.of(context).pop('delete'),
             ),
           ],

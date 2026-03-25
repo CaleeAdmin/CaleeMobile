@@ -1175,8 +1175,15 @@ class SyncRepository {
   }
 
   Future<bool> handlePublicSubscription(String icsUrl) async {
+    final String normalizedUrl = CaleeServerService.canonicalizeSubscriptionUrl(icsUrl) ?? icsUrl.trim();
+    final db = await _dbHelper.database;
+    final String? existingRemotePath = await _findExistingSubscriptionByUrl(db, normalizedUrl);
+    if (existingRemotePath != null && existingRemotePath.isNotEmpty) {
+      return true;
+    }
+
     // 1. 使用你提供的方法获取原始名称
-    String? originalName = await CaleeServerService().getIcsNameFromUrl(icsUrl);
+    String? originalName = await CaleeServerService().getIcsNameFromUrl(normalizedUrl);
 
     // 确定用于显示的名称
     final String displayName = originalName ?? "Public subscription_${DateTime.now().millisecond}";
@@ -1191,7 +1198,7 @@ class SyncRepository {
       userId: userId,
       calendarName: displayName,  // 🌟 这里用你抓取到的原始中文名
       calendarId: safeCalendarId, // 🌟 这里用纯数字/字母的 ID
-      icsUrl: icsUrl,
+      icsUrl: normalizedUrl,
     );
 
     if (remotePath != null) {
@@ -1207,12 +1214,11 @@ class SyncRepository {
         accountName: accountName,
       );
 
-      final db = await _dbHelper.database;
       await db.update(
         'remote_collections',
         {
           'is_subscription': 1,
-          'subscription_url': icsUrl,
+          'subscription_url': normalizedUrl,
         },
         where: 'remote_path = ?',
         whereArgs: [remotePath],
@@ -1220,6 +1226,29 @@ class SyncRepository {
       return true;
     }
     return false;
+  }
+
+  Future<String?> _findExistingSubscriptionByUrl(DatabaseExecutor db, String normalizedUrl) async {
+    if (normalizedUrl.isEmpty) return null;
+
+    final List<Map<String, dynamic>> rows = await db.query(
+      'remote_collections',
+      columns: ['remote_path', 'id', 'subscription_url'],
+      where: 'is_subscription = 1 AND subscription_url IS NOT NULL AND subscription_url != ""',
+    );
+
+    for (final Map<String, dynamic> row in rows) {
+      final String existingUrl = CaleeServerService.canonicalizeSubscriptionUrl(row['subscription_url']?.toString()) ?? '';
+      if (existingUrl != normalizedUrl) {
+        continue;
+      }
+      final String remotePath = (row['remote_path'] ?? '').toString();
+      if (remotePath.isNotEmpty) {
+        return remotePath;
+      }
+      return (row['id'] ?? '').toString();
+    }
+    return null;
   }
 
   Future<void> updateSystemCalendarId(String oldLocalId, String newSystemId) async {
