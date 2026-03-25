@@ -1,9 +1,12 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
 
 import '../controllers/calendar_probe_controller.dart';
 import '../entity/sync_run_record.dart';
+import 'sync_settings_page.dart';
 import 'sync_run_details_page.dart';
 
 class SyncStatusDetailsPage extends StatelessWidget {
@@ -14,7 +17,7 @@ class SyncStatusDetailsPage extends StatelessWidget {
     final ctrl = Get.find<CalendarProbeController>();
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Sync Activity'),
+        title: Text(Platform.isIOS ? 'Connection Activity' : 'Sync Activity'),
         actions: [
           IconButton(onPressed: ctrl.loadRecentRuns, icon: const Icon(Icons.refresh)),
         ],
@@ -22,7 +25,13 @@ class SyncStatusDetailsPage extends StatelessWidget {
       body: Obx(() {
         final runs = ctrl.syncRuns;
         if (runs.isEmpty) {
-          return const Center(child: Text('No sync activity yet.'));
+          return Center(
+            child: Text(
+              Platform.isIOS
+                  ? 'No connection activity yet.'
+                  : 'No sync activity yet.',
+            ),
+          );
         }
         return ListView.separated(
           itemCount: runs.length,
@@ -47,9 +56,17 @@ class SyncStatusDetailsPage extends StatelessWidget {
         );
       }),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: ctrl.isSyncing.value ? null : ctrl.syncNow,
-        icon: const Icon(Icons.sync),
-        label: const Text('Sync now'),
+        onPressed: ctrl.isSyncing.value
+            ? null
+            : () {
+                if (Platform.isIOS) {
+                  Get.to(() => const SyncSettingsPage());
+                  return;
+                }
+                ctrl.syncNow();
+              },
+        icon: Icon(Platform.isIOS ? Icons.settings : Icons.sync),
+        label: Text(Platform.isIOS ? 'Open Connections' : 'Sync now'),
       ),
     );
   }
@@ -148,4 +165,3 @@ String _triggerLabel(SyncRunTrigger trigger) {
     SyncRunTrigger.force => 'force',
   };
 }
-

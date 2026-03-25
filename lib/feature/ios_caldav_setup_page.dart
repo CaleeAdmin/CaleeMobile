@@ -177,7 +177,7 @@ class _IosCalDavSetupPageState extends State<IosCalDavSetupPage> {
             SizedBox(height: 10),
             Text('• Open Apple Calendar and ensure the Calee calendar appears.'),
             SizedBox(height: 6),
-            Text('• Create a test event to confirm two-way sync if needed.'),
+            Text('• Create a test event in Apple Calendar to confirm the connection.'),
           ],
         ),
       ),
@@ -187,7 +187,7 @@ class _IosCalDavSetupPageState extends State<IosCalDavSetupPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Add Calee Calendar to iPhone')),
+      appBar: AppBar(title: const Text('Add Calee to Apple Calendar')),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : SafeArea(

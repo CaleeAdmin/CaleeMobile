@@ -169,7 +169,7 @@ class _CalendarPageState extends State<CalendarPage> {
               ),
               ListTile(
                 leading: const Icon(Icons.add_link),
-                title: const Text('New subscription'),
+                title: const Text('Import calendar by link'),
                 onTap: () {
                   Navigator.of(sheetContext).pop();
                   showDialog<bool>(
@@ -195,7 +195,7 @@ class _CalendarPageState extends State<CalendarPage> {
                                 ],
                               ),
                               const SizedBox(height: 8),
-                              const Text('Subscribe to a read-only calendar using a URL', style: TextStyle(color: Colors.black54)),
+                              const Text('Add a read-only imported calendar to Calee', style: TextStyle(color: Colors.black54)),
                               const SizedBox(height: 12),
                               const Align(
                                 alignment: Alignment.centerLeft,

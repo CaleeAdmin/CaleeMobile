@@ -221,19 +221,6 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> with WidgetsBinding
                       trailing: const Icon(Icons.chevron_right),
                       onTap: () => Get.to(() => const IosExternalCalendarImportPage()),
                     ),
-                    const SizedBox(height: 12),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: _saveSettings,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.black87,
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                        ),
-                        child: const Text('Save Connections', style: TextStyle(color: Colors.white)),
-                      ),
-                    ),
                   ] else ...[
                     const Text('Configure how often your calendars and tasks sync with their sources', style: TextStyle(color: Colors.black54)),
                     const SizedBox(height: 16),
@@ -305,11 +292,18 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> with WidgetsBinding
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('About Sync', style: TextStyle(fontWeight: FontWeight.w600)),
+                  Text(
+                    isIosConnectionsMode ? 'About iPhone Connections' : 'About Sync',
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
                   const SizedBox(height: 8),
-                  const Text(
-                    'Calee automatically synchronizes your calendars and tasks with Google, iCloud, Outlook, and other connected services. When "Two-way sync" is enabled, changes made in either location will be synced bidirectionally. Otherwise, data is read-only in the respective location to prevent conflicts.',
-                    style: TextStyle(color: Colors.black54),
+                  Text(
+                    isIosConnectionsMode
+                        ? 'Use Apple Calendar’s CalDAV account path for Calee two-way sync.\n'
+                            'Use imported iCloud, Google, or Outlook links for read-only calendars inside Calee.\n'
+                            'Imported calendars refresh periodically and are not two-way synced from Calee.'
+                        : 'Calee automatically synchronizes your calendars and tasks with Google, iCloud, Outlook, and other connected services. When "Two-way sync" is enabled, changes made in either location will be synced bidirectionally. Otherwise, data is read-only in the respective location to prevent conflicts.',
+                    style: const TextStyle(color: Colors.black54),
                   ),
                   const SizedBox(height: 12),
                   FutureBuilder<String>(

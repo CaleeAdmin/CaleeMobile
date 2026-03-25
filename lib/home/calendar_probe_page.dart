@@ -74,11 +74,18 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
         actions: [
           Obx(() {
             final isSyncing = _ctrl.isRunActive;
+            final isIos = Platform.isIOS;
 
             return IconButton(
-              tooltip: isSyncing ? 'View Activity' : 'Sync Now',
+              tooltip: isSyncing
+                  ? 'View Activity'
+                  : (isIos ? 'Connections' : 'Sync Now'),
               onPressed: () async {
                 if (!isSyncing) {
+                  if (isIos) {
+                    Get.to(() => const SyncSettingsPage());
+                    return;
+                  }
                   await _ctrl.refreshPagesBeforeSync();
                   await _ctrl.syncNow();
                   return;
@@ -95,8 +102,8 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
                         height: 20,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : const Icon(
-                        Icons.sync,
+                    : Icon(
+                        isIos ? Icons.settings : Icons.sync,
                         key: ValueKey('sync-icon'),
                         color: Colors.black87,
                       ),
