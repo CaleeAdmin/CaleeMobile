@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../app_constant.dart';
 import '../../models/calendar_display_item.dart';
 
 class CalendarOptionsDialog extends StatefulWidget {
@@ -45,42 +46,44 @@ class _CalendarOptionsDialogState extends State<CalendarOptionsDialog> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  CheckboxListTile(
-                    contentPadding: EdgeInsets.zero,
-                    value: isTwoWay,
-                    onChanged: isTwoWayDisabled ? null : (v) async {
-                      final bool nextValue = v ?? false;
-                      setState(() {
-                        isTwoWay = nextValue;
-                      });
-
-                      if (widget.onTwoWayChanged != null) {
-                        await widget.onTwoWayChanged!(nextValue);
-                      }
-                    },
-                    title: const Text('Two-way sync', style: TextStyle(fontWeight: FontWeight.w600)),
-                    subtitle: const Text('Sync bidirectionally between Calee Online and Local device', style: TextStyle(fontSize: 12)),
-                    controlAffinity: ListTileControlAffinity.leading,
-                  ),
-
-                  CheckboxListTile(
-                    contentPadding: EdgeInsets.zero,
-                    value: allowMassDeletionDangerous,
-                    onChanged: (v) async {
-                      final bool nextValue = v ?? false;
-                      if (widget.onAllowMassDeletionChanged == null) return;
-                      final bool applied = await widget.onAllowMassDeletionChanged!(nextValue);
-                      if (!mounted) return;
-                      if (applied) {
+                  if (AppConstant.enableAppSync) ...[
+                    CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      value: isTwoWay,
+                      onChanged: isTwoWayDisabled ? null : (v) async {
+                        final bool nextValue = v ?? false;
                         setState(() {
-                          allowMassDeletionDangerous = nextValue;
+                          isTwoWay = nextValue;
                         });
-                      }
-                    },
-                    title: const Text('Allow mass deletion', style: TextStyle(fontWeight: FontWeight.w600)),
-                    subtitle: const Text('When off, large delete waves are blocked for both local and remote deletes.', style: TextStyle(fontSize: 12)),
-                    controlAffinity: ListTileControlAffinity.leading,
-                  ),
+
+                        if (widget.onTwoWayChanged != null) {
+                          await widget.onTwoWayChanged!(nextValue);
+                        }
+                      },
+                      title: const Text('Two-way sync', style: TextStyle(fontWeight: FontWeight.w600)),
+                      subtitle: const Text('Sync bidirectionally between Calee Online and Local device', style: TextStyle(fontSize: 12)),
+                      controlAffinity: ListTileControlAffinity.leading,
+                    ),
+
+                    CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      value: allowMassDeletionDangerous,
+                      onChanged: (v) async {
+                        final bool nextValue = v ?? false;
+                        if (widget.onAllowMassDeletionChanged == null) return;
+                        final bool applied = await widget.onAllowMassDeletionChanged!(nextValue);
+                        if (!mounted) return;
+                        if (applied) {
+                          setState(() {
+                            allowMassDeletionDangerous = nextValue;
+                          });
+                        }
+                      },
+                      title: const Text('Allow mass deletion', style: TextStyle(fontWeight: FontWeight.w600)),
+                      subtitle: const Text('When off, large delete waves are blocked for both local and remote deletes.', style: TextStyle(fontSize: 12)),
+                      controlAffinity: ListTileControlAffinity.leading,
+                    ),
+                  ],
                 ],
               ),
             ),
