@@ -248,9 +248,9 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
                         SizedBox(
                           width: double.infinity,
                           child: FilledButton.icon(
-                            onPressed: probeCtrl.isSyncing.value ? null : () async {
-                              await probeCtrl.syncNow();
-                            ),
+                            onPressed: probeCtrl.isSyncing.value
+                                ? null
+                                : () async => probeCtrl.syncNow(),
                             icon: const Icon(Icons.sync),
                             label: Text(probeCtrl.isSyncing.value ? 'Syncing…' : 'Sync Now'),
                           ),
