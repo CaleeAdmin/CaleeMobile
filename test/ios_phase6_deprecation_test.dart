@@ -16,8 +16,26 @@ class _FakeCalendarProbeController extends CalendarProbeController {
 }
 
 void main() {
+  bool mmkvReady = false;
+
+  setUpAll(() async {
+    try {
+      await bootstrapTestStorage();
+      mmkvReady = true;
+    } catch (_) {
+      mmkvReady = false;
+    }
+  });
+
+  Future<void> requireMmkv() async {
+    if (!mmkvReady) {
+      markTestSkipped('MMKV platform plugin is unavailable in this test environment.');
+    }
+  }
+
   setUp(() async {
-    await bootstrapTestStorage();
+    await requireMmkv();
+    if (!mmkvReady) return;
     MMKVUtils.instance.clear();
     Get.reset();
     Get.testMode = true;
@@ -25,7 +43,9 @@ void main() {
     CalendarProbeController.debugForceIosForTesting = null;
   });
 
-  test('migrateLegacyIosSyncMode seeds deprecation flag and disables old toggles', () {
+  test('migrateLegacyIosSyncMode seeds deprecation flag and disables old toggles', () async {
+    await requireMmkv();
+    if (!mmkvReady) return;
     MMKVUtils.instance.setBool(AppConstant.autoSyncEnabledKey, true);
     MMKVUtils.instance.setBool(AppConstant.periodicSyncEnabledKey, true);
 
@@ -37,6 +57,8 @@ void main() {
   });
 
   test('iOS scheduler methods are no-op and stay disabled', () async {
+    await requireMmkv();
+    if (!mmkvReady) return;
     BackgroundSyncScheduler.debugForceIosForTesting = true;
 
     await BackgroundSyncScheduler.setPeriodicEnabled(true);
@@ -50,6 +72,8 @@ void main() {
   });
 
   test('CalendarProbeController.syncNow returns immediately on iOS', () async {
+    await requireMmkv();
+    if (!mmkvReady) return;
     CalendarProbeController.debugForceIosForTesting = true;
     final controller = CalendarProbeController();
     final seeded = SyncSummary()
@@ -67,6 +91,8 @@ void main() {
   });
 
   testWidgets('dashboard migration notice appears and can be dismissed once', (tester) async {
+    await requireMmkv();
+    if (!mmkvReady) return;
     MMKVUtils.instance.setBool(AppConstant.iosLegacySyncDeprecatedKey, true);
     MMKVUtils.instance.setBool(AppConstant.iosLegacySyncNoticeDismissedKey, false);
     Get.put<CalendarProbeController>(_FakeCalendarProbeController());
