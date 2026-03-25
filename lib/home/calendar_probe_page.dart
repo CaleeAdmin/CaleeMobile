@@ -1,5 +1,6 @@
 import 'package:caleesync/common/route_constant.dart';
 import 'package:caleesync/common/app_constant.dart';
+import 'package:caleesync/common/global_config.dart';
 import 'package:caleesync/common/utils/mmkv_utils.dart';
 import 'package:caleesync/home/sync_settings_page.dart';
 import 'package:flutter/material.dart';
@@ -20,11 +21,11 @@ class CalendarProbePage extends StatefulWidget {
 
 class _CalendarProbePageState extends State<CalendarProbePage> {
   final CalendarProbeController _ctrl = Get.put(CalendarProbeController());
-  final List<Widget> _pages = const [
-    DashboardPage(),
-    CalendarPage(),
-    SyncSettingsPage(),
-  ];
+  List<Widget> get _pages => [
+        const DashboardPage(),
+        const CalendarPage(),
+        if (GlobalConfig.enableAppSync) const SyncSettingsPage(),
+      ];
 
   @override
   Widget build(BuildContext context) {
@@ -113,22 +114,23 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
         () => NavigationBar(
           selectedIndex: _ctrl.selectedIndex.value,
           onDestinationSelected: _ctrl.setSelectedIndex,
-          destinations: const [
-            NavigationDestination(
+          destinations: [
+            const NavigationDestination(
               icon: Icon(Icons.dashboard_outlined),
               selectedIcon: Icon(Icons.dashboard),
               label: 'Dashboard',
             ),
-            NavigationDestination(
+            const NavigationDestination(
               icon: Icon(Icons.calendar_today_outlined),
               selectedIcon: Icon(Icons.calendar_today),
               label: 'Calendars',
             ),
-            NavigationDestination(
-              icon: Icon(Icons.settings_outlined),
-              selectedIcon: Icon(Icons.settings),
-              label: 'Sync Settings',
-            ),
+            if (GlobalConfig.enableAppSync)
+              const NavigationDestination(
+                icon: Icon(Icons.settings_outlined),
+                selectedIcon: Icon(Icons.settings),
+                label: 'Sync Settings',
+              ),
           ],
         ),
       ),

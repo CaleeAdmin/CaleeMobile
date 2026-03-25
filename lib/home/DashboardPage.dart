@@ -1,4 +1,5 @@
 import 'package:caleesync/core/platform/pigeon/background_sync_api.g.dart';
+import 'package:caleesync/common/global_config.dart';
 import 'package:caleesync/sync/background_sync_scheduler.dart';
 import 'dart:io' show Platform;
 
@@ -154,21 +155,22 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
                       _banner(isRunning, needsAttention),
                       const SizedBox(height: 20),
 
-                      // Last Sync
-                      Row(
-                        children: [
-                          Icon(_runIcon(run?.result), color: runColor, size: 18),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              '${_runLabel(run?.result)} · ${_relative(run?.endTime ?? run?.startTime)}',
-                              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                      if (GlobalConfig.enableAppSync) ...[
+                        // Last Sync
+                        Row(
+                          children: [
+                            Icon(_runIcon(run?.result), color: runColor, size: 18),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                '${_runLabel(run?.result)} · ${_relative(run?.endTime ?? run?.startTime)}',
+                                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                              ),
                             ),
-                          ),
-                        ],
-                      ),
-
-                      const SizedBox(height: 20),
+                          ],
+                        ),
+                        const SizedBox(height: 20),
+                      ],
 
                       // Configured
                       Text(_sourceLabel(configured), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
@@ -180,64 +182,66 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
                         ),
                       ],
 
-                      const SizedBox(height: 20),
-                      const Divider(height: 1),
-                      const SizedBox(height: 20),
+                      if (GlobalConfig.enableAppSync) ...[
+                        const SizedBox(height: 20),
+                        const Divider(height: 1),
+                        const SizedBox(height: 20),
 
-                      // Background
-                      const Text('Background', style: TextStyle(fontWeight: FontWeight.w600)),
-                      const SizedBox(height: 8),
-                      Text(_schedulerSummary(backgroundStatus), style: const TextStyle(color: Colors.black87)),
-                      if (_showSchedulerWarning(backgroundStatus)) ...[
+                        // Background
+                        const Text('Background', style: TextStyle(fontWeight: FontWeight.w600)),
                         const SizedBox(height: 8),
-                        Text(
-                          backgroundStatus?.periodicConfigured == true && backgroundStatus?.periodicEnabled != true
-                              ? 'Scheduler not currently active.'
-                              : (backgroundStatus?.lastResult == BackgroundRunOutcome.retry ? 'Background run will retry.' : 'Background run failed.'),
-                          style: const TextStyle(color: Colors.deepOrange),
-                        ),
-                        const SizedBox(height: 6),
-                        ExpansionTile(
-                          tilePadding: EdgeInsets.zero,
-                          title: const Text('Diagnostics', style: TextStyle(fontSize: 13)),
-                          childrenPadding: EdgeInsets.zero,
-                          children: [
-                            Align(
-                              alignment: Alignment.centerLeft,
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text('Result: ${backgroundStatus?.lastResult?.name ?? 'unknown'}'),
-                                  Text('Reason: ${backgroundStatus?.lastReason?.isNotEmpty == true ? backgroundStatus!.lastReason! : 'n/a'}'),
-                                  Text('Gate: ${backgroundStatus?.lastGate?.name ?? 'n/a'}'),
-                                  Text('Error: ${backgroundStatus?.lastError?.isNotEmpty == true ? backgroundStatus!.lastError! : 'n/a'}'),
-                                  Text('Periodic: ${backgroundStatus?.periodicEnabled == true ? 'enabled' : 'disabled'}'),
-                                  Text('Interval: ${backgroundStatus?.intervalMinutes ?? 15}m'),
-                                  Text('Periodic Work: ${backgroundStatus?.periodicWorkState ?? 'n/a'}'),
-                                  Text('One-off Work: ${backgroundStatus?.oneOffWorkState ?? 'n/a'}'),
-                                  Text('Failure Stage: ${backgroundStatus?.lastFailureStage?.isNotEmpty == true ? backgroundStatus!.lastFailureStage! : 'n/a'}'),
-                                  Text('Failure Elapsed: ${backgroundStatus?.lastFailureElapsedMs != null ? '${backgroundStatus!.lastFailureElapsedMs}ms' : 'n/a'}'),
-                                  Text('Failure Step: ${backgroundStatus?.lastFailureStep?.isNotEmpty == true ? backgroundStatus!.lastFailureStep! : 'n/a'}'),
-                                  const SizedBox(height: 8),
-                                  TextButton.icon(
-                                    onPressed: () async {
-                                      await BackgroundSyncScheduler.selfHealPeriodicIfNeeded();
-                                      await _refreshAll();
-                                      if (!mounted) return;
-                                      final status = probeCtrl.backgroundStatus.value;
-                                      final label = status?.periodicEnabled == true ? 'scheduled/updated' : 'not enabled';
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(content: Text('Repair complete: $label · one-off queued (repair_scheduler).')),
-                                      );
-                                    },
-                                    icon: const Icon(Icons.build, size: 16),
-                                    label: const Text('Repair Scheduler'),
-                                  ),
-                                ],
+                        Text(_schedulerSummary(backgroundStatus), style: const TextStyle(color: Colors.black87)),
+                        if (_showSchedulerWarning(backgroundStatus)) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            backgroundStatus?.periodicConfigured == true && backgroundStatus?.periodicEnabled != true
+                                ? 'Scheduler not currently active.'
+                                : (backgroundStatus?.lastResult == BackgroundRunOutcome.retry ? 'Background run will retry.' : 'Background run failed.'),
+                            style: const TextStyle(color: Colors.deepOrange),
+                          ),
+                          const SizedBox(height: 6),
+                          ExpansionTile(
+                            tilePadding: EdgeInsets.zero,
+                            title: const Text('Diagnostics', style: TextStyle(fontSize: 13)),
+                            childrenPadding: EdgeInsets.zero,
+                            children: [
+                              Align(
+                                alignment: Alignment.centerLeft,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text('Result: ${backgroundStatus?.lastResult?.name ?? 'unknown'}'),
+                                    Text('Reason: ${backgroundStatus?.lastReason?.isNotEmpty == true ? backgroundStatus!.lastReason! : 'n/a'}'),
+                                    Text('Gate: ${backgroundStatus?.lastGate?.name ?? 'n/a'}'),
+                                    Text('Error: ${backgroundStatus?.lastError?.isNotEmpty == true ? backgroundStatus!.lastError! : 'n/a'}'),
+                                    Text('Periodic: ${backgroundStatus?.periodicEnabled == true ? 'enabled' : 'disabled'}'),
+                                    Text('Interval: ${backgroundStatus?.intervalMinutes ?? 15}m'),
+                                    Text('Periodic Work: ${backgroundStatus?.periodicWorkState ?? 'n/a'}'),
+                                    Text('One-off Work: ${backgroundStatus?.oneOffWorkState ?? 'n/a'}'),
+                                    Text('Failure Stage: ${backgroundStatus?.lastFailureStage?.isNotEmpty == true ? backgroundStatus!.lastFailureStage! : 'n/a'}'),
+                                    Text('Failure Elapsed: ${backgroundStatus?.lastFailureElapsedMs != null ? '${backgroundStatus!.lastFailureElapsedMs}ms' : 'n/a'}'),
+                                    Text('Failure Step: ${backgroundStatus?.lastFailureStep?.isNotEmpty == true ? backgroundStatus!.lastFailureStep! : 'n/a'}'),
+                                    const SizedBox(height: 8),
+                                    TextButton.icon(
+                                      onPressed: () async {
+                                        await BackgroundSyncScheduler.selfHealPeriodicIfNeeded();
+                                        await _refreshAll();
+                                        if (!mounted) return;
+                                        final status = probeCtrl.backgroundStatus.value;
+                                        final label = status?.periodicEnabled == true ? 'scheduled/updated' : 'not enabled';
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          SnackBar(content: Text('Repair complete: $label · one-off queued (repair_scheduler).')),
+                                        );
+                                      },
+                                      icon: const Icon(Icons.build, size: 16),
+                                      label: const Text('Repair Scheduler'),
+                                    ),
+                                  ],
+                                ),
                               ),
-                            ),
-                          ],
-                        ),
+                            ],
+                          ),
+                        ],
                       ],
 
                       const SizedBox(height: 24),
@@ -253,14 +257,16 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
                           label: Text(probeCtrl.isSyncing.value ? 'Syncing…' : 'Sync Now'),
                         ),
                       ),
-                      const SizedBox(height: 8),
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: TextButton(
-                          onPressed: () => Get.to(() => const SyncStatusDetailsPage()),
-                          child: const Text('View Activity'),
+                      if (GlobalConfig.enableAppSync) ...[
+                        const SizedBox(height: 8),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton(
+                            onPressed: () => Get.to(() => const SyncStatusDetailsPage()),
+                            child: const Text('View Activity'),
+                          ),
                         ),
-                      ),
+                      ],
                     ],
                   ),
                 ),
@@ -283,15 +289,17 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
                           label: const Text('Subscribe to Calee Calendar'),
                         ),
                       ),
-                      const SizedBox(height: 10),
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          onPressed: () => Get.to(() => const LocalCalendarsPage()),
-                          icon: const Icon(Icons.link),
-                          label: const Text('Local Calendars'),
+                      if (GlobalConfig.enableAppSync) ...[
+                        const SizedBox(height: 10),
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: () => Get.to(() => const LocalCalendarsPage()),
+                            icon: const Icon(Icons.link),
+                            label: const Text('Local Calendars'),
+                          ),
                         ),
-                      ),
+                      ],
                     ],
                   ),
                 ),

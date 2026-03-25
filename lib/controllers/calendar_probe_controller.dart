@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:caleesync/common/app_constant.dart';
+import 'package:caleesync/common/global_config.dart';
 import 'package:caleesync/common/utils/mmkv_utils.dart';
 import 'package:get/get.dart';
 
@@ -24,13 +25,15 @@ class CalendarProbeController extends GetxController {
   final Rxn<BackgroundSyncStatus> backgroundStatus = Rxn<BackgroundSyncStatus>();
   final Rxn<SyncRunRecord> latestRun = Rxn<SyncRunRecord>();
 
-  /// 当前选中的页面索引（0: Dashboard, 1: Calendars, 2: SyncSettings）
+  /// 当前选中的页面索引（0: Dashboard, 1: Calendars, 2: SyncSettings[Android only]）
   final RxInt selectedIndex = 1.obs;
 
   /// 设置选中的页面索引
   void setSelectedIndex(int index) {
-    selectedIndex.value = index;
-    if (index == 0) {
+    final int maxIndex = GlobalConfig.enableAppSync ? 2 : 1;
+    final int normalizedIndex = index.clamp(0, maxIndex);
+    selectedIndex.value = normalizedIndex;
+    if (normalizedIndex == 0) {
       unawaited(refreshOverviewState());
     }
   }
