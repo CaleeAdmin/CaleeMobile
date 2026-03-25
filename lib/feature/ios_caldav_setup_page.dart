@@ -196,7 +196,11 @@ class _IosCalDavSetupPageState extends State<IosCalDavSetupPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (_setupInfo?.isReady != true) _buildBlockedState() else ...[
+                    if (_setupInfo?.isReady != true) ...[
+                      _buildBlockedState(),
+                      const SizedBox(height: 12),
+                      _buildStepsCard(),
+                    ] else ...[
                       _buildSetupCard(),
                       const SizedBox(height: 12),
                       _buildStepsCard(),

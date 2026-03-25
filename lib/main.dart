@@ -58,12 +58,9 @@ void _migrateLegacyIosSyncMode({bool? isIOSOverride}) {
   final bool isIOS = isIOSOverride ?? Platform.isIOS;
   if (!isIOS) return;
 
-  final bool wasAutoEnabled = MMKVUtils.instance.getBool(AppConstant.autoSyncEnabledKey, defaultValue: false) ?? false;
-  final bool wasPeriodicEnabled = MMKVUtils.instance.getBool(AppConstant.periodicSyncEnabledKey, defaultValue: false) ?? false;
-
-  if (wasAutoEnabled || wasPeriodicEnabled) {
-    MMKVUtils.instance.setBool(AppConstant.iosLegacySyncDeprecatedKey, true);
-  }
+  // Phase 6: iOS hidden app-level sync is fully deprecated.
+  // Always seed this marker so iOS users can see the migration notice once.
+  MMKVUtils.instance.setBool(AppConstant.iosLegacySyncDeprecatedKey, true);
 
   MMKVUtils.instance.setBool(AppConstant.autoSyncEnabledKey, false);
   MMKVUtils.instance.setBool(AppConstant.periodicSyncEnabledKey, false);
