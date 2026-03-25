@@ -682,6 +682,7 @@ class _CalendarRow extends StatelessWidget {
       item: item,
       isToggling: isToggling,
       color: color,
+      showDetails: AppConstant.enableAppSync,
       onEnablePressed: isToggling ? null : () => controller.enableRemoteCalendar(item),
       onDisablePressed: isToggling ? null : () => controller.disableRemoteCalendar(item),
       onReviewRelinkPressed: isToggling ? null : () => controller.openRemoteRelinkReview(item),

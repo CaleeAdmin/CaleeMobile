@@ -12,6 +12,7 @@ class RemoteCalendarRowView extends StatelessWidget {
   final VoidCallback? onEnableAnywayPressed;
   final VoidCallback? onMorePressed;
   final String? syncGateMessage;
+  final bool showDetails;
 
   const RemoteCalendarRowView({
     super.key,
@@ -24,6 +25,7 @@ class RemoteCalendarRowView extends StatelessWidget {
     this.onEnableAnywayPressed,
     this.onMorePressed,
     this.syncGateMessage,
+    this.showDetails = true,
   });
 
   @override
@@ -82,7 +84,7 @@ class RemoteCalendarRowView extends StatelessWidget {
               ),
             ],
           ),
-          if (isToggling)
+          if (showDetails && isToggling)
             Padding(
               padding: const EdgeInsets.only(bottom: 6),
               child: Text(
@@ -90,42 +92,43 @@ class RemoteCalendarRowView extends StatelessWidget {
                 style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
               ),
             ),
-          Wrap(
-            crossAxisAlignment: WrapCrossAlignment.center,
-            spacing: 8,
-            runSpacing: 6,
-            children: [
-              Container(
-                width: 12,
-                height: 12,
-                decoration: BoxDecoration(
-                  color: color,
-                  borderRadius: BorderRadius.circular(3),
+          if (showDetails)
+            Wrap(
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 8,
+              runSpacing: 6,
+              children: [
+                Container(
+                  width: 12,
+                  height: 12,
+                  decoration: BoxDecoration(
+                    color: color,
+                    borderRadius: BorderRadius.circular(3),
+                  ),
                 ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade300,
-                  borderRadius: BorderRadius.circular(8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    item.isReadOnly ? 'Read-only' : 'Two-way sync',
+                    style: const TextStyle(fontSize: 12, color: Colors.black54),
+                  ),
                 ),
-                child: Text(
-                  item.isReadOnly ? 'Read-only' : 'Two-way sync',
+                Text(
+                  '${item.eventCount} events',
                   style: const TextStyle(fontSize: 12, color: Colors.black54),
                 ),
-              ),
-              Text(
-                '${item.eventCount} events',
-                style: const TextStyle(fontSize: 12, color: Colors.black54),
-              ),
-              if (item.isEnabled)
-                Text(
-                  'Connected',
-                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-                ),
-            ],
-          ),
-          if (!item.isEnabled && item.hasRelinkSuggestion)
+                if (item.isEnabled)
+                  Text(
+                    'Connected',
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                  ),
+              ],
+            ),
+          if (showDetails && !item.isEnabled && item.hasRelinkSuggestion)
             Padding(
               padding: const EdgeInsets.only(top: 6),
               child: Text(
@@ -133,7 +136,7 @@ class RemoteCalendarRowView extends StatelessWidget {
                 style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
               ),
             ),
-          if (item.isEnabled && normalizedSyncGateMessage.isNotEmpty)
+          if (showDetails && item.isEnabled && normalizedSyncGateMessage.isNotEmpty)
             Container(
               margin: const EdgeInsets.only(top: 4),
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -163,39 +166,40 @@ class RemoteCalendarRowView extends StatelessWidget {
                 ],
               ),
             ),
-          Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                if (item.isEnabled)
-                  OutlinedButton(
-                    onPressed: isToggling ? null : onDisablePressed,
-                    style: compactOutlinedStyle,
-                    child: isToggling ? buildLoadingSpinner() : const Text('Disable'),
-                  ),
-                if (showEnableAction)
-                  FilledButton.tonal(
-                    onPressed: isToggling ? null : onEnablePressed,
-                    style: compactTonalStyle,
-                    child: isToggling ? buildLoadingSpinner() : const Text('Enable'),
-                  ),
-                if (showRelinkAction) ...[
-                  FilledButton.tonal(
-                    onPressed: isToggling ? null : onReviewRelinkPressed,
-                    style: compactTonalStyle,
-                    child: const Text('Review Re-link'),
-                  ),
-                  TextButton(
-                    onPressed: isToggling ? null : onEnableAnywayPressed,
-                    style: compactTextStyle,
-                    child: const Text('Enable anyway'),
-                  ),
+          if (showDetails)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  if (item.isEnabled)
+                    OutlinedButton(
+                      onPressed: isToggling ? null : onDisablePressed,
+                      style: compactOutlinedStyle,
+                      child: isToggling ? buildLoadingSpinner() : const Text('Disable'),
+                    ),
+                  if (showEnableAction)
+                    FilledButton.tonal(
+                      onPressed: isToggling ? null : onEnablePressed,
+                      style: compactTonalStyle,
+                      child: isToggling ? buildLoadingSpinner() : const Text('Enable'),
+                    ),
+                  if (showRelinkAction) ...[
+                    FilledButton.tonal(
+                      onPressed: isToggling ? null : onReviewRelinkPressed,
+                      style: compactTonalStyle,
+                      child: const Text('Review Re-link'),
+                    ),
+                    TextButton(
+                      onPressed: isToggling ? null : onEnableAnywayPressed,
+                      style: compactTextStyle,
+                      child: const Text('Enable anyway'),
+                    ),
+                  ],
                 ],
-              ],
+              ),
             ),
-          ),
         ],
       ),
     );
