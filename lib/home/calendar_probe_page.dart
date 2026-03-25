@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:caleesync/common/route_constant.dart';
 import 'package:caleesync/home/sync_settings_page.dart';
 import 'package:flutter/material.dart';
@@ -111,7 +113,7 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
         () => NavigationBar(
           selectedIndex: _ctrl.selectedIndex.value,
           onDestinationSelected: _ctrl.setSelectedIndex,
-          destinations: const [
+          destinations: [
             NavigationDestination(
               icon: Icon(Icons.dashboard_outlined),
               selectedIcon: Icon(Icons.dashboard),
@@ -125,7 +127,7 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
             NavigationDestination(
               icon: Icon(Icons.settings_outlined),
               selectedIcon: Icon(Icons.settings),
-              label: 'Sync Settings',
+              label: Platform.isIOS ? 'Connections' : 'Sync Settings',
             ),
           ],
         ),

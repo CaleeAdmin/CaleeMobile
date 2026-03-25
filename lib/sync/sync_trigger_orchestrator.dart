@@ -56,6 +56,9 @@ class SyncTriggerOrchestrator extends GetxService with WidgetsBindingObserver {
   }
 
   void notifyMeaningfulForegroundChange() {
+    if (Platform.isIOS) {
+      return;
+    }
     final bool autoSyncEnabled = MMKVUtils.instance.getBool(AppConstant.autoSyncEnabledKey, defaultValue: true) ?? true;
     if (!autoSyncEnabled || !_appActive) {
       return;

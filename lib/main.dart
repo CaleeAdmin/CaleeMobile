@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:caleesync/common/app_constant.dart';
 import 'package:caleesync/common/route_constant.dart';
 import 'package:caleesync/common/utils/mmkv_utils.dart';
@@ -42,7 +44,9 @@ void main() async {
   Get.put(AuthController());
   Get.put(CalendarPageController());
   Get.put(SyncTriggerOrchestrator(), permanent: true);
-  await BackgroundSyncScheduler.selfHealPeriodicIfNeeded();
+  if (Platform.isAndroid) {
+    await BackgroundSyncScheduler.selfHealPeriodicIfNeeded();
+  }
   await appController.init();
 
   runApp(const CaleeApp());
@@ -50,7 +54,10 @@ void main() async {
 
 void _seedDefaultSyncSettings() {
   if (!MMKVUtils.instance.contains(AppConstant.autoSyncEnabledKey)) {
-    MMKVUtils.instance.setBool(AppConstant.autoSyncEnabledKey, true);
+    MMKVUtils.instance.setBool(AppConstant.autoSyncEnabledKey, Platform.isAndroid);
+  }
+  if (Platform.isIOS && !MMKVUtils.instance.contains(AppConstant.periodicSyncEnabledKey)) {
+    MMKVUtils.instance.setBool(AppConstant.periodicSyncEnabledKey, false);
   }
 }
 

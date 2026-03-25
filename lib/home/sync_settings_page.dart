@@ -32,6 +32,7 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> with WidgetsBinding
   bool _periodicSyncEnabled = false;
   late final Future<String> _appVersionLabelFuture;
   Completer<void>? _resumeCompleter;
+  bool get _isIosConnectionsMode => Platform.isIOS;
 
   @override
   void initState() {
@@ -78,8 +79,8 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> with WidgetsBinding
       setState(() {
         _calendarInterval = valCal;
         _tasksInterval = valTask;
-        _autoSyncEnabled = autoSyncEnabled;
-        _periodicSyncEnabled = periodicSyncEnabled;
+        _autoSyncEnabled = _isIosConnectionsMode ? false : autoSyncEnabled;
+        _periodicSyncEnabled = _isIosConnectionsMode ? false : periodicSyncEnabled;
       });
     } catch (_) {}
   }
@@ -137,6 +138,19 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> with WidgetsBinding
 
   Future<void> _saveSettings() async {
     try {
+      if (_isIosConnectionsMode) {
+        MMKVUtils.instance.setBool(AppConstant.autoSyncEnabledKey, false);
+        await BackgroundSyncScheduler.setPeriodicEnabled(false);
+        if (Get.isRegistered<CalendarProbeController>()) {
+          await Get.find<CalendarProbeController>().refreshOverviewState();
+        }
+        if (!mounted) {
+          return;
+        }
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Connections updated')));
+        return;
+      }
+
       if (_periodicSyncEnabled) {
         final hasPermission = await _ensureBackgroundPermissionGranted();
         if (!hasPermission) {
@@ -166,6 +180,7 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> with WidgetsBinding
 
   @override
   Widget build(BuildContext context) {
+    final bool isIosConnectionsMode = _isIosConnectionsMode;
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -178,67 +193,98 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> with WidgetsBinding
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Synchronization', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                  Text(isIosConnectionsMode ? 'Connections' : 'Synchronization', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
                   const SizedBox(height: 6),
-                  const Text('Configure how often your calendars and tasks sync with their sources', style: TextStyle(color: Colors.black54)),
-                  const SizedBox(height: 16),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('Foreground Auto Sync', style: TextStyle(fontWeight: FontWeight.w600)),
-                    subtitle: const Text('Trigger sync on meaningful changes while app is active'),
-                    value: _autoSyncEnabled,
-                    onChanged: (v) => setState(() => _autoSyncEnabled = v),
-                  ),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('Periodic Background Sync', style: TextStyle(fontWeight: FontWeight.w600)),
-                    subtitle: const Text('Run periodic sync when network is available'),
-                    value: _periodicSyncEnabled,
-                    onChanged: (v) async {
-                      if (!v) {
-                        setState(() => _periodicSyncEnabled = false);
-                        return;
-                      }
-
-                      final hasPermission = await _ensureBackgroundPermissionGranted();
-                      if (!mounted) {
-                        return;
-                      }
-                      setState(() => _periodicSyncEnabled = hasPermission);
-                    },
-                  ),
-
-                  const Text('Calendar Sync Interval', style: TextStyle(fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 8),
-                  DropdownButtonFormField<int>(
-                    value: _calendarInterval,
-                    items: _intervalOptions.map((opt) {
-                      return DropdownMenuItem<int>(value: opt['minutes'] as int, child: Text(opt['label'] as String));
-                    }).toList(),
-                    onChanged: (v) {
-                      if (v != null) setState(() => _calendarInterval = v);
-                    },
-                    decoration: InputDecoration(
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                  if (isIosConnectionsMode) ...[
+                    const Text(
+                      'iPhone uses Apple Calendar account connections and imported subscription calendars. App-level hidden background sync is not the primary path.',
+                      style: TextStyle(color: Colors.black54),
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text('More frequent syncing may impact battery life on mobile devices', style: TextStyle(color: Colors.black54, fontSize: 12)),
-                  const SizedBox(height: 16),
-
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: () => _saveSettings(),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.black87,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    const SizedBox(height: 16),
+                    const ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(Icons.phone_iphone),
+                      title: Text('Add Calee Calendar to iPhone'),
+                      subtitle: Text('Coming next phase'),
+                    ),
+                    const ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(Icons.cloud_outlined),
+                      title: Text('Import iCloud / Google / Outlook into Calee'),
+                      subtitle: Text('Coming next phase'),
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: _saveSettings,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.black87,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                        child: const Text('Save Connections', style: TextStyle(color: Colors.white)),
                       ),
-                      child: const Text('Save Settings',style: TextStyle(color: Colors.white),),
                     ),
-                  ),
+                  ] else ...[
+                    const Text('Configure how often your calendars and tasks sync with their sources', style: TextStyle(color: Colors.black54)),
+                    const SizedBox(height: 16),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Foreground Auto Sync', style: TextStyle(fontWeight: FontWeight.w600)),
+                      subtitle: const Text('Trigger sync on meaningful changes while app is active'),
+                      value: _autoSyncEnabled,
+                      onChanged: (v) => setState(() => _autoSyncEnabled = v),
+                    ),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Periodic Background Sync', style: TextStyle(fontWeight: FontWeight.w600)),
+                      subtitle: const Text('Run periodic sync when network is available'),
+                      value: _periodicSyncEnabled,
+                      onChanged: (v) async {
+                        if (!v) {
+                          setState(() => _periodicSyncEnabled = false);
+                          return;
+                        }
+
+                        final hasPermission = await _ensureBackgroundPermissionGranted();
+                        if (!mounted) {
+                          return;
+                        }
+                        setState(() => _periodicSyncEnabled = hasPermission);
+                      },
+                    ),
+                    const Text('Calendar Sync Interval', style: TextStyle(fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 8),
+                    DropdownButtonFormField<int>(
+                      value: _calendarInterval,
+                      items: _intervalOptions.map((opt) {
+                        return DropdownMenuItem<int>(value: opt['minutes'] as int, child: Text(opt['label'] as String));
+                      }).toList(),
+                      onChanged: (v) {
+                        if (v != null) setState(() => _calendarInterval = v);
+                      },
+                      decoration: InputDecoration(
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text('More frequent syncing may impact battery life on mobile devices', style: TextStyle(color: Colors.black54, fontSize: 12)),
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: _saveSettings,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.black87,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                        child: const Text('Save Settings', style: TextStyle(color: Colors.white)),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
