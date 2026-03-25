@@ -187,7 +187,7 @@ class _IosCalDavSetupPageState extends State<IosCalDavSetupPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Add Calee to Apple Calendar')),
+      appBar: AppBar(title: const Text('Add Calee Calendar to iPhone')),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : SafeArea(
