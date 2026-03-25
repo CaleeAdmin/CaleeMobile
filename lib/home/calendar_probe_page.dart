@@ -25,8 +25,6 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
     CalendarPage(),
     SyncSettingsPage(),
   ];
-  final Set<String> _copiedFieldLabels = <String>{};
-
 
   @override
   Widget build(BuildContext context) {
@@ -229,30 +227,83 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
     final String server = _normalizeServerForDisplay(rawServer);
     final String username = (MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? '').trim();
     final String password = (MMKVUtils.instance.getString(AppConstant.appPasswordKey) ?? '').trim();
+    final Set<String> copiedFieldLabels = <String>{};
+    var showPassword = false;
 
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
       builder: (context) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'CalDav',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+        return StatefulBuilder(
+          builder: (context, modalSetState) {
+            return SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'CalDav',
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 12),
+                    _copyableField(
+                      label: 'Server',
+                      value: server,
+                      copied: copiedFieldLabels.contains('Server'),
+                      onCopiedStateChange: (bool copied) {
+                        modalSetState(() {
+                          if (copied) {
+                            copiedFieldLabels.add('Server');
+                          } else {
+                            copiedFieldLabels.remove('Server');
+                          }
+                        });
+                      },
+                    ),
+                    _copyableField(
+                      label: 'Username',
+                      value: username,
+                      copied: copiedFieldLabels.contains('Username'),
+                      onCopiedStateChange: (bool copied) {
+                        modalSetState(() {
+                          if (copied) {
+                            copiedFieldLabels.add('Username');
+                          } else {
+                            copiedFieldLabels.remove('Username');
+                          }
+                        });
+                      },
+                    ),
+                    _copyableField(
+                      label: 'Password',
+                      value: showPassword ? password : _maskPassword(password),
+                      copyValue: password,
+                      copied: copiedFieldLabels.contains('Password'),
+                      canToggleVisibility: password.isNotEmpty,
+                      isVisible: showPassword,
+                      onToggleVisibility: () {
+                        modalSetState(() {
+                          showPassword = !showPassword;
+                        });
+                      },
+                      onCopiedStateChange: (bool copied) {
+                        modalSetState(() {
+                          if (copied) {
+                            copiedFieldLabels.add('Password');
+                          } else {
+                            copiedFieldLabels.remove('Password');
+                          }
+                        });
+                      },
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 12),
-                _copyableField(label: 'Server', value: server),
-                _copyableField(label: 'Username', value: username),
-                _copyableField(label: 'Password', value: password),
-              ],
-            ),
-          ),
+              ),
+            );
+          },
         );
       },
     );
@@ -266,8 +317,22 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
     return normalized;
   }
 
-  Widget _copyableField({required String label, required String value}) {
-    final bool copied = _copiedFieldLabels.contains(label);
+  String _maskPassword(String value) {
+    if (value.isEmpty) return value;
+    return '•' * value.length;
+  }
+
+  Widget _copyableField({
+    required String label,
+    required String value,
+    String? copyValue,
+    required bool copied,
+    bool canToggleVisibility = false,
+    bool isVisible = true,
+    VoidCallback? onToggleVisibility,
+    required ValueChanged<bool> onCopiedStateChange,
+  }) {
+    final String textToCopy = copyValue ?? value;
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
       child: Padding(
@@ -297,21 +362,23 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
                 ],
               ),
             ),
+            if (canToggleVisibility)
+              IconButton(
+                tooltip: isVisible ? 'Hide $label' : 'Show $label',
+                onPressed: onToggleVisibility,
+                icon: Icon(isVisible ? Icons.visibility_off_outlined : Icons.visibility_outlined),
+              ),
             IconButton(
               tooltip: 'Copy $label',
-              onPressed: value.isEmpty
+              onPressed: textToCopy.isEmpty
                   ? null
                   : () async {
-                      await Clipboard.setData(ClipboardData(text: value));
+                      await Clipboard.setData(ClipboardData(text: textToCopy));
                       if (!mounted) return;
-                      setState(() {
-                        _copiedFieldLabels.add(label);
-                      });
+                      onCopiedStateChange(true);
                       Future<void>.delayed(const Duration(seconds: 2), () {
                         if (!mounted) return;
-                        setState(() {
-                          _copiedFieldLabels.remove(label);
-                        });
+                        onCopiedStateChange(false);
                       });
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(content: Text('$label copied')),
