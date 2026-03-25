@@ -1,8 +1,8 @@
 import 'package:caleesync/common/app_constant.dart';
 import 'package:caleesync/common/utils/mmkv_utils.dart';
 import 'package:caleesync/services/ios_caldav_setup_service.dart';
-import 'package:caleesync/test_bootstrap.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'test_bootstrap.dart';
 
 void main() {
   late IosCalDavSetupService service;

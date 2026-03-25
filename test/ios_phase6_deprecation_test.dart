@@ -5,10 +5,10 @@ import 'package:caleesync/entity/SyncSummary.dart';
 import 'package:caleesync/home/DashboardPage.dart';
 import 'package:caleesync/main.dart' as app_main;
 import 'package:caleesync/sync/background_sync_scheduler.dart';
-import 'package:caleesync/test_bootstrap.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get/get.dart';
+import 'test_bootstrap.dart';
 
 class _FakeCalendarProbeController extends CalendarProbeController {
   @override
