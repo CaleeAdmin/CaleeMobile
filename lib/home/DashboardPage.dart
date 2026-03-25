@@ -9,6 +9,8 @@ import 'package:intl/intl.dart';
 
 import '../common/app_constant.dart';
 import '../common/utils/mmkv_utils.dart';
+import '../common/widget/new_subscription_dialog.dart';
+import '../controllers/CalendarPageController.dart';
 import '../controllers/calendar_probe_controller.dart';
 import '../entity/sync_run_record.dart';
 import '../feature/local_calendars_page.dart';
@@ -317,6 +319,20 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
                     children: [
                       const Text('Quick Actions', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
                       const SizedBox(height: 12),
+                      if (!AppConstant.enableAppSync) ...[
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: () => showNewSubscriptionDialog(
+                              context: context,
+                              onSubmit: (url) => Get.find<CalendarPageController>().subscribePublicIcs(url),
+                            ),
+                            icon: const Icon(Icons.add_link),
+                            label: const Text('New subscription'),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                      ],
                       SizedBox(
                         width: double.infinity,
                         child: OutlinedButton.icon(
