@@ -21,6 +21,8 @@ class MMKVUtils {
   final Map<Type, dynamic> _toJsonRegistry = {};
   final Map<Type, dynamic> _fromJsonRegistry = {};
 
+  bool get isInitialized => _mmkv != null;
+
   /// Initialize MMKV. Call once (e.g. in main).
   ///
   /// For mmkv 1.3.16 (synchronous instance creation):
