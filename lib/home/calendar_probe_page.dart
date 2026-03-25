@@ -1,6 +1,9 @@
 import 'package:caleesync/common/route_constant.dart';
+import 'package:caleesync/common/app_constant.dart';
+import 'package:caleesync/common/utils/mmkv_utils.dart';
 import 'package:caleesync/home/sync_settings_page.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import '../controllers/calendar_probe_controller.dart';
 import 'DashboardPage.dart';
@@ -22,7 +25,6 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
     CalendarPage(),
     SyncSettingsPage(),
   ];
-
 
   @override
   Widget build(BuildContext context) {
@@ -205,6 +207,184 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
                 Navigator.of(context).pop(); // Close drawer
                 Get.to(() => const LinkDevicePage());
               },
+            ),
+            _drawerItem(
+              icon: Icons.cloud_outlined,
+              label: 'CalDav',
+              onTap: () {
+                Navigator.of(context).pop();
+                _showCalDavPanel();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showCalDavPanel() {
+    final String rawServer = (MMKVUtils.instance.getString(AppConstant.serverKey) ?? AppConstant.caleeServer).trim();
+    final String server = _normalizeServerForDisplay(rawServer);
+    final String username = (MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? '').trim();
+    final String password = (MMKVUtils.instance.getString(AppConstant.appPasswordKey) ?? '').trim();
+    final Set<String> copiedFieldLabels = <String>{};
+    var showPassword = false;
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, modalSetState) {
+            return SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'CalDav',
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 12),
+                    _copyableField(
+                      label: 'Server',
+                      value: server,
+                      copied: copiedFieldLabels.contains('Server'),
+                      onCopiedStateChange: (bool copied) {
+                        modalSetState(() {
+                          if (copied) {
+                            copiedFieldLabels.add('Server');
+                          } else {
+                            copiedFieldLabels.remove('Server');
+                          }
+                        });
+                      },
+                    ),
+                    _copyableField(
+                      label: 'Username',
+                      value: username,
+                      copied: copiedFieldLabels.contains('Username'),
+                      onCopiedStateChange: (bool copied) {
+                        modalSetState(() {
+                          if (copied) {
+                            copiedFieldLabels.add('Username');
+                          } else {
+                            copiedFieldLabels.remove('Username');
+                          }
+                        });
+                      },
+                    ),
+                    _copyableField(
+                      label: 'Password',
+                      value: showPassword ? password : _maskPassword(password),
+                      copyValue: password,
+                      copied: copiedFieldLabels.contains('Password'),
+                      canToggleVisibility: password.isNotEmpty,
+                      isVisible: showPassword,
+                      onToggleVisibility: () {
+                        modalSetState(() {
+                          showPassword = !showPassword;
+                        });
+                      },
+                      onCopiedStateChange: (bool copied) {
+                        modalSetState(() {
+                          if (copied) {
+                            copiedFieldLabels.add('Password');
+                          } else {
+                            copiedFieldLabels.remove('Password');
+                          }
+                        });
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  String _normalizeServerForDisplay(String value) {
+    if (value.isEmpty) return value;
+    var normalized = value.trim();
+    normalized = normalized.replaceFirst(RegExp(r'^https?://', caseSensitive: false), '');
+    normalized = normalized.replaceFirst(RegExp(r'/.*$'), '');
+    return normalized;
+  }
+
+  String _maskPassword(String value) {
+    if (value.isEmpty) return value;
+    return '•' * value.length;
+  }
+
+  Widget _copyableField({
+    required String label,
+    required String value,
+    String? copyValue,
+    required bool copied,
+    bool canToggleVisibility = false,
+    bool isVisible = true,
+    VoidCallback? onToggleVisibility,
+    required ValueChanged<bool> onCopiedStateChange,
+  }) {
+    final String textToCopy = copyValue ?? value;
+    return Card(
+      margin: const EdgeInsets.only(bottom: 10),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Colors.black54,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  SelectionArea(
+                    child: SelectableText(
+                      value.isEmpty ? '-' : value,
+                      style: const TextStyle(fontSize: 15, color: Colors.black87),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (canToggleVisibility)
+              IconButton(
+                tooltip: isVisible ? 'Hide $label' : 'Show $label',
+                onPressed: onToggleVisibility,
+                icon: Icon(isVisible ? Icons.visibility_off_outlined : Icons.visibility_outlined),
+              ),
+            IconButton(
+              tooltip: 'Copy $label',
+              onPressed: textToCopy.isEmpty
+                  ? null
+                  : () async {
+                      await Clipboard.setData(ClipboardData(text: textToCopy));
+                      if (!mounted) return;
+                      onCopiedStateChange(true);
+                      Future<void>.delayed(const Duration(seconds: 2), () {
+                        if (!mounted) return;
+                        onCopiedStateChange(false);
+                      });
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('$label copied')),
+                      );
+                    },
+              icon: Icon(copied ? Icons.check_circle_outline : Icons.copy_outlined),
             ),
           ],
         ),
