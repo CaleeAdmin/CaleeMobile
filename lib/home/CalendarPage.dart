@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:caleesync/common/app_constant.dart';
 import 'package:caleesync/common/widget/calendar_options_dialog.dart';
 import 'package:caleesync/feature/public_subscriptions_page.dart';
 import 'package:caleesync/feature/local_calendars_page.dart';
@@ -275,14 +276,15 @@ class _CalendarPageState extends State<CalendarPage> {
                   Get.to(() => const PublicSubscriptionsGetxPage());
                 },
               ),
-              ListTile(
-                leading: const Icon(Icons.link),
-                title: const Text('Local Calendars'),
-                onTap: () {
-                  Navigator.of(sheetContext).pop();
-                  Get.to(() => LocalCalendarsPage());
-                },
-              ),
+              if (AppConstant.enableAppSync)
+                ListTile(
+                  leading: const Icon(Icons.link),
+                  title: const Text('Local Calendars'),
+                  onTap: () {
+                    Navigator.of(sheetContext).pop();
+                    Get.to(() => LocalCalendarsPage());
+                  },
+                ),
             ],
           ),
         );
