@@ -3,10 +3,14 @@ import 'package:caleesync/sync/background_sync_scheduler.dart';
 import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
 
 import '../common/app_constant.dart';
+import '../common/utils/mmkv_utils.dart';
+import '../common/widget/new_subscription_dialog.dart';
+import '../controllers/CalendarPageController.dart';
 import '../controllers/calendar_probe_controller.dart';
 import '../entity/sync_run_record.dart';
 import '../feature/local_calendars_page.dart';
@@ -21,6 +25,8 @@ class DashboardPage extends StatefulWidget {
 }
 
 class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserver {
+  bool _showAppPassword = false;
+
   @override
   void initState() {
     super.initState();
@@ -267,7 +273,43 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
                     ),
                   ),
                 ),
-              if (AppConstant.enableAppSync) const SizedBox(height: 16),
+              if (!AppConstant.enableAppSync)
+                Card(
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('CalDav Account', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                        const SizedBox(height: 12),
+                        _accountField(
+                          context: context,
+                          label: 'Server',
+                          value: AppConstant.caleeServer,
+                          copyValue: AppConstant.caleeServer,
+                        ),
+                        const SizedBox(height: 10),
+                        _accountField(
+                          context: context,
+                          label: 'Username',
+                          value: MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? '',
+                          copyValue: MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? '',
+                        ),
+                        const SizedBox(height: 10),
+                        _accountField(
+                          context: context,
+                          label: 'Password',
+                          value: MMKVUtils.instance.getString(AppConstant.appPasswordKey) ?? '',
+                          copyValue: MMKVUtils.instance.getString(AppConstant.appPasswordKey) ?? '',
+                          obscure: !_showAppPassword,
+                          onToggleObscure: () => setState(() => _showAppPassword = !_showAppPassword),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              const SizedBox(height: 16),
               Card(
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 child: Padding(
@@ -277,6 +319,20 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
                     children: [
                       const Text('Quick Actions', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
                       const SizedBox(height: 12),
+                      if (!AppConstant.enableAppSync) ...[
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: () => showNewSubscriptionDialog(
+                              context: context,
+                              onSubmit: (url) => Get.find<CalendarPageController>().subscribePublicIcs(url),
+                            ),
+                            icon: const Icon(Icons.add_link),
+                            label: const Text('New subscription'),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                      ],
                       SizedBox(
                         width: double.infinity,
                         child: OutlinedButton.icon(
@@ -318,6 +374,64 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
         border: Border.all(color: color.withOpacity(0.3)),
       ),
       child: Text(text, style: TextStyle(color: color, fontWeight: FontWeight.w700)),
+    );
+  }
+
+  Widget _accountField({
+    required BuildContext context,
+    required String label,
+    required String value,
+    required String copyValue,
+    bool obscure = false,
+    VoidCallback? onToggleObscure,
+  }) {
+    final displayValue = value.isEmpty ? 'Not available' : value;
+    final hiddenValue = displayValue == 'Not available' ? displayValue : '••••••••';
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade50,
+        border: Border.all(color: Colors.grey.shade300),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label, style: const TextStyle(fontSize: 12, color: Colors.black54)),
+                const SizedBox(height: 4),
+                Text(
+                  obscure ? hiddenValue : displayValue,
+                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                ),
+              ],
+            ),
+          ),
+          if (onToggleObscure != null)
+            IconButton(
+              onPressed: onToggleObscure,
+              icon: Icon(obscure ? Icons.visibility : Icons.visibility_off),
+              tooltip: obscure ? 'Show password' : 'Hide password',
+            ),
+          IconButton(
+            onPressed: copyValue.isEmpty
+                ? null
+                : () async {
+                    await Clipboard.setData(ClipboardData(text: copyValue));
+                    if (!mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('$label copied')),
+                    );
+                  },
+            icon: const Icon(Icons.copy),
+            tooltip: 'Copy $label',
+          ),
+        ],
+      ),
     );
   }
 }

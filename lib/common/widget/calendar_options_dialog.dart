@@ -40,13 +40,13 @@ class _CalendarOptionsDialogState extends State<CalendarOptionsDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Header with checkbox
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (AppConstant.enableAppSync) ...[
+            if (AppConstant.enableAppSync) ...[
+              // Header with checkbox
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
                     CheckboxListTile(
                       contentPadding: EdgeInsets.zero,
                       value: isTwoWay,
@@ -64,7 +64,6 @@ class _CalendarOptionsDialogState extends State<CalendarOptionsDialog> {
                       subtitle: const Text('Sync bidirectionally between Calee Online and Local device', style: TextStyle(fontSize: 12)),
                       controlAffinity: ListTileControlAffinity.leading,
                     ),
-
                     CheckboxListTile(
                       contentPadding: EdgeInsets.zero,
                       value: allowMassDeletionDangerous,
@@ -84,15 +83,15 @@ class _CalendarOptionsDialogState extends State<CalendarOptionsDialog> {
                       controlAffinity: ListTileControlAffinity.leading,
                     ),
                   ],
-                ],
+                ),
               ),
-            ),
-            const Divider(height: 1),
-            ListTile(
-              contentPadding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
-              title: const Text('Properties'),
-              onTap: () => Navigator.of(context).pop('properties'),
-            ),
+              const Divider(height: 1),
+              ListTile(
+                contentPadding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+                title: const Text('Properties'),
+                onTap: () => Navigator.of(context).pop('properties'),
+              ),
+            ],
             ListTile(
               title: Text(
                 'Rename calendar',
