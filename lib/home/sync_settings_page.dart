@@ -6,12 +6,15 @@ import 'package:get/get.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../common/utils/mmkv_utils.dart';
+import '../feature/ios_caldav_setup_page.dart';
 import '../common/app_constant.dart';
 import '../controllers/calendar_probe_controller.dart';
 import '../sync/background_sync_scheduler.dart';
 
 class SyncSettingsPage extends StatefulWidget {
-  const SyncSettingsPage({super.key});
+  const SyncSettingsPage({super.key, this.forceIosConnectionsMode});
+
+  final bool? forceIosConnectionsMode;
 
   @override
   State<SyncSettingsPage> createState() => _SyncSettingsPageState();
@@ -32,7 +35,7 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> with WidgetsBinding
   bool _periodicSyncEnabled = false;
   late final Future<String> _appVersionLabelFuture;
   Completer<void>? _resumeCompleter;
-  bool get _isIosConnectionsMode => Platform.isIOS;
+  bool get _isIosConnectionsMode => widget.forceIosConnectionsMode ?? Platform.isIOS;
 
   @override
   void initState() {
@@ -201,11 +204,13 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> with WidgetsBinding
                       style: TextStyle(color: Colors.black54),
                     ),
                     const SizedBox(height: 16),
-                    const ListTile(
+                    ListTile(
                       contentPadding: EdgeInsets.zero,
-                      leading: Icon(Icons.phone_iphone),
-                      title: Text('Add Calee Calendar to iPhone'),
-                      subtitle: Text('Coming next phase'),
+                      leading: const Icon(Icons.phone_iphone),
+                      title: const Text('Add Calee Calendar to iPhone'),
+                      subtitle: const Text('Set up Apple Calendar two-way sync for Calee'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => Get.to(() => const IosCalDavSetupPage()),
                     ),
                     const ListTile(
                       contentPadding: EdgeInsets.zero,
