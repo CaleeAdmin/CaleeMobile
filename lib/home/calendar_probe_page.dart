@@ -1,6 +1,9 @@
 import 'package:caleesync/common/route_constant.dart';
+import 'package:caleesync/common/app_constant.dart';
+import 'package:caleesync/common/utils/mmkv_utils.dart';
 import 'package:caleesync/home/sync_settings_page.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import '../controllers/calendar_probe_controller.dart';
 import 'DashboardPage.dart';
@@ -205,6 +208,96 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
                 Navigator.of(context).pop(); // Close drawer
                 Get.to(() => const LinkDevicePage());
               },
+            ),
+            _drawerItem(
+              icon: Icons.cloud_outlined,
+              label: 'CalDav',
+              onTap: () {
+                Navigator.of(context).pop();
+                _showCalDavPanel();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showCalDavPanel() {
+    final String server = (MMKVUtils.instance.getString(AppConstant.serverKey) ?? AppConstant.caleeServer).trim();
+    final String username = (MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? '').trim();
+    final String password = (MMKVUtils.instance.getString(AppConstant.appPasswordKey) ?? '').trim();
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (context) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'CalDav',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 12),
+                _copyableField(label: 'Server', value: server),
+                _copyableField(label: 'Username', value: username),
+                _copyableField(label: 'Password', value: password),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _copyableField({required String label, required String value}) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 10),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Colors.black54,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  SelectionArea(
+                    child: SelectableText(
+                      value.isEmpty ? '-' : value,
+                      style: const TextStyle(fontSize: 15, color: Colors.black87),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            IconButton(
+              tooltip: 'Copy $label',
+              onPressed: value.isEmpty
+                  ? null
+                  : () async {
+                      await Clipboard.setData(ClipboardData(text: value));
+                      if (!mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('$label copied')),
+                      );
+                    },
+              icon: const Icon(Icons.copy_outlined),
             ),
           ],
         ),
