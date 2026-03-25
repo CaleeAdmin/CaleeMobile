@@ -1,4 +1,5 @@
 import 'package:caleesync/common/route_constant.dart';
+import 'package:caleesync/common/app_constant.dart';
 import 'package:caleesync/home/sync_settings_page.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
@@ -17,12 +18,11 @@ class CalendarProbePage extends StatefulWidget {
 
 class _CalendarProbePageState extends State<CalendarProbePage> {
   final CalendarProbeController _ctrl = Get.put(CalendarProbeController());
-  final List<Widget> _pages = const [
-    DashboardPage(),
-    CalendarPage(),
-    SyncSettingsPage(),
+  late final List<Widget> _pages = [
+    const DashboardPage(),
+    const CalendarPage(),
+    if (AppConstant.enableAppSync) const SyncSettingsPage(),
   ];
-
 
   @override
   Widget build(BuildContext context) {
@@ -72,10 +72,17 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
         actions: [
           Obx(() {
             final isSyncing = _ctrl.isRunActive;
+            final syncEnabled = AppConstant.enableAppSync;
 
             return IconButton(
-              tooltip: isSyncing ? 'View Activity' : 'Sync Now',
+              tooltip: !syncEnabled
+                  ? 'Refresh'
+                  : (isSyncing ? 'View Activity' : 'Sync Now'),
               onPressed: () async {
+                if (!syncEnabled) {
+                  await _ctrl.refreshOverviewState();
+                  return;
+                }
                 if (!isSyncing) {
                   await _ctrl.refreshPagesBeforeSync();
                   await _ctrl.syncNow();
@@ -104,34 +111,39 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
         ],
       ),
       body: Obx(() => IndexedStack(
-            index: _ctrl.selectedIndex.value,
+            index: _ctrl.selectedIndex.value >= _pages.length ? _pages.length - 1 : _ctrl.selectedIndex.value,
             children: _pages,
           )),
       bottomNavigationBar: Obx(
         () => NavigationBar(
-          selectedIndex: _ctrl.selectedIndex.value,
+          selectedIndex: _ctrl.selectedIndex.value >= _navigationDestinations.length
+              ? _navigationDestinations.length - 1
+              : _ctrl.selectedIndex.value,
           onDestinationSelected: _ctrl.setSelectedIndex,
-          destinations: const [
-            NavigationDestination(
-              icon: Icon(Icons.dashboard_outlined),
-              selectedIcon: Icon(Icons.dashboard),
-              label: 'Dashboard',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.calendar_today_outlined),
-              selectedIcon: Icon(Icons.calendar_today),
-              label: 'Calendars',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.settings_outlined),
-              selectedIcon: Icon(Icons.settings),
-              label: 'Sync Settings',
-            ),
-          ],
+          destinations: _navigationDestinations,
         ),
       ),
     );
   }
+
+  List<NavigationDestination> get _navigationDestinations => [
+        const NavigationDestination(
+          icon: Icon(Icons.dashboard_outlined),
+          selectedIcon: Icon(Icons.dashboard),
+          label: 'Dashboard',
+        ),
+        const NavigationDestination(
+          icon: Icon(Icons.calendar_today_outlined),
+          selectedIcon: Icon(Icons.calendar_today),
+          label: 'Calendars',
+        ),
+        if (AppConstant.enableAppSync)
+          const NavigationDestination(
+            icon: Icon(Icons.settings_outlined),
+            selectedIcon: Icon(Icons.settings),
+            label: 'Sync Settings',
+          ),
+      ];
 
   Widget _buildDrawer() {
     return Drawer(
