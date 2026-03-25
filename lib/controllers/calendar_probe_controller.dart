@@ -29,7 +29,8 @@ class CalendarProbeController extends GetxController {
 
   /// 设置选中的页面索引
   void setSelectedIndex(int index) {
-    selectedIndex.value = index;
+    final int maxIndex = AppConstant.enableAppSync ? 2 : 1;
+    selectedIndex.value = index.clamp(0, maxIndex);
     if (index == 0) {
       unawaited(refreshOverviewState());
     }

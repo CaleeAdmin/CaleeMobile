@@ -1,6 +1,13 @@
+import 'dart:io' show Platform;
+
 /// 应用常量配置类
 class AppConstant {
   AppConstant._();
+
+  /// Global app sync feature flag.
+  /// - Android: enabled
+  /// - iOS: disabled
+  static final bool enableAppSync = Platform.isAndroid;
 
   /// Calee 服务器地址
   static const String caleeServer = 'portal.calee.com.au';
