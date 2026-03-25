@@ -2,10 +2,10 @@ import 'package:caleesync/common/app_constant.dart';
 import 'package:caleesync/common/utils/mmkv_utils.dart';
 import 'package:caleesync/feature/ios_caldav_setup_page.dart';
 import 'package:caleesync/home/sync_settings_page.dart';
-import 'package:caleesync/test_bootstrap.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get/get.dart';
+import 'test_bootstrap.dart';
 
 void main() {
   setUp(() async {

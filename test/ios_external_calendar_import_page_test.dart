@@ -48,7 +48,7 @@ void main() {
     await tester.tap(find.text('Import iCloud / Google / Outlook into Calee'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Import into Calee'), findsOneWidget);
+    expect(find.text('Import Calendar into Calee'), findsOneWidget);
     expect(find.text('Imported calendars are read-only'), findsOneWidget);
   });
 }

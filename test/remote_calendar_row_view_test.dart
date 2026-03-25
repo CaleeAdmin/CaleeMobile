@@ -17,6 +17,7 @@ void main() {
       eventCount: 12,
       isReadOnly: false,
       isSubscription: false,
+      isImportedSubscription: false,
       isLocalReadOnly: false,
       accountName: 'demo@example.com',
       isEnabled: isEnabled,
