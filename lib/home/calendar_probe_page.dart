@@ -74,10 +74,17 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
         actions: [
           Obx(() {
             final isSyncing = _ctrl.isRunActive;
+            final syncEnabled = AppConstant.enableAppSync;
 
             return IconButton(
-              tooltip: isSyncing ? 'View Activity' : 'Sync Now',
+              tooltip: !syncEnabled
+                  ? 'Refresh'
+                  : (isSyncing ? 'View Activity' : 'Sync Now'),
               onPressed: () async {
+                if (!syncEnabled) {
+                  await _ctrl.refreshOverviewState();
+                  return;
+                }
                 if (!isSyncing) {
                   await _ctrl.refreshPagesBeforeSync();
                   await _ctrl.syncNow();
