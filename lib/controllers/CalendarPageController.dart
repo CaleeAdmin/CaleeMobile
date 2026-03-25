@@ -347,6 +347,13 @@ class CalendarPageController extends GetxController {
   }
 
   Future<void> _populateRelinkSuggestions(List<CalendarDisplayItem> items) async {
+    if (!AppConstant.enableAppSync) {
+      for (final item in items) {
+        item.hasRelinkSuggestion = false;
+      }
+      return;
+    }
+
     final String loginName = (MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? '').trim();
     final LocalCalendarPageController localCtrl = Get.isRegistered<LocalCalendarPageController>()
         ? Get.find<LocalCalendarPageController>()
@@ -420,21 +427,23 @@ class CalendarPageController extends GetxController {
       final Map<String, bool> localReadOnlyById = {};
       final List<CalendarDisplayItem> nextCloudCalendars = [];
 
-      try {
-        // Request permission before accessing calendars
-        final bool hasPermission = await _nativeApi.requestPermission(false);
-        if (!hasPermission) {
-          debugPrint('[WARN] Calendar permission not granted, skipping local calendar read-only status');
-        } else {
-          final List<PlatformCalendar?> platformCalendars = await _nativeApi.getCalendars();
-          for (final PlatformCalendar calendar in platformCalendars.whereType<PlatformCalendar>()) {
-            final String id = calendar.id ?? '';
-            if (id.isEmpty) continue;
-            localReadOnlyById[id] = calendar.isReadOnly ?? false;
+      if (AppConstant.enableAppSync) {
+        try {
+          // Request permission before accessing calendars
+          final bool hasPermission = await _nativeApi.requestPermission(false);
+          if (!hasPermission) {
+            debugPrint('[WARN] Calendar permission not granted, skipping local calendar read-only status');
+          } else {
+            final List<PlatformCalendar?> platformCalendars = await _nativeApi.getCalendars();
+            for (final PlatformCalendar calendar in platformCalendars.whereType<PlatformCalendar>()) {
+              final String id = calendar.id ?? '';
+              if (id.isEmpty) continue;
+              localReadOnlyById[id] = calendar.isReadOnly ?? false;
+            }
           }
+        } catch (e) {
+          debugPrint('[WARN] Failed to read local calendar read-only status: $e');
         }
-      } catch (e) {
-        debugPrint('[WARN] Failed to read local calendar read-only status: $e');
       }
 
       final countRows = await db.rawQuery(
