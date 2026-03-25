@@ -11,8 +11,10 @@ class CalendarDisplayItem {
   // 3. 状态控制
   final bool isReadOnly;
   final bool isSubscription;
+  final bool isImportedSubscription;
   final bool isLocalReadOnly;
   final String? subscriptionUrl;
+  final String? importedProviderHint;
   final String accountName;
   bool isEnabled;            // 对应数据库 collection_states.is_enabled
   final String? syncGateReason;
@@ -32,8 +34,10 @@ class CalendarDisplayItem {
     required this.eventCount,
     required this.isReadOnly,
     required this.isSubscription,
+    required this.isImportedSubscription,
     required this.isLocalReadOnly,
     this.subscriptionUrl,
+    this.importedProviderHint,
     required this.accountName,
     required this.isEnabled,
     this.syncGateReason,
@@ -47,4 +51,3 @@ class CalendarDisplayItem {
   });
 
 }
-

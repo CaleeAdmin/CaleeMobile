@@ -224,8 +224,10 @@ class CalendarPageController extends GetxController {
       eventCount: item.eventCount,
       isReadOnly: item.isReadOnly,
       isSubscription: item.isSubscription,
+      isImportedSubscription: item.isImportedSubscription,
       isLocalReadOnly: item.isLocalReadOnly,
       subscriptionUrl: item.subscriptionUrl,
+      importedProviderHint: item.importedProviderHint,
       accountName: item.accountName,
       isEnabled: result.success,
       syncGateReason: item.syncGateReason,
@@ -451,6 +453,7 @@ class CalendarPageController extends GetxController {
         final String? remotePath = cal['remote_path'];
         final int? syncMode = cal['sync_mode'];
         final bool isSubscription = (cal['is_subscription'] == 1 || cal['is_subscription'] == true);
+        final String? subscriptionUrl = cal['subscription_url']?.toString();
         final int origin = (cal['origin_kind'] as int?) ?? 2;
 
         final String countKey = (cal['id'] ?? '').toString();
@@ -470,8 +473,10 @@ class CalendarPageController extends GetxController {
           eventCount: realCount,
           isReadOnly: syncMode == 0,
           isSubscription: isSubscription,
+          isImportedSubscription: isSubscription,
           isLocalReadOnly: localReadOnlyById[localId] ?? false,
-          subscriptionUrl: cal['subscription_url']?.toString(),
+          subscriptionUrl: subscriptionUrl,
+          importedProviderHint: _inferImportedProviderHint(subscriptionUrl),
           accountName: cal['account_name']?.toString() ?? '',
           isEnabled: (cal['state_is_enabled'] as int?) == 1,
           syncGateReason: cal['sync_gate_reason']?.toString(),
@@ -587,6 +592,10 @@ class CalendarPageController extends GetxController {
     if (subscribingUrls.contains(normalizedUrl)) {
       return false;
     }
+    if (isPublicIcsSubscribed(normalizedUrl)) {
+      Get.snackbar('Already imported', 'This calendar is already imported into Calee');
+      return false;
+    }
 
     subscribingUrls.add(normalizedUrl);
 
@@ -596,15 +605,15 @@ class CalendarPageController extends GetxController {
       if (ok) {
         await reloadCalendars();
         _notifyMeaningfulChange();
-        Get.snackbar('Success', 'Subscribed to calendar');
+        Get.snackbar('Success', 'Imported calendar added');
         return true;
       } else {
-        Get.snackbar('Error', 'Subscription failed');
+        Get.snackbar('Error', 'Import failed');
         return false;
       }
     } catch (e) {
       print('[ERROR] Subscription failed: $e');
-      Get.snackbar('Error', 'Subscription failed');
+      Get.snackbar('Error', 'Import failed');
       return false;
     } finally {
       subscribingUrls.remove(normalizedUrl);
@@ -685,6 +694,22 @@ class CalendarPageController extends GetxController {
       return 'Only http, https, or webcal URLs are supported.';
     }
 
+    return null;
+  }
+
+  String? _inferImportedProviderHint(String? subscriptionUrl) {
+    final String normalizedUrl = canonicalizeSubscriptionUrl(subscriptionUrl);
+    if (normalizedUrl.isEmpty) return null;
+
+    final Uri? parsed = Uri.tryParse(normalizedUrl);
+    final String host = (parsed?.host ?? '').toLowerCase();
+    if (host.isEmpty) return null;
+
+    if (host.contains('icloud.com')) return 'iCloud';
+    if (host.contains('google.com') || host.contains('calendar.google.com')) return 'Google';
+    if (host.contains('outlook') || host.contains('office365') || host.contains('live.com')) {
+      return 'Outlook';
+    }
     return null;
   }
 

@@ -362,6 +362,12 @@ extension on _CalendarRow {
   Future<void> _handleOptionResult(String result, BuildContext context, CalendarDisplayItem item, CalendarPageController controller) async {
     switch (result) {
       case 'rename':
+        if (item.isImportedSubscription) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Imported calendars cannot be renamed here')),
+          );
+          return;
+        }
         final bool? confirm = await _showRenameDialog(context, item);
         // 刷新数据（保持原行为）
         if (confirm == true) {
@@ -369,7 +375,7 @@ extension on _CalendarRow {
         }
         break;
       case 'delete':
-        final bool? confirm = await _showDeleteConfirm(context);
+        final bool? confirm = await _showDeleteConfirm(context, item: item);
         if (confirm == true) {
           try {
             await controller.deleteCalendarTotally(localId: item.localId, remotePath: item.remotePath);
@@ -407,6 +413,12 @@ extension on _CalendarRow {
                 const SizedBox(height: 16),
                 _propertyRow('Events', '${item.eventCount}'),
                 _propertyRow('Sync Mode', item.isReadOnly ? 'Read-only' : 'Two-way sync'),
+                if (item.isImportedSubscription)
+                  _propertyRow('Type', 'Imported subscription'),
+                if (item.isImportedSubscription)
+                  _propertyRow('Provider', item.importedProviderHint ?? 'Unknown'),
+                if (item.isImportedSubscription)
+                  _propertyRow('Source URL', item.subscriptionUrl ?? ''),
                 _propertyRow('Enabled', item.isEnabled ? 'Yes' : 'No'),
                 _propertyRow('Color', item.color),
                 _propertyRow('Provenance', _provenanceLabel(item.origin)),
@@ -453,15 +465,18 @@ extension on _CalendarRow {
     );
   }
 
-  Future<bool?> _showDeleteConfirm(BuildContext context) {
+  Future<bool?> _showDeleteConfirm(BuildContext context, {CalendarDisplayItem? item}) {
+    final bool isImportedSubscription = item?.isImportedSubscription == true;
     return showDialog<bool>(
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: const Text('Delete Calendar'),
-          content: const Text(
-            'Are you sure you want to delete this calendar? '
-            'This action cannot be undone and all events in this calendar will be permanently deleted.',
+          title: Text(isImportedSubscription ? 'Remove imported calendar' : 'Delete Calendar'),
+          content: Text(
+            isImportedSubscription
+                ? 'This removes the imported subscription from Calee.'
+                : 'Are you sure you want to delete this calendar? '
+                    'This action cannot be undone and all events in this calendar will be permanently deleted.',
             style: TextStyle(fontSize: 14),
           ),
           actions: [
@@ -475,7 +490,10 @@ extension on _CalendarRow {
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
               ),
               onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Delete', style: TextStyle(color: Colors.white)),
+              child: Text(
+                isImportedSubscription ? 'Remove' : 'Delete',
+                style: const TextStyle(color: Colors.white),
+              ),
             ),
           ],
         );
