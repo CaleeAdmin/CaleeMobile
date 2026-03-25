@@ -4,9 +4,9 @@ import 'package:caleesync/models/ios_caldav_setup_info.dart';
 
 class IosCalDavSetupService {
   IosCaldavSetupInfo loadSetupInfo() {
-    final rawServer = MMKVUtils.instance.getString(AppConstant.serverKey);
-    final rawUsername = MMKVUtils.instance.getString(AppConstant.loginNameKey);
-    final rawPassword = MMKVUtils.instance.getString(AppConstant.appPasswordKey);
+    final rawServer = _safeGetString(AppConstant.serverKey);
+    final rawUsername = _safeGetString(AppConstant.loginNameKey);
+    final rawPassword = _safeGetString(AppConstant.appPasswordKey);
 
     final server = _normalizeServerForAppleAccount(rawServer ?? AppConstant.caleeServer);
     final username = (rawUsername ?? '').trim();
@@ -52,8 +52,16 @@ class IosCalDavSetupService {
     return normalized.toString().replaceAll(RegExp(r'/+$'), '');
   }
 
+  String? _safeGetString(String key) {
+    try {
+      return MMKVUtils.instance.getString(key);
+    } catch (_) {
+      return null;
+    }
+  }
+
   String _resolveDescription() {
-    final stored = MMKVUtils.instance.getString(AppConstant.calendarAccountNameKey)?.trim();
+    final stored = _safeGetString(AppConstant.calendarAccountNameKey)?.trim();
     if (stored != null && stored.isNotEmpty) {
       return stored;
     }

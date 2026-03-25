@@ -37,10 +37,26 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> with WidgetsBinding
   late final Future<String> _appVersionLabelFuture;
   Completer<void>? _resumeCompleter;
   bool get _isIosConnectionsMode => widget.forceIosConnectionsMode ?? Platform.isIOS;
+
+  bool _readBool(String key, {required bool fallback}) {
+    try {
+      return MMKVUtils.instance.getBool(key, defaultValue: fallback) ?? fallback;
+    } catch (_) {
+      return fallback;
+    }
+  }
+
+  int _readInt(String key, {required int fallback}) {
+    try {
+      return MMKVUtils.instance.getInt(key) ?? fallback;
+    } catch (_) {
+      return fallback;
+    }
+  }
   bool get _showIosMigrationReminder {
     if (!_isIosConnectionsMode) return false;
-    final deprecated = MMKVUtils.instance.getBool(AppConstant.iosLegacySyncDeprecatedKey, defaultValue: false) ?? false;
-    final dismissed = MMKVUtils.instance.getBool(AppConstant.iosLegacySyncNoticeDismissedKey, defaultValue: false) ?? false;
+    final deprecated = _readBool(AppConstant.iosLegacySyncDeprecatedKey, fallback: false);
+    final dismissed = _readBool(AppConstant.iosLegacySyncNoticeDismissedKey, fallback: false);
     return deprecated && !dismissed;
   }
 
@@ -78,10 +94,10 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> with WidgetsBinding
 
   void _loadSettings() {
     try {
-      int valCal = MMKVUtils.instance.getInt(AppConstant.syncIntervalCalendarKey) ?? 15;
-      int valTask = MMKVUtils.instance.getInt('sync_interval_tasks') ?? 30;
-      final bool autoSyncEnabled = MMKVUtils.instance.getBool(AppConstant.autoSyncEnabledKey, defaultValue: true) ?? true;
-      final bool periodicSyncEnabled = MMKVUtils.instance.getBool(AppConstant.periodicSyncEnabledKey, defaultValue: false) ?? false;
+      int valCal = _readInt(AppConstant.syncIntervalCalendarKey, fallback: 15);
+      int valTask = _readInt('sync_interval_tasks', fallback: 30);
+      final bool autoSyncEnabled = _readBool(AppConstant.autoSyncEnabledKey, fallback: true);
+      final bool periodicSyncEnabled = _readBool(AppConstant.periodicSyncEnabledKey, fallback: false);
       // validate against available options to avoid Dropdown assertion errors
       final validMinutes = _intervalOptions.map((e) => e['minutes'] as int).toSet();
       if (!validMinutes.contains(valCal) || valCal <= 0) valCal = 15;
