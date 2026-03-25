@@ -10,6 +10,7 @@ import '../controllers/calendar_probe_controller.dart';
 import '../entity/sync_run_record.dart';
 import '../feature/local_calendars_page.dart';
 import '../feature/public_subscriptions_page.dart';
+import 'sync_settings_page.dart';
 import 'sync_status_details_page.dart';
 
 class DashboardPage extends StatefulWidget {
@@ -102,24 +103,23 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
   }
 
   String _schedulerSummary(BackgroundSyncStatus? backgroundStatus) {
+    if (Platform.isIOS) {
+      return 'iPhone uses calendar connections instead of app-level background sync.\n'
+          'Add accounts in Apple Calendar settings or import subscription calendars into Calee.';
+    }
+
     final enabled = backgroundStatus?.periodicEnabled == true;
     final intervalMinutes = backgroundStatus?.intervalMinutes;
     final interval = intervalMinutes != null ? 'Every ${intervalMinutes}m' : 'Every 15m';
     final next = _clock(backgroundStatus?.nextScheduledAt);
     final periodicState = backgroundStatus?.periodicWorkState;
-    final periodicStateLabel = periodicState ?? (Platform.isIOS && enabled ? 'iOS-managed' : 'unknown');
-
-    if (Platform.isIOS && enabled) {
-      final requestedInterval = backgroundStatus?.intervalMinutes ?? 15;
-      return 'Best effort in background\n'
-          'Requested interval: ${requestedInterval} min\n'
-          'Next requested earliest time: $next';
-    }
+    final periodicStateLabel = periodicState ?? 'unknown';
 
     return '${enabled ? 'Enabled' : 'Disabled'} · $interval · Next $next · $periodicStateLabel';
   }
 
   bool _showSchedulerWarning(BackgroundSyncStatus? backgroundStatus) {
+    if (Platform.isIOS) return false;
     if (backgroundStatus == null) return false;
     if (backgroundStatus.periodicConfigured && !backgroundStatus.periodicEnabled) return true;
     return (backgroundStatus.lastResult == BackgroundRunOutcome.retry || backgroundStatus.lastResult == BackgroundRunOutcome.failure);
@@ -188,7 +188,7 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
                       const Text('Background', style: TextStyle(fontWeight: FontWeight.w600)),
                       const SizedBox(height: 8),
                       Text(_schedulerSummary(backgroundStatus), style: const TextStyle(color: Colors.black87)),
-                      if (_showSchedulerWarning(backgroundStatus)) ...[
+                      if (!Platform.isIOS && _showSchedulerWarning(backgroundStatus)) ...[
                         const SizedBox(height: 8),
                         Text(
                           backgroundStatus?.periodicConfigured == true && backgroundStatus?.periodicEnabled != true
@@ -246,11 +246,21 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
                       SizedBox(
                         width: double.infinity,
                         child: FilledButton.icon(
-                          onPressed: probeCtrl.isSyncing.value ? null : () async {
-                            await probeCtrl.syncNow();
-                          },
-                          icon: const Icon(Icons.sync),
-                          label: Text(probeCtrl.isSyncing.value ? 'Syncing…' : 'Sync Now'),
+                          onPressed: probeCtrl.isSyncing.value
+                              ? null
+                              : () async {
+                                  if (Platform.isIOS) {
+                                    Get.to(() => const SyncSettingsPage());
+                                    return;
+                                  }
+                                  await probeCtrl.syncNow();
+                                },
+                          icon: Icon(Platform.isIOS ? Icons.settings : Icons.sync),
+                          label: Text(
+                            Platform.isIOS
+                                ? 'Open Connections'
+                                : (probeCtrl.isSyncing.value ? 'Syncing…' : 'Sync Now'),
+                          ),
                         ),
                       ),
                       const SizedBox(height: 8),
@@ -275,23 +285,34 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
                     children: [
                       const Text('Quick Actions', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
                       const SizedBox(height: 12),
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          onPressed: () => Get.to(() => const PublicSubscriptionsGetxPage()),
-                          icon: const Icon(Icons.public),
-                          label: const Text('Subscribe to Calee Calendar'),
+                      if (Platform.isIOS)
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: () => Get.to(() => const SyncSettingsPage()),
+                            icon: const Icon(Icons.settings),
+                            label: const Text('Manage iPhone Calendar Connections'),
+                          ),
+                        )
+                      else ...[
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: () => Get.to(() => const PublicSubscriptionsGetxPage()),
+                            icon: const Icon(Icons.public),
+                            label: const Text('Subscribe to Calee Calendar'),
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 10),
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          onPressed: () => Get.to(() => const LocalCalendarsPage()),
-                          icon: const Icon(Icons.link),
-                          label: const Text('Local Calendars'),
+                        const SizedBox(height: 10),
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: () => Get.to(() => const LocalCalendarsPage()),
+                            icon: const Icon(Icons.link),
+                            label: const Text('Local Calendars'),
+                          ),
                         ),
-                      ),
+                      ],
                     ],
                   ),
                 ),
