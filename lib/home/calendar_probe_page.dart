@@ -79,7 +79,7 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
             return IconButton(
               tooltip: isSyncing
                   ? 'View Activity'
-                  : (isIos ? 'Connections' : 'Sync Now'),
+                  : (isIos ? 'Set Up Connections' : 'Sync Now'),
               onPressed: () async {
                 if (!isSyncing) {
                   if (isIos) {

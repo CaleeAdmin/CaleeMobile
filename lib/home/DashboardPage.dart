@@ -1,5 +1,7 @@
 import 'package:caleesync/core/platform/pigeon/background_sync_api.g.dart';
 import 'package:caleesync/sync/background_sync_scheduler.dart';
+import 'package:caleesync/common/app_constant.dart';
+import 'package:caleesync/common/utils/mmkv_utils.dart';
 import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
@@ -14,13 +16,17 @@ import 'sync_settings_page.dart';
 import 'sync_status_details_page.dart';
 
 class DashboardPage extends StatefulWidget {
-  const DashboardPage({super.key});
+  const DashboardPage({super.key, this.forceIosMode});
+
+  final bool? forceIosMode;
 
   @override
   State<DashboardPage> createState() => _DashboardPageState();
 }
 
 class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserver {
+  bool get _isIosMode => widget.forceIosMode ?? Platform.isIOS;
+
   @override
   void initState() {
     super.initState();
@@ -103,7 +109,7 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
   }
 
   String _schedulerSummary(BackgroundSyncStatus? backgroundStatus) {
-    if (Platform.isIOS) {
+    if (_isIosMode) {
       return 'Use Apple Calendar account connections for Calee two-way sync.\n'
           'Import iCloud, Google, or Outlook calendars into Calee as read-only subscriptions.';
     }
@@ -119,10 +125,22 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
   }
 
   bool _showSchedulerWarning(BackgroundSyncStatus? backgroundStatus) {
-    if (Platform.isIOS) return false;
+    if (_isIosMode) return false;
     if (backgroundStatus == null) return false;
     if (backgroundStatus.periodicConfigured && !backgroundStatus.periodicEnabled) return true;
     return (backgroundStatus.lastResult == BackgroundRunOutcome.retry || backgroundStatus.lastResult == BackgroundRunOutcome.failure);
+  }
+
+  bool _shouldShowIosMigrationNotice() {
+    if (!_isIosMode) return false;
+    final deprecated = MMKVUtils.instance.getBool(AppConstant.iosLegacySyncDeprecatedKey, defaultValue: false) ?? false;
+    final dismissed = MMKVUtils.instance.getBool(AppConstant.iosLegacySyncNoticeDismissedKey, defaultValue: false) ?? false;
+    return deprecated && !dismissed;
+  }
+
+  void _dismissIosMigrationNotice() {
+    MMKVUtils.instance.setBool(AppConstant.iosLegacySyncNoticeDismissedKey, true);
+    setState(() {});
   }
 
   @override
@@ -151,6 +169,43 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      if (_shouldShowIosMigrationNotice()) ...[
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.amber.withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.amber.withOpacity(0.4)),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('iPhone sync has moved', style: TextStyle(fontWeight: FontWeight.w700)),
+                              const SizedBox(height: 6),
+                              const Text(
+                                'Calee now uses Apple Calendar account connections for Calee two-way sync.\n'
+                                'Use imported calendar links for iCloud, Google, and Outlook calendars.',
+                              ),
+                              const SizedBox(height: 8),
+                              Wrap(
+                                spacing: 8,
+                                children: [
+                                  OutlinedButton(
+                                    onPressed: () => Get.to(() => const SyncSettingsPage()),
+                                    child: const Text('Set Up Connections'),
+                                  ),
+                                  TextButton(
+                                    onPressed: _dismissIosMigrationNotice,
+                                    child: const Text('Dismiss'),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                      ],
                       _banner(isRunning, needsAttention),
                       const SizedBox(height: 20),
 
@@ -186,12 +241,12 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
 
                       // Background / iOS setup
                       Text(
-                        Platform.isIOS ? 'iPhone Calendar Setup' : 'Background',
+                        _isIosMode ? 'iPhone Calendar Setup' : 'Background',
                         style: const TextStyle(fontWeight: FontWeight.w600),
                       ),
                       const SizedBox(height: 8),
                       Text(_schedulerSummary(backgroundStatus), style: const TextStyle(color: Colors.black87)),
-                      if (!Platform.isIOS && _showSchedulerWarning(backgroundStatus)) ...[
+                      if (!_isIosMode && _showSchedulerWarning(backgroundStatus)) ...[
                         const SizedBox(height: 8),
                         Text(
                           backgroundStatus?.periodicConfigured == true && backgroundStatus?.periodicEnabled != true
@@ -252,16 +307,16 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
                           onPressed: probeCtrl.isSyncing.value
                               ? null
                               : () async {
-                                  if (Platform.isIOS) {
+                                  if (_isIosMode) {
                                     Get.to(() => const SyncSettingsPage());
                                     return;
                                   }
                                   await probeCtrl.syncNow();
                                 },
-                          icon: Icon(Platform.isIOS ? Icons.settings : Icons.sync),
+                          icon: Icon(_isIosMode ? Icons.settings : Icons.sync),
                           label: Text(
-                            Platform.isIOS
-                                ? 'Open Connections'
+                            _isIosMode
+                                ? 'Set Up Connections'
                                 : (probeCtrl.isSyncing.value ? 'Syncing…' : 'Sync Now'),
                           ),
                         ),
@@ -288,7 +343,7 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
                     children: [
                       const Text('Quick Actions', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
                       const SizedBox(height: 12),
-                      if (Platform.isIOS)
+                      if (_isIosMode)
                         SizedBox(
                           width: double.infinity,
                           child: OutlinedButton.icon(

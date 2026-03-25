@@ -44,7 +44,7 @@ class SyncStatusDetailsPage extends StatelessWidget {
                 '${_formatTimestamp(run.startTime)} • ${_duration(run)}',
               ),
               subtitle: Text(
-                '${_triggerLabel(run.trigger)} • ${run.bindings.length} ${run.bindings.length == 1 ? 'source' : 'sources'}\n'
+                '${Platform.isIOS ? 'Historical connection activity' : _triggerLabel(run.trigger)} • ${run.bindings.length} ${run.bindings.length == 1 ? 'source' : 'sources'}\n'
                 'On device +${counts.localCreated}/${counts.localUpdated}/-${counts.localDeleted}  '
                 'In cloud +${counts.remoteCreated}/${counts.remoteUpdated}/-${counts.remoteDeleted}',
               ),
@@ -66,7 +66,7 @@ class SyncStatusDetailsPage extends StatelessWidget {
                 ctrl.syncNow();
               },
         icon: Icon(Platform.isIOS ? Icons.settings : Icons.sync),
-        label: Text(Platform.isIOS ? 'Open Connections' : 'Sync now'),
+        label: Text(Platform.isIOS ? 'Set Up Connections' : 'Sync now'),
       ),
     );
   }

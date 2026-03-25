@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import '../common/app_constant.dart';
 import '../common/utils/mmkv_utils.dart';
 import '../core/platform/pigeon/background_sync_api.g.dart';
@@ -61,8 +63,19 @@ class BackgroundSyncStatus {
 
 class BackgroundSyncScheduler {
   static final BackgroundSyncControlApi _api = BackgroundSyncControlApi();
+  static bool? debugForceIosForTesting;
+
+  static bool get _isIOS => debugForceIosForTesting ?? Platform.isIOS;
 
   static Future<void> setPeriodicEnabled(bool enabled) async {
+    if (_isIOS) {
+      MMKVUtils.instance.setBool(AppConstant.periodicSyncEnabledKey, false);
+      try {
+        await _api.cancelPeriodic();
+      } catch (_) {}
+      return;
+    }
+
     MMKVUtils.instance.setBool(AppConstant.periodicSyncEnabledKey, enabled);
     if (enabled) {
       final int interval = MMKVUtils.instance.getInt(AppConstant.syncIntervalCalendarKey) ?? 15;
@@ -77,10 +90,15 @@ class BackgroundSyncScheduler {
     bool expedited = false,
     OneOffEnqueuePolicy policy = OneOffEnqueuePolicy.keep,
   }) {
+    if (_isIOS) {
+      return Future.value();
+    }
     return _api.enqueueOneOff(reason, expedited, policy);
   }
 
   static Future<void> selfHealPeriodicIfNeeded() async {
+    if (_isIOS) return;
+
     final status = await getStatus();
     final bool enabledByMmkv = MMKVUtils.instance.getBool(AppConstant.periodicSyncEnabledKey, defaultValue: false) ?? false;
     if (!status.periodicEnabled && !enabledByMmkv) {
@@ -94,6 +112,16 @@ class BackgroundSyncScheduler {
   }
 
   static Future<BackgroundSyncStatus> getStatus() async {
+    if (_isIOS) {
+      return const BackgroundSyncStatus(
+        periodicEnabled: false,
+        periodicConfigured: false,
+        workerRunning: false,
+        intervalMinutes: null,
+        periodicWorkState: null,
+        oneOffWorkState: null,
+      );
+    }
     final dto = await _api.getBackgroundStatus();
     return BackgroundSyncStatus.fromDto(dto);
   }

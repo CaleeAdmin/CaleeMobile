@@ -37,6 +37,12 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> with WidgetsBinding
   late final Future<String> _appVersionLabelFuture;
   Completer<void>? _resumeCompleter;
   bool get _isIosConnectionsMode => widget.forceIosConnectionsMode ?? Platform.isIOS;
+  bool get _showIosMigrationReminder {
+    if (!_isIosConnectionsMode) return false;
+    final deprecated = MMKVUtils.instance.getBool(AppConstant.iosLegacySyncDeprecatedKey, defaultValue: false) ?? false;
+    final dismissed = MMKVUtils.instance.getBool(AppConstant.iosLegacySyncNoticeDismissedKey, defaultValue: false) ?? false;
+    return deprecated && !dismissed;
+  }
 
   @override
   void initState() {
@@ -200,8 +206,25 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> with WidgetsBinding
                   Text(isIosConnectionsMode ? 'Connections' : 'Synchronization', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
                   const SizedBox(height: 6),
                   if (isIosConnectionsMode) ...[
+                    if (_showIosMigrationReminder) ...[
+                      Container(
+                        width: double.infinity,
+                        margin: const EdgeInsets.only(bottom: 12),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.amber.withOpacity(0.1),
+                          border: Border.all(color: Colors.amber.withOpacity(0.4)),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Text(
+                          'iPhone sync has moved to Apple Calendar account connections and imported read-only links.',
+                        ),
+                      ),
+                    ],
                     const Text(
-                      'iPhone uses Apple Calendar account connections and imported subscription calendars. App-level hidden background sync is not the primary path.',
+                      'CaleeSync no longer uses hidden app-level sync on iPhone.\n'
+                      'Use Apple Calendar account connections for Calee two-way sync.\n'
+                      'Use imported subscription calendars for iCloud, Google, and Outlook.',
                       style: TextStyle(color: Colors.black54),
                     ),
                     const SizedBox(height: 16),

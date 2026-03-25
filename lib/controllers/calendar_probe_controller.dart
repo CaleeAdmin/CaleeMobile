@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:caleesync/common/app_constant.dart';
 import 'package:caleesync/common/utils/mmkv_utils.dart';
@@ -15,6 +16,8 @@ import '../sync/sync_completed_event_bus.dart';
 import '../sync/sync_trigger_orchestrator.dart';
 
 class CalendarProbeController extends GetxController {
+  static bool? debugForceIosForTesting;
+
   final RxBool isSyncing = false.obs;
   final RxInt success = 0.obs;
   final RxInt failed = 0.obs;
@@ -130,6 +133,11 @@ class CalendarProbeController extends GetxController {
   }
 
   Future<SyncSummary> syncNow() async {
+    final bool isIOS = debugForceIosForTesting ?? Platform.isIOS;
+    if (isIOS) {
+      return summary.value ?? SyncSummary();
+    }
+
     if (isSyncing.value) {
       return summary.value ?? SyncSummary();
     }

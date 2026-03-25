@@ -17,6 +17,8 @@ class AppConstant {
   static const String autoSyncEnabledKey = 'auto_sync_enabled';
   static const String periodicSyncEnabledKey = 'periodic_sync_enabled';
   static const String syncIntervalCalendarKey = 'sync_interval_calendar';
+  static const String iosLegacySyncDeprecatedKey = 'ios_legacy_sync_deprecated';
+  static const String iosLegacySyncNoticeDismissedKey = 'ios_legacy_sync_notice_dismissed';
 
   /// Android calendar account type used by system calendar integration.
   static const String calendarAccountType = 'com.calee.caleesync';
