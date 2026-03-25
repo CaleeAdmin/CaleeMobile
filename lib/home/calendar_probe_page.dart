@@ -25,6 +25,7 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
     CalendarPage(),
     SyncSettingsPage(),
   ];
+  final Set<String> _copiedFieldLabels = <String>{};
 
 
   @override
@@ -224,7 +225,8 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
   }
 
   void _showCalDavPanel() {
-    final String server = (MMKVUtils.instance.getString(AppConstant.serverKey) ?? AppConstant.caleeServer).trim();
+    final String rawServer = (MMKVUtils.instance.getString(AppConstant.serverKey) ?? AppConstant.caleeServer).trim();
+    final String server = _normalizeServerForDisplay(rawServer);
     final String username = (MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? '').trim();
     final String password = (MMKVUtils.instance.getString(AppConstant.appPasswordKey) ?? '').trim();
 
@@ -256,7 +258,16 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
     );
   }
 
+  String _normalizeServerForDisplay(String value) {
+    if (value.isEmpty) return value;
+    var normalized = value.trim();
+    normalized = normalized.replaceFirst(RegExp(r'^https?://', caseSensitive: false), '');
+    normalized = normalized.replaceFirst(RegExp(r'/.*$'), '');
+    return normalized;
+  }
+
   Widget _copyableField({required String label, required String value}) {
+    final bool copied = _copiedFieldLabels.contains(label);
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
       child: Padding(
@@ -293,11 +304,20 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
                   : () async {
                       await Clipboard.setData(ClipboardData(text: value));
                       if (!mounted) return;
+                      setState(() {
+                        _copiedFieldLabels.add(label);
+                      });
+                      Future<void>.delayed(const Duration(seconds: 2), () {
+                        if (!mounted) return;
+                        setState(() {
+                          _copiedFieldLabels.remove(label);
+                        });
+                      });
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(content: Text('$label copied')),
                       );
                     },
-              icon: const Icon(Icons.copy_outlined),
+              icon: Icon(copied ? Icons.check_circle_outline : Icons.copy_outlined),
             ),
           ],
         ),
