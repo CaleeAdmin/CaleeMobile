@@ -271,42 +271,42 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
                     ),
                   ),
                 ),
-              if (AppConstant.enableAppSync) const SizedBox(height: 16),
-              Card(
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('CalDav Account', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-                      const SizedBox(height: 12),
-                      _accountField(
-                        context: context,
-                        label: 'Server',
-                        value: AppConstant.caleeServer,
-                        copyValue: AppConstant.caleeServer,
-                      ),
-                      const SizedBox(height: 10),
-                      _accountField(
-                        context: context,
-                        label: 'Username',
-                        value: MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? '',
-                        copyValue: MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? '',
-                      ),
-                      const SizedBox(height: 10),
-                      _accountField(
-                        context: context,
-                        label: 'Password',
-                        value: MMKVUtils.instance.getString(AppConstant.appPasswordKey) ?? '',
-                        copyValue: MMKVUtils.instance.getString(AppConstant.appPasswordKey) ?? '',
-                        obscure: !_showAppPassword,
-                        onToggleObscure: () => setState(() => _showAppPassword = !_showAppPassword),
-                      ),
-                    ],
+              if (!AppConstant.enableAppSync)
+                Card(
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('CalDav Account', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                        const SizedBox(height: 12),
+                        _accountField(
+                          context: context,
+                          label: 'Server',
+                          value: AppConstant.caleeServer,
+                          copyValue: AppConstant.caleeServer,
+                        ),
+                        const SizedBox(height: 10),
+                        _accountField(
+                          context: context,
+                          label: 'Username',
+                          value: MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? '',
+                          copyValue: MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? '',
+                        ),
+                        const SizedBox(height: 10),
+                        _accountField(
+                          context: context,
+                          label: 'Password',
+                          value: MMKVUtils.instance.getString(AppConstant.appPasswordKey) ?? '',
+                          copyValue: MMKVUtils.instance.getString(AppConstant.appPasswordKey) ?? '',
+                          obscure: !_showAppPassword,
+                          onToggleObscure: () => setState(() => _showAppPassword = !_showAppPassword),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
               const SizedBox(height: 16),
               Card(
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
