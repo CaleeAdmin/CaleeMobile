@@ -217,9 +217,9 @@ class _IosExternalCalendarImportPageState extends State<IosExternalCalendarImpor
           children: [
             Text('Imported calendars are read-only', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
             SizedBox(height: 8),
-            Text('This creates a read-only subscription calendar in Calee.'),
+            Text('This creates a read-only imported calendar in Calee.'),
             SizedBox(height: 6),
-            Text('It is not the Apple Calendar two-way sync connection path.'),
+            Text('It does not add a two-way Apple Calendar account.'),
           ],
         ),
       ),
@@ -229,7 +229,7 @@ class _IosExternalCalendarImportPageState extends State<IosExternalCalendarImpor
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Import into Calee')),
+      appBar: AppBar(title: const Text('Import Calendar into Calee')),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(16),

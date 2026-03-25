@@ -104,8 +104,8 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
 
   String _schedulerSummary(BackgroundSyncStatus? backgroundStatus) {
     if (Platform.isIOS) {
-      return 'iPhone uses calendar connections instead of app-level background sync.\n'
-          'Add accounts in Apple Calendar settings or import subscription calendars into Calee.';
+      return 'Use Apple Calendar account connections for Calee two-way sync.\n'
+          'Import iCloud, Google, or Outlook calendars into Calee as read-only subscriptions.';
     }
 
     final enabled = backgroundStatus?.periodicEnabled == true;
@@ -184,8 +184,11 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
                       const Divider(height: 1),
                       const SizedBox(height: 20),
 
-                      // Background
-                      const Text('Background', style: TextStyle(fontWeight: FontWeight.w600)),
+                      // Background / iOS setup
+                      Text(
+                        Platform.isIOS ? 'iPhone Calendar Setup' : 'Background',
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
                       const SizedBox(height: 8),
                       Text(_schedulerSummary(backgroundStatus), style: const TextStyle(color: Colors.black87)),
                       if (!Platform.isIOS && _showSchedulerWarning(backgroundStatus)) ...[
@@ -291,7 +294,7 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
                           child: OutlinedButton.icon(
                             onPressed: () => Get.to(() => const SyncSettingsPage()),
                             icon: const Icon(Icons.settings),
-                            label: const Text('Manage iPhone Calendar Connections'),
+                            label: const Text('Set Up iPhone Calendar Connections'),
                           ),
                         )
                       else ...[
