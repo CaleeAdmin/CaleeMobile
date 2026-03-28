@@ -147,7 +147,7 @@ class SyncItemPlanner {
     final String? dbCtag = local['synced_ctag']?.toString();
     final String? remoteCtag = remote?['ctag']?.toString();
     final bool remoteChanged = remoteCtag != null && remoteCtag != dbCtag;
-    final bool localChanged = await _isCalendarDirty(db, local['id']);
+    final bool localChanged = await _hasLocalDirtyState(db: db, row: local);
     final bool metaChanged =
         (remote?['display_name']?.toString() ?? '') != (local['display_name']?.toString() ?? '') ||
             (remote?['color']?.toString() ?? '') != (local['color']?.toString() ?? '');
@@ -280,8 +280,36 @@ class SyncItemPlanner {
     return loginName.isNotEmpty && password.isNotEmpty;
   }
 
-  Future<bool> _isCalendarDirty(Database db, Object? remoteCollectionId) async {
-    if (remoteCollectionId == null) return false;
+  Future<bool> _hasLocalDirtyState({
+    required Database db,
+    required Map<String, dynamic> row,
+  }) async {
+    final int remoteCollectionId = (row['remote_collection_id'] as int?) ?? (row['id'] as int?) ?? 0;
+    final String localCalendarId = row['local_collection_id']?.toString() ?? '';
+    final int bindingRole = BindingRoleResolver.resolveBindingRole(row);
+    final int syncMode = (row['sync_mode'] as int?) ?? SyncBindingMode.readOnly;
+
+    if (remoteCollectionId <= 0) return false;
+    if (await _hasPendingPushRows(db, remoteCollectionId)) {
+      return true;
+    }
+
+    final bool isOwnerLink = bindingRole == SyncBindingRole.ownerLink;
+    final bool isTwoWay = syncMode == SyncBindingMode.twoWay;
+    final bool shouldProbeUnmappedLocal = isOwnerLink || isTwoWay;
+    if (!shouldProbeUnmappedLocal || localCalendarId.isEmpty) {
+      return false;
+    }
+
+    return _hasUnmappedLocalEvents(
+      db: db,
+      remoteCollectionId: remoteCollectionId,
+      localCalendarId: localCalendarId,
+    );
+  }
+
+  Future<bool> _hasPendingPushRows(Database db, int remoteCollectionId) async {
+    if (remoteCollectionId <= 0) return false;
     final List<Map<String, dynamic>> dirtyCheck = await db.rawQuery('''
       SELECT 1 FROM sync_items
       WHERE remote_collection_id = ?
@@ -289,6 +317,59 @@ class SyncItemPlanner {
       LIMIT 1
     ''', [remoteCollectionId]);
     return dirtyCheck.isNotEmpty;
+  }
+
+  Future<bool> _hasUnmappedLocalEvents({
+    required Database db,
+    required int remoteCollectionId,
+    required String localCalendarId,
+  }) async {
+    if (remoteCollectionId <= 0 || localCalendarId.isEmpty) return false;
+    final ({int startMs, int endMs}) probeWindow = _buildLocalDiscoveryProbeWindow();
+    final List<PlatformItem?> localEvents =
+        await _native.getEvents(localCalendarId, probeWindow.startMs, probeWindow.endMs);
+    if (localEvents.isEmpty) return false;
+
+    final List<Map<String, dynamic>> mappedRows = await db.rawQuery('''
+      SELECT local_item_id, remote_uid
+      FROM sync_items
+      WHERE remote_collection_id = ?
+    ''', [remoteCollectionId]);
+    final Set<String> mappedLocalIds = mappedRows
+        .map((row) => row['local_item_id']?.toString() ?? '')
+        .where((id) => id.isNotEmpty)
+        .toSet();
+    final Set<String> mappedRemoteUids = mappedRows
+        .map((row) => (row['remote_uid']?.toString() ?? '').trim())
+        .where((uid) => uid.isNotEmpty)
+        .toSet();
+
+    for (final PlatformItem event in localEvents.whereType<PlatformItem>()) {
+      final String localId = (event.localId ?? '').trim();
+      final String uid = (event.uid ?? '').trim();
+      final bool mappedByLocalId = localId.isNotEmpty && mappedLocalIds.contains(localId);
+      final bool mappedByUid = uid.isNotEmpty && mappedRemoteUids.contains(uid);
+      if (!mappedByLocalId && !mappedByUid) {
+        debugPrint(
+          '[SYNC_LOCAL_DISCOVERY][remote_collection_id=$remoteCollectionId]'
+          '[local_collection_id=$localCalendarId] unmapped_local_event_detected'
+          ' localId=$localId uid=$uid',
+        );
+        return true;
+      }
+    }
+    return false;
+  }
+
+  ({int startMs, int endMs}) _buildLocalDiscoveryProbeWindow() {
+    const int dayMs = 24 * 60 * 60 * 1000;
+    const int lookbackMs = 365 * dayMs;
+    const int lookaheadMs = 730 * dayMs;
+    final int nowMs = DateTime.now().millisecondsSinceEpoch;
+    return (
+      startMs: nowMs - lookbackMs,
+      endMs: nowMs + lookaheadMs,
+    );
   }
 
   Future<bool> _isBootstrapRequired(

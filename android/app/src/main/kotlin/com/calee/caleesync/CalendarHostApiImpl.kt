@@ -66,6 +66,27 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
         }
     }
 
+    private fun getCalendarAccountType(calendarId: Long): String? {
+        val projection = arrayOf(CalendarContract.Calendars.ACCOUNT_TYPE)
+        return context.contentResolver.query(
+            CalendarContract.Calendars.CONTENT_URI,
+            projection,
+            "${CalendarContract.Calendars._ID} = ?",
+            arrayOf(calendarId.toString()),
+            null
+        )?.use { cursor ->
+            if (!cursor.moveToFirst()) {
+                null
+            } else {
+                cursor.getString(0)
+            }
+        }
+    }
+
+    private fun isAppManagedMirrorCalendar(calendarId: Long): Boolean {
+        return getCalendarAccountType(calendarId) == CalendarConstants.ACCOUNT_TYPE
+    }
+
     companion object {
         
         private val CALENDAR_PROJECTION = arrayOf(
@@ -292,7 +313,7 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
             put(CalendarContract.Calendars.OWNER_ACCOUNT, accountName)
 
             // 关键：允许提醒和可见性
-            put(CalendarContract.Calendars.VISIBLE, 1)
+            put(CalendarContract.Calendars.VISIBLE, 0)
             put(CalendarContract.Calendars.SYNC_EVENTS, 1)
             put(CalendarContract.Calendars.CALENDAR_TIME_ZONE, TimeZone.getDefault().id)
 
@@ -685,9 +706,15 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
             }
 
             val account = ensureAccountAndSync(accountName)
+            val detectedAccountType = getCalendarAccountType(idLong)
+            val appManagedMirror = isAppManagedMirrorCalendar(idLong)
+            val syncEventsValue = if (enabled) 1 else 0
+            val visibleValue: Int? = if (appManagedMirror) 0 else null
             val values = ContentValues().apply {
-                put(CalendarContract.Calendars.SYNC_EVENTS, if (enabled) 1 else 0)
-                put(CalendarContract.Calendars.VISIBLE, if (enabled) 1 else 0)
+                put(CalendarContract.Calendars.SYNC_EVENTS, syncEventsValue)
+                if (appManagedMirror) {
+                    put(CalendarContract.Calendars.VISIBLE, 0)
+                }
             }
 
             val updateUri = ContentUris.withAppendedId(CalendarContract.Calendars.CONTENT_URI, idLong)
@@ -696,6 +723,13 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
                 .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_NAME, account.name)
                 .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_TYPE, account.type)
                 .build()
+
+            Log.d(
+                "CalendarSync",
+                "setCalendarEnabled calendarId=$calendarId detectedAccountType=$detectedAccountType " +
+                    "isAppManagedMirrorCalendar=$appManagedMirror final_SYNC_EVENTS=$syncEventsValue " +
+                    "final_VISIBLE=${visibleValue ?: "unchanged"}"
+            )
 
             val rows = context.contentResolver.update(updateUri, values, null, null)
             callback(Result.success(rows > 0))
