@@ -171,6 +171,13 @@ class SyncItemPlanner {
       explicitGate: explicitGate,
     );
     final bool forceMode = forceRequested || bootstrapRequired;
+    final bool canUseLocalPushFastPath = localChanged == true &&
+        remoteChanged == false &&
+        metaChanged == false &&
+        forceMode == false &&
+        bootstrapRequired == false &&
+        safeFirstSync == false &&
+        (isTwoWay == true || isOwnerLink == true);
 
     if (!shouldSync && !forceMode) {
       debugPrint('[SYNC_GATE][remote_collection_id=$remoteCollectionId][path=$path][origin=$originKind] skipped reason=no_detected_change');
@@ -190,6 +197,10 @@ class SyncItemPlanner {
       bindingRole: bindingRole,
       bootstrapRequired: bootstrapRequired,
       safeFirstSync: safeFirstSync,
+      remoteChanged: remoteChanged,
+      localChanged: localChanged,
+      metaChanged: metaChanged,
+      useLocalPushFastPath: canUseLocalPushFastPath,
     );
   }
 
@@ -303,6 +314,10 @@ class SyncItemPlanner {
     required int bindingRole,
     required bool bootstrapRequired,
     required bool safeFirstSync,
+    required bool remoteChanged,
+    required bool localChanged,
+    required bool metaChanged,
+    required bool useLocalPushFastPath,
   }) {
     return SyncContext(
       remoteCollectionId: (local['id'] as int?) ?? 0,
@@ -322,6 +337,10 @@ class SyncItemPlanner {
         'sync_gate_reason': local['sync_gate_reason']?.toString(),
         'bootstrap_required': bootstrapRequired,
         'safe_first_sync': safeFirstSync,
+        'remote_changed': remoteChanged,
+        'local_changed': localChanged,
+        'meta_changed': metaChanged,
+        'use_local_push_fast_path': useLocalPushFastPath,
       },
     );
   }
