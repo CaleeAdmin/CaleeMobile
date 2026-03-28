@@ -130,9 +130,13 @@ Future<List<SyncContext>> _planTwoWay({
   required bool force,
   required int syncItemCount,
   String? gateReason,
+  int syncMode = SyncBindingMode.twoWay,
+  int bindingRole = SyncBindingRole.mirror,
 }) async {
   final row = _baseCollectionRow();
   row['sync_gate_reason'] = gateReason;
+  row['sync_mode'] = syncMode;
+  row['binding_role'] = bindingRole;
   final _FakeDatabase db = _FakeDatabase(
     collectionRows: <Map<String, dynamic>>[row],
     localChanged: localChanged,
@@ -226,6 +230,7 @@ void main() {
 
       expect(contexts, hasLength(1));
       expect(contexts.first.action, SyncAction.fullSyncBidi);
+      expect(contexts.first.extra['use_local_push_fast_path'], isTrue);
     });
 
     test('syncs when metaChanged for two-way calendar', () async {
@@ -242,6 +247,7 @@ void main() {
 
       expect(contexts, hasLength(1));
       expect(contexts.first.action, SyncAction.fullSyncBidi);
+      expect(contexts.first.extra['use_local_push_fast_path'], isFalse);
     });
 
     test('syncs unchanged two-way calendar when force is requested', () async {
@@ -258,6 +264,7 @@ void main() {
 
       expect(contexts, hasLength(1));
       expect(contexts.first.action, SyncAction.fullSyncBidi);
+      expect(contexts.first.extra['use_local_push_fast_path'], isFalse);
     });
 
     test('syncs unchanged two-way calendar when bootstrap is required', () async {
@@ -274,6 +281,7 @@ void main() {
 
       expect(contexts, hasLength(1));
       expect(contexts.first.action, SyncAction.fullSyncBidi);
+      expect(contexts.first.extra['use_local_push_fast_path'], isFalse);
     });
 
     test('syncs unchanged two-way calendar when safe_first_sync gate is set and has mappings', () async {
@@ -293,6 +301,59 @@ void main() {
       expect(contexts.first.action, SyncAction.fullSyncBidi);
       expect(contexts.first.extra['bootstrap_required'], isTrue);
       expect(contexts.first.extra['safe_first_sync'], isTrue);
+      expect(contexts.first.extra['use_local_push_fast_path'], isFalse);
+    });
+
+    test('owner-link localChanged enables local push fast path and keeps fullSyncPush action', () async {
+      await requireMmkv();
+      if (!mmkvReady) return;
+
+      final contexts = await _planTwoWay(
+        remoteChanged: false,
+        localChanged: true,
+        metaChanged: false,
+        force: false,
+        syncItemCount: 1,
+        syncMode: SyncBindingMode.readOnly,
+        bindingRole: SyncBindingRole.ownerLink,
+      );
+
+      expect(contexts, hasLength(1));
+      expect(contexts.first.action, SyncAction.fullSyncPush);
+      expect(contexts.first.extra['use_local_push_fast_path'], isTrue);
+    });
+
+    test('remoteChanged + localChanged disables local push fast path', () async {
+      await requireMmkv();
+      if (!mmkvReady) return;
+
+      final contexts = await _planTwoWay(
+        remoteChanged: true,
+        localChanged: true,
+        metaChanged: false,
+        force: false,
+        syncItemCount: 1,
+      );
+
+      expect(contexts, hasLength(1));
+      expect(contexts.first.extra['use_local_push_fast_path'], isFalse);
+    });
+
+    test('safe_first_sync disables local push fast path', () async {
+      await requireMmkv();
+      if (!mmkvReady) return;
+
+      final contexts = await _planTwoWay(
+        remoteChanged: false,
+        localChanged: true,
+        metaChanged: false,
+        force: false,
+        syncItemCount: 3,
+        gateReason: SyncGateReason.safeFirstSync,
+      );
+
+      expect(contexts, hasLength(1));
+      expect(contexts.first.extra['use_local_push_fast_path'], isFalse);
     });
   });
 }
