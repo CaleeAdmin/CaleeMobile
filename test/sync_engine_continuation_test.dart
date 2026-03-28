@@ -106,7 +106,6 @@ void main() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockDecodedMessageHandler<Object?>(
       enqueueChannel,
-      BackgroundSyncControlApi.pigeonChannelCodec,
       (Object? message) async {
         calls.add(message);
         return <Object?>[null];
@@ -123,12 +122,11 @@ void main() {
       runRecorder: recorder,
     );
 
-    await engine.executeFullSync(trigger: SyncRunTrigger.repairScheduler);
+    await engine.executeFullSync(trigger: SyncRunTrigger.force);
 
     await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockDecodedMessageHandler<Object?>(
       enqueueChannel,
-      BackgroundSyncControlApi.pigeonChannelCodec,
       null,
     );
 

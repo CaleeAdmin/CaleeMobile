@@ -1120,6 +1120,9 @@ abstract class SyncStrategy {
             (_) => _CanonicalOperation(
               type: _CanonicalOperationType.skip,
               uid: 'uid-$i',
+              remote: null,
+              mapping: null,
+              local: null,
             ),
           ),
         ),
