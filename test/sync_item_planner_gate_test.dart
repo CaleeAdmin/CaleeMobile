@@ -5,6 +5,7 @@ import 'package:caleesync/data/database_helper.dart';
 import 'package:caleesync/entity/SyncContext.dart';
 import 'package:caleesync/sync/SyncEnum.dart';
 import 'package:caleesync/sync/force_sync_registry.dart';
+import 'package:caleesync/sync/sync_gate_reason.dart';
 import 'package:caleesync/sync/sync_item_planner.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite/sqflite.dart';
@@ -36,12 +37,12 @@ class _FakeDatabase implements Database {
   _FakeDatabase({
     required this.collectionRows,
     required this.localChanged,
-    required this.bootstrapRequired,
+    required this.syncItemCount,
   });
 
   final List<Map<String, dynamic>> collectionRows;
   final bool localChanged;
-  final bool bootstrapRequired;
+  final int syncItemCount;
 
   @override
   Future<List<Map<String, Object?>>> rawQuery(String sql, [List<Object?>? arguments]) async {
@@ -59,7 +60,7 @@ class _FakeDatabase implements Database {
 
     if (sql.contains('SELECT COUNT(1) AS count')) {
       return <Map<String, Object?>>[
-        <String, Object?>{'count': bootstrapRequired ? 0 : 1},
+        <String, Object?>{'count': syncItemCount},
       ];
     }
 
@@ -127,12 +128,15 @@ Future<List<SyncContext>> _planTwoWay({
   required bool localChanged,
   required bool metaChanged,
   required bool force,
-  required bool bootstrapRequired,
+  required int syncItemCount,
+  String? gateReason,
 }) async {
+  final row = _baseCollectionRow();
+  row['sync_gate_reason'] = gateReason;
   final _FakeDatabase db = _FakeDatabase(
-    collectionRows: <Map<String, dynamic>>[_baseCollectionRow()],
+    collectionRows: <Map<String, dynamic>>[row],
     localChanged: localChanged,
-    bootstrapRequired: bootstrapRequired,
+    syncItemCount: syncItemCount,
   );
 
   final SyncItemPlanner planner = SyncItemPlanner(
@@ -186,7 +190,7 @@ void main() {
         localChanged: false,
         metaChanged: false,
         force: false,
-        bootstrapRequired: false,
+        syncItemCount: 1,
       );
 
       expect(contexts, isEmpty);
@@ -201,7 +205,7 @@ void main() {
         localChanged: false,
         metaChanged: false,
         force: false,
-        bootstrapRequired: false,
+        syncItemCount: 1,
       );
 
       expect(contexts, hasLength(1));
@@ -217,7 +221,7 @@ void main() {
         localChanged: true,
         metaChanged: false,
         force: false,
-        bootstrapRequired: false,
+        syncItemCount: 1,
       );
 
       expect(contexts, hasLength(1));
@@ -233,7 +237,7 @@ void main() {
         localChanged: false,
         metaChanged: true,
         force: false,
-        bootstrapRequired: false,
+        syncItemCount: 1,
       );
 
       expect(contexts, hasLength(1));
@@ -249,7 +253,7 @@ void main() {
         localChanged: false,
         metaChanged: false,
         force: true,
-        bootstrapRequired: false,
+        syncItemCount: 1,
       );
 
       expect(contexts, hasLength(1));
@@ -265,11 +269,30 @@ void main() {
         localChanged: false,
         metaChanged: false,
         force: false,
-        bootstrapRequired: true,
+        syncItemCount: 0,
       );
 
       expect(contexts, hasLength(1));
       expect(contexts.first.action, SyncAction.fullSyncBidi);
+    });
+
+    test('syncs unchanged two-way calendar when safe_first_sync gate is set and has mappings', () async {
+      await requireMmkv();
+      if (!mmkvReady) return;
+
+      final contexts = await _planTwoWay(
+        remoteChanged: false,
+        localChanged: false,
+        metaChanged: false,
+        force: false,
+        syncItemCount: 3,
+        gateReason: SyncGateReason.safeFirstSync,
+      );
+
+      expect(contexts, hasLength(1));
+      expect(contexts.first.action, SyncAction.fullSyncBidi);
+      expect(contexts.first.extra['bootstrap_required'], isTrue);
+      expect(contexts.first.extra['safe_first_sync'], isTrue);
     });
   });
 }

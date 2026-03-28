@@ -157,6 +157,7 @@ class SyncItemPlanner {
     final bool isOwnerLink = bindingRole == SyncBindingRole.ownerLink;
     final bool isMirror = bindingRole == SyncBindingRole.mirror;
 
+    final bool safeFirstSync = explicitGate == SyncGateReason.safeFirstSync;
     final bool shouldSync = isTwoWay
         ? (remoteChanged || localChanged || metaChanged)
         : isOwnerLink
@@ -164,7 +165,11 @@ class SyncItemPlanner {
             : isMirror
                 ? (remoteChanged || localChanged || metaChanged)
                 : (remoteChanged || localChanged || metaChanged);
-    final bool bootstrapRequired = await _isBootstrapRequired(db, remoteCollectionId);
+    final bool bootstrapRequired = await _isBootstrapRequired(
+      db,
+      remoteCollectionId,
+      explicitGate: explicitGate,
+    );
     final bool forceMode = forceRequested || bootstrapRequired;
 
     if (!shouldSync && !forceMode) {
@@ -178,7 +183,14 @@ class SyncItemPlanner {
             ? SyncAction.fullSyncPush
             : SyncAction.fullSyncPull;
 
-    return _buildContext(remote ?? {}, local, action, bindingRole: bindingRole);
+    return _buildContext(
+      remote ?? {},
+      local,
+      action,
+      bindingRole: bindingRole,
+      bootstrapRequired: bootstrapRequired,
+      safeFirstSync: safeFirstSync,
+    );
   }
 
   Future<void> _setCollectionGateReason({
@@ -268,7 +280,12 @@ class SyncItemPlanner {
     return dirtyCheck.isNotEmpty;
   }
 
-  Future<bool> _isBootstrapRequired(Database db, int remoteCollectionId) async {
+  Future<bool> _isBootstrapRequired(
+    Database db,
+    int remoteCollectionId, {
+    String? explicitGate,
+  }) async {
+    if (explicitGate == SyncGateReason.safeFirstSync) return true;
     if (remoteCollectionId <= 0) return false;
     final List<Map<String, dynamic>> rows = await db.rawQuery('''
       SELECT COUNT(1) AS count
@@ -284,6 +301,8 @@ class SyncItemPlanner {
     Map local,
     SyncAction action, {
     required int bindingRole,
+    required bool bootstrapRequired,
+    required bool safeFirstSync,
   }) {
     return SyncContext(
       remoteCollectionId: (local['id'] as int?) ?? 0,
@@ -301,6 +320,8 @@ class SyncItemPlanner {
         'binding_role': bindingRole,
         'origin_kind': local['origin_kind'] ?? SyncBindingOrigin.remote,
         'sync_gate_reason': local['sync_gate_reason']?.toString(),
+        'bootstrap_required': bootstrapRequired,
+        'safe_first_sync': safeFirstSync,
       },
     );
   }

@@ -11,7 +11,8 @@ class FullSyncBidiStrategy extends SyncStrategy {
     }
 
     try {
-      await runUnifiedSync(ctx, summary, mode: UnifiedSyncMode.bidi);
+      final bool bootstrap = ctx.extra['bootstrap_required'] == true;
+      await runUnifiedSync(ctx, summary, mode: UnifiedSyncMode.bidi, bootstrap: bootstrap);
     } catch (e) {
       summary.failed++;
       summary.errorLog.add('[ERROR] ${ctx.displayName} Two-way sync exception: $e');
