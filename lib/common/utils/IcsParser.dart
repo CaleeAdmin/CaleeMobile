@@ -51,11 +51,6 @@ class IcsParser {
         : null;
     final int resolvedEndMillis = endMillis ?? (startMillis + 3600000);
 
-    debugPrint(
-      '[ICS] Parsed VEVENT uid=$finalUid recurrenceId=${recurrenceId ?? ''} '
-      'start=$startMillis end=$resolvedEndMillis source=VEVENT',
-    );
-
     return {
       'uid': finalUid,
       'summary': _decodeIcsText(

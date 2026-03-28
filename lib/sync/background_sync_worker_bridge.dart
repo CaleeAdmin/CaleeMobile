@@ -6,6 +6,7 @@ import 'package:caleesync/common/app_constant.dart';
 import 'package:caleesync/common/utils/mmkv_utils.dart';
 import 'package:caleesync/core/platform/pigeon/background_sync_api.g.dart';
 import 'package:caleesync/data/database_helper.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
 import 'SyncEngine.dart';
@@ -28,7 +29,11 @@ class BackgroundSyncWorkerBridge implements BackgroundSyncRunnerApi {
   static const Duration _initTimeout = Duration(seconds: 12);
   static const Duration _readyNotifyWindow = Duration(seconds: 20);
   static const Duration _readyNotifyRetryDelay = Duration(milliseconds: 350);
-  static const Duration _backgroundLifecycleTimeout = Duration(seconds: 50);
+  static const Duration _runStartTimeout = Duration(seconds: 20);
+  @visibleForTesting
+  static Duration runStartTimeoutForTest = _runStartTimeout;
+  @visibleForTesting
+  static Future<void>? runInProgressBarrierForTest;
 
   static Future<void> start() async {
     WidgetsFlutterBinding.ensureInitialized();
@@ -42,7 +47,8 @@ class BackgroundSyncWorkerBridge implements BackgroundSyncRunnerApi {
       if (!_readyDelivered) {
         return;
       }
-      await _runFinishedCompleter!.future.timeout(_backgroundLifecycleTimeout);
+      await _runStartedCompleter!.future.timeout(runStartTimeoutForTest);
+      await _runFinishedCompleter!.future;
     } on TimeoutException {
       _finishBackgroundCycle();
     } catch (_) {
@@ -115,6 +121,10 @@ class BackgroundSyncWorkerBridge implements BackgroundSyncRunnerApi {
     final String trigger = request.trigger;
     if (!(_runStartedCompleter?.isCompleted ?? true)) {
       _runStartedCompleter!.complete();
+    }
+
+    if (runInProgressBarrierForTest != null) {
+      await runInProgressBarrierForTest;
     }
 
     try {
