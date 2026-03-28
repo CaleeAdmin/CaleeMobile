@@ -17,6 +17,7 @@ void main() {
   );
 
   setUp(() {
+    BackgroundSyncWorkerBridge.resetForTest();
     BackgroundSyncWorkerBridge.runStartTimeoutForTest = const Duration(seconds: 20);
     BackgroundSyncWorkerBridge.runInProgressBarrierForTest = null;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
@@ -27,6 +28,7 @@ void main() {
   });
 
   tearDown(() {
+    BackgroundSyncWorkerBridge.resetForTest();
     BackgroundSyncWorkerBridge.runStartTimeoutForTest = const Duration(seconds: 20);
     BackgroundSyncWorkerBridge.runInProgressBarrierForTest = null;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
@@ -58,6 +60,12 @@ void main() {
       await BackgroundSyncWorkerBridge.start();
     });
 
+    test('start does not trigger heavy init before runBackgroundSync', () async {
+      BackgroundSyncWorkerBridge.runStartTimeoutForTest = const Duration(milliseconds: 80);
+
+      await BackgroundSyncWorkerBridge.start();
+    });
+
     test('start stays alive past legacy window once runBackgroundSync has started', () async {
       final bridge = BackgroundSyncWorkerBridge();
       final runGate = Completer<void>();
@@ -68,9 +76,11 @@ void main() {
       final runFuture = bridge.runBackgroundSync(
         BackgroundRunRequest(trigger: 'periodic', contractVersion: -1),
       );
+      var startCompleted = false;
+      startFuture.then((_) => startCompleted = true);
 
       await Future<void>.delayed(const Duration(milliseconds: 140));
-      expect(startFuture, isNot(completes));
+      expect(startCompleted, isFalse);
 
       runGate.complete();
       await runFuture;

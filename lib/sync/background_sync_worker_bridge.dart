@@ -41,7 +41,6 @@ class BackgroundSyncWorkerBridge implements BackgroundSyncRunnerApi {
     DartPluginRegistrant.ensureInitialized();
     _prepareBackgroundCycle();
     BackgroundSyncRunnerApi.setUp(BackgroundSyncWorkerBridge());
-    _ensureInitFuture();
 
     try {
       await _notifyReadyWithRetry();
@@ -58,6 +57,18 @@ class BackgroundSyncWorkerBridge implements BackgroundSyncRunnerApi {
     } finally {
       _finishBackgroundCycle();
     }
+  }
+
+  @visibleForTesting
+  static void resetForTest() {
+    _initFuture = null;
+    _initFailure = null;
+    _readyDelivered = false;
+    _runStartedCompleter = null;
+    _runFinishedCompleter = null;
+    _backgroundCycleActive = false;
+    runStartTimeoutForTest = _runStartTimeout;
+    runInProgressBarrierForTest = null;
   }
 
   static void _prepareBackgroundCycle() {
