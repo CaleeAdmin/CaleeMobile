@@ -18,6 +18,8 @@ import 'package:sqflite/sqflite.dart';
 
 abstract class SyncStrategy {
   static const int massDeletionAbsoluteThreshold = 10;
+  static const int chunkModeOperationThreshold = 150;
+  static const int chunkModeOperationBudget = 120;
 
   final SyncRepository repo = SyncRepository();
   final CaleeServerService nc = CaleeServerService();
@@ -734,6 +736,16 @@ abstract class SyncStrategy {
     }
 
     final List<_CanonicalOperation> allOperations = plans.expand((p) => p.operations).toList();
+    final bool chunkMode = _shouldChunkUnifiedRun(
+      bootstrap: bootstrap,
+      safeFirstSync: safeFirstSync,
+      operationCount: allOperations.length,
+    );
+    final List<_PlannedAction> plansToRun = chunkMode
+        ? _selectPlanBatch(plans, maxOperations: SyncStrategy.chunkModeOperationBudget)
+        : plans;
+    final bool hasRemainingPlans = plansToRun.length < plans.length;
+    final List<_CanonicalOperation> selectedOperations = plansToRun.expand((p) => p.operations).toList();
     final int localDeleteCandidates = allOperations.where((o) => o.type == _CanonicalOperationType.localDelete).length;
     final int remoteDeleteCandidates = allOperations.where((o) => o.type == _CanonicalOperationType.remoteDelete).length;
     final bool allowMassDeletion = isMassDeletionOverrideEnabled(bindingId);
@@ -762,11 +774,11 @@ abstract class SyncStrategy {
     bool canCommitCollectionProgress = false;
 
     final Map<String, _ExecutionState> states = {
-      for (final plan in plans) plan.uid: _ExecutionState(),
+      for (final plan in plansToRun) plan.uid: _ExecutionState(),
     };
 
-    final nonDeleteOperations = allOperations.where((o) => !o.isDeleteOperation);
-    final deleteOperations = allOperations.where((o) => o.isDeleteOperation);
+    final nonDeleteOperations = selectedOperations.where((o) => !o.isDeleteOperation);
+    final deleteOperations = selectedOperations.where((o) => o.isDeleteOperation);
 
     Future<void> executeOperation(_CanonicalOperation operation) async {
       final state = states.putIfAbsent(operation.uid, () => _ExecutionState());
@@ -932,14 +944,25 @@ abstract class SyncStrategy {
       await executeOperation(operation);
     }
 
-    snapshotCoverageComplete = !bootstrap || bindingRole == SyncBindingRole.ownerLink
-        ? true
-        : await _isRemoteSnapshotFullyMapped(
-            db: db,
-            remoteCollectionId: remoteCollectionId,
-            remoteSnapshotUids: remoteByUid.keys,
-          );
-    canCommitCollectionProgress = remoteTrusted && !mutationFailure && snapshotCoverageComplete;
+    if (hasRemainingPlans) {
+      summary.continuationQueued = true;
+      snapshotCoverageComplete = false;
+      canCommitCollectionProgress = false;
+      debugPrint(
+        '[SYNC_CHUNK][remote_collection_id=$remoteCollectionId] '
+        'selectedPlans=${plansToRun.length} remainingPlans=${plans.length - plansToRun.length} '
+        'selectedOperations=${selectedOperations.length} totalOperations=${allOperations.length}',
+      );
+    } else {
+      snapshotCoverageComplete = !bootstrap || bindingRole == SyncBindingRole.ownerLink
+          ? true
+          : await _isRemoteSnapshotFullyMapped(
+              db: db,
+              remoteCollectionId: remoteCollectionId,
+              remoteSnapshotUids: remoteByUid.keys,
+            );
+      canCommitCollectionProgress = remoteTrusted && !mutationFailure && snapshotCoverageComplete;
+    }
 
     if (canCommitCollectionProgress) {
       await db.update(
@@ -1044,6 +1067,68 @@ abstract class SyncStrategy {
           _CanonicalOperation(type: _CanonicalOperationType.skip, uid: uid, remote: remote, mapping: mapping, local: local),
         ];
     }
+  }
+
+  bool _shouldChunkUnifiedRun({
+    required bool bootstrap,
+    required bool safeFirstSync,
+    required int operationCount,
+  }) {
+    return bootstrap || safeFirstSync || operationCount > SyncStrategy.chunkModeOperationThreshold;
+  }
+
+  List<_PlannedAction> _selectPlanBatch(
+    List<_PlannedAction> plans, {
+    required int maxOperations,
+  }) {
+    if (plans.isEmpty) {
+      return const <_PlannedAction>[];
+    }
+    final List<_PlannedAction> selected = <_PlannedAction>[];
+    int operationCount = 0;
+    for (final plan in plans) {
+      final int planOperations = plan.operations.length;
+      if (selected.isNotEmpty && operationCount + planOperations > maxOperations) {
+        break;
+      }
+      selected.add(plan);
+      operationCount += planOperations;
+      if (selected.length == 1 && operationCount >= maxOperations) {
+        break;
+      }
+    }
+    return selected;
+  }
+
+  @visibleForTesting
+  List<int> selectPlanBatchSizesForTest(
+    List<int> planOperationSizes, {
+    required int maxOperations,
+  }) {
+    final List<_PlannedAction> plans = <_PlannedAction>[];
+    for (int i = 0; i < planOperationSizes.length; i++) {
+      final int count = planOperationSizes[i];
+      plans.add(
+        _PlannedAction(
+          uid: 'uid-$i',
+          action: SyncItemAction.skip,
+          remote: null,
+          mapping: null,
+          local: null,
+          operations: List<_CanonicalOperation>.generate(
+            count,
+            (_) => _CanonicalOperation(
+              type: _CanonicalOperationType.skip,
+              uid: 'uid-$i',
+            ),
+          ),
+        ),
+      );
+    }
+    final selected = _selectPlanBatch(plans, maxOperations: maxOperations);
+    return selected
+        .map((plan) => int.parse(plan.uid.replaceFirst('uid-', '')))
+        .toList();
   }
 
 

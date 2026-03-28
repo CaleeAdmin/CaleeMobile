@@ -13,6 +13,7 @@ class SyncSummary {
   int success = 0;
   int failed = 0;
   int processing = 0;
+  bool continuationQueued = false;
   final SyncRunTelemetry? telemetry;
 
   List<String> successLog = [];
@@ -30,6 +31,7 @@ class SyncSummary {
     success = 0;
     failed = 0;
     processing = 0;
+    continuationQueued = false;
     successLog.clear();
     errorLog.clear();
     bindingOutcomes.clear();
