@@ -87,8 +87,12 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
         return getCalendarAccountType(calendarId) == CalendarConstants.ACCOUNT_TYPE
     }
 
-    private fun getCalendarVisibility(calendarId: Long): Int? {
-        val projection = arrayOf(CalendarContract.Calendars.VISIBLE)
+    private fun getCalendarPresentationState(calendarId: Long): Triple<String?, Int?, Int?> {
+        val projection = arrayOf(
+            CalendarContract.Calendars.ACCOUNT_TYPE,
+            CalendarContract.Calendars.VISIBLE,
+            CalendarContract.Calendars.SYNC_EVENTS
+        )
         return context.contentResolver.query(
             CalendarContract.Calendars.CONTENT_URI,
             projection,
@@ -97,28 +101,11 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
             null
         )?.use { cursor ->
             if (!cursor.moveToFirst()) {
-                null
+                Triple(null, null, null)
             } else {
-                cursor.getInt(0)
+                Triple(cursor.getString(0), cursor.getInt(1), cursor.getInt(2))
             }
-        }
-    }
-
-    private fun getCalendarSyncEvents(calendarId: Long): Int? {
-        val projection = arrayOf(CalendarContract.Calendars.SYNC_EVENTS)
-        return context.contentResolver.query(
-            CalendarContract.Calendars.CONTENT_URI,
-            projection,
-            "${CalendarContract.Calendars._ID} = ?",
-            arrayOf(calendarId.toString()),
-            null
-        )?.use { cursor ->
-            if (!cursor.moveToFirst()) {
-                null
-            } else {
-                cursor.getInt(0)
-            }
-        }
+        } ?: Triple(null, null, null)
     }
 
     companion object {
@@ -156,31 +143,6 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
 
         val account = Account(accountName, CalendarConstants.ACCOUNT_TYPE)
         manager.addAccountExplicitly(account, null, null)
-        return account
-    }
-
-    private fun enforceCalendarSyncSettings(account: Account) {
-        val canWriteSyncSettings = ContextCompat.checkSelfPermission(
-            context,
-            android.Manifest.permission.WRITE_SYNC_SETTINGS
-        ) == PackageManager.PERMISSION_GRANTED
-
-        if (!canWriteSyncSettings) {
-            Log.w("CalendarSync", "WRITE_SYNC_SETTINGS not granted; skipping setIsSyncable/setSyncAutomatically")
-            return
-        }
-
-        try {
-            ContentResolver.setIsSyncable(account, CalendarConstants.CALENDAR_AUTHORITY, 1)
-            ContentResolver.setSyncAutomatically(account, CalendarConstants.CALENDAR_AUTHORITY, true)
-        } catch (se: SecurityException) {
-            Log.w("CalendarSync", "No permission to update sync settings for ${account.name}", se)
-        }
-    }
-
-    private fun ensureAccountAndSync(accountName: String): Account {
-        val account = ensureCalendarAccount(accountName)
-        enforceCalendarSyncSettings(account)
         return account
     }
 
@@ -324,7 +286,7 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
     ) {
         val accountType = CalendarConstants.ACCOUNT_TYPE
         val cr = context.contentResolver
-        ensureAccountAndSync(accountName)
+        ensureCalendarAccount(accountName)
 
         // 1. 构建带有 SyncAdapter 标识的 URI
         val uri = CalendarContract.Calendars.CONTENT_URI.buildUpon()
@@ -348,7 +310,7 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
 
             // 关键：允许提醒和可见性
             put(CalendarContract.Calendars.VISIBLE, 0)
-            put(CalendarContract.Calendars.SYNC_EVENTS, 1)
+            put(CalendarContract.Calendars.SYNC_EVENTS, 0)
             put(CalendarContract.Calendars.CALENDAR_TIME_ZONE, TimeZone.getDefault().id)
 
             // 🌟 必须：允许同步适配器对事件进行操作
@@ -362,7 +324,12 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
             val newId = resultUri?.lastPathSegment
 
             if (newId != null) {
-                enforceCalendarSyncSettings(Account(accountName, accountType))
+                val state = getCalendarPresentationState(newId.toLong())
+                Log.d(
+                    "CalendarSync",
+                    "createCalendar postInsert calendarId=$newId accountName=$accountName " +
+                        "accountType=${state.first} readback_VISIBLE=${state.second} readback_SYNC_EVENTS=${state.third}"
+                )
                 callback(Result.success(newId))
             } else {
                 callback(Result.failure(Exception("Calendar creation failed: URI is null")))
@@ -739,10 +706,10 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
                 return
             }
 
-            val account = ensureAccountAndSync(accountName)
+            val account = ensureCalendarAccount(accountName)
             val detectedAccountType = getCalendarAccountType(idLong)
             val appManagedMirror = isAppManagedMirrorCalendar(idLong)
-            val syncEventsValue = if (enabled) 1 else 0
+            val syncEventsValue = if (appManagedMirror) 0 else if (enabled) 1 else 0
             val visibleValue: Int? = if (appManagedMirror) 0 else null
             val values = ContentValues().apply {
                 put(CalendarContract.Calendars.SYNC_EVENTS, syncEventsValue)
@@ -766,13 +733,64 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
             )
 
             val rows = context.contentResolver.update(updateUri, values, null, null)
-            val readbackVisible = getCalendarVisibility(idLong)
-            val readbackSyncEvents = getCalendarSyncEvents(idLong)
+            val state = getCalendarPresentationState(idLong)
             Log.d(
                 "CalendarSync",
                 "setCalendarEnabled postUpdate calendarId=$calendarId requested_enabled=$enabled " +
                     "detectedAccountType=$detectedAccountType isAppManagedMirrorCalendar=$appManagedMirror " +
-                    "readback_VISIBLE=$readbackVisible readback_SYNC_EVENTS=$readbackSyncEvents"
+                    "accountName=$accountName accountType=${state.first} " +
+                    "readback_VISIBLE=${state.second} readback_SYNC_EVENTS=${state.third}"
+            )
+            callback(Result.success(rows > 0))
+        } catch (e: Exception) {
+            callback(Result.failure(e))
+        }
+    }
+
+    override fun normalizeMirrorCalendarPresentation(
+        calendarId: String,
+        callback: (Result<Boolean>) -> Unit
+    ) {
+        try {
+            val idLong = calendarId.toLongOrNull() ?: run {
+                callback(Result.success(false))
+                return
+            }
+
+            if (getCalendarAccountType(idLong) == null) {
+                callback(Result.success(false))
+                return
+            }
+
+            if (!isAppManagedMirrorCalendar(idLong)) {
+                callback(Result.success(false))
+                return
+            }
+
+            val account = getCalendarAccount(calendarId) ?: run {
+                callback(Result.success(false))
+                return
+            }
+
+            val values = ContentValues().apply {
+                put(CalendarContract.Calendars.VISIBLE, 0)
+                put(CalendarContract.Calendars.SYNC_EVENTS, 0)
+            }
+
+            val updateUri = ContentUris.withAppendedId(CalendarContract.Calendars.CONTENT_URI, idLong)
+                .buildUpon()
+                .appendQueryParameter(CalendarContract.CALLER_IS_SYNCADAPTER, "true")
+                .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_NAME, account.name)
+                .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_TYPE, account.type)
+                .build()
+
+            val rows = context.contentResolver.update(updateUri, values, null, null)
+            val state = getCalendarPresentationState(idLong)
+            Log.d(
+                "CalendarSync",
+                "normalizeMirrorCalendarPresentation postUpdate calendarId=$calendarId " +
+                    "accountName=${account.name} accountType=${state.first} " +
+                    "readback_VISIBLE=${state.second} readback_SYNC_EVENTS=${state.third}"
             )
             callback(Result.success(rows > 0))
         } catch (e: Exception) {

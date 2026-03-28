@@ -124,5 +124,8 @@ abstract class NativeCalendarApi {
   bool setCalendarEnabled(String calendarId, String accountName, bool enabled);
 
   @async
+  bool normalizeMirrorCalendarPresentation(String calendarId);
+
+  @async
   bool isCalendarAccountSyncEnabled(String accountName);
 }

@@ -526,9 +526,8 @@ class SyncRepository {
     }
   }
 
-  Future<void> _ensureAndroidMirrorCalendarHidden({
+  Future<void> _normalizeAndroidMirrorPresentation({
     required String localCalendarId,
-    required String accountName,
     required int bindingRole,
   }) async {
     if (!Platform.isAndroid) {
@@ -541,7 +540,7 @@ class SyncRepository {
     if (normalizedLocalId.isEmpty) {
       return;
     }
-    await _nativeApi.setCalendarEnabled(normalizedLocalId, accountName, true);
+    await _nativeApi.normalizeMirrorCalendarPresentation(normalizedLocalId);
   }
 
   Future<void> reconcileAndroidMirrorVisibilityForAccount(String accountName) async {
@@ -574,9 +573,8 @@ class SyncRepository {
         try {
           final String localId = (row['local_collection_id'] ?? '').toString();
           final int bindingRole = row['binding_role'] as int? ?? SyncBindingRole.mirror;
-          await _ensureAndroidMirrorCalendarHidden(
+          await _normalizeAndroidMirrorPresentation(
             localCalendarId: localId,
-            accountName: normalizedAccountName,
             bindingRole: bindingRole,
           );
         } catch (e) {
@@ -856,9 +854,8 @@ class SyncRepository {
           where: 'remote_collection_id = ?',
           whereArgs: [remoteCollectionId],
         );
-        await _ensureAndroidMirrorCalendarHidden(
+        await _normalizeAndroidMirrorPresentation(
           localCalendarId: existingLocalId,
-          accountName: accountName,
           bindingRole: SyncBindingRole.mirror,
         );
         _triggerOneShotForceSyncInBackground(remoteCollectionId);
@@ -1023,9 +1020,8 @@ class SyncRepository {
 
       createdLocalIdForEnableAttempt = null;
       createdBindingRoleForEnableAttempt = null;
-      await _ensureAndroidMirrorCalendarHidden(
+      await _normalizeAndroidMirrorPresentation(
         localCalendarId: normalizedLocalId,
-        accountName: accountName,
         bindingRole: SyncBindingRole.mirror,
       );
       _triggerOneShotForceSyncInBackground(remoteCollectionId);

@@ -274,6 +274,7 @@ interface NativeCalendarApi {
   fun deleteEvent(eventId: String): Boolean
   fun modifyCalendarTitle(calendarId: String, newTitle: String, accountName: String, accountType: String, callback: (Result<Boolean>) -> Unit)
   fun setCalendarEnabled(calendarId: String, accountName: String, enabled: Boolean, callback: (Result<Boolean>) -> Unit)
+  fun normalizeMirrorCalendarPresentation(calendarId: String, callback: (Result<Boolean>) -> Unit)
   fun isCalendarAccountSyncEnabled(accountName: String, callback: (Result<Boolean>) -> Unit)
 
   companion object {
@@ -497,6 +498,26 @@ interface NativeCalendarApi {
             val accountNameArg = args[1] as String
             val enabledArg = args[2] as Boolean
             api.setCalendarEnabled(calendarIdArg, accountNameArg, enabledArg) { result: Result<Boolean> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(wrapError(error))
+              } else {
+                val data = result.getOrNull()
+                reply.reply(wrapResult(data))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.caleesync.NativeCalendarApi.normalizeMirrorCalendarPresentation$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val calendarIdArg = args[0] as String
+            api.normalizeMirrorCalendarPresentation(calendarIdArg) { result: Result<Boolean> ->
               val error = result.exceptionOrNull()
               if (error != null) {
                 reply.reply(wrapError(error))
