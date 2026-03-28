@@ -424,11 +424,20 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
             val index = cursor.getColumnIndex(column)
             if (index >= 0) {
                 val value = cursor.getString(index)?.trim()
-                if (!value.isNullOrEmpty()) return value
+                if (isSafeProviderUid(value)) return value!!
             }
         }
 
         return "local_$id"
+    }
+
+    private fun isSafeProviderUid(value: String?): Boolean {
+        val trimmed = value?.trim() ?: return false
+        if (trimmed.isEmpty()) return false
+        if (trimmed.length > 190) return false
+        if (trimmed.contains('\r') || trimmed.contains('\n')) return false
+        if (trimmed.contains(';') || trimmed.contains(':')) return false
+        return Regex("^[A-Za-z0-9._@-]+$").matches(trimmed)
     }
 
     // 2. 实现计算结束时间的工具函数

@@ -1,6 +1,6 @@
 import '../../common/app_constant.dart';
+import '../../common/utils/CaleeUidSanitizer.dart';
 import '../../common/utils/EventParsedUtils.dart';
-import '../../common/utils/UidGenerator.dart';
 import '../../common/utils/mmkv_utils.dart';
 import '../../core/platform/pigeon/calendar_api.g.dart';
 import '../../data/database_helper.dart';
@@ -225,9 +225,10 @@ abstract class SyncStrategy {
       return null;
     }
 
-    String uid = (local.uid ?? '').trim();
-    if (uid.isEmpty) {
-      uid = CaleeUid.generate();
+    final String originalLocalUid = (local.uid ?? '').trim();
+    final bool localUidWasSafe = CaleeUidSanitizer.isSafeForRemotePut(originalLocalUid);
+    String uid = CaleeUidSanitizer.normalizeForRemotePut(originalLocalUid);
+    if (!localUidWasSafe) {
       await localGateway.createOrUpdateEvent(
         calendarId: localCalendarId,
         eventId: local.localId,
