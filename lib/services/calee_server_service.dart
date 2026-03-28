@@ -7,6 +7,7 @@ import 'package:xml/xml.dart' as xml;
 import '../common/app_constant.dart';
 import '../common/utils/IcsParser.dart';
 import '../common/utils/IcsSerializer.dart';
+import '../common/utils/UidGenerator.dart';
 import '../common/utils/mmkv_utils.dart';
 import '../data/database_helper.dart';
 
@@ -718,6 +719,15 @@ class CaleeServerService {
     String? originalVeventBlock,
     bool allowMinimalUpdateFallback = false,
   }) async {
+    final String rawUid = uid;
+    final String safeUid = CaleeUid.normalizeForRemoteWrite(rawUid);
+    if (safeUid != rawUid) {
+      debugPrint(
+        '[ICS_UID_REPAIR] raw="$rawUid" repaired="$safeUid" title="$title" '
+        'targetEventPath=${(targetEventPath != null && targetEventPath.trim().isNotEmpty) ? 'present' : 'absent'}',
+      );
+    }
+
     final DateTime? resolvedStart = start;
     final DateTime? resolvedEnd = end;
     final List<String> blockers = <String>[];
@@ -740,7 +750,7 @@ class CaleeServerService {
     }
 
     if (blockers.isNotEmpty) {
-      debugPrint('[ICS] Upload skipped uid=$uid summary=$title reason=${blockers.join('; ')}');
+      debugPrint('[ICS] Upload skipped uid=$safeUid summary=$title reason=${blockers.join('; ')}');
       return null;
     }
 
@@ -751,7 +761,7 @@ class CaleeServerService {
     if (hasTarget && hasOriginalBlock) {
       icsString = IcsSerializer.mergeIntoExistingVevent(
         originalVeventBlock: originalVeventBlock!,
-        uid: uid,
+        uid: safeUid,
         summary: title,
         description: description,
         location: location,
@@ -767,7 +777,7 @@ class CaleeServerService {
       );
     } else if (hasTarget && allowMinimalUpdateFallback) {
       icsString = IcsSerializer.toIcs(
-        uid: uid,
+        uid: safeUid,
         summary: title,
         description: description,
         location: location,
@@ -786,7 +796,7 @@ class CaleeServerService {
       return null;
     } else {
       icsString = IcsSerializer.toIcs(
-        uid: uid,
+        uid: safeUid,
         summary: title,
         description: description,
         location: location,
@@ -804,7 +814,7 @@ class CaleeServerService {
 
     return await putEvent(
       calendarPath: calendarPath,
-      uid: uid,
+      uid: safeUid,
       icsData: icsString,
       userId: userId,
       targetEventPath: targetEventPath,
@@ -822,6 +832,7 @@ class CaleeServerService {
   }) async {
     final baseUrl = _activeServerBase;
     final password = MMKVUtils.instance.getString(AppConstant.appPasswordKey);
+    final String safeUid = CaleeUid.normalizeForRemoteWrite(uid);
 
     // 严谨拼接 URL
     final String cleanPath = calendarPath.endsWith('/')
@@ -830,7 +841,7 @@ class CaleeServerService {
     final String normalizedTargetPath = (targetEventPath ?? '').trim();
     final String eventPath = normalizedTargetPath.isNotEmpty
         ? (normalizedTargetPath.startsWith('/') ? normalizedTargetPath : '/$normalizedTargetPath')
-        : '$cleanPath/$uid.ics';
+        : '$cleanPath/$safeUid.ics';
     final fullUrl = "$baseUrl$eventPath";
 
     try {

@@ -1,11 +1,13 @@
 import 'package:caleesync/common/utils/IcsParser.dart';
 import 'package:caleesync/common/utils/IcsSerializer.dart';
+import 'package:caleesync/common/utils/UidGenerator.dart';
 import 'package:caleesync/services/calee_server_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 class _RecordingCaleeServerService extends CaleeServerService {
   String? lastPutIcsData;
   String? lastPutTargetEventPath;
+  String? lastPutUid;
   int putCallCount = 0;
 
   @override
@@ -17,6 +19,7 @@ class _RecordingCaleeServerService extends CaleeServerService {
     String? targetEventPath,
   }) async {
     putCallCount += 1;
+    lastPutUid = uid;
     lastPutIcsData = icsData;
     lastPutTargetEventPath = targetEventPath;
     return 'etag-test';
@@ -265,6 +268,116 @@ void main() {
   });
 
   group('CaleeServerService.uploadEventData', () {
+    test('malformed long UID is repaired before PUT', () async {
+      final service = _RecordingCaleeServerService();
+      final String longUid = 'X' * 400;
+
+      final result = await service.uploadEventData(
+        userId: 'user',
+        calendarPath: '/remote.php/dav/calendars/user/test/',
+        uid: longUid,
+        title: 'Long UID Event',
+        start: DateTime.utc(2026, 12, 12, 10),
+        end: DateTime.utc(2026, 12, 12, 11),
+      );
+
+      expect(result, isNotNull);
+      expect(service.lastPutUid, isNot(longUid));
+      expect(service.lastPutUid, startsWith('CALEE-REPAIRED-'));
+      expect(service.lastPutIcsData, contains('UID:${service.lastPutUid}'));
+    });
+
+    test('contaminated UID is repaired before PUT', () async {
+      final service = _RecordingCaleeServerService();
+      const String contaminatedUid = 'safe-part\r\nATTENDEE:mailto:hijack@example.com';
+
+      final result = await service.uploadEventData(
+        userId: 'user',
+        calendarPath: '/remote.php/dav/calendars/user/test/',
+        uid: contaminatedUid,
+        title: 'Contaminated UID Event',
+        start: DateTime.utc(2026, 12, 12, 10),
+        end: DateTime.utc(2026, 12, 12, 11),
+      );
+
+      expect(result, isNotNull);
+      expect(service.lastPutUid, isNot(contaminatedUid));
+      expect(service.lastPutUid, startsWith('CALEE-REPAIRED-'));
+      expect(service.lastPutIcsData, isNot(contains('hijack@example.com')));
+    });
+
+    test('same bad UID repairs deterministically across repeated calls', () async {
+      final service = _RecordingCaleeServerService();
+      const String badUid = 'bad uid with spaces and/slash';
+      final String expected = CaleeUid.normalizeForRemoteWrite(badUid);
+
+      final first = await service.uploadEventData(
+        userId: 'user',
+        calendarPath: '/remote.php/dav/calendars/user/test/',
+        uid: badUid,
+        title: 'Event One',
+        start: DateTime.utc(2026, 12, 12, 10),
+        end: DateTime.utc(2026, 12, 12, 11),
+      );
+      final String? firstUid = service.lastPutUid;
+
+      final second = await service.uploadEventData(
+        userId: 'user',
+        calendarPath: '/remote.php/dav/calendars/user/test/',
+        uid: badUid,
+        title: 'Event Two',
+        start: DateTime.utc(2026, 12, 13, 10),
+        end: DateTime.utc(2026, 12, 13, 11),
+      );
+      final String? secondUid = service.lastPutUid;
+
+      expect(first, isNotNull);
+      expect(second, isNotNull);
+      expect(firstUid, expected);
+      expect(secondUid, expected);
+    });
+
+    test('valid UUID-shaped UID is unchanged', () async {
+      final service = _RecordingCaleeServerService();
+      const String validUuid = 'ae6c35cc-3203-44d8-a56c-973d48d7e289';
+
+      final result = await service.uploadEventData(
+        userId: 'user',
+        calendarPath: '/remote.php/dav/calendars/user/test/',
+        uid: validUuid,
+        title: 'UUID Event',
+        start: DateTime.utc(2026, 12, 12, 10),
+        end: DateTime.utc(2026, 12, 12, 11),
+      );
+
+      expect(result, isNotNull);
+      expect(service.lastPutUid, validUuid);
+      expect(service.lastPutIcsData, contains('UID:$validUuid'));
+    });
+
+    test('existing update with targetEventPath keeps target path while body UID is repaired', () async {
+      final service = _RecordingCaleeServerService();
+      const String badUid = 'bad uid with spaces';
+      const String targetPath = '/remote.php/dav/calendars/user/test/existing.ics';
+
+      final result = await service.uploadEventData(
+        userId: 'user',
+        calendarPath: '/remote.php/dav/calendars/user/test/',
+        uid: badUid,
+        title: 'Existing Event',
+        parseSource: 'VEVENT',
+        start: DateTime.utc(2026, 12, 12, 10),
+        end: DateTime.utc(2026, 12, 12, 11),
+        targetEventPath: targetPath,
+        originalVeventBlock: 'BEGIN:VEVENT\r\nUID:legacy\r\nSUMMARY:Existing\r\nEND:VEVENT\r\n',
+      );
+
+      expect(result, isNotNull);
+      expect(service.lastPutTargetEventPath, targetPath);
+      expect(service.lastPutUid, CaleeUid.normalizeForRemoteWrite(badUid));
+      expect(service.lastPutIcsData, contains('UID:${service.lastPutUid}'));
+    });
+
     test('blocks implausible ancient-start modern-end payloads before upload', () async {
       final service = CaleeServerService();
       final result = await service.uploadEventData(
