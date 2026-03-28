@@ -451,6 +451,7 @@ class CaleeServerService {
           'created': parsed['created'],
           'last_modified': parsed['last_modified'],
           'parse_source': parsed['parse_source'],
+          'vevent_block': parsed['vevent_block'],
 
           'remote_uid': instanceKey,
           'start': parsed['dtstart'],

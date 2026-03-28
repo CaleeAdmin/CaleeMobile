@@ -357,12 +357,12 @@ void main() {
     expect(gateway.lastUploadArgs, isNull);
   });
 
-  test('simple UUID existing remote event may allow minimal fallback', () async {
+  test('simple local-origin existing remote event may allow minimal fallback', () async {
     final gateway = _RecordingRemoteGateway();
     final strategy = _TestSyncStrategy(remote: gateway);
     final local = PlatformItem(
-      uid: 'C4975D9D-34B2-4D21-8AC9-874A96685F7F',
-      title: 'Title',
+      uid: 'local_109',
+      title: 'Test 2 from pixel 2',
       startTime: DateTime.utc(2026, 12, 12, 10).millisecondsSinceEpoch,
       endTime: DateTime.utc(2026, 12, 12, 11).millisecondsSinceEpoch,
     );
@@ -373,17 +373,48 @@ void main() {
       localCalendarId: 'cal-1',
       remoteSnapshot: {
         'parse_source': 'VEVENT',
-        'uid': 'C4975D9D-34B2-4D21-8AC9-874A96685F7F',
-        'calendar_data': 'BEGIN:VEVENT\r\nUID:C4975D9D-34B2-4D21-8AC9-874A96685F7F\r\nEND:VEVENT\r\n',
+        'uid': 'local_109',
+        'summary': 'Test 2 from pixel',
+        'calendar_data': 'BEGIN:VEVENT\r\nUID:local_109\r\nSUMMARY:Test 2 from pixel\r\nEND:VEVENT\r\n',
         'vevent_block': null,
         'rrule': '',
         'recurrence_id': '',
       },
-      targetRemoteHref: '/remote.php/dav/calendars/tester/work/uid-simple.ics',
+      targetRemoteHref: '/remote.php/dav/calendars/tester/work/local_109.ics',
     );
 
     expect(result, isNotNull);
     expect(gateway.lastUploadArgs?['allowMinimalUpdateFallback'], isTrue);
+    expect(gateway.lastUploadArgs?['targetEventPath'], '/remote.php/dav/calendars/tester/work/local_109.ics');
+  });
+
+  test('existing remote update prefers VEVENT merge path when vevent_block exists', () async {
+    final gateway = _RecordingRemoteGateway();
+    final strategy = _TestSyncStrategy(remote: gateway);
+    final local = PlatformItem(
+      uid: 'local_109',
+      title: 'Test 2 from pixel 2',
+      startTime: DateTime.utc(2026, 12, 12, 10).millisecondsSinceEpoch,
+      endTime: DateTime.utc(2026, 12, 12, 11).millisecondsSinceEpoch,
+    );
+
+    final result = await strategy.pushLocalEventToRemote(
+      local: local,
+      remotePath: '/remote.php/dav/calendars/tester/work/',
+      localCalendarId: 'cal-1',
+      remoteSnapshot: {
+        'parse_source': 'VEVENT',
+        'uid': 'local_109',
+        'vevent_block': 'BEGIN:VEVENT\r\nUID:local_109\r\nSUMMARY:Test 2 from pixel\r\nEND:VEVENT\r\n',
+        'rrule': '',
+        'recurrence_id': '',
+      },
+      targetRemoteHref: '/remote.php/dav/calendars/tester/work/local_109.ics',
+    );
+
+    expect(result, isNotNull);
+    expect(gateway.lastUploadArgs?['allowMinimalUpdateFallback'], isFalse);
+    expect((gateway.lastUploadArgs?['originalVeventBlock'] as String?)?.isNotEmpty, isTrue);
   });
 
   test('recurring existing remote event with missing vevent_block is blocked', () async {
