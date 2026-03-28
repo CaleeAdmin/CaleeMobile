@@ -565,24 +565,35 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
 
             if (request.eventId != null && request.eventId.isNotEmpty()) {
                 // --- 执行更新 UPDATE ---
-                val eventBaseUri = ContentUris.withAppendedId(
-                    CalendarContract.Events.CONTENT_URI,
-                    request.eventId.toLong()
-                )
-                val syncAdapterUpdateUri = buildEventWriteUri(eventBaseUri, request.calendarId)
-                val rows = try {
-                    contentResolver.update(syncAdapterUpdateUri, values, null, null)
-                } catch (iae: IllegalArgumentException) {
-                    contentResolver.update(eventBaseUri, values, null, null)
-                }
+                val rows = updateEventById(request.eventId, request.calendarId, values)
 
                 if (rows > 0) {
                     callback(Result.success(request.eventId))
                 } else {
-                    // 如果传入了 ID 但没找到记录，转为插入或返回失败
+                    val canonicalEventId = chooseCanonicalEventId(
+                        findExistingEventIdsByUid(request.calendarId, request.uid)
+                    )
+                    if (canonicalEventId != null) {
+                        val fallbackRows = updateEventById(canonicalEventId, request.calendarId, values)
+                        if (fallbackRows > 0) {
+                            callback(Result.success(canonicalEventId))
+                            return
+                        }
+                    }
                     callback(Result.failure(Exception("Event with ID ${request.eventId} not found for update")))
                 }
             } else {
+                val canonicalEventId = chooseCanonicalEventId(
+                    findExistingEventIdsByUid(request.calendarId, request.uid)
+                )
+                if (canonicalEventId != null) {
+                    val rows = updateEventById(canonicalEventId, request.calendarId, values)
+                    if (rows > 0) {
+                        callback(Result.success(canonicalEventId))
+                        return
+                    }
+                }
+
                 // --- 执行插入 INSERT ---
                 val syncAdapterUri = buildEventWriteUri(CalendarContract.Events.CONTENT_URI, request.calendarId)
                 var uri = contentResolver.insert(syncAdapterUri, values)
@@ -601,6 +612,54 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
             }
         } catch (e: Exception) {
             callback(Result.failure(e))
+        }
+    }
+
+    private fun findExistingEventIdsByUid(calendarId: String, uid: String): List<String> {
+        if (uid.isBlank()) {
+            return emptyList()
+        }
+
+        val eventIds = mutableListOf<String>()
+        val projection = arrayOf(CalendarContract.Events._ID)
+        val selection = "${CalendarContract.Events.CALENDAR_ID} = ? AND " +
+            "${CalendarContract.Events.UID_2445} = ? AND " +
+            "${CalendarContract.Events.DELETED} = 0"
+        val selectionArgs = arrayOf(calendarId, uid)
+
+        context.contentResolver.query(
+            CalendarContract.Events.CONTENT_URI,
+            projection,
+            selection,
+            selectionArgs,
+            null
+        )?.use { cursor ->
+            while (cursor.moveToNext()) {
+                eventIds.add(cursor.getLong(0).toString())
+            }
+        }
+
+        return eventIds
+    }
+
+    private fun chooseCanonicalEventId(eventIds: List<String>): String? {
+        return eventIds
+            .mapNotNull { it.toLongOrNull() }
+            .minOrNull()
+            ?.toString()
+    }
+
+    private fun updateEventById(eventId: String, calendarId: String, values: ContentValues): Int {
+        val parsedEventId = eventId.toLongOrNull() ?: return 0
+        val eventBaseUri = ContentUris.withAppendedId(
+            CalendarContract.Events.CONTENT_URI,
+            parsedEventId
+        )
+        val syncAdapterUpdateUri = buildEventWriteUri(eventBaseUri, calendarId)
+        return try {
+            context.contentResolver.update(syncAdapterUpdateUri, values, null, null)
+        } catch (iae: IllegalArgumentException) {
+            context.contentResolver.update(eventBaseUri, values, null, null)
         }
     }
 

@@ -168,6 +168,8 @@ abstract class SyncStrategy {
       return null;
     }
 
+    // Native Android now relinks by (calendar_id + UID_2445) when existingLocalId is stale/missing,
+    // so this pull path intentionally keeps passing both existingLocalId and eventData.uid unchanged.
     final String? localEventId = await localGateway.createOrUpdateEvent(
       calendarId: localCalendarId,
       title: eventData.summary,
