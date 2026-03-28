@@ -409,6 +409,7 @@ class CalendarPageController extends GetxController {
           serverUrl: _authService.normalizedUrl,
           authUserId: authUserId,
           accountName: accountName);
+      await _repo.reconcileAndroidMirrorVisibilityForAccount(accountName);
 
       // 2. 查询本地 remote_collections 的所有日历记录
       final db = await DatabaseHelper.instance.database;
