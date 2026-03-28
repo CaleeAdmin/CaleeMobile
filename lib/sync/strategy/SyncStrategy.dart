@@ -602,6 +602,26 @@ abstract class SyncStrategy {
     return _RepairResult(records: refreshed, removedCount: toDeleteIds.length);
   }
 
+  Future<bool> _isRemoteSnapshotFullyMapped({
+    required Database db,
+    required int remoteCollectionId,
+    required Iterable<String> remoteSnapshotUids,
+  }) async {
+    if (remoteSnapshotUids.isEmpty) return true;
+    final List<Map<String, dynamic>> rows = await db.query(
+      'sync_items',
+      columns: ['remote_uid'],
+      where: 'remote_collection_id = ?',
+      whereArgs: [remoteCollectionId],
+    );
+    final Set<String> mappedUids = {
+      for (final row in rows)
+        if ((row['remote_uid']?.toString() ?? '').trim().isNotEmpty)
+          row['remote_uid'].toString().trim(),
+    };
+    return remoteSnapshotUids.every(mappedUids.contains);
+  }
+
   Future<void> runUnifiedSync(
     SyncContext ctx,
     SyncSummary summary, {
@@ -737,6 +757,9 @@ abstract class SyncStrategy {
     int deleteLocal = 0;
     int deleteRemote = 0;
     int skip = 0;
+    bool mutationFailure = false;
+    bool snapshotCoverageComplete = true;
+    bool canCommitCollectionProgress = false;
 
     final Map<String, _ExecutionState> states = {
       for (final plan in plans) plan.uid: _ExecutionState(),
@@ -761,6 +784,7 @@ abstract class SyncStrategy {
             isSubscription: ctx.isSubscription ?? false,
           );
           if (pulled == null) {
+            mutationFailure = true;
             skip++;
             return;
           }
@@ -790,6 +814,7 @@ abstract class SyncStrategy {
                 : null,
           );
           if (pushed == null) {
+            mutationFailure = true;
             skip++;
             return;
           }
@@ -907,19 +932,34 @@ abstract class SyncStrategy {
       await executeOperation(operation);
     }
 
-    await db.update(
-      'remote_collections',
-      {'synced_ctag': ctx.ctag},
-      where: 'id = ?',
-      whereArgs: [remoteCollectionId],
-    );
+    snapshotCoverageComplete = !bootstrap || bindingRole == SyncBindingRole.ownerLink
+        ? true
+        : await _isRemoteSnapshotFullyMapped(
+            db: db,
+            remoteCollectionId: remoteCollectionId,
+            remoteSnapshotUids: remoteByUid.keys,
+          );
+    canCommitCollectionProgress = remoteTrusted && !mutationFailure && snapshotCoverageComplete;
 
-    if (safeFirstSync) {
+    if (canCommitCollectionProgress) {
       await db.update(
-        'collection_states',
-        {'sync_gate_reason': null},
-        where: 'remote_collection_id = ?',
+        'remote_collections',
+        {'synced_ctag': ctx.ctag},
+        where: 'id = ?',
         whereArgs: [remoteCollectionId],
+      );
+
+      if (safeFirstSync) {
+        await db.update(
+          'collection_states',
+          {'sync_gate_reason': null},
+          where: 'remote_collection_id = ?',
+          whereArgs: [remoteCollectionId],
+        );
+      }
+    } else {
+      debugPrint(
+        '[SYNC_GATE][remote_collection_id=$remoteCollectionId] bootstrap/reconnect incomplete; keeping synced_ctag and safe_first_sync unchanged',
       );
     }
 
