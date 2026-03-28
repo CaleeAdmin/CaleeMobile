@@ -47,18 +47,29 @@ abstract class SyncStrategy {
     required int rangeEndMs,
   }) async {
     final events = await localGateway.getEvents(localCalendarId, rangeStartMs, rangeEndMs);
-    bool canInferDeletesFromLocalAbsence = false;
+    Set<String> rangedSystemIds = <String>{};
+    bool snapshotCoverageComplete = false;
     try {
-      await localGateway.getSystemEventIds(localCalendarId, rangeStartMs, rangeEndMs);
-      canInferDeletesFromLocalAbsence = true;
+      rangedSystemIds = (await localGateway.getSystemEventIds(localCalendarId, rangeStartMs, rangeEndMs))
+          .map((id) => id.trim())
+          .where((id) => id.isNotEmpty)
+          .toSet();
+      final Set<String> rangedEventIds = {
+        for (final event in events)
+          if ((event.localId ?? '').trim().isNotEmpty) (event.localId ?? '').trim(),
+      };
+      snapshotCoverageComplete = rangedEventIds.every(rangedSystemIds.contains);
     } catch (_) {
-      canInferDeletesFromLocalAbsence = false;
+      rangedSystemIds = <String>{};
+      snapshotCoverageComplete = false;
     }
     return LocalEventsSnapshot(
       events: events,
       rangeStartMs: rangeStartMs,
       rangeEndMs: rangeEndMs,
-      canInferDeletesFromLocalAbsence: canInferDeletesFromLocalAbsence,
+      rangedSystemIds: rangedSystemIds,
+      snapshotCoverageComplete: snapshotCoverageComplete,
+      canInferDeletesFromLocalAbsence: snapshotCoverageComplete,
     );
   }
 
@@ -111,6 +122,7 @@ abstract class SyncStrategy {
       return AdaptiveLocalFetchWindow(
         rangeStartMs: nowMs - fallbackPastMs,
         rangeEndMs: nowMs + fallbackFutureMs,
+        wasClamped: false,
       );
     }
 
@@ -125,10 +137,12 @@ abstract class SyncStrategy {
     }
 
     final int span = maxTs - minTs;
+    bool wasClamped = false;
     if (span > clampSpanMs) {
       final int center = minTs + (span ~/ 2);
       minTs = center - (clampSpanMs ~/ 2);
       maxTs = center + (clampSpanMs ~/ 2);
+      wasClamped = true;
     }
 
     final int finalStartMs = minTs < liveStartMs ? minTs : liveStartMs;
@@ -137,7 +151,71 @@ abstract class SyncStrategy {
     return AdaptiveLocalFetchWindow(
       rangeStartMs: finalStartMs,
       rangeEndMs: finalEndMs,
+      wasClamped: wasClamped,
     );
+  }
+
+  DeleteInferenceAssessment assessDeleteInferenceAuthority({
+    required LocalEventsSnapshot localSnapshot,
+    required List<Map<String, dynamic>> mappedRecords,
+    required AdaptiveLocalFetchWindow window,
+  }) {
+    final Set<String> mappedInWindowLocalIds = <String>{};
+    final Set<String> mappedOutsideWindowUids = <String>{};
+    for (final mapping in mappedRecords) {
+      final String localId = (mapping['local_item_id']?.toString() ?? '').trim();
+      final String uid = (mapping['remote_uid']?.toString() ?? '').trim();
+      if (localId.isEmpty || uid.isEmpty) continue;
+      if (_mappingOverlapsWindow(
+        mapping: mapping,
+        rangeStartMs: window.rangeStartMs,
+        rangeEndMs: window.rangeEndMs,
+      )) {
+        mappedInWindowLocalIds.add(localId);
+      } else {
+        mappedOutsideWindowUids.add(uid);
+      }
+    }
+
+    final Set<String> missingMappedLocalIds =
+        mappedInWindowLocalIds.where((id) => !localSnapshot.rangedSystemIds.contains(id)).toSet();
+    final bool snapshotCoverageComplete = localSnapshot.snapshotCoverageComplete && missingMappedLocalIds.isEmpty;
+    final Set<String> disableReasons = <String>{};
+    if (!localSnapshot.snapshotCoverageComplete) {
+      disableReasons.add('local_snapshot_incomplete');
+    }
+    if (window.wasClamped) {
+      disableReasons.add('window_clamped');
+    }
+    if (missingMappedLocalIds.isNotEmpty) {
+      disableReasons.add('mapped_ids_missing_from_system_scan');
+    }
+    return DeleteInferenceAssessment(
+      canDeleteRemoteFromMissingLocal: snapshotCoverageComplete,
+      disableReasons: disableReasons,
+      mappedInWindowLocalIds: mappedInWindowLocalIds,
+      missingMappedLocalIds: missingMappedLocalIds,
+      mappedOutsideWindowUids: mappedOutsideWindowUids,
+    );
+  }
+
+  bool _mappingOverlapsWindow({
+    required Map<String, dynamic> mapping,
+    required int rangeStartMs,
+    required int rangeEndMs,
+  }) {
+    int? parsePositive(dynamic value) {
+      final int? parsed = value is int ? value : int.tryParse((value ?? '').toString());
+      if (parsed == null || parsed <= 0) return null;
+      return parsed;
+    }
+
+    final int? dtstart = parsePositive(mapping['dtstart']);
+    final int? dtend = parsePositive(mapping['dtend']);
+    if (dtstart == null || dtend == null) {
+      return true;
+    }
+    return dtstart < rangeEndMs && dtend > rangeStartMs;
   }
 
   Map<String, PlatformItem> mapLocalEventsByUid(List<PlatformItem> localEvents) {
@@ -709,15 +787,27 @@ abstract class SyncStrategy {
 
     final bool remoteTrusted = snapshot.fetchSucceeded &&
         (snapshot.statusCode == 200 || snapshot.statusCode == 207);
-    final bool canDeleteRemoteFromMissingLocal = localSnapshot.canInferDeletesFromLocalAbsence;
+    final DeleteInferenceAssessment deleteInferenceAssessment = assessDeleteInferenceAuthority(
+      localSnapshot: localSnapshot,
+      mappedRecords: dedup.records,
+      window: adaptiveWindow,
+    );
+    final bool canDeleteRemoteFromMissingLocal = deleteInferenceAssessment.canDeleteRemoteFromMissingLocal;
     final bool canDeleteLocalFromMissingRemote = remoteTrusted;
 
     final List<_PlannedAction> plans = [];
+    int remoteDeleteCandidatesBeforeGating = 0;
     for (final uid in allUids) {
       final remote = remoteByUid[uid];
       final mapping = mappingByUid[uid];
       final PlatformItem? local = localByUid[uid] ??
           (mapping != null ? localById[mapping['local_item_id']?.toString() ?? ''] : null);
+      final bool canDeleteRemoteForUid = canDeleteRemoteFromMissingLocal &&
+          !deleteInferenceAssessment.mappedOutsideWindowUids.contains(uid);
+
+      if (remote != null && mapping != null && local == null) {
+        remoteDeleteCandidatesBeforeGating++;
+      }
 
       final action = _decideCanonicalAction(
         uid: uid,
@@ -727,7 +817,7 @@ abstract class SyncStrategy {
         bindingRole: bindingRole,
         rules: rules,
         bootstrap: bootstrap,
-        canDeleteRemoteFromMissingLocal: canDeleteRemoteFromMissingLocal,
+        canDeleteRemoteFromMissingLocal: canDeleteRemoteForUid,
         canDeleteLocalFromMissingRemote: canDeleteLocalFromMissingRemote,
       );
       plans.add(_PlannedAction(
@@ -749,6 +839,19 @@ abstract class SyncStrategy {
     final List<_CanonicalOperation> allOperations = plans.expand((p) => p.operations).toList();
     final int localDeleteCandidates = allOperations.where((o) => o.type == _CanonicalOperationType.localDelete).length;
     final int remoteDeleteCandidates = allOperations.where((o) => o.type == _CanonicalOperationType.remoteDelete).length;
+    final bool deleteInferencePartiallyDisabled =
+        !canDeleteRemoteFromMissingLocal || deleteInferenceAssessment.mappedOutsideWindowUids.isNotEmpty;
+    if (deleteInferencePartiallyDisabled) {
+      final Set<String> reasons = {...deleteInferenceAssessment.disableReasons};
+      if (deleteInferenceAssessment.mappedOutsideWindowUids.isNotEmpty) {
+        reasons.add('window_clamped');
+      }
+      summary.telemetry?.onSafetyTriggered(
+        ctx: ctx,
+        detail:
+            'delete_inference_disabled reasons=${reasons.join(",")} mapped_in_window=${deleteInferenceAssessment.mappedInWindowLocalIds.length} ranged_system_ids=${localSnapshot.rangedSystemIds.length} missing_mapped_ids=${deleteInferenceAssessment.missingMappedLocalIds.length} remoteDeleteCandidatesBeforeGating=$remoteDeleteCandidatesBeforeGating',
+      );
+    }
     final bool allowMassDeletion = isMassDeletionOverrideEnabled(bindingId);
     final bool massDeletionSafetyTripped =
         localDeleteCandidates >= SyncStrategy.massDeletionAbsoluteThreshold ||
@@ -1432,12 +1535,16 @@ class LocalEventsSnapshot {
   final List<PlatformItem> events;
   final int rangeStartMs;
   final int rangeEndMs;
+  final Set<String> rangedSystemIds;
+  final bool snapshotCoverageComplete;
   final bool canInferDeletesFromLocalAbsence;
 
   const LocalEventsSnapshot({
     required this.events,
     required this.rangeStartMs,
     required this.rangeEndMs,
+    required this.rangedSystemIds,
+    required this.snapshotCoverageComplete,
     required this.canInferDeletesFromLocalAbsence,
   });
 }
@@ -1445,10 +1552,28 @@ class LocalEventsSnapshot {
 class AdaptiveLocalFetchWindow {
   final int rangeStartMs;
   final int rangeEndMs;
+  final bool wasClamped;
 
   const AdaptiveLocalFetchWindow({
     required this.rangeStartMs,
     required this.rangeEndMs,
+    required this.wasClamped,
+  });
+}
+
+class DeleteInferenceAssessment {
+  final bool canDeleteRemoteFromMissingLocal;
+  final Set<String> disableReasons;
+  final Set<String> mappedInWindowLocalIds;
+  final Set<String> missingMappedLocalIds;
+  final Set<String> mappedOutsideWindowUids;
+
+  const DeleteInferenceAssessment({
+    required this.canDeleteRemoteFromMissingLocal,
+    required this.disableReasons,
+    required this.mappedInWindowLocalIds,
+    required this.missingMappedLocalIds,
+    required this.mappedOutsideWindowUids,
   });
 }
 

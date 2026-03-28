@@ -377,11 +377,13 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
             CalendarContract.Events.EVENT_TIMEZONE
         )
 
+        val overlapEndExpr =
+            "CASE WHEN ${CalendarContract.Events.DTEND} <= 0 THEN ${CalendarContract.Events.DTSTART} + 1 ELSE ${CalendarContract.Events.DTEND} END"
         val selection = "${CalendarContract.Events.CALENDAR_ID} = ? AND " +
-                "${CalendarContract.Events.DTSTART} >= ? AND " +
-                "${CalendarContract.Events.DTSTART} <= ? AND " +
-                "${CalendarContract.Events.DELETED} = 0"
-        val selectionArgs = arrayOf(calendarId, startMs.toString(), endMs.toString())
+                "${CalendarContract.Events.DELETED} = 0 AND " +
+                "${CalendarContract.Events.DTSTART} < ? AND " +
+                "$overlapEndExpr > ?"
+        val selectionArgs = arrayOf(calendarId, endMs.toString(), startMs.toString())
 
         context.contentResolver.query(uri, EVENT_PROJECTION, selection, selectionArgs, null)?.use { cursor ->
             while (cursor.moveToNext()) {
@@ -608,10 +610,12 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
         val eventIds = mutableListOf<String>()
         val uri = CalendarContract.Events.CONTENT_URI
         val projection = arrayOf(CalendarContract.Events._ID)
+        val overlapEndExpr =
+            "CASE WHEN ${CalendarContract.Events.DTEND} <= 0 THEN ${CalendarContract.Events.DTSTART} + 1 ELSE ${CalendarContract.Events.DTEND} END"
         val selection = "${CalendarContract.Events.CALENDAR_ID} = ? AND " +
             "${CalendarContract.Events.DELETED} = 0 AND " +
             "${CalendarContract.Events.DTSTART} < ? AND " +
-            "${CalendarContract.Events.DTEND} > ?"
+            "$overlapEndExpr > ?"
         val selectionArgs = arrayOf(calendarId, endMs.toString(), startMs.toString())
         try {
             context.contentResolver.query(uri, projection, selection, selectionArgs, null)?.use { cursor ->

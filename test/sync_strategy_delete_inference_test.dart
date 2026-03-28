@@ -138,7 +138,7 @@ void main() {
   });
 
   group('SyncStrategy loadLocalEvents trust flag', () {
-    test('marks local absence trusted when ranged system ID enumeration succeeds', () async {
+    test('marks local snapshot complete when ranged system IDs cover all fetched events', () async {
       final gateway = _FakeLocalItemGateway(
         events: [PlatformItem(localId: 'l-1', uid: 'uid-1')],
         systemIds: ['l-1'],
@@ -151,10 +151,32 @@ void main() {
         rangeEndMs: 2000,
       );
 
+      expect(snapshot.rangedSystemIds, {'l-1'});
+      expect(snapshot.snapshotCoverageComplete, isTrue);
       expect(snapshot.canInferDeletesFromLocalAbsence, isTrue);
     });
 
-    test('marks local absence untrusted when ranged system ID enumeration throws', () async {
+    test('marks local snapshot incomplete when ranged system IDs miss fetched event ids', () async {
+      final gateway = _FakeLocalItemGateway(
+        events: [
+          PlatformItem(localId: 'l-1', uid: 'uid-1'),
+          PlatformItem(localId: 'l-2', uid: 'uid-2'),
+        ],
+        systemIds: ['l-1'],
+      );
+      final strategy = _TestSyncStrategy(gateway: gateway);
+
+      final snapshot = await strategy.loadLocalEvents(
+        'cal-1',
+        rangeStartMs: 1000,
+        rangeEndMs: 2000,
+      );
+
+      expect(snapshot.snapshotCoverageComplete, isFalse);
+      expect(snapshot.canInferDeletesFromLocalAbsence, isFalse);
+    });
+
+    test('marks local snapshot incomplete when ranged system ID enumeration throws', () async {
       final gateway = _FakeLocalItemGateway(
         events: [PlatformItem(localId: 'l-1', uid: 'uid-1')],
         shouldThrowOnGetSystemIds: true,
@@ -167,6 +189,8 @@ void main() {
         rangeEndMs: 2000,
       );
 
+      expect(snapshot.rangedSystemIds, isEmpty);
+      expect(snapshot.snapshotCoverageComplete, isFalse);
       expect(snapshot.canInferDeletesFromLocalAbsence, isFalse);
     });
 

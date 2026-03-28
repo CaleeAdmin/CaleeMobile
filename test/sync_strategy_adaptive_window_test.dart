@@ -24,6 +24,7 @@ void main() {
       final expectedEnd = now.add(const Duration(days: 365 * 3)).millisecondsSinceEpoch;
       expect(window.rangeStartMs, expectedStart);
       expect(window.rangeEndMs, expectedEnd);
+      expect(window.wasClamped, isFalse);
     });
 
     test('builds from remote and mapped ranges with padding', () {
@@ -50,6 +51,7 @@ void main() {
 
       expect(window.rangeStartMs, historicalStart < liveStart ? historicalStart : liveStart);
       expect(window.rangeEndMs, historicalEnd > liveEnd ? historicalEnd : liveEnd);
+      expect(window.wasClamped, isFalse);
     });
 
     test('clamps very large spans', () {
@@ -69,6 +71,7 @@ void main() {
       expect(span <= const Duration(days: 365 * 8).inMilliseconds, isTrue);
       expect(window.rangeStartMs <= now.subtract(const Duration(days: 365)).millisecondsSinceEpoch, isTrue);
       expect(window.rangeEndMs >= now.add(const Duration(days: 730)).millisecondsSinceEpoch, isTrue);
+      expect(window.wasClamped, isTrue);
     });
 
     test('long history cannot exclude present or future live window events', () {
