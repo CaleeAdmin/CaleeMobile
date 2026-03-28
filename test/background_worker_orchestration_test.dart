@@ -11,8 +11,10 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  const String notifyReadyChannel =
-      'dev.flutter.pigeon.caleesync.BackgroundSyncRunnerHostApi.notifyBackgroundIsolateReady';
+  const BasicMessageChannel<Object?> notifyReadyChannel = BasicMessageChannel<Object?>(
+    'dev.flutter.pigeon.caleesync.BackgroundSyncRunnerHostApi.notifyBackgroundIsolateReady',
+    BackgroundSyncRunnerHostApi.pigeonChannelCodec,
+  );
 
   setUp(() {
     BackgroundSyncWorkerBridge.runStartTimeoutForTest = const Duration(seconds: 20);
