@@ -30,6 +30,7 @@ class BackgroundSyncWorkerBridge implements BackgroundSyncRunnerApi {
   static const Duration _readyNotifyWindow = Duration(seconds: 20);
   static const Duration _readyNotifyRetryDelay = Duration(milliseconds: 350);
   static const Duration _runStartTimeout = Duration(seconds: 20);
+  static const Duration _backgroundSyncBudget = Duration(seconds: 150);
   @visibleForTesting
   static Duration runStartTimeoutForTest = _runStartTimeout;
   @visibleForTesting
@@ -174,10 +175,12 @@ class BackgroundSyncWorkerBridge implements BackgroundSyncRunnerApi {
         }
 
         try {
-          final summary = await SyncEngine().executeFullSync(
-            trigger: _mapTrigger(trigger),
-            waitForTurn: false,
-          );
+          final summary = await SyncEngine()
+              .executeFullSync(
+                trigger: _mapTrigger(trigger),
+                waitForTurn: false,
+              )
+              .timeout(_backgroundSyncBudget);
           if (summary == null) {
             return BackgroundRunResult(
               outcome: BackgroundRunOutcome.success,
@@ -197,6 +200,14 @@ class BackgroundSyncWorkerBridge implements BackgroundSyncRunnerApi {
             return BackgroundRunResult(outcome: BackgroundRunOutcome.retry, reason: details.isEmpty ? 'transient' : details, gateReason: BackgroundGateReason.none, error: details, contractVersion: kBackgroundSyncContractVersion);
           }
           return BackgroundRunResult(outcome: BackgroundRunOutcome.failure, reason: details.isEmpty ? 'sync_failed' : details, gateReason: BackgroundGateReason.none, error: details, contractVersion: kBackgroundSyncContractVersion);
+        } on TimeoutException {
+          return BackgroundRunResult(
+            outcome: BackgroundRunOutcome.retry,
+            reason: 'sync_execution_timeout',
+            gateReason: BackgroundGateReason.none,
+            error: 'background_sync_budget_exceeded',
+            contractVersion: kBackgroundSyncContractVersion,
+          );
         } on SocketException catch (e) {
           return BackgroundRunResult(outcome: BackgroundRunOutcome.retry, reason: 'socket_exception', gateReason: BackgroundGateReason.noNetwork, error: e.message, contractVersion: kBackgroundSyncContractVersion);
         } on TimeoutException catch (e) {

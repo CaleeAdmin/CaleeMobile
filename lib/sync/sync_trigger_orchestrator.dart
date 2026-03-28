@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:caleesync/common/app_constant.dart';
 import 'package:caleesync/common/utils/mmkv_utils.dart';
@@ -75,7 +74,7 @@ class SyncTriggerOrchestrator extends GetxService with WidgetsBindingObserver {
     if (_shouldRunInline(trigger)) {
       final SyncSummary? summary = await SyncEngine().executeFullSync(
         onProgress: onProgress,
-        trigger: SyncRunTrigger.manual,
+        trigger: _mapInlineTrigger(trigger),
         waitForTurn: true,
       );
       return summary ?? SyncSummary();
@@ -95,7 +94,16 @@ class SyncTriggerOrchestrator extends GetxService with WidgetsBindingObserver {
   }
 
   bool _shouldRunInline(SyncTriggerType trigger) {
-    return Platform.isIOS && _appActive && trigger == SyncTriggerType.manual;
+    final bool isManualOrForce = trigger == SyncTriggerType.manual || trigger == SyncTriggerType.force;
+    return _appActive && isManualOrForce;
+  }
+
+  SyncRunTrigger _mapInlineTrigger(SyncTriggerType trigger) {
+    return switch (trigger) {
+      SyncTriggerType.manual => SyncRunTrigger.manual,
+      SyncTriggerType.force => SyncRunTrigger.force,
+      SyncTriggerType.autoForeground => SyncRunTrigger.autoForeground,
+    };
   }
 
   Future<String?> _loadLatestRunId() async {
