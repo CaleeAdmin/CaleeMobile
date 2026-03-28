@@ -225,13 +225,13 @@ abstract class SyncStrategy {
       return null;
     }
 
-    String uid = (local.uid ?? '').trim();
-    if (uid.isEmpty) {
-      uid = CaleeUid.generate();
+    final String rawUid = (local.uid ?? '').trim();
+    final String safeUid = CaleeUid.normalizeForRemoteWrite(rawUid);
+    if (safeUid != rawUid) {
       await localGateway.createOrUpdateEvent(
         calendarId: localCalendarId,
         eventId: local.localId,
-        uid: uid,
+        uid: safeUid,
         title: local.title ?? 'Untitled',
         start: local.startTime ?? 0,
         end: local.endTime ?? 0,
@@ -265,7 +265,7 @@ abstract class SyncStrategy {
     if (existingRemoteUpdate && !hasOriginalVeventBlock && !allowMinimalUpdateFallback) {
       debugPrint(
         '[SYNC_PUSH_BLOCKED] existingRemoteUpdate=true missingVeventBlock=true '
-        'uid=$uid targetRemoteHref=${targetRemoteHref?.trim()} '
+        'uid=$safeUid targetRemoteHref=${targetRemoteHref?.trim()} '
         'parse_source=${(remoteSnapshot?['parse_source'] ?? '').toString()} '
         'fallback_decision=${_minimalFallbackBlockReason(remoteSnapshot)}',
       );
@@ -275,7 +275,7 @@ abstract class SyncStrategy {
     final String? newEtag = await remoteGateway.uploadEventData(
       userId: loginName!,
       calendarPath: remotePath,
-      uid: uid,
+      uid: safeUid,
       title: local.title ?? 'Untitled',
       description: local.notes,
       location: (local.location?.trim().isNotEmpty == true)
@@ -303,9 +303,9 @@ abstract class SyncStrategy {
     final String normalizedRemotePath = remotePath.endsWith('/') ? remotePath : '$remotePath/';
     final String remoteHref = (targetRemoteHref != null && targetRemoteHref.trim().isNotEmpty)
         ? targetRemoteHref.trim()
-        : '${normalizedRemotePath}$uid.ics';
+        : '${normalizedRemotePath}$safeUid.ics';
     return RemotePushResult(
-      uid: uid,
+      uid: safeUid,
       etag: normalizeRemoteToken(newEtag),
       remoteHref: remoteHref,
       lastMtime: local.lastModified ?? DateTime.now().millisecondsSinceEpoch,
