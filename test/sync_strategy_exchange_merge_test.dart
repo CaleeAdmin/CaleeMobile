@@ -473,4 +473,106 @@ void main() {
     expect(localGateway.lastCreateOrUpdateArgs?['eventTimezone'], 'Asia/Tokyo');
     expect(localGateway.lastCreateOrUpdateArgs?['isAllDay'], isTrue);
   });
+
+  test('pushLocalEventToRemote with safe local UID uploads same UID', () async {
+    final gateway = _RecordingRemoteGateway();
+    final localGateway = _NoopLocalGateway();
+    final strategy = _TestSyncStrategy(remote: gateway, local: localGateway);
+
+    final local = PlatformItem(
+      uid: 'local_109',
+      localId: 'evt-safe',
+      title: 'safe uid',
+      startTime: DateTime.utc(2026, 1, 1, 10).millisecondsSinceEpoch,
+      endTime: DateTime.utc(2026, 1, 1, 11).millisecondsSinceEpoch,
+    );
+
+    await strategy.pushLocalEventToRemote(
+      local: local,
+      remotePath: '/remote.php/dav/calendars/tester/work/',
+      localCalendarId: 'cal-1',
+      remoteSnapshot: null,
+      targetRemoteHref: null,
+    );
+
+    expect(gateway.lastUploadArgs?['uid'], 'local_109');
+    expect(localGateway.lastCreateOrUpdateArgs, isNull);
+  });
+
+  test('pushLocalEventToRemote with overlong local UID regenerates and persists UID', () async {
+    final gateway = _RecordingRemoteGateway();
+    final localGateway = _NoopLocalGateway();
+    final strategy = _TestSyncStrategy(remote: gateway, local: localGateway);
+
+    final local = PlatformItem(
+      uid: 'A' * 191,
+      localId: 'evt-long',
+      title: 'long uid',
+      startTime: DateTime.utc(2026, 1, 1, 10).millisecondsSinceEpoch,
+      endTime: DateTime.utc(2026, 1, 1, 11).millisecondsSinceEpoch,
+    );
+
+    await strategy.pushLocalEventToRemote(
+      local: local,
+      remotePath: '/remote.php/dav/calendars/tester/work/',
+      localCalendarId: 'cal-1',
+      remoteSnapshot: null,
+      targetRemoteHref: null,
+    );
+
+    final String uploadedUid = gateway.lastUploadArgs?['uid'] as String;
+    expect(uploadedUid.length, lessThanOrEqualTo(190));
+    expect(uploadedUid, isNot('A' * 191));
+    expect(localGateway.lastCreateOrUpdateArgs?['uid'], uploadedUid);
+  });
+
+  test('pushLocalEventToRemote with newline-contaminated UID regenerates for upload', () async {
+    final gateway = _RecordingRemoteGateway();
+    final strategy = _TestSyncStrategy(remote: gateway, local: _NoopLocalGateway());
+
+    final local = PlatformItem(
+      uid: 'abc\nxyz',
+      localId: 'evt-newline',
+      title: 'bad uid',
+      startTime: DateTime.utc(2026, 1, 1, 10).millisecondsSinceEpoch,
+      endTime: DateTime.utc(2026, 1, 1, 11).millisecondsSinceEpoch,
+    );
+
+    await strategy.pushLocalEventToRemote(
+      local: local,
+      remotePath: '/remote.php/dav/calendars/tester/work/',
+      localCalendarId: 'cal-1',
+      remoteSnapshot: null,
+      targetRemoteHref: null,
+    );
+
+    final String uploadedUid = gateway.lastUploadArgs?['uid'] as String;
+    expect(uploadedUid, isNot('abc\nxyz'));
+    expect(uploadedUid, matches(RegExp(r'^[A-Za-z0-9._@-]+$')));
+  });
+
+  test('pushLocalEventToRemote with UID contamination regenerates for upload', () async {
+    final gateway = _RecordingRemoteGateway();
+    final strategy = _TestSyncStrategy(remote: gateway, local: _NoopLocalGateway());
+
+    final local = PlatformItem(
+      uid: 'UID:malformed',
+      localId: 'evt-contaminated',
+      title: 'bad uid',
+      startTime: DateTime.utc(2026, 1, 1, 10).millisecondsSinceEpoch,
+      endTime: DateTime.utc(2026, 1, 1, 11).millisecondsSinceEpoch,
+    );
+
+    await strategy.pushLocalEventToRemote(
+      local: local,
+      remotePath: '/remote.php/dav/calendars/tester/work/',
+      localCalendarId: 'cal-1',
+      remoteSnapshot: null,
+      targetRemoteHref: null,
+    );
+
+    final String uploadedUid = gateway.lastUploadArgs?['uid'] as String;
+    expect(uploadedUid, isNot('UID:malformed'));
+    expect(uploadedUid, matches(RegExp(r'^[A-Za-z0-9._@-]+$')));
+  });
 }
