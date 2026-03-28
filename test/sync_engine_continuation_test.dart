@@ -94,7 +94,10 @@ class _FakeRunRecorder extends SyncRunRecorder {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  const String enqueueChannel = 'dev.flutter.pigeon.caleesync.BackgroundSyncControlApi.enqueueOneOff';
+  const BasicMessageChannel<Object?> enqueueChannel = BasicMessageChannel<Object?>(
+    'dev.flutter.pigeon.caleesync.BackgroundSyncControlApi.enqueueOneOff',
+    BackgroundSyncControlApi.pigeonChannelCodec,
+  );
 
   setUpAll(() async {
     await bootstrapTestStorage();
@@ -103,8 +106,7 @@ void main() {
 
   Future<List<Object?>> _runEngineAndCaptureScheduleCalls({required bool queueContinuation}) async {
     final List<Object?> calls = <Object?>[];
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockDecodedMessageHandler<Object?>(
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockDecodedMessageHandler<Object?>(
       enqueueChannel,
       (Object? message) async {
         calls.add(message);
@@ -124,8 +126,7 @@ void main() {
 
     await engine.executeFullSync(trigger: SyncRunTrigger.force);
 
-    await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockDecodedMessageHandler<Object?>(
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockDecodedMessageHandler<Object?>(
       enqueueChannel,
       null,
     );
