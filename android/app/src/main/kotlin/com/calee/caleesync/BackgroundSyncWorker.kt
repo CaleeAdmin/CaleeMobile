@@ -205,8 +205,8 @@ class CaleeSyncPeriodicWorker(appContext: Context, params: WorkerParameters) : C
         private const val STAGE_RUN_SYNC_TIMEOUT = "RUN_SYNC_TIMEOUT"
         private const val STAGE_WORKER_FINISHED = "WORKER_FINISHED"
         const val DART_READY_TIMEOUT_MS = 60_000L
-        private const val SYNC_REPLY_TIMEOUT_MS = 90_000L
         private const val WORKER_EXEC_TIMEOUT_MS = 180_000L
+        private const val SYNC_REPLY_TIMEOUT_MS = WORKER_EXEC_TIMEOUT_MS - 10_000L
         private const val RECENT_ATTEMPT_WINDOW_MS = 30_000L
 
         const val PERIODIC_UNIQUE = "CaleeSyncPeriodicWorker"

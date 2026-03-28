@@ -13,6 +13,7 @@ import '../../services/calee_server_service.dart';
 import '../SyncEnum.dart';
 import '../sync_gate_reason.dart';
 import '../sync_run_telemetry.dart';
+import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
 
 abstract class SyncStrategy {
@@ -167,6 +168,8 @@ abstract class SyncStrategy {
       return null;
     }
 
+    // Native Android now relinks by (calendar_id + UID_2445) when existingLocalId is stale/missing,
+    // so this pull path intentionally keeps passing both existingLocalId and eventData.uid unchanged.
     final String? localEventId = await localGateway.createOrUpdateEvent(
       calendarId: localCalendarId,
       title: eventData.summary,
@@ -222,13 +225,13 @@ abstract class SyncStrategy {
       return null;
     }
 
-    String uid = (local.uid ?? '').trim();
-    if (uid.isEmpty) {
-      uid = CaleeUid.generate();
+    final String rawUid = (local.uid ?? '').trim();
+    final String safeUid = CaleeUid.normalizeForRemoteWrite(rawUid);
+    if (safeUid != rawUid) {
       await localGateway.createOrUpdateEvent(
         calendarId: localCalendarId,
         eventId: local.localId,
-        uid: uid,
+        uid: safeUid,
         title: local.title ?? 'Untitled',
         start: local.startTime ?? 0,
         end: local.endTime ?? 0,
@@ -260,13 +263,19 @@ abstract class SyncStrategy {
         _canFallbackToMinimalExistingRemoteRebuild(remoteSnapshot);
 
     if (existingRemoteUpdate && !hasOriginalVeventBlock && !allowMinimalUpdateFallback) {
+      debugPrint(
+        '[SYNC_PUSH_BLOCKED] existingRemoteUpdate=true missingVeventBlock=true '
+        'uid=$safeUid targetRemoteHref=${targetRemoteHref?.trim()} '
+        'parse_source=${(remoteSnapshot?['parse_source'] ?? '').toString()} '
+        'fallback_decision=${_minimalFallbackBlockReason(remoteSnapshot)}',
+      );
       return null;
     }
 
     final String? newEtag = await remoteGateway.uploadEventData(
       userId: loginName!,
       calendarPath: remotePath,
-      uid: uid,
+      uid: safeUid,
       title: local.title ?? 'Untitled',
       description: local.notes,
       location: (local.location?.trim().isNotEmpty == true)
@@ -294,9 +303,9 @@ abstract class SyncStrategy {
     final String normalizedRemotePath = remotePath.endsWith('/') ? remotePath : '$remotePath/';
     final String remoteHref = (targetRemoteHref != null && targetRemoteHref.trim().isNotEmpty)
         ? targetRemoteHref.trim()
-        : '${normalizedRemotePath}$uid.ics';
+        : '${normalizedRemotePath}$safeUid.ics';
     return RemotePushResult(
-      uid: uid,
+      uid: safeUid,
       etag: normalizeRemoteToken(newEtag),
       remoteHref: remoteHref,
       lastMtime: local.lastModified ?? DateTime.now().millisecondsSinceEpoch,
@@ -356,7 +365,32 @@ abstract class SyncStrategy {
       r'^[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}$',
       caseSensitive: false,
     );
-    return uuidShape.hasMatch(normalized);
+    final RegExp localIdShape = RegExp(r'^local_\d+$');
+    return uuidShape.hasMatch(normalized) || localIdShape.hasMatch(normalized);
+  }
+
+  String _minimalFallbackBlockReason(Map<String, dynamic>? remoteSnapshot) {
+    if (remoteSnapshot == null) return 'remote_snapshot_missing';
+    final String parseSource = (remoteSnapshot['parse_source']?.toString() ?? '').trim().toUpperCase();
+    if (parseSource != 'VEVENT') {
+      return 'parse_source_not_vevent($parseSource)';
+    }
+    final String uid = (remoteSnapshot['uid']?.toString() ?? '').trim();
+    if (!_looksLikeSimpleGeneratedUid(uid)) {
+      return 'uid_not_generated($uid)';
+    }
+    if (_hasRichRemoteIndicators(remoteSnapshot)) {
+      return 'rich_markers_detected';
+    }
+    final String rrule = (remoteSnapshot['rrule']?.toString() ?? '').trim();
+    if (rrule.isNotEmpty) {
+      return 'rrule_present';
+    }
+    final String recurrenceId = (remoteSnapshot['recurrence_id']?.toString() ?? '').trim();
+    if (recurrenceId.isNotEmpty) {
+      return 'recurrence_id_present';
+    }
+    return 'unknown';
   }
 
   Map<String, dynamic>? _resolvePushDateMeta({
@@ -570,6 +604,26 @@ abstract class SyncStrategy {
     return _RepairResult(records: refreshed, removedCount: toDeleteIds.length);
   }
 
+  Future<bool> _isRemoteSnapshotFullyMapped({
+    required Database db,
+    required int remoteCollectionId,
+    required Iterable<String> remoteSnapshotUids,
+  }) async {
+    if (remoteSnapshotUids.isEmpty) return true;
+    final List<Map<String, dynamic>> rows = await db.query(
+      'sync_items',
+      columns: ['remote_uid'],
+      where: 'remote_collection_id = ?',
+      whereArgs: [remoteCollectionId],
+    );
+    final Set<String> mappedUids = {
+      for (final row in rows)
+        if ((row['remote_uid']?.toString() ?? '').trim().isNotEmpty)
+          row['remote_uid'].toString().trim(),
+    };
+    return remoteSnapshotUids.every(mappedUids.contains);
+  }
+
   Future<void> runUnifiedSync(
     SyncContext ctx,
     SyncSummary summary, {
@@ -583,6 +637,19 @@ abstract class SyncStrategy {
     final int bindingRole = (ctx.extra['binding_role'] as int?) ?? SyncBindingRole.mirror;
     final String? syncGateReason = ctx.extra['sync_gate_reason']?.toString();
     final bool safeFirstSync = syncGateReason == SyncGateReason.safeFirstSync;
+    final bool useLocalPushFastPath = ctx.extra['use_local_push_fast_path'] == true;
+
+    if (useLocalPushFastPath) {
+      final bool handled = await _runLocalPendingPushFastPath(
+        db: db,
+        ctx: ctx,
+        summary: summary,
+        mode: mode,
+      );
+      if (handled) {
+        return;
+      }
+    }
 
     final snapshot = await remoteGateway.fetchUnifiedEventsSnapshot(
       calendarPath: ctx.remotePath,
@@ -705,6 +772,9 @@ abstract class SyncStrategy {
     int deleteLocal = 0;
     int deleteRemote = 0;
     int skip = 0;
+    bool mutationFailure = false;
+    bool snapshotCoverageComplete = true;
+    bool canCommitCollectionProgress = false;
 
     final Map<String, _ExecutionState> states = {
       for (final plan in plans) plan.uid: _ExecutionState(),
@@ -729,6 +799,7 @@ abstract class SyncStrategy {
             isSubscription: ctx.isSubscription ?? false,
           );
           if (pulled == null) {
+            mutationFailure = true;
             skip++;
             return;
           }
@@ -758,6 +829,7 @@ abstract class SyncStrategy {
                 : null,
           );
           if (pushed == null) {
+            mutationFailure = true;
             skip++;
             return;
           }
@@ -875,19 +947,34 @@ abstract class SyncStrategy {
       await executeOperation(operation);
     }
 
-    await db.update(
-      'remote_collections',
-      {'synced_ctag': ctx.ctag},
-      where: 'id = ?',
-      whereArgs: [remoteCollectionId],
-    );
+    snapshotCoverageComplete = !bootstrap || bindingRole == SyncBindingRole.ownerLink
+        ? true
+        : await _isRemoteSnapshotFullyMapped(
+            db: db,
+            remoteCollectionId: remoteCollectionId,
+            remoteSnapshotUids: remoteByUid.keys,
+          );
+    canCommitCollectionProgress = remoteTrusted && !mutationFailure && snapshotCoverageComplete;
 
-    if (safeFirstSync) {
+    if (canCommitCollectionProgress) {
       await db.update(
-        'collection_states',
-        {'sync_gate_reason': null},
-        where: 'remote_collection_id = ?',
+        'remote_collections',
+        {'synced_ctag': ctx.ctag},
+        where: 'id = ?',
         whereArgs: [remoteCollectionId],
+      );
+
+      if (safeFirstSync) {
+        await db.update(
+          'collection_states',
+          {'sync_gate_reason': null},
+          where: 'remote_collection_id = ?',
+          whereArgs: [remoteCollectionId],
+        );
+      }
+    } else {
+      debugPrint(
+        '[SYNC_GATE][remote_collection_id=$remoteCollectionId] bootstrap/reconnect incomplete; keeping synced_ctag and safe_first_sync unchanged',
       );
     }
 
@@ -914,6 +1001,200 @@ abstract class SyncStrategy {
       );
     }
 
+  }
+
+  Future<bool> _runLocalPendingPushFastPath({
+    required Database db,
+    required SyncContext ctx,
+    required SyncSummary summary,
+    required UnifiedSyncMode mode,
+  }) async {
+    if (mode != UnifiedSyncMode.bidi && mode != UnifiedSyncMode.push) {
+      return false;
+    }
+
+    final List<Map<String, dynamic>> pendingRows = await _loadPendingPushMappings(
+      db,
+      ctx.remoteCollectionId,
+    );
+    if (pendingRows.isEmpty) {
+      return false;
+    }
+
+    final _PendingPushLocalWindow? window = _computePendingPushLocalFetchWindow(pendingRows);
+    if (window == null) {
+      return false;
+    }
+
+    final localSnapshot = await loadLocalEvents(
+      ctx.localCalendarId,
+      rangeStartMs: window.rangeStartMs,
+      rangeEndMs: window.rangeEndMs,
+    );
+    final _ResolvedPendingLocalEvents? resolved = _resolvePendingLocalEvents(
+      pendingRows: pendingRows,
+      localEvents: localSnapshot.events,
+    );
+    if (resolved == null) {
+      return false;
+    }
+
+    int createRemote = 0;
+    int updateRemote = 0;
+    for (final _PendingPushResolvedItem item in resolved.items) {
+      final bool hasRemoteIdentity =
+          (item.mapping['remote_href']?.toString().trim().isNotEmpty ?? false) ||
+          (item.mapping['remote_uid']?.toString().trim().isNotEmpty ?? false);
+      final String? targetRemoteHref = hasRemoteIdentity ? item.mapping['remote_href']?.toString() : null;
+      final RemotePushResult? pushed = await pushLocalEventToRemote(
+        local: item.local,
+        remotePath: ctx.remotePath,
+        localCalendarId: ctx.localCalendarId,
+        remoteSnapshot: null,
+        targetRemoteHref: targetRemoteHref,
+      );
+      if (pushed == null) {
+        return false;
+      }
+
+      await upsertSyncedItem(
+        db: db,
+        remoteCollectionId: ctx.remoteCollectionId,
+        uid: pushed.uid,
+        localItemId: item.local.localId ?? '',
+        etag: pushed.etag,
+        lastMtime: item.local.lastModified ?? pushed.lastMtime,
+        remoteHref: pushed.remoteHref,
+        summary: item.local.title,
+        description: item.local.notes,
+        dtstart: item.local.startTime,
+        dtend: item.local.endTime,
+      );
+
+      if (hasRemoteIdentity) {
+        updateRemote++;
+      } else {
+        createRemote++;
+      }
+    }
+
+    _finalizeFastPathSuccess(
+      ctx: ctx,
+      summary: summary,
+      createRemoteCount: createRemote,
+      updateRemoteCount: updateRemote,
+    );
+    return true;
+  }
+
+  Future<List<Map<String, dynamic>>> _loadPendingPushMappings(
+    Database db,
+    int remoteCollectionId,
+  ) async {
+    return db.query(
+      'sync_items',
+      columns: [
+        'id',
+        'remote_uid',
+        'remote_href',
+        'local_item_id',
+        'summary',
+        'description',
+        'dtstart',
+        'dtend',
+        'last_mtime',
+      ],
+      where: 'remote_collection_id = ? AND sync_status = ?',
+      whereArgs: [remoteCollectionId, SyncItemStatus.pendingPush],
+    );
+  }
+
+  _PendingPushLocalWindow? _computePendingPushLocalFetchWindow(
+    List<Map<String, dynamic>> pendingRows,
+  ) {
+    const int paddingMs = 1000 * 60 * 60 * 24 * 7;
+    final List<int> points = <int>[];
+    for (final row in pendingRows) {
+      final int? dtstart = row['dtstart'] is int ? row['dtstart'] as int : int.tryParse('${row['dtstart']}');
+      final int? dtend = row['dtend'] is int ? row['dtend'] as int : int.tryParse('${row['dtend']}');
+      if (dtstart == null || dtstart <= 0 || dtend == null || dtend <= 0) {
+        return null;
+      }
+      points.add(dtstart);
+      points.add(dtend);
+    }
+    if (points.isEmpty) {
+      return null;
+    }
+    int minTs = points.reduce((a, b) => a < b ? a : b) - paddingMs;
+    int maxTs = points.reduce((a, b) => a > b ? a : b) + paddingMs;
+    if (maxTs <= minTs) {
+      return null;
+    }
+    return _PendingPushLocalWindow(rangeStartMs: minTs, rangeEndMs: maxTs);
+  }
+
+  _ResolvedPendingLocalEvents? _resolvePendingLocalEvents({
+    required List<Map<String, dynamic>> pendingRows,
+    required List<PlatformItem> localEvents,
+  }) {
+    final Map<String, PlatformItem> localById = mapLocalEventsById(localEvents);
+    final Map<String, List<PlatformItem>> localByUid = <String, List<PlatformItem>>{};
+    for (final event in localEvents) {
+      final String uid = (event.uid ?? '').trim();
+      if (uid.isEmpty) continue;
+      localByUid.putIfAbsent(uid, () => <PlatformItem>[]).add(event);
+    }
+
+    final List<_PendingPushResolvedItem> resolved = <_PendingPushResolvedItem>[];
+    for (final row in pendingRows) {
+      final String localId = (row['local_item_id']?.toString() ?? '').trim();
+      PlatformItem? local = localId.isNotEmpty ? localById[localId] : null;
+      if (local == null) {
+        final String uid = (row['remote_uid']?.toString() ?? '').trim();
+        if (uid.isEmpty) {
+          return null;
+        }
+        final List<PlatformItem> matches = localByUid[uid] ?? const <PlatformItem>[];
+        if (matches.length != 1) {
+          return null;
+        }
+        local = matches.first;
+      }
+      resolved.add(_PendingPushResolvedItem(mapping: row, local: local));
+    }
+    return _ResolvedPendingLocalEvents(items: resolved);
+  }
+
+  void _finalizeFastPathSuccess({
+    required SyncContext ctx,
+    required SyncSummary summary,
+    required int createRemoteCount,
+    required int updateRemoteCount,
+  }) {
+    for (int i = 0; i < createRemoteCount; i++) {
+      summary.telemetry?.onOperation(
+        ctx: ctx,
+        target: SyncOperationTarget.remote,
+        type: SyncOperationType.created,
+      );
+    }
+    for (int i = 0; i < updateRemoteCount; i++) {
+      summary.telemetry?.onOperation(
+        ctx: ctx,
+        target: SyncOperationTarget.remote,
+        type: SyncOperationType.updated,
+      );
+    }
+    summary.success++;
+    final int bindingId = (ctx.extra['binding_id'] as int?) ?? 0;
+    summary.recordBindingOutcome(bindingId, SyncOutcomeStatus.completedNormally);
+    summary.telemetry?.onBindingEnd(
+      ctx: ctx,
+      status: SyncBindingResultStatus.success,
+      snapshotTrustStatus: SnapshotTrustStatus.unknown,
+      safetyTriggered: false,
+    );
   }
 
   List<_CanonicalOperation> _buildCanonicalOperations({
@@ -1121,6 +1402,32 @@ class RemotePushResult {
     required this.remoteHref,
     required this.lastMtime,
   });
+}
+
+class _PendingPushLocalWindow {
+  final int rangeStartMs;
+  final int rangeEndMs;
+
+  const _PendingPushLocalWindow({
+    required this.rangeStartMs,
+    required this.rangeEndMs,
+  });
+}
+
+class _PendingPushResolvedItem {
+  final Map<String, dynamic> mapping;
+  final PlatformItem local;
+
+  const _PendingPushResolvedItem({
+    required this.mapping,
+    required this.local,
+  });
+}
+
+class _ResolvedPendingLocalEvents {
+  final List<_PendingPushResolvedItem> items;
+
+  const _ResolvedPendingLocalEvents({required this.items});
 }
 
 class LocalEventsSnapshot {

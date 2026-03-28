@@ -11,7 +11,8 @@ class FullSyncPullStrategy extends SyncStrategy {
     }
 
     try {
-      await runUnifiedSync(ctx, summary, mode: UnifiedSyncMode.pull);
+      final bool bootstrap = ctx.extra['bootstrap_required'] == true;
+      await runUnifiedSync(ctx, summary, mode: UnifiedSyncMode.pull, bootstrap: bootstrap);
     } catch (e) {
       summary.failed++;
       summary.errorLog.add('[ERROR] ${ctx.displayName} Pull sync exception: $e');

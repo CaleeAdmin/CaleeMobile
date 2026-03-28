@@ -2,6 +2,7 @@ import 'package:caleesync/core/platform/pigeon/calendar_api.g.dart';
 import 'package:caleesync/entity/SyncContext.dart';
 import 'package:caleesync/entity/SyncSummary.dart';
 import 'package:caleesync/services/calee_server_service.dart';
+import 'package:caleesync/common/utils/UidGenerator.dart';
 import 'package:caleesync/sync/strategy/SyncStrategy.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -357,12 +358,12 @@ void main() {
     expect(gateway.lastUploadArgs, isNull);
   });
 
-  test('simple UUID existing remote event may allow minimal fallback', () async {
+  test('simple local-origin existing remote event may allow minimal fallback', () async {
     final gateway = _RecordingRemoteGateway();
     final strategy = _TestSyncStrategy(remote: gateway);
     final local = PlatformItem(
-      uid: 'C4975D9D-34B2-4D21-8AC9-874A96685F7F',
-      title: 'Title',
+      uid: 'local_109',
+      title: 'Test 2 from pixel 2',
       startTime: DateTime.utc(2026, 12, 12, 10).millisecondsSinceEpoch,
       endTime: DateTime.utc(2026, 12, 12, 11).millisecondsSinceEpoch,
     );
@@ -373,17 +374,48 @@ void main() {
       localCalendarId: 'cal-1',
       remoteSnapshot: {
         'parse_source': 'VEVENT',
-        'uid': 'C4975D9D-34B2-4D21-8AC9-874A96685F7F',
-        'calendar_data': 'BEGIN:VEVENT\r\nUID:C4975D9D-34B2-4D21-8AC9-874A96685F7F\r\nEND:VEVENT\r\n',
+        'uid': 'local_109',
+        'summary': 'Test 2 from pixel',
+        'calendar_data': 'BEGIN:VEVENT\r\nUID:local_109\r\nSUMMARY:Test 2 from pixel\r\nEND:VEVENT\r\n',
         'vevent_block': null,
         'rrule': '',
         'recurrence_id': '',
       },
-      targetRemoteHref: '/remote.php/dav/calendars/tester/work/uid-simple.ics',
+      targetRemoteHref: '/remote.php/dav/calendars/tester/work/local_109.ics',
     );
 
     expect(result, isNotNull);
     expect(gateway.lastUploadArgs?['allowMinimalUpdateFallback'], isTrue);
+    expect(gateway.lastUploadArgs?['targetEventPath'], '/remote.php/dav/calendars/tester/work/local_109.ics');
+  });
+
+  test('existing remote update prefers VEVENT merge path when vevent_block exists', () async {
+    final gateway = _RecordingRemoteGateway();
+    final strategy = _TestSyncStrategy(remote: gateway);
+    final local = PlatformItem(
+      uid: 'local_109',
+      title: 'Test 2 from pixel 2',
+      startTime: DateTime.utc(2026, 12, 12, 10).millisecondsSinceEpoch,
+      endTime: DateTime.utc(2026, 12, 12, 11).millisecondsSinceEpoch,
+    );
+
+    final result = await strategy.pushLocalEventToRemote(
+      local: local,
+      remotePath: '/remote.php/dav/calendars/tester/work/',
+      localCalendarId: 'cal-1',
+      remoteSnapshot: {
+        'parse_source': 'VEVENT',
+        'uid': 'local_109',
+        'vevent_block': 'BEGIN:VEVENT\r\nUID:local_109\r\nSUMMARY:Test 2 from pixel\r\nEND:VEVENT\r\n',
+        'rrule': '',
+        'recurrence_id': '',
+      },
+      targetRemoteHref: '/remote.php/dav/calendars/tester/work/local_109.ics',
+    );
+
+    expect(result, isNotNull);
+    expect(gateway.lastUploadArgs?['allowMinimalUpdateFallback'], isFalse);
+    expect((gateway.lastUploadArgs?['originalVeventBlock'] as String?)?.isNotEmpty, isTrue);
   });
 
   test('recurring existing remote event with missing vevent_block is blocked', () async {
@@ -441,5 +473,118 @@ void main() {
     expect(localGateway.lastCreateOrUpdateArgs?['location'], 'Room 7');
     expect(localGateway.lastCreateOrUpdateArgs?['eventTimezone'], 'Asia/Tokyo');
     expect(localGateway.lastCreateOrUpdateArgs?['isAllDay'], isTrue);
+  });
+
+  test('malformed local UID is backfilled to local provider before remote upload', () async {
+    final gateway = _RecordingRemoteGateway();
+    final localGateway = _NoopLocalGateway();
+    final strategy = _TestSyncStrategy(remote: gateway, local: localGateway);
+    const String malformedUid = 'bad uid with spaces';
+
+    final local = PlatformItem(
+      uid: malformedUid,
+      localId: 'evt-malformed',
+      title: 'Malformed UID',
+      startTime: DateTime.utc(2026, 12, 14, 10).millisecondsSinceEpoch,
+      endTime: DateTime.utc(2026, 12, 14, 11).millisecondsSinceEpoch,
+    );
+
+    final result = await strategy.pushLocalEventToRemote(
+      local: local,
+      remotePath: '/remote.php/dav/calendars/tester/work/',
+      localCalendarId: 'cal-1',
+      remoteSnapshot: null,
+      targetRemoteHref: null,
+    );
+
+    final String repairedUid = CaleeUid.normalizeForRemoteWrite(malformedUid);
+    expect(result, isNotNull);
+    expect(localGateway.lastCreateOrUpdateArgs?['eventId'], 'evt-malformed');
+    expect(localGateway.lastCreateOrUpdateArgs?['uid'], repairedUid);
+    expect(gateway.lastUploadArgs?['uid'], repairedUid);
+  });
+
+  test('create-remote path returns repaired RemotePushResult.uid and derived remoteHref', () async {
+    final gateway = _RecordingRemoteGateway();
+    final strategy = _TestSyncStrategy(remote: gateway);
+    const String malformedUid = 'bad uid/with/slashes';
+    final String repairedUid = CaleeUid.normalizeForRemoteWrite(malformedUid);
+
+    final local = PlatformItem(
+      uid: malformedUid,
+      title: 'Create repaired',
+      startTime: DateTime.utc(2026, 12, 15, 10).millisecondsSinceEpoch,
+      endTime: DateTime.utc(2026, 12, 15, 11).millisecondsSinceEpoch,
+    );
+
+    final result = await strategy.pushLocalEventToRemote(
+      local: local,
+      remotePath: '/remote.php/dav/calendars/tester/work/',
+      localCalendarId: 'cal-1',
+      remoteSnapshot: null,
+      targetRemoteHref: null,
+    );
+
+    expect(result, isNotNull);
+    expect(result?.uid, repairedUid);
+    expect(result?.remoteHref, '/remote.php/dav/calendars/tester/work/$repairedUid.ics');
+  });
+
+  test('existing mapped update keeps targetRemoteHref unchanged even when local UID is repaired', () async {
+    final gateway = _RecordingRemoteGateway();
+    final strategy = _TestSyncStrategy(remote: gateway);
+    const String malformedUid = 'bad uid with spaces';
+    const String existingHref = '/remote.php/dav/calendars/tester/work/already-mapped.ics';
+    final String repairedUid = CaleeUid.normalizeForRemoteWrite(malformedUid);
+
+    final local = PlatformItem(
+      uid: malformedUid,
+      title: 'Existing mapped',
+      startTime: DateTime.utc(2026, 12, 16, 10).millisecondsSinceEpoch,
+      endTime: DateTime.utc(2026, 12, 16, 11).millisecondsSinceEpoch,
+    );
+
+    final result = await strategy.pushLocalEventToRemote(
+      local: local,
+      remotePath: '/remote.php/dav/calendars/tester/work/',
+      localCalendarId: 'cal-1',
+      remoteSnapshot: {
+        'vevent_block': 'BEGIN:VEVENT\r\nUID:legacy\r\nSUMMARY:Existing\r\nEND:VEVENT\r\n',
+      },
+      targetRemoteHref: existingHref,
+    );
+
+    expect(result, isNotNull);
+    expect(gateway.lastUploadArgs?['uid'], repairedUid);
+    expect(gateway.lastUploadArgs?['targetEventPath'], existingHref);
+    expect(result?.remoteHref, existingHref);
+  });
+
+  test('valid UID path remains unchanged', () async {
+    final gateway = _RecordingRemoteGateway();
+    final localGateway = _NoopLocalGateway();
+    final strategy = _TestSyncStrategy(remote: gateway, local: localGateway);
+    const String validUid = 'AE6C35CC-3203-44D8-A56C-973D48D7E289';
+
+    final local = PlatformItem(
+      uid: validUid,
+      title: 'Valid UID',
+      startTime: DateTime.utc(2026, 12, 17, 10).millisecondsSinceEpoch,
+      endTime: DateTime.utc(2026, 12, 17, 11).millisecondsSinceEpoch,
+    );
+
+    final result = await strategy.pushLocalEventToRemote(
+      local: local,
+      remotePath: '/remote.php/dav/calendars/tester/work/',
+      localCalendarId: 'cal-1',
+      remoteSnapshot: null,
+      targetRemoteHref: null,
+    );
+
+    expect(result, isNotNull);
+    expect(localGateway.lastCreateOrUpdateArgs, isNull);
+    expect(gateway.lastUploadArgs?['uid'], validUid);
+    expect(result?.uid, validUid);
+    expect(result?.remoteHref, '/remote.php/dav/calendars/tester/work/$validUid.ics');
   });
 }
