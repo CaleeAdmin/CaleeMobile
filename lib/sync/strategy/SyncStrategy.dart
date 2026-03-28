@@ -13,6 +13,7 @@ import '../../services/calee_server_service.dart';
 import '../SyncEnum.dart';
 import '../sync_gate_reason.dart';
 import '../sync_run_telemetry.dart';
+import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
 
 abstract class SyncStrategy {
@@ -260,6 +261,12 @@ abstract class SyncStrategy {
         _canFallbackToMinimalExistingRemoteRebuild(remoteSnapshot);
 
     if (existingRemoteUpdate && !hasOriginalVeventBlock && !allowMinimalUpdateFallback) {
+      debugPrint(
+        '[SYNC_PUSH_BLOCKED] existingRemoteUpdate=true missingVeventBlock=true '
+        'uid=$uid targetRemoteHref=${targetRemoteHref?.trim()} '
+        'parse_source=${(remoteSnapshot?['parse_source'] ?? '').toString()} '
+        'fallback_decision=${_minimalFallbackBlockReason(remoteSnapshot)}',
+      );
       return null;
     }
 
@@ -356,7 +363,32 @@ abstract class SyncStrategy {
       r'^[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}$',
       caseSensitive: false,
     );
-    return uuidShape.hasMatch(normalized);
+    final RegExp localIdShape = RegExp(r'^local_\d+$');
+    return uuidShape.hasMatch(normalized) || localIdShape.hasMatch(normalized);
+  }
+
+  String _minimalFallbackBlockReason(Map<String, dynamic>? remoteSnapshot) {
+    if (remoteSnapshot == null) return 'remote_snapshot_missing';
+    final String parseSource = (remoteSnapshot['parse_source']?.toString() ?? '').trim().toUpperCase();
+    if (parseSource != 'VEVENT') {
+      return 'parse_source_not_vevent($parseSource)';
+    }
+    final String uid = (remoteSnapshot['uid']?.toString() ?? '').trim();
+    if (!_looksLikeSimpleGeneratedUid(uid)) {
+      return 'uid_not_generated($uid)';
+    }
+    if (_hasRichRemoteIndicators(remoteSnapshot)) {
+      return 'rich_markers_detected';
+    }
+    final String rrule = (remoteSnapshot['rrule']?.toString() ?? '').trim();
+    if (rrule.isNotEmpty) {
+      return 'rrule_present';
+    }
+    final String recurrenceId = (remoteSnapshot['recurrence_id']?.toString() ?? '').trim();
+    if (recurrenceId.isNotEmpty) {
+      return 'recurrence_id_present';
+    }
+    return 'unknown';
   }
 
   Map<String, dynamic>? _resolvePushDateMeta({
