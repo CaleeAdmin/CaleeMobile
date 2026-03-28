@@ -434,7 +434,6 @@ class CaleeServerService {
               );
 
         final String instanceKey = (parsed['instance_key'] ?? parsedUid).toString();
-        debugPrint('[ICS] Snapshot parsed uid=$parsedUid instanceKey=$instanceKey source=${parsed['parse_source']} start=${parsed['dtstart']} end=${parsed['dtend']}');
 
         return {
           'uid': parsedUid,
