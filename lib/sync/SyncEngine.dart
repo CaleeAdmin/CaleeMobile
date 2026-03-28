@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:caleesync/common/app_constant.dart';
 import 'package:caleesync/common/utils/mmkv_utils.dart';
@@ -10,9 +11,11 @@ import '../entity/sync_run_record.dart';
 import '../services/calee_auth_service.dart';
 import '../services/calee_server_service.dart';
 import 'force_sync_registry.dart';
+import 'background_sync_scheduler.dart';
 import 'sync_item_executor.dart';
 import 'sync_item_planner.dart';
 import 'sync_run_recorder.dart';
+import '../core/platform/pigeon/background_sync_api.g.dart';
 
 class SyncEngine {
   SyncEngine({
@@ -78,7 +81,17 @@ class SyncEngine {
       );
 
       final int enabledBindings = await _repo.countEnabledCalendarBindings(accountName);
-      final syncItems = await _planner.generateSyncItems(accountName, remoteCalendars);
+      final syncItems = (await _planner.generateSyncItems(accountName, remoteCalendars))
+          .map(
+            (ctx) => ctx.copyWith(
+              extra: {
+                ...ctx.extra,
+                'run_trigger': trigger.name,
+                'allows_background_continuation': !Platform.isIOS,
+              },
+            ),
+          )
+          .toList();
       debugPrint('====generateSyncItems===$syncItems');
 
       final mode = syncItems.isEmpty ? SyncRunMode.twoWay : mapRunModeFromAction(syncItems.first.action);
@@ -108,12 +121,22 @@ class SyncEngine {
         }
       }
 
+      if (summary.continuationQueued && !Platform.isIOS) {
+        await BackgroundSyncScheduler.scheduleOneOff(
+          reason: 'repair_scheduler',
+          expedited: false,
+          policy: OneOffEnqueuePolicy.replace,
+        );
+      }
+
       final hasSafetyAbort = _runRecorder.hasSafetyAbort;
       final SyncRunResult result;
       if (summary.failed > 0 && summary.success > 0) {
         result = SyncRunResult.partial;
       } else if (summary.failed > 0) {
         result = SyncRunResult.failed;
+      } else if (summary.continuationQueued) {
+        result = SyncRunResult.partial;
       } else if (hasSafetyAbort) {
         result = SyncRunResult.abortedBySafety;
       } else {
