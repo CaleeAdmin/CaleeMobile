@@ -20,7 +20,6 @@ void main() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockDecodedMessageHandler<Object?>(
       notifyReadyChannel,
-      BackgroundSyncRunnerHostApi.pigeonChannelCodec,
       (Object? message) async => <Object?>[null],
     );
   });
@@ -31,7 +30,6 @@ void main() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockDecodedMessageHandler<Object?>(
       notifyReadyChannel,
-      BackgroundSyncRunnerHostApi.pigeonChannelCodec,
       null,
     );
   });
