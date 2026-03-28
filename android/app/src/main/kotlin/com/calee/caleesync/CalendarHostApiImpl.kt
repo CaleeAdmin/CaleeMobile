@@ -87,6 +87,40 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
         return getCalendarAccountType(calendarId) == CalendarConstants.ACCOUNT_TYPE
     }
 
+    private fun getCalendarVisibility(calendarId: Long): Int? {
+        val projection = arrayOf(CalendarContract.Calendars.VISIBLE)
+        return context.contentResolver.query(
+            CalendarContract.Calendars.CONTENT_URI,
+            projection,
+            "${CalendarContract.Calendars._ID} = ?",
+            arrayOf(calendarId.toString()),
+            null
+        )?.use { cursor ->
+            if (!cursor.moveToFirst()) {
+                null
+            } else {
+                cursor.getInt(0)
+            }
+        }
+    }
+
+    private fun getCalendarSyncEvents(calendarId: Long): Int? {
+        val projection = arrayOf(CalendarContract.Calendars.SYNC_EVENTS)
+        return context.contentResolver.query(
+            CalendarContract.Calendars.CONTENT_URI,
+            projection,
+            "${CalendarContract.Calendars._ID} = ?",
+            arrayOf(calendarId.toString()),
+            null
+        )?.use { cursor ->
+            if (!cursor.moveToFirst()) {
+                null
+            } else {
+                cursor.getInt(0)
+            }
+        }
+    }
+
     companion object {
         
         private val CALENDAR_PROJECTION = arrayOf(
@@ -732,6 +766,14 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
             )
 
             val rows = context.contentResolver.update(updateUri, values, null, null)
+            val readbackVisible = getCalendarVisibility(idLong)
+            val readbackSyncEvents = getCalendarSyncEvents(idLong)
+            Log.d(
+                "CalendarSync",
+                "setCalendarEnabled postUpdate calendarId=$calendarId requested_enabled=$enabled " +
+                    "detectedAccountType=$detectedAccountType isAppManagedMirrorCalendar=$appManagedMirror " +
+                    "readback_VISIBLE=$readbackVisible readback_SYNC_EVENTS=$readbackSyncEvents"
+            )
             callback(Result.success(rows > 0))
         } catch (e: Exception) {
             callback(Result.failure(e))

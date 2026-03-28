@@ -526,6 +526,68 @@ class SyncRepository {
     }
   }
 
+  Future<void> _ensureAndroidMirrorCalendarHidden({
+    required String localCalendarId,
+    required String accountName,
+    required int bindingRole,
+  }) async {
+    if (!Platform.isAndroid) {
+      return;
+    }
+    if (bindingRole != SyncBindingRole.mirror) {
+      return;
+    }
+    final String normalizedLocalId = localCalendarId.trim();
+    if (normalizedLocalId.isEmpty) {
+      return;
+    }
+    await _nativeApi.setCalendarEnabled(normalizedLocalId, accountName, true);
+  }
+
+  Future<void> reconcileAndroidMirrorVisibilityForAccount(String accountName) async {
+    if (!Platform.isAndroid) {
+      return;
+    }
+    final String normalizedAccountName = accountName.trim();
+    if (normalizedAccountName.isEmpty) {
+      return;
+    }
+
+    try {
+      final db = await _dbHelper.database;
+      final List<Map<String, dynamic>> rows = await db.rawQuery(
+        '''
+        SELECT lb.local_collection_id, lb.binding_role
+        FROM remote_collections rc
+        INNER JOIN local_bindings lb ON lb.remote_collection_id = rc.id
+        LEFT JOIN collection_states cs ON cs.remote_collection_id = rc.id
+        WHERE rc.account_name = ?
+          AND lb.binding_role = ?
+          AND lb.local_collection_id IS NOT NULL
+          AND TRIM(lb.local_collection_id) != ''
+          AND (cs.is_enabled = 1 OR cs.is_enabled IS NULL)
+        ''',
+        [normalizedAccountName, SyncBindingRole.mirror],
+      );
+
+      for (final Map<String, dynamic> row in rows) {
+        try {
+          final String localId = (row['local_collection_id'] ?? '').toString();
+          final int bindingRole = row['binding_role'] as int? ?? SyncBindingRole.mirror;
+          await _ensureAndroidMirrorCalendarHidden(
+            localCalendarId: localId,
+            accountName: normalizedAccountName,
+            bindingRole: bindingRole,
+          );
+        } catch (e) {
+          debugPrint('[WARN] Failed to reconcile Android mirror visibility for one row: $e');
+        }
+      }
+    } catch (e) {
+      debugPrint('[WARN] Failed to reconcile Android mirror visibility: $e');
+    }
+  }
+
   Future<void> renameCalendar({
     String? localId,
     String? remotePath,
@@ -794,6 +856,11 @@ class SyncRepository {
           where: 'remote_collection_id = ?',
           whereArgs: [remoteCollectionId],
         );
+        await _ensureAndroidMirrorCalendarHidden(
+          localCalendarId: existingLocalId,
+          accountName: accountName,
+          bindingRole: SyncBindingRole.mirror,
+        );
         _triggerOneShotForceSyncInBackground(remoteCollectionId);
         return EnableCalendarResult(
           success: true,
@@ -956,6 +1023,11 @@ class SyncRepository {
 
       createdLocalIdForEnableAttempt = null;
       createdBindingRoleForEnableAttempt = null;
+      await _ensureAndroidMirrorCalendarHidden(
+        localCalendarId: normalizedLocalId,
+        accountName: accountName,
+        bindingRole: SyncBindingRole.mirror,
+      );
       _triggerOneShotForceSyncInBackground(remoteCollectionId);
       return EnableCalendarResult(
         success: true,
