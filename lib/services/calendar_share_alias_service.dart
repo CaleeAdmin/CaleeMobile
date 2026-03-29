@@ -10,14 +10,9 @@ class CalendarShareAliasService {
 
   CalendarShareAliasService({http.Client? client}) : _client = client ?? http.Client();
 
-  String _normalizedServerBase() {
-    final raw = MMKVUtils.instance.getString(AppConstant.serverKey) ?? AppConstant.caleeServer;
-    var normalized = raw.trim();
-    if (!normalized.startsWith('http://') && !normalized.startsWith('https://')) {
-      normalized = 'https://$normalized';
-    }
-    return normalized.endsWith('/') ? normalized.substring(0, normalized.length - 1) : normalized;
-  }
+  Uri _fetchAliasUri() => Uri.https(AppConstant.caleeApiServer, '/v1/me/calendar-share-alias');
+
+  Uri _rotateAliasUri() => Uri.https(AppConstant.caleeApiServer, '/v1/me/calendar-share-alias/rotate');
 
   Map<String, String> _headers() {
     final username = MMKVUtils.instance.getString(AppConstant.loginNameKey) ?? '';
@@ -33,7 +28,7 @@ class CalendarShareAliasService {
   }
 
   Future<CalendarShareAliasDto> fetchCurrentAlias() async {
-    final uri = Uri.parse('${_normalizedServerBase()}/v1/me/calendar-share-alias');
+    final uri = _fetchAliasUri();
     final response = await _client.get(uri, headers: _headers());
     if (response.statusCode != 200) {
       throw Exception('Failed to load calendar share alias: ${response.statusCode} ${response.body}');
@@ -46,7 +41,7 @@ class CalendarShareAliasService {
   }
 
   Future<RotateCalendarShareAliasDto> rotateAlias() async {
-    final uri = Uri.parse('${_normalizedServerBase()}/v1/me/calendar-share-alias/rotate');
+    final uri = _rotateAliasUri();
     final response = await _client.post(uri, headers: _headers());
     if (response.statusCode != 200) {
       throw Exception('Failed to rotate calendar share alias: ${response.statusCode} ${response.body}');
