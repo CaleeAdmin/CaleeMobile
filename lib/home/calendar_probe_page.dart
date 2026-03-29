@@ -3,6 +3,7 @@ import 'package:caleesync/common/app_constant.dart';
 import 'package:caleesync/home/sync_settings_page.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import '../controllers/calendar_probe_controller.dart';
 import 'DashboardPage.dart';
 import 'CalendarPage.dart';
@@ -18,11 +19,23 @@ class CalendarProbePage extends StatefulWidget {
 
 class _CalendarProbePageState extends State<CalendarProbePage> {
   final CalendarProbeController _ctrl = Get.put(CalendarProbeController());
+  late final Future<String> _appVersionLabelFuture;
   late final List<Widget> _pages = [
     const DashboardPage(),
     const CalendarPage(),
     if (AppConstant.enableAppSync) const SyncSettingsPage(),
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    _appVersionLabelFuture = _loadAppVersionLabel();
+  }
+
+  Future<String> _loadAppVersionLabel() async {
+    final packageInfo = await PackageInfo.fromPlatform();
+    return 'Version ${packageInfo.version} (${packageInfo.buildNumber})';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -217,6 +230,25 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
                 Navigator.of(context).pop(); // Close drawer
                 Get.to(() => const LinkDevicePage());
               },
+            ),
+            const Spacer(),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+              child: FutureBuilder<String>(
+                future: _appVersionLabelFuture,
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const Text(
+                      'Version -',
+                      style: TextStyle(fontSize: 12, color: Colors.black54),
+                    );
+                  }
+                  return Text(
+                    snapshot.data ?? 'Version -',
+                    style: const TextStyle(fontSize: 12, color: Colors.black54),
+                  );
+                },
+              ),
             ),
           ],
         ),
