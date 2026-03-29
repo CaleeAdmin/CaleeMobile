@@ -15,7 +15,6 @@ import '../controllers/calendar_probe_controller.dart';
 import '../entity/sync_run_record.dart';
 import '../feature/local_calendars_page.dart';
 import '../feature/public_subscriptions_page.dart';
-import '../services/calendar_share_alias_service.dart';
 import 'sync_status_details_page.dart';
 
 class DashboardPage extends StatefulWidget {
@@ -27,9 +26,6 @@ class DashboardPage extends StatefulWidget {
 
 class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserver {
   bool _showAppPassword = false;
-  final CalendarShareAliasService _calendarShareAliasService = CalendarShareAliasService();
-  String _calendarShareAlias = '';
-  bool _isAliasLoading = false;
 
   @override
   void initState() {
@@ -52,36 +48,7 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
   }
 
   Future<void> _refreshAll() async {
-    await Future.wait([
-      Get.find<CalendarProbeController>().refreshOverviewState(),
-      _loadCalendarShareAlias(),
-    ]);
-  }
-
-  Future<void> _loadCalendarShareAlias() async {
-    if (AppConstant.enableAppSync) return;
-    if (mounted) {
-      setState(() {
-        _isAliasLoading = true;
-      });
-    }
-    try {
-      final alias = await _calendarShareAliasService.fetchCurrentAlias();
-      if (!mounted) return;
-      setState(() {
-        _calendarShareAlias = alias.copyValue.isNotEmpty ? alias.copyValue : alias.aliasEmail;
-      });
-    } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _calendarShareAlias = '';
-      });
-    } finally {
-      if (!mounted) return;
-      setState(() {
-        _isAliasLoading = false;
-      });
-    }
+    await Get.find<CalendarProbeController>().refreshOverviewState();
   }
 
   String _sourceLabel(int count) => '$count ${count == 1 ? 'source' : 'sources'}';
@@ -342,28 +309,6 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
                     ),
                   ),
                 ),
-              if (!AppConstant.enableAppSync) ...[
-                const SizedBox(height: 16),
-                Card(
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('Calendar Share Alias', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-                        const SizedBox(height: 12),
-                        _accountField(
-                          context: context,
-                          label: 'Calendar Share Alias',
-                          value: _isAliasLoading ? 'Loading…' : _calendarShareAlias,
-                          copyValue: _calendarShareAlias,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
               const SizedBox(height: 16),
               Card(
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
