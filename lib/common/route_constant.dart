@@ -3,4 +3,5 @@ class RouteConstant {
   static const home = '/home';
   static const profile = '/profile';
   static const security = '/security';
+  static const calendarShareAlias = '/calendar-share-alias';
 }
