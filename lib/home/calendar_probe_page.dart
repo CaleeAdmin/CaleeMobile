@@ -23,7 +23,7 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
   late final List<Widget> _pages = [
     const DashboardPage(),
     const CalendarPage(),
-    const SyncSettingsPage(),
+    if (AppConstant.enableAppSync) const SyncSettingsPage(),
   ];
 
   @override
@@ -150,11 +150,12 @@ class _CalendarProbePageState extends State<CalendarProbePage> {
           selectedIcon: Icon(Icons.calendar_today),
           label: 'Calendars',
         ),
-        const NavigationDestination(
-          icon: Icon(Icons.settings_outlined),
-          selectedIcon: Icon(Icons.settings),
-          label: 'Sync Settings',
-        ),
+        if (AppConstant.enableAppSync)
+          const NavigationDestination(
+            icon: Icon(Icons.settings_outlined),
+            selectedIcon: Icon(Icons.settings),
+            label: 'Sync Settings',
+          ),
       ];
 
   Widget _buildDrawer() {
