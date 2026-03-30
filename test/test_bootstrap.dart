@@ -11,7 +11,11 @@ Future<void> bootstrapTestStorage({String loginName = 'tester'}) async {
   }
 
   TestWidgetsFlutterBinding.ensureInitialized();
-  await MMKVUtils.instance.init(id: 'test-mmkv');
+  try {
+    await MMKVUtils.instance.init(id: 'test-mmkv');
+  } catch (error) {
+    throw StateError('MMKV platform plugin is unavailable in this test environment: $error');
+  }
   MMKVUtils.instance.setString(AppConstant.loginNameKey, loginName);
   _bootstrapped = true;
 }
