@@ -449,10 +449,13 @@ abstract class SyncStrategy {
     required bool isEnd,
   }) {
     final int rawMs = isEnd ? (local.endTime ?? 0) : (local.startTime ?? 0);
-    final DateTime base = DateTime.fromMillisecondsSinceEpoch(rawMs);
     if (local.isAllDay != true) {
-      return base;
+      return DateTime.fromMillisecondsSinceEpoch(rawMs);
     }
+
+    final String timezoneMarker = (local.eventTimezone ?? '').trim().toUpperCase();
+    final bool treatAsUtc = timezoneMarker == 'UTC' || timezoneMarker == 'ETC/UTC';
+    final DateTime base = DateTime.fromMillisecondsSinceEpoch(rawMs, isUtc: treatAsUtc);
 
     if (!isEnd) {
       return DateTime(base.year, base.month, base.day);
