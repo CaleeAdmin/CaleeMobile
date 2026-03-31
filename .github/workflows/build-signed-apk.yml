@@ -28,6 +28,8 @@ jobs:
 
       - name: Run automation tests
         run: flutter test
+        env:
+          TZ: Australia/Perth
 
       - name: Validate signing secrets are configured
         shell: bash

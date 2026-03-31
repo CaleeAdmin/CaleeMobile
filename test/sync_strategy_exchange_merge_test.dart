@@ -180,18 +180,17 @@ void main() {
     expect(gateway.lastUploadArgs?['originalVeventBlock'], isNull);
   });
 
-  test('pushLocalEventToRemote synthesizes VALUE=DATE for local all-day create', () async {
+  test('pushLocalEventToRemote preserves UTC all-day Android boundaries for VALUE=DATE create', () async {
     final gateway = _RecordingRemoteGateway();
     final strategy = _TestSyncStrategy(remote: gateway);
 
-    final DateTime start = DateTime(2026, 3, 25, 0, 0, 0);
-    final DateTime end = DateTime(2026, 3, 25, 23, 59, 59);
     final local = PlatformItem(
-      uid: 'uid-allday',
-      title: 'All-day',
+      uid: 'uid-allday-utc',
+      title: 'All-day UTC marker',
       isAllDay: true,
-      startTime: start.millisecondsSinceEpoch,
-      endTime: end.millisecondsSinceEpoch,
+      eventTimezone: 'UTC',
+      startTime: DateTime.utc(2026, 3, 31).millisecondsSinceEpoch,
+      endTime: DateTime.utc(2026, 4, 1).millisecondsSinceEpoch,
     );
 
     await strategy.pushLocalEventToRemote(
@@ -204,10 +203,34 @@ void main() {
 
     final Map<String, dynamic>? dtstartMeta = gateway.lastUploadArgs?['dtstartMeta'] as Map<String, dynamic>?;
     final Map<String, dynamic>? dtendMeta = gateway.lastUploadArgs?['dtendMeta'] as Map<String, dynamic>?;
-    expect(dtstartMeta, isNotNull);
-    expect(dtendMeta, isNotNull);
-    expect(dtstartMeta?['isDateOnly'], isTrue);
-    expect(dtendMeta?['isDateOnly'], isTrue);
+    expect((dtstartMeta?['params'] as Map?)?['VALUE'], 'DATE');
+    expect((dtendMeta?['params'] as Map?)?['VALUE'], 'DATE');
+    expect(gateway.lastUploadArgs?['start'], DateTime(2026, 3, 31));
+    expect(gateway.lastUploadArgs?['end'], DateTime(2026, 4, 1));
+  });
+
+  test('pushLocalEventToRemote keeps non-UTC non-midnight all-day end fallback normalization', () async {
+    final gateway = _RecordingRemoteGateway();
+    final strategy = _TestSyncStrategy(remote: gateway);
+
+    final local = PlatformItem(
+      uid: 'uid-allday-local-shape',
+      title: 'All-day local shape',
+      isAllDay: true,
+      startTime: DateTime(2026, 3, 25, 0, 0, 0).millisecondsSinceEpoch,
+      endTime: DateTime(2026, 3, 25, 23, 59, 59).millisecondsSinceEpoch,
+    );
+
+    await strategy.pushLocalEventToRemote(
+      local: local,
+      remotePath: '/remote.php/dav/calendars/tester/work/',
+      localCalendarId: 'cal-1',
+      remoteSnapshot: null,
+      targetRemoteHref: null,
+    );
+
+    final Map<String, dynamic>? dtstartMeta = gateway.lastUploadArgs?['dtstartMeta'] as Map<String, dynamic>?;
+    final Map<String, dynamic>? dtendMeta = gateway.lastUploadArgs?['dtendMeta'] as Map<String, dynamic>?;
     expect((dtstartMeta?['params'] as Map?)?['VALUE'], 'DATE');
     expect((dtendMeta?['params'] as Map?)?['VALUE'], 'DATE');
     expect(gateway.lastUploadArgs?['start'], DateTime(2026, 3, 25));
