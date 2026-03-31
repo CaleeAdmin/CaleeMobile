@@ -449,10 +449,13 @@ abstract class SyncStrategy {
     required bool isEnd,
   }) {
     final int rawMs = isEnd ? (local.endTime ?? 0) : (local.startTime ?? 0);
-    final DateTime base = DateTime.fromMillisecondsSinceEpoch(rawMs);
     if (local.isAllDay != true) {
-      return base;
+      return DateTime.fromMillisecondsSinceEpoch(rawMs);
     }
+
+    final String timezoneMarker = (local.eventTimezone ?? '').trim().toUpperCase();
+    final bool treatAsUtc = timezoneMarker == 'UTC' || timezoneMarker == 'ETC/UTC';
+    final DateTime base = DateTime.fromMillisecondsSinceEpoch(rawMs, isUtc: treatAsUtc);
 
     if (!isEnd) {
       return DateTime(base.year, base.month, base.day);
@@ -607,12 +610,12 @@ abstract class SyncStrategy {
   Future<bool> _isRemoteSnapshotFullyMapped({
     required Database db,
     required int remoteCollectionId,
-    required Iterable<String> remoteSnapshotUids,
+    required Iterable<Map<String, dynamic>> remoteSnapshotEvents,
   }) async {
-    if (remoteSnapshotUids.isEmpty) return true;
+    if (remoteSnapshotEvents.isEmpty) return true;
     final List<Map<String, dynamic>> rows = await db.query(
       'sync_items',
-      columns: ['remote_uid'],
+      columns: ['remote_uid', 'local_item_id'],
       where: 'remote_collection_id = ?',
       whereArgs: [remoteCollectionId],
     );
@@ -621,7 +624,61 @@ abstract class SyncStrategy {
         if ((row['remote_uid']?.toString() ?? '').trim().isNotEmpty)
           row['remote_uid'].toString().trim(),
     };
-    return remoteSnapshotUids.every(mappedUids.contains);
+    final Map<String, List<Map<String, dynamic>>> mappedRowsByBaseUid = <String, List<Map<String, dynamic>>>{};
+    for (final row in rows) {
+      final String mappedIdentity = (row['remote_uid']?.toString() ?? '').trim();
+      if (mappedIdentity.isEmpty) continue;
+      final String mappedBaseUid = _baseUidFromIdentityKey(mappedIdentity);
+      if (mappedBaseUid.isEmpty) continue;
+      mappedRowsByBaseUid.putIfAbsent(mappedBaseUid, () => <Map<String, dynamic>>[]).add(row);
+    }
+
+    for (final remote in remoteSnapshotEvents) {
+      if (!_isRemoteCoveredForBootstrap(
+        remote: remote,
+        mappedUids: mappedUids,
+        mappedRowsByBaseUid: mappedRowsByBaseUid,
+      )) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  String _baseUidFromIdentityKey(String key) {
+    final String normalized = key.trim();
+    if (normalized.isEmpty) return '';
+    final int separatorIndex = normalized.indexOf('::');
+    if (separatorIndex <= 0) return normalized;
+    return normalized.substring(0, separatorIndex).trim();
+  }
+
+  bool _isRecurringExceptionRemote(Map<String, dynamic> remote) {
+    final String recurrenceId = (remote['recurrence_id']?.toString() ?? '').trim();
+    if (recurrenceId.isNotEmpty) return true;
+    final String identityKey =
+        (remote['instance_key']?.toString() ?? remote['remote_uid']?.toString() ?? '').trim();
+    return identityKey.contains('::');
+  }
+
+  bool _isRemoteCoveredForBootstrap({
+    required Map<String, dynamic> remote,
+    required Set<String> mappedUids,
+    required Map<String, List<Map<String, dynamic>>> mappedRowsByBaseUid,
+  }) {
+    final String identityKey =
+        (remote['instance_key']?.toString() ?? remote['remote_uid']?.toString() ?? '').trim();
+    if (identityKey.isEmpty) return true;
+    if (mappedUids.contains(identityKey)) return true;
+
+    if (!_isRecurringExceptionRemote(remote)) return false;
+
+    final String baseUid = _baseUidFromIdentityKey(identityKey);
+    if (baseUid.isEmpty) return false;
+    if (mappedUids.contains(baseUid)) return true;
+
+    final List<Map<String, dynamic>> sameSeriesRows = mappedRowsByBaseUid[baseUid] ?? const <Map<String, dynamic>>[];
+    return sameSeriesRows.any((row) => (row['local_item_id']?.toString() ?? '').trim().isNotEmpty);
   }
 
   Future<void> runUnifiedSync(
@@ -952,7 +1009,7 @@ abstract class SyncStrategy {
         : await _isRemoteSnapshotFullyMapped(
             db: db,
             remoteCollectionId: remoteCollectionId,
-            remoteSnapshotUids: remoteByUid.keys,
+            remoteSnapshotEvents: snapshot.events,
           );
     canCommitCollectionProgress = remoteTrusted && !mutationFailure && snapshotCoverageComplete;
 
