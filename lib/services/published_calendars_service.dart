@@ -4,12 +4,12 @@ import 'package:caleesync/common/app_constant.dart';
 import 'package:caleesync/common/utils/mmkv_utils.dart';
 import 'package:http/http.dart' as http;
 
-import '../entity/public_subscription.dart';
+import '../entity/published_calendar.dart';
 
-class PublicSubscriptionsService {
+class PublishedCalendarsService {
   final http.Client _client;
 
-  PublicSubscriptionsService({http.Client? client}) : _client = client ?? http.Client();
+  PublishedCalendarsService({http.Client? client}) : _client = client ?? http.Client();
 
   Uri _fetchUri() => Uri.https(AppConstant.caleeApiServer, '/v1/me/published-calendars');
 
@@ -26,7 +26,7 @@ class PublicSubscriptionsService {
     };
   }
 
-  Future<List<PublicSubscriptionCategory>> fetch() async {
+  Future<List<PublishedCalendarCategory>> fetch() async {
     final response = await _client.get(_fetchUri(), headers: _headers());
     if (response.statusCode != 200) {
       throw Exception('Failed to load calendars: ${response.statusCode} ${response.body}');
@@ -44,11 +44,11 @@ class PublicSubscriptionsService {
 
     final calendars = items
         .whereType<Map<String, dynamic>>()
-        .map(PublicSubscriptionCalendar.fromJson)
+        .map(PublishedCalendar.fromJson)
         .toList();
 
     return [
-      PublicSubscriptionCategory(title: 'Calee Calendars', calendars: calendars),
+      PublishedCalendarCategory(title: 'Calee Calendars', calendars: calendars),
     ];
   }
 }

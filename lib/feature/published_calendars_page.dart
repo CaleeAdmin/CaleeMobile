@@ -2,15 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
 import '../controllers/CalendarPageController.dart';
-import '../controllers/public_subscriptions_controller.dart';
-import '../entity/public_subscription.dart';
+import '../controllers/published_calendars_controller.dart';
+import '../entity/published_calendar.dart';
 
-class PublicSubscriptionsGetxPage extends StatelessWidget {
-  const PublicSubscriptionsGetxPage({super.key});
+class PublishedCalendarsGetxPage extends StatelessWidget {
+  const PublishedCalendarsGetxPage({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final ctrl = Get.put(PublicSubscriptionsController());
+    final ctrl = Get.put(PublishedCalendarsController());
     return Scaffold(
       appBar: AppBar(
         centerTitle: true,
@@ -40,7 +40,7 @@ class PublicSubscriptionsGetxPage extends StatelessWidget {
           padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
           itemCount: categories.length,
           itemBuilder: (context, index) {
-            final PublicSubscriptionCategory cat = categories[index];
+            final PublishedCalendarCategory cat = categories[index];
             return _CategorySection.fromDomain(category: cat);
           },
         );
@@ -50,10 +50,10 @@ class PublicSubscriptionsGetxPage extends StatelessWidget {
 }
 
 class _CategorySection extends StatelessWidget {
-  final PublicSubscriptionCategory category;
+  final PublishedCalendarCategory category;
   const _CategorySection({super.key, required this.category});
 
-  factory _CategorySection.fromDomain({required PublicSubscriptionCategory category}) {
+  factory _CategorySection.fromDomain({required PublishedCalendarCategory category}) {
     return _CategorySection(category: category);
   }
 
@@ -105,7 +105,7 @@ class _CategorySection extends StatelessWidget {
 }
 
 class _CalendarCard extends StatelessWidget {
-  final PublicSubscriptionCalendar calendar;
+  final PublishedCalendar calendar;
   const _CalendarCard({super.key, required this.calendar});
 
   static const _cardTitleStyle = TextStyle(
