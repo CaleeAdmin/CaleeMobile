@@ -30,12 +30,12 @@ class PublicSubscriptionsGetxPage extends StatelessWidget {
           return Center(
             child: Padding(
               padding: const EdgeInsets.all(16),
-              child: Text('Failed to load subscriptions: ${ctrl.error.value}'),
+              child: Text('Failed to load calendars: ${ctrl.error.value}'),
             ),
           );
         }
         final categories = ctrl.categories;
-        if (categories.isEmpty) return const Center(child: Text('No public subscriptions found'));
+        if (categories.isEmpty) return const Center(child: Text('No public calendars found'));
         return ListView.builder(
           padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
           itemCount: categories.length,
@@ -247,15 +247,7 @@ class _CalendarCard extends StatelessWidget {
                           children: [
                             Text('By', style: _cardMetaStyle),
                             const SizedBox(height: 4),
-                            Text(calendar.ownerUid, style: _cardMetaStyle),
-                          ],
-                        ),
-                        const Spacer(),
-                        Row(
-                          children: [
-                            const Icon(Icons.people, size: 14, color: Color(0xFF9CA3AF)),
-                            const SizedBox(width: 6),
-                            Text('${calendar.subscribers}', style: _cardMetaStyle),
+                            Text(calendar.ownerDisplayName.isNotEmpty ? calendar.ownerDisplayName : calendar.ownerUid, style: _cardMetaStyle),
                           ],
                         ),
                       ],
