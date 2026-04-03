@@ -124,8 +124,14 @@ class _CalendarCard extends StatelessWidget {
     color: Color(0xFF4B5563),
   );
 
-  static const _publisherStyle = TextStyle(
-    fontSize: 13,
+  static const _publisherPrefixStyle = TextStyle(
+    fontSize: 12,
+    fontWeight: FontWeight.w500,
+    color: Color(0xFF6B7280),
+  );
+
+  static const _publisherNameStyle = TextStyle(
+    fontSize: 14,
     fontWeight: FontWeight.w600,
     color: Color(0xFF374151),
   );
@@ -238,11 +244,21 @@ class _CalendarCard extends StatelessWidget {
                       ],
                     ),
                     const SizedBox(height: 6),
-                    Text(
-                      calendar.ownerDisplayName.isNotEmpty
-                          ? 'From ${calendar.ownerDisplayName}'
-                          : 'From ${calendar.ownerUid}',
-                      style: _publisherStyle,
+                    Text.rich(
+                      TextSpan(
+                        children: [
+                          const TextSpan(
+                            text: 'From ',
+                            style: _publisherPrefixStyle,
+                          ),
+                          TextSpan(
+                            text: calendar.ownerDisplayName.isNotEmpty
+                                ? calendar.ownerDisplayName
+                                : calendar.ownerUid,
+                            style: _publisherNameStyle,
+                          ),
+                        ],
+                      ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
