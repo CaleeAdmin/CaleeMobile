@@ -601,7 +601,7 @@ class CalendarPageController extends GetxController {
 
     try {
       isLoading.value = true;
-      final ok = await _repo.handlePublicSubscription(normalizedUrl);
+      final ok = await _repo.handlePublishedCalendarSubscription(normalizedUrl);
       if (ok) {
         await reloadCalendars();
         _notifyMeaningfulChange();

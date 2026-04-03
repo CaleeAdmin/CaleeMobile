@@ -1,14 +1,14 @@
 import 'package:get/get.dart';
-import 'package:caleesync/services/public_subscriptions_service.dart';
+import 'package:caleesync/services/published_calendars_service.dart';
 
-import '../entity/public_subscription.dart';
+import '../entity/published_calendar.dart';
 
-class PublicSubscriptionsController extends GetxController {
+class PublishedCalendarsController extends GetxController {
   final RxBool isLoading = false.obs;
   final RxString error = ''.obs;
-  final RxList<PublicSubscriptionCategory> categories = <PublicSubscriptionCategory>[].obs;
+  final RxList<PublishedCalendarCategory> categories = <PublishedCalendarCategory>[].obs;
 
-  final PublicSubscriptionsService _service = PublicSubscriptionsService();
+  final PublishedCalendarsService _service = PublishedCalendarsService();
 
   @override
   void onInit() {
@@ -21,7 +21,7 @@ class PublicSubscriptionsController extends GetxController {
       isLoading.value = true;
       error.value = '';
       categories.clear();
-      final List<PublicSubscriptionCategory> result = await _service.fetch();
+      final List<PublishedCalendarCategory> result = await _service.fetch();
       categories.assignAll(result);
     } catch (e) {
       error.value = e.toString();

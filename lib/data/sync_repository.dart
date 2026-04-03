@@ -1174,7 +1174,7 @@ class SyncRepository {
     });
   }
 
-  Future<bool> handlePublicSubscription(String icsUrl) async {
+  Future<bool> handlePublishedCalendarSubscription(String icsUrl) async {
     // 1. 使用你提供的方法获取原始名称
     String? originalName = await CaleeServerService().getIcsNameFromUrl(icsUrl);
 

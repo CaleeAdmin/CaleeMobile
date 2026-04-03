@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-/// Public subscription calendar model used across the app.
-class PublicSubscriptionCalendar {
+/// Published calendar model used across the app.
+class PublishedCalendar {
   final String title;
   final String description;
   final String ownerUid;
@@ -9,7 +9,7 @@ class PublicSubscriptionCalendar {
   final Color color;
   final String? icsUrl;
 
-  const PublicSubscriptionCalendar({
+  const PublishedCalendar({
     required this.title,
     required this.description,
     required this.ownerUid,
@@ -18,7 +18,7 @@ class PublicSubscriptionCalendar {
     this.icsUrl,
   });
 
-  factory PublicSubscriptionCalendar.fromJson(Map<String, dynamic> json) {
+  factory PublishedCalendar.fromJson(Map<String, dynamic> json) {
     final title = (json['calendar_name'] ?? json['title'] ?? '').toString();
     final description = (json['description'] ?? '').toString();
     final ownerUid = (json['owner_uid'] ?? '').toString();
@@ -37,7 +37,7 @@ class PublicSubscriptionCalendar {
       }
     } catch (_) {}
 
-    return PublicSubscriptionCalendar(
+    return PublishedCalendar(
       title: title.isEmpty ? 'Untitled' : title,
       description: description,
       ownerUid: ownerUid,
@@ -48,12 +48,12 @@ class PublicSubscriptionCalendar {
   }
 }
 
-/// Category grouping for public subscriptions.
-class PublicSubscriptionCategory {
+/// Category grouping for published calendars.
+class PublishedCalendarCategory {
   final String title;
-  final List<PublicSubscriptionCalendar> calendars;
+  final List<PublishedCalendar> calendars;
 
-  const PublicSubscriptionCategory({
+  const PublishedCalendarCategory({
     required this.title,
     required this.calendars,
   });
