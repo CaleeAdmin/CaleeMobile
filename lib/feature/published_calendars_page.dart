@@ -2,15 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
 import '../controllers/CalendarPageController.dart';
-import '../controllers/public_subscriptions_controller.dart';
-import '../entity/public_subscription.dart';
+import '../controllers/published_calendars_controller.dart';
+import '../entity/published_calendar.dart';
 
-class PublicSubscriptionsGetxPage extends StatelessWidget {
-  const PublicSubscriptionsGetxPage({super.key});
+class PublishedCalendarsGetxPage extends StatelessWidget {
+  const PublishedCalendarsGetxPage({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final ctrl = Get.put(PublicSubscriptionsController());
+    final ctrl = Get.put(PublishedCalendarsController());
     return Scaffold(
       appBar: AppBar(
         centerTitle: true,
@@ -30,17 +30,17 @@ class PublicSubscriptionsGetxPage extends StatelessWidget {
           return Center(
             child: Padding(
               padding: const EdgeInsets.all(16),
-              child: Text('Failed to load subscriptions: ${ctrl.error.value}'),
+              child: Text('Failed to load calendars: ${ctrl.error.value}'),
             ),
           );
         }
         final categories = ctrl.categories;
-        if (categories.isEmpty) return const Center(child: Text('No public subscriptions found'));
+        if (categories.isEmpty) return const Center(child: Text('No Calee calendars found'));
         return ListView.builder(
           padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
           itemCount: categories.length,
           itemBuilder: (context, index) {
-            final PublicSubscriptionCategory cat = categories[index];
+            final PublishedCalendarCategory cat = categories[index];
             return _CategorySection.fromDomain(category: cat);
           },
         );
@@ -50,10 +50,10 @@ class PublicSubscriptionsGetxPage extends StatelessWidget {
 }
 
 class _CategorySection extends StatelessWidget {
-  final PublicSubscriptionCategory category;
+  final PublishedCalendarCategory category;
   const _CategorySection({super.key, required this.category});
 
-  factory _CategorySection.fromDomain({required PublicSubscriptionCategory category}) {
+  factory _CategorySection.fromDomain({required PublishedCalendarCategory category}) {
     return _CategorySection(category: category);
   }
 
@@ -105,7 +105,7 @@ class _CategorySection extends StatelessWidget {
 }
 
 class _CalendarCard extends StatelessWidget {
-  final PublicSubscriptionCalendar calendar;
+  final PublishedCalendar calendar;
   const _CalendarCard({super.key, required this.calendar});
 
   static const _cardTitleStyle = TextStyle(
@@ -122,6 +122,18 @@ class _CalendarCard extends StatelessWidget {
   static const _cardMetaStyle = TextStyle(
     fontSize: 12,
     color: Color(0xFF4B5563),
+  );
+
+  static const _publisherPrefixStyle = TextStyle(
+    fontSize: 12,
+    fontWeight: FontWeight.w500,
+    color: Color(0xFF6B7280),
+  );
+
+  static const _publisherNameStyle = TextStyle(
+    fontSize: 14,
+    fontWeight: FontWeight.w600,
+    color: Color(0xFF374151),
   );
 
   @override
@@ -231,35 +243,34 @@ class _CalendarCard extends StatelessWidget {
                           ),
                       ],
                     ),
-                    const SizedBox(height: 8),
-                    if (calendar.description.isNotEmpty)
+                    const SizedBox(height: 6),
+                    Text.rich(
+                      TextSpan(
+                        children: [
+                          const TextSpan(
+                            text: 'From ',
+                            style: _publisherPrefixStyle,
+                          ),
+                          TextSpan(
+                            text: calendar.ownerDisplayName.isNotEmpty
+                                ? calendar.ownerDisplayName
+                                : calendar.ownerUid,
+                            style: _publisherNameStyle,
+                          ),
+                        ],
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    if (calendar.description.isNotEmpty) ...[
+                      const SizedBox(height: 8),
                       Text(
                         calendar.description,
                         style: _cardBodyStyle,
                         maxLines: 3,
                         overflow: TextOverflow.ellipsis,
                       ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('By', style: _cardMetaStyle),
-                            const SizedBox(height: 4),
-                            Text(calendar.ownerUid, style: _cardMetaStyle),
-                          ],
-                        ),
-                        const Spacer(),
-                        Row(
-                          children: [
-                            const Icon(Icons.people, size: 14, color: Color(0xFF9CA3AF)),
-                            const SizedBox(width: 6),
-                            Text('${calendar.subscribers}', style: _cardMetaStyle),
-                          ],
-                        ),
-                      ],
-                    ),
+                    ],
                   ],
                 ),
               ),

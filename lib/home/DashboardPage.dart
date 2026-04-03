@@ -14,7 +14,7 @@ import '../controllers/CalendarPageController.dart';
 import '../controllers/calendar_probe_controller.dart';
 import '../entity/sync_run_record.dart';
 import '../feature/local_calendars_page.dart';
-import '../feature/public_subscriptions_page.dart';
+import '../feature/published_calendars_page.dart';
 import 'sync_status_details_page.dart';
 
 class DashboardPage extends StatefulWidget {
@@ -336,7 +336,7 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
                       SizedBox(
                         width: double.infinity,
                         child: OutlinedButton.icon(
-                          onPressed: () => Get.to(() => const PublicSubscriptionsGetxPage()),
+                          onPressed: () => Get.to(() => const PublishedCalendarsGetxPage()),
                           icon: const Icon(Icons.public),
                           label: const Text('Subscribe to Calee Calendar'),
                         ),
