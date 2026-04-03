@@ -35,7 +35,7 @@ class PublishedCalendarsGetxPage extends StatelessWidget {
           );
         }
         final categories = ctrl.categories;
-        if (categories.isEmpty) return const Center(child: Text('No public calendars found'));
+        if (categories.isEmpty) return const Center(child: Text('No Calee calendars found'));
         return ListView.builder(
           padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
           itemCount: categories.length,
@@ -122,6 +122,12 @@ class _CalendarCard extends StatelessWidget {
   static const _cardMetaStyle = TextStyle(
     fontSize: 12,
     color: Color(0xFF4B5563),
+  );
+
+  static const _publisherStyle = TextStyle(
+    fontSize: 13,
+    fontWeight: FontWeight.w600,
+    color: Color(0xFF374151),
   );
 
   @override
@@ -231,27 +237,24 @@ class _CalendarCard extends StatelessWidget {
                           ),
                       ],
                     ),
-                    const SizedBox(height: 8),
-                    if (calendar.description.isNotEmpty)
+                    const SizedBox(height: 6),
+                    Text(
+                      calendar.ownerDisplayName.isNotEmpty
+                          ? 'From ${calendar.ownerDisplayName}'
+                          : 'From ${calendar.ownerUid}',
+                      style: _publisherStyle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    if (calendar.description.isNotEmpty) ...[
+                      const SizedBox(height: 8),
                       Text(
                         calendar.description,
                         style: _cardBodyStyle,
                         maxLines: 3,
                         overflow: TextOverflow.ellipsis,
                       ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('By', style: _cardMetaStyle),
-                            const SizedBox(height: 4),
-                            Text(calendar.ownerDisplayName.isNotEmpty ? calendar.ownerDisplayName : calendar.ownerUid, style: _cardMetaStyle),
-                          ],
-                        ),
-                      ],
-                    ),
+                    ],
                   ],
                 ),
               ),
