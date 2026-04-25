@@ -64,21 +64,28 @@ class Eventparsedutils {
         if (uid.isEmpty || dtstart == null || dtend == null) {
           return null;
         }
+        final Map<String, dynamic>? dtstartMeta = remote['dtstart_meta'] as Map<String, dynamic>?;
+        final Map<String, dynamic>? dtendMeta = remote['dtend_meta'] as Map<String, dynamic>?;
 
         return ParsedEvent(
           uid: uid,
           identityKey: (remote['instance_key'] ?? remote['remote_uid'] ?? uid).toString(),
           summary: remote['summary'] ?? 'Untitled',
           dtstart: dtstart,
-          dtend: dtend,
+          dtend: _normalizeAllDayExclusiveEnd(
+            dtstart: dtstart,
+            dtend: dtend,
+            dtstartMeta: dtstartMeta,
+            dtendMeta: dtendMeta,
+          ),
           description: remote['description'],
           href: remote['href'],
           recurrenceId: remote['recurrence_id']?.toString(),
           location: remote['location']?.toString(),
           url: remote['url']?.toString(),
           parseSource: (remote['parse_source'] ?? 'VEVENT').toString(),
-          dtstartMeta: remote['dtstart_meta'] as Map<String, dynamic>?,
-          dtendMeta: remote['dtend_meta'] as Map<String, dynamic>?,
+          dtstartMeta: dtstartMeta,
+          dtendMeta: dtendMeta,
         );
       }
 
@@ -104,21 +111,30 @@ class Eventparsedutils {
       if (parsedMap.isEmpty) {
         return null;
       }
+      final Map<String, dynamic>? dtstartMeta = parsedMap['dtstart_meta'] as Map<String, dynamic>?;
+      final Map<String, dynamic>? dtendMeta = parsedMap['dtend_meta'] as Map<String, dynamic>?;
+      final int parsedStart = parsedMap['dtstart'];
+      final int parsedEnd = parsedMap['dtend'];
 
       return ParsedEvent(
         uid: parsedMap['uid'] ?? remote['uid'] ?? href,
         identityKey: (parsedMap['instance_key'] ?? parsedMap['uid'] ?? remote['uid'] ?? href).toString(),
         summary: parsedMap['summary'] ?? 'Untitled event',
-        dtstart: parsedMap['dtstart'],
-        dtend: parsedMap['dtend'],
+        dtstart: parsedStart,
+        dtend: _normalizeAllDayExclusiveEnd(
+          dtstart: parsedStart,
+          dtend: parsedEnd,
+          dtstartMeta: dtstartMeta,
+          dtendMeta: dtendMeta,
+        ),
         description: parsedMap['description'],
         href: href,
         recurrenceId: parsedMap['recurrence_id']?.toString(),
         location: parsedMap['location']?.toString(),
         url: parsedMap['url']?.toString(),
         parseSource: (parsedMap['parse_source'] ?? 'VEVENT').toString(),
-        dtstartMeta: parsedMap['dtstart_meta'] as Map<String, dynamic>?,
-        dtendMeta: parsedMap['dtend_meta'] as Map<String, dynamic>?,
+        dtstartMeta: dtstartMeta,
+        dtendMeta: dtendMeta,
       );
     } catch (e) {
       debugPrint('[ERROR] resolveEventData exception: $e');
@@ -135,5 +151,30 @@ class Eventparsedutils {
       normalized = 'https://$normalized';
     }
     return normalized.endsWith('/') ? normalized.substring(0, normalized.length - 1) : normalized;
+  }
+
+  static int _normalizeAllDayExclusiveEnd({
+    required int dtstart,
+    required int dtend,
+    required Map<String, dynamic>? dtstartMeta,
+    required Map<String, dynamic>? dtendMeta,
+  }) {
+    final bool isDateOnlyStart = dtstartMeta?['isDateOnly'] == true;
+    if (!isDateOnlyStart || dtend <= dtstart) {
+      return dtend;
+    }
+
+    final DateTime end = DateTime.fromMillisecondsSinceEpoch(dtend);
+    final bool endAtMidnight =
+        end.hour == 0 && end.minute == 0 && end.second == 0 && end.millisecond == 0 && end.microsecond == 0;
+    if (!endAtMidnight) {
+      return dtend;
+    }
+
+    if (dtendMeta?['isDateOnly'] == false) {
+      return dtend;
+    }
+
+    return dtend - 1;
   }
 }
