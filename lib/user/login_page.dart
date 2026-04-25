@@ -150,7 +150,7 @@ class _LoginPageState extends State<LoginPage> {
   Future<void> _openTermsAndConditionsPage() async {
     final termsUri = Uri.https(
       AppConstant.caleeServer,
-      '/terms-and-conditions',
+      '/terms',
     );
 
     final opened = await launchUrl(
