@@ -159,7 +159,7 @@ class IcsParser {
       final int day = int.parse(compact.substring(6, 8));
 
       if (isDateOnly) {
-        return DateTime(year, month, day).millisecondsSinceEpoch;
+        return DateTime.utc(year, month, day).millisecondsSinceEpoch;
       }
 
       if (dateStr.endsWith('Z')) {
