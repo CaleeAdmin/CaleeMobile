@@ -147,6 +147,27 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 
+  Future<void> _openTermsAndConditionsPage() async {
+    final termsUri = Uri.https(
+      AppConstant.caleeServer,
+      '/terms',
+    );
+
+    final opened = await launchUrl(
+      termsUri,
+      mode: LaunchMode.platformDefault,
+    );
+
+    if (opened) return;
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Could not open terms and conditions page in browser'),
+      ),
+    );
+  }
+
   Future<void> _openForgotPasswordPage() async {
     final resetPasswordUri = Uri.https(
       AppConstant.caleeServer,
@@ -284,9 +305,7 @@ class _LoginPageState extends State<LoginPage> {
                                   decoration: TextDecoration.underline,
                                 ),
                                 recognizer: TapGestureRecognizer()
-                                  ..onTap = () {
-                                    // TODO: open terms page
-                                  },
+                                  ..onTap = _openTermsAndConditionsPage,
                               ),
                             ],
                           ),

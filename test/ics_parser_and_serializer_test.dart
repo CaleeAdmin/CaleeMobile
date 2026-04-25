@@ -69,9 +69,31 @@ void main() {
       final parsed = IcsParser.parse(ics, 'fallback');
       final meta = parsed['dtstart_meta'] as Map<String, dynamic>;
 
-      expect(parsed['dtstart'], DateTime(2026, 12, 12).millisecondsSinceEpoch);
+      expect(parsed['dtstart'], DateTime.utc(2026, 12, 12).millisecondsSinceEpoch);
+      expect(parsed['dtend'], DateTime.utc(2026, 12, 13).millisecondsSinceEpoch);
       expect(meta['isDateOnly'], isTrue);
       expect((meta['params'] as Map<String, dynamic>)['VALUE'], 'DATE');
+    });
+
+    test('parses Google all-day VALUE=DATE as UTC midnight Android-compatible millis', () {
+      const String ics = 'BEGIN:VCALENDAR\n'
+          'BEGIN:VEVENT\n'
+          'UID:google-all-day\n'
+          'DTSTART;VALUE=DATE:20260425\n'
+          'DTEND;VALUE=DATE:20260426\n'
+          'SUMMARY:Google All Day\n'
+          'END:VEVENT\n'
+          'END:VCALENDAR\n';
+
+      final parsed = IcsParser.parse(ics, 'fallback');
+
+      expect(parsed['dtstart'], DateTime.utc(2026, 4, 25).millisecondsSinceEpoch);
+      expect(parsed['dtend'], DateTime.utc(2026, 4, 26).millisecondsSinceEpoch);
+
+      final startMeta = parsed['dtstart_meta'] as Map<String, dynamic>;
+      final endMeta = parsed['dtend_meta'] as Map<String, dynamic>;
+      expect(startMeta['isDateOnly'], isTrue);
+      expect(endMeta['isDateOnly'], isTrue);
     });
 
     test('preserves UTC date-time metadata', () {
