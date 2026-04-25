@@ -464,37 +464,6 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
     }
 
 
-    private fun normalizeAllDayUtcMidnight(rawMs: Long): Long {
-        val calendar = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC")).apply {
-            timeInMillis = rawMs
-            set(java.util.Calendar.HOUR_OF_DAY, 0)
-            set(java.util.Calendar.MINUTE, 0)
-            set(java.util.Calendar.SECOND, 0)
-            set(java.util.Calendar.MILLISECOND, 0)
-        }
-        return calendar.timeInMillis
-    }
-
-    private fun normalizeAllDayUtcDateBoundary(rawMs: Long, sourceTimezone: String?): Long {
-        val sourceTz = java.util.TimeZone.getTimeZone(
-            sourceTimezone?.takeIf { it.isNotBlank() } ?: java.util.TimeZone.getDefault().id
-        )
-        val source = java.util.Calendar.getInstance(sourceTz).apply {
-            timeInMillis = rawMs
-        }
-        val utc = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC")).apply {
-            clear()
-            set(java.util.Calendar.YEAR, source.get(java.util.Calendar.YEAR))
-            set(java.util.Calendar.MONTH, source.get(java.util.Calendar.MONTH))
-            set(java.util.Calendar.DAY_OF_MONTH, source.get(java.util.Calendar.DAY_OF_MONTH))
-            set(java.util.Calendar.HOUR_OF_DAY, 0)
-            set(java.util.Calendar.MINUTE, 0)
-            set(java.util.Calendar.SECOND, 0)
-            set(java.util.Calendar.MILLISECOND, 0)
-        }
-        return normalizeAllDayUtcMidnight(utc.timeInMillis)
-    }
-
     override fun createEvent(
         calendarId: String,
         title: String,
@@ -537,12 +506,12 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
 
             val allDay = isAllDay == true
             val resolvedStart = if (allDay) {
-                normalizeAllDayUtcDateBoundary(start, eventTimezone)
+                AllDayUtcNormalizer.normalizeAllDayUtcDateBoundary(start, eventTimezone)
             } else {
                 start
             }
             val resolvedEnd = if (allDay) {
-                normalizeAllDayUtcDateBoundary(end, eventTimezone)
+                AllDayUtcNormalizer.normalizeAllDayUtcDateBoundary(end, eventTimezone)
             } else {
                 end
             }
@@ -599,12 +568,12 @@ class CalendarHostApiImpl(private val context: Context) : NativeCalendarApi {
             val contentResolver = context.contentResolver
             val allDay = request.isAllDay == true
             val resolvedStart = if (allDay) {
-                normalizeAllDayUtcDateBoundary(request.start, request.eventTimezone)
+                AllDayUtcNormalizer.normalizeAllDayUtcDateBoundary(request.start, request.eventTimezone)
             } else {
                 request.start
             }
             val resolvedEnd = if (allDay) {
-                normalizeAllDayUtcDateBoundary(request.end, request.eventTimezone)
+                AllDayUtcNormalizer.normalizeAllDayUtcDateBoundary(request.end, request.eventTimezone)
             } else {
                 request.end
             }
