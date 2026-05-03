@@ -7,10 +7,57 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
 import 'package:permission_handler/permission_handler.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class LinkDeviceController {
   Future<void> handleQrScan(BuildContext context, String scannedValue) async {
     try {
+      final hubNativeLoginUrl = _tryParseHubNativeLoginUrl(scannedValue);
+      if (hubNativeLoginUrl != null) {
+        if (!context.mounted) return;
+
+        final bool? shouldOpen = await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) {
+            return AlertDialog(
+              title: const Text('Approve Calee tablet sign-in?'),
+              content: const Text(
+                'This QR code is a Calee tablet sign-in request. '
+                'Continue in your browser to approve and link the tablet.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(false),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(true),
+                  child: const Text('Continue'),
+                ),
+              ],
+            );
+          },
+        );
+
+        if (shouldOpen != true) return;
+
+        final opened = await launchUrl(
+          hubNativeLoginUrl,
+          mode: LaunchMode.externalApplication,
+        );
+
+        if (!opened && context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Could not open Calee sign-in page.'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+
+        return;
+      }
+
       final approvalRequest = _parseApprovalRequest(scannedValue);
       if (!context.mounted) return;
 
@@ -98,6 +145,24 @@ class LinkDeviceController {
         'Approval failed (${response.statusCode}): ${response.body}',
       );
     }
+  }
+
+
+  Uri? _tryParseHubNativeLoginUrl(String scannedValue) {
+    final uri = Uri.tryParse(scannedValue.trim());
+    if (uri == null) return null;
+
+    final isHttps = uri.scheme.toLowerCase() == 'https';
+    final isTrustedHub = uri.host.toLowerCase() == 'hub.calee.com.au';
+    final isNativeLoginPath = RegExp(
+      r'^/native-login/[A-Za-z0-9_-]{32,256}$',
+    ).hasMatch(uri.path);
+
+    if (!isHttps || !isTrustedHub || !isNativeLoginPath) {
+      return null;
+    }
+
+    return uri;
   }
 
   _ApprovalRequest _parseApprovalRequest(String scannedValue) {
