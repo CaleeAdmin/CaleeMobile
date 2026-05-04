@@ -11,6 +11,59 @@ import 'package:permission_handler/permission_handler.dart';
 class LinkDeviceController {
   Future<void> handleQrScan(BuildContext context, String scannedValue) async {
     try {
+      final hubRequest = _tryParseHubNativeApprovalRequest(scannedValue);
+      if (hubRequest != null) {
+        if (!context.mounted) return;
+
+        final bool? shouldApprove = await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) {
+            return AlertDialog(
+              title: const Text('Approve device link?', textAlign: TextAlign.left),
+              titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
+              contentPadding: const EdgeInsets.fromLTRB(24, 0, 24, 12),
+              content: SizedBox(
+                width: double.maxFinite,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _detailRow('Device name', hubRequest.deviceName),
+                    const SizedBox(height: 8),
+                    _detailRow('Server', hubRequest.serverBase),
+                  ],
+                ),
+              ),
+              actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(false),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(true),
+                  child: const Text('Approve'),
+                ),
+              ],
+            );
+          },
+        );
+
+        if (shouldApprove != true) return;
+
+        await _sendHubNativeApproval(hubRequest);
+
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Device approval sent successfully.'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+
+        return;
+      }
+
       final approvalRequest = _parseApprovalRequest(scannedValue);
       if (!context.mounted) return;
 
@@ -98,6 +151,73 @@ class LinkDeviceController {
         'Approval failed (${response.statusCode}): ${response.body}',
       );
     }
+  }
+
+
+  Future<void> _sendHubNativeApproval(_HubNativeApprovalRequest request) async {
+    const endpoint = 'https://hub.calee.com.au/v1/native-login-flows/mobile-approve';
+    final auth = base64Encode(utf8.encode('${request.loginName}:${request.appPassword}'));
+
+    final response = await http.post(
+      Uri.parse(endpoint),
+      headers: {
+        'Authorization': 'Basic $auth',
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: jsonEncode({
+        'native_login_url': request.nativeLoginUri.toString(),
+        'server': request.serverBase,
+        'device_name': request.deviceName,
+      }),
+    );
+
+    dynamic responseJson;
+    try {
+      responseJson = jsonDecode(response.body);
+    } catch (_) {
+      responseJson = null;
+    }
+
+    final bool ok = responseJson is Map<String, dynamic> && responseJson['ok'] == true;
+    if (response.statusCode != 200 || !ok) {
+      final message = responseJson is Map<String, dynamic>
+          ? ((responseJson['message'] ?? responseJson['error'])?.toString() ?? 'Unknown error')
+          : 'Unknown error';
+      throw Exception('Approval failed (${response.statusCode}): $message');
+    }
+  }
+
+  _HubNativeApprovalRequest? _tryParseHubNativeApprovalRequest(String scannedValue) {
+    final uri = Uri.tryParse(scannedValue.trim());
+    if (uri == null || uri.scheme != 'https' || uri.host != 'hub.calee.com.au') {
+      return null;
+    }
+
+    final pathRegex = RegExp(r'^/native-login/[A-Za-z0-9_-]{32,256}$');
+    if (!pathRegex.hasMatch(uri.path)) {
+      return null;
+    }
+
+    final savedServer = MMKVUtils.instance.getString(AppConstant.serverKey)?.trim() ?? '';
+    final serverBase = _normalizeServerBase(savedServer);
+    if (serverBase == null) {
+      throw const FormatException('Missing saved Calee server');
+    }
+
+    final loginName = MMKVUtils.instance.getString(AppConstant.loginNameKey)?.trim() ?? '';
+    final appPassword = MMKVUtils.instance.getString(AppConstant.appPasswordKey)?.trim() ?? '';
+    if (loginName.isEmpty || appPassword.isEmpty) {
+      throw const FormatException('Missing saved Calee credentials (loginName/appPassword)');
+    }
+
+    return _HubNativeApprovalRequest(
+      nativeLoginUri: uri,
+      serverBase: serverBase,
+      deviceName: 'Calee Tablet',
+      loginName: loginName,
+      appPassword: appPassword,
+    );
   }
 
   _ApprovalRequest _parseApprovalRequest(String scannedValue) {
@@ -219,6 +339,22 @@ class _ApprovalRequest {
   });
 
   final String pollToken;
+  final String serverBase;
+  final String deviceName;
+  final String loginName;
+  final String appPassword;
+}
+
+class _HubNativeApprovalRequest {
+  const _HubNativeApprovalRequest({
+    required this.nativeLoginUri,
+    required this.serverBase,
+    required this.deviceName,
+    required this.loginName,
+    required this.appPassword,
+  });
+
+  final Uri nativeLoginUri;
   final String serverBase;
   final String deviceName;
   final String loginName;
