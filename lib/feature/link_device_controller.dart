@@ -133,6 +133,11 @@ class LinkDeviceController {
     final endpoint = Uri.parse('${request.serverBase}/index.php/apps/caleeflow/approve');
     final auth = base64Encode(utf8.encode('${request.loginName}:${request.appPassword}'));
 
+    debugPrint(
+      'LinkDevice legacy approval request: endpoint=$endpoint '
+      'server=${request.serverBase} loginName=${request.loginName}',
+    );
+
     final response = await http.post(
       endpoint,
       headers: {
@@ -146,6 +151,17 @@ class LinkDeviceController {
       }),
     );
 
+    debugPrint(
+      'LinkDevice legacy approval response: status=${response.statusCode} body=${response.body}',
+    );
+
+    if (response.statusCode == 403) {
+      throw Exception(
+        'This Calee account is not allowed to approve this device link. '
+        'Please make sure the QR code belongs to the same Calee account.',
+      );
+    }
+
     if (response.statusCode != 200) {
       throw Exception(
         'Approval failed (${response.statusCode}): ${response.body}',
@@ -157,6 +173,11 @@ class LinkDeviceController {
   Future<void> _sendHubNativeApproval(_HubNativeApprovalRequest request) async {
     const endpoint = 'https://hub.calee.com.au/v1/native-login-flows/mobile-approve';
     final auth = base64Encode(utf8.encode('${request.loginName}:${request.appPassword}'));
+
+    debugPrint(
+      'LinkDevice Hub approval request: endpoint=$endpoint '
+      'server=${request.serverBase} loginName=${request.loginName}',
+    );
 
     final response = await http.post(
       Uri.parse(endpoint),
@@ -172,6 +193,10 @@ class LinkDeviceController {
       }),
     );
 
+    debugPrint(
+      'LinkDevice Hub approval response: status=${response.statusCode} body=${response.body}',
+    );
+
     dynamic responseJson;
     try {
       responseJson = jsonDecode(response.body);
@@ -180,6 +205,13 @@ class LinkDeviceController {
     }
 
     final bool ok = responseJson is Map<String, dynamic> && responseJson['ok'] == true;
+    if (response.statusCode == 403) {
+      throw Exception(
+        'This Calee account is not allowed to approve this device link. '
+        'Please make sure you are signed in with the same Calee account that created the QR code.',
+      );
+    }
+
     if (response.statusCode != 200 || !ok) {
       final message = responseJson is Map<String, dynamic>
           ? ((responseJson['message'] ?? responseJson['error'])?.toString() ?? 'Unknown error')
@@ -214,7 +246,7 @@ class LinkDeviceController {
     return _HubNativeApprovalRequest(
       nativeLoginUri: uri,
       serverBase: serverBase,
-      deviceName: 'Calee Tablet',
+      deviceName: 'Calee device',
       loginName: loginName,
       appPassword: appPassword,
     );

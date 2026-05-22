@@ -150,6 +150,8 @@ class UserProfileService {
     }
   }
 
+  /// Deprecated: CaleeSync login now uses Calee Hub / Keycloak passwords.
+  /// Do not call this from UI. Password changes must go through Calee Hub.
   Future<void> changePassword({
     required String currentPassword,
     required String newPassword,

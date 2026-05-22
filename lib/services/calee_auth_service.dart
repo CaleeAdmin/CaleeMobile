@@ -1,9 +1,12 @@
 import 'dart:convert';
+import 'package:caleesync/common/app_constant.dart';
 import 'package:http/http.dart' as http;
 
-/// Nextcloud Login Flow v2 认证服务
-/// 
-/// 参考文档: https://docs.nextcloud.com/server/latest/developer_manual/client_apis/LoginFlow/index.html#login-flow-v2
+/// Calee authentication service.
+///
+/// Normal CaleeSync login authenticates through Calee Hub and receives
+/// Portal sync credentials. Legacy Nextcloud login-flow helpers remain for
+/// compatibility but are not used by the main login button.
 class CaleeAuthService {
   final String serverBaseUrl;
 
@@ -106,7 +109,143 @@ class CaleeAuthService {
     }
   }
 
-  /// 使用用户名密码验证登录
+
+  /// Authenticate with Calee Hub and receive Portal sync credentials.
+  ///
+  /// This keeps the app UI unchanged: the existing loginName/password fields
+  /// are now Calee Hub credentials. Hub returns the Portal server/login/app
+  /// password that the existing sync engine already expects.
+  Future<Map<String, String>> loginWithHubCredentials({
+    required String loginName,
+    required String password,
+    String deviceName = 'CaleeSync Android',
+  }) async {
+    final url = Uri.https(AppConstant.caleeHubServer, '/v1/sync/login');
+
+    final response = await http.post(
+      url,
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: jsonEncode({
+        'email': loginName.trim(),
+        'password': password,
+        'device_name': deviceName,
+      }),
+    ).timeout(
+      const Duration(seconds: 15),
+      onTimeout: () {
+        throw Exception('Request timeout: Unable to connect to Calee Hub');
+      },
+    );
+
+    final bodyText = response.body.trim();
+    dynamic decoded;
+    if (bodyText.isNotEmpty) {
+      try {
+        decoded = jsonDecode(bodyText);
+      } catch (_) {
+        throw Exception('Invalid Calee Hub response');
+      }
+    }
+
+    if (response.statusCode != 200) {
+      if (decoded is Map<String, dynamic>) {
+        final message = decoded['message']?.toString();
+        if (message != null && message.isNotEmpty) {
+          throw Exception(message);
+        }
+      }
+
+      if (response.statusCode == 401) {
+        throw Exception('Invalid email or password');
+      }
+
+      throw Exception('CaleeSync login is temporarily unavailable');
+    }
+
+    if (decoded is! Map<String, dynamic>) {
+      throw Exception('Invalid Calee Hub response');
+    }
+
+    final ok = decoded['ok'] == true;
+    final server = decoded['server']?.toString() ?? '';
+    final returnedLoginName = decoded['loginName']?.toString() ?? '';
+    final appPassword = decoded['appPassword']?.toString() ?? '';
+
+    if (!ok || server.isEmpty || returnedLoginName.isEmpty || appPassword.isEmpty) {
+      throw Exception('Invalid Calee Hub response');
+    }
+
+    return {
+      'server': server,
+      'loginName': returnedLoginName,
+      'appPassword': appPassword,
+    };
+  }
+
+
+  /// Change the user's Calee Hub / Keycloak password.
+  ///
+  /// This does not modify the Portal / Nextcloud password or app password.
+  Future<void> changeHubPassword({
+    required String email,
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    final url = Uri.https(AppConstant.caleeHubServer, '/v1/sync/change-password');
+
+    final response = await http.post(
+      url,
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: jsonEncode({
+        'email': email.trim(),
+        'current_password': currentPassword,
+        'new_password': newPassword,
+      }),
+    ).timeout(
+      const Duration(seconds: 15),
+      onTimeout: () {
+        throw Exception('Request timeout: Unable to connect to Calee Hub');
+      },
+    );
+
+    dynamic decoded;
+    final bodyText = response.body.trim();
+    if (bodyText.isNotEmpty) {
+      try {
+        decoded = jsonDecode(bodyText);
+      } catch (_) {
+        throw Exception('Invalid Calee Hub response');
+      }
+    }
+
+    if (response.statusCode != 200) {
+      if (decoded is Map<String, dynamic>) {
+        final message = decoded['message']?.toString();
+        if (message != null && message.isNotEmpty) {
+          throw Exception(message);
+        }
+      }
+
+      if (response.statusCode == 401) {
+        throw Exception('Current password is incorrect.');
+      }
+
+      throw Exception('Password change failed. Please try again.');
+    }
+
+    if (decoded is! Map<String, dynamic> || decoded['ok'] != true) {
+      throw Exception('Password change failed. Please try again.');
+    }
+  }
+
+  /// Legacy Portal/Nextcloud credential check.
+  /// Not used by the main CaleeSync login button.
   /// 
   /// [loginName] 用户名
   /// [password] 密码
@@ -143,9 +282,8 @@ class CaleeAuthService {
     }
   }
 
-  /// 使用登录凭据换取 Calee App Password，后续 API 调用应使用该密码。
-  ///
-  /// Nextcloud 文档接口：GET /ocs/v2.php/core/getapppassword
+  /// Legacy Portal/Nextcloud app-password retrieval.
+  /// Not used by the main CaleeSync login button.
   Future<String> getAppPassword({
     required String loginName,
     required String password,
