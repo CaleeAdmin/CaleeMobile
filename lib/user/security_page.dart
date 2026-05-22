@@ -55,10 +55,10 @@ class _SecurityPageState extends State<SecurityPage> {
       return;
     }
 
-    if (newPassword.isEmpty || newPassword.length < 6) {
+    if (newPassword.isEmpty || newPassword.length < 8) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('New password must be at least 6 characters'),
+          content: Text('New password must be at least 8 characters'),
           backgroundColor: Colors.red,
         ),
       );
