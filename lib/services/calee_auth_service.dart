@@ -1,7 +1,8 @@
 import 'dart:convert';
+import 'package:caleesync/common/app_constant.dart';
 import 'package:http/http.dart' as http;
 
-/// Nextcloud Login Flow v2 认证服务
+/// Calee authentication service.
 /// 
 /// 参考文档: https://docs.nextcloud.com/server/latest/developer_manual/client_apis/LoginFlow/index.html#login-flow-v2
 class CaleeAuthService {
@@ -104,6 +105,82 @@ class CaleeAuthService {
       }
       rethrow;
     }
+  }
+
+
+  /// Authenticate with Calee Hub and receive Portal sync credentials.
+  ///
+  /// This keeps the app UI unchanged: the existing loginName/password fields
+  /// are now Calee Hub credentials. Hub returns the Portal server/login/app
+  /// password that the existing sync engine already expects.
+  Future<Map<String, String>> loginWithHubCredentials({
+    required String loginName,
+    required String password,
+    String deviceName = 'CaleeSync Android',
+  }) async {
+    final url = Uri.https(AppConstant.caleeHubServer, '/v1/sync/login');
+
+    final response = await http.post(
+      url,
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: jsonEncode({
+        'email': loginName.trim(),
+        'password': password,
+        'device_name': deviceName,
+      }),
+    ).timeout(
+      const Duration(seconds: 15),
+      onTimeout: () {
+        throw Exception('Request timeout: Unable to connect to Calee Hub');
+      },
+    );
+
+    final bodyText = response.body.trim();
+    dynamic decoded;
+    if (bodyText.isNotEmpty) {
+      try {
+        decoded = jsonDecode(bodyText);
+      } catch (_) {
+        throw Exception('Invalid Calee Hub response');
+      }
+    }
+
+    if (response.statusCode != 200) {
+      if (decoded is Map<String, dynamic>) {
+        final message = decoded['message']?.toString();
+        if (message != null && message.isNotEmpty) {
+          throw Exception(message);
+        }
+      }
+
+      if (response.statusCode == 401) {
+        throw Exception('Invalid email or password');
+      }
+
+      throw Exception('CaleeSync login is temporarily unavailable');
+    }
+
+    if (decoded is! Map<String, dynamic>) {
+      throw Exception('Invalid Calee Hub response');
+    }
+
+    final ok = decoded['ok'] == true;
+    final server = decoded['server']?.toString() ?? '';
+    final returnedLoginName = decoded['loginName']?.toString() ?? '';
+    final appPassword = decoded['appPassword']?.toString() ?? '';
+
+    if (!ok || server.isEmpty || returnedLoginName.isEmpty || appPassword.isEmpty) {
+      throw Exception('Invalid Calee Hub response');
+    }
+
+    return {
+      'server': server,
+      'loginName': returnedLoginName,
+      'appPassword': appPassword,
+    };
   }
 
   /// 使用用户名密码验证登录
