@@ -33,29 +33,17 @@ class AuthController extends GetxController {
     try {
       authStateRx.value = const AuthState(status: AuthStatus.initiating);
 
-      final success = await _authService.loginWithCredentials(
+      final result = await _authService.loginWithHubCredentials(
         loginName: loginName,
         password: password,
       );
 
-      if (success) {
-        final appPassword = await _authService.getAppPassword(
-          loginName: loginName,
-          password: password,
-        );
-
-        authStateRx.value = AuthState(
-          status: AuthStatus.success,
-          serverUrl: _authService.normalizedUrl,
-          loginName: loginName,
-          appPassword: appPassword,
-        );
-      } else {
-        authStateRx.value = const AuthState(
-          status: AuthStatus.error,
-          errorMessage: 'Invalid username or password',
-        );
-      }
+      authStateRx.value = AuthState(
+        status: AuthStatus.success,
+        serverUrl: result['server'],
+        loginName: result['loginName'],
+        appPassword: result['appPassword'],
+      );
     } catch (e) {
       authStateRx.value = AuthState(
         status: AuthStatus.error,

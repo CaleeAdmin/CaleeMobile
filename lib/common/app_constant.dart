@@ -11,6 +11,7 @@ class AppConstant {
 
   /// Calee 服务器地址
   static const String caleeServer = 'portal.calee.com.au';
+  static const String caleeHubServer = 'hub.calee.com.au';
   static const String caleeApiServer = 'api.calee.com.au';
 
   /// MMKV 存储 Key

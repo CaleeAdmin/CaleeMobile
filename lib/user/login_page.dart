@@ -10,7 +10,7 @@ import 'package:get/get.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-/// Login page with Nextcloud Login Flow v2 integration.
+/// Calee login page.
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
 
@@ -170,8 +170,8 @@ class _LoginPageState extends State<LoginPage> {
 
   Future<void> _openForgotPasswordPage() async {
     final resetPasswordUri = Uri.https(
-      AppConstant.caleeServer,
-      '/index.php/login',
+      AppConstant.caleeHubServer,
+      '/login',
     );
 
     final opened = await launchUrl(
