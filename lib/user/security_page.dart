@@ -1,6 +1,8 @@
+import 'package:caleesync/common/app_constant.dart';
 import 'package:caleesync/common/route_constant.dart';
+import 'package:caleesync/common/utils/mmkv_utils.dart';
 import 'package:caleesync/controllers/app_controller.dart';
-import 'package:caleesync/services/user_profile_service.dart';
+import 'package:caleesync/services/calee_auth_service.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
@@ -88,8 +90,14 @@ class _SecurityPageState extends State<SecurityPage> {
     });
 
     try {
-      final userProfileService = UserProfileService();
-      await userProfileService.changePassword(
+      final email = MMKVUtils.instance.getString(AppConstant.loginNameKey)?.trim() ?? '';
+      if (email.isEmpty) {
+        throw Exception('Missing Calee account email. Please log in again.');
+      }
+
+      final authService = CaleeAuthService(serverBaseUrl: AppConstant.caleeServer);
+      await authService.changeHubPassword(
+        email: email,
         currentPassword: currentPassword,
         newPassword: newPassword,
       );
@@ -205,7 +213,7 @@ class _SecurityPageState extends State<SecurityPage> {
                   children: [
                     _buildSectionTitle(
                       'Change Password',
-                      'Update your password to keep your account secure',
+                      'Update your Calee Hub password to keep your account secure',
                     ),
                     const SizedBox(height: 24),
                     _buildLabel('Current Password'),
