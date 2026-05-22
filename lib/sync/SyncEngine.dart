@@ -7,7 +7,6 @@ import 'package:flutter/cupertino.dart';
 
 import '../entity/SyncSummary.dart';
 import '../entity/sync_run_record.dart';
-import '../services/calee_auth_service.dart';
 import '../services/calee_server_service.dart';
 import 'force_sync_registry.dart';
 import 'sync_item_executor.dart';
@@ -18,20 +17,17 @@ class SyncEngine {
   SyncEngine({
     SyncRepository? repo,
     CaleeServerService? serverService,
-    CaleeAuthService? authService,
     SyncItemPlanner? planner,
     SyncItemExecutor? executor,
     SyncRunRecorder? runRecorder,
   })  : _repo = repo ?? SyncRepository(),
         _serverService = serverService ?? CaleeServerService(),
-        _authService = authService ?? CaleeAuthService(serverBaseUrl: AppConstant.caleeServer),
         _planner = planner ?? SyncItemPlanner(),
         _executor = executor ?? SyncItemExecutor(),
         _runRecorder = runRecorder ?? SyncRunRecorder();
 
   final SyncRepository _repo;
   final CaleeServerService _serverService;
-  final CaleeAuthService _authService;
   final SyncItemPlanner _planner;
   final SyncItemExecutor _executor;
   final SyncRunRecorder _runRecorder;
@@ -70,9 +66,12 @@ class SyncEngine {
         return summary;
       }
 
+      final String serverUrl =
+          MMKVUtils.instance.getString(AppConstant.serverKey) ?? AppConstant.caleeServer;
+
       await _repo.scanLocalCalendars(authUserId);
       final List<Map<String, dynamic>> remoteCalendars = await _serverService.scanRemoteCalendars(
-        serverUrl: _authService.normalizedUrl,
+        serverUrl: serverUrl,
         authUserId: authUserId,
         accountName: accountName,
       );
