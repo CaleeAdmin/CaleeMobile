@@ -11,7 +11,7 @@ class LoginPage extends StatefulWidget {
   });
 
   final CaleeHubClient hubClient;
-  final void Function(String accessToken, ClientBootstrap bootstrap) onSignedIn;
+  final void Function(String accessToken, String refreshToken, ClientBootstrap bootstrap) onSignedIn;
 
   @override
   State<LoginPage> createState() => _LoginPageState();
@@ -52,7 +52,7 @@ class _LoginPageState extends State<LoginPage> {
         return;
       }
 
-      widget.onSignedIn(result.accessToken, result.bootstrap);
+      widget.onSignedIn(result.accessToken, result.refreshToken, result.bootstrap);
     } on CaleeHubException catch (e) {
       setState(() {
         _errorMessage = e.message;

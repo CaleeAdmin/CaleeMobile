@@ -158,16 +158,20 @@ class ClientContext {
 class ClientLoginResult {
   const ClientLoginResult({
     required this.accessToken,
+    required this.refreshToken,
     required this.tokenType,
     required this.expiresIn,
+    required this.refreshExpiresIn,
     required this.bootstrap,
   });
 
   factory ClientLoginResult.fromJson(Map<String, dynamic> json) {
     return ClientLoginResult(
       accessToken: json['accessToken'] as String? ?? '',
+      refreshToken: json['refreshToken'] as String? ?? '',
       tokenType: json['tokenType'] as String? ?? 'Bearer',
       expiresIn: json['expiresIn'] as int? ?? 0,
+      refreshExpiresIn: json['refreshExpiresIn'] as int? ?? 0,
       bootstrap: ClientBootstrap.fromJson(
         json['bootstrap'] as Map<String, dynamic>? ?? const {},
       ),
@@ -175,7 +179,29 @@ class ClientLoginResult {
   }
 
   final String accessToken;
+  final String refreshToken;
   final String tokenType;
   final int expiresIn;
+  final int refreshExpiresIn;
   final ClientBootstrap bootstrap;
+}
+
+class ClientRefreshResult {
+  const ClientRefreshResult({
+    required this.accessToken,
+    required this.tokenType,
+    required this.expiresIn,
+  });
+
+  factory ClientRefreshResult.fromJson(Map<String, dynamic> json) {
+    return ClientRefreshResult(
+      accessToken: json['accessToken'] as String? ?? '',
+      tokenType: json['tokenType'] as String? ?? 'Bearer',
+      expiresIn: json['expiresIn'] as int? ?? 0,
+    );
+  }
+
+  final String accessToken;
+  final String tokenType;
+  final int expiresIn;
 }
