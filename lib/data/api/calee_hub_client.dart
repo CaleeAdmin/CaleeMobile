@@ -39,6 +39,19 @@ class CaleeHubClient {
     return ClientBootstrap.fromJson(_data(json));
   }
 
+  Future<ClientRefreshResult> refresh({
+    required String refreshToken,
+  }) async {
+    final json = await _postJson(
+      '/client/v1/auth/refresh',
+      body: {
+        'refreshToken': refreshToken,
+      },
+    );
+
+    return ClientRefreshResult.fromJson(_data(json));
+  }
+
   Future<Map<String, dynamic>> _postJson(
     String path, {
     required Map<String, dynamic> body,
