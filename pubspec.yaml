@@ -35,18 +35,8 @@ dependencies:
   # Use with the CupertinoIcons class for iOS style icons.
   # 1. 状态管理与路由
   get: ^4.6.6
-  get_storage: ^2.1.1  # GetX 持久化存储
-  cupertino_icons: ^1.0.8
-  go_router: ^14.2.0
-  flutter_riverpod: ^2.6.1
-  http: ^1.2.2
-  url_launcher: ^6.3.1
-  xml: ^6.5.0   # 用于解析服务器返回的 XML 数据
   intl: ^0.19.0  # 或者最新版本
   uuid: ^4.3.3 # 请检查 pub.dev 获取最新版本
-  webview_flutter: ^4.10.0
-  path_provider: ^2.1.4
-  package_info_plus: ^8.0.2
 
 dev_dependencies:
   flutter_test:
