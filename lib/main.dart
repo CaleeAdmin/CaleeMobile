@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:get/get.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -11,7 +10,7 @@ class CaleeMobileApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GetMaterialApp(
+    return MaterialApp(
       title: 'Calee',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
