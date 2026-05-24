@@ -31,7 +31,7 @@ class CaleeUid {
 
   static String buildDeterministicRepairedUid(String rawUid) {
     final String seed = rawUid.trim().isEmpty ? '<EMPTY_UID>' : rawUid;
-    final String deterministicUuid = _uuid.v5(Uuid.NAMESPACE_URL, seed).toUpperCase();
+    final String deterministicUuid = _uuid.v5(Namespace.url.value, seed).toUpperCase();
     if (_uuidPattern.hasMatch(seed)) {
       return seed.toUpperCase();
     }
