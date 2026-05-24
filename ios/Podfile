@@ -37,7 +37,6 @@ end
 post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_ios_build_settings(target)
-    # Enable calendar permission for permission_handler
     target.build_configurations.each do |config|
       # Raise iOS deployment target to 13.0 to silence lower-target warnings
       config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.6'
