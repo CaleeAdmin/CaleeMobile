@@ -36,8 +36,6 @@
 	<string>Calendar access is required to read and display your events.</string>
 	<key>NSCalendarsUsageDescription</key>
 	<string>Calendar access is required to read and display your events.</string>
-	<key>NSCameraUsageDescription</key>
-	<string>Camera access is required to scan QR codes and link devices.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
