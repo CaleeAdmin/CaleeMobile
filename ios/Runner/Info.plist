@@ -4,16 +4,16 @@
 <dict>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
-		<string>com.calee.caleesync.periodic</string>
-		<string>com.calee.caleesync.sync</string>
-		<string>com.calee.caleesync.watchdog</string>
+		<string>au.com.calee.mobile.periodic</string>
+		<string>au.com.calee.mobile.sync</string>
+		<string>au.com.calee.mobile.watchdog</string>
 	</array>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>CaleeSync</string>
+	<string>Calee</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -21,7 +21,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>caleesync</string>
+	<string>Calee</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
