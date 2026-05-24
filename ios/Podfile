@@ -44,7 +44,6 @@ post_install do |installer|
         '$(inherited)',
         'PERMISSION_EVENTS=1',
         'PERMISSION_REMINDERS=1', # optional, in case reminders/tasks are needed
-        'PERMISSION_CAMERA=1',
       ]
     end
   end
