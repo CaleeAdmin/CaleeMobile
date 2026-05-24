@@ -1,12 +1,12 @@
 # CaleeMobile Data Architecture
 
-CaleeMobile should use the Calee Hub API as its backend boundary.
+CaleeMobile should use the Calee Client API as its backend boundary.
 
-## Direction
+## Final direction
 
 CaleeMobile should be a lightweight Flutter client:
 
-CaleeMobile -> Calee Hub API -> Nextcloud / CalDAV / Tasks / Chores
+CaleeMobile -> Calee Client API -> Calee Hub -> Nextcloud / CalDAV / Tasks / Chores / external calendar integrations
 
 The mobile app should not reimplement the old Android/CaleeSync local calendar sync engine.
 
@@ -20,12 +20,13 @@ CaleeMobile may later add local caching for speed and offline viewing, but the f
 
 Initial version:
 
-- Fetch on app open
+- Fetch bootstrap after login
+- Fetch screen data on screen open
 - Pull to refresh
 - Refresh after create/edit/delete
 - Refresh on app resume if data is stale
 
-Avoid background sync until the foreground app is stable.
+Avoid background CalDAV sync in the mobile app.
 
 ## Feature areas
 
@@ -48,5 +49,8 @@ Do not rebuild:
 - Background CalDAV workers
 - Local dirty-event sync engine
 - Direct Google/iCloud/Outlook credential handling
+- Direct Nextcloud CalDAV protocol handling
 
 External calendar integrations should be handled by server-side Calee Hub integrations.
+
+See `docs/calee_client_api_contract.md` for the shared Client API contract.
