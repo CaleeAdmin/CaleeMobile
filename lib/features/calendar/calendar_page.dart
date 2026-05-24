@@ -18,28 +18,53 @@ class CalendarPage extends StatefulWidget {
 }
 
 class _CalendarPageState extends State<CalendarPage> {
-  late Future<ClientCalendarList> _calendarListFuture;
+  late Future<_CalendarOverview> _overviewFuture;
 
   @override
   void initState() {
     super.initState();
-    _calendarListFuture = _loadCalendars();
+    _overviewFuture = _loadOverview();
   }
 
-  Future<ClientCalendarList> _loadCalendars() {
-    return widget.hubClient.calendars(accessToken: widget.accessToken);
+  Future<_CalendarOverview> _loadOverview() async {
+    final today = DateTime.now();
+    final from = _formatDate(today);
+    final to = _formatDate(today.add(const Duration(days: 7)));
+
+    final results = await Future.wait([
+      widget.hubClient.calendars(accessToken: widget.accessToken),
+      widget.hubClient.events(
+        accessToken: widget.accessToken,
+        from: from,
+        to: to,
+      ),
+    ]);
+
+    return _CalendarOverview(
+      calendarList: results[0] as ClientCalendarList,
+      eventList: results[1] as ClientEventList,
+    );
   }
 
-  void _reloadCalendars() {
+  void _reloadOverview() {
     setState(() {
-      _calendarListFuture = _loadCalendars();
+      _overviewFuture = _loadOverview();
     });
+  }
+
+  String _formatDate(DateTime value) {
+    final local = value.toLocal();
+    final year = local.year.toString().padLeft(4, '0');
+    final month = local.month.toString().padLeft(2, '0');
+    final day = local.day.toString().padLeft(2, '0');
+
+    return '$year-$month-$day';
   }
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<ClientCalendarList>(
-      future: _calendarListFuture,
+    return FutureBuilder<_CalendarOverview>(
+      future: _overviewFuture,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(
@@ -49,52 +74,173 @@ class _CalendarPageState extends State<CalendarPage> {
 
         if (snapshot.hasError) {
           return _CalendarErrorState(
-            onRetry: _reloadCalendars,
+            onRetry: _reloadOverview,
           );
         }
 
-        final calendars = snapshot.data?.calendars ?? const [];
+        final overview = snapshot.data;
+        final calendars = overview?.calendarList.calendars ?? const [];
+        final events = overview?.eventList.events ?? const [];
 
-        if (calendars.isEmpty) {
+        if (calendars.isEmpty && events.isEmpty) {
           return const _CalendarEmptyState();
         }
 
         return RefreshIndicator(
           onRefresh: () async {
-            _reloadCalendars();
-            await _calendarListFuture;
+            _reloadOverview();
+            await _overviewFuture;
           },
-          child: ListView.separated(
+          child: ListView(
             padding: const EdgeInsets.all(16),
-            itemCount: calendars.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 12),
-            itemBuilder: (context, index) {
-              final calendar = calendars[index];
-
-              return Card(
-                child: ListTile(
-                  leading: CircleAvatar(
-                    child: Text(
-                      calendar.name.isNotEmpty
-                          ? calendar.name.characters.first.toUpperCase()
-                          : '?',
-                    ),
-                  ),
-                  title: Text(calendar.name),
-                  subtitle: Text(
-                    [
-                      calendar.serviceName,
-                      calendar.source,
-                      if (calendar.readOnly) 'Read-only',
-                    ].where((item) => item.trim().isNotEmpty).join(' · '),
-                  ),
-                  trailing: const Icon(Icons.chevron_right),
-                ),
-              );
-            },
+            children: [
+              _SectionHeader(
+                title: 'Calendars',
+                subtitle: '${calendars.length} connected',
+              ),
+              const SizedBox(height: 8),
+              if (calendars.isEmpty)
+                const _EmptySectionMessage(message: 'No calendars available.')
+              else
+                ...calendars.map(_CalendarTile.new),
+              const SizedBox(height: 24),
+              _SectionHeader(
+                title: 'Upcoming events',
+                subtitle: 'Next 7 days',
+              ),
+              const SizedBox(height: 8),
+              if (events.isEmpty)
+                const _EmptySectionMessage(message: 'No upcoming events.')
+              else
+                ...events.map(_EventTile.new),
+            ],
           ),
         );
       },
+    );
+  }
+}
+
+class _CalendarOverview {
+  const _CalendarOverview({
+    required this.calendarList,
+    required this.eventList,
+  });
+
+  final ClientCalendarList calendarList;
+  final ClientEventList eventList;
+}
+
+class _CalendarTile extends StatelessWidget {
+  const _CalendarTile(this.calendar);
+
+  final ClientCalendar calendar;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: ListTile(
+        leading: CircleAvatar(
+          child: Text(
+            calendar.name.isNotEmpty
+                ? calendar.name.characters.first.toUpperCase()
+                : '?',
+          ),
+        ),
+        title: Text(calendar.name),
+        subtitle: Text(
+          [
+            calendar.serviceName,
+            calendar.source,
+            if (calendar.readOnly) 'Read-only',
+          ].where((item) => item.trim().isNotEmpty).join(' · '),
+        ),
+      ),
+    );
+  }
+}
+
+class _EventTile extends StatelessWidget {
+  const _EventTile(this.event);
+
+  final ClientEvent event;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: ListTile(
+        leading: const Icon(Icons.event_outlined),
+        title: Text(event.title),
+        subtitle: Text(
+          [
+            _formatEventTime(event),
+            event.serviceName,
+            if ((event.location ?? '').trim().isNotEmpty) event.location!,
+          ].where((item) => item.trim().isNotEmpty).join(' · '),
+        ),
+      ),
+    );
+  }
+
+  String _formatEventTime(ClientEvent event) {
+    if (event.allDay) {
+      return 'All day';
+    }
+
+    final start = DateTime.tryParse(event.startsAt);
+    if (start == null) {
+      return event.startsAt;
+    }
+
+    final local = start.toLocal();
+    final hour = local.hour.toString().padLeft(2, '0');
+    final minute = local.minute.toString().padLeft(2, '0');
+
+    return '${local.day}/${local.month} $hour:$minute';
+  }
+}
+
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader({
+    required this.title,
+    required this.subtitle,
+  });
+
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          title,
+          style: Theme.of(context).textTheme.titleLarge,
+        ),
+        Text(
+          subtitle,
+          style: Theme.of(context).textTheme.bodyMedium,
+        ),
+      ],
+    );
+  }
+}
+
+class _EmptySectionMessage extends StatelessWidget {
+  const _EmptySectionMessage({
+    required this.message,
+  });
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Text(message),
+      ),
     );
   }
 }
@@ -119,7 +265,7 @@ class _CalendarErrorState extends StatelessWidget {
               const Icon(Icons.cloud_off_outlined, size: 40),
               const SizedBox(height: 12),
               Text(
-                'Unable to load calendars.',
+                'Unable to load calendar data.',
                 style: Theme.of(context).textTheme.titleMedium,
               ),
               const SizedBox(height: 12),
@@ -146,7 +292,7 @@ class _CalendarEmptyState extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Text(
-            'No calendars available yet.',
+            'No calendar data available yet.',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.titleMedium,
           ),
