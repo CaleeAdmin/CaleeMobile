@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import '../models/client_bootstrap.dart';
+import '../models/client_calendar.dart';
 
 class CaleeHubClient {
   CaleeHubClient({
@@ -37,6 +38,17 @@ class CaleeHubClient {
     );
 
     return ClientBootstrap.fromJson(_data(json));
+  }
+
+  Future<ClientCalendarList> calendars({
+    required String accessToken,
+  }) async {
+    final json = await _getJson(
+      '/client/v1/calendars',
+      accessToken: accessToken,
+    );
+
+    return ClientCalendarList.fromJson(_data(json));
   }
 
   Future<ClientRefreshResult> refresh({
