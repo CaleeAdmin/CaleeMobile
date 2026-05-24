@@ -170,6 +170,8 @@ class _CaleeAppState extends State<CaleeApp> {
     }
 
     return CaleeHomePage(
+      hubClient: _hubClient,
+      accessToken: _accessToken!,
       bootstrap: _bootstrap!,
       onSignOut: _signOut,
     );

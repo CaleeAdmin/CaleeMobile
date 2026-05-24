@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../data/api/calee_hub_client.dart';
 import '../data/models/client_bootstrap.dart';
 import '../features/calendar/calendar_page.dart';
 import '../features/chores/chores_page.dart';
@@ -8,11 +9,15 @@ import '../features/tasks/tasks_page.dart';
 
 class CaleeHomePage extends StatefulWidget {
   const CaleeHomePage({
+    required this.hubClient,
+    required this.accessToken,
     required this.bootstrap,
     required this.onSignOut,
     super.key,
   });
 
+  final CaleeHubClient hubClient;
+  final String accessToken;
   final ClientBootstrap bootstrap;
   final VoidCallback onSignOut;
 
@@ -24,11 +29,14 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
   int _selectedIndex = 0;
 
   List<_CaleeTab> get _tabs => [
-        const _CaleeTab(
+        _CaleeTab(
           title: 'Calendar',
           icon: Icons.calendar_month_outlined,
           selectedIcon: Icons.calendar_month,
-          page: CalendarPage(),
+          page: CalendarPage(
+            hubClient: widget.hubClient,
+            accessToken: widget.accessToken,
+          ),
         ),
         const _CaleeTab(
           title: 'Tasks',
