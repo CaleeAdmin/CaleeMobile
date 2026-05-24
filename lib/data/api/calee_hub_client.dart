@@ -51,6 +51,27 @@ class CaleeHubClient {
     return ClientCalendarList.fromJson(_data(json));
   }
 
+  Future<ClientEventList> events({
+    required String accessToken,
+    required String from,
+    required String to,
+  }) async {
+    final uri = Uri(
+      path: '/client/v1/events',
+      queryParameters: {
+        'from': from,
+        'to': to,
+      },
+    );
+
+    final json = await _getJson(
+      uri.toString(),
+      accessToken: accessToken,
+    );
+
+    return ClientEventList.fromJson(_data(json));
+  }
+
   Future<ClientRefreshResult> refresh({
     required String refreshToken,
   }) async {
