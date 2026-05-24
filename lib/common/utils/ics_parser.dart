@@ -90,7 +90,7 @@ class IcsParser {
 
   static IcsPropertyValue? _extractFieldFromBlock(String block, String name) {
     final RegExp reg = RegExp(
-      '^' + RegExp.escape(name) + r'((?:;[^:]*)?):(.*)$',
+      r'^${RegExp.escape(name)}((?:;[^:]*)?):(.*)$',
       multiLine: true,
       caseSensitive: false,
     );
