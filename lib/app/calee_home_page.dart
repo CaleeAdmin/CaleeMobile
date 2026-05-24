@@ -1,0 +1,87 @@
+import 'package:flutter/material.dart';
+
+import '../features/calendar/calendar_page.dart';
+import '../features/chores/chores_page.dart';
+import '../features/settings/settings_page.dart';
+import '../features/tasks/tasks_page.dart';
+
+class CaleeHomePage extends StatefulWidget {
+  const CaleeHomePage({super.key});
+
+  @override
+  State<CaleeHomePage> createState() => _CaleeHomePageState();
+}
+
+class _CaleeHomePageState extends State<CaleeHomePage> {
+  int _selectedIndex = 0;
+
+  static const List<_CaleeTab> _tabs = [
+    _CaleeTab(
+      title: 'Calendar',
+      icon: Icons.calendar_month_outlined,
+      selectedIcon: Icons.calendar_month,
+      page: CalendarPage(),
+    ),
+    _CaleeTab(
+      title: 'Tasks',
+      icon: Icons.checklist_outlined,
+      selectedIcon: Icons.checklist,
+      page: TasksPage(),
+    ),
+    _CaleeTab(
+      title: 'Chores',
+      icon: Icons.family_restroom_outlined,
+      selectedIcon: Icons.family_restroom,
+      page: ChoresPage(),
+    ),
+    _CaleeTab(
+      title: 'Settings',
+      icon: Icons.settings_outlined,
+      selectedIcon: Icons.settings,
+      page: SettingsPage(),
+    ),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final tab = _tabs[_selectedIndex];
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(tab.title),
+      ),
+      body: tab.page,
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _selectedIndex,
+        onDestinationSelected: (index) {
+          setState(() {
+            _selectedIndex = index;
+          });
+        },
+        destinations: _tabs
+            .map(
+              (tab) => NavigationDestination(
+                icon: Icon(tab.icon),
+                selectedIcon: Icon(tab.selectedIcon),
+                label: tab.title,
+              ),
+            )
+            .toList(),
+      ),
+    );
+  }
+}
+
+class _CaleeTab {
+  const _CaleeTab({
+    required this.title,
+    required this.icon,
+    required this.selectedIcon,
+    required this.page,
+  });
+
+  final String title;
+  final IconData icon;
+  final IconData selectedIcon;
+  final Widget page;
+}
