@@ -100,7 +100,7 @@ class _CalendarPageState extends State<CalendarPage> {
               ),
               const SizedBox(height: 8),
               if (calendars.isEmpty)
-                const _EmptySectionMessage(message: 'No calendars available.')
+                const _EmptySectionMessage(message: 'No calendars connected yet. Connect a Calee service to show its calendars here.')
               else
                 ...calendars.map(_CalendarTile.new),
               const SizedBox(height: 24),
@@ -110,7 +110,7 @@ class _CalendarPageState extends State<CalendarPage> {
               ),
               const SizedBox(height: 8),
               if (events.isEmpty)
-                const _EmptySectionMessage(message: 'No upcoming events.')
+                const _EmptySectionMessage(message: 'No upcoming events in the next 7 days.')
               else
                 ...events.map(_EventTile.new),
             ],
@@ -183,16 +183,17 @@ class _EventTile extends StatelessWidget {
   }
 
   String _formatEventTime(ClientEvent event) {
-    if (event.allDay) {
-      return 'All day';
-    }
-
     final start = DateTime.tryParse(event.startsAt);
     if (start == null) {
-      return event.startsAt;
+      return event.allDay ? 'All day' : event.startsAt;
     }
 
     final local = start.toLocal();
+
+    if (event.allDay) {
+      return '${local.day}/${local.month} · All day';
+    }
+
     final hour = local.hour.toString().padLeft(2, '0');
     final minute = local.minute.toString().padLeft(2, '0');
 
@@ -265,7 +266,7 @@ class _CalendarErrorState extends StatelessWidget {
               const Icon(Icons.cloud_off_outlined, size: 40),
               const SizedBox(height: 12),
               Text(
-                'Unable to load calendar data.',
+                'Unable to load calendars and events.',
                 style: Theme.of(context).textTheme.titleMedium,
               ),
               const SizedBox(height: 12),
@@ -292,7 +293,7 @@ class _CalendarEmptyState extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Text(
-            'No calendar data available yet.',
+            'No calendars connected yet. Once a Calee service is connected, its calendars and events will appear here.',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.titleMedium,
           ),
