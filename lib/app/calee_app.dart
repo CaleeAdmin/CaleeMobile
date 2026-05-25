@@ -131,30 +131,6 @@ class _CaleeAppState extends State<CaleeApp> {
     });
   }
 
-  Future<void> _refreshBootstrap() async {
-    final accessToken = _accessToken;
-
-    if (accessToken == null) {
-      return;
-    }
-
-    try {
-      final bootstrap = await _hubClient.bootstrap(accessToken: accessToken);
-
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _bootstrap = bootstrap;
-      });
-    } on CaleeHubException catch (e) {
-      if (e.statusCode == 401) {
-        await _signOut();
-      }
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -198,7 +174,6 @@ class _CaleeAppState extends State<CaleeApp> {
       accessToken: _accessToken!,
       bootstrap: _bootstrap!,
       onSignOut: _signOut,
-      onRefreshBootstrap: _refreshBootstrap,
     );
   }
 }
