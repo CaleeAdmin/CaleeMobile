@@ -169,8 +169,7 @@ class _CalendarTile extends StatelessWidget {
         title: Text(calendar.name),
         subtitle: Text(
           [
-            calendar.serviceName,
-            calendar.source,
+            if (calendar.serviceName.trim().isNotEmpty) 'From ${calendar.serviceName}',
             if (calendar.readOnly) 'Read-only',
           ].where((item) => item.trim().isNotEmpty).join(' · '),
         ),
@@ -193,7 +192,7 @@ class _EventTile extends StatelessWidget {
         subtitle: Text(
           [
             _formatEventTime(event),
-            event.serviceName,
+            if (event.serviceName.trim().isNotEmpty) 'From ${event.serviceName}',
             if ((event.location ?? '').trim().isNotEmpty) event.location!,
           ].where((item) => item.trim().isNotEmpty).join(' · '),
         ),
