@@ -85,13 +85,38 @@ class CaleeHubClient {
     return ClientRefreshResult.fromJson(_data(json));
   }
 
+  Future<void> storeServiceCredentials({
+    required String accessToken,
+    required String serviceId,
+    required String loginName,
+    required String appPassword,
+  }) async {
+    await _postJson(
+      '/client/v1/services/${Uri.encodeComponent(serviceId)}/credentials',
+      accessToken: accessToken,
+      body: {
+        'loginName': loginName,
+        'appPassword': appPassword,
+      },
+    );
+  }
+
   Future<Map<String, dynamic>> _postJson(
     String path, {
     required Map<String, dynamic> body,
+    String? accessToken,
   }) async {
     final request = await _httpClient.postUrl(baseUri.resolve(path));
     request.headers.contentType = ContentType.json;
     request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+
+    if (accessToken != null) {
+      request.headers.set(
+        HttpHeaders.authorizationHeader,
+        'Bearer $accessToken',
+      );
+    }
+
     request.write(jsonEncode(body));
 
     return _readJsonResponse(await request.close());

@@ -13,6 +13,7 @@ class CaleeHomePage extends StatefulWidget {
     required this.accessToken,
     required this.bootstrap,
     required this.onSignOut,
+    required this.onRefreshBootstrap,
     super.key,
   });
 
@@ -20,6 +21,7 @@ class CaleeHomePage extends StatefulWidget {
   final String accessToken;
   final ClientBootstrap bootstrap;
   final VoidCallback onSignOut;
+  final Future<void> Function() onRefreshBootstrap;
 
   @override
   State<CaleeHomePage> createState() => _CaleeHomePageState();
@@ -55,8 +57,11 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
           icon: Icons.settings_outlined,
           selectedIcon: Icons.settings,
           page: SettingsPage(
+            hubClient: widget.hubClient,
+            accessToken: widget.accessToken,
             bootstrap: widget.bootstrap,
             onSignOut: widget.onSignOut,
+            onRefreshBootstrap: widget.onRefreshBootstrap,
           ),
         ),
       ];
