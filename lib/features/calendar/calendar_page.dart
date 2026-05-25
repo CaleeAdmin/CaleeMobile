@@ -28,8 +28,10 @@ class _CalendarPageState extends State<CalendarPage> {
 
   Future<_CalendarOverview> _loadOverview() async {
     final today = DateTime.now();
-    final from = _formatDate(today);
-    final to = _formatDate(today.add(const Duration(days: 7)));
+    final fromDate = today;
+    final toDate = today.add(const Duration(days: 7));
+    final from = _formatDate(fromDate);
+    final to = _formatDate(toDate);
 
     final results = await Future.wait([
       widget.hubClient.calendars(accessToken: widget.accessToken),
@@ -43,6 +45,8 @@ class _CalendarPageState extends State<CalendarPage> {
     return _CalendarOverview(
       calendarList: results[0] as ClientCalendarList,
       eventList: results[1] as ClientEventList,
+      fromDate: fromDate,
+      toDate: toDate,
     );
   }
 
@@ -59,6 +63,13 @@ class _CalendarPageState extends State<CalendarPage> {
     final day = local.day.toString().padLeft(2, '0');
 
     return '$year-$month-$day';
+  }
+
+  String _formatDateRange(DateTime from, DateTime to) {
+    final start = from.toLocal();
+    final end = to.toLocal();
+
+    return '${start.day}/${start.month} - ${end.day}/${end.month}';
   }
 
   @override
@@ -79,8 +90,12 @@ class _CalendarPageState extends State<CalendarPage> {
         }
 
         final overview = snapshot.data;
-        final calendars = overview?.calendarList.calendars ?? const [];
-        final events = overview?.eventList.events ?? const [];
+        if (overview == null) {
+          return const _CalendarEmptyState();
+        }
+
+        final calendars = overview.calendarList.calendars;
+        final events = overview.eventList.events;
 
         if (calendars.isEmpty && events.isEmpty) {
           return const _CalendarEmptyState();
@@ -106,11 +121,11 @@ class _CalendarPageState extends State<CalendarPage> {
               const SizedBox(height: 24),
               _SectionHeader(
                 title: 'Upcoming events',
-                subtitle: 'Next 7 days',
+                subtitle: _formatDateRange(overview.fromDate, overview.toDate),
               ),
               const SizedBox(height: 8),
               if (events.isEmpty)
-                const _EmptySectionMessage(message: 'No upcoming events in the next 7 days.')
+                const _EmptySectionMessage(message: 'No events found in this date range.')
               else
                 ...events.map(_EventTile.new),
             ],
@@ -125,10 +140,14 @@ class _CalendarOverview {
   const _CalendarOverview({
     required this.calendarList,
     required this.eventList,
+    required this.fromDate,
+    required this.toDate,
   });
 
   final ClientCalendarList calendarList;
   final ClientEventList eventList;
+  final DateTime fromDate;
+  final DateTime toDate;
 }
 
 class _CalendarTile extends StatelessWidget {
