@@ -285,10 +285,17 @@ class _CalendarErrorState extends StatelessWidget {
               const Icon(Icons.cloud_off_outlined, size: 40),
               const SizedBox(height: 12),
               Text(
-                'Unable to load calendars and events.',
+                'Unable to load calendars and events from Calee.',
+                textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.titleMedium,
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 8),
+              Text(
+                'Check your connection, then try again.',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 16),
               FilledButton(
                 onPressed: onRetry,
                 child: const Text('Try again'),
