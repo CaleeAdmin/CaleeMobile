@@ -94,7 +94,7 @@ class _CalendarPageState extends State<CalendarPage> {
           return const _CalendarEmptyState();
         }
 
-        final calendars = overview.calendarList.calendars;
+        final calendars = overview.calendarList.calendars.where((calendar) => calendar.isCalendarKind).toList();
         final events = overview.eventList.events;
 
         if (calendars.isEmpty && events.isEmpty) {
