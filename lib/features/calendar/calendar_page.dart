@@ -96,11 +96,11 @@ class _CalendarPageState extends State<CalendarPage> {
             children: [
               _SectionHeader(
                 title: 'Calendars',
-                subtitle: '${calendars.length} connected',
+                subtitle: '${calendars.length} found',
               ),
               const SizedBox(height: 8),
               if (calendars.isEmpty)
-                const _EmptySectionMessage(message: 'No calendars connected yet. Connect a Calee service to show its calendars here.')
+                const _EmptySectionMessage(message: 'No calendars found yet. Calee will connect your calendar services automatically.')
               else
                 ...calendars.map(_CalendarTile.new),
               const SizedBox(height: 24),
@@ -293,7 +293,7 @@ class _CalendarEmptyState extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Text(
-            'No calendars connected yet. Once a Calee service is connected, its calendars and events will appear here.',
+            'No calendars found yet. Calee will connect your calendar services automatically, then calendars and events will appear here.',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.titleMedium,
           ),
