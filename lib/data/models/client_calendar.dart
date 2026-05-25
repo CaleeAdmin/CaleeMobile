@@ -21,6 +21,11 @@ class ClientCalendar {
     required this.serviceId,
     required this.serviceName,
     required this.name,
+    required this.components,
+    required this.primaryKind,
+    required this.supportsEvents,
+    required this.supportsTasks,
+    required this.supportsChores,
     required this.readOnly,
     required this.source,
     this.color,
@@ -33,6 +38,13 @@ class ClientCalendar {
       serviceName: json['serviceName'] as String? ?? '',
       name: json['name'] as String? ?? '',
       color: json['color'] as String?,
+      components: (json['components'] as List<dynamic>? ?? const [])
+          .whereType<String>()
+          .toList(),
+      primaryKind: json['primaryKind'] as String? ?? 'calendar',
+      supportsEvents: json['supportsEvents'] as bool? ?? true,
+      supportsTasks: json['supportsTasks'] as bool? ?? false,
+      supportsChores: json['supportsChores'] as bool? ?? false,
       readOnly: json['readOnly'] as bool? ?? false,
       source: json['source'] as String? ?? '',
     );
@@ -43,8 +55,17 @@ class ClientCalendar {
   final String serviceName;
   final String name;
   final String? color;
+  final List<String> components;
+  final String primaryKind;
+  final bool supportsEvents;
+  final bool supportsTasks;
+  final bool supportsChores;
   final bool readOnly;
   final String source;
+
+  bool get isCalendarKind => primaryKind == 'calendar';
+  bool get isTaskKind => primaryKind == 'tasks';
+  bool get isChoreKind => primaryKind == 'chores';
 }
 
 class ClientEventList {
