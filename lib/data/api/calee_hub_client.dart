@@ -3,6 +3,7 @@ import 'dart:io';
 
 import '../models/client_bootstrap.dart';
 import '../models/client_calendar.dart';
+import '../models/client_task.dart';
 
 class CaleeHubClient {
   CaleeHubClient({
@@ -49,6 +50,27 @@ class CaleeHubClient {
     );
 
     return ClientCalendarList.fromJson(_data(json));
+  }
+
+  Future<ClientTaskList> tasks({
+    required String accessToken,
+    required String from,
+    required String to,
+  }) async {
+    final uri = Uri(
+      path: '/client/v1/tasks',
+      queryParameters: {
+        'from': from,
+        'to': to,
+      },
+    );
+
+    final json = await _getJson(
+      uri.toString(),
+      accessToken: accessToken,
+    );
+
+    return ClientTaskList.fromJson(_data(json));
   }
 
   Future<ClientEventList> events({
