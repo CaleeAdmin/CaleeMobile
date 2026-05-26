@@ -47,11 +47,14 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
             accessToken: widget.accessToken,
           ),
         ),
-        const _CaleeTab(
+        _CaleeTab(
           title: 'Chores',
           icon: Icons.family_restroom_outlined,
           selectedIcon: Icons.family_restroom,
-          page: ChoresPage(),
+          page: ChoresPage(
+            hubClient: widget.hubClient,
+            accessToken: widget.accessToken,
+          ),
         ),
         _CaleeTab(
           title: 'Settings',
