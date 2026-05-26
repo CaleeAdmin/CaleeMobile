@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../data/api/calee_hub_client.dart';
+import '../../data/models/client_calendar.dart';
 import '../../data/models/client_task.dart';
 
 class TasksPage extends StatefulWidget {
@@ -18,29 +19,39 @@ class TasksPage extends StatefulWidget {
 }
 
 class _TasksPageState extends State<TasksPage> {
-  late Future<ClientTaskList> _tasksFuture;
+  late Future<_TasksOverview> _overviewFuture;
 
   @override
   void initState() {
     super.initState();
-    _tasksFuture = _loadTasks();
+    _overviewFuture = _loadOverview();
   }
 
-  Future<ClientTaskList> _loadTasks() {
+  Future<_TasksOverview> _loadOverview() async {
     final today = DateTime.now();
     final from = _formatDate(DateTime(today.year, 1, 1));
     final to = _formatDate(DateTime(today.year, 12, 31));
 
-    return widget.hubClient.tasks(
+    final calendarList = await widget.hubClient.calendars(
       accessToken: widget.accessToken,
+    );
+    final taskList = await widget.hubClient.tasks(
+      accessToken: widget.accessToken,
+      from: from,
+      to: to,
+    );
+
+    return _TasksOverview(
+      calendarList: calendarList,
+      taskList: taskList,
       from: from,
       to: to,
     );
   }
 
-  void _reloadTasks() {
+  void _reloadOverview() {
     setState(() {
-      _tasksFuture = _loadTasks();
+      _overviewFuture = _loadOverview();
     });
   }
 
@@ -68,49 +79,108 @@ class _TasksPageState extends State<TasksPage> {
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<ClientTaskList>(
-      future: _tasksFuture,
+    return FutureBuilder<_TasksOverview>(
+      future: _overviewFuture,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(
-            child: CircularProgressIndicator(),
-          );
+          return const Center(child: CircularProgressIndicator());
         }
 
         if (snapshot.hasError) {
-          return _TasksErrorState(
-            onRetry: _reloadTasks,
-          );
+          return _TasksErrorState(onRetry: _reloadOverview);
         }
 
-        final taskList = snapshot.data;
-        if (taskList == null || taskList.tasks.isEmpty) {
+        final overview = snapshot.data;
+        if (overview == null) {
+          return const _TasksEmptyState();
+        }
+
+        final taskCalendars = overview.calendarList.calendars
+            .where((calendar) => calendar.isTaskKind)
+            .toList();
+        final tasks = overview.taskList.tasks;
+
+        if (taskCalendars.isEmpty && tasks.isEmpty) {
           return const _TasksEmptyState();
         }
 
         return RefreshIndicator(
           onRefresh: () async {
-            _reloadTasks();
-            await _tasksFuture;
+            _reloadOverview();
+            await _overviewFuture;
           },
           child: ListView(
             padding: const EdgeInsets.all(16),
             children: [
               _SectionHeader(
-                title: 'Tasks',
-                subtitle: '${taskList.tasks.length} found',
+                title: 'Task lists',
+                subtitle: '${taskCalendars.length} found',
               ),
               const SizedBox(height: 8),
-              ...taskList.tasks.map(
-                (task) => _TaskTile(
-                  task: task,
-                  dueLabel: _formatDueAt(task.dueAt),
-                ),
+              if (taskCalendars.isEmpty)
+                const _EmptySectionMessage(message: 'No task lists found yet.')
+              else
+                ...taskCalendars.map(_TaskListTile.new),
+              const SizedBox(height: 24),
+              _SectionHeader(
+                title: 'Tasks',
+                subtitle: '${tasks.length} found',
               ),
+              const SizedBox(height: 8),
+              if (tasks.isEmpty)
+                const _EmptySectionMessage(message: 'No tasks found yet.')
+              else
+                ...tasks.map(
+                  (task) => _TaskTile(
+                    task: task,
+                    dueLabel: _formatDueAt(task.dueAt),
+                  ),
+                ),
             ],
           ),
         );
       },
+    );
+  }
+}
+
+class _TasksOverview {
+  const _TasksOverview({
+    required this.calendarList,
+    required this.taskList,
+    required this.from,
+    required this.to,
+  });
+
+  final ClientCalendarList calendarList;
+  final ClientTaskList taskList;
+  final String from;
+  final String to;
+}
+
+class _TaskListTile extends StatelessWidget {
+  const _TaskListTile(this.calendar);
+
+  final ClientCalendar calendar;
+
+  @override
+  Widget build(BuildContext context) {
+    final firstLetter = calendar.name.trim().isNotEmpty
+        ? calendar.name.trim().characters.first.toUpperCase()
+        : '?';
+
+    return Card(
+      child: ListTile(
+        leading: CircleAvatar(child: Text(firstLetter)),
+        title: Text(calendar.name),
+        subtitle: Text(
+          [
+            if (calendar.serviceName.trim().isNotEmpty)
+              'From ${calendar.serviceName}',
+            if (calendar.readOnly) 'Read-only',
+          ].where((item) => item.trim().isNotEmpty).join(' · '),
+        ),
+      ),
     );
   }
 }
@@ -161,15 +231,27 @@ class _SectionHeader extends StatelessWidget {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(
-          title,
-          style: Theme.of(context).textTheme.titleLarge,
-        ),
-        Text(
-          subtitle,
-          style: Theme.of(context).textTheme.bodyMedium,
-        ),
+        Text(title, style: Theme.of(context).textTheme.titleLarge),
+        Text(subtitle, style: Theme.of(context).textTheme.bodyMedium),
       ],
+    );
+  }
+}
+
+class _EmptySectionMessage extends StatelessWidget {
+  const _EmptySectionMessage({
+    required this.message,
+  });
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Text(message),
+      ),
     );
   }
 }
@@ -185,7 +267,7 @@ class _TasksEmptyState extends StatelessWidget {
         child: Padding(
           padding: EdgeInsets.all(24),
           child: Text(
-            'No tasks found yet.',
+            'No task lists or tasks found yet.',
             textAlign: TextAlign.center,
           ),
         ),
