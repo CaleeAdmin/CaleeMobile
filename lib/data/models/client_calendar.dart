@@ -64,7 +64,7 @@ class ClientCalendar {
   final String source;
 
   bool get isCalendarKind => primaryKind == 'calendar';
-  bool get isTaskKind => primaryKind == 'tasks';
+  bool get isTaskKind => primaryKind == 'tasks' || supportsTasks;
   bool get isChoreKind => primaryKind == 'chores';
 }
 
