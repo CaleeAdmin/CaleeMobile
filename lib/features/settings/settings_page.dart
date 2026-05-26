@@ -45,7 +45,11 @@ class SettingsPage extends StatelessWidget {
                     contentPadding: EdgeInsets.zero,
                     leading: const Icon(Icons.cloud_outlined),
                     title: Text(service.displayName),
-                    subtitle: Text(service.baseUrl),
+                    subtitle: Text(
+                      service.hasMissingCalendarCredential
+                          ? '${service.baseUrl}\nSign in to connect calendar access'
+                          : service.baseUrl,
+                    ),
                     trailing: Text(service.accessStatus),
                   ),
               ],
