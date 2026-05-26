@@ -19,10 +19,11 @@ class ClientBootstrap {
       contexts: ClientContexts.fromJson(
         json['contexts'] as Map<String, dynamic>? ?? const {},
       ),
-      availableContexts: (json['availableContexts'] as List<dynamic>? ?? const [])
-          .whereType<Map<String, dynamic>>()
-          .map(ClientContext.fromJson)
-          .toList(),
+      availableContexts:
+          (json['availableContexts'] as List<dynamic>? ?? const [])
+              .whereType<Map<String, dynamic>>()
+              .map(ClientContext.fromJson)
+              .toList(),
       capabilities: Map<String, dynamic>.from(
         json['capabilities'] as Map<String, dynamic>? ?? const {},
       ),
@@ -70,6 +71,7 @@ class ClientService {
     required this.launchUrl,
     required this.serviceType,
     required this.accessStatus,
+    required this.calendarCredentialStatus,
     required this.source,
   });
 
@@ -81,6 +83,8 @@ class ClientService {
       launchUrl: json['launchUrl'] as String? ?? '',
       serviceType: json['serviceType'] as String? ?? '',
       accessStatus: json['accessStatus'] as String? ?? '',
+      calendarCredentialStatus:
+          json['calendarCredentialStatus'] as String? ?? 'unsupported',
       source: json['source'] as String? ?? '',
     );
   }
@@ -91,7 +95,15 @@ class ClientService {
   final String launchUrl;
   final String serviceType;
   final String accessStatus;
+  final String calendarCredentialStatus;
   final String source;
+
+  bool get hasConnectedCalendarCredential =>
+      calendarCredentialStatus == 'connected';
+  bool get hasMissingCalendarCredential =>
+      calendarCredentialStatus == 'missing';
+  bool get supportsCalendarCredential =>
+      calendarCredentialStatus != 'unsupported';
 }
 
 class ClientContexts {
