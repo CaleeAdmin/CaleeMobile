@@ -74,6 +74,32 @@ class CaleeHubClient {
     return ClientChoreList.fromJson(_data(json));
   }
 
+  Future<ClientTask> createTask({
+    required String accessToken,
+    required String serviceId,
+    required String calendarId,
+    required String title,
+    String? dueAt,
+    String? description,
+  }) async {
+    final body = <String, Object?>{
+      'serviceId': serviceId,
+      'calendarId': calendarId,
+      'title': title,
+      if (dueAt != null && dueAt.trim().isNotEmpty) 'dueAt': dueAt.trim(),
+      if (description != null && description.trim().isNotEmpty)
+        'description': description.trim(),
+    };
+
+    final json = await _postJson(
+      '/client/v1/tasks',
+      accessToken: accessToken,
+      body: body,
+    );
+
+    return ClientTask.fromJson(_data(json)['task'] as Map<String, dynamic>);
+  }
+
   Future<ClientTaskList> tasks({
     required String accessToken,
     required String from,
@@ -131,11 +157,16 @@ class CaleeHubClient {
 
   Future<Map<String, dynamic>> _postJson(
     String path, {
+    String? accessToken,
     required Map<String, dynamic> body,
   }) async {
     final request = await _httpClient.postUrl(baseUri.resolve(path));
     request.headers.contentType = ContentType.json;
     request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+    if (accessToken != null && accessToken.trim().isNotEmpty) {
+      request.headers
+          .set(HttpHeaders.authorizationHeader, 'Bearer $accessToken');
+    }
     request.write(jsonEncode(body));
 
     return _readJsonResponse(await request.close());
