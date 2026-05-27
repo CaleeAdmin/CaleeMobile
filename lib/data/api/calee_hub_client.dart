@@ -74,6 +74,23 @@ class CaleeHubClient {
     return ClientChoreList.fromJson(_data(json));
   }
 
+  Future<ClientTask> updateTaskStatus({
+    required String accessToken,
+    required String taskId,
+    required bool completed,
+  }) async {
+    final json = await _patchJson(
+      '/client/v1/tasks',
+      accessToken: accessToken,
+      body: {
+        'taskId': taskId,
+        'completed': completed,
+      },
+    );
+
+    return ClientTask.fromJson(_data(json)['task'] as Map<String, dynamic>);
+  }
+
   Future<ClientTask> createTask({
     required String accessToken,
     required String serviceId,
@@ -153,6 +170,20 @@ class CaleeHubClient {
     );
 
     return ClientRefreshResult.fromJson(_data(json));
+  }
+
+  Future<Map<String, dynamic>> _patchJson(
+    String path, {
+    required String accessToken,
+    required Map<String, dynamic> body,
+  }) async {
+    final request = await _httpClient.openUrl('PATCH', baseUri.resolve(path));
+    request.headers.contentType = ContentType.json;
+    request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+    request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $accessToken');
+    request.write(jsonEncode(body));
+
+    return _readJsonResponse(await request.close());
   }
 
   Future<Map<String, dynamic>> _postJson(

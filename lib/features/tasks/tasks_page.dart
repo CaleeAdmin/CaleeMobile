@@ -21,6 +21,7 @@ class TasksPage extends StatefulWidget {
 class _TasksPageState extends State<TasksPage> {
   late Future<_TasksOverview> _overviewFuture;
   bool _isCreatingTask = false;
+  final Set<String> _updatingTaskIds = {};
 
   @override
   void initState() {
@@ -98,6 +99,40 @@ class _TasksPageState extends State<TasksPage> {
       if (mounted) {
         setState(() {
           _isCreatingTask = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _toggleTaskStatus(ClientTask task) async {
+    if (_updatingTaskIds.contains(task.id)) {
+      return;
+    }
+
+    setState(() {
+      _updatingTaskIds.add(task.id);
+    });
+
+    try {
+      await widget.hubClient.updateTaskStatus(
+        accessToken: widget.accessToken,
+        taskId: task.id,
+        completed: !task.isCompleted,
+      );
+
+      if (mounted) {
+        _reloadOverview();
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Unable to update task.')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _updatingTaskIds.remove(task.id);
         });
       }
     }
@@ -209,6 +244,8 @@ class _TasksPageState extends State<TasksPage> {
                     (task) => _TaskTile(
                       task: task,
                       dueLabel: _formatDueAt(task.dueAt),
+                      isUpdating: _updatingTaskIds.contains(task.id),
+                      onToggle: () => _toggleTaskStatus(task),
                     ),
                   ),
                 const SizedBox(height: 96),
@@ -480,20 +517,34 @@ class _TaskTile extends StatelessWidget {
   const _TaskTile({
     required this.task,
     required this.dueLabel,
+    required this.isUpdating,
+    required this.onToggle,
   });
 
   final ClientTask task;
   final String dueLabel;
+  final bool isUpdating;
+  final VoidCallback onToggle;
 
   @override
   Widget build(BuildContext context) {
     return Card(
       child: ListTile(
-        leading: Icon(
-          task.isCompleted
-              ? Icons.check_circle_outline
-              : Icons.radio_button_unchecked,
-        ),
+        leading: isUpdating
+            ? const SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : IconButton(
+                icon: Icon(
+                  task.isCompleted
+                      ? Icons.check_circle_outline
+                      : Icons.radio_button_unchecked,
+                ),
+                onPressed: onToggle,
+                tooltip: task.isCompleted ? 'Mark as not done' : 'Mark as done',
+              ),
         title: Text(task.title),
         subtitle: Text(
           [
