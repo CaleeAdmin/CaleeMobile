@@ -91,6 +91,18 @@ class CaleeHubClient {
     return ClientTask.fromJson(_data(json)['task'] as Map<String, dynamic>);
   }
 
+  Future<void> deleteTask({
+    required String accessToken,
+    required String taskId,
+  }) async {
+    final encodedTaskId = Uri.encodeComponent(taskId);
+
+    await _deleteJson(
+      '/client/v1/tasks/$encodedTaskId',
+      accessToken: accessToken,
+    );
+  }
+
   Future<ClientTask> createTask({
     required String accessToken,
     required String serviceId,
@@ -170,6 +182,17 @@ class CaleeHubClient {
     );
 
     return ClientRefreshResult.fromJson(_data(json));
+  }
+
+  Future<Map<String, dynamic>> _deleteJson(
+    String path, {
+    required String accessToken,
+  }) async {
+    final request = await _httpClient.deleteUrl(baseUri.resolve(path));
+    request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+    request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $accessToken');
+
+    return _readJsonResponse(await request.close());
   }
 
   Future<Map<String, dynamic>> _patchJson(
