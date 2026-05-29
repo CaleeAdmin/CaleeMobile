@@ -22,6 +22,7 @@ class _TasksPageState extends State<TasksPage> {
   late Future<_TasksOverview> _overviewFuture;
   bool _isCreatingTask = false;
   final Set<String> _updatingTaskIds = {};
+  final Set<String> _deletingTaskIds = {};
 
   @override
   void initState() {
@@ -138,6 +139,61 @@ class _TasksPageState extends State<TasksPage> {
     }
   }
 
+  Future<void> _confirmDeleteTask(ClientTask task) async {
+    if (_deletingTaskIds.contains(task.id)) {
+      return;
+    }
+
+    final shouldDelete = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete task?'),
+        content: Text('Delete "${task.title}"? This cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldDelete != true || !mounted) {
+      return;
+    }
+
+    setState(() {
+      _deletingTaskIds.add(task.id);
+    });
+
+    try {
+      await widget.hubClient.deleteTask(
+        accessToken: widget.accessToken,
+        taskId: task.id,
+      );
+
+      if (mounted) {
+        _reloadOverview();
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Unable to delete task.')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _deletingTaskIds.remove(task.id);
+        });
+      }
+    }
+  }
+
   String _rawCalendarId(ClientCalendar calendar) {
     final prefix = '${calendar.serviceId}:';
     if (calendar.id.startsWith(prefix)) {
@@ -245,7 +301,9 @@ class _TasksPageState extends State<TasksPage> {
                       task: task,
                       dueLabel: _formatDueAt(task.dueAt),
                       isUpdating: _updatingTaskIds.contains(task.id),
+                      isDeleting: _deletingTaskIds.contains(task.id),
                       onToggle: () => _toggleTaskStatus(task),
+                      onDelete: () => _confirmDeleteTask(task),
                     ),
                   ),
                 const SizedBox(height: 96),
@@ -518,13 +576,17 @@ class _TaskTile extends StatelessWidget {
     required this.task,
     required this.dueLabel,
     required this.isUpdating,
+    required this.isDeleting,
     required this.onToggle,
+    required this.onDelete,
   });
 
   final ClientTask task;
   final String dueLabel;
   final bool isUpdating;
+  final bool isDeleting;
   final VoidCallback onToggle;
+  final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -546,6 +608,17 @@ class _TaskTile extends StatelessWidget {
                 tooltip: task.isCompleted ? 'Mark as not done' : 'Mark as done',
               ),
         title: Text(task.title),
+        trailing: isDeleting
+            ? const SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : IconButton(
+                icon: const Icon(Icons.delete_outline),
+                onPressed: isUpdating ? null : onDelete,
+                tooltip: 'Delete task',
+              ),
         subtitle: Text(
           [
             task.statusLabel,
