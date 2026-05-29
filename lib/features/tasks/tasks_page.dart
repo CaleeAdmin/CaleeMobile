@@ -23,6 +23,7 @@ class _TasksPageState extends State<TasksPage> {
   bool _isCreatingTask = false;
   final Set<String> _updatingTaskIds = {};
   final Set<String> _deletingTaskIds = {};
+  final Set<String> _editingTaskIds = {};
 
   @override
   void initState() {
@@ -134,6 +135,53 @@ class _TasksPageState extends State<TasksPage> {
       if (mounted) {
         setState(() {
           _updatingTaskIds.remove(task.id);
+        });
+      }
+    }
+  }
+
+  Future<void> _openEditTaskSheet(ClientTask task) async {
+    if (_editingTaskIds.contains(task.id) ||
+        _deletingTaskIds.contains(task.id)) {
+      return;
+    }
+
+    final updated = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => _EditTaskSheet(
+        task: task,
+        onUpdate: _updateTask,
+      ),
+    );
+
+    if (updated == true && mounted) {
+      _reloadOverview();
+    }
+  }
+
+  Future<void> _updateTask({
+    required ClientTask task,
+    required String title,
+    String? dueAt,
+    String? description,
+  }) async {
+    setState(() {
+      _editingTaskIds.add(task.id);
+    });
+
+    try {
+      await widget.hubClient.updateTask(
+        accessToken: widget.accessToken,
+        taskId: task.id,
+        title: title,
+        dueAt: dueAt,
+        description: description,
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _editingTaskIds.remove(task.id);
         });
       }
     }
@@ -302,7 +350,9 @@ class _TasksPageState extends State<TasksPage> {
                       dueLabel: _formatDueAt(task.dueAt),
                       isUpdating: _updatingTaskIds.contains(task.id),
                       isDeleting: _deletingTaskIds.contains(task.id),
+                      isEditing: _editingTaskIds.contains(task.id),
                       onToggle: () => _toggleTaskStatus(task),
+                      onEdit: () => _openEditTaskSheet(task),
                       onDelete: () => _confirmDeleteTask(task),
                     ),
                   ),
@@ -544,6 +594,197 @@ class _CreateTaskSheetState extends State<_CreateTaskSheet> {
   }
 }
 
+class _EditTaskSheet extends StatefulWidget {
+  const _EditTaskSheet({
+    required this.task,
+    required this.onUpdate,
+  });
+
+  final ClientTask task;
+  final Future<void> Function({
+    required ClientTask task,
+    required String title,
+    String? dueAt,
+    String? description,
+  }) onUpdate;
+
+  @override
+  State<_EditTaskSheet> createState() => _EditTaskSheetState();
+}
+
+class _EditTaskSheetState extends State<_EditTaskSheet> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _titleController;
+  late final TextEditingController _descriptionController;
+
+  DateTime? _selectedDueDate;
+  bool _isSubmitting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _titleController = TextEditingController(text: widget.task.title);
+    _descriptionController =
+        TextEditingController(text: widget.task.description ?? '');
+
+    final dueAt = widget.task.dueAt;
+    if (dueAt != null && dueAt.trim().isNotEmpty) {
+      _selectedDueDate = DateTime.tryParse(dueAt)?.toLocal();
+    }
+  }
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _descriptionController.dispose();
+    super.dispose();
+  }
+
+  String _formatDate(DateTime value) {
+    final year = value.year.toString().padLeft(4, '0');
+    final month = value.month.toString().padLeft(2, '0');
+    final day = value.day.toString().padLeft(2, '0');
+
+    return '$year-$month-$day';
+  }
+
+  Future<void> _pickDueDate() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDueDate ?? now,
+      firstDate: DateTime(now.year - 1),
+      lastDate: DateTime(now.year + 5),
+    );
+
+    if (picked != null && mounted) {
+      setState(() {
+        _selectedDueDate = picked;
+      });
+    }
+  }
+
+  Future<void> _submit() async {
+    if (_isSubmitting || !_formKey.currentState!.validate()) {
+      return;
+    }
+
+    setState(() {
+      _isSubmitting = true;
+    });
+
+    try {
+      await widget.onUpdate(
+        task: widget.task,
+        title: _titleController.text.trim(),
+        dueAt: _selectedDueDate == null ? null : _formatDate(_selectedDueDate!),
+        description: _descriptionController.text.trim(),
+      );
+
+      if (mounted) {
+        Navigator.of(context).pop(true);
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _isSubmitting = false;
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Unable to update task.')),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + bottomInset),
+        child: Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'Edit task',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: _titleController,
+                  enabled: !_isSubmitting,
+                  autofocus: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Title',
+                    border: OutlineInputBorder(),
+                  ),
+                  textInputAction: TextInputAction.next,
+                  validator: (value) {
+                    if ((value ?? '').trim().isEmpty) {
+                      return 'Enter a task title';
+                    }
+
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 12),
+                OutlinedButton.icon(
+                  onPressed: _isSubmitting ? null : _pickDueDate,
+                  icon: const Icon(Icons.event_outlined),
+                  label: Text(
+                    _selectedDueDate == null
+                        ? 'Add due date'
+                        : 'Due ${_formatDate(_selectedDueDate!)}',
+                  ),
+                ),
+                if (_selectedDueDate != null)
+                  TextButton(
+                    onPressed: _isSubmitting
+                        ? null
+                        : () {
+                            setState(() {
+                              _selectedDueDate = null;
+                            });
+                          },
+                    child: const Text('Remove due date'),
+                  ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _descriptionController,
+                  enabled: !_isSubmitting,
+                  decoration: const InputDecoration(
+                    labelText: 'Notes',
+                    border: OutlineInputBorder(),
+                  ),
+                  minLines: 2,
+                  maxLines: 4,
+                ),
+                const SizedBox(height: 16),
+                FilledButton(
+                  onPressed: _isSubmitting ? null : _submit,
+                  child: _isSubmitting
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('Save task'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _TaskListTile extends StatelessWidget {
   const _TaskListTile(this.calendar);
 
@@ -577,7 +818,9 @@ class _TaskTile extends StatelessWidget {
     required this.dueLabel,
     required this.isUpdating,
     required this.isDeleting,
+    required this.isEditing,
     required this.onToggle,
+    required this.onEdit,
     required this.onDelete,
   });
 
@@ -585,7 +828,9 @@ class _TaskTile extends StatelessWidget {
   final String dueLabel;
   final bool isUpdating;
   final bool isDeleting;
+  final bool isEditing;
   final VoidCallback onToggle;
+  final VoidCallback onEdit;
   final VoidCallback onDelete;
 
   @override
@@ -608,16 +853,31 @@ class _TaskTile extends StatelessWidget {
                 tooltip: task.isCompleted ? 'Mark as not done' : 'Mark as done',
               ),
         title: Text(task.title),
-        trailing: isDeleting
+        trailing: isDeleting || isEditing
             ? const SizedBox(
                 width: 24,
                 height: 24,
                 child: CircularProgressIndicator(strokeWidth: 2),
               )
-            : IconButton(
-                icon: const Icon(Icons.delete_outline),
-                onPressed: isUpdating ? null : onDelete,
-                tooltip: 'Delete task',
+            : PopupMenuButton<String>(
+                onSelected: (value) {
+                  if (value == 'edit') {
+                    onEdit();
+                  }
+                  if (value == 'delete') {
+                    onDelete();
+                  }
+                },
+                itemBuilder: (context) => const [
+                  PopupMenuItem(
+                    value: 'edit',
+                    child: Text('Edit task'),
+                  ),
+                  PopupMenuItem(
+                    value: 'delete',
+                    child: Text('Delete task'),
+                  ),
+                ],
               ),
         subtitle: Text(
           [
