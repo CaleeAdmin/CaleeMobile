@@ -74,6 +74,27 @@ class CaleeHubClient {
     return ClientChoreList.fromJson(_data(json));
   }
 
+  Future<ClientTask> updateTask({
+    required String accessToken,
+    required String taskId,
+    required String title,
+    String? dueAt,
+    String? description,
+  }) async {
+    final json = await _patchJson(
+      '/client/v1/tasks',
+      accessToken: accessToken,
+      body: <String, dynamic>{
+        'taskId': taskId,
+        'title': title,
+        'dueAt': dueAt,
+        'description': description ?? '',
+      },
+    );
+
+    return ClientTask.fromJson(_data(json)['task'] as Map<String, dynamic>);
+  }
+
   Future<ClientTask> updateTaskStatus({
     required String accessToken,
     required String taskId,
