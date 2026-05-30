@@ -82,6 +82,29 @@ class ClientChore {
   final String? recurrence;
   final int points;
 
+  String get completionActionId {
+    if (isBaseChore && id.trim().isNotEmpty) {
+      return id;
+    }
+
+    final uid = choreUid ?? parentChoreUid;
+    if (uid == null || uid.trim().isEmpty || serviceId.trim().isEmpty) {
+      return '';
+    }
+
+    return '$serviceId:$uid';
+  }
+
+  bool get canToggleCompletion {
+    if (completionActionId.trim().isEmpty) {
+      return false;
+    }
+
+    return section == 'todoToday' ||
+        section == 'overdue' ||
+        section == 'doneToday';
+  }
+
   bool get isCompletionLog => kind == 'completionLog';
   bool get isBaseChore => kind == 'baseChore';
   bool get isRecurring => recurrence != null && recurrence!.trim().isNotEmpty;
