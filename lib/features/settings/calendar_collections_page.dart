@@ -9,12 +9,16 @@ class CalendarCollectionsPage extends StatefulWidget {
     required this.hubClient,
     required this.accessToken,
     required this.services,
+    this.initialCreateKind,
+    this.autoOpenCreate = false,
     super.key,
   });
 
   final CaleeHubClient hubClient;
   final String accessToken;
   final List<ClientService> services;
+  final String? initialCreateKind;
+  final bool autoOpenCreate;
 
   @override
   State<CalendarCollectionsPage> createState() =>
@@ -39,6 +43,14 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
   void initState() {
     super.initState();
     _future = _loadCalendars();
+
+    if (widget.autoOpenCreate) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _openCreateSheet();
+        }
+      });
+    }
   }
 
   Future<ClientCalendarList> _loadCalendars() {
@@ -68,6 +80,7 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
       builder: (context) => _CollectionFormSheet(
         title: 'Create list or calendar',
         services: services,
+        initialPrimaryKind: widget.initialCreateKind ?? 'calendar',
         onSubmit: ({
           required String name,
           required String primaryKind,

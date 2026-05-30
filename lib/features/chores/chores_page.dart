@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../data/api/calee_hub_client.dart';
+import '../../data/models/client_bootstrap.dart';
+import '../settings/calendar_collections_page.dart';
 import '../../data/models/client_calendar.dart';
 import '../../data/models/client_chore.dart';
 
@@ -68,11 +70,13 @@ class ChoresPage extends StatefulWidget {
   const ChoresPage({
     required this.hubClient,
     required this.accessToken,
+    required this.services,
     super.key,
   });
 
   final CaleeHubClient hubClient;
   final String accessToken;
+  final List<ClientService> services;
 
   @override
   State<ChoresPage> createState() => _ChoresPageState();
@@ -108,6 +112,26 @@ class _ChoresPageState extends State<ChoresPage> {
       from: from,
       to: to,
     );
+  }
+
+  void _openCollectionCreateShortcut() {
+    Navigator.of(context)
+        .push(
+      MaterialPageRoute<void>(
+        builder: (_) => CalendarCollectionsPage(
+          hubClient: widget.hubClient,
+          accessToken: widget.accessToken,
+          services: widget.services,
+          initialCreateKind: 'chores',
+          autoOpenCreate: true,
+        ),
+      ),
+    )
+        .then((_) {
+      if (mounted) {
+        _reloadOverview();
+      }
+    });
   }
 
   void _reloadOverview() {
@@ -409,7 +433,9 @@ class _ChoresPageState extends State<ChoresPage> {
 
         final overview = snapshot.data;
         if (overview == null) {
-          return const _ChoresEmptyState();
+          return _ChoresEmptyState(
+            onCreateChoreList: _openCollectionCreateShortcut,
+          );
         }
 
         final choreCalendars = overview.calendarList.calendars
@@ -426,7 +452,9 @@ class _ChoresPageState extends State<ChoresPage> {
         ];
 
         if (choreCalendars.isEmpty && chores.isEmpty) {
-          return const _ChoresEmptyState();
+          return _ChoresEmptyState(
+            onCreateChoreList: _openCollectionCreateShortcut,
+          );
         }
 
         return RefreshIndicator(
@@ -450,7 +478,14 @@ class _ChoresPageState extends State<ChoresPage> {
               ),
               const SizedBox(height: 8),
               if (choreCalendars.isEmpty)
-                const _EmptySectionMessage(message: 'No chore lists found yet.')
+                _EmptySectionMessage(
+                  message: 'No chore lists found yet.',
+                  action: TextButton.icon(
+                    onPressed: _openCollectionCreateShortcut,
+                    icon: const Icon(Icons.add),
+                    label: const Text('Create chore list'),
+                  ),
+                )
               else
                 ...choreCalendars.map(_ChoreListTile.new),
               const SizedBox(height: 24),
@@ -462,9 +497,13 @@ class _ChoresPageState extends State<ChoresPage> {
               Align(
                 alignment: Alignment.centerLeft,
                 child: FilledButton.icon(
-                  onPressed: () => _openCreateChoreSheet(choreCalendars),
+                  onPressed: choreCalendars.isEmpty
+                      ? _openCollectionCreateShortcut
+                      : () => _openCreateChoreSheet(choreCalendars),
                   icon: const Icon(Icons.add),
-                  label: const Text('Add chore'),
+                  label: Text(
+                    choreCalendars.isEmpty ? 'Create chore list' : 'Add chore',
+                  ),
                 ),
               ),
               const SizedBox(height: 12),
@@ -1286,23 +1325,38 @@ class _SectionHeader extends StatelessWidget {
 class _EmptySectionMessage extends StatelessWidget {
   const _EmptySectionMessage({
     required this.message,
+    this.action,
   });
 
   final String message;
+  final Widget? action;
 
   @override
   Widget build(BuildContext context) {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Text(message),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(message),
+            if (action != null) ...[
+              const SizedBox(height: 8),
+              action!,
+            ],
+          ],
+        ),
       ),
     );
   }
 }
 
 class _ChoresEmptyState extends StatelessWidget {
-  const _ChoresEmptyState();
+  const _ChoresEmptyState({
+    this.onCreateChoreList,
+  });
+
+  final VoidCallback? onCreateChoreList;
 
   @override
   Widget build(BuildContext context) {
