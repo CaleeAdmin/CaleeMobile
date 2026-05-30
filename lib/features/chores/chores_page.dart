@@ -102,6 +102,52 @@ class _ChoresPageState extends State<ChoresPage> {
     );
   }
 
+  Future<void> _openEditChoreSheet(ClientChore chore) async {
+    final choreId = chore.completionActionId;
+
+    if (choreId.trim().isEmpty || _updatingChoreIds.contains(choreId)) {
+      return;
+    }
+
+    final updated = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => _EditChoreSheet(
+        chore: chore,
+        onUpdate: _updateChore,
+      ),
+    );
+
+    if (updated == true && mounted) {
+      _reloadOverview();
+    }
+  }
+
+  Future<void> _updateChore({
+    required ClientChore chore,
+    required String title,
+    String? scheduledAt,
+    String? description,
+    String? recurrence,
+    required int points,
+  }) async {
+    final choreId = chore.completionActionId;
+
+    if (choreId.trim().isEmpty) {
+      throw StateError('Missing chore id');
+    }
+
+    await widget.hubClient.updateChore(
+      accessToken: widget.accessToken,
+      choreId: choreId,
+      title: title,
+      scheduledAt: scheduledAt,
+      description: description,
+      recurrence: recurrence,
+      points: points,
+    );
+  }
+
   Future<void> _toggleChoreCompletion(ClientChore chore) async {
     final choreId = chore.completionActionId;
 
@@ -318,6 +364,7 @@ class _ChoresPageState extends State<ChoresPage> {
                     scheduledLabelBuilder: _formatScheduledAt,
                     updatingChoreIds: _updatingChoreIds,
                     onToggleCompletion: _toggleChoreCompletion,
+                    onEditChore: _openEditChoreSheet,
                   ),
                   const SizedBox(height: 16),
                 ],
@@ -716,6 +763,307 @@ class _CreateChoreSheetState extends State<_CreateChoreSheet> {
   }
 }
 
+class _EditChoreSheet extends StatefulWidget {
+  const _EditChoreSheet({
+    required this.chore,
+    required this.onUpdate,
+  });
+
+  final ClientChore chore;
+  final Future<void> Function({
+    required ClientChore chore,
+    required String title,
+    String? scheduledAt,
+    String? description,
+    String? recurrence,
+    required int points,
+  }) onUpdate;
+
+  @override
+  State<_EditChoreSheet> createState() => _EditChoreSheetState();
+}
+
+class _EditChoreSheetState extends State<_EditChoreSheet> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _titleController;
+  late final TextEditingController _descriptionController;
+
+  DateTime? _selectedDate;
+  String? _selectedRecurrence;
+  late int _points;
+  bool _isSubmitting = false;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _titleController = TextEditingController(text: widget.chore.title);
+    _descriptionController =
+        TextEditingController(text: widget.chore.description ?? '');
+    _selectedDate =
+        _parseDate(widget.chore.scheduledDate ?? widget.chore.scheduledAt);
+    _selectedRecurrence = _rruleToRecurrence(widget.chore.recurrence);
+    _points = widget.chore.points <= 1 ? 1 : 2;
+  }
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _descriptionController.dispose();
+    super.dispose();
+  }
+
+  DateTime? _parseDate(String? value) {
+    if (value == null || value.trim().isEmpty) {
+      return null;
+    }
+
+    final parsed = DateTime.tryParse(value);
+    if (parsed == null) {
+      return null;
+    }
+
+    return parsed.toLocal();
+  }
+
+  String _formatDate(DateTime value) {
+    final year = value.year.toString().padLeft(4, '0');
+    final month = value.month.toString().padLeft(2, '0');
+    final day = value.day.toString().padLeft(2, '0');
+
+    return '$year-$month-$day';
+  }
+
+  String? _rruleToRecurrence(String? value) {
+    final rrule = value?.trim().toUpperCase();
+
+    if (rrule == 'FREQ=DAILY') {
+      return 'daily';
+    }
+
+    if (rrule == 'FREQ=WEEKLY') {
+      return 'weekly';
+    }
+
+    if (rrule == 'FREQ=MONTHLY') {
+      return 'monthly';
+    }
+
+    return null;
+  }
+
+  String? _recurrenceToRrule(String? value) {
+    switch (value) {
+      case 'daily':
+        return 'FREQ=DAILY';
+      case 'weekly':
+        return 'FREQ=WEEKLY';
+      case 'monthly':
+        return 'FREQ=MONTHLY';
+      default:
+        return null;
+    }
+  }
+
+  Future<void> _pickDate() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate ?? now,
+      firstDate: DateTime(now.year - 1),
+      lastDate: DateTime(now.year + 5),
+    );
+
+    if (picked != null && mounted) {
+      setState(() {
+        _selectedDate = picked;
+      });
+    }
+  }
+
+  Future<void> _submit() async {
+    if (_isSubmitting || !_formKey.currentState!.validate()) {
+      return;
+    }
+
+    setState(() {
+      _isSubmitting = true;
+    });
+
+    try {
+      await widget.onUpdate(
+        chore: widget.chore,
+        title: _titleController.text.trim(),
+        scheduledAt: _selectedDate == null ? null : _formatDate(_selectedDate!),
+        description: _descriptionController.text.trim(),
+        recurrence: _recurrenceToRrule(_selectedRecurrence),
+        points: _points,
+      );
+
+      if (mounted) {
+        Navigator.of(context).pop(true);
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _isSubmitting = false;
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Unable to update chore.')),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + bottomInset),
+        child: Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'Edit chore',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: _titleController,
+                  enabled: !_isSubmitting,
+                  autofocus: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Title',
+                    border: OutlineInputBorder(),
+                  ),
+                  textInputAction: TextInputAction.next,
+                  validator: (value) {
+                    if ((value ?? '').trim().isEmpty) {
+                      return 'Enter a chore title';
+                    }
+
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 12),
+                OutlinedButton.icon(
+                  onPressed: _isSubmitting ? null : _pickDate,
+                  icon: const Icon(Icons.event_outlined),
+                  label: Text(
+                    _selectedDate == null
+                        ? 'Add scheduled date'
+                        : 'Scheduled ${_formatDate(_selectedDate!)}',
+                  ),
+                ),
+                if (_selectedDate != null)
+                  TextButton(
+                    onPressed: _isSubmitting
+                        ? null
+                        : () {
+                            setState(() {
+                              _selectedDate = null;
+                            });
+                          },
+                    child: const Text('Remove scheduled date'),
+                  ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String?>(
+                  initialValue: _selectedRecurrence,
+                  decoration: const InputDecoration(
+                    labelText: 'Repeat',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: const [
+                    DropdownMenuItem<String?>(
+                      value: null,
+                      child: Text('Does not repeat'),
+                    ),
+                    DropdownMenuItem<String?>(
+                      value: 'daily',
+                      child: Text('Daily'),
+                    ),
+                    DropdownMenuItem<String?>(
+                      value: 'weekly',
+                      child: Text('Weekly'),
+                    ),
+                    DropdownMenuItem<String?>(
+                      value: 'monthly',
+                      child: Text('Monthly'),
+                    ),
+                  ],
+                  onChanged: _isSubmitting
+                      ? null
+                      : (value) {
+                          setState(() {
+                            _selectedRecurrence = value;
+                          });
+                        },
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<int>(
+                  initialValue: _points,
+                  decoration: const InputDecoration(
+                    labelText: 'Points',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: const [
+                    DropdownMenuItem(
+                      value: 1,
+                      child: Text('1 point'),
+                    ),
+                    DropdownMenuItem(
+                      value: 2,
+                      child: Text('2 points'),
+                    ),
+                  ],
+                  onChanged: _isSubmitting
+                      ? null
+                      : (value) {
+                          if (value != null) {
+                            setState(() {
+                              _points = value;
+                            });
+                          }
+                        },
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _descriptionController,
+                  enabled: !_isSubmitting,
+                  decoration: const InputDecoration(
+                    labelText: 'Notes',
+                    border: OutlineInputBorder(),
+                  ),
+                  minLines: 2,
+                  maxLines: 4,
+                ),
+                const SizedBox(height: 16),
+                FilledButton(
+                  onPressed: _isSubmitting ? null : _submit,
+                  child: _isSubmitting
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('Save chore'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _ChoreListTile extends StatelessWidget {
   const _ChoreListTile(this.calendar);
 
@@ -751,6 +1099,7 @@ class _ChoreSection extends StatelessWidget {
     required this.scheduledLabelBuilder,
     required this.updatingChoreIds,
     required this.onToggleCompletion,
+    required this.onEditChore,
   });
 
   final String title;
@@ -759,6 +1108,7 @@ class _ChoreSection extends StatelessWidget {
   final String Function(ClientChore chore) scheduledLabelBuilder;
   final Set<String> updatingChoreIds;
   final ValueChanged<ClientChore> onToggleCompletion;
+  final ValueChanged<ClientChore> onEditChore;
 
   @override
   Widget build(BuildContext context) {
@@ -779,6 +1129,7 @@ class _ChoreSection extends StatelessWidget {
               scheduledLabel: scheduledLabelBuilder(chore),
               isUpdating: updatingChoreIds.contains(chore.completionActionId),
               onToggleCompletion: () => onToggleCompletion(chore),
+              onEditChore: () => onEditChore(chore),
             ),
           ),
       ],
@@ -792,12 +1143,14 @@ class _ChoreTile extends StatelessWidget {
     required this.scheduledLabel,
     required this.isUpdating,
     required this.onToggleCompletion,
+    required this.onEditChore,
   });
 
   final ClientChore chore;
   final String scheduledLabel;
   final bool isUpdating;
   final VoidCallback onToggleCompletion;
+  final VoidCallback onEditChore;
 
   @override
   Widget build(BuildContext context) {
@@ -822,6 +1175,14 @@ class _ChoreTile extends StatelessWidget {
                     : 'Complete chore',
               ),
         title: Text(chore.title),
+        trailing: IconButton(
+          icon: const Icon(Icons.edit_outlined),
+          onPressed: chore.completionActionId.trim().isEmpty ||
+                  chore.section == 'history'
+              ? null
+              : onEditChore,
+          tooltip: 'Edit chore',
+        ),
         subtitle: Text(
           [
             scheduledLabel,
