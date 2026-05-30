@@ -315,8 +315,6 @@ class CaleeHubClient {
       if (dueAt != null && dueAt.trim().isNotEmpty) 'dueAt': dueAt.trim(),
       if (description != null && description.trim().isNotEmpty)
         'description': description.trim(),
-      if (recurrence != null && recurrence.trim().isNotEmpty)
-        'recurrence': recurrence.trim(),
     };
 
     final json = await _postJson(
@@ -372,6 +370,8 @@ class CaleeHubClient {
         'location': location.trim(),
       if (description != null && description.trim().isNotEmpty)
         'description': description.trim(),
+      if (recurrence != null && recurrence.trim().isNotEmpty)
+        'recurrence': recurrence.trim(),
     };
 
     final json = await _postJson(
