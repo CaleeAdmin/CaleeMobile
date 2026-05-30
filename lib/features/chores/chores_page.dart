@@ -208,6 +208,67 @@ class _ChoresPageState extends State<ChoresPage> {
     );
   }
 
+  Future<void> _deleteChore(ClientChore chore) async {
+    final choreId = chore.completionActionId;
+
+    if (choreId.trim().isEmpty || _updatingChoreIds.contains(choreId)) {
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete chore?'),
+        content: Text(
+          'This will delete "${chore.title}" and its completion history.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) {
+      return;
+    }
+
+    setState(() {
+      _updatingChoreIds.add(choreId);
+    });
+
+    try {
+      await widget.hubClient.deleteChore(
+        accessToken: widget.accessToken,
+        choreId: choreId,
+      );
+
+      if (mounted) {
+        _reloadOverview();
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(_choreErrorMessage(error, 'Unable to delete chore.')),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _updatingChoreIds.remove(choreId);
+        });
+      }
+    }
+  }
+
   Future<void> _toggleChoreCompletion(ClientChore chore) async {
     final choreId = chore.completionActionId;
 
@@ -419,6 +480,7 @@ class _ChoresPageState extends State<ChoresPage> {
                     updatingChoreIds: _updatingChoreIds,
                     onToggleCompletion: _toggleChoreCompletion,
                     onEditChore: _openEditChoreSheet,
+                    onDeleteChore: _deleteChore,
                   ),
                   const SizedBox(height: 16),
                 ],
@@ -1083,6 +1145,7 @@ class _ChoreSection extends StatelessWidget {
     required this.updatingChoreIds,
     required this.onToggleCompletion,
     required this.onEditChore,
+    required this.onDeleteChore,
   });
 
   final String title;
@@ -1092,6 +1155,7 @@ class _ChoreSection extends StatelessWidget {
   final Set<String> updatingChoreIds;
   final ValueChanged<ClientChore> onToggleCompletion;
   final ValueChanged<ClientChore> onEditChore;
+  final ValueChanged<ClientChore> onDeleteChore;
 
   @override
   Widget build(BuildContext context) {
@@ -1113,6 +1177,7 @@ class _ChoreSection extends StatelessWidget {
               isUpdating: updatingChoreIds.contains(chore.completionActionId),
               onToggleCompletion: () => onToggleCompletion(chore),
               onEditChore: () => onEditChore(chore),
+              onDeleteChore: () => onDeleteChore(chore),
             ),
           ),
       ],
@@ -1127,6 +1192,7 @@ class _ChoreTile extends StatelessWidget {
     required this.isUpdating,
     required this.onToggleCompletion,
     required this.onEditChore,
+    required this.onDeleteChore,
   });
 
   final ClientChore chore;
@@ -1134,6 +1200,7 @@ class _ChoreTile extends StatelessWidget {
   final bool isUpdating;
   final VoidCallback onToggleCompletion;
   final VoidCallback onEditChore;
+  final VoidCallback onDeleteChore;
 
   @override
   Widget build(BuildContext context) {
@@ -1158,13 +1225,26 @@ class _ChoreTile extends StatelessWidget {
                     : 'Complete chore',
               ),
         title: Text(chore.title),
-        trailing: IconButton(
-          icon: const Icon(Icons.edit_outlined),
-          onPressed: chore.completionActionId.trim().isEmpty ||
-                  chore.section == 'history'
-              ? null
-              : onEditChore,
-          tooltip: 'Edit chore',
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              icon: const Icon(Icons.edit_outlined),
+              onPressed: chore.completionActionId.trim().isEmpty ||
+                      chore.section == 'history'
+                  ? null
+                  : onEditChore,
+              tooltip: 'Edit chore',
+            ),
+            IconButton(
+              icon: const Icon(Icons.delete_outline),
+              onPressed: chore.completionActionId.trim().isEmpty ||
+                      chore.section == 'history'
+                  ? null
+                  : onDeleteChore,
+              tooltip: 'Delete chore',
+            ),
+          ],
         ),
         subtitle: Text(
           [
