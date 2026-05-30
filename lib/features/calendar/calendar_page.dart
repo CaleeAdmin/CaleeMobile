@@ -1,17 +1,21 @@
 import 'package:flutter/material.dart';
 
 import '../../data/api/calee_hub_client.dart';
+import '../../data/models/client_bootstrap.dart';
+import '../settings/calendar_collections_page.dart';
 import '../../data/models/client_calendar.dart';
 
 class CalendarPage extends StatefulWidget {
   const CalendarPage({
     required this.hubClient,
     required this.accessToken,
+    required this.services,
     super.key,
   });
 
   final CaleeHubClient hubClient;
   final String accessToken;
+  final List<ClientService> services;
 
   @override
   State<CalendarPage> createState() => _CalendarPageState();
@@ -48,6 +52,26 @@ class _CalendarPageState extends State<CalendarPage> {
       fromDate: fromDate,
       toDate: toDate,
     );
+  }
+
+  void _openCollectionCreateShortcut() {
+    Navigator.of(context)
+        .push(
+      MaterialPageRoute<void>(
+        builder: (_) => CalendarCollectionsPage(
+          hubClient: widget.hubClient,
+          accessToken: widget.accessToken,
+          services: widget.services,
+          initialCreateKind: 'calendar',
+          autoOpenCreate: true,
+        ),
+      ),
+    )
+        .then((_) {
+      if (mounted) {
+        _reloadOverview();
+      }
+    });
   }
 
   void _reloadOverview() {
@@ -91,14 +115,20 @@ class _CalendarPageState extends State<CalendarPage> {
 
         final overview = snapshot.data;
         if (overview == null) {
-          return const _CalendarEmptyState();
+          return _CalendarEmptyState(
+            onCreateCalendar: _openCollectionCreateShortcut,
+          );
         }
 
-        final calendars = overview.calendarList.calendars.where((calendar) => calendar.isCalendarKind).toList();
+        final calendars = overview.calendarList.calendars
+            .where((calendar) => calendar.isCalendarKind)
+            .toList();
         final events = overview.eventList.events;
 
         if (calendars.isEmpty && events.isEmpty) {
-          return const _CalendarEmptyState();
+          return _CalendarEmptyState(
+            onCreateCalendar: _openCollectionCreateShortcut,
+          );
         }
 
         return RefreshIndicator(
@@ -115,7 +145,14 @@ class _CalendarPageState extends State<CalendarPage> {
               ),
               const SizedBox(height: 8),
               if (calendars.isEmpty)
-                const _EmptySectionMessage(message: 'No calendars found yet. Calee will connect your calendar services automatically.')
+                _EmptySectionMessage(
+                  message: 'No calendars found yet.',
+                  action: TextButton.icon(
+                    onPressed: _openCollectionCreateShortcut,
+                    icon: const Icon(Icons.add),
+                    label: const Text('Create calendar'),
+                  ),
+                )
               else
                 ...calendars.map(_CalendarTile.new),
               const SizedBox(height: 24),
@@ -125,7 +162,8 @@ class _CalendarPageState extends State<CalendarPage> {
               ),
               const SizedBox(height: 8),
               if (events.isEmpty)
-                const _EmptySectionMessage(message: 'No events found in this date range.')
+                const _EmptySectionMessage(
+                    message: 'No events found in this date range.')
               else
                 ...events.map(_EventTile.new),
             ],
@@ -169,7 +207,8 @@ class _CalendarTile extends StatelessWidget {
         title: Text(calendar.name),
         subtitle: Text(
           [
-            if (calendar.serviceName.trim().isNotEmpty) 'From ${calendar.serviceName}',
+            if (calendar.serviceName.trim().isNotEmpty)
+              'From ${calendar.serviceName}',
             if (calendar.readOnly) 'Read-only',
           ].where((item) => item.trim().isNotEmpty).join(' · '),
         ),
@@ -192,7 +231,8 @@ class _EventTile extends StatelessWidget {
         subtitle: Text(
           [
             _formatEventTime(event),
-            if (event.serviceName.trim().isNotEmpty) 'From ${event.serviceName}',
+            if (event.serviceName.trim().isNotEmpty)
+              'From ${event.serviceName}',
             if ((event.location ?? '').trim().isNotEmpty) event.location!,
           ].where((item) => item.trim().isNotEmpty).join(' · '),
         ),
@@ -249,16 +289,27 @@ class _SectionHeader extends StatelessWidget {
 class _EmptySectionMessage extends StatelessWidget {
   const _EmptySectionMessage({
     required this.message,
+    this.action,
   });
 
   final String message;
+  final Widget? action;
 
   @override
   Widget build(BuildContext context) {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Text(message),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(message),
+            if (action != null) ...[
+              const SizedBox(height: 8),
+              action!,
+            ],
+          ],
+        ),
       ),
     );
   }
@@ -308,7 +359,11 @@ class _CalendarErrorState extends StatelessWidget {
 }
 
 class _CalendarEmptyState extends StatelessWidget {
-  const _CalendarEmptyState();
+  const _CalendarEmptyState({
+    this.onCreateCalendar,
+  });
+
+  final VoidCallback? onCreateCalendar;
 
   @override
   Widget build(BuildContext context) {

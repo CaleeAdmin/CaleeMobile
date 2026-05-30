@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../data/api/calee_hub_client.dart';
+import '../../data/models/client_bootstrap.dart';
+import '../settings/calendar_collections_page.dart';
 import '../../data/models/client_calendar.dart';
 import '../../data/models/client_task.dart';
 
@@ -8,11 +10,13 @@ class TasksPage extends StatefulWidget {
   const TasksPage({
     required this.hubClient,
     required this.accessToken,
+    required this.services,
     super.key,
   });
 
   final CaleeHubClient hubClient;
   final String accessToken;
+  final List<ClientService> services;
 
   @override
   State<TasksPage> createState() => _TasksPageState();
@@ -51,6 +55,26 @@ class _TasksPageState extends State<TasksPage> {
       from: from,
       to: to,
     );
+  }
+
+  void _openCollectionCreateShortcut() {
+    Navigator.of(context)
+        .push(
+      MaterialPageRoute<void>(
+        builder: (_) => CalendarCollectionsPage(
+          hubClient: widget.hubClient,
+          accessToken: widget.accessToken,
+          services: widget.services,
+          initialCreateKind: 'tasks',
+          autoOpenCreate: true,
+        ),
+      ),
+    )
+        .then((_) {
+      if (mounted) {
+        _reloadOverview();
+      }
+    });
   }
 
   void _reloadOverview() {
@@ -288,7 +312,13 @@ class _TasksPageState extends State<TasksPage> {
 
         final overview = snapshot.data;
         if (overview == null) {
-          return const _TasksEmptyState();
+          return _TasksEmptyState(
+            action: FilledButton.icon(
+              onPressed: _openCollectionCreateShortcut,
+              icon: const Icon(Icons.add),
+              label: const Text('Create task list'),
+            ),
+          );
         }
 
         final taskCalendars = overview.calendarList.calendars
@@ -299,9 +329,9 @@ class _TasksPageState extends State<TasksPage> {
         if (taskCalendars.isEmpty && tasks.isEmpty) {
           return _TasksEmptyState(
             action: FilledButton.icon(
-              onPressed: null,
+              onPressed: _openCollectionCreateShortcut,
               icon: const Icon(Icons.add),
-              label: const Text('New task'),
+              label: const Text('Create task list'),
             ),
           );
         }
@@ -330,8 +360,13 @@ class _TasksPageState extends State<TasksPage> {
                 ),
                 const SizedBox(height: 8),
                 if (taskCalendars.isEmpty)
-                  const _EmptySectionMessage(
+                  _EmptySectionMessage(
                     message: 'No task lists found yet.',
+                    action: TextButton.icon(
+                      onPressed: _openCollectionCreateShortcut,
+                      icon: const Icon(Icons.add),
+                      label: const Text('Create task list'),
+                    ),
                   )
                 else
                   ...taskCalendars.map(_TaskListTile.new),
@@ -916,14 +951,28 @@ class _SectionHeader extends StatelessWidget {
 class _EmptySectionMessage extends StatelessWidget {
   const _EmptySectionMessage({
     required this.message,
+    this.action,
   });
 
   final String message;
+  final Widget? action;
 
   @override
   Widget build(BuildContext context) {
     return Card(
-      child: Padding(padding: const EdgeInsets.all(16), child: Text(message)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(message),
+            if (action != null) ...[
+              const SizedBox(height: 8),
+              action!,
+            ],
+          ],
+        ),
+      ),
     );
   }
 }

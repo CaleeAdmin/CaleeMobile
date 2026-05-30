@@ -41,6 +41,7 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
         page: CalendarPage(
           hubClient: widget.hubClient,
           accessToken: widget.accessToken,
+          services: widget.bootstrap.services,
         ),
       ),
       _CaleeTab(
@@ -50,6 +51,7 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
         page: TasksPage(
           hubClient: widget.hubClient,
           accessToken: widget.accessToken,
+          services: widget.bootstrap.services,
         ),
       ),
       _CaleeTab(
@@ -59,6 +61,7 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
         page: ChoresPage(
           hubClient: widget.hubClient,
           accessToken: widget.accessToken,
+          services: widget.bootstrap.services,
         ),
       ),
       _CaleeTab(
