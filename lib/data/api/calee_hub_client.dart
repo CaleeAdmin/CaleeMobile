@@ -74,6 +74,37 @@ class CaleeHubClient {
     return ClientChoreList.fromJson(_data(json));
   }
 
+  Future<void> completeChore({
+    required String accessToken,
+    required String choreId,
+    String? date,
+  }) async {
+    final encodedChoreId = Uri.encodeComponent(choreId);
+    final body = <String, dynamic>{};
+
+    if (date != null && date.trim().isNotEmpty) {
+      body['date'] = date.trim();
+    }
+
+    await _postJson(
+      '/client/v1/chores/$encodedChoreId/complete',
+      accessToken: accessToken,
+      body: body,
+    );
+  }
+
+  Future<void> undoChoreCompletion({
+    required String accessToken,
+    required String choreId,
+  }) async {
+    final encodedChoreId = Uri.encodeComponent(choreId);
+
+    await _deleteJson(
+      '/client/v1/chores/$encodedChoreId/completion/today',
+      accessToken: accessToken,
+    );
+  }
+
   Future<ClientTask> updateTask({
     required String accessToken,
     required String taskId,

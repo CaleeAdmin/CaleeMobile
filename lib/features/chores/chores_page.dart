@@ -20,6 +20,7 @@ class ChoresPage extends StatefulWidget {
 
 class _ChoresPageState extends State<ChoresPage> {
   late Future<_ChoresOverview> _overviewFuture;
+  final Set<String> _updatingChoreIds = {};
 
   @override
   void initState() {
@@ -53,6 +54,48 @@ class _ChoresPageState extends State<ChoresPage> {
     setState(() {
       _overviewFuture = _loadOverview();
     });
+  }
+
+  Future<void> _toggleChoreCompletion(ClientChore chore) async {
+    final choreId = chore.completionActionId;
+
+    if (choreId.trim().isEmpty || _updatingChoreIds.contains(choreId)) {
+      return;
+    }
+
+    setState(() {
+      _updatingChoreIds.add(choreId);
+    });
+
+    try {
+      if (chore.completedToday || chore.section == 'doneToday') {
+        await widget.hubClient.undoChoreCompletion(
+          accessToken: widget.accessToken,
+          choreId: choreId,
+        );
+      } else {
+        await widget.hubClient.completeChore(
+          accessToken: widget.accessToken,
+          choreId: choreId,
+        );
+      }
+
+      if (mounted) {
+        _reloadOverview();
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Unable to update chore.')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _updatingChoreIds.remove(choreId);
+        });
+      }
+    }
   }
 
   String _formatDate(DateTime value) {
@@ -218,6 +261,8 @@ class _ChoresPageState extends State<ChoresPage> {
                     chores: choresBySection[section] ?? const [],
                     emptyMessage: _sectionEmptyMessage(section),
                     scheduledLabelBuilder: _formatScheduledAt,
+                    updatingChoreIds: _updatingChoreIds,
+                    onToggleCompletion: _toggleChoreCompletion,
                   ),
                   const SizedBox(height: 16),
                 ],
@@ -354,12 +399,16 @@ class _ChoreSection extends StatelessWidget {
     required this.chores,
     required this.emptyMessage,
     required this.scheduledLabelBuilder,
+    required this.updatingChoreIds,
+    required this.onToggleCompletion,
   });
 
   final String title;
   final List<ClientChore> chores;
   final String emptyMessage;
   final String Function(ClientChore chore) scheduledLabelBuilder;
+  final Set<String> updatingChoreIds;
+  final ValueChanged<ClientChore> onToggleCompletion;
 
   @override
   Widget build(BuildContext context) {
@@ -378,6 +427,8 @@ class _ChoreSection extends StatelessWidget {
             (chore) => _ChoreTile(
               chore: chore,
               scheduledLabel: scheduledLabelBuilder(chore),
+              isUpdating: updatingChoreIds.contains(chore.completionActionId),
+              onToggleCompletion: () => onToggleCompletion(chore),
             ),
           ),
       ],
@@ -389,20 +440,37 @@ class _ChoreTile extends StatelessWidget {
   const _ChoreTile({
     required this.chore,
     required this.scheduledLabel,
+    required this.isUpdating,
+    required this.onToggleCompletion,
   });
 
   final ClientChore chore;
   final String scheduledLabel;
+  final bool isUpdating;
+  final VoidCallback onToggleCompletion;
 
   @override
   Widget build(BuildContext context) {
-    final icon = chore.completedToday
+    final icon = chore.completedToday || chore.section == 'doneToday'
         ? Icons.check_circle_outline
-        : Icons.cleaning_services_outlined;
+        : Icons.radio_button_unchecked;
+    final canToggle = chore.canToggleCompletion;
 
     return Card(
       child: ListTile(
-        leading: Icon(icon),
+        leading: isUpdating
+            ? const SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : IconButton(
+                icon: Icon(icon),
+                onPressed: canToggle ? onToggleCompletion : null,
+                tooltip: chore.completedToday || chore.section == 'doneToday'
+                    ? 'Undo completion'
+                    : 'Complete chore',
+              ),
         title: Text(chore.title),
         subtitle: Text(
           [
