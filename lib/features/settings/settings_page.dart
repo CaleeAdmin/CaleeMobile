@@ -1,14 +1,20 @@
 import 'package:flutter/material.dart';
 
+import '../../data/api/calee_hub_client.dart';
 import '../../data/models/client_bootstrap.dart';
+import 'calendar_collections_page.dart';
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({
+    required this.hubClient,
+    required this.accessToken,
     required this.bootstrap,
     required this.onSignOut,
     super.key,
   });
 
+  final CaleeHubClient hubClient;
+  final String accessToken;
   final ClientBootstrap bootstrap;
   final VoidCallback onSignOut;
 
@@ -26,6 +32,27 @@ class SettingsPage extends StatelessWidget {
             leading: const CircleAvatar(
               child: Icon(Icons.person),
             ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.calendar_month_outlined),
+            title: const Text('Lists & calendars'),
+            subtitle:
+                const Text('Manage calendars, task lists, and chore lists'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => CalendarCollectionsPage(
+                    hubClient: hubClient,
+                    accessToken: accessToken,
+                    services: bootstrap.services,
+                  ),
+                ),
+              );
+            },
           ),
         ),
         const SizedBox(height: 12),

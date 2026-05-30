@@ -66,6 +66,8 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
         icon: Icons.settings_outlined,
         selectedIcon: Icons.settings,
         page: SettingsPage(
+          hubClient: widget.hubClient,
+          accessToken: widget.accessToken,
           bootstrap: widget.bootstrap,
           onSignOut: widget.onSignOut,
         ),
