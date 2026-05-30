@@ -53,6 +53,80 @@ class CaleeHubClient {
     return ClientCalendarList.fromJson(_data(json));
   }
 
+  Future<ClientCalendar> createCalendar({
+    required String accessToken,
+    required String serviceId,
+    required String name,
+    required String primaryKind,
+    String? color,
+  }) async {
+    final json = await _postJson(
+      '/client/v1/calendars',
+      accessToken: accessToken,
+      body: <String, Object?>{
+        'serviceId': serviceId,
+        'name': name,
+        'primaryKind': primaryKind,
+        if (color != null && color.trim().isNotEmpty) 'color': color.trim(),
+      },
+    );
+
+    return ClientCalendar.fromJson(
+      _data(json)['calendar'] as Map<String, dynamic>,
+    );
+  }
+
+  Future<ClientCalendar> updateCalendar({
+    required String accessToken,
+    required String calendarId,
+    String? name,
+    String? color,
+  }) async {
+    final body = <String, dynamic>{};
+
+    if (name != null) {
+      body['name'] = name;
+    }
+
+    if (color != null) {
+      body['color'] = color;
+    }
+
+    if (body.isEmpty) {
+      throw const CaleeHubException(
+        statusCode: 0,
+        message: 'No calendar updates provided',
+      );
+    }
+
+    final encodedCalendarId = Uri.encodeComponent(calendarId);
+    final json = await _patchJson(
+      '/client/v1/calendars/$encodedCalendarId',
+      accessToken: accessToken,
+      body: body,
+    );
+
+    return ClientCalendar.fromJson(
+      _data(json)['calendar'] as Map<String, dynamic>,
+    );
+  }
+
+  Future<void> deleteCalendar({
+    required String accessToken,
+    required String calendarId,
+    required bool confirmDeleteItems,
+  }) async {
+    final encodedCalendarId = Uri.encodeComponent(calendarId);
+
+    await _deleteJson(
+      '/client/v1/calendars/$encodedCalendarId',
+      accessToken: accessToken,
+      body: <String, dynamic>{
+        'confirmDeleteItems': confirmDeleteItems,
+      },
+    );
+  }
+
   Future<ClientChoreList> chores({
     required String accessToken,
     required String from,
@@ -310,10 +384,16 @@ class CaleeHubClient {
   Future<void> _deleteJson(
     String path, {
     required String accessToken,
+    Map<String, dynamic>? body,
   }) async {
     final request = await _httpClient.deleteUrl(baseUri.resolve(path));
     request.headers.set(HttpHeaders.acceptHeader, 'application/json');
     request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $accessToken');
+
+    if (body != null) {
+      request.headers.contentType = ContentType.json;
+      request.write(jsonEncode(body));
+    }
 
     await _readJsonResponse(await request.close());
   }
