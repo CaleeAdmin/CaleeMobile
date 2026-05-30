@@ -63,7 +63,8 @@ class _ChoresPageState extends State<ChoresPage> {
     return '$year-$month-$day';
   }
 
-  String _formatScheduledAt(String? value) {
+  String _formatScheduledAt(ClientChore chore) {
+    final value = chore.scheduledAt;
     if (value == null || value.trim().isEmpty) {
       return 'No scheduled date';
     }
@@ -75,6 +76,72 @@ class _ChoresPageState extends State<ChoresPage> {
 
     final local = parsed.toLocal();
     return 'Scheduled ${local.day}/${local.month}/${local.year}';
+  }
+
+  String _sectionTitle(String section) {
+    switch (section) {
+      case 'todoToday':
+        return 'To do today';
+      case 'overdue':
+        return 'Overdue';
+      case 'doneToday':
+        return 'Done today';
+      case 'future':
+        return 'Future';
+      case 'history':
+        return 'History';
+      default:
+        return 'Other';
+    }
+  }
+
+  String _sectionEmptyMessage(String section) {
+    switch (section) {
+      case 'todoToday':
+        return 'No chores due today.';
+      case 'overdue':
+        return 'No overdue chores.';
+      case 'doneToday':
+        return 'No chores completed today yet.';
+      case 'future':
+        return 'No future chores found.';
+      case 'history':
+        return 'No completion history found.';
+      default:
+        return 'No chores found.';
+    }
+  }
+
+  Map<String, List<ClientChore>> _groupChoresBySection(
+    List<ClientChore> chores,
+  ) {
+    final grouped = <String, List<ClientChore>>{};
+
+    for (final chore in chores) {
+      final section = chore.section.trim().isEmpty ? 'future' : chore.section;
+      grouped.putIfAbsent(section, () => []).add(chore);
+    }
+
+    for (final group in grouped.values) {
+      group.sort((a, b) {
+        final aDate = a.scheduledDate ?? a.scheduledAt ?? '';
+        final bDate = b.scheduledDate ?? b.scheduledAt ?? '';
+        final dateCompare = aDate.compareTo(bDate);
+        if (dateCompare != 0) {
+          return dateCompare;
+        }
+
+        return a.title.toLowerCase().compareTo(b.title.toLowerCase());
+      });
+    }
+
+    return grouped;
+  }
+
+  int _weeklyPoints(List<ClientChore> chores) {
+    return chores
+        .where((chore) => chore.section == 'doneToday' || chore.completedToday)
+        .fold<int>(0, (total, chore) => total + chore.points);
   }
 
   @override
@@ -99,6 +166,14 @@ class _ChoresPageState extends State<ChoresPage> {
             .where((calendar) => calendar.isChoreKind)
             .toList();
         final chores = overview.choreList.chores;
+        final choresBySection = _groupChoresBySection(chores);
+        final sectionOrder = [
+          'todoToday',
+          'overdue',
+          'doneToday',
+          'future',
+          'history',
+        ];
 
         if (choreCalendars.isEmpty && chores.isEmpty) {
           return const _ChoresEmptyState();
@@ -112,6 +187,13 @@ class _ChoresPageState extends State<ChoresPage> {
           child: ListView(
             padding: const EdgeInsets.all(16),
             children: [
+              _ChoreSummaryCard(
+                todoTodayCount: choresBySection['todoToday']?.length ?? 0,
+                overdueCount: choresBySection['overdue']?.length ?? 0,
+                doneTodayCount: choresBySection['doneToday']?.length ?? 0,
+                weeklyPoints: _weeklyPoints(chores),
+              ),
+              const SizedBox(height: 24),
               _SectionHeader(
                 title: 'Chore lists',
                 subtitle: '${choreCalendars.length} found',
@@ -130,12 +212,15 @@ class _ChoresPageState extends State<ChoresPage> {
               if (chores.isEmpty)
                 const _EmptySectionMessage(message: 'No chores found yet.')
               else
-                ...chores.map(
-                  (chore) => _ChoreTile(
-                    chore: chore,
-                    scheduledLabel: _formatScheduledAt(chore.scheduledAt),
+                for (final section in sectionOrder) ...[
+                  _ChoreSection(
+                    title: _sectionTitle(section),
+                    chores: choresBySection[section] ?? const [],
+                    emptyMessage: _sectionEmptyMessage(section),
+                    scheduledLabelBuilder: _formatScheduledAt,
                   ),
-                ),
+                  const SizedBox(height: 16),
+                ],
             ],
           ),
         );
@@ -156,6 +241,84 @@ class _ChoresOverview {
   final ClientChoreList choreList;
   final String from;
   final String to;
+}
+
+class _ChoreSummaryCard extends StatelessWidget {
+  const _ChoreSummaryCard({
+    required this.todoTodayCount,
+    required this.overdueCount,
+    required this.doneTodayCount,
+    required this.weeklyPoints,
+  });
+
+  final int todoTodayCount;
+  final int overdueCount;
+  final int doneTodayCount;
+  final int weeklyPoints;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            Expanded(
+              child: _SummaryMetric(
+                label: 'Today',
+                value: todoTodayCount.toString(),
+              ),
+            ),
+            Expanded(
+              child: _SummaryMetric(
+                label: 'Overdue',
+                value: overdueCount.toString(),
+              ),
+            ),
+            Expanded(
+              child: _SummaryMetric(
+                label: 'Done',
+                value: doneTodayCount.toString(),
+              ),
+            ),
+            Expanded(
+              child: Column(
+                children: [
+                  Text(
+                    weeklyPoints.toString(),
+                    style: textTheme.titleLarge,
+                  ),
+                  const Text('Points'),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SummaryMetric extends StatelessWidget {
+  const _SummaryMetric({
+    required this.label,
+    required this.value,
+  });
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Text(value, style: Theme.of(context).textTheme.titleLarge),
+        Text(label),
+      ],
+    );
+  }
 }
 
 class _ChoreListTile extends StatelessWidget {
@@ -185,6 +348,43 @@ class _ChoreListTile extends StatelessWidget {
   }
 }
 
+class _ChoreSection extends StatelessWidget {
+  const _ChoreSection({
+    required this.title,
+    required this.chores,
+    required this.emptyMessage,
+    required this.scheduledLabelBuilder,
+  });
+
+  final String title;
+  final List<ClientChore> chores;
+  final String emptyMessage;
+  final String Function(ClientChore chore) scheduledLabelBuilder;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionHeader(
+          title: title,
+          subtitle: '${chores.length}',
+        ),
+        const SizedBox(height: 8),
+        if (chores.isEmpty)
+          _EmptySectionMessage(message: emptyMessage)
+        else
+          ...chores.map(
+            (chore) => _ChoreTile(
+              chore: chore,
+              scheduledLabel: scheduledLabelBuilder(chore),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
 class _ChoreTile extends StatelessWidget {
   const _ChoreTile({
     required this.chore,
@@ -196,13 +396,20 @@ class _ChoreTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final icon = chore.completedToday
+        ? Icons.check_circle_outline
+        : Icons.cleaning_services_outlined;
+
     return Card(
       child: ListTile(
-        leading: const Icon(Icons.cleaning_services_outlined),
+        leading: Icon(icon),
         title: Text(chore.title),
         subtitle: Text(
           [
             scheduledLabel,
+            if (chore.points > 0)
+              '${chore.points} point${chore.points == 1 ? '' : 's'}',
+            if (chore.isRecurring) 'Repeats',
             if (chore.serviceName.trim().isNotEmpty)
               'From ${chore.serviceName}',
             if ((chore.description ?? '').trim().isNotEmpty) chore.description!,
@@ -258,16 +465,7 @@ class _ChoresEmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return const Center(
-      child: Card(
-        margin: EdgeInsets.all(24),
-        child: Padding(
-          padding: EdgeInsets.all(24),
-          child: Text(
-            'No chore lists or chores found yet.',
-            textAlign: TextAlign.center,
-          ),
-        ),
-      ),
+      child: Text('No chores available yet.'),
     );
   }
 }
@@ -289,20 +487,8 @@ class _ChoresErrorState extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.cloud_off_outlined, size: 40),
+              const Text('Unable to load chores.'),
               const SizedBox(height: 12),
-              Text(
-                'Unable to load chores from Calee.',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Check your connection, then try again.',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-              const SizedBox(height: 16),
               FilledButton(
                 onPressed: onRetry,
                 child: const Text('Try again'),
