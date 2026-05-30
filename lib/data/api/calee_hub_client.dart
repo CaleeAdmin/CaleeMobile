@@ -106,6 +106,33 @@ class CaleeHubClient {
     return ClientChore.fromJson(_data(json)['chore'] as Map<String, dynamic>);
   }
 
+  Future<ClientChore> updateChore({
+    required String accessToken,
+    required String choreId,
+    required String title,
+    String? scheduledAt,
+    String? description,
+    String? recurrence,
+    int points = 1,
+  }) async {
+    final encodedChoreId = Uri.encodeComponent(choreId);
+    final body = <String, Object?>{
+      'title': title,
+      'points': points,
+      'scheduledAt': scheduledAt,
+      'description': description ?? '',
+      'recurrence': recurrence,
+    };
+
+    final json = await _patchJson(
+      '/client/v1/chores/$encodedChoreId',
+      accessToken: accessToken,
+      body: body,
+    );
+
+    return ClientChore.fromJson(_data(json)['chore'] as Map<String, dynamic>);
+  }
+
   Future<void> completeChore({
     required String accessToken,
     required String choreId,
