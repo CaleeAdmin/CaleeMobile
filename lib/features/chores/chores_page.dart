@@ -4,6 +4,66 @@ import '../../data/api/calee_hub_client.dart';
 import '../../data/models/client_calendar.dart';
 import '../../data/models/client_chore.dart';
 
+String _formatChoreDate(DateTime value) {
+  final year = value.year.toString().padLeft(4, '0');
+  final month = value.month.toString().padLeft(2, '0');
+  final day = value.day.toString().padLeft(2, '0');
+
+  return '$year-$month-$day';
+}
+
+DateTime? _parseChoreDate(String? value) {
+  if (value == null || value.trim().isEmpty) {
+    return null;
+  }
+
+  final parsed = DateTime.tryParse(value);
+  if (parsed == null) {
+    return null;
+  }
+
+  return parsed.toLocal();
+}
+
+String? _choreRecurrenceToRrule(String? value) {
+  switch (value) {
+    case 'daily':
+      return 'FREQ=DAILY';
+    case 'weekly':
+      return 'FREQ=WEEKLY';
+    case 'monthly':
+      return 'FREQ=MONTHLY';
+    default:
+      return null;
+  }
+}
+
+String? _choreRruleToRecurrence(String? value) {
+  final rrule = value?.trim().toUpperCase();
+
+  if (rrule == 'FREQ=DAILY') {
+    return 'daily';
+  }
+
+  if (rrule == 'FREQ=WEEKLY') {
+    return 'weekly';
+  }
+
+  if (rrule == 'FREQ=MONTHLY') {
+    return 'monthly';
+  }
+
+  return null;
+}
+
+String _choreErrorMessage(Object error, String fallback) {
+  if (error is CaleeHubException && error.message.trim().isNotEmpty) {
+    return error.message;
+  }
+
+  return fallback;
+}
+
 class ChoresPage extends StatefulWidget {
   const ChoresPage({
     required this.hubClient,
@@ -30,8 +90,8 @@ class _ChoresPageState extends State<ChoresPage> {
 
   Future<_ChoresOverview> _loadOverview() async {
     final today = DateTime.now();
-    final from = _formatDate(DateTime(today.year, 1, 1));
-    final to = _formatDate(DateTime(today.year, 12, 31));
+    final from = _formatChoreDate(DateTime(today.year, 1, 1));
+    final to = _formatChoreDate(DateTime(today.year, 12, 31));
 
     final calendarList = await widget.hubClient.calendars(
       accessToken: widget.accessToken,
@@ -175,10 +235,12 @@ class _ChoresPageState extends State<ChoresPage> {
       if (mounted) {
         _reloadOverview();
       }
-    } catch (_) {
+    } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Unable to update chore.')),
+          SnackBar(
+            content: Text(_choreErrorMessage(error, 'Unable to update chore.')),
+          ),
         );
       }
     } finally {
@@ -188,14 +250,6 @@ class _ChoresPageState extends State<ChoresPage> {
         });
       }
     }
-  }
-
-  String _formatDate(DateTime value) {
-    final year = value.year.toString().padLeft(4, '0');
-    final month = value.month.toString().padLeft(2, '0');
-    final day = value.day.toString().padLeft(2, '0');
-
-    return '$year-$month-$day';
   }
 
   String _formatScheduledAt(ClientChore chore) {
@@ -273,7 +327,7 @@ class _ChoresPageState extends State<ChoresPage> {
     return grouped;
   }
 
-  int _weeklyPoints(List<ClientChore> chores) {
+  int _todayCompletionPoints(List<ClientChore> chores) {
     return chores
         .where((chore) => chore.section == 'doneToday' || chore.completedToday)
         .fold<int>(0, (total, chore) => total + chore.points);
@@ -326,7 +380,7 @@ class _ChoresPageState extends State<ChoresPage> {
                 todoTodayCount: choresBySection['todoToday']?.length ?? 0,
                 overdueCount: choresBySection['overdue']?.length ?? 0,
                 doneTodayCount: choresBySection['doneToday']?.length ?? 0,
-                weeklyPoints: _weeklyPoints(chores),
+                weeklyPoints: _todayCompletionPoints(chores),
               ),
               const SizedBox(height: 24),
               _SectionHeader(
@@ -512,27 +566,6 @@ class _CreateChoreSheetState extends State<_CreateChoreSheet> {
     super.dispose();
   }
 
-  String _formatDate(DateTime value) {
-    final year = value.year.toString().padLeft(4, '0');
-    final month = value.month.toString().padLeft(2, '0');
-    final day = value.day.toString().padLeft(2, '0');
-
-    return '$year-$month-$day';
-  }
-
-  String? _recurrenceToRrule(String? value) {
-    switch (value) {
-      case 'daily':
-        return 'FREQ=DAILY';
-      case 'weekly':
-        return 'FREQ=WEEKLY';
-      case 'monthly':
-        return 'FREQ=MONTHLY';
-      default:
-        return null;
-    }
-  }
-
   Future<void> _pickDate() async {
     final now = DateTime.now();
     final picked = await showDatePicker(
@@ -562,9 +595,10 @@ class _CreateChoreSheetState extends State<_CreateChoreSheet> {
       await widget.onCreate(
         calendar: _selectedCalendar,
         title: _titleController.text.trim(),
-        scheduledAt: _selectedDate == null ? null : _formatDate(_selectedDate!),
+        scheduledAt:
+            _selectedDate == null ? null : _formatChoreDate(_selectedDate!),
         description: _descriptionController.text.trim(),
-        recurrence: _recurrenceToRrule(_selectedRecurrence),
+        recurrence: _choreRecurrenceToRrule(_selectedRecurrence),
         points: _points,
       );
 
@@ -658,7 +692,7 @@ class _CreateChoreSheetState extends State<_CreateChoreSheet> {
                   label: Text(
                     _selectedDate == null
                         ? 'Add scheduled date'
-                        : 'Scheduled ${_formatDate(_selectedDate!)}',
+                        : 'Scheduled ${_formatChoreDate(_selectedDate!)}',
                   ),
                 ),
                 if (_selectedDate != null)
@@ -801,8 +835,8 @@ class _EditChoreSheetState extends State<_EditChoreSheet> {
     _descriptionController =
         TextEditingController(text: widget.chore.description ?? '');
     _selectedDate =
-        _parseDate(widget.chore.scheduledDate ?? widget.chore.scheduledAt);
-    _selectedRecurrence = _rruleToRecurrence(widget.chore.recurrence);
+        _parseChoreDate(widget.chore.scheduledDate ?? widget.chore.scheduledAt);
+    _selectedRecurrence = _choreRruleToRecurrence(widget.chore.recurrence);
     _points = widget.chore.points <= 1 ? 1 : 2;
   }
 
@@ -811,58 +845,6 @@ class _EditChoreSheetState extends State<_EditChoreSheet> {
     _titleController.dispose();
     _descriptionController.dispose();
     super.dispose();
-  }
-
-  DateTime? _parseDate(String? value) {
-    if (value == null || value.trim().isEmpty) {
-      return null;
-    }
-
-    final parsed = DateTime.tryParse(value);
-    if (parsed == null) {
-      return null;
-    }
-
-    return parsed.toLocal();
-  }
-
-  String _formatDate(DateTime value) {
-    final year = value.year.toString().padLeft(4, '0');
-    final month = value.month.toString().padLeft(2, '0');
-    final day = value.day.toString().padLeft(2, '0');
-
-    return '$year-$month-$day';
-  }
-
-  String? _rruleToRecurrence(String? value) {
-    final rrule = value?.trim().toUpperCase();
-
-    if (rrule == 'FREQ=DAILY') {
-      return 'daily';
-    }
-
-    if (rrule == 'FREQ=WEEKLY') {
-      return 'weekly';
-    }
-
-    if (rrule == 'FREQ=MONTHLY') {
-      return 'monthly';
-    }
-
-    return null;
-  }
-
-  String? _recurrenceToRrule(String? value) {
-    switch (value) {
-      case 'daily':
-        return 'FREQ=DAILY';
-      case 'weekly':
-        return 'FREQ=WEEKLY';
-      case 'monthly':
-        return 'FREQ=MONTHLY';
-      default:
-        return null;
-    }
   }
 
   Future<void> _pickDate() async {
@@ -894,9 +876,10 @@ class _EditChoreSheetState extends State<_EditChoreSheet> {
       await widget.onUpdate(
         chore: widget.chore,
         title: _titleController.text.trim(),
-        scheduledAt: _selectedDate == null ? null : _formatDate(_selectedDate!),
+        scheduledAt:
+            _selectedDate == null ? null : _formatChoreDate(_selectedDate!),
         description: _descriptionController.text.trim(),
-        recurrence: _recurrenceToRrule(_selectedRecurrence),
+        recurrence: _choreRecurrenceToRrule(_selectedRecurrence),
         points: _points,
       );
 
@@ -959,7 +942,7 @@ class _EditChoreSheetState extends State<_EditChoreSheet> {
                   label: Text(
                     _selectedDate == null
                         ? 'Add scheduled date'
-                        : 'Scheduled ${_formatDate(_selectedDate!)}',
+                        : 'Scheduled ${_formatChoreDate(_selectedDate!)}',
                   ),
                 ),
                 if (_selectedDate != null)

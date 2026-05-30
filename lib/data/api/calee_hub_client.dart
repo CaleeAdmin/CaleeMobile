@@ -307,7 +307,7 @@ class CaleeHubClient {
     return ClientRefreshResult.fromJson(_data(json));
   }
 
-  Future<Map<String, dynamic>> _deleteJson(
+  Future<void> _deleteJson(
     String path, {
     required String accessToken,
   }) async {
@@ -315,7 +315,7 @@ class CaleeHubClient {
     request.headers.set(HttpHeaders.acceptHeader, 'application/json');
     request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $accessToken');
 
-    return _readJsonResponse(await request.close());
+    await _readJsonResponse(await request.close());
   }
 
   Future<Map<String, dynamic>> _patchJson(

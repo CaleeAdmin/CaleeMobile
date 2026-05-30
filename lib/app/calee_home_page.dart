@@ -27,50 +27,55 @@ class CaleeHomePage extends StatefulWidget {
 
 class _CaleeHomePageState extends State<CaleeHomePage> {
   int _selectedIndex = 0;
+  late final List<_CaleeTab> _tabs;
 
-  List<_CaleeTab> get _tabs => [
-        _CaleeTab(
-          title: 'Calendar',
-          icon: Icons.calendar_month_outlined,
-          selectedIcon: Icons.calendar_month,
-          page: CalendarPage(
-            hubClient: widget.hubClient,
-            accessToken: widget.accessToken,
-          ),
+  @override
+  void initState() {
+    super.initState();
+
+    _tabs = [
+      _CaleeTab(
+        title: 'Calendar',
+        icon: Icons.calendar_month_outlined,
+        selectedIcon: Icons.calendar_month,
+        page: CalendarPage(
+          hubClient: widget.hubClient,
+          accessToken: widget.accessToken,
         ),
-        _CaleeTab(
-          title: 'Tasks',
-          icon: Icons.checklist_outlined,
-          selectedIcon: Icons.checklist,
-          page: TasksPage(
-            hubClient: widget.hubClient,
-            accessToken: widget.accessToken,
-          ),
+      ),
+      _CaleeTab(
+        title: 'Tasks',
+        icon: Icons.checklist_outlined,
+        selectedIcon: Icons.checklist,
+        page: TasksPage(
+          hubClient: widget.hubClient,
+          accessToken: widget.accessToken,
         ),
-        _CaleeTab(
-          title: 'Chores',
-          icon: Icons.family_restroom_outlined,
-          selectedIcon: Icons.family_restroom,
-          page: ChoresPage(
-            hubClient: widget.hubClient,
-            accessToken: widget.accessToken,
-          ),
+      ),
+      _CaleeTab(
+        title: 'Chores',
+        icon: Icons.family_restroom_outlined,
+        selectedIcon: Icons.family_restroom,
+        page: ChoresPage(
+          hubClient: widget.hubClient,
+          accessToken: widget.accessToken,
         ),
-        _CaleeTab(
-          title: 'Settings',
-          icon: Icons.settings_outlined,
-          selectedIcon: Icons.settings,
-          page: SettingsPage(
-            bootstrap: widget.bootstrap,
-            onSignOut: widget.onSignOut,
-          ),
+      ),
+      _CaleeTab(
+        title: 'Settings',
+        icon: Icons.settings_outlined,
+        selectedIcon: Icons.settings,
+        page: SettingsPage(
+          bootstrap: widget.bootstrap,
+          onSignOut: widget.onSignOut,
         ),
-      ];
+      ),
+    ];
+  }
 
   @override
   Widget build(BuildContext context) {
-    final tabs = _tabs;
-    final tab = tabs[_selectedIndex];
+    final tab = _tabs[_selectedIndex];
 
     return Scaffold(
       appBar: AppBar(
@@ -84,7 +89,7 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
             _selectedIndex = index;
           });
         },
-        destinations: tabs
+        destinations: _tabs
             .map(
               (tab) => NavigationDestination(
                 icon: Icon(tab.icon),
