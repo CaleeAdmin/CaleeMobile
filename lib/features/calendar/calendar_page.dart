@@ -107,6 +107,7 @@ class _CalendarPageState extends State<CalendarPage> {
     required bool allDay,
     String? location,
     String? description,
+    String? recurrence,
   }) async {
     await widget.hubClient.createEvent(
       accessToken: widget.accessToken,
@@ -118,6 +119,7 @@ class _CalendarPageState extends State<CalendarPage> {
       allDay: allDay,
       location: location,
       description: description,
+      recurrence: recurrence,
     );
   }
 
@@ -346,6 +348,7 @@ class _CreateEventSheet extends StatefulWidget {
     required bool allDay,
     String? location,
     String? description,
+    String? recurrence,
   }) onCreate;
 
   @override
@@ -362,6 +365,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
   late DateTime _selectedDate;
   late TimeOfDay _startTime;
   late TimeOfDay _endTime;
+  String _selectedRecurrence = 'none';
   bool _allDay = false;
   bool _isSubmitting = false;
 
@@ -404,6 +408,36 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
     final hour = value.hour.toString().padLeft(2, '0');
     final minute = value.minute.toString().padLeft(2, '0');
     return '$hour:$minute';
+  }
+
+  String? _recurrenceValue(String value) {
+    switch (value) {
+      case 'daily':
+        return 'FREQ=DAILY';
+      case 'weekly':
+        return 'FREQ=WEEKLY';
+      case 'monthly':
+        return 'FREQ=MONTHLY';
+      case 'yearly':
+        return 'FREQ=YEARLY';
+      default:
+        return null;
+    }
+  }
+
+  String _recurrenceLabel(String value) {
+    switch (value) {
+      case 'daily':
+        return 'Daily';
+      case 'weekly':
+        return 'Weekly';
+      case 'monthly':
+        return 'Monthly';
+      case 'yearly':
+        return 'Yearly';
+      default:
+        return 'Does not repeat';
+    }
   }
 
   Future<void> _pickDate() async {
@@ -481,6 +515,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
         description: _descriptionController.text.trim().isEmpty
             ? null
             : _descriptionController.text.trim(),
+        recurrence: _recurrenceValue(_selectedRecurrence),
       );
 
       if (mounted) {
@@ -602,6 +637,52 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                         ),
                       ),
                     ],
+                  ),
+                ],
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  initialValue: _selectedRecurrence,
+                  decoration: const InputDecoration(
+                    labelText: 'Repeat',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: const [
+                    DropdownMenuItem(
+                      value: 'none',
+                      child: Text('Does not repeat'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'daily',
+                      child: Text('Daily'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'weekly',
+                      child: Text('Weekly'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'monthly',
+                      child: Text('Monthly'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'yearly',
+                      child: Text('Yearly'),
+                    ),
+                  ],
+                  onChanged: _isSubmitting
+                      ? null
+                      : (value) {
+                          if (value != null) {
+                            setState(() {
+                              _selectedRecurrence = value;
+                            });
+                          }
+                        },
+                ),
+                if (_selectedRecurrence != 'none') ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    'Repeats ${_recurrenceLabel(_selectedRecurrence).toLowerCase()}.',
+                    style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ],
                 const SizedBox(height: 12),
