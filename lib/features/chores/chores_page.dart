@@ -56,6 +56,52 @@ class _ChoresPageState extends State<ChoresPage> {
     });
   }
 
+  Future<void> _openCreateChoreSheet(
+      List<ClientCalendar> choreCalendars) async {
+    final writableCalendars =
+        choreCalendars.where((calendar) => !calendar.readOnly).toList();
+
+    if (writableCalendars.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No writable chore list is available.')),
+      );
+      return;
+    }
+
+    final created = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => _CreateChoreSheet(
+        calendars: writableCalendars,
+        onCreate: _createChore,
+      ),
+    );
+
+    if (created == true && mounted) {
+      _reloadOverview();
+    }
+  }
+
+  Future<void> _createChore({
+    required ClientCalendar calendar,
+    required String title,
+    String? scheduledAt,
+    String? description,
+    String? recurrence,
+    required int points,
+  }) async {
+    await widget.hubClient.createChore(
+      accessToken: widget.accessToken,
+      serviceId: calendar.serviceId,
+      calendarId: calendar.id,
+      title: title,
+      scheduledAt: scheduledAt,
+      description: description,
+      recurrence: recurrence,
+      points: points,
+    );
+  }
+
   Future<void> _toggleChoreCompletion(ClientChore chore) async {
     final choreId = chore.completionActionId;
 
@@ -252,6 +298,15 @@ class _ChoresPageState extends State<ChoresPage> {
                 subtitle: '${chores.length} found',
               ),
               const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: FilledButton.icon(
+                  onPressed: () => _openCreateChoreSheet(choreCalendars),
+                  icon: const Icon(Icons.add),
+                  label: const Text('Add chore'),
+                ),
+              ),
+              const SizedBox(height: 12),
               if (chores.isEmpty)
                 const _EmptySectionMessage(message: 'No chores found yet.')
               else
@@ -362,6 +417,301 @@ class _SummaryMetric extends StatelessWidget {
         Text(value, style: Theme.of(context).textTheme.titleLarge),
         Text(label),
       ],
+    );
+  }
+}
+
+class _CreateChoreSheet extends StatefulWidget {
+  const _CreateChoreSheet({
+    required this.calendars,
+    required this.onCreate,
+  });
+
+  final List<ClientCalendar> calendars;
+  final Future<void> Function({
+    required ClientCalendar calendar,
+    required String title,
+    String? scheduledAt,
+    String? description,
+    String? recurrence,
+    required int points,
+  }) onCreate;
+
+  @override
+  State<_CreateChoreSheet> createState() => _CreateChoreSheetState();
+}
+
+class _CreateChoreSheetState extends State<_CreateChoreSheet> {
+  final _formKey = GlobalKey<FormState>();
+  final _titleController = TextEditingController();
+  final _descriptionController = TextEditingController();
+
+  late ClientCalendar _selectedCalendar;
+  DateTime? _selectedDate;
+  String? _selectedRecurrence;
+  int _points = 1;
+  bool _isSubmitting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedCalendar = widget.calendars.first;
+  }
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _descriptionController.dispose();
+    super.dispose();
+  }
+
+  String _formatDate(DateTime value) {
+    final year = value.year.toString().padLeft(4, '0');
+    final month = value.month.toString().padLeft(2, '0');
+    final day = value.day.toString().padLeft(2, '0');
+
+    return '$year-$month-$day';
+  }
+
+  String? _recurrenceToRrule(String? value) {
+    switch (value) {
+      case 'daily':
+        return 'FREQ=DAILY';
+      case 'weekly':
+        return 'FREQ=WEEKLY';
+      case 'monthly':
+        return 'FREQ=MONTHLY';
+      default:
+        return null;
+    }
+  }
+
+  Future<void> _pickDate() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate ?? now,
+      firstDate: DateTime(now.year - 1),
+      lastDate: DateTime(now.year + 5),
+    );
+
+    if (picked != null && mounted) {
+      setState(() {
+        _selectedDate = picked;
+      });
+    }
+  }
+
+  Future<void> _submit() async {
+    if (_isSubmitting || !_formKey.currentState!.validate()) {
+      return;
+    }
+
+    setState(() {
+      _isSubmitting = true;
+    });
+
+    try {
+      await widget.onCreate(
+        calendar: _selectedCalendar,
+        title: _titleController.text.trim(),
+        scheduledAt: _selectedDate == null ? null : _formatDate(_selectedDate!),
+        description: _descriptionController.text.trim(),
+        recurrence: _recurrenceToRrule(_selectedRecurrence),
+        points: _points,
+      );
+
+      if (mounted) {
+        Navigator.of(context).pop(true);
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _isSubmitting = false;
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Unable to create chore.')),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + bottomInset),
+        child: Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'Add chore',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                const SizedBox(height: 16),
+                DropdownButtonFormField<ClientCalendar>(
+                  initialValue: _selectedCalendar,
+                  decoration: const InputDecoration(
+                    labelText: 'Chore list',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: widget.calendars
+                      .map(
+                        (calendar) => DropdownMenuItem(
+                          value: calendar,
+                          child: Text(
+                            [
+                              calendar.name,
+                              if (calendar.serviceName.trim().isNotEmpty)
+                                calendar.serviceName,
+                            ].join(' · '),
+                          ),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: _isSubmitting
+                      ? null
+                      : (value) {
+                          if (value != null) {
+                            setState(() {
+                              _selectedCalendar = value;
+                            });
+                          }
+                        },
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _titleController,
+                  enabled: !_isSubmitting,
+                  autofocus: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Title',
+                    border: OutlineInputBorder(),
+                  ),
+                  textInputAction: TextInputAction.next,
+                  validator: (value) {
+                    if ((value ?? '').trim().isEmpty) {
+                      return 'Enter a chore title';
+                    }
+
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 12),
+                OutlinedButton.icon(
+                  onPressed: _isSubmitting ? null : _pickDate,
+                  icon: const Icon(Icons.event_outlined),
+                  label: Text(
+                    _selectedDate == null
+                        ? 'Add scheduled date'
+                        : 'Scheduled ${_formatDate(_selectedDate!)}',
+                  ),
+                ),
+                if (_selectedDate != null)
+                  TextButton(
+                    onPressed: _isSubmitting
+                        ? null
+                        : () {
+                            setState(() {
+                              _selectedDate = null;
+                            });
+                          },
+                    child: const Text('Remove scheduled date'),
+                  ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String?>(
+                  initialValue: _selectedRecurrence,
+                  decoration: const InputDecoration(
+                    labelText: 'Repeat',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: const [
+                    DropdownMenuItem<String?>(
+                      value: null,
+                      child: Text('Does not repeat'),
+                    ),
+                    DropdownMenuItem<String?>(
+                      value: 'daily',
+                      child: Text('Daily'),
+                    ),
+                    DropdownMenuItem<String?>(
+                      value: 'weekly',
+                      child: Text('Weekly'),
+                    ),
+                    DropdownMenuItem<String?>(
+                      value: 'monthly',
+                      child: Text('Monthly'),
+                    ),
+                  ],
+                  onChanged: _isSubmitting
+                      ? null
+                      : (value) {
+                          setState(() {
+                            _selectedRecurrence = value;
+                          });
+                        },
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<int>(
+                  initialValue: _points,
+                  decoration: const InputDecoration(
+                    labelText: 'Points',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: const [
+                    DropdownMenuItem(
+                      value: 1,
+                      child: Text('1 point'),
+                    ),
+                    DropdownMenuItem(
+                      value: 2,
+                      child: Text('2 points'),
+                    ),
+                  ],
+                  onChanged: _isSubmitting
+                      ? null
+                      : (value) {
+                          if (value != null) {
+                            setState(() {
+                              _points = value;
+                            });
+                          }
+                        },
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _descriptionController,
+                  enabled: !_isSubmitting,
+                  decoration: const InputDecoration(
+                    labelText: 'Notes',
+                    border: OutlineInputBorder(),
+                  ),
+                  minLines: 2,
+                  maxLines: 4,
+                ),
+                const SizedBox(height: 16),
+                FilledButton(
+                  onPressed: _isSubmitting ? null : _submit,
+                  child: _isSubmitting
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('Create chore'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
