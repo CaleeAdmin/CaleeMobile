@@ -74,6 +74,38 @@ class CaleeHubClient {
     return ClientChoreList.fromJson(_data(json));
   }
 
+  Future<ClientChore> createChore({
+    required String accessToken,
+    required String serviceId,
+    required String calendarId,
+    required String title,
+    String? scheduledAt,
+    String? description,
+    String? recurrence,
+    int points = 1,
+  }) async {
+    final body = <String, Object?>{
+      'serviceId': serviceId,
+      'calendarId': calendarId,
+      'title': title,
+      'points': points,
+      if (scheduledAt != null && scheduledAt.trim().isNotEmpty)
+        'scheduledAt': scheduledAt.trim(),
+      if (description != null && description.trim().isNotEmpty)
+        'description': description.trim(),
+      if (recurrence != null && recurrence.trim().isNotEmpty)
+        'recurrence': recurrence.trim(),
+    };
+
+    final json = await _postJson(
+      '/client/v1/chores',
+      accessToken: accessToken,
+      body: body,
+    );
+
+    return ClientChore.fromJson(_data(json)['chore'] as Map<String, dynamic>);
+  }
+
   Future<void> completeChore({
     required String accessToken,
     required String choreId,
