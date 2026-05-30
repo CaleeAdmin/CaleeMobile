@@ -152,6 +152,18 @@ class CaleeHubClient {
     );
   }
 
+  Future<void> deleteChore({
+    required String accessToken,
+    required String choreId,
+  }) async {
+    final encodedChoreId = Uri.encodeComponent(choreId);
+
+    await _deleteJson(
+      '/client/v1/chores/$encodedChoreId',
+      accessToken: accessToken,
+    );
+  }
+
   Future<void> undoChoreCompletion({
     required String accessToken,
     required String choreId,
