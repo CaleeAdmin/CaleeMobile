@@ -347,6 +347,39 @@ class CaleeHubClient {
     return ClientTaskList.fromJson(_data(json));
   }
 
+  Future<ClientEvent> createEvent({
+    required String accessToken,
+    required String serviceId,
+    required String calendarId,
+    required String title,
+    required String startsAt,
+    required String endsAt,
+    required bool allDay,
+    String? location,
+    String? description,
+  }) async {
+    final body = <String, Object?>{
+      'serviceId': serviceId,
+      'calendarId': calendarId,
+      'title': title,
+      'startsAt': startsAt,
+      'endsAt': endsAt,
+      'allDay': allDay,
+      if (location != null && location.trim().isNotEmpty)
+        'location': location.trim(),
+      if (description != null && description.trim().isNotEmpty)
+        'description': description.trim(),
+    };
+
+    final json = await _postJson(
+      '/client/v1/events',
+      accessToken: accessToken,
+      body: body,
+    );
+
+    return ClientEvent.fromJson(_data(json)['event'] as Map<String, dynamic>);
+  }
+
   Future<ClientEventList> events({
     required String accessToken,
     required String from,
