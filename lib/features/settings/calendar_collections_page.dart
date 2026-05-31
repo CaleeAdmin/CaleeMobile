@@ -114,7 +114,25 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
     });
   }
 
-  // ── Create ────────────────────────────────────────────────────────────────
+  // ── Create / subscribe ───────────────────────────────────────────────────
+
+  void _openAddActions() {
+    CaleeActionSheet.show(
+      context: context,
+      actions: [
+        CaleeAction(
+          label: 'Create list or calendar',
+          icon: Icons.add_circle_outline,
+          onTap: _openCreateSheet,
+        ),
+        CaleeAction(
+          label: 'Subscribe from link',
+          icon: Icons.link_rounded,
+          onTap: _openSubscribeSheet,
+        ),
+      ],
+    );
+  }
 
   Future<void> _openCreateSheet() async {
     final services = _calendarServices;
@@ -161,10 +179,56 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
     if (created == true && mounted) _reload();
   }
 
+  Future<void> _openSubscribeSheet() async {
+    final services = _calendarServices;
+
+    if (services.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No connected calendar service is available.'),
+        ),
+      );
+      return;
+    }
+
+    final created = await CaleeBottomSheet.show<bool>(
+      context: context,
+      title: 'Subscribe from link',
+      child: _SubscriptionFormContent(
+        services: services,
+        onSubmit: ({
+          required String name,
+          required String url,
+          required String? color,
+          required ClientService? service,
+        }) async {
+          final selectedService = service;
+          if (selectedService == null) {
+            throw const CaleeHubException(
+              statusCode: 0,
+              message: 'Choose a service',
+            );
+          }
+
+          await widget.hubClient.subscribeCalendarFromLink(
+            accessToken: widget.accessToken,
+            serviceId: selectedService.id,
+            name: name,
+            url: url,
+            color: color,
+          );
+        },
+      ),
+    );
+
+    if (created == true && mounted) _reload();
+  }
+
   // ── Edit ──────────────────────────────────────────────────────────────────
 
   Future<void> _openEditSheet(ClientCalendar calendar) async {
-    if (calendar.readOnly || _updatingCalendarIds.contains(calendar.id)) {
+    if ((!calendar.isSubscription && calendar.readOnly) ||
+        _updatingCalendarIds.contains(calendar.id)) {
       return;
     }
 
@@ -215,10 +279,10 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
           from: from,
           to: to,
         );
-        final count = eventList.events
-            .where((e) => e.calendarId == calendar.id)
-            .length;
-        if (count > 0) lines.add(_pluralCount(count, 'visible event occurrence'));
+        final count =
+            eventList.events.where((e) => e.calendarId == calendar.id).length;
+        if (count > 0)
+          lines.add(_pluralCount(count, 'visible event occurrence'));
       }
 
       if (calendar.supportsTasks) {
@@ -240,8 +304,7 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
         );
         final chores =
             choreList.chores.where((c) => c.calendarId == calendar.id).toList();
-        final choreCount =
-            chores.where((c) => c.kind == 'baseChore').length;
+        final choreCount = chores.where((c) => c.kind == 'baseChore').length;
         final completionRecordCount =
             chores.where((c) => c.kind == 'completionLog').length;
         if (choreCount > 0) lines.add(_pluralCount(choreCount, 'chore'));
@@ -342,8 +405,7 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content:
-                Text(_errorMessage(error, 'Unable to delete collection.')),
+            content: Text(_errorMessage(error, 'Unable to delete collection.')),
           ),
         );
       }
@@ -369,20 +431,21 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
     List<ClientCalendar> calendars,
     String primaryKind,
   ) {
-    return calendars
-        .where((c) => c.primaryKind == primaryKind)
-        .toList();
+    return calendars.where((c) => c.primaryKind == primaryKind).toList();
   }
 
   // ── Row builder ───────────────────────────────────────────────────────────
 
   Widget _buildCollectionRow(ClientCalendar calendar) {
     final isUpdating = _updatingCalendarIds.contains(calendar.id);
-    final isEditable = !calendar.readOnly && !isUpdating;
+    final canRename = !calendar.readOnly && !isUpdating;
+    final canDelete =
+        (!calendar.readOnly || calendar.isSubscription) && !isUpdating;
     final dotColor = _collectionColor(calendar);
 
     final subtitleParts = <String>[
       if (calendar.serviceName.trim().isNotEmpty) calendar.serviceName,
+      if (calendar.isSubscription) 'Subscription',
       if (calendar.readOnly) 'Read-only',
     ];
 
@@ -396,10 +459,10 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
           color: CaleeColors.textTertiary,
         ),
       );
-    } else if (isEditable) {
+    } else if (canRename || canDelete) {
       trailing = _CollectionMenuButton(
-        onEdit: () => _openEditSheet(calendar),
-        onDelete: () => _deleteCalendar(calendar),
+        onEdit: canRename ? () => _openEditSheet(calendar) : null,
+        onDelete: canDelete ? () => _deleteCalendar(calendar) : null,
       );
     }
 
@@ -407,7 +470,7 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
       title: calendar.name,
       subtitle: subtitleParts.isEmpty ? null : subtitleParts.join(' · '),
       leading: CaleeColorDot(color: dotColor, size: 12),
-      onTap: isEditable ? () => _openEditSheet(calendar) : null,
+      onTap: canRename ? () => _openEditSheet(calendar) : null,
       trailing: trailing,
     );
   }
@@ -452,8 +515,8 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
         actions: [
           IconButton(
             icon: const Icon(Icons.add),
-            tooltip: 'Create',
-            onPressed: _openCreateSheet,
+            tooltip: 'Add',
+            onPressed: _openAddActions,
           ),
         ],
       ),
@@ -469,8 +532,8 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
             return CaleeEmptyState(
               icon: Icons.error_outline,
               title: 'Unable to load',
-              body: _errorMessage(
-                  snapshot.error!, 'Unable to load collections.'),
+              body:
+                  _errorMessage(snapshot.error!, 'Unable to load collections.'),
               action: TextButton(
                 onPressed: _reload,
                 child: const Text('Try again'),
@@ -528,8 +591,8 @@ class _CollectionMenuButton extends StatelessWidget {
     required this.onDelete,
   });
 
-  final VoidCallback onEdit;
-  final VoidCallback onDelete;
+  final VoidCallback? onEdit;
+  final VoidCallback? onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -537,17 +600,19 @@ class _CollectionMenuButton extends StatelessWidget {
       onTap: () => CaleeActionSheet.show(
         context: context,
         actions: [
-          CaleeAction(
-            label: 'Rename',
-            icon: Icons.edit_outlined,
-            onTap: onEdit,
-          ),
-          CaleeAction(
-            label: 'Delete',
-            icon: Icons.delete_outline,
-            isDestructive: true,
-            onTap: onDelete,
-          ),
+          if (onEdit != null)
+            CaleeAction(
+              label: 'Rename',
+              icon: Icons.edit_outlined,
+              onTap: onEdit!,
+            ),
+          if (onDelete != null)
+            CaleeAction(
+              label: 'Delete',
+              icon: Icons.delete_outline,
+              isDestructive: true,
+              onTap: onDelete!,
+            ),
         ],
       ),
       child: const Icon(
@@ -613,8 +678,7 @@ class _CollectionFormContentState extends State<_CollectionFormContent> {
     super.initState();
     _nameController = TextEditingController(text: widget.initialName ?? '');
     _colorController = TextEditingController(text: widget.initialColor ?? '');
-    _selectedService =
-        widget.services.isEmpty ? null : widget.services.first;
+    _selectedService = widget.services.isEmpty ? null : widget.services.first;
     _selectedKind = widget.initialPrimaryKind;
     // Rebuild whenever the color text changes so palette swatches update.
     _colorController.addListener(() => setState(() {}));
@@ -698,8 +762,7 @@ class _CollectionFormContentState extends State<_CollectionFormContent> {
                 ],
                 onChanged: _isSubmitting
                     ? null
-                    : (service) =>
-                        setState(() => _selectedService = service),
+                    : (service) => setState(() => _selectedService = service),
                 validator: (service) =>
                     service == null ? 'Choose a service' : null,
               ),
@@ -781,8 +844,7 @@ class _CollectionFormContentState extends State<_CollectionFormContent> {
               validator: (value) {
                 final color = (value ?? '').trim();
                 if (color.isEmpty) return null;
-                final normalized =
-                    color.startsWith('#') ? color : '#$color';
+                final normalized = color.startsWith('#') ? color : '#$color';
                 if (!RegExp(r'^#[0-9A-Fa-f]{6}$').hasMatch(normalized)) {
                   return 'Use a color like #8BC34A';
                 }
@@ -801,6 +863,237 @@ class _CollectionFormContentState extends State<_CollectionFormContent> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Text('Save'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── _SubscriptionFormContent ─────────────────────────────────────────────────
+
+class _SubscriptionFormContent extends StatefulWidget {
+  const _SubscriptionFormContent({
+    required this.services,
+    required this.onSubmit,
+  });
+
+  final List<ClientService> services;
+  final Future<void> Function({
+    required String name,
+    required String url,
+    required String? color,
+    required ClientService? service,
+  }) onSubmit;
+
+  @override
+  State<_SubscriptionFormContent> createState() =>
+      _SubscriptionFormContentState();
+}
+
+class _SubscriptionFormContentState extends State<_SubscriptionFormContent> {
+  static const List<(String, Color)> _colorPalette = [
+    ('#FF3B30', CaleeColors.dotRed),
+    ('#FF9500', CaleeColors.dotOrange),
+    ('#FFCC00', CaleeColors.dotYellow),
+    ('#34C759', CaleeColors.dotGreen),
+    ('#5AC8FA', CaleeColors.dotTeal),
+    ('#007AFF', CaleeColors.dotBlue),
+    ('#AF52DE', CaleeColors.dotPurple),
+    ('#FF2D55', CaleeColors.dotPink),
+    ('#8E8E93', CaleeColors.dotGray),
+  ];
+
+  final _formKey = GlobalKey<FormState>();
+  final _nameController = TextEditingController();
+  final _urlController = TextEditingController();
+  final _colorController = TextEditingController(text: '#007AFF');
+
+  ClientService? _selectedService;
+  bool _isSubmitting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedService = widget.services.isEmpty ? null : widget.services.first;
+    _colorController.addListener(() => setState(() {}));
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _urlController.dispose();
+    _colorController.dispose();
+    super.dispose();
+  }
+
+  bool _isPaletteColorSelected(String hex) {
+    return _colorController.text.trim().toUpperCase() == hex.toUpperCase();
+  }
+
+  bool _isAllowedSubscriptionUrl(String value) {
+    final url = value.trim();
+    if (url.isEmpty) return false;
+
+    final parsed = Uri.tryParse(url);
+    final scheme = parsed?.scheme.toLowerCase() ?? '';
+
+    return parsed != null &&
+        parsed.host.trim().isNotEmpty &&
+        (scheme == 'https' || scheme == 'http' || scheme == 'webcal');
+  }
+
+  Future<void> _submit() async {
+    if (_isSubmitting || !_formKey.currentState!.validate()) return;
+
+    setState(() => _isSubmitting = true);
+
+    try {
+      await widget.onSubmit(
+        name: _nameController.text.trim(),
+        url: _urlController.text.trim(),
+        color: _colorController.text.trim().isEmpty
+            ? null
+            : _colorController.text.trim(),
+        service: _selectedService,
+      );
+      if (mounted) Navigator.of(context).pop(true);
+    } catch (error) {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              error is CaleeHubException
+                  ? error.message
+                  : 'Unable to subscribe from this link.',
+            ),
+          ),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Form(
+      key: _formKey,
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            DropdownButtonFormField<ClientService>(
+              initialValue: _selectedService,
+              decoration: const InputDecoration(labelText: 'Service'),
+              items: [
+                for (final service in widget.services)
+                  DropdownMenuItem(
+                    value: service,
+                    child: Text(service.displayName),
+                  ),
+              ],
+              onChanged: _isSubmitting
+                  ? null
+                  : (service) => setState(() => _selectedService = service),
+              validator: (service) =>
+                  service == null ? 'Choose a service' : null,
+            ),
+            const SizedBox(height: CaleeSpacing.sm + 4),
+            TextFormField(
+              controller: _nameController,
+              enabled: !_isSubmitting,
+              autofocus: true,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(
+                labelText: 'Name',
+                hintText: 'School calendar',
+              ),
+              validator: (value) {
+                final name = (value ?? '').trim();
+                if (name.isEmpty) return 'Enter a name';
+                if (name.length > 120) return 'Name is too long';
+                return null;
+              },
+            ),
+            const SizedBox(height: CaleeSpacing.sm + 4),
+            TextFormField(
+              controller: _urlController,
+              enabled: !_isSubmitting,
+              keyboardType: TextInputType.url,
+              autocorrect: false,
+              decoration: const InputDecoration(
+                labelText: 'Calendar link',
+                hintText: 'https://example.com/calendar.ics',
+              ),
+              validator: (value) {
+                final url = (value ?? '').trim();
+                if (url.isEmpty) return 'Enter a calendar link';
+                if (!_isAllowedSubscriptionUrl(url)) {
+                  return 'Use a valid http, https, or webcal link';
+                }
+                return null;
+              },
+            ),
+            const SizedBox(height: CaleeSpacing.xs),
+            Text(
+              'Subscribed calendars are read-only and stay linked to the source.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: CaleeColors.textSecondary,
+              ),
+            ),
+            const SizedBox(height: CaleeSpacing.md),
+            Text(
+              'Color',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: CaleeColors.textSecondary,
+              ),
+            ),
+            const SizedBox(height: CaleeSpacing.sm),
+            Wrap(
+              spacing: CaleeSpacing.sm,
+              runSpacing: CaleeSpacing.sm,
+              children: [
+                for (final (hex, color) in _colorPalette)
+                  _ColorSwatch(
+                    hex: hex,
+                    color: color,
+                    isSelected: _isPaletteColorSelected(hex),
+                    onTap: () => setState(() => _colorController.text = hex),
+                  ),
+              ],
+            ),
+            const SizedBox(height: CaleeSpacing.sm + 4),
+            TextFormField(
+              controller: _colorController,
+              enabled: !_isSubmitting,
+              decoration: const InputDecoration(
+                labelText: 'Custom color',
+                hintText: '#007AFF',
+              ),
+              validator: (value) {
+                final color = (value ?? '').trim();
+                if (color.isEmpty) return null;
+                final normalized = color.startsWith('#') ? color : '#$color';
+                if (!RegExp(r'^#[0-9A-Fa-f]{6}$').hasMatch(normalized)) {
+                  return 'Use a color like #007AFF';
+                }
+                return null;
+              },
+            ),
+            const SizedBox(height: CaleeSpacing.md),
+            FilledButton(
+              onPressed: _isSubmitting ? null : _submit,
+              child: _isSubmitting
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('Subscribe'),
             ),
           ],
         ),

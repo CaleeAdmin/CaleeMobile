@@ -27,8 +27,10 @@ class ClientCalendar {
     required this.supportsTasks,
     required this.supportsChores,
     required this.readOnly,
+    required this.isSubscription,
     required this.source,
     this.color,
+    this.subscriptionUrl,
   });
 
   factory ClientCalendar.fromJson(Map<String, dynamic> json) {
@@ -46,6 +48,8 @@ class ClientCalendar {
       supportsTasks: json['supportsTasks'] as bool? ?? false,
       supportsChores: json['supportsChores'] as bool? ?? false,
       readOnly: json['readOnly'] as bool? ?? false,
+      isSubscription: json['isSubscription'] as bool? ?? false,
+      subscriptionUrl: json['subscriptionUrl'] as String?,
       source: json['source'] as String? ?? '',
     );
   }
@@ -61,6 +65,8 @@ class ClientCalendar {
   final bool supportsTasks;
   final bool supportsChores;
   final bool readOnly;
+  final bool isSubscription;
+  final String? subscriptionUrl;
   final String source;
 
   bool get isCalendarKind => primaryKind == 'calendar';
