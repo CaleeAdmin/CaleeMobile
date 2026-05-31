@@ -567,6 +567,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
   final _titleController = TextEditingController();
   final _locationController = TextEditingController();
   final _descriptionController = TextEditingController();
+  final _recurrenceCountController = TextEditingController(text: '10');
 
   late ClientCalendar _selectedCalendar;
   late DateTime _selectedDate;
@@ -574,6 +575,8 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
   late TimeOfDay _startTime;
   late TimeOfDay _endTime;
   String _selectedRecurrence = 'none';
+  String _recurrenceEnd = 'never';
+  late DateTime _recurrenceEndDate;
   bool _allDay = false;
   bool _isSubmitting = false;
 
@@ -598,6 +601,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
           start.add(const Duration(hours: 1));
 
       _selectedDate = DateTime(start.year, start.month, start.day);
+      _recurrenceEndDate = _selectedDate.add(const Duration(days: 30));
       _selectedEndDate = event.allDay
           ? DateTime(end.year, end.month, end.day)
               .subtract(const Duration(days: 1))
@@ -615,6 +619,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
     final now = DateTime.now();
     _selectedDate = DateTime(now.year, now.month, now.day);
     _selectedEndDate = _selectedDate;
+    _recurrenceEndDate = _selectedDate.add(const Duration(days: 30));
 
     final nextHour = now.add(const Duration(hours: 1));
     _startTime = TimeOfDay(hour: nextHour.hour, minute: 0);
@@ -626,6 +631,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
     _titleController.dispose();
     _locationController.dispose();
     _descriptionController.dispose();
+    _recurrenceCountController.dispose();
     super.dispose();
   }
 
@@ -649,19 +655,56 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
     return '$hour:$minute';
   }
 
-  String? _recurrenceValue(String value) {
-    switch (value) {
-      case 'daily':
-        return 'FREQ=DAILY';
-      case 'weekly':
-        return 'FREQ=WEEKLY';
-      case 'monthly':
-        return 'FREQ=MONTHLY';
-      case 'yearly':
-        return 'FREQ=YEARLY';
-      default:
-        return null;
+  String? _recurrenceValue() {
+    final frequency = switch (_selectedRecurrence) {
+      'daily' => 'DAILY',
+      'weekly' => 'WEEKLY',
+      'monthly' => 'MONTHLY',
+      'yearly' => 'YEARLY',
+      _ => null,
+    };
+
+    if (frequency == null) {
+      return null;
     }
+
+    final parts = <String>['FREQ=$frequency'];
+
+    if (_recurrenceEnd == 'count') {
+      final count = int.tryParse(_recurrenceCountController.text.trim());
+      if (count == null || count < 1) {
+        throw const FormatException('Enter a repeat count of at least 1.');
+      }
+
+      parts.add('COUNT=$count');
+    } else if (_recurrenceEnd == 'date') {
+      parts.add('UNTIL=${_formatRRuleUntil(_recurrenceEndDate)}');
+    }
+
+    return parts.join(';');
+  }
+
+  String _formatRRuleUntil(DateTime value) {
+    if (_allDay) {
+      final year = value.year.toString().padLeft(4, '0');
+      final month = value.month.toString().padLeft(2, '0');
+      final day = value.day.toString().padLeft(2, '0');
+
+      return '$year$month$day';
+    }
+
+    final localEndOfDay =
+        DateTime(value.year, value.month, value.day, 23, 59, 59);
+    final utc = localEndOfDay.toUtc();
+
+    final year = utc.year.toString().padLeft(4, '0');
+    final month = utc.month.toString().padLeft(2, '0');
+    final day = utc.day.toString().padLeft(2, '0');
+    final hour = utc.hour.toString().padLeft(2, '0');
+    final minute = utc.minute.toString().padLeft(2, '0');
+    final second = utc.second.toString().padLeft(2, '0');
+
+    return '${year}${month}${day}T$hour$minute${second}Z';
   }
 
   String _recurrenceLabel(String value) {
@@ -694,6 +737,23 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
         if (_selectedEndDate.isBefore(_selectedDate)) {
           _selectedEndDate = _selectedDate;
         }
+      });
+    }
+  }
+
+  Future<void> _pickRecurrenceEndDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _recurrenceEndDate.isBefore(_selectedDate)
+          ? _selectedDate
+          : _recurrenceEndDate,
+      firstDate: _selectedDate,
+      lastDate: DateTime(2100),
+    );
+
+    if (picked != null && mounted) {
+      setState(() {
+        _recurrenceEndDate = DateTime(picked.year, picked.month, picked.day);
       });
     }
   }
@@ -798,7 +858,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
           allDay: _allDay,
           location: location,
           description: description,
-          recurrence: _recurrenceValue(_selectedRecurrence),
+          recurrence: _recurrenceValue(),
         );
       }
 
@@ -992,9 +1052,76 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                           },
                   ),
                   if (_selectedRecurrence != 'none') ...[
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      initialValue: _recurrenceEnd,
+                      decoration: const InputDecoration(
+                        labelText: 'Ends',
+                        border: OutlineInputBorder(),
+                      ),
+                      items: const [
+                        DropdownMenuItem(
+                          value: 'never',
+                          child: Text('Never'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'date',
+                          child: Text('On date'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'count',
+                          child: Text('After count'),
+                        ),
+                      ],
+                      onChanged: _isSubmitting
+                          ? null
+                          : (value) {
+                              if (value != null) {
+                                setState(() {
+                                  _recurrenceEnd = value;
+                                });
+                              }
+                            },
+                    ),
+                    if (_recurrenceEnd == 'date') ...[
+                      const SizedBox(height: 8),
+                      OutlinedButton.icon(
+                        onPressed:
+                            _isSubmitting ? null : _pickRecurrenceEndDate,
+                        icon: const Icon(Icons.event_repeat_outlined),
+                        label: Text(
+                          'Ends ${_dateLabel(_recurrenceEndDate)}',
+                        ),
+                      ),
+                    ],
+                    if (_recurrenceEnd == 'count') ...[
+                      const SizedBox(height: 8),
+                      TextFormField(
+                        controller: _recurrenceCountController,
+                        enabled: !_isSubmitting,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                          labelText: 'Number of repeats',
+                          border: OutlineInputBorder(),
+                        ),
+                        validator: (value) {
+                          if (_selectedRecurrence == 'none' ||
+                              _recurrenceEnd != 'count') {
+                            return null;
+                          }
+
+                          final count = int.tryParse((value ?? '').trim());
+                          if (count == null || count < 1) {
+                            return 'Enter a number of at least 1';
+                          }
+
+                          return null;
+                        },
+                      ),
+                    ],
                     const SizedBox(height: 8),
                     Text(
-                      'Repeats ${_recurrenceLabel(_selectedRecurrence).toLowerCase()}.',
+                      'Repeats ${_recurrenceLabel(_selectedRecurrence).toLowerCase()}${_recurrenceEnd == 'never' ? '' : _recurrenceEnd == 'date' ? ' until ${_dateLabel(_recurrenceEndDate)}' : ' ${_recurrenceCountController.text.trim().isEmpty ? '' : 'for ${_recurrenceCountController.text.trim()} times'}'}.',
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ],
