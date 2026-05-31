@@ -366,8 +366,11 @@ class CaleeHubClient {
       'allDay': allDay,
       'location': location ?? '',
       'description': description ?? '',
-      'recurrence': recurrence,
     };
+
+    if (recurrence != null && recurrence.trim().isNotEmpty) {
+      body['recurrence'] = recurrence.trim();
+    }
 
     final json = await _patchJson(
       '/client/v1/events/$encodedEventId',
