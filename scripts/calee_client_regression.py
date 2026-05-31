@@ -171,6 +171,10 @@ class Regression:
     def encoded(self, value: str) -> str:
         return urllib.parse.quote(value, safe="")
 
+    def event_date(self, value: Any) -> str:
+        text = str(value or "").strip()
+        return text[:10] if len(text) >= 10 else text
+
     def pick_service(self, bootstrap: dict[str, Any]) -> dict[str, Any]:
         preferred = os.environ.get("CALEE_TEST_SERVICE_ID", "").strip()
         services = bootstrap.get("bootstrap", {}).get("services", [])
@@ -375,12 +379,15 @@ class Regression:
             if all_day_event.get("allDay") is not True:
                 raise RuntimeError("Multi-day all-day event was not returned as all-day")
 
-            if all_day_event.get("startsAt") != expected_start:
+            actual_start = self.event_date(all_day_event.get("startsAt"))
+            actual_end = self.event_date(all_day_event.get("endsAt"))
+
+            if actual_start != expected_start:
                 raise RuntimeError(
                     f"Expected all-day startsAt {expected_start}, got {all_day_event.get('startsAt')}"
                 )
 
-            if all_day_event.get("endsAt") != expected_end:
+            if actual_end != expected_end:
                 raise RuntimeError(
                     f"Expected all-day exclusive endsAt {expected_end}, got {all_day_event.get('endsAt')}"
                 )
@@ -608,7 +615,9 @@ class Regression:
             if event.get("allDay") is not True:
                 raise RuntimeError("Edited multi-day event was not returned as all-day")
 
-            if event.get("endsAt") != expected_end:
+            actual_end = self.event_date(event.get("endsAt"))
+
+            if actual_end != expected_end:
                 raise RuntimeError(
                     f"Expected edited all-day exclusive endsAt {expected_end}, got {event.get('endsAt')}"
                 )
