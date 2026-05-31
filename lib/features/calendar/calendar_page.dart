@@ -213,7 +213,13 @@ class _CalendarPageState extends State<CalendarPage> {
     if (writableCalendars.isEmpty) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No writable calendar is available.')),
+        SnackBar(
+          content: const Text('No writable calendar is available.'),
+          action: SnackBarAction(
+            label: 'Create',
+            onPressed: _openCollectionCreateShortcut,
+          ),
+        ),
       );
       return;
     }
