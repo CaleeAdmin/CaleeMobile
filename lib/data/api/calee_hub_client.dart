@@ -351,9 +351,9 @@ class CaleeHubClient {
     required String accessToken,
     required String eventId,
     required String title,
-    required String startsAt,
-    required String endsAt,
-    required bool allDay,
+    String? startsAt,
+    String? endsAt,
+    bool? allDay,
     String? location,
     String? description,
     String? recurrence,
@@ -363,12 +363,21 @@ class CaleeHubClient {
     final encodedEventId = Uri.encodeComponent(eventId);
     final body = <String, Object?>{
       'title': title,
-      'startsAt': startsAt,
-      'endsAt': endsAt,
-      'allDay': allDay,
       'location': location ?? '',
       'description': description ?? '',
     };
+
+    final hasDateUpdate = startsAt != null || endsAt != null || allDay != null;
+    if (hasDateUpdate) {
+      if (startsAt == null || endsAt == null || allDay == null) {
+        throw ArgumentError(
+            'startsAt, endsAt, and allDay must be supplied together.');
+      }
+
+      body['startsAt'] = startsAt;
+      body['endsAt'] = endsAt;
+      body['allDay'] = allDay;
+    }
 
     if (includeRecurrence) {
       body['recurrence'] = recurrence == null || recurrence.trim().isEmpty
