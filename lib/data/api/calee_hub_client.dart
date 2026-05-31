@@ -347,6 +347,49 @@ class CaleeHubClient {
     return ClientTaskList.fromJson(_data(json));
   }
 
+  Future<ClientEvent> updateEvent({
+    required String accessToken,
+    required String eventId,
+    required String title,
+    required String startsAt,
+    required String endsAt,
+    required bool allDay,
+    String? location,
+    String? description,
+    String? recurrence,
+  }) async {
+    final encodedEventId = Uri.encodeComponent(eventId);
+    final body = <String, Object?>{
+      'title': title,
+      'startsAt': startsAt,
+      'endsAt': endsAt,
+      'allDay': allDay,
+      'location': location ?? '',
+      'description': description ?? '',
+      'recurrence': recurrence,
+    };
+
+    final json = await _patchJson(
+      '/client/v1/events/$encodedEventId',
+      accessToken: accessToken,
+      body: body,
+    );
+
+    return ClientEvent.fromJson(_data(json)['event'] as Map<String, dynamic>);
+  }
+
+  Future<void> deleteEvent({
+    required String accessToken,
+    required String eventId,
+  }) async {
+    final encodedEventId = Uri.encodeComponent(eventId);
+
+    await _deleteJson(
+      '/client/v1/events/$encodedEventId',
+      accessToken: accessToken,
+    );
+  }
+
   Future<ClientEvent> createEvent({
     required String accessToken,
     required String serviceId,
