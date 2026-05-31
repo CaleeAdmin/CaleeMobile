@@ -4,6 +4,37 @@ import '../../data/api/calee_hub_client.dart';
 import '../../data/models/client_bootstrap.dart';
 import '../../data/models/client_calendar.dart';
 
+String _formatCollectionPreviewDate(DateTime value) {
+  final year = value.year.toString().padLeft(4, '0');
+  final month = value.month.toString().padLeft(2, '0');
+  final day = value.day.toString().padLeft(2, '0');
+
+  return '$year-$month-$day';
+}
+
+String _pluralCount(int count, String singular, [String? plural]) {
+  return '$count ${count == 1 ? singular : plural ?? '${singular}s'}';
+}
+
+class _CollectionDeletePreview {
+  const _CollectionDeletePreview({
+    required this.lines,
+    required this.rangeDescription,
+    required this.itemCountsAvailable,
+  });
+
+  const _CollectionDeletePreview.unavailable()
+      : lines = const [],
+        rangeDescription = '',
+        itemCountsAvailable = false;
+
+  final List<String> lines;
+  final String rangeDescription;
+  final bool itemCountsAvailable;
+
+  bool get hasItems => lines.isNotEmpty;
+}
+
 class CalendarCollectionsPage extends StatefulWidget {
   const CalendarCollectionsPage({
     required this.hubClient,
@@ -147,17 +178,131 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
     }
   }
 
+  Future<_CollectionDeletePreview> _loadDeletePreview(
+    ClientCalendar calendar,
+  ) async {
+    final now = DateTime.now();
+    final from = _formatCollectionPreviewDate(DateTime(now.year, 1, 1));
+    final to = _formatCollectionPreviewDate(DateTime(now.year, 12, 31));
+    const rangeDescription = 'the current calendar year';
+
+    try {
+      final lines = <String>[];
+
+      if (calendar.supportsEvents) {
+        final eventList = await widget.hubClient.events(
+          accessToken: widget.accessToken,
+          from: from,
+          to: to,
+        );
+
+        final count = eventList.events
+            .where((event) => event.calendarId == calendar.id)
+            .length;
+
+        if (count > 0) {
+          lines.add(_pluralCount(count, 'visible event occurrence'));
+        }
+      }
+
+      if (calendar.supportsTasks) {
+        final taskList = await widget.hubClient.tasks(
+          accessToken: widget.accessToken,
+          from: from,
+          to: to,
+        );
+
+        final count = taskList.tasks
+            .where((task) => task.calendarId == calendar.id)
+            .length;
+
+        if (count > 0) {
+          lines.add(_pluralCount(count, 'task'));
+        }
+      }
+
+      if (calendar.supportsChores) {
+        final choreList = await widget.hubClient.chores(
+          accessToken: widget.accessToken,
+          from: from,
+          to: to,
+        );
+
+        final chores = choreList.chores
+            .where((chore) => chore.calendarId == calendar.id)
+            .toList();
+
+        final choreCount =
+            chores.where((chore) => chore.kind == 'baseChore').length;
+        final completionRecordCount =
+            chores.where((chore) => chore.kind == 'completionLog').length;
+
+        if (choreCount > 0) {
+          lines.add(_pluralCount(choreCount, 'chore'));
+        }
+
+        if (completionRecordCount > 0) {
+          lines.add(_pluralCount(completionRecordCount, 'completion record'));
+        }
+      }
+
+      return _CollectionDeletePreview(
+        lines: lines,
+        rangeDescription: rangeDescription,
+        itemCountsAvailable: true,
+      );
+    } catch (_) {
+      return const _CollectionDeletePreview.unavailable();
+    }
+  }
+
   Future<void> _deleteCalendar(ClientCalendar calendar) async {
     if (calendar.readOnly || _updatingCalendarIds.contains(calendar.id)) {
+      return;
+    }
+
+    final preview = await _loadDeletePreview(calendar);
+    if (!mounted) {
       return;
     }
 
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Delete list or calendar?'),
-        content: Text(
-          'This will permanently delete "${calendar.name}" and all items inside it.',
+        title: const Text('Delete collection permanently?'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('This will permanently delete "${calendar.name}".'),
+              const SizedBox(height: 12),
+              if (preview.itemCountsAvailable && preview.hasItems) ...[
+                Text('Known items found in ${preview.rangeDescription}:'),
+                const SizedBox(height: 4),
+                ...preview.lines.map(
+                  (line) => Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text('• $line'),
+                  ),
+                ),
+              ] else if (preview.itemCountsAvailable) ...[
+                Text('No items were found in ${preview.rangeDescription}.'),
+              ] else ...[
+                const Text(
+                  'Item counts could not be loaded right now.',
+                ),
+              ],
+              const SizedBox(height: 12),
+              const Text(
+                'Older or future items may not be shown in this preview.',
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Deleting this collection also deletes the data stored inside it. This cannot be undone.',
+              ),
+            ],
+          ),
         ),
         actions: [
           TextButton(
@@ -165,6 +310,10 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
             child: const Text('Cancel'),
           ),
           FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
+            ),
             onPressed: () => Navigator.of(context).pop(true),
             child: const Text('Delete everything'),
           ),
