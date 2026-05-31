@@ -66,7 +66,7 @@ abstract final class CaleeTheme {
       useMaterial3: true,
       colorScheme: colorScheme,
       scaffoldBackgroundColor: CaleeColors.scaffoldBackground,
-      cardTheme: CardTheme(
+      cardTheme: CardThemeData(
         color: CaleeColors.surface,
         elevation: 0,
         margin: EdgeInsets.zero,
