@@ -411,7 +411,7 @@ class Regression:
                     "scheduledAt": self.tomorrow.isoformat(),
                     "description": "Edited by local regression script",
                     "recurrence": "FREQ=DAILY",
-                    "points": 3,
+                    "points": 2,
                 },
             )
             chore_holder["chore"] = data["chore"]
