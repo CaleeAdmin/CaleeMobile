@@ -76,6 +76,29 @@ class CaleeHubClient {
     );
   }
 
+  Future<ClientCalendar> subscribeCalendarFromLink({
+    required String accessToken,
+    required String serviceId,
+    required String name,
+    required String url,
+    String? color,
+  }) async {
+    final json = await _postJson(
+      '/client/v1/calendar-subscriptions',
+      accessToken: accessToken,
+      body: <String, Object?>{
+        'serviceId': serviceId,
+        'name': name,
+        'url': url,
+        if (color != null && color.trim().isNotEmpty) 'color': color.trim(),
+      },
+    );
+
+    return ClientCalendar.fromJson(
+      _data(json)['calendar'] as Map<String, dynamic>,
+    );
+  }
+
   Future<ClientCalendar> updateCalendar({
     required String accessToken,
     required String calendarId,
