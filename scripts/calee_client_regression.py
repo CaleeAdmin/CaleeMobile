@@ -984,6 +984,64 @@ class Regression:
             _read_series_update_preserves_detached_occurrence,
         )
 
+        def _delete_edited_recurring_occurrence() -> str:
+            detached = event_holder["occurrence_edit_middle"]
+            occurrence_id = detached["id"]
+
+            self.client.delete(
+                f"/client/v1/events/{self.encoded(occurrence_id)}",
+                query={"scope": "occurrence"},
+            )
+
+            return occurrence_id
+
+        self.run_step(
+            "recurring event edited occurrence delete",
+            _delete_edited_recurring_occurrence,
+        )
+
+        def _read_edited_recurring_occurrence_delete() -> str:
+            data = self.client.get(
+                "/client/v1/events",
+                query={
+                    "from": self.today.isoformat(),
+                    "to": (self.today + dt.timedelta(days=7)).isoformat(),
+                },
+            )
+
+            detached_title = f"RT recurring occurrence edited {self.run_id}"
+            series_title = f"RT recurring occurrence edit series updated {self.run_id}"
+            deleted_occurrence_id = event_holder["occurrence_edit_middle"]["id"]
+
+            detached_matches = [
+                event
+                for event in data.get("events", [])
+                if event.get("title") == detached_title and event.get("recurring") is True
+            ]
+            series_matches = [
+                event
+                for event in data.get("events", [])
+                if event.get("title") == series_title and event.get("recurring") is True
+            ]
+
+            if detached_matches:
+                raise RuntimeError(
+                    f"Deleted edited detached occurrence is still visible: {deleted_occurrence_id}"
+                )
+
+            if len(series_matches) != 2:
+                raise RuntimeError(
+                    f"Expected 2 remaining series occurrences after deleting edited occurrence, found {len(series_matches)}"
+                )
+
+            event_holder["occurrence_edit_remaining"] = series_matches
+            return f"remaining series occurrences={len(series_matches)}"
+
+        self.run_step(
+            "recurring event edited occurrence delete readback",
+            _read_edited_recurring_occurrence_delete,
+        )
+
         def _delete_occurrence_edit_series_cleanup() -> str:
             remaining = event_holder["occurrence_edit_remaining"]
             series_id = remaining[0].get("seriesId") or remaining[0]["id"]
