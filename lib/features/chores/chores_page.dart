@@ -421,18 +421,21 @@ class _ChoresPageState extends State<ChoresPage> {
   }
 
   String _formatScheduledAt(ClientChore chore) {
-    final value = chore.scheduledAt;
+    final value = chore.scheduledDate ?? chore.scheduledAt;
+    final isHistory = chore.isCompletionLog || chore.section == 'history';
+
     if (value == null || value.trim().isEmpty) {
-      return 'No scheduled date';
+      return isHistory ? 'Completed date unknown' : 'No scheduled date';
     }
 
     final parsed = DateTime.tryParse(value);
     if (parsed == null) {
-      return value;
+      return isHistory ? 'Completed $value' : 'Scheduled $value';
     }
 
     final local = parsed.toLocal();
-    return 'Scheduled ${local.day}/${local.month}/${local.year}';
+    final label = isHistory ? 'Completed' : 'Scheduled';
+    return '$label ${local.day}/${local.month}/${local.year}';
   }
 
   String _sectionTitle(String section) {
@@ -446,7 +449,7 @@ class _ChoresPageState extends State<ChoresPage> {
       case 'future':
         return 'Future';
       case 'history':
-        return 'History';
+        return 'Completion history';
       default:
         return 'Other';
     }
@@ -463,7 +466,7 @@ class _ChoresPageState extends State<ChoresPage> {
       case 'future':
         return 'No future chores found.';
       case 'history':
-        return 'No completion history found.';
+        return 'No past completions found.';
       default:
         return 'No chores found.';
     }
@@ -530,8 +533,8 @@ class _ChoresPageState extends State<ChoresPage> {
           'todoToday',
           'overdue',
           'doneToday',
-          'future',
           'history',
+          'future',
         ];
 
         if (choreCalendars.isEmpty && chores.isEmpty) {
@@ -1326,10 +1329,11 @@ class _ChoreTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isHistory = chore.isCompletionLog || chore.section == 'history';
     final icon = chore.completedToday || chore.section == 'doneToday'
         ? Icons.check_circle_outline
         : Icons.radio_button_unchecked;
-    final canToggle = chore.canToggleCompletion;
+    final canToggle = !isHistory && chore.canToggleCompletion;
 
     return Card(
       child: ListTile(
@@ -1339,38 +1343,41 @@ class _ChoreTile extends StatelessWidget {
                 height: 24,
                 child: CircularProgressIndicator(strokeWidth: 2),
               )
-            : IconButton(
-                icon: Icon(icon),
-                onPressed: canToggle ? onToggleCompletion : null,
-                tooltip: chore.completedToday || chore.section == 'doneToday'
-                    ? 'Undo completion'
-                    : 'Complete chore',
-              ),
+            : isHistory
+                ? const Icon(Icons.history_outlined)
+                : IconButton(
+                    icon: Icon(icon),
+                    onPressed: canToggle ? onToggleCompletion : null,
+                    tooltip: chore.completedToday || chore.section == 'doneToday'
+                        ? 'Undo completion'
+                        : 'Complete chore',
+                  ),
         title: Text(chore.title),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconButton(
-              icon: const Icon(Icons.edit_outlined),
-              onPressed: chore.completionActionId.trim().isEmpty ||
-                      chore.section == 'history'
-                  ? null
-                  : onEditChore,
-              tooltip: 'Edit chore',
-            ),
-            IconButton(
-              icon: const Icon(Icons.delete_outline),
-              onPressed: chore.completionActionId.trim().isEmpty ||
-                      chore.section == 'history'
-                  ? null
-                  : onDeleteChore,
-              tooltip: 'Delete chore',
-            ),
-          ],
-        ),
+        trailing: isHistory
+            ? null
+            : Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.edit_outlined),
+                    onPressed: chore.completionActionId.trim().isEmpty
+                        ? null
+                        : onEditChore,
+                    tooltip: 'Edit chore',
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline),
+                    onPressed: chore.completionActionId.trim().isEmpty
+                        ? null
+                        : onDeleteChore,
+                    tooltip: 'Delete chore',
+                  ),
+                ],
+              ),
         subtitle: Text(
           [
             scheduledLabel,
+            if (chore.isCompletionLog) 'Completion record',
             if (chore.points > 0)
               '${chore.points} point${chore.points == 1 ? '' : 's'}',
             if (chore.isRecurring) 'Repeats',
