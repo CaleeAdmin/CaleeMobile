@@ -184,17 +184,21 @@ class _CalendarPageState extends State<CalendarPage> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Edit recurring event?'),
-        content: const Text(
-          'Edit only this event. Series editing will be handled separately.',
+        content: Text(
+          'Edit only this event, or edit "${event.title}" and the entire recurring series?',
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(null),
             child: const Text('Cancel'),
           ),
-          FilledButton(
+          TextButton(
             onPressed: () => Navigator.of(context).pop('occurrence'),
             child: const Text('Edit this event'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop('series'),
+            child: const Text('Edit entire series'),
           ),
         ],
       ),
@@ -226,27 +230,36 @@ class _CalendarPageState extends State<CalendarPage> {
   Future<void> _updateEvent({
     required ClientEvent event,
     required String title,
-    required DateTime startsAt,
-    required DateTime endsAt,
-    required bool allDay,
+    required DateTime? startsAt,
+    required DateTime? endsAt,
+    required bool? allDay,
     String? location,
     String? description,
     String? recurrence,
     String? editScope,
   }) async {
     final editOccurrence = event.recurring && editScope == 'occurrence';
+    final editSeriesMetadataOnly = event.recurring && editScope == 'series';
 
     await widget.hubClient.updateEvent(
       accessToken: widget.accessToken,
       eventId: editOccurrence ? event.id : event.writableEventId,
       title: title,
-      startsAt: allDay ? _formatDate(startsAt) : startsAt.toIso8601String(),
-      endsAt: allDay ? _formatDate(endsAt) : endsAt.toIso8601String(),
-      allDay: allDay,
+      startsAt: editSeriesMetadataOnly || startsAt == null
+          ? null
+          : allDay == true
+              ? _formatDate(startsAt)
+              : startsAt.toIso8601String(),
+      endsAt: editSeriesMetadataOnly || endsAt == null
+          ? null
+          : allDay == true
+              ? _formatDate(endsAt)
+              : endsAt.toIso8601String(),
+      allDay: editSeriesMetadataOnly ? null : allDay,
       location: location,
       description: description,
-      recurrence: editOccurrence ? null : recurrence,
-      includeRecurrence: !editOccurrence,
+      recurrence: editOccurrence || editSeriesMetadataOnly ? null : recurrence,
+      includeRecurrence: !editOccurrence && !editSeriesMetadataOnly,
       scope: event.recurring ? editScope : null,
     );
   }
@@ -623,9 +636,9 @@ class _CreateEventSheet extends StatefulWidget {
   final Future<void> Function({
     required ClientEvent event,
     required String title,
-    required DateTime startsAt,
-    required DateTime endsAt,
-    required bool allDay,
+    required DateTime? startsAt,
+    required DateTime? endsAt,
+    required bool? allDay,
     String? location,
     String? description,
     String? recurrence,
@@ -659,6 +672,11 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
       _isEditing &&
       widget.initialEvent!.recurring &&
       widget.editScope == 'occurrence';
+
+  bool get _isEditingRecurringSeriesMetadata =>
+      _isEditing &&
+      widget.initialEvent!.recurring &&
+      widget.editScope == 'series';
 
   @override
   void initState() {
@@ -955,24 +973,31 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
       return;
     }
 
-    final startsAt = _dateTimeFor(_startTime);
-    var endsAt = _dateTimeFor(_endTime);
+    final metadataOnly = _isEditingRecurringSeriesMetadata;
+    DateTime? startsAt;
+    DateTime? endsAt;
 
-    if (_allDay) {
-      if (_selectedEndDate.isBefore(_selectedDate)) {
+    if (!metadataOnly) {
+      startsAt = _dateTimeFor(_startTime);
+      endsAt = _dateTimeFor(_endTime);
+
+      if (_allDay) {
+        if (_selectedEndDate.isBefore(_selectedDate)) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('End date must be on or after start date.'),
+            ),
+          );
+          return;
+        }
+
+        endsAt = _selectedEndDate.add(const Duration(days: 1));
+      } else if (!endsAt.isAfter(startsAt)) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('End date must be on or after start date.')),
+          const SnackBar(content: Text('End time must be after start time.')),
         );
         return;
       }
-
-      endsAt = _selectedEndDate.add(const Duration(days: 1));
-    } else if (!endsAt.isAfter(startsAt)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('End time must be after start time.')),
-      );
-      return;
     }
 
     setState(() {
@@ -994,18 +1019,20 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
           title: title,
           startsAt: startsAt,
           endsAt: endsAt,
-          allDay: _allDay,
+          allDay: metadataOnly ? null : _allDay,
           location: location,
           description: description,
-          recurrence: _isEditingSingleOccurrence ? null : _recurrenceValue(),
+          recurrence: _isEditingSingleOccurrence || metadataOnly
+              ? null
+              : _recurrenceValue(),
           editScope: widget.editScope,
         );
       } else {
         await widget.onCreate(
           calendar: _selectedCalendar,
           title: title,
-          startsAt: startsAt,
-          endsAt: endsAt,
+          startsAt: startsAt!,
+          endsAt: endsAt!,
           allDay: _allDay,
           location: location,
           description: description,
@@ -1057,9 +1084,11 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                   _isEditing
                       ? _isEditingSingleOccurrence
                           ? 'Edit this event'
-                          : widget.initialEvent!.recurring
-                              ? 'Edit series'
-                              : 'Edit event'
+                          : _isEditingRecurringSeriesMetadata
+                              ? 'Edit series details'
+                              : widget.initialEvent!.recurring
+                                  ? 'Edit series'
+                                  : 'Edit event'
                       : 'Add event',
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
@@ -1104,67 +1133,70 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                     return null;
                   },
                 ),
-                const SizedBox(height: 12),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('All day'),
-                  value: _allDay,
-                  onChanged: _isSubmitting
-                      ? null
-                      : (value) {
-                          setState(() {
-                            _allDay = value;
-                          });
-                        },
-                ),
-                if (_allDay) ...[
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: _isSubmitting ? null : _pickDate,
-                          icon: const Icon(Icons.today_outlined),
-                          label: Text('Start ${_dateLabel(_selectedDate)}'),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: _isSubmitting ? null : _pickEndDate,
-                          icon: const Icon(Icons.event_available_outlined),
-                          label: Text('End ${_dateLabel(_selectedEndDate)}'),
-                        ),
-                      ),
-                    ],
+                if (!_isEditingRecurringSeriesMetadata) ...[
+                  const SizedBox(height: 12),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('All day'),
+                    value: _allDay,
+                    onChanged: _isSubmitting
+                        ? null
+                        : (value) {
+                            setState(() {
+                              _allDay = value;
+                            });
+                          },
                   ),
-                ] else ...[
-                  OutlinedButton.icon(
-                    onPressed: _isSubmitting ? null : _pickDate,
-                    icon: const Icon(Icons.today_outlined),
-                    label: Text(_dateLabel(_selectedDate)),
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: _isSubmitting ? null : _pickStartTime,
-                          icon: const Icon(Icons.schedule_outlined),
-                          label: Text('Start ${_timeLabel(_startTime)}'),
+                  if (_allDay) ...[
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: _isSubmitting ? null : _pickDate,
+                            icon: const Icon(Icons.today_outlined),
+                            label: Text('Start ${_dateLabel(_selectedDate)}'),
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: _isSubmitting ? null : _pickEndTime,
-                          icon: const Icon(Icons.schedule),
-                          label: Text('End ${_timeLabel(_endTime)}'),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: _isSubmitting ? null : _pickEndDate,
+                            icon: const Icon(Icons.event_available_outlined),
+                            label: Text('End ${_dateLabel(_selectedEndDate)}'),
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
+                      ],
+                    ),
+                  ] else ...[
+                    OutlinedButton.icon(
+                      onPressed: _isSubmitting ? null : _pickDate,
+                      icon: const Icon(Icons.today_outlined),
+                      label: Text(_dateLabel(_selectedDate)),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: _isSubmitting ? null : _pickStartTime,
+                            icon: const Icon(Icons.schedule_outlined),
+                            label: Text('Start ${_timeLabel(_startTime)}'),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: _isSubmitting ? null : _pickEndTime,
+                            icon: const Icon(Icons.schedule),
+                            label: Text('End ${_timeLabel(_endTime)}'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ],
-                if (!_isEditingSingleOccurrence) ...[
+                if (!_isEditingSingleOccurrence &&
+                    !_isEditingRecurringSeriesMetadata) ...[
                   const SizedBox(height: 12),
                   DropdownButtonFormField<String>(
                     initialValue: _selectedRecurrence,
@@ -1278,6 +1310,13 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ],
+                ],
+                if (_isEditingRecurringSeriesMetadata) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    'Series date, time, and repeat settings are preserved.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
                 ],
                 const SizedBox(height: 12),
                 TextFormField(
