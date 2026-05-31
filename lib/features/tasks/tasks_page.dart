@@ -829,7 +829,7 @@ class _CreateTaskFormState extends State<_CreateTaskForm> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             DropdownButtonFormField<ClientCalendar>(
-              value: _selectedTaskCalendar,
+              initialValue: _selectedTaskCalendar,
               items: widget.taskCalendars
                   .map(
                     (calendar) => DropdownMenuItem(
