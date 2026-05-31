@@ -1028,7 +1028,7 @@ class _CreateChoreSheetState extends State<_CreateChoreSheet> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               DropdownButtonFormField<ClientCalendar>(
-                value: _selectedCalendar,
+                initialValue: _selectedCalendar,
                 decoration: const InputDecoration(labelText: 'Chore list'),
                 items: widget.calendars
                     .map(
@@ -1091,7 +1091,7 @@ class _CreateChoreSheetState extends State<_CreateChoreSheet> {
                 ),
               const SizedBox(height: CaleeSpacing.sm + 4),
               DropdownButtonFormField<String?>(
-                value: _selectedRecurrence,
+                initialValue: _selectedRecurrence,
                 decoration: const InputDecoration(labelText: 'Repeat'),
                 items: const [
                   DropdownMenuItem<String?>(
@@ -1121,7 +1121,7 @@ class _CreateChoreSheetState extends State<_CreateChoreSheet> {
               ),
               const SizedBox(height: CaleeSpacing.sm + 4),
               DropdownButtonFormField<int>(
-                value: _points,
+                initialValue: _points,
                 decoration: const InputDecoration(labelText: 'Points'),
                 items: const [
                   DropdownMenuItem(value: 1, child: Text('1 point')),
@@ -1344,7 +1344,7 @@ class _EditChoreSheetState extends State<_EditChoreSheet> {
                 ),
               const SizedBox(height: CaleeSpacing.sm + 4),
               DropdownButtonFormField<String?>(
-                value: _selectedRecurrence,
+                initialValue: _selectedRecurrence,
                 decoration: const InputDecoration(labelText: 'Repeat'),
                 items: const [
                   DropdownMenuItem<String?>(
@@ -1374,7 +1374,7 @@ class _EditChoreSheetState extends State<_EditChoreSheet> {
               ),
               const SizedBox(height: CaleeSpacing.sm + 4),
               DropdownButtonFormField<int>(
-                value: _points,
+                initialValue: _points,
                 decoration: const InputDecoration(labelText: 'Points'),
                 items: const [
                   DropdownMenuItem(value: 1, child: Text('1 point')),
