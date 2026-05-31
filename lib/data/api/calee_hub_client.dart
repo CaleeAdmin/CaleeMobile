@@ -357,6 +357,7 @@ class CaleeHubClient {
     String? location,
     String? description,
     String? recurrence,
+    bool includeRecurrence = false,
   }) async {
     final encodedEventId = Uri.encodeComponent(eventId);
     final body = <String, Object?>{
@@ -368,7 +369,11 @@ class CaleeHubClient {
       'description': description ?? '',
     };
 
-    if (recurrence != null && recurrence.trim().isNotEmpty) {
+    if (includeRecurrence) {
+      body['recurrence'] = recurrence == null || recurrence.trim().isEmpty
+          ? null
+          : recurrence.trim();
+    } else if (recurrence != null && recurrence.trim().isNotEmpty) {
       body['recurrence'] = recurrence.trim();
     }
 

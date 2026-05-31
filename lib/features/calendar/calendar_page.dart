@@ -1011,34 +1011,65 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                     ],
                   ),
                 ],
-                if (!_isEditing) ...[
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  initialValue: _selectedRecurrence,
+                  decoration: const InputDecoration(
+                    labelText: 'Repeat',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: const [
+                    DropdownMenuItem(
+                      value: 'none',
+                      child: Text('Does not repeat'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'daily',
+                      child: Text('Daily'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'weekly',
+                      child: Text('Weekly'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'monthly',
+                      child: Text('Monthly'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'yearly',
+                      child: Text('Yearly'),
+                    ),
+                  ],
+                  onChanged: _isSubmitting
+                      ? null
+                      : (value) {
+                          if (value != null) {
+                            setState(() {
+                              _selectedRecurrence = value;
+                            });
+                          }
+                        },
+                ),
+                if (_selectedRecurrence != 'none') ...[
                   const SizedBox(height: 12),
                   DropdownButtonFormField<String>(
-                    initialValue: _selectedRecurrence,
+                    initialValue: _recurrenceEnd,
                     decoration: const InputDecoration(
-                      labelText: 'Repeat',
+                      labelText: 'Ends',
                       border: OutlineInputBorder(),
                     ),
                     items: const [
                       DropdownMenuItem(
-                        value: 'none',
-                        child: Text('Does not repeat'),
+                        value: 'never',
+                        child: Text('Never'),
                       ),
                       DropdownMenuItem(
-                        value: 'daily',
-                        child: Text('Daily'),
+                        value: 'date',
+                        child: Text('On date'),
                       ),
                       DropdownMenuItem(
-                        value: 'weekly',
-                        child: Text('Weekly'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'monthly',
-                        child: Text('Monthly'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'yearly',
-                        child: Text('Yearly'),
+                        value: 'count',
+                        child: Text('After count'),
                       ),
                     ],
                     onChanged: _isSubmitting
@@ -1046,85 +1077,51 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                         : (value) {
                             if (value != null) {
                               setState(() {
-                                _selectedRecurrence = value;
+                                _recurrenceEnd = value;
                               });
                             }
                           },
                   ),
-                  if (_selectedRecurrence != 'none') ...[
-                    const SizedBox(height: 12),
-                    DropdownButtonFormField<String>(
-                      initialValue: _recurrenceEnd,
-                      decoration: const InputDecoration(
-                        labelText: 'Ends',
-                        border: OutlineInputBorder(),
-                      ),
-                      items: const [
-                        DropdownMenuItem(
-                          value: 'never',
-                          child: Text('Never'),
-                        ),
-                        DropdownMenuItem(
-                          value: 'date',
-                          child: Text('On date'),
-                        ),
-                        DropdownMenuItem(
-                          value: 'count',
-                          child: Text('After count'),
-                        ),
-                      ],
-                      onChanged: _isSubmitting
-                          ? null
-                          : (value) {
-                              if (value != null) {
-                                setState(() {
-                                  _recurrenceEnd = value;
-                                });
-                              }
-                            },
-                    ),
-                    if (_recurrenceEnd == 'date') ...[
-                      const SizedBox(height: 8),
-                      OutlinedButton.icon(
-                        onPressed:
-                            _isSubmitting ? null : _pickRecurrenceEndDate,
-                        icon: const Icon(Icons.event_repeat_outlined),
-                        label: Text(
-                          'Ends ${_dateLabel(_recurrenceEndDate)}',
-                        ),
-                      ),
-                    ],
-                    if (_recurrenceEnd == 'count') ...[
-                      const SizedBox(height: 8),
-                      TextFormField(
-                        controller: _recurrenceCountController,
-                        enabled: !_isSubmitting,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'Number of repeats',
-                          border: OutlineInputBorder(),
-                        ),
-                        validator: (value) {
-                          if (_selectedRecurrence == 'none' ||
-                              _recurrenceEnd != 'count') {
-                            return null;
-                          }
-
-                          final count = int.tryParse((value ?? '').trim());
-                          if (count == null || count < 1) {
-                            return 'Enter a number of at least 1';
-                          }
-
-                          return null;
-                        },
-                      ),
-                    ],
+                  if (_recurrenceEnd == 'date') ...[
                     const SizedBox(height: 8),
-                    Text(
-                      'Repeats ${_recurrenceLabel(_selectedRecurrence).toLowerCase()}${_recurrenceEnd == 'never' ? '' : _recurrenceEnd == 'date' ? ' until ${_dateLabel(_recurrenceEndDate)}' : ' ${_recurrenceCountController.text.trim().isEmpty ? '' : 'for ${_recurrenceCountController.text.trim()} times'}'}.',
-                      style: Theme.of(context).textTheme.bodySmall,
+                    OutlinedButton.icon(
+                      onPressed: _isSubmitting ? null : _pickRecurrenceEndDate,
+                      icon: const Icon(Icons.event_repeat_outlined),
+                      label: Text(
+                        'Ends ${_dateLabel(_recurrenceEndDate)}',
+                      ),
                     ),
                   ],
+                  if (_recurrenceEnd == 'count') ...[
+                    const SizedBox(height: 8),
+                    TextFormField(
+                      controller: _recurrenceCountController,
+                      enabled: !_isSubmitting,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Number of repeats',
+                        border: OutlineInputBorder(),
+                      ),
+                      validator: (value) {
+                        if (_selectedRecurrence == 'none' ||
+                            _recurrenceEnd != 'count') {
+                          return null;
+                        }
+
+                        final count = int.tryParse((value ?? '').trim());
+                        if (count == null || count < 1) {
+                          return 'Enter a number of at least 1';
+                        }
+
+                        return null;
+                      },
+                    ),
+                  ],
+                  const SizedBox(height: 8),
+                  Text(
+                    'Repeats ${_recurrenceLabel(_selectedRecurrence).toLowerCase()}${_recurrenceEnd == 'never' ? '' : _recurrenceEnd == 'date' ? ' until ${_dateLabel(_recurrenceEndDate)}' : ' ${_recurrenceCountController.text.trim().isEmpty ? '' : 'for ${_recurrenceCountController.text.trim()} times'}'}.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
                 ],
                 const SizedBox(height: 12),
                 TextFormField(
