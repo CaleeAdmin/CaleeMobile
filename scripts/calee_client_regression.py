@@ -135,8 +135,15 @@ class CaleeClient:
     def patch(self, path: str, body: dict[str, Any]) -> Any:
         return self.data("PATCH", path, body)
 
-    def delete(self, path: str, body: dict[str, Any] | None = None, *, allow_statuses: set[int] | None = None) -> tuple[int, Any]:
-        return self.request("DELETE", path, body, allow_statuses=allow_statuses)
+    def delete(
+        self,
+        path: str,
+        body: dict[str, Any] | None = None,
+        *,
+        query: dict[str, Any] | None = None,
+        allow_statuses: set[int] | None = None,
+    ) -> tuple[int, Any]:
+        return self.request("DELETE", path, body, query=query, allow_statuses=allow_statuses)
 
 
 class Regression:
@@ -690,7 +697,7 @@ class Regression:
 
             self.client.delete(
                 f"/client/v1/events/{self.encoded(occurrence_id)}",
-                {"scope": "occurrence"},
+                query={"scope": "occurrence"},
             )
 
             return occurrence_id
