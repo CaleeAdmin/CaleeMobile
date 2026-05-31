@@ -1,0 +1,709 @@
+import 'package:flutter/material.dart';
+
+import 'calee_theme.dart';
+
+// ─────────────────────────────────────────────
+// CaleeScaffold
+// ─────────────────────────────────────────────
+
+/// Standard Calee page scaffold. Wraps [Scaffold] with the shared grouped
+/// background colour and consistent safe-area handling. Accepts an optional
+/// [floatingActionButton] and [bottomNavigationBar] forwarded unchanged.
+class CaleeScaffold extends StatelessWidget {
+  const CaleeScaffold({
+    required this.body,
+    this.appBar,
+    this.floatingActionButton,
+    this.bottomNavigationBar,
+    super.key,
+  });
+
+  final PreferredSizeWidget? appBar;
+  final Widget body;
+  final Widget? floatingActionButton;
+  final Widget? bottomNavigationBar;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: CaleeColors.scaffoldBackground,
+      appBar: appBar,
+      floatingActionButton: floatingActionButton,
+      bottomNavigationBar: bottomNavigationBar,
+      body: body,
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
+// CaleeSection
+// ─────────────────────────────────────────────
+
+/// A grouped section card styled like iOS grouped table view sections.
+/// Shows an optional [title] above and optional [footer] below the card.
+class CaleeSection extends StatelessWidget {
+  const CaleeSection({
+    required this.children,
+    this.title,
+    this.trailing,
+    this.footer,
+    super.key,
+  });
+
+  final String? title;
+  final String? trailing;
+  final String? footer;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (title != null || trailing != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              CaleeSpacing.sm,
+              0,
+              CaleeSpacing.sm,
+              CaleeSpacing.xs,
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                if (title != null)
+                  Text(
+                    title!.toUpperCase(),
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: CaleeColors.textSecondary,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                if (trailing != null)
+                  Text(
+                    trailing!,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: CaleeColors.textSecondary,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        Container(
+          decoration: BoxDecoration(
+            color: CaleeColors.surface,
+            borderRadius: BorderRadius.circular(CaleeRadius.card),
+          ),
+          clipBehavior: Clip.hardEdge,
+          child: Column(
+            children: _intersperse(children),
+          ),
+        ),
+        if (footer != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              CaleeSpacing.sm,
+              CaleeSpacing.xs,
+              CaleeSpacing.sm,
+              0,
+            ),
+            child: Text(
+              footer!,
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: CaleeColors.textSecondary,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  List<Widget> _intersperse(List<Widget> items) {
+    if (items.length <= 1) return items;
+    final result = <Widget>[];
+    for (var i = 0; i < items.length; i++) {
+      result.add(items[i]);
+      if (i < items.length - 1) {
+        result.add(const Divider(
+          indent: CaleeSpacing.md,
+          endIndent: 0,
+        ));
+      }
+    }
+    return result;
+  }
+}
+
+// ─────────────────────────────────────────────
+// CaleeListRow
+// ─────────────────────────────────────────────
+
+/// A single row inside a [CaleeSection]. Provides consistent padding, leading
+/// widget, title, optional subtitle and optional trailing widget.
+class CaleeListRow extends StatelessWidget {
+  const CaleeListRow({
+    required this.title,
+    this.subtitle,
+    this.leading,
+    this.trailing,
+    this.onTap,
+    this.titleStyle,
+    this.subtitleStyle,
+    this.enabled = true,
+    super.key,
+  });
+
+  final String title;
+  final String? subtitle;
+  final Widget? leading;
+  final Widget? trailing;
+  final VoidCallback? onTap;
+  final TextStyle? titleStyle;
+  final TextStyle? subtitleStyle;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return InkWell(
+      onTap: enabled ? onTap : null,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: CaleeSpacing.md,
+          vertical: 11,
+        ),
+        child: Row(
+          children: [
+            if (leading != null) ...[
+              leading!,
+              const SizedBox(width: CaleeSpacing.md),
+            ],
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    title,
+                    style: titleStyle ??
+                        theme.textTheme.bodyLarge?.copyWith(
+                          color: enabled
+                              ? CaleeColors.textPrimary
+                              : CaleeColors.textTertiary,
+                        ),
+                  ),
+                  if (subtitle != null && subtitle!.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(
+                        subtitle!,
+                        style: subtitleStyle ??
+                            theme.textTheme.bodySmall?.copyWith(
+                              color: CaleeColors.textSecondary,
+                            ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            if (trailing != null) ...[
+              const SizedBox(width: CaleeSpacing.sm),
+              trailing!,
+            ] else if (onTap != null)
+              const Icon(
+                Icons.chevron_right,
+                color: CaleeColors.textTertiary,
+                size: 20,
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
+// CaleeBottomSheet
+// ─────────────────────────────────────────────
+
+/// Standard Calee modal bottom sheet chrome: drag handle, title, keyboard
+/// inset padding, and safe-area support. Wrap form content in [child].
+class CaleeBottomSheet extends StatelessWidget {
+  const CaleeBottomSheet({
+    required this.title,
+    required this.child,
+    this.showHandle = true,
+    super.key,
+  });
+
+  final String title;
+  final Widget child;
+  final bool showHandle;
+
+  /// Convenience: shows a [CaleeBottomSheet] via [showModalBottomSheet].
+  static Future<T?> show<T>({
+    required BuildContext context,
+    required String title,
+    required Widget child,
+  }) {
+    return showModalBottomSheet<T>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: CaleeColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(CaleeRadius.sheet),
+        ),
+      ),
+      builder: (_) => CaleeBottomSheet(title: title, child: child),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+    final theme = Theme.of(context);
+
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(
+          CaleeSpacing.md,
+          CaleeSpacing.sm,
+          CaleeSpacing.md,
+          CaleeSpacing.md + bottomInset,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (showHandle)
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: CaleeSpacing.md),
+                  decoration: BoxDecoration(
+                    color: CaleeColors.separatorOpaque,
+                    borderRadius: BorderRadius.circular(CaleeRadius.dot),
+                  ),
+                ),
+              ),
+            Text(title, style: theme.textTheme.titleLarge),
+            const SizedBox(height: CaleeSpacing.md),
+            child,
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
+// CaleeActionSheet
+// ─────────────────────────────────────────────
+
+/// A labelled action in a [CaleeActionSheet].
+class CaleeAction {
+  const CaleeAction({
+    required this.label,
+    required this.onTap,
+    this.icon,
+    this.isDestructive = false,
+  });
+
+  final String label;
+  final VoidCallback onTap;
+  final IconData? icon;
+  final bool isDestructive;
+}
+
+/// Calee-style action sheet. Shows a list of [CaleeAction]s in a modal bottom
+/// sheet with an optional [title]. Automatically adds a Cancel row.
+class CaleeActionSheet extends StatelessWidget {
+  const CaleeActionSheet({
+    required this.actions,
+    this.title,
+    super.key,
+  });
+
+  final String? title;
+  final List<CaleeAction> actions;
+
+  static Future<void> show({
+    required BuildContext context,
+    required List<CaleeAction> actions,
+    String? title,
+  }) {
+    return showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => CaleeActionSheet(title: title, actions: actions),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(CaleeSpacing.sm),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              decoration: BoxDecoration(
+                color: CaleeColors.surface,
+                borderRadius: BorderRadius.circular(CaleeRadius.card),
+              ),
+              clipBehavior: Clip.hardEdge,
+              child: Column(
+                children: [
+                  if (title != null) ...[
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: CaleeSpacing.md,
+                        vertical: CaleeSpacing.sm,
+                      ),
+                      child: Text(
+                        title!,
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          color: CaleeColors.textSecondary,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                    const Divider(),
+                  ],
+                  for (int i = 0; i < actions.length; i++) ...[
+                    if (i > 0) const Divider(),
+                    _ActionRow(actions[i]),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(height: CaleeSpacing.sm),
+            Container(
+              decoration: BoxDecoration(
+                color: CaleeColors.surface,
+                borderRadius: BorderRadius.circular(CaleeRadius.card),
+              ),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(CaleeRadius.card),
+                onTap: () => Navigator.of(context).pop(),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    vertical: CaleeSpacing.sm + 4,
+                  ),
+                  child: Center(
+                    child: Text(
+                      'Cancel',
+                      style: theme.textTheme.bodyLarge?.copyWith(
+                        fontWeight: FontWeight.w600,
+                        color: CaleeColors.primary,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ActionRow extends StatelessWidget {
+  const _ActionRow(this.action);
+
+  final CaleeAction action;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final color = action.isDestructive
+        ? CaleeColors.destructive
+        : CaleeColors.textPrimary;
+
+    return InkWell(
+      onTap: () {
+        Navigator.of(context).pop();
+        action.onTap();
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: CaleeSpacing.md,
+          vertical: CaleeSpacing.sm + 4,
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            if (action.icon != null) ...[
+              Icon(action.icon, color: color, size: 20),
+              const SizedBox(width: CaleeSpacing.sm),
+            ],
+            Text(
+              action.label,
+              style: theme.textTheme.bodyLarge?.copyWith(color: color),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
+// CaleeDestructiveDialog
+// ─────────────────────────────────────────────
+
+/// A confirmation dialog for destructive actions (delete, remove, etc.).
+/// Returns [true] if the user confirmed, [false] or [null] otherwise.
+class CaleeDestructiveDialog extends StatelessWidget {
+  const CaleeDestructiveDialog({
+    required this.title,
+    required this.body,
+    required this.confirmLabel,
+    this.cancelLabel = 'Cancel',
+    super.key,
+  });
+
+  final String title;
+  final String body;
+  final String confirmLabel;
+  final String cancelLabel;
+
+  static Future<bool> show({
+    required BuildContext context,
+    required String title,
+    required String body,
+    String confirmLabel = 'Delete',
+    String cancelLabel = 'Cancel',
+  }) async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (_) => CaleeDestructiveDialog(
+        title: title,
+        body: body,
+        confirmLabel: confirmLabel,
+        cancelLabel: cancelLabel,
+      ),
+    );
+    return result == true;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(title),
+      content: Text(body),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: Text(cancelLabel),
+        ),
+        TextButton(
+          style: TextButton.styleFrom(
+            foregroundColor: CaleeColors.destructive,
+          ),
+          onPressed: () => Navigator.of(context).pop(true),
+          child: Text(
+            confirmLabel,
+            style: const TextStyle(fontWeight: FontWeight.w600),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
+// CaleeEmptyState
+// ─────────────────────────────────────────────
+
+/// Full-page centred empty state with icon, title, body and optional action.
+class CaleeEmptyState extends StatelessWidget {
+  const CaleeEmptyState({
+    required this.icon,
+    required this.title,
+    required this.body,
+    this.action,
+    super.key,
+  });
+
+  final IconData icon;
+  final String title;
+  final String body;
+  final Widget? action;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(CaleeSpacing.xl),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 48,
+              color: CaleeColors.textTertiary,
+            ),
+            const SizedBox(height: CaleeSpacing.md),
+            Text(
+              title,
+              style: theme.textTheme.titleMedium?.copyWith(
+                color: CaleeColors.textPrimary,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: CaleeSpacing.xs),
+            Text(
+              body,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: CaleeColors.textSecondary,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            if (action != null) ...[
+              const SizedBox(height: CaleeSpacing.lg),
+              action!,
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
+// CaleeColorDot
+// ─────────────────────────────────────────────
+
+/// A small filled circle used to represent a calendar or list colour.
+class CaleeColorDot extends StatelessWidget {
+  const CaleeColorDot({
+    required this.color,
+    this.size = 10,
+    super.key,
+  });
+
+  final Color color;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: color,
+        shape: BoxShape.circle,
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
+// CaleeCheckCircle
+// ─────────────────────────────────────────────
+
+/// A tappable check/uncheck circle for task completion, similar to Apple
+/// Reminders. Shows a spinner while [isLoading] is true.
+class CaleeCheckCircle extends StatelessWidget {
+  const CaleeCheckCircle({
+    required this.isChecked,
+    required this.onTap,
+    this.isLoading = false,
+    this.color,
+    this.size = 24,
+    super.key,
+  });
+
+  final bool isChecked;
+  final VoidCallback onTap;
+  final bool isLoading;
+  final Color? color;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final effectiveColor =
+        color ?? Theme.of(context).colorScheme.primary;
+
+    if (isLoading) {
+      return SizedBox(
+        width: size,
+        height: size,
+        child: CircularProgressIndicator(
+          strokeWidth: 2,
+          color: effectiveColor,
+        ),
+      );
+    }
+
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: SizedBox(
+        width: size,
+        height: size,
+        child: isChecked
+            ? Icon(
+                Icons.check_circle,
+                size: size,
+                color: effectiveColor,
+              )
+            : Icon(
+                Icons.radio_button_unchecked,
+                size: size,
+                color: CaleeColors.textTertiary,
+              ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
+// CaleeDateHeader
+// ─────────────────────────────────────────────
+
+/// A lightweight date heading row (e.g. "Today", "Monday 2 June").
+/// Appears above a group of items that share the same date.
+class CaleeDateHeader extends StatelessWidget {
+  const CaleeDateHeader({
+    required this.label,
+    this.isToday = false,
+    super.key,
+  });
+
+  final String label;
+  final bool isToday;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final color = isToday ? CaleeColors.primary : CaleeColors.textSecondary;
+
+    return Padding(
+      padding: const EdgeInsets.only(
+        top: CaleeSpacing.md,
+        bottom: CaleeSpacing.xs,
+      ),
+      child: Text(
+        label,
+        style: theme.textTheme.labelLarge?.copyWith(
+          color: color,
+          fontWeight: isToday ? FontWeight.w700 : FontWeight.w600,
+          letterSpacing: 0.2,
+        ),
+      ),
+    );
+  }
+}
