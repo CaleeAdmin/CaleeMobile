@@ -175,8 +175,7 @@ class _CalendarPageState extends State<CalendarPage> {
   }
 
   void _prevMonth() {
-    final newMonth =
-        DateTime(_selectedMonth.year, _selectedMonth.month - 1, 1);
+    final newMonth = DateTime(_selectedMonth.year, _selectedMonth.month - 1, 1);
     setState(() {
       _selectedMonth = newMonth;
       if (_selectedDay.year != newMonth.year ||
@@ -188,8 +187,7 @@ class _CalendarPageState extends State<CalendarPage> {
   }
 
   void _nextMonth() {
-    final newMonth =
-        DateTime(_selectedMonth.year, _selectedMonth.month + 1, 1);
+    final newMonth = DateTime(_selectedMonth.year, _selectedMonth.month + 1, 1);
     setState(() {
       _selectedMonth = newMonth;
       if (_selectedDay.year != newMonth.year ||
@@ -203,18 +201,30 @@ class _CalendarPageState extends State<CalendarPage> {
   // ── CRUD (preserved) ───────────────────────────────────────────────────────
 
   void _openCollectionCreateShortcut() {
+    _openCalendarCollectionsShortcut(autoOpenCreate: true);
+  }
+
+  void _openCollectionSubscribeShortcut() {
+    _openCalendarCollectionsShortcut(autoOpenSubscribe: true);
+  }
+
+  void _openCalendarCollectionsShortcut({
+    bool autoOpenCreate = false,
+    bool autoOpenSubscribe = false,
+  }) {
     Navigator.of(context)
         .push(
-          MaterialPageRoute<void>(
-            builder: (_) => CalendarCollectionsPage(
-              hubClient: widget.hubClient,
-              accessToken: widget.accessToken,
-              services: widget.services,
-              initialCreateKind: 'calendar',
-              autoOpenCreate: true,
-            ),
-          ),
-        )
+      MaterialPageRoute<void>(
+        builder: (_) => CalendarCollectionsPage(
+          hubClient: widget.hubClient,
+          accessToken: widget.accessToken,
+          services: widget.services,
+          initialCreateKind: autoOpenCreate ? 'calendar' : null,
+          autoOpenCreate: autoOpenCreate,
+          autoOpenSubscribe: autoOpenSubscribe,
+        ),
+      ),
+    )
         .then((_) {
       if (mounted) _loadMonth();
     });
@@ -253,13 +263,13 @@ class _CalendarPageState extends State<CalendarPage> {
         onToggle: _toggleCalendarVisibility,
         onShowAll: _showAllCalendars,
         onNewCalendar: _openCollectionCreateShortcut,
+        onSubscribeFromLink: _openCollectionSubscribeShortcut,
       ),
     );
   }
 
   Future<void> _openCreateEventSheet() async {
-    final writableCalendars =
-        _calendars.where((c) => !c.readOnly).toList();
+    final writableCalendars = _calendars.where((c) => !c.readOnly).toList();
 
     if (writableCalendars.isEmpty) {
       if (!mounted) return;
@@ -438,8 +448,7 @@ class _CalendarPageState extends State<CalendarPage> {
       allDay: editSeriesMetadataOnly ? null : allDay,
       location: location,
       description: description,
-      recurrence:
-          editOccurrence || editSeriesMetadataOnly ? null : recurrence,
+      recurrence: editOccurrence || editSeriesMetadataOnly ? null : recurrence,
       includeRecurrence: !editOccurrence && !editSeriesMetadataOnly,
       scope: event.recurring ? editScope : null,
     );
@@ -774,8 +783,7 @@ class _CalendarPageState extends State<CalendarPage> {
             itemBuilder: (context, index) {
               final date = _gridStart.add(Duration(days: index));
               final dayEvents = _eventsForDay(date);
-              final dotColors =
-                  dayEvents.take(3).map(_eventColor).toList();
+              final dotColors = dayEvents.take(3).map(_eventColor).toList();
               return _DayCell(
                 date: date,
                 isCurrentMonth: date.month == _selectedMonth.month,
@@ -915,8 +923,7 @@ class _DayCell extends StatelessWidget {
               '${date.day}',
               style: TextStyle(
                 fontSize: 14,
-                fontWeight:
-                    isToday ? FontWeight.w700 : FontWeight.w400,
+                fontWeight: isToday ? FontWeight.w700 : FontWeight.w400,
                 color: numberColor,
               ),
             ),
@@ -1233,8 +1240,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
       final separator = part.indexOf('=');
       if (separator <= 0 || separator == part.length - 1) continue;
       final key = part.substring(0, separator).trim().toUpperCase();
-      final parsedValue =
-          part.substring(separator + 1).trim().toUpperCase();
+      final parsedValue = part.substring(separator + 1).trim().toUpperCase();
       parts[key] = parsedValue;
     }
     return parts;
@@ -1443,8 +1449,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
         endsAt = _selectedEndDate.add(const Duration(days: 1));
       } else if (!endsAt.isAfter(startsAt)) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('End time must be after start time.')),
+          const SnackBar(content: Text('End time must be after start time.')),
         );
         return;
       }
@@ -1603,19 +1608,15 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                           child: OutlinedButton.icon(
                             onPressed: _isSubmitting ? null : _pickDate,
                             icon: const Icon(Icons.today_outlined),
-                            label:
-                                Text('Start ${_dateLabel(_selectedDate)}'),
+                            label: Text('Start ${_dateLabel(_selectedDate)}'),
                           ),
                         ),
                         const SizedBox(width: 8),
                         Expanded(
                           child: OutlinedButton.icon(
-                            onPressed:
-                                _isSubmitting ? null : _pickEndDate,
-                            icon: const Icon(
-                                Icons.event_available_outlined),
-                            label: Text(
-                                'End ${_dateLabel(_selectedEndDate)}'),
+                            onPressed: _isSubmitting ? null : _pickEndDate,
+                            icon: const Icon(Icons.event_available_outlined),
+                            label: Text('End ${_dateLabel(_selectedEndDate)}'),
                           ),
                         ),
                       ],
@@ -1631,21 +1632,17 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                       children: [
                         Expanded(
                           child: OutlinedButton.icon(
-                            onPressed:
-                                _isSubmitting ? null : _pickStartTime,
+                            onPressed: _isSubmitting ? null : _pickStartTime,
                             icon: const Icon(Icons.schedule_outlined),
-                            label: Text(
-                                'Start ${_timeLabel(_startTime)}'),
+                            label: Text('Start ${_timeLabel(_startTime)}'),
                           ),
                         ),
                         const SizedBox(width: 8),
                         Expanded(
                           child: OutlinedButton.icon(
-                            onPressed:
-                                _isSubmitting ? null : _pickEndTime,
+                            onPressed: _isSubmitting ? null : _pickEndTime,
                             icon: const Icon(Icons.schedule),
-                            label:
-                                Text('End ${_timeLabel(_endTime)}'),
+                            label: Text('End ${_timeLabel(_endTime)}'),
                           ),
                         ),
                       ],
@@ -1663,16 +1660,12 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                     ),
                     items: const [
                       DropdownMenuItem(
-                          value: 'none',
-                          child: Text('Does not repeat')),
-                      DropdownMenuItem(
-                          value: 'daily', child: Text('Daily')),
-                      DropdownMenuItem(
-                          value: 'weekly', child: Text('Weekly')),
+                          value: 'none', child: Text('Does not repeat')),
+                      DropdownMenuItem(value: 'daily', child: Text('Daily')),
+                      DropdownMenuItem(value: 'weekly', child: Text('Weekly')),
                       DropdownMenuItem(
                           value: 'monthly', child: Text('Monthly')),
-                      DropdownMenuItem(
-                          value: 'yearly', child: Text('Yearly')),
+                      DropdownMenuItem(value: 'yearly', child: Text('Yearly')),
                     ],
                     onChanged: _isSubmitting
                         ? null
@@ -1693,10 +1686,8 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                         border: OutlineInputBorder(),
                       ),
                       items: const [
-                        DropdownMenuItem(
-                            value: 'never', child: Text('Never')),
-                        DropdownMenuItem(
-                            value: 'date', child: Text('On date')),
+                        DropdownMenuItem(value: 'never', child: Text('Never')),
+                        DropdownMenuItem(value: 'date', child: Text('On date')),
                         DropdownMenuItem(
                             value: 'count', child: Text('After count')),
                       ],
@@ -1713,12 +1704,10 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                     if (_recurrenceEnd == 'date') ...[
                       const SizedBox(height: 8),
                       OutlinedButton.icon(
-                        onPressed: _isSubmitting
-                            ? null
-                            : _pickRecurrenceEndDate,
+                        onPressed:
+                            _isSubmitting ? null : _pickRecurrenceEndDate,
                         icon: const Icon(Icons.event_repeat_outlined),
-                        label: Text(
-                            'Ends ${_dateLabel(_recurrenceEndDate)}'),
+                        label: Text('Ends ${_dateLabel(_recurrenceEndDate)}'),
                       ),
                     ],
                     if (_recurrenceEnd == 'count') ...[
@@ -1736,8 +1725,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                               _recurrenceEnd != 'count') {
                             return null;
                           }
-                          final count =
-                              int.tryParse((value ?? '').trim());
+                          final count = int.tryParse((value ?? '').trim());
                           if (count == null || count < 1) {
                             return 'Enter a number of at least 1';
                           }
@@ -1813,6 +1801,7 @@ class _CalendarChooserSheet extends StatefulWidget {
     required this.onToggle,
     required this.onShowAll,
     required this.onNewCalendar,
+    required this.onSubscribeFromLink,
   });
 
   final List<ClientCalendar> calendars;
@@ -1820,6 +1809,7 @@ class _CalendarChooserSheet extends StatefulWidget {
   final void Function(String calendarId) onToggle;
   final VoidCallback onShowAll;
   final VoidCallback onNewCalendar;
+  final VoidCallback onSubscribeFromLink;
 
   @override
   State<_CalendarChooserSheet> createState() => _CalendarChooserSheetState();
@@ -1995,14 +1985,13 @@ class _CalendarChooserSheetState extends State<_CalendarChooserSheet> {
           title: 'Subscribe from Link',
           leading: const Icon(
             Icons.link_outlined,
-            color: CaleeColors.textTertiary,
+            color: CaleeColors.primary,
             size: 22,
           ),
-          trailing: const Text(
-            'Coming soon',
-            style: TextStyle(fontSize: 12, color: CaleeColors.textTertiary),
-          ),
-          enabled: false,
+          onTap: () {
+            Navigator.of(context).pop();
+            widget.onSubscribeFromLink();
+          },
         ),
         CaleeListRow(
           title: 'Add Holiday Calendar',
