@@ -358,6 +358,7 @@ class CaleeHubClient {
     String? description,
     String? recurrence,
     bool includeRecurrence = false,
+    String? scope,
   }) async {
     final encodedEventId = Uri.encodeComponent(eventId);
     final body = <String, Object?>{
@@ -377,8 +378,13 @@ class CaleeHubClient {
       body['recurrence'] = recurrence.trim();
     }
 
+    final trimmedScope = scope?.trim();
+    final path = trimmedScope == null || trimmedScope.isEmpty
+        ? '/client/v1/events/$encodedEventId'
+        : '/client/v1/events/$encodedEventId?scope=${Uri.encodeQueryComponent(trimmedScope)}';
+
     final json = await _patchJson(
-      '/client/v1/events/$encodedEventId',
+      path,
       accessToken: accessToken,
       body: body,
     );
