@@ -303,14 +303,34 @@ class Regression:
                     "to": (self.today + dt.timedelta(days=7)).isoformat(),
                 },
             )
-            titles = [event.get("title", "") for event in data.get("events", [])]
+            events = data.get("events", [])
+            titles = [event.get("title", "") for event in events]
             expected = f"RT event {self.run_id}"
             expected_recurring = f"RT recurring event {self.run_id}"
             if expected not in titles:
                 raise RuntimeError(f"Created event title not found in events response: {expected}")
-            if expected_recurring not in titles:
-                raise RuntimeError(f"Created recurring event title not found in events response: {expected_recurring}")
-            return f"{len(data.get('events', []))} events returned"
+
+            recurring_occurrences = [
+                event
+                for event in events
+                if event.get("title") == expected_recurring and event.get("recurring") is True
+            ]
+            if not recurring_occurrences:
+                raise RuntimeError(
+                    f"Created recurring event occurrence not found in events response: {expected_recurring}"
+                )
+
+            occurrence = recurring_occurrences[0]
+            occurrence_id = occurrence.get("id", "")
+            series_id = occurrence.get("seriesId", "")
+
+            if not occurrence_id or not series_id or occurrence_id == series_id:
+                raise RuntimeError(
+                    "Recurring event read model did not include distinct occurrence id and series id"
+                )
+
+            event_holder["recurring_occurrence"] = occurrence
+            return f"{len(events)} events returned"
 
         self.run_step("event read: created events visible", _read)
 
@@ -345,6 +365,88 @@ class Regression:
             return event_id
 
         self.run_step("event delete", _delete)
+
+        def _edit_recurring_series_via_occurrence_id() -> str:
+            event = event_holder["recurring_occurrence"]
+            occurrence_id = event["id"]
+            start = dt.datetime.combine(self.tomorrow, dt.time(hour=12, minute=0))
+            end = start + dt.timedelta(minutes=45)
+
+            data = self.client.patch(
+                f"/client/v1/events/{self.encoded(occurrence_id)}",
+                {
+                    "title": f"RT recurring event edited {self.run_id}",
+                    "startsAt": start.isoformat(),
+                    "endsAt": end.isoformat(),
+                    "allDay": False,
+                    "location": "Recurring regression test edited",
+                    "description": "Edited as whole series via occurrence id",
+                },
+            )
+
+            event_holder["recurring_occurrence"] = data["event"]
+            return data["event"].get("id", occurrence_id)
+
+        self.run_step(
+            "recurring event series edit via occurrence id",
+            _edit_recurring_series_via_occurrence_id,
+        )
+
+        def _read_recurring_series_edit() -> str:
+            data = self.client.get(
+                "/client/v1/events",
+                query={
+                    "from": self.today.isoformat(),
+                    "to": (self.today + dt.timedelta(days=7)).isoformat(),
+                },
+            )
+
+            expected = f"RT recurring event edited {self.run_id}"
+            matching = [
+                event for event in data.get("events", [])
+                if event.get("title") == expected and event.get("recurring") is True
+            ]
+
+            if not matching:
+                raise RuntimeError("Edited recurring series occurrence was not found")
+
+            event_holder["recurring_occurrence"] = matching[0]
+            return matching[0].get("id", "")
+
+        self.run_step("recurring event series edit readback", _read_recurring_series_edit)
+
+        def _delete_recurring_series_via_occurrence_id() -> str:
+            event = event_holder["recurring_occurrence"]
+            occurrence_id = event["id"]
+            self.client.delete(f"/client/v1/events/{self.encoded(occurrence_id)}")
+            return occurrence_id
+
+        self.run_step(
+            "recurring event series delete via occurrence id",
+            _delete_recurring_series_via_occurrence_id,
+        )
+
+        def _read_recurring_series_delete() -> str:
+            data = self.client.get(
+                "/client/v1/events",
+                query={
+                    "from": self.today.isoformat(),
+                    "to": (self.today + dt.timedelta(days=7)).isoformat(),
+                },
+            )
+
+            deleted_title = f"RT recurring event edited {self.run_id}"
+            matching = [
+                event for event in data.get("events", [])
+                if event.get("title") == deleted_title and event.get("recurring") is True
+            ]
+
+            if matching:
+                raise RuntimeError("Deleted recurring series is still visible")
+
+            return "recurring series no longer visible"
+
+        self.run_step("recurring event series delete readback", _read_recurring_series_delete)
 
     def test_tasks(self, task_calendar: dict[str, Any]) -> None:
         task_holder: dict[str, Any] = {}
