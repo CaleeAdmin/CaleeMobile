@@ -83,9 +83,9 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
     final tab = _tabs[_selectedIndex];
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(tab.title),
-      ),
+      appBar: _selectedIndex == 0
+          ? null
+          : AppBar(title: Text(tab.title)),
       body: tab.page,
       bottomNavigationBar: NavigationBar(
         selectedIndex: _selectedIndex,
