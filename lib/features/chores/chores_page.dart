@@ -5,25 +5,24 @@ import '../../data/models/client_bootstrap.dart';
 import '../settings/calendar_collections_page.dart';
 import '../../data/models/client_calendar.dart';
 import '../../data/models/client_chore.dart';
+import '../../ui/calee_theme.dart';
+import '../../ui/calee_widgets.dart';
+
+// ─────────────────────────────────────────────
+// Helpers (unchanged from original)
+// ─────────────────────────────────────────────
 
 String _formatChoreDate(DateTime value) {
   final year = value.year.toString().padLeft(4, '0');
   final month = value.month.toString().padLeft(2, '0');
   final day = value.day.toString().padLeft(2, '0');
-
   return '$year-$month-$day';
 }
 
 DateTime? _parseChoreDate(String? value) {
-  if (value == null || value.trim().isEmpty) {
-    return null;
-  }
-
+  if (value == null || value.trim().isEmpty) return null;
   final parsed = DateTime.tryParse(value);
-  if (parsed == null) {
-    return null;
-  }
-
+  if (parsed == null) return null;
   return parsed.toLocal();
 }
 
@@ -42,19 +41,9 @@ String? _choreRecurrenceToRrule(String? value) {
 
 String? _choreRruleToRecurrence(String? value) {
   final rrule = value?.trim().toUpperCase();
-
-  if (rrule == 'FREQ=DAILY') {
-    return 'daily';
-  }
-
-  if (rrule == 'FREQ=WEEKLY') {
-    return 'weekly';
-  }
-
-  if (rrule == 'FREQ=MONTHLY') {
-    return 'monthly';
-  }
-
+  if (rrule == 'FREQ=DAILY') return 'daily';
+  if (rrule == 'FREQ=WEEKLY') return 'weekly';
+  if (rrule == 'FREQ=MONTHLY') return 'monthly';
   return null;
 }
 
@@ -62,9 +51,20 @@ String _choreErrorMessage(Object error, String fallback) {
   if (error is CaleeHubException && error.message.trim().isNotEmpty) {
     return error.message;
   }
-
   return fallback;
 }
+
+String _rruleLabel(String? recurrence) {
+  final rrule = recurrence?.trim().toUpperCase();
+  if (rrule == 'FREQ=DAILY') return 'Daily';
+  if (rrule == 'FREQ=WEEKLY') return 'Weekly';
+  if (rrule == 'FREQ=MONTHLY') return 'Monthly';
+  return '';
+}
+
+// ─────────────────────────────────────────────
+// ChoresPage
+// ─────────────────────────────────────────────
 
 class ChoresPage extends StatefulWidget {
   const ChoresPage({
@@ -155,6 +155,12 @@ class _ChoresPageState extends State<ChoresPage> {
     final created = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
+      backgroundColor: CaleeColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(CaleeRadius.sheet),
+        ),
+      ),
       builder: (context) => _CreateChoreSheet(
         calendars: writableCalendars,
         onCreate: _createChore,
@@ -196,6 +202,12 @@ class _ChoresPageState extends State<ChoresPage> {
     final updated = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
+      backgroundColor: CaleeColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(CaleeRadius.sheet),
+        ),
+      ),
       builder: (context) => _EditChoreSheet(
         chore: chore,
         onUpdate: _updateChore,
@@ -230,150 +242,6 @@ class _ChoresPageState extends State<ChoresPage> {
       recurrence: recurrence,
       points: points,
     );
-  }
-
-  Future<bool> _confirmPermanentChoreDelete(ClientChore chore) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete permanently?'),
-        content: Text(
-          'This will permanently delete "${chore.title}" and its completion records. This cannot be undone.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Delete permanently'),
-          ),
-        ],
-      ),
-    );
-
-    return confirmed == true;
-  }
-
-  Future<void> _deleteChore(ClientChore chore) async {
-    final choreId = chore.completionActionId;
-
-    if (choreId.trim().isEmpty || _updatingChoreIds.contains(choreId)) {
-      return;
-    }
-
-    String? action;
-    String? actionDate;
-    var successMessage = 'Chore deleted permanently.';
-
-    if (chore.isRecurring) {
-      action = await showDialog<String>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Recurring chore'),
-          content: Text(
-            'What would you like to do with "${chore.title}"?',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(context).pop('skip'),
-              child: const Text('Skip this time'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(context).pop('stopRepeating'),
-              child: const Text('Stop repeating'),
-            ),
-            TextButton(
-              style: TextButton.styleFrom(
-                foregroundColor: Theme.of(context).colorScheme.error,
-              ),
-              onPressed: () => Navigator.of(context).pop('deletePermanent'),
-              child: const Text('Delete permanently'),
-            ),
-          ],
-        ),
-      );
-
-      if (action == null || !mounted) {
-        return;
-      }
-
-      if (action == 'skip') {
-        final scheduledDate = chore.scheduledDate;
-        actionDate = scheduledDate != null && scheduledDate.trim().isNotEmpty
-            ? scheduledDate.trim()
-            : DateTime.now().toIso8601String().split('T').first;
-        successMessage = 'Skipped this time.';
-      } else if (action == 'stopRepeating') {
-        successMessage = 'Repeating stopped.';
-      } else if (action == 'deletePermanent') {
-        await Future<void>.delayed(Duration.zero);
-        if (!mounted) {
-          return;
-        }
-
-        final confirmedPermanentDelete =
-            await _confirmPermanentChoreDelete(chore);
-
-        if (!confirmedPermanentDelete || !mounted) {
-          return;
-        }
-      }
-    } else {
-      final confirmedPermanentDelete =
-          await _confirmPermanentChoreDelete(chore);
-
-      if (!confirmedPermanentDelete || !mounted) {
-        return;
-      }
-
-      action = 'deletePermanent';
-    }
-
-    setState(() {
-      _updatingChoreIds.add(choreId);
-    });
-
-    try {
-      await widget.hubClient.deleteChore(
-        accessToken: widget.accessToken,
-        choreId: choreId,
-        action: action,
-        date: actionDate,
-      );
-
-      if (mounted) {
-        _reloadOverview();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(successMessage)),
-        );
-      }
-    } catch (error) {
-      if (mounted) {
-        final fallbackMessage = switch (action) {
-          'skip' => 'Unable to skip chore.',
-          'stopRepeating' => 'Unable to stop repeating chore.',
-          _ => 'Unable to delete chore.',
-        };
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(_choreErrorMessage(error, fallbackMessage)),
-          ),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _updatingChoreIds.remove(choreId);
-        });
-      }
-    }
   }
 
   Future<void> _toggleChoreCompletion(ClientChore chore) async {
@@ -420,55 +288,142 @@ class _ChoresPageState extends State<ChoresPage> {
     }
   }
 
-  String _formatScheduledAt(ClientChore chore) {
-    final value = chore.scheduledDate ?? chore.scheduledAt;
-    final isHistory = chore.isCompletionLog || chore.section == 'history';
+  // Replaces _deleteChore: shows a CaleeActionSheet for recurring options,
+  // uses CaleeDestructiveDialog for confirmation.
+  void _showChoreActions(ClientChore chore) {
+    final choreId = chore.completionActionId;
+    if (choreId.trim().isEmpty) return;
 
-    if (value == null || value.trim().isEmpty) {
-      return isHistory ? 'Completed date unknown' : 'No scheduled date';
+    final actions = <CaleeAction>[
+      CaleeAction(
+        label: 'Edit',
+        icon: Icons.edit_outlined,
+        onTap: () => _openEditChoreSheet(chore),
+      ),
+    ];
+
+    if (chore.isRecurring) {
+      actions.addAll([
+        CaleeAction(
+          label: 'Skip this time',
+          icon: Icons.event_busy_outlined,
+          onTap: () => _skipChore(chore),
+        ),
+        CaleeAction(
+          label: 'Stop repeating',
+          icon: Icons.repeat_one_outlined,
+          onTap: () => _stopRepeatingChore(chore),
+        ),
+        CaleeAction(
+          label: 'Delete permanently',
+          icon: Icons.delete_outline,
+          isDestructive: true,
+          onTap: () => _confirmAndDeletePermanentChore(chore),
+        ),
+      ]);
+    } else {
+      actions.add(CaleeAction(
+        label: 'Delete',
+        icon: Icons.delete_outline,
+        isDestructive: true,
+        onTap: () => _confirmAndDeletePermanentChore(chore),
+      ));
     }
 
-    final parsed = DateTime.tryParse(value);
-    if (parsed == null) {
-      return isHistory ? 'Completed $value' : 'Scheduled $value';
-    }
-
-    final local = parsed.toLocal();
-    final label = isHistory ? 'Completed' : 'Scheduled';
-    return '$label ${local.day}/${local.month}/${local.year}';
+    CaleeActionSheet.show(
+      context: context,
+      title: chore.title,
+      actions: actions,
+    );
   }
 
-  String _sectionTitle(String section) {
-    switch (section) {
-      case 'todoToday':
-        return 'To do today';
-      case 'overdue':
-        return 'Overdue';
-      case 'doneToday':
-        return 'Done today';
-      case 'future':
-        return 'Future';
-      case 'history':
-        return 'Completion history';
-      default:
-        return 'Other';
+  void _skipChore(ClientChore chore) {
+    final scheduledDate = chore.scheduledDate;
+    final actionDate = scheduledDate != null && scheduledDate.trim().isNotEmpty
+        ? scheduledDate.trim()
+        : DateTime.now().toIso8601String().split('T').first;
+    _performChoreAction(
+      chore: chore,
+      action: 'skip',
+      actionDate: actionDate,
+      successMessage: 'Skipped this time.',
+      failureMessage: 'Unable to skip chore.',
+    );
+  }
+
+  void _stopRepeatingChore(ClientChore chore) {
+    _performChoreAction(
+      chore: chore,
+      action: 'stopRepeating',
+      successMessage: 'Repeating stopped.',
+      failureMessage: 'Unable to stop repeating chore.',
+    );
+  }
+
+  Future<void> _confirmAndDeletePermanentChore(ClientChore chore) async {
+    final confirmed = await CaleeDestructiveDialog.show(
+      context: context,
+      title: 'Delete permanently?',
+      body:
+          'This will permanently delete "${chore.title}" and its completion records. This cannot be undone.',
+      confirmLabel: 'Delete permanently',
+    );
+
+    if (confirmed && mounted) {
+      _performChoreAction(
+        chore: chore,
+        action: 'deletePermanent',
+        successMessage: 'Chore deleted permanently.',
+        failureMessage: 'Unable to delete chore.',
+      );
     }
   }
 
-  String _sectionEmptyMessage(String section) {
-    switch (section) {
-      case 'todoToday':
-        return 'No chores due today.';
-      case 'overdue':
-        return 'No overdue chores.';
-      case 'doneToday':
-        return 'No chores completed today yet.';
-      case 'future':
-        return 'No future chores found.';
-      case 'history':
-        return 'No past completions found.';
-      default:
-        return 'No chores found.';
+  Future<void> _performChoreAction({
+    required ClientChore chore,
+    required String action,
+    String? actionDate,
+    required String successMessage,
+    required String failureMessage,
+  }) async {
+    final choreId = chore.completionActionId;
+
+    if (choreId.trim().isEmpty || _updatingChoreIds.contains(choreId)) {
+      return;
+    }
+
+    setState(() {
+      _updatingChoreIds.add(choreId);
+    });
+
+    try {
+      await widget.hubClient.deleteChore(
+        accessToken: widget.accessToken,
+        choreId: choreId,
+        action: action,
+        date: actionDate,
+      );
+
+      if (mounted) {
+        _reloadOverview();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(successMessage)),
+        );
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(_choreErrorMessage(error, failureMessage)),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _updatingChoreIds.remove(choreId);
+        });
+      }
     }
   }
 
@@ -487,10 +442,7 @@ class _ChoresPageState extends State<ChoresPage> {
         final aDate = a.scheduledDate ?? a.scheduledAt ?? '';
         final bDate = b.scheduledDate ?? b.scheduledAt ?? '';
         final dateCompare = aDate.compareTo(bDate);
-        if (dateCompare != 0) {
-          return dateCompare;
-        }
-
+        if (dateCompare != 0) return dateCompare;
         return a.title.toLowerCase().compareTo(b.title.toLowerCase());
       });
     }
@@ -504,23 +456,90 @@ class _ChoresPageState extends State<ChoresPage> {
         .fold<int>(0, (total, chore) => total + chore.points);
   }
 
+  String _formatScheduledAt(ClientChore chore) {
+    final value = chore.scheduledDate ?? chore.scheduledAt;
+    final isHistory = chore.isCompletionLog || chore.section == 'history';
+
+    if (value == null || value.trim().isEmpty) {
+      return isHistory ? 'Completed date unknown' : 'No scheduled date';
+    }
+
+    final parsed = DateTime.tryParse(value);
+    if (parsed == null) {
+      return isHistory ? 'Completed $value' : 'Scheduled $value';
+    }
+
+    final local = parsed.toLocal();
+    final label = isHistory ? 'Completed' : 'Scheduled';
+    return '$label ${local.day}/${local.month}/${local.year}';
+  }
+
+  String _calendarNameForChore(
+      ClientChore chore, List<ClientCalendar> calendars) {
+    for (final cal in calendars) {
+      if (cal.id == chore.calendarId ||
+          cal.id == '${chore.serviceId}:${chore.calendarId}') {
+        return cal.name;
+      }
+    }
+    return chore.serviceName.trim().isNotEmpty ? chore.serviceName : '';
+  }
+
+  String _sectionTitle(String section) {
+    switch (section) {
+      case 'todoToday':
+        return 'Today';
+      case 'overdue':
+        return 'Overdue';
+      case 'doneToday':
+        return 'Done today';
+      case 'future':
+        return 'Upcoming';
+      case 'history':
+        return 'History';
+      default:
+        return 'Other';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<_ChoresOverview>(
       future: _overviewFuture,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
+          return const CaleeScaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
         }
 
         if (snapshot.hasError) {
-          return _ChoresErrorState(onRetry: _reloadOverview);
+          return CaleeScaffold(
+            body: CaleeEmptyState(
+              icon: Icons.cloud_off_outlined,
+              title: 'Unable to load chores',
+              body: 'Check your connection, then try again.',
+              action: FilledButton(
+                onPressed: _reloadOverview,
+                child: const Text('Try again'),
+              ),
+            ),
+          );
         }
 
         final overview = snapshot.data;
         if (overview == null) {
-          return _ChoresEmptyState(
-            onCreateChoreList: _openCollectionCreateShortcut,
+          return CaleeScaffold(
+            body: CaleeEmptyState(
+              icon: Icons.family_restroom_outlined,
+              title: 'No chore lists yet',
+              body: 'Create a chore list to start tracking family chores.',
+              action: FilledButton.icon(
+                onPressed: _openCollectionCreateShortcut,
+                icon: const Icon(Icons.add),
+                label: const Text('Create chore list'),
+              ),
+            ),
           );
         }
 
@@ -529,93 +548,158 @@ class _ChoresPageState extends State<ChoresPage> {
             .toList();
         final chores = overview.choreList.chores;
         final choresBySection = _groupChoresBySection(chores);
-        final sectionOrder = [
-          'todoToday',
-          'overdue',
-          'doneToday',
-          'history',
-          'future',
-        ];
 
         if (choreCalendars.isEmpty && chores.isEmpty) {
-          return _ChoresEmptyState(
-            onCreateChoreList: _openCollectionCreateShortcut,
+          return CaleeScaffold(
+            body: CaleeEmptyState(
+              icon: Icons.family_restroom_outlined,
+              title: 'No chore lists yet',
+              body: 'Create a chore list to start tracking family chores.',
+              action: FilledButton.icon(
+                onPressed: _openCollectionCreateShortcut,
+                icon: const Icon(Icons.add),
+                label: const Text('Create chore list'),
+              ),
+            ),
           );
         }
 
-        return RefreshIndicator(
-          onRefresh: () async {
-            _reloadOverview();
-            await _overviewFuture;
-          },
-          child: ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              _ChoreSummaryCard(
-                todoTodayCount: choresBySection['todoToday']?.length ?? 0,
-                overdueCount: choresBySection['overdue']?.length ?? 0,
-                doneTodayCount: choresBySection['doneToday']?.length ?? 0,
-                weeklyPoints: _todayCompletionPoints(chores),
-              ),
-              const SizedBox(height: 24),
-              _SectionHeader(
-                title: 'Chore lists',
-                subtitle: '${choreCalendars.length} found',
-              ),
-              const SizedBox(height: 8),
-              if (choreCalendars.isEmpty)
-                _EmptySectionMessage(
-                  message: 'No chore lists found yet.',
-                  action: TextButton.icon(
-                    onPressed: _openCollectionCreateShortcut,
-                    icon: const Icon(Icons.add),
-                    label: const Text('Create chore list'),
-                  ),
-                )
-              else
-                ...choreCalendars.map(_ChoreListTile.new),
-              const SizedBox(height: 24),
-              _SectionHeader(
-                title: 'Chores',
-                subtitle: '${chores.length} found',
-              ),
-              const SizedBox(height: 8),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: FilledButton.icon(
-                  onPressed: choreCalendars.isEmpty
-                      ? _openCollectionCreateShortcut
-                      : () => _openCreateChoreSheet(choreCalendars),
+        final writableCalendars =
+            choreCalendars.where((c) => !c.readOnly).toList();
+        final hasWritable = writableCalendars.isNotEmpty;
+
+        // Section order: urgent first, then today, done, upcoming, history
+        const sectionOrder = [
+          'overdue',
+          'todoToday',
+          'doneToday',
+          'future',
+          'history',
+        ];
+
+        final activeSections = sectionOrder
+            .where((s) => (choresBySection[s]?.isNotEmpty ?? false))
+            .toList();
+
+        final overdueCount = choresBySection['overdue']?.length ?? 0;
+        final todoTodayCount = choresBySection['todoToday']?.length ?? 0;
+        final doneTodayCount = choresBySection['doneToday']?.length ?? 0;
+        final pointsToday = _todayCompletionPoints(chores);
+
+        return CaleeScaffold(
+          floatingActionButton: hasWritable
+              ? FloatingActionButton.extended(
+                  onPressed: () => _openCreateChoreSheet(choreCalendars),
                   icon: const Icon(Icons.add),
-                  label: Text(
-                    choreCalendars.isEmpty ? 'Create chore list' : 'Add chore',
-                  ),
-                ),
+                  label: const Text('Chore'),
+                )
+              : null,
+          body: RefreshIndicator(
+            onRefresh: () async {
+              _reloadOverview();
+              await _overviewFuture;
+            },
+            child: ListView(
+              padding: const EdgeInsets.symmetric(
+                horizontal: CaleeSpacing.pagePadding,
+                vertical: CaleeSpacing.md,
               ),
-              const SizedBox(height: 12),
-              if (chores.isEmpty)
-                const _EmptySectionMessage(message: 'No chores found yet.')
-              else
-                for (final section in sectionOrder) ...[
-                  _ChoreSection(
-                    title: _sectionTitle(section),
-                    chores: choresBySection[section] ?? const [],
-                    emptyMessage: _sectionEmptyMessage(section),
-                    scheduledLabelBuilder: _formatScheduledAt,
-                    updatingChoreIds: _updatingChoreIds,
-                    onToggleCompletion: _toggleChoreCompletion,
-                    onEditChore: _openEditChoreSheet,
-                    onDeleteChore: _deleteChore,
+              children: [
+                // ── Summary strip ────────────────────────────────────
+                if (overdueCount > 0 ||
+                    todoTodayCount > 0 ||
+                    doneTodayCount > 0) ...[
+                  _ChoreSummaryStrip(
+                    overdueCount: overdueCount,
+                    todoTodayCount: todoTodayCount,
+                    doneTodayCount: doneTodayCount,
+                    pointsToday: pointsToday,
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: CaleeSpacing.sectionSpacing),
                 ],
-            ],
+
+                // ── Chore sections ───────────────────────────────────
+                if (activeSections.isEmpty && choreCalendars.isNotEmpty)
+                  CaleeSection(
+                    title: 'Chores',
+                    children: [
+                      CaleeListRow(
+                        title: 'No chores yet',
+                        subtitle: 'Tap + Chore to add your first chore.',
+                        leading: const Icon(
+                          Icons.check_circle_outline,
+                          color: CaleeColors.textTertiary,
+                          size: 22,
+                        ),
+                      ),
+                    ],
+                  )
+                else
+                  for (final section in activeSections) ...[
+                    CaleeSection(
+                      title: _sectionTitle(section),
+                      trailing: '${choresBySection[section]!.length}',
+                      children: choresBySection[section]!
+                          .map(
+                            (chore) => _ChoreRow(
+                              key: ValueKey(chore.completionActionId.isNotEmpty
+                                  ? chore.completionActionId
+                                  : chore.id),
+                              chore: chore,
+                              calendarName:
+                                  _calendarNameForChore(chore, choreCalendars),
+                              scheduledLabel: _formatScheduledAt(chore),
+                              isUpdating: _updatingChoreIds
+                                  .contains(chore.completionActionId),
+                              onToggleCompletion: chore.canToggleCompletion
+                                  ? () => _toggleChoreCompletion(chore)
+                                  : null,
+                              onMoreTap:
+                                  chore.completionActionId.trim().isNotEmpty &&
+                                          !chore.isCompletionLog &&
+                                          chore.section != 'history'
+                                      ? () => _showChoreActions(chore)
+                                      : null,
+                            ),
+                          )
+                          .toList(),
+                    ),
+                    const SizedBox(height: CaleeSpacing.sectionSpacing),
+                  ],
+
+                // ── No chore lists: prompt to create one ─────────────
+                if (choreCalendars.isEmpty) ...[
+                  if (activeSections.isNotEmpty)
+                    const SizedBox(height: CaleeSpacing.sectionSpacing),
+                  CaleeSection(
+                    footer: 'Connect a chore list to start adding chores.',
+                    children: [
+                      CaleeListRow(
+                        title: 'Add chore list',
+                        leading: const Icon(
+                          Icons.add_circle_outline,
+                          color: CaleeColors.primary,
+                          size: 22,
+                        ),
+                        onTap: _openCollectionCreateShortcut,
+                      ),
+                    ],
+                  ),
+                ],
+
+                const SizedBox(height: 96),
+              ],
+            ),
           ),
         );
       },
     );
   }
 }
+
+// ─────────────────────────────────────────────
+// Data model
+// ─────────────────────────────────────────────
 
 class _ChoresOverview {
   const _ChoresOverview({
@@ -631,83 +715,210 @@ class _ChoresOverview {
   final String to;
 }
 
-class _ChoreSummaryCard extends StatelessWidget {
-  const _ChoreSummaryCard({
-    required this.todoTodayCount,
+// ─────────────────────────────────────────────
+// Summary strip
+// ─────────────────────────────────────────────
+
+class _ChoreSummaryStrip extends StatelessWidget {
+  const _ChoreSummaryStrip({
     required this.overdueCount,
+    required this.todoTodayCount,
     required this.doneTodayCount,
-    required this.weeklyPoints,
+    required this.pointsToday,
   });
 
-  final int todoTodayCount;
   final int overdueCount;
+  final int todoTodayCount;
   final int doneTodayCount;
-  final int weeklyPoints;
+  final int pointsToday;
 
   @override
   Widget build(BuildContext context) {
-    final textTheme = Theme.of(context).textTheme;
+    return Wrap(
+      spacing: CaleeSpacing.sm,
+      runSpacing: CaleeSpacing.xs,
+      children: [
+        if (overdueCount > 0)
+          _StripChip(
+            label: '$overdueCount overdue',
+            color: const Color(0xFFFF9500),
+          ),
+        if (todoTodayCount > 0)
+          _StripChip(label: '$todoTodayCount today'),
+        if (doneTodayCount > 0)
+          _StripChip(label: '$doneTodayCount done'),
+        if (pointsToday > 0)
+          _StripChip(label: '$pointsToday pts'),
+      ],
+    );
+  }
+}
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            Expanded(
-              child: _SummaryMetric(
-                label: 'Today',
-                value: todoTodayCount.toString(),
-              ),
-            ),
-            Expanded(
-              child: _SummaryMetric(
-                label: 'Overdue',
-                value: overdueCount.toString(),
-              ),
-            ),
-            Expanded(
-              child: _SummaryMetric(
-                label: 'Done',
-                value: doneTodayCount.toString(),
-              ),
-            ),
-            Expanded(
-              child: Column(
-                children: [
-                  Text(
-                    weeklyPoints.toString(),
-                    style: textTheme.titleLarge,
-                  ),
-                  const Text('Points'),
-                ],
-              ),
-            ),
-          ],
+class _StripChip extends StatelessWidget {
+  const _StripChip({
+    required this.label,
+    this.color,
+  });
+
+  final String label;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    final effectiveColor = color ?? CaleeColors.primary;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: effectiveColor.withAlpha(26),
+        borderRadius: BorderRadius.circular(CaleeRadius.dot),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 12,
+          color: effectiveColor,
+          fontWeight: FontWeight.w500,
         ),
       ),
     );
   }
 }
 
-class _SummaryMetric extends StatelessWidget {
-  const _SummaryMetric({
-    required this.label,
-    required this.value,
-  });
+// ─────────────────────────────────────────────
+// Points badge
+// ─────────────────────────────────────────────
 
-  final String label;
-  final String value;
+class _PointsBadge extends StatelessWidget {
+  const _PointsBadge(this.points);
+
+  final int points;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Text(value, style: Theme.of(context).textTheme.titleLarge),
-        Text(label),
-      ],
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: CaleeColors.primary.withAlpha(20),
+        borderRadius: BorderRadius.circular(CaleeRadius.dot),
+      ),
+      child: Text(
+        '$points pts',
+        style: const TextStyle(
+          fontSize: 11,
+          color: CaleeColors.primary,
+          fontWeight: FontWeight.w500,
+        ),
+      ),
     );
   }
 }
+
+// ─────────────────────────────────────────────
+// Chore row
+// ─────────────────────────────────────────────
+
+class _ChoreRow extends StatelessWidget {
+  const _ChoreRow({
+    required this.chore,
+    required this.calendarName,
+    required this.scheduledLabel,
+    required this.isUpdating,
+    this.onToggleCompletion,
+    this.onMoreTap,
+    super.key,
+  });
+
+  final ClientChore chore;
+  final String calendarName;
+  final String scheduledLabel;
+  final bool isUpdating;
+  final VoidCallback? onToggleCompletion;
+  final VoidCallback? onMoreTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDone =
+        chore.completedToday || chore.section == 'doneToday';
+    final isHistory =
+        chore.isCompletionLog || chore.section == 'history';
+
+    // Subtitle: date · recurrence · list name
+    final subtitleParts = <String>[];
+    if (scheduledLabel.isNotEmpty) subtitleParts.add(scheduledLabel);
+    final recLabel = _rruleLabel(chore.recurrence);
+    if (recLabel.isNotEmpty) subtitleParts.add('Repeats $recLabel');
+    if (calendarName.isNotEmpty) subtitleParts.add(calendarName);
+    final subtitle =
+        subtitleParts.where((p) => p.isNotEmpty).join(' · ');
+
+    // Leading widget
+    Widget leading;
+    if (isHistory) {
+      leading = const Icon(
+        Icons.history_outlined,
+        size: 22,
+        color: CaleeColors.textTertiary,
+      );
+    } else {
+      leading = CaleeCheckCircle(
+        isChecked: isDone,
+        onTap: onToggleCompletion ?? () {},
+        isLoading: isUpdating,
+        size: 22,
+      );
+    }
+
+    // Trailing: points badge + more button
+    Widget? trailing;
+    final showMore = onMoreTap != null;
+    if (chore.points > 0 || showMore) {
+      trailing = Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (chore.points > 0) _PointsBadge(chore.points),
+          if (showMore) ...[
+            const SizedBox(width: CaleeSpacing.xs),
+            SizedBox(
+              width: 28,
+              height: 28,
+              child: IconButton(
+                padding: EdgeInsets.zero,
+                icon: const Icon(Icons.more_horiz, size: 18),
+                color: CaleeColors.textTertiary,
+                onPressed: onMoreTap,
+              ),
+            ),
+          ],
+        ],
+      );
+    }
+
+    // Title style: muted for done/history
+    TextStyle? titleStyle;
+    if (isDone) {
+      titleStyle = const TextStyle(
+        color: CaleeColors.textTertiary,
+        decoration: TextDecoration.lineThrough,
+        decorationColor: CaleeColors.textTertiary,
+      );
+    } else if (isHistory) {
+      titleStyle = const TextStyle(color: CaleeColors.textTertiary);
+    }
+
+    return CaleeListRow(
+      leading: leading,
+      title: chore.title,
+      subtitle: subtitle.isNotEmpty ? subtitle : null,
+      trailing: trailing,
+      titleStyle: titleStyle,
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
+// Create chore sheet
+// ─────────────────────────────────────────────
 
 class _CreateChoreSheet extends StatefulWidget {
   const _CreateChoreSheet({
@@ -807,182 +1018,155 @@ class _CreateChoreSheetState extends State<_CreateChoreSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
-
-    return SafeArea(
-      child: Padding(
-        padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + bottomInset),
-        child: Form(
-          key: _formKey,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  'Add chore',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-                const SizedBox(height: 16),
-                DropdownButtonFormField<ClientCalendar>(
-                  initialValue: _selectedCalendar,
-                  decoration: const InputDecoration(
-                    labelText: 'Chore list',
-                    border: OutlineInputBorder(),
-                  ),
-                  items: widget.calendars
-                      .map(
-                        (calendar) => DropdownMenuItem(
-                          value: calendar,
-                          child: Text(
-                            [
-                              calendar.name,
-                              if (calendar.serviceName.trim().isNotEmpty)
-                                calendar.serviceName,
-                            ].join(' · '),
-                          ),
+    return CaleeBottomSheet(
+      title: 'Add chore',
+      child: Form(
+        key: _formKey,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              DropdownButtonFormField<ClientCalendar>(
+                value: _selectedCalendar,
+                decoration: const InputDecoration(labelText: 'Chore list'),
+                items: widget.calendars
+                    .map(
+                      (calendar) => DropdownMenuItem(
+                        value: calendar,
+                        child: Text(
+                          [
+                            calendar.name,
+                            if (calendar.serviceName.trim().isNotEmpty)
+                              calendar.serviceName,
+                          ].join(' · '),
                         ),
-                      )
-                      .toList(),
-                  onChanged: _isSubmitting
-                      ? null
-                      : (value) {
-                          if (value != null) {
-                            setState(() {
-                              _selectedCalendar = value;
-                            });
-                          }
-                        },
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _titleController,
-                  enabled: !_isSubmitting,
-                  autofocus: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Title',
-                    border: OutlineInputBorder(),
-                  ),
-                  textInputAction: TextInputAction.next,
-                  validator: (value) {
-                    if ((value ?? '').trim().isEmpty) {
-                      return 'Enter a chore title';
-                    }
-
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 12),
-                OutlinedButton.icon(
-                  onPressed: _isSubmitting ? null : _pickDate,
-                  icon: const Icon(Icons.event_outlined),
-                  label: Text(
-                    _selectedDate == null
-                        ? 'Add scheduled date'
-                        : 'Scheduled ${_formatChoreDate(_selectedDate!)}',
-                  ),
-                ),
-                if (_selectedDate != null)
-                  TextButton(
-                    onPressed: _isSubmitting
-                        ? null
-                        : () {
-                            setState(() {
-                              _selectedDate = null;
-                            });
-                          },
-                    child: const Text('Remove scheduled date'),
-                  ),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<String?>(
-                  initialValue: _selectedRecurrence,
-                  decoration: const InputDecoration(
-                    labelText: 'Repeat',
-                    border: OutlineInputBorder(),
-                  ),
-                  items: const [
-                    DropdownMenuItem<String?>(
-                      value: null,
-                      child: Text('Does not repeat'),
-                    ),
-                    DropdownMenuItem<String?>(
-                      value: 'daily',
-                      child: Text('Daily'),
-                    ),
-                    DropdownMenuItem<String?>(
-                      value: 'weekly',
-                      child: Text('Weekly'),
-                    ),
-                    DropdownMenuItem<String?>(
-                      value: 'monthly',
-                      child: Text('Monthly'),
-                    ),
-                  ],
-                  onChanged: _isSubmitting
-                      ? null
-                      : (value) {
+                      ),
+                    )
+                    .toList(),
+                onChanged: _isSubmitting
+                    ? null
+                    : (value) {
+                        if (value != null) {
                           setState(() {
-                            _selectedRecurrence = value;
+                            _selectedCalendar = value;
+                          });
+                        }
+                      },
+              ),
+              const SizedBox(height: CaleeSpacing.sm + 4),
+              TextFormField(
+                controller: _titleController,
+                enabled: !_isSubmitting,
+                autofocus: true,
+                decoration: const InputDecoration(labelText: 'Title'),
+                textInputAction: TextInputAction.next,
+                validator: (value) {
+                  if ((value ?? '').trim().isEmpty) {
+                    return 'Enter a chore title';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: CaleeSpacing.sm + 4),
+              OutlinedButton.icon(
+                onPressed: _isSubmitting ? null : _pickDate,
+                icon: const Icon(Icons.event_outlined),
+                label: Text(
+                  _selectedDate == null
+                      ? 'Add scheduled date'
+                      : 'Scheduled ${_formatChoreDate(_selectedDate!)}',
+                ),
+              ),
+              if (_selectedDate != null)
+                TextButton(
+                  onPressed: _isSubmitting
+                      ? null
+                      : () {
+                          setState(() {
+                            _selectedDate = null;
                           });
                         },
+                  child: const Text('Remove scheduled date'),
                 ),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<int>(
-                  initialValue: _points,
-                  decoration: const InputDecoration(
-                    labelText: 'Points',
-                    border: OutlineInputBorder(),
+              const SizedBox(height: CaleeSpacing.sm + 4),
+              DropdownButtonFormField<String?>(
+                value: _selectedRecurrence,
+                decoration: const InputDecoration(labelText: 'Repeat'),
+                items: const [
+                  DropdownMenuItem<String?>(
+                    value: null,
+                    child: Text('Does not repeat'),
                   ),
-                  items: const [
-                    DropdownMenuItem(
-                      value: 1,
-                      child: Text('1 point'),
-                    ),
-                    DropdownMenuItem(
-                      value: 2,
-                      child: Text('2 points'),
-                    ),
-                  ],
-                  onChanged: _isSubmitting
-                      ? null
-                      : (value) {
-                          if (value != null) {
-                            setState(() {
-                              _points = value;
-                            });
-                          }
-                        },
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _descriptionController,
-                  enabled: !_isSubmitting,
-                  decoration: const InputDecoration(
-                    labelText: 'Notes',
-                    border: OutlineInputBorder(),
+                  DropdownMenuItem<String?>(
+                    value: 'daily',
+                    child: Text('Daily'),
                   ),
-                  minLines: 2,
-                  maxLines: 4,
-                ),
-                const SizedBox(height: 16),
-                FilledButton(
-                  onPressed: _isSubmitting ? null : _submit,
-                  child: _isSubmitting
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Text('Create chore'),
-                ),
-              ],
-            ),
+                  DropdownMenuItem<String?>(
+                    value: 'weekly',
+                    child: Text('Weekly'),
+                  ),
+                  DropdownMenuItem<String?>(
+                    value: 'monthly',
+                    child: Text('Monthly'),
+                  ),
+                ],
+                onChanged: _isSubmitting
+                    ? null
+                    : (value) {
+                        setState(() {
+                          _selectedRecurrence = value;
+                        });
+                      },
+              ),
+              const SizedBox(height: CaleeSpacing.sm + 4),
+              DropdownButtonFormField<int>(
+                value: _points,
+                decoration: const InputDecoration(labelText: 'Points'),
+                items: const [
+                  DropdownMenuItem(value: 1, child: Text('1 point')),
+                  DropdownMenuItem(value: 2, child: Text('2 points')),
+                ],
+                onChanged: _isSubmitting
+                    ? null
+                    : (value) {
+                        if (value != null) {
+                          setState(() {
+                            _points = value;
+                          });
+                        }
+                      },
+              ),
+              const SizedBox(height: CaleeSpacing.sm + 4),
+              TextFormField(
+                controller: _descriptionController,
+                enabled: !_isSubmitting,
+                decoration: const InputDecoration(labelText: 'Notes'),
+                minLines: 2,
+                maxLines: 4,
+              ),
+              const SizedBox(height: CaleeSpacing.md),
+              FilledButton(
+                onPressed: _isSubmitting ? null : _submit,
+                child: _isSubmitting
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('Create chore'),
+              ),
+            ],
           ),
         ),
       ),
     );
   }
 }
+
+// ─────────────────────────────────────────────
+// Edit chore sheet
+// ─────────────────────────────────────────────
 
 class _EditChoreSheet extends StatefulWidget {
   const _EditChoreSheet({
@@ -1017,7 +1201,6 @@ class _EditChoreSheetState extends State<_EditChoreSheet> {
   @override
   void initState() {
     super.initState();
-
     _titleController = TextEditingController(text: widget.chore.title);
     _descriptionController =
         TextEditingController(text: widget.chore.description ?? '');
@@ -1088,419 +1271,143 @@ class _EditChoreSheetState extends State<_EditChoreSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
-
-    return SafeArea(
-      child: Padding(
-        padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + bottomInset),
-        child: Form(
-          key: _formKey,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  'Edit chore',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-                if (widget.chore.isRecurring) ...[
-                  const SizedBox(height: 8),
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Icon(
-                            Icons.repeat,
-                            color: Theme.of(context).colorScheme.primary,
-                          ),
-                          const SizedBox(width: 12),
-                          const Expanded(
-                            child: Text(
-                              'This is a repeating chore. Changes will apply to the recurring chore going forward.',
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 16),
-                TextFormField(
-                  controller: _titleController,
-                  enabled: !_isSubmitting,
-                  autofocus: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Title',
-                    border: OutlineInputBorder(),
-                  ),
-                  textInputAction: TextInputAction.next,
-                  validator: (value) {
-                    if ((value ?? '').trim().isEmpty) {
-                      return 'Enter a chore title';
-                    }
-
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 12),
-                OutlinedButton.icon(
-                  onPressed: _isSubmitting ? null : _pickDate,
-                  icon: const Icon(Icons.event_outlined),
-                  label: Text(
-                    _selectedDate == null
-                        ? 'Add scheduled date'
-                        : 'Scheduled ${_formatChoreDate(_selectedDate!)}',
-                  ),
-                ),
-                if (_selectedDate != null)
-                  TextButton(
-                    onPressed: _isSubmitting
-                        ? null
-                        : () {
-                            setState(() {
-                              _selectedDate = null;
-                            });
-                          },
-                    child: const Text('Remove scheduled date'),
-                  ),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<String?>(
-                  initialValue: _selectedRecurrence,
-                  decoration: const InputDecoration(
-                    labelText: 'Repeat',
-                    border: OutlineInputBorder(),
-                  ),
-                  items: const [
-                    DropdownMenuItem<String?>(
-                      value: null,
-                      child: Text('Does not repeat'),
-                    ),
-                    DropdownMenuItem<String?>(
-                      value: 'daily',
-                      child: Text('Daily'),
-                    ),
-                    DropdownMenuItem<String?>(
-                      value: 'weekly',
-                      child: Text('Weekly'),
-                    ),
-                    DropdownMenuItem<String?>(
-                      value: 'monthly',
-                      child: Text('Monthly'),
-                    ),
-                  ],
-                  onChanged: _isSubmitting
-                      ? null
-                      : (value) {
-                          setState(() {
-                            _selectedRecurrence = value;
-                          });
-                        },
-                ),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<int>(
-                  initialValue: _points,
-                  decoration: const InputDecoration(
-                    labelText: 'Points',
-                    border: OutlineInputBorder(),
-                  ),
-                  items: const [
-                    DropdownMenuItem(
-                      value: 1,
-                      child: Text('1 point'),
-                    ),
-                    DropdownMenuItem(
-                      value: 2,
-                      child: Text('2 points'),
-                    ),
-                  ],
-                  onChanged: _isSubmitting
-                      ? null
-                      : (value) {
-                          if (value != null) {
-                            setState(() {
-                              _points = value;
-                            });
-                          }
-                        },
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _descriptionController,
-                  enabled: !_isSubmitting,
-                  decoration: const InputDecoration(
-                    labelText: 'Notes',
-                    border: OutlineInputBorder(),
-                  ),
-                  minLines: 2,
-                  maxLines: 4,
-                ),
-                const SizedBox(height: 16),
-                FilledButton(
-                  onPressed: _isSubmitting ? null : _submit,
-                  child: _isSubmitting
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Text('Save chore'),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ChoreListTile extends StatelessWidget {
-  const _ChoreListTile(this.calendar);
-
-  final ClientCalendar calendar;
-
-  @override
-  Widget build(BuildContext context) {
-    final firstLetter = calendar.name.trim().isNotEmpty
-        ? calendar.name.trim().characters.first.toUpperCase()
-        : '?';
-
-    return Card(
-      child: ListTile(
-        leading: CircleAvatar(child: Text(firstLetter)),
-        title: Text(calendar.name),
-        subtitle: Text(
-          [
-            if (calendar.serviceName.trim().isNotEmpty)
-              'From ${calendar.serviceName}',
-            if (calendar.readOnly) 'Read-only',
-          ].where((item) => item.trim().isNotEmpty).join(' · '),
-        ),
-      ),
-    );
-  }
-}
-
-class _ChoreSection extends StatelessWidget {
-  const _ChoreSection({
-    required this.title,
-    required this.chores,
-    required this.emptyMessage,
-    required this.scheduledLabelBuilder,
-    required this.updatingChoreIds,
-    required this.onToggleCompletion,
-    required this.onEditChore,
-    required this.onDeleteChore,
-  });
-
-  final String title;
-  final List<ClientChore> chores;
-  final String emptyMessage;
-  final String Function(ClientChore chore) scheduledLabelBuilder;
-  final Set<String> updatingChoreIds;
-  final ValueChanged<ClientChore> onToggleCompletion;
-  final ValueChanged<ClientChore> onEditChore;
-  final ValueChanged<ClientChore> onDeleteChore;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _SectionHeader(
-          title: title,
-          subtitle: '${chores.length}',
-        ),
-        const SizedBox(height: 8),
-        if (chores.isEmpty)
-          _EmptySectionMessage(message: emptyMessage)
-        else
-          ...chores.map(
-            (chore) => _ChoreTile(
-              chore: chore,
-              scheduledLabel: scheduledLabelBuilder(chore),
-              isUpdating: updatingChoreIds.contains(chore.completionActionId),
-              onToggleCompletion: () => onToggleCompletion(chore),
-              onEditChore: () => onEditChore(chore),
-              onDeleteChore: () => onDeleteChore(chore),
-            ),
-          ),
-      ],
-    );
-  }
-}
-
-class _ChoreTile extends StatelessWidget {
-  const _ChoreTile({
-    required this.chore,
-    required this.scheduledLabel,
-    required this.isUpdating,
-    required this.onToggleCompletion,
-    required this.onEditChore,
-    required this.onDeleteChore,
-  });
-
-  final ClientChore chore;
-  final String scheduledLabel;
-  final bool isUpdating;
-  final VoidCallback onToggleCompletion;
-  final VoidCallback onEditChore;
-  final VoidCallback onDeleteChore;
-
-  @override
-  Widget build(BuildContext context) {
-    final isHistory = chore.isCompletionLog || chore.section == 'history';
-    final icon = chore.completedToday || chore.section == 'doneToday'
-        ? Icons.check_circle_outline
-        : Icons.radio_button_unchecked;
-    final canToggle = !isHistory && chore.canToggleCompletion;
-
-    return Card(
-      child: ListTile(
-        leading: isUpdating
-            ? const SizedBox(
-                width: 24,
-                height: 24,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            : isHistory
-                ? const Icon(Icons.history_outlined)
-                : IconButton(
-                    icon: Icon(icon),
-                    onPressed: canToggle ? onToggleCompletion : null,
-                    tooltip: chore.completedToday || chore.section == 'doneToday'
-                        ? 'Undo completion'
-                        : 'Complete chore',
-                  ),
-        title: Text(chore.title),
-        trailing: isHistory
-            ? null
-            : Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.edit_outlined),
-                    onPressed: chore.completionActionId.trim().isEmpty
-                        ? null
-                        : onEditChore,
-                    tooltip: 'Edit chore',
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.delete_outline),
-                    onPressed: chore.completionActionId.trim().isEmpty
-                        ? null
-                        : onDeleteChore,
-                    tooltip: 'Delete chore',
-                  ),
-                ],
-              ),
-        subtitle: Text(
-          [
-            scheduledLabel,
-            if (chore.isCompletionLog) 'Completion record',
-            if (chore.points > 0)
-              '${chore.points} point${chore.points == 1 ? '' : 's'}',
-            if (chore.isRecurring) 'Repeats',
-            if (chore.serviceName.trim().isNotEmpty)
-              'From ${chore.serviceName}',
-            if ((chore.description ?? '').trim().isNotEmpty) chore.description!,
-          ].where((item) => item.trim().isNotEmpty).join(' · '),
-        ),
-      ),
-    );
-  }
-}
-
-class _SectionHeader extends StatelessWidget {
-  const _SectionHeader({
-    required this.title,
-    required this.subtitle,
-  });
-
-  final String title;
-  final String subtitle;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(title, style: Theme.of(context).textTheme.titleLarge),
-        Text(subtitle, style: Theme.of(context).textTheme.bodyMedium),
-      ],
-    );
-  }
-}
-
-class _EmptySectionMessage extends StatelessWidget {
-  const _EmptySectionMessage({
-    required this.message,
-    this.action,
-  });
-
-  final String message;
-  final Widget? action;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(message),
-            if (action != null) ...[
-              const SizedBox(height: 8),
-              action!,
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ChoresEmptyState extends StatelessWidget {
-  const _ChoresEmptyState({
-    this.onCreateChoreList,
-  });
-
-  final VoidCallback? onCreateChoreList;
-
-  @override
-  Widget build(BuildContext context) {
-    return const Center(
-      child: Text('No chores available yet.'),
-    );
-  }
-}
-
-class _ChoresErrorState extends StatelessWidget {
-  const _ChoresErrorState({
-    required this.onRetry,
-  });
-
-  final VoidCallback onRetry;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Card(
-        margin: const EdgeInsets.all(24),
-        child: Padding(
-          padding: const EdgeInsets.all(24),
+    return CaleeBottomSheet(
+      title: 'Edit chore',
+      child: Form(
+        key: _formKey,
+        child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text('Unable to load chores.'),
-              const SizedBox(height: 12),
+              if (widget.chore.isRecurring) ...[
+                Container(
+                  padding: const EdgeInsets.all(CaleeSpacing.sm + 4),
+                  decoration: BoxDecoration(
+                    color: CaleeColors.primary.withAlpha(15),
+                    borderRadius: BorderRadius.circular(CaleeRadius.card),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.repeat,
+                        size: 16,
+                        color: CaleeColors.primary,
+                      ),
+                      const SizedBox(width: CaleeSpacing.sm),
+                      Expanded(
+                        child: Text(
+                          'Repeating chore — changes apply going forward.',
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: CaleeColors.primary,
+                              ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: CaleeSpacing.sm + 4),
+              ],
+              TextFormField(
+                controller: _titleController,
+                enabled: !_isSubmitting,
+                autofocus: true,
+                decoration: const InputDecoration(labelText: 'Title'),
+                textInputAction: TextInputAction.next,
+                validator: (value) {
+                  if ((value ?? '').trim().isEmpty) {
+                    return 'Enter a chore title';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: CaleeSpacing.sm + 4),
+              OutlinedButton.icon(
+                onPressed: _isSubmitting ? null : _pickDate,
+                icon: const Icon(Icons.event_outlined),
+                label: Text(
+                  _selectedDate == null
+                      ? 'Add scheduled date'
+                      : 'Scheduled ${_formatChoreDate(_selectedDate!)}',
+                ),
+              ),
+              if (_selectedDate != null)
+                TextButton(
+                  onPressed: _isSubmitting
+                      ? null
+                      : () {
+                          setState(() {
+                            _selectedDate = null;
+                          });
+                        },
+                  child: const Text('Remove scheduled date'),
+                ),
+              const SizedBox(height: CaleeSpacing.sm + 4),
+              DropdownButtonFormField<String?>(
+                value: _selectedRecurrence,
+                decoration: const InputDecoration(labelText: 'Repeat'),
+                items: const [
+                  DropdownMenuItem<String?>(
+                    value: null,
+                    child: Text('Does not repeat'),
+                  ),
+                  DropdownMenuItem<String?>(
+                    value: 'daily',
+                    child: Text('Daily'),
+                  ),
+                  DropdownMenuItem<String?>(
+                    value: 'weekly',
+                    child: Text('Weekly'),
+                  ),
+                  DropdownMenuItem<String?>(
+                    value: 'monthly',
+                    child: Text('Monthly'),
+                  ),
+                ],
+                onChanged: _isSubmitting
+                    ? null
+                    : (value) {
+                        setState(() {
+                          _selectedRecurrence = value;
+                        });
+                      },
+              ),
+              const SizedBox(height: CaleeSpacing.sm + 4),
+              DropdownButtonFormField<int>(
+                value: _points,
+                decoration: const InputDecoration(labelText: 'Points'),
+                items: const [
+                  DropdownMenuItem(value: 1, child: Text('1 point')),
+                  DropdownMenuItem(value: 2, child: Text('2 points')),
+                ],
+                onChanged: _isSubmitting
+                    ? null
+                    : (value) {
+                        if (value != null) {
+                          setState(() {
+                            _points = value;
+                          });
+                        }
+                      },
+              ),
+              const SizedBox(height: CaleeSpacing.sm + 4),
+              TextFormField(
+                controller: _descriptionController,
+                enabled: !_isSubmitting,
+                decoration: const InputDecoration(labelText: 'Notes'),
+                minLines: 2,
+                maxLines: 4,
+              ),
+              const SizedBox(height: CaleeSpacing.md),
               FilledButton(
-                onPressed: onRetry,
-                child: const Text('Try again'),
+                onPressed: _isSubmitting ? null : _submit,
+                child: _isSubmitting
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('Save chore'),
               ),
             ],
           ),
