@@ -2,8 +2,54 @@ import 'package:flutter/material.dart';
 
 import '../../data/api/calee_hub_client.dart';
 import '../../data/models/client_bootstrap.dart';
-import '../settings/calendar_collections_page.dart';
 import '../../data/models/client_calendar.dart';
+import '../../ui/calee_design.dart';
+import '../settings/calendar_collections_page.dart';
+
+// ─── Label helpers ────────────────────────────────────────────────────────────
+
+const _kMonthNames = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+];
+
+const _kDayAbbr = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+
+const _kFullDayNames = [
+  'Sunday',
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+];
+
+String _monthYearLabel(DateTime d) => '${_kMonthNames[d.month - 1]} ${d.year}';
+
+bool _isSameDay(DateTime a, DateTime b) =>
+    a.year == b.year && a.month == b.month && a.day == b.day;
+
+String _eventTimeLabel(ClientEvent event) {
+  final start = DateTime.tryParse(event.startsAt)?.toLocal();
+  if (start == null) return event.allDay ? 'All day' : '';
+  if (event.allDay) return 'All day';
+  final h = start.hour.toString().padLeft(2, '0');
+  final m = start.minute.toString().padLeft(2, '0');
+  return '$h:$m';
+}
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
 
 class CalendarPage extends StatefulWidget {
   const CalendarPage({
@@ -22,63 +68,150 @@ class CalendarPage extends StatefulWidget {
 }
 
 class _CalendarPageState extends State<CalendarPage> {
-  late Future<_CalendarOverview> _overviewFuture;
+  // ── State ──────────────────────────────────────────────────────────────────
+
+  late DateTime _today;
+  late DateTime _selectedMonth; // always the 1st of the displayed month
+  late DateTime _selectedDay;
+
+  List<ClientCalendar> _calendars = [];
+  List<ClientEvent> _events = [];
+  bool _loading = false;
+  Object? _error;
+
+  // Grid start: first Sunday on or before the first of _selectedMonth
+  late DateTime _gridStart;
+
+  // ── Lifecycle ──────────────────────────────────────────────────────────────
 
   @override
   void initState() {
     super.initState();
-    _overviewFuture = _loadOverview();
+    final now = DateTime.now();
+    _today = DateTime(now.year, now.month, now.day);
+    _selectedDay = _today;
+    _selectedMonth = DateTime(now.year, now.month, 1);
+    _gridStart = _computeGridStart(_selectedMonth);
+    _loadMonth();
   }
 
-  Future<_CalendarOverview> _loadOverview() async {
-    final today = DateTime.now();
-    final fromDate = today;
-    final toDate = today.add(const Duration(days: 7));
-    final from = _formatDate(fromDate);
-    final to = _formatDate(toDate);
+  // ── Data loading ───────────────────────────────────────────────────────────
 
-    final results = await Future.wait([
-      widget.hubClient.calendars(accessToken: widget.accessToken),
-      widget.hubClient.events(
-        accessToken: widget.accessToken,
-        from: from,
-        to: to,
-      ),
-    ]);
-
-    return _CalendarOverview(
-      calendarList: results[0] as ClientCalendarList,
-      eventList: results[1] as ClientEventList,
-      fromDate: fromDate,
-      toDate: toDate,
-    );
+  static DateTime _computeGridStart(DateTime firstOfMonth) {
+    // weekday: Mon=1 … Sun=7 → Sunday-first offset: (weekday % 7) gives Sun=0
+    final offset = firstOfMonth.weekday % 7;
+    return firstOfMonth.subtract(Duration(days: offset));
   }
+
+  Future<void> _loadMonth() async {
+    final gridStart = _computeGridStart(_selectedMonth);
+    final gridEnd = gridStart.add(const Duration(days: 41)); // 6 weeks − 1 day
+
+    setState(() {
+      _gridStart = gridStart;
+      _loading = true;
+      _error = null;
+    });
+
+    try {
+      final results = await Future.wait([
+        widget.hubClient.calendars(accessToken: widget.accessToken),
+        widget.hubClient.events(
+          accessToken: widget.accessToken,
+          from: _formatDate(gridStart),
+          to: _formatDate(gridEnd),
+        ),
+      ]);
+
+      if (!mounted) return;
+
+      setState(() {
+        _calendars = (results[0] as ClientCalendarList)
+            .calendars
+            .where((c) => c.isCalendarKind)
+            .toList();
+        _events = (results[1] as ClientEventList).events;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e;
+        _loading = false;
+      });
+    }
+  }
+
+  // ── Month navigation ───────────────────────────────────────────────────────
+
+  void _goToToday() {
+    final now = DateTime.now();
+    final newToday = DateTime(now.year, now.month, now.day);
+    final newMonth = DateTime(now.year, now.month, 1);
+    final sameMonth = newMonth.year == _selectedMonth.year &&
+        newMonth.month == _selectedMonth.month;
+    setState(() {
+      _today = newToday;
+      _selectedDay = newToday;
+      _selectedMonth = newMonth;
+    });
+    if (!sameMonth) {
+      _loadMonth();
+    }
+  }
+
+  void _prevMonth() {
+    final newMonth =
+        DateTime(_selectedMonth.year, _selectedMonth.month - 1, 1);
+    setState(() {
+      _selectedMonth = newMonth;
+      if (_selectedDay.year != newMonth.year ||
+          _selectedDay.month != newMonth.month) {
+        _selectedDay = newMonth;
+      }
+    });
+    _loadMonth();
+  }
+
+  void _nextMonth() {
+    final newMonth =
+        DateTime(_selectedMonth.year, _selectedMonth.month + 1, 1);
+    setState(() {
+      _selectedMonth = newMonth;
+      if (_selectedDay.year != newMonth.year ||
+          _selectedDay.month != newMonth.month) {
+        _selectedDay = newMonth;
+      }
+    });
+    _loadMonth();
+  }
+
+  // ── CRUD (preserved) ───────────────────────────────────────────────────────
 
   void _openCollectionCreateShortcut() {
     Navigator.of(context)
         .push(
-      MaterialPageRoute<void>(
-        builder: (_) => CalendarCollectionsPage(
-          hubClient: widget.hubClient,
-          accessToken: widget.accessToken,
-          services: widget.services,
-          initialCreateKind: 'calendar',
-          autoOpenCreate: true,
-        ),
-      ),
-    )
+          MaterialPageRoute<void>(
+            builder: (_) => CalendarCollectionsPage(
+              hubClient: widget.hubClient,
+              accessToken: widget.accessToken,
+              services: widget.services,
+              initialCreateKind: 'calendar',
+              autoOpenCreate: true,
+            ),
+          ),
+        )
         .then((_) {
-      if (mounted) {
-        _reloadOverview();
-      }
+      if (mounted) _loadMonth();
     });
   }
 
-  Future<void> _openCreateEventSheet(List<ClientCalendar> calendars) async {
+  Future<void> _openCreateEventSheet() async {
     final writableCalendars =
-        calendars.where((calendar) => !calendar.readOnly).toList();
+        _calendars.where((c) => !c.readOnly).toList();
 
     if (writableCalendars.isEmpty) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('No writable calendar is available.')),
       );
@@ -90,35 +223,29 @@ class _CalendarPageState extends State<CalendarPage> {
       isScrollControlled: true,
       builder: (context) => _CreateEventSheet(
         calendars: writableCalendars,
+        initialDate: _selectedDay,
         onCreate: _createEvent,
       ),
     );
 
     if (created == true && mounted) {
-      _reloadOverview();
+      _loadMonth();
     }
   }
 
-  ClientCalendar? _calendarForEvent(
-    ClientEvent event,
-    List<ClientCalendar> calendars,
-  ) {
-    for (final calendar in calendars) {
+  ClientCalendar? _calendarForEvent(ClientEvent event) {
+    for (final calendar in _calendars) {
       if (calendar.id == event.calendarId ||
           calendar.id.endsWith(':${event.calendarId}') ||
           event.calendarId.endsWith(':${calendar.id}')) {
         return calendar;
       }
     }
-
     return null;
   }
 
-  Future<void> _openEventActions(
-    ClientEvent event,
-    List<ClientCalendar> calendars,
-  ) async {
-    final calendar = _calendarForEvent(event, calendars);
+  Future<void> _openEventActions(ClientEvent event) async {
+    final calendar = _calendarForEvent(event);
     final canWrite = calendar != null && !calendar.readOnly;
 
     final editLabel = event.recurring ? 'Edit series' : 'Edit event';
@@ -136,7 +263,7 @@ class _CalendarPageState extends State<CalendarPage> {
             ListTile(
               leading: const Icon(Icons.event_outlined),
               title: Text(event.title),
-              subtitle: Text(_EventTile.formatEventTime(event)),
+              subtitle: Text(_agendaTimeLabel(event)),
             ),
             const Divider(height: 1),
             ListTile(
@@ -144,7 +271,8 @@ class _CalendarPageState extends State<CalendarPage> {
               leading: const Icon(Icons.edit_outlined),
               title: Text(editLabel),
               subtitle: canWrite ? null : Text(readOnlyMessage),
-              onTap: canWrite ? () => Navigator.of(context).pop('edit') : null,
+              onTap:
+                  canWrite ? () => Navigator.of(context).pop('edit') : null,
             ),
             ListTile(
               enabled: canWrite,
@@ -159,16 +287,11 @@ class _CalendarPageState extends State<CalendarPage> {
       ),
     );
 
-    if (!mounted) {
-      return;
-    }
+    if (!mounted) return;
 
     if (action == 'edit') {
       final editScope = await _chooseEditScope(event);
-      if (editScope == null || !mounted) {
-        return;
-      }
-
+      if (editScope == null || !mounted) return;
       await _openEditEventSheet(event, calendar!, editScope: editScope);
     } else if (action == 'delete') {
       await _confirmDeleteEvent(event);
@@ -176,9 +299,7 @@ class _CalendarPageState extends State<CalendarPage> {
   }
 
   Future<String?> _chooseEditScope(ClientEvent event) async {
-    if (!event.recurring) {
-      return 'series';
-    }
+    if (!event.recurring) return 'series';
 
     return showDialog<String>(
       context: context,
@@ -223,7 +344,7 @@ class _CalendarPageState extends State<CalendarPage> {
     );
 
     if (updated == true && mounted) {
-      _reloadOverview();
+      _loadMonth();
     }
   }
 
@@ -258,7 +379,8 @@ class _CalendarPageState extends State<CalendarPage> {
       allDay: editSeriesMetadataOnly ? null : allDay,
       location: location,
       description: description,
-      recurrence: editOccurrence || editSeriesMetadataOnly ? null : recurrence,
+      recurrence:
+          editOccurrence || editSeriesMetadataOnly ? null : recurrence,
       includeRecurrence: !editOccurrence && !editSeriesMetadataOnly,
       scope: event.recurring ? editScope : null,
     );
@@ -308,9 +430,7 @@ class _CalendarPageState extends State<CalendarPage> {
       },
     );
 
-    if (deleteScope == null) {
-      return;
-    }
+    if (deleteScope == null) return;
 
     final deleteOccurrence = event.recurring && deleteScope == 'occurrence';
 
@@ -333,7 +453,7 @@ class _CalendarPageState extends State<CalendarPage> {
             ),
           ),
         );
-        _reloadOverview();
+        _loadMonth();
       }
     } catch (error) {
       if (mounted) {
@@ -378,249 +498,542 @@ class _CalendarPageState extends State<CalendarPage> {
     );
   }
 
-  void _reloadOverview() {
-    setState(() {
-      _overviewFuture = _loadOverview();
-    });
-  }
+  // ── Helpers ────────────────────────────────────────────────────────────────
 
   String _formatDate(DateTime value) {
     final local = value.toLocal();
     final year = local.year.toString().padLeft(4, '0');
     final month = local.month.toString().padLeft(2, '0');
     final day = local.day.toString().padLeft(2, '0');
-
     return '$year-$month-$day';
   }
 
-  String _formatDateRange(DateTime from, DateTime to) {
-    final start = from.toLocal();
-    final end = to.toLocal();
-
-    return '${start.day}/${start.month} - ${end.day}/${end.month}';
+  List<ClientEvent> _eventsForDay(DateTime day) {
+    final result = <ClientEvent>[];
+    for (final event in _events) {
+      final start = DateTime.tryParse(event.startsAt)?.toLocal();
+      if (start == null) continue;
+      if (event.allDay) {
+        final end = DateTime.tryParse(event.endsAt)?.toLocal();
+        final startDate = DateTime(start.year, start.month, start.day);
+        // all-day endsAt is exclusive
+        final endDate = end != null
+            ? DateTime(end.year, end.month, end.day)
+                .subtract(const Duration(days: 1))
+            : startDate;
+        final check = DateTime(day.year, day.month, day.day);
+        if (!check.isBefore(startDate) && !check.isAfter(endDate)) {
+          result.add(event);
+        }
+      } else {
+        if (start.year == day.year &&
+            start.month == day.month &&
+            start.day == day.day) {
+          result.add(event);
+        }
+      }
+    }
+    result.sort((a, b) {
+      final at = DateTime.tryParse(a.startsAt);
+      final bt = DateTime.tryParse(b.startsAt);
+      if (at == null || bt == null) return 0;
+      return at.compareTo(bt);
+    });
+    return result;
   }
+
+  Color _eventColor(ClientEvent event) {
+    final cal = _calendarForEvent(event);
+    if (cal?.color != null) {
+      final parsed = _parseHexColor(cal!.color!);
+      if (parsed != null) return parsed;
+    }
+    return CaleeColors.dotBlue;
+  }
+
+  Color? _parseHexColor(String hex) {
+    final clean = hex.startsWith('#') ? hex.substring(1) : hex;
+    if (clean.length == 6) {
+      final value = int.tryParse(clean, radix: 16);
+      if (value != null) return Color(0xFF000000 | value);
+    }
+    if (clean.length == 8) {
+      final value = int.tryParse(clean, radix: 16);
+      if (value != null) return Color(value);
+    }
+    return null;
+  }
+
+  String _agendaTimeLabel(ClientEvent event) {
+    return _eventTimeLabel(event);
+  }
+
+  String _agendaDateLabel(DateTime day) {
+    if (_isSameDay(day, _today)) return 'Today';
+    final weekday = _kFullDayNames[day.weekday % 7]; // Sun=0
+    return '$weekday ${day.day} ${_kMonthNames[day.month - 1]}';
+  }
+
+  // ── Build ──────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<_CalendarOverview>(
-      future: _overviewFuture,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(
-            child: CircularProgressIndicator(),
-          );
-        }
+    if (_loading && _calendars.isEmpty && _events.isEmpty) {
+      return CaleeScaffold(
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
 
-        if (snapshot.hasError) {
-          return _CalendarErrorState(
-            onRetry: _reloadOverview,
-          );
-        }
+    if (_error != null && _calendars.isEmpty && _events.isEmpty) {
+      return CaleeScaffold(
+        body: _CalendarErrorState(onRetry: _loadMonth),
+      );
+    }
 
-        final overview = snapshot.data;
-        if (overview == null) {
-          return _CalendarEmptyState(
-            onCreateCalendar: _openCollectionCreateShortcut,
-          );
-        }
-
-        final calendars = overview.calendarList.calendars
-            .where((calendar) => calendar.isCalendarKind)
-            .toList();
-        final events = overview.eventList.events;
-
-        if (calendars.isEmpty && events.isEmpty) {
-          return _CalendarEmptyState(
-            onCreateCalendar: _openCollectionCreateShortcut,
-          );
-        }
-
-        return RefreshIndicator(
-          onRefresh: () async {
-            _reloadOverview();
-            await _overviewFuture;
-          },
-          child: ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              _SectionHeader(
-                title: 'Calendars',
-                subtitle: '${calendars.length} found',
+    return CaleeScaffold(
+      body: SafeArea(
+        child: Column(
+          children: [
+            _buildTopBar(),
+            _buildWeekdayHeader(),
+            _buildMonthGrid(),
+            const Divider(height: 1),
+            Expanded(
+              child: RefreshIndicator(
+                onRefresh: _loadMonth,
+                child: ListView(
+                  padding: EdgeInsets.zero,
+                  children: _buildAgendaItems(),
+                ),
               ),
-              const SizedBox(height: 8),
-              if (calendars.isEmpty)
-                _EmptySectionMessage(
-                  message: 'No calendars found yet.',
-                  action: TextButton.icon(
-                    onPressed: _openCollectionCreateShortcut,
-                    icon: const Icon(Icons.add),
-                    label: const Text('Create calendar'),
-                  ),
-                )
-              else
-                ...calendars.map(_CalendarTile.new),
-              const SizedBox(height: 24),
-              _SectionHeader(
-                title: 'Upcoming events',
-                subtitle: _formatDateRange(overview.fromDate, overview.toDate),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTopBar() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: CaleeSpacing.sm,
+        vertical: CaleeSpacing.xs,
+      ),
+      child: Row(
+        children: [
+          TextButton(
+            onPressed: _goToToday,
+            style: TextButton.styleFrom(
+              foregroundColor: CaleeColors.primary,
+              padding: const EdgeInsets.symmetric(
+                horizontal: CaleeSpacing.sm,
+                vertical: CaleeSpacing.xs,
               ),
-              const SizedBox(height: 8),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: FilledButton.icon(
-                  onPressed: calendars.isEmpty
-                      ? _openCollectionCreateShortcut
-                      : () => _openCreateEventSheet(calendars),
-                  icon: const Icon(Icons.add),
-                  label: Text(
-                    calendars.isEmpty ? 'Create calendar' : 'Add event',
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: const Text(
+              'Today',
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+            ),
+          ),
+          const SizedBox(width: CaleeSpacing.xs),
+          IconButton(
+            onPressed: _prevMonth,
+            icon: const Icon(Icons.chevron_left),
+            iconSize: 22,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+            color: CaleeColors.primary,
+          ),
+          Expanded(
+            child: Text(
+              _monthYearLabel(_selectedMonth),
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.w600,
+                color: CaleeColors.textPrimary,
+              ),
+            ),
+          ),
+          IconButton(
+            onPressed: _nextMonth,
+            icon: const Icon(Icons.chevron_right),
+            iconSize: 22,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+            color: CaleeColors.primary,
+          ),
+          const SizedBox(width: CaleeSpacing.xs),
+          IconButton(
+            onPressed: _openCreateEventSheet,
+            icon: const Icon(Icons.add),
+            iconSize: 22,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+            color: CaleeColors.primary,
+            tooltip: 'Add event',
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWeekdayHeader() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: CaleeSpacing.xs,
+        vertical: 2,
+      ),
+      child: Row(
+        children: _kDayAbbr
+            .map(
+              (d) => Expanded(
+                child: Center(
+                  child: Text(
+                    d,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: CaleeColors.textSecondary,
+                    ),
                   ),
                 ),
               ),
-              const SizedBox(height: 12),
-              if (events.isEmpty)
-                _EmptySectionMessage(
-                  message: 'No events found in this date range.',
-                  action: calendars.isEmpty
-                      ? TextButton.icon(
-                          onPressed: _openCollectionCreateShortcut,
-                          icon: const Icon(Icons.add),
-                          label: const Text('Create calendar'),
-                        )
-                      : TextButton.icon(
-                          onPressed: () => _openCreateEventSheet(calendars),
-                          icon: const Icon(Icons.add),
-                          label: const Text('Add event'),
-                        ),
-                )
-              else
-                ...events.map(
-                  (event) => _EventTile(
-                    event: event,
-                    onTap: () => _openEventActions(event, calendars),
-                  ),
-                ),
-            ],
+            )
+            .toList(),
+      ),
+    );
+  }
+
+  Widget _buildMonthGrid() {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final cellSize = constraints.maxWidth / 7;
+        return SizedBox(
+          height: cellSize * 6,
+          child: GridView.builder(
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 7,
+            ),
+            itemCount: 42,
+            itemBuilder: (context, index) {
+              final date = _gridStart.add(Duration(days: index));
+              final dayEvents = _eventsForDay(date);
+              final dotColors =
+                  dayEvents.take(3).map(_eventColor).toList();
+              return _DayCell(
+                date: date,
+                isCurrentMonth: date.month == _selectedMonth.month,
+                isToday: _isSameDay(date, _today),
+                isSelected: _isSameDay(date, _selectedDay),
+                dotColors: dotColors,
+                onTap: () => setState(() => _selectedDay = date),
+              );
+            },
           ),
         );
       },
     );
   }
-}
 
-class _CalendarOverview {
-  const _CalendarOverview({
-    required this.calendarList,
-    required this.eventList,
-    required this.fromDate,
-    required this.toDate,
-  });
+  List<Widget> _buildAgendaItems() {
+    final items = <Widget>[];
 
-  final ClientCalendarList calendarList;
-  final ClientEventList eventList;
-  final DateTime fromDate;
-  final DateTime toDate;
-}
-
-class _CalendarTile extends StatelessWidget {
-  const _CalendarTile(this.calendar);
-
-  final ClientCalendar calendar;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: ListTile(
-        leading: CircleAvatar(
-          child: Text(
-            calendar.name.isNotEmpty
-                ? calendar.name.characters.first.toUpperCase()
-                : '?',
-          ),
+    // Date header
+    items.add(
+      Padding(
+        padding: const EdgeInsets.fromLTRB(
+          CaleeSpacing.md,
+          CaleeSpacing.md,
+          CaleeSpacing.md,
+          CaleeSpacing.xs,
         ),
-        title: Text(calendar.name),
-        subtitle: Text(
-          [
-            if (calendar.serviceName.trim().isNotEmpty)
-              'From ${calendar.serviceName}',
-            if (calendar.readOnly) 'Read-only',
-          ].where((item) => item.trim().isNotEmpty).join(' · '),
+        child: Text(
+          _agendaDateLabel(_selectedDay),
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: _isSameDay(_selectedDay, _today)
+                ? CaleeColors.primary
+                : CaleeColors.textSecondary,
+            letterSpacing: 0.2,
+          ),
         ),
       ),
     );
+
+    final dayEvents = _eventsForDay(_selectedDay);
+
+    if (dayEvents.isEmpty) {
+      items.add(
+        Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: CaleeSpacing.md,
+            vertical: CaleeSpacing.lg,
+          ),
+          child: Center(
+            child: Text(
+              'No events',
+              style: TextStyle(
+                fontSize: 15,
+                color: CaleeColors.textTertiary,
+              ),
+            ),
+          ),
+        ),
+      );
+    } else {
+      for (final event in dayEvents) {
+        items.add(
+          _AgendaEventRow(
+            event: event,
+            color: _eventColor(event),
+            calendarName: _calendarForEvent(event)?.name,
+            onTap: () => _openEventActions(event),
+          ),
+        );
+      }
+    }
+
+    // Bottom padding so content isn't cut off
+    items.add(const SizedBox(height: CaleeSpacing.xl));
+
+    return items;
   }
 }
 
-class _EventTile extends StatelessWidget {
-  const _EventTile({
-    required this.event,
+// ─── Month day cell ───────────────────────────────────────────────────────────
+
+class _DayCell extends StatelessWidget {
+  const _DayCell({
+    required this.date,
+    required this.isCurrentMonth,
+    required this.isToday,
+    required this.isSelected,
+    required this.dotColors,
     required this.onTap,
   });
 
-  final ClientEvent event;
+  final DateTime date;
+  final bool isCurrentMonth;
+  final bool isToday;
+  final bool isSelected;
+  final List<Color> dotColors;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      child: ListTile(
-        onTap: onTap,
-        leading: const Icon(Icons.event_outlined),
-        title: Text(event.title),
-        subtitle: Text(
-          [
-            formatEventTime(event),
-            if (event.serviceName.trim().isNotEmpty)
-              'From ${event.serviceName}',
-            if ((event.location ?? '').trim().isNotEmpty) event.location!,
-          ].where((item) => item.trim().isNotEmpty).join(' · '),
-        ),
-        trailing: const Icon(Icons.more_horiz),
+    final Color numberColor;
+    final Color? bgColor;
+
+    if (isToday && isSelected) {
+      bgColor = CaleeColors.primary;
+      numberColor = Colors.white;
+    } else if (isToday) {
+      bgColor = CaleeColors.primary;
+      numberColor = Colors.white;
+    } else if (isSelected) {
+      bgColor = CaleeColors.primary.withAlpha(30);
+      numberColor = CaleeColors.primary;
+    } else if (isCurrentMonth) {
+      bgColor = null;
+      numberColor = CaleeColors.textPrimary;
+    } else {
+      bgColor = null;
+      numberColor = CaleeColors.textTertiary;
+    }
+
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            width: 30,
+            height: 30,
+            decoration: bgColor != null
+                ? BoxDecoration(color: bgColor, shape: BoxShape.circle)
+                : null,
+            alignment: Alignment.center,
+            child: Text(
+              '${date.day}',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight:
+                    isToday ? FontWeight.w700 : FontWeight.w400,
+                color: numberColor,
+              ),
+            ),
+          ),
+          const SizedBox(height: 3),
+          _EventDots(colors: dotColors),
+        ],
       ),
     );
   }
+}
 
-  static String formatEventTime(ClientEvent event) {
-    final start = DateTime.tryParse(event.startsAt);
-    if (start == null) {
-      return event.allDay ? 'All day' : event.startsAt;
+// ─── Event dots row ───────────────────────────────────────────────────────────
+
+class _EventDots extends StatelessWidget {
+  const _EventDots({required this.colors});
+
+  final List<Color> colors;
+
+  @override
+  Widget build(BuildContext context) {
+    if (colors.isEmpty) {
+      return const SizedBox(height: 5);
     }
 
-    final local = start.toLocal();
-
-    if (event.allDay) {
-      final end = DateTime.tryParse(event.endsAt)?.toLocal();
-      if (end == null) {
-        return '${local.day}/${local.month} · All day';
-      }
-
-      final visibleEnd = end.subtract(const Duration(days: 1));
-      if (visibleEnd.year == local.year &&
-          visibleEnd.month == local.month &&
-          visibleEnd.day == local.day) {
-        return '${local.day}/${local.month} · All day';
-      }
-
-      return '${local.day}/${local.month} - ${visibleEnd.day}/${visibleEnd.month} · All day';
-    }
-
-    final hour = local.hour.toString().padLeft(2, '0');
-    final minute = local.minute.toString().padLeft(2, '0');
-
-    return '${local.day}/${local.month} $hour:$minute';
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        for (int i = 0; i < colors.length; i++) ...[
+          if (i > 0) const SizedBox(width: 2),
+          Container(
+            width: 5,
+            height: 5,
+            decoration: BoxDecoration(
+              color: colors[i],
+              shape: BoxShape.circle,
+            ),
+          ),
+        ],
+      ],
+    );
   }
 }
+
+// ─── Agenda event row ─────────────────────────────────────────────────────────
+
+class _AgendaEventRow extends StatelessWidget {
+  const _AgendaEventRow({
+    required this.event,
+    required this.color,
+    required this.onTap,
+    this.calendarName,
+  });
+
+  final ClientEvent event;
+  final Color color;
+  final VoidCallback onTap;
+  final String? calendarName;
+
+  @override
+  Widget build(BuildContext context) {
+    final timeLabel = _eventTimeLabel(event);
+    final subtitle = [
+      if (calendarName != null && calendarName!.trim().isNotEmpty)
+        calendarName!.trim(),
+      if ((event.location ?? '').trim().isNotEmpty) event.location!.trim(),
+    ].join(' · ');
+
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: CaleeSpacing.md,
+          vertical: 10,
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Colored left bar
+            Container(
+              width: 3,
+              height: subtitle.isNotEmpty ? 40 : 22,
+              decoration: BoxDecoration(
+                color: color,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(width: CaleeSpacing.sm + 2),
+            // Time
+            SizedBox(
+              width: 42,
+              child: Text(
+                timeLabel,
+                style: const TextStyle(
+                  fontSize: 13,
+                  color: CaleeColors.textSecondary,
+                  height: 1.4,
+                ),
+              ),
+            ),
+            const SizedBox(width: CaleeSpacing.sm),
+            // Title + subtitle
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    event.title,
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w500,
+                      color: CaleeColors.textPrimary,
+                    ),
+                  ),
+                  if (subtitle.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: CaleeColors.textSecondary,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Error state ──────────────────────────────────────────────────────────────
+
+class _CalendarErrorState extends StatelessWidget {
+  const _CalendarErrorState({required this.onRetry});
+
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return CaleeEmptyState(
+      icon: Icons.cloud_off_outlined,
+      title: 'Unable to load calendar',
+      body: 'Check your connection, then try again.',
+      action: FilledButton(
+        onPressed: onRetry,
+        child: const Text('Try again'),
+      ),
+    );
+  }
+}
+
+// ─── Create / Edit event sheet ────────────────────────────────────────────────
 
 class _CreateEventSheet extends StatefulWidget {
   const _CreateEventSheet({
     required this.calendars,
     required this.onCreate,
+    this.initialDate,
     this.initialEvent,
     this.editScope,
     this.onUpdate,
   });
 
   final List<ClientCalendar> calendars;
+  final DateTime? initialDate;
   final ClientEvent? initialEvent;
   final String? editScope;
   final Future<void> Function({
@@ -716,8 +1129,12 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
       return;
     }
 
+    // Use initialDate from calendar selection if provided, else today
+    final initial = widget.initialDate;
     final now = DateTime.now();
-    _selectedDate = DateTime(now.year, now.month, now.day);
+    _selectedDate = initial != null
+        ? DateTime(initial.year, initial.month, initial.day)
+        : DateTime(now.year, now.month, now.day);
     _selectedEndDate = _selectedDate;
     _recurrenceEndDate = _selectedDate.add(const Duration(days: 30));
 
@@ -757,39 +1174,27 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
 
   Map<String, String> _parseRRule(String? recurrence) {
     final value = (recurrence ?? '').trim();
-    if (value.isEmpty) {
-      return {};
-    }
+    if (value.isEmpty) return {};
 
     final parts = <String, String>{};
     for (final part in value.split(';')) {
       final separator = part.indexOf('=');
-      if (separator <= 0 || separator == part.length - 1) {
-        continue;
-      }
-
+      if (separator <= 0 || separator == part.length - 1) continue;
       final key = part.substring(0, separator).trim().toUpperCase();
-      final parsedValue = part.substring(separator + 1).trim().toUpperCase();
+      final parsedValue =
+          part.substring(separator + 1).trim().toUpperCase();
       parts[key] = parsedValue;
     }
-
     return parts;
   }
 
   DateTime? _dateFromRRuleUntil(String? value) {
-    if (value == null || value.length < 8) {
-      return null;
-    }
-
+    if (value == null || value.length < 8) return null;
     final rawDate = value.substring(0, 8);
     final year = int.tryParse(rawDate.substring(0, 4));
     final month = int.tryParse(rawDate.substring(4, 6));
     final day = int.tryParse(rawDate.substring(6, 8));
-
-    if (year == null || month == null || day == null) {
-      return null;
-    }
-
+    if (year == null || month == null || day == null) return null;
     return DateTime(year, month, day);
   }
 
@@ -831,9 +1236,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
       _ => null,
     };
 
-    if (frequency == null) {
-      return null;
-    }
+    if (frequency == null) return null;
 
     final parts = <String>['FREQ=$frequency'];
 
@@ -842,7 +1245,6 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
       if (count == null || count < 1) {
         throw const FormatException('Enter a repeat count of at least 1.');
       }
-
       parts.add('COUNT=$count');
     } else if (_recurrenceEnd == 'date') {
       parts.add('UNTIL=${_formatRRuleUntil(_recurrenceEndDate)}');
@@ -856,7 +1258,6 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
       final year = value.year.toString().padLeft(4, '0');
       final month = value.month.toString().padLeft(2, '0');
       final day = value.day.toString().padLeft(2, '0');
-
       return '$year$month$day';
     }
 
@@ -900,7 +1301,6 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
     if (picked != null && mounted) {
       setState(() {
         _selectedDate = DateTime(picked.year, picked.month, picked.day);
-
         if (_selectedEndDate.isBefore(_selectedDate)) {
           _selectedEndDate = _selectedDate;
         }
@@ -969,9 +1369,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
   }
 
   Future<void> _submit() async {
-    if (_isSubmitting || !_formKey.currentState!.validate()) {
-      return;
-    }
+    if (_isSubmitting || !_formKey.currentState!.validate()) return;
 
     final metadataOnly = _isEditingRecurringSeriesMetadata;
     DateTime? startsAt;
@@ -990,11 +1388,11 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
           );
           return;
         }
-
         endsAt = _selectedEndDate.add(const Duration(days: 1));
       } else if (!endsAt.isAfter(startsAt)) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('End time must be after start time.')),
+          const SnackBar(
+              content: Text('End time must be after start time.')),
         );
         return;
       }
@@ -1129,7 +1527,6 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                     if ((value ?? '').trim().isEmpty) {
                       return 'Enter a title';
                     }
-
                     return null;
                   },
                 ),
@@ -1154,15 +1551,19 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                           child: OutlinedButton.icon(
                             onPressed: _isSubmitting ? null : _pickDate,
                             icon: const Icon(Icons.today_outlined),
-                            label: Text('Start ${_dateLabel(_selectedDate)}'),
+                            label:
+                                Text('Start ${_dateLabel(_selectedDate)}'),
                           ),
                         ),
                         const SizedBox(width: 8),
                         Expanded(
                           child: OutlinedButton.icon(
-                            onPressed: _isSubmitting ? null : _pickEndDate,
-                            icon: const Icon(Icons.event_available_outlined),
-                            label: Text('End ${_dateLabel(_selectedEndDate)}'),
+                            onPressed:
+                                _isSubmitting ? null : _pickEndDate,
+                            icon: const Icon(
+                                Icons.event_available_outlined),
+                            label: Text(
+                                'End ${_dateLabel(_selectedEndDate)}'),
                           ),
                         ),
                       ],
@@ -1178,17 +1579,21 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                       children: [
                         Expanded(
                           child: OutlinedButton.icon(
-                            onPressed: _isSubmitting ? null : _pickStartTime,
+                            onPressed:
+                                _isSubmitting ? null : _pickStartTime,
                             icon: const Icon(Icons.schedule_outlined),
-                            label: Text('Start ${_timeLabel(_startTime)}'),
+                            label: Text(
+                                'Start ${_timeLabel(_startTime)}'),
                           ),
                         ),
                         const SizedBox(width: 8),
                         Expanded(
                           child: OutlinedButton.icon(
-                            onPressed: _isSubmitting ? null : _pickEndTime,
+                            onPressed:
+                                _isSubmitting ? null : _pickEndTime,
                             icon: const Icon(Icons.schedule),
-                            label: Text('End ${_timeLabel(_endTime)}'),
+                            label:
+                                Text('End ${_timeLabel(_endTime)}'),
                           ),
                         ),
                       ],
@@ -1206,25 +1611,16 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                     ),
                     items: const [
                       DropdownMenuItem(
-                        value: 'none',
-                        child: Text('Does not repeat'),
-                      ),
+                          value: 'none',
+                          child: Text('Does not repeat')),
                       DropdownMenuItem(
-                        value: 'daily',
-                        child: Text('Daily'),
-                      ),
+                          value: 'daily', child: Text('Daily')),
                       DropdownMenuItem(
-                        value: 'weekly',
-                        child: Text('Weekly'),
-                      ),
+                          value: 'weekly', child: Text('Weekly')),
                       DropdownMenuItem(
-                        value: 'monthly',
-                        child: Text('Monthly'),
-                      ),
+                          value: 'monthly', child: Text('Monthly')),
                       DropdownMenuItem(
-                        value: 'yearly',
-                        child: Text('Yearly'),
-                      ),
+                          value: 'yearly', child: Text('Yearly')),
                     ],
                     onChanged: _isSubmitting
                         ? null
@@ -1246,17 +1642,11 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                       ),
                       items: const [
                         DropdownMenuItem(
-                          value: 'never',
-                          child: Text('Never'),
-                        ),
+                            value: 'never', child: Text('Never')),
                         DropdownMenuItem(
-                          value: 'date',
-                          child: Text('On date'),
-                        ),
+                            value: 'date', child: Text('On date')),
                         DropdownMenuItem(
-                          value: 'count',
-                          child: Text('After count'),
-                        ),
+                            value: 'count', child: Text('After count')),
                       ],
                       onChanged: _isSubmitting
                           ? null
@@ -1271,12 +1661,12 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                     if (_recurrenceEnd == 'date') ...[
                       const SizedBox(height: 8),
                       OutlinedButton.icon(
-                        onPressed:
-                            _isSubmitting ? null : _pickRecurrenceEndDate,
+                        onPressed: _isSubmitting
+                            ? null
+                            : _pickRecurrenceEndDate,
                         icon: const Icon(Icons.event_repeat_outlined),
                         label: Text(
-                          'Ends ${_dateLabel(_recurrenceEndDate)}',
-                        ),
+                            'Ends ${_dateLabel(_recurrenceEndDate)}'),
                       ),
                     ],
                     if (_recurrenceEnd == 'count') ...[
@@ -1294,12 +1684,11 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                               _recurrenceEnd != 'count') {
                             return null;
                           }
-
-                          final count = int.tryParse((value ?? '').trim());
+                          final count =
+                              int.tryParse((value ?? '').trim());
                           if (count == null || count < 1) {
                             return 'Enter a number of at least 1';
                           }
-
                           return null;
                         },
                       ),
@@ -1356,143 +1745,6 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                 ),
               ],
             ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _SectionHeader extends StatelessWidget {
-  const _SectionHeader({
-    required this.title,
-    required this.subtitle,
-  });
-
-  final String title;
-  final String subtitle;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(
-          title,
-          style: Theme.of(context).textTheme.titleLarge,
-        ),
-        Text(
-          subtitle,
-          style: Theme.of(context).textTheme.bodyMedium,
-        ),
-      ],
-    );
-  }
-}
-
-class _EmptySectionMessage extends StatelessWidget {
-  const _EmptySectionMessage({
-    required this.message,
-    this.action,
-  });
-
-  final String message;
-  final Widget? action;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(message),
-            if (action != null) ...[
-              const SizedBox(height: 8),
-              action!,
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _CalendarErrorState extends StatelessWidget {
-  const _CalendarErrorState({
-    required this.onRetry,
-  });
-
-  final VoidCallback onRetry;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Card(
-        margin: const EdgeInsets.all(24),
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.cloud_off_outlined, size: 40),
-              const SizedBox(height: 12),
-              Text(
-                'Unable to load calendars and events from Calee.',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Check your connection, then try again.',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-              const SizedBox(height: 16),
-              FilledButton(
-                onPressed: onRetry,
-                child: const Text('Try again'),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _CalendarEmptyState extends StatelessWidget {
-  const _CalendarEmptyState({
-    this.onCreateCalendar,
-  });
-
-  final VoidCallback? onCreateCalendar;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Card(
-        margin: const EdgeInsets.all(24),
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                'No calendars found yet. Calee will connect your calendar services automatically, then calendars and events will appear here.',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              if (onCreateCalendar != null) ...[
-                const SizedBox(height: 16),
-                FilledButton.icon(
-                  onPressed: onCreateCalendar,
-                  icon: const Icon(Icons.add),
-                  label: const Text('Create calendar'),
-                ),
-              ],
-            ],
           ),
         ),
       ),
