@@ -275,6 +275,28 @@ class Regression:
 
         self.run_step("event create: one-off", _create_one_off)
 
+        def _create_all_day_multiday() -> str:
+            start_date = self.tomorrow
+            end_date = start_date + dt.timedelta(days=3)
+
+            data = self.client.post(
+                "/client/v1/events",
+                {
+                    "serviceId": calendar["serviceId"],
+                    "calendarId": calendar["id"],
+                    "title": f"RT all-day multi-day event {self.run_id}",
+                    "startsAt": start_date.isoformat(),
+                    "endsAt": end_date.isoformat(),
+                    "allDay": True,
+                    "description": "Created by local regression script",
+                },
+            )
+
+            event_holder["all_day_multiday"] = data["event"]
+            return data["event"].get("id", "")
+
+        self.run_step("event create: all-day multi-day", _create_all_day_multiday)
+
         def _create_recurring_count() -> str:
             start = dt.datetime.combine(self.tomorrow, dt.time(hour=10, minute=0))
             end = start + dt.timedelta(minutes=30)
@@ -328,11 +350,42 @@ class Regression:
             events = data.get("events", [])
             titles = [event.get("title", "") for event in events]
             expected = f"RT event {self.run_id}"
+            expected_all_day_multiday = f"RT all-day multi-day event {self.run_id}"
             expected_recurring_count = f"RT recurring count event {self.run_id}"
             expected_recurring_until = f"RT recurring until event {self.run_id}"
 
             if expected not in titles:
                 raise RuntimeError(f"Created event title not found in events response: {expected}")
+
+            all_day_matches = [
+                event
+                for event in events
+                if event.get("title") == expected_all_day_multiday
+            ]
+
+            if len(all_day_matches) != 1:
+                raise RuntimeError(
+                    f"Expected 1 multi-day all-day event, found {len(all_day_matches)}"
+                )
+
+            all_day_event = all_day_matches[0]
+            expected_start = self.tomorrow.isoformat()
+            expected_end = (self.tomorrow + dt.timedelta(days=3)).isoformat()
+
+            if all_day_event.get("allDay") is not True:
+                raise RuntimeError("Multi-day all-day event was not returned as all-day")
+
+            if all_day_event.get("startsAt") != expected_start:
+                raise RuntimeError(
+                    f"Expected all-day startsAt {expected_start}, got {all_day_event.get('startsAt')}"
+                )
+
+            if all_day_event.get("endsAt") != expected_end:
+                raise RuntimeError(
+                    f"Expected all-day exclusive endsAt {expected_end}, got {all_day_event.get('endsAt')}"
+                )
+
+            event_holder["all_day_multiday"] = all_day_event
 
             recurring_count_occurrences = [
                 event
@@ -504,6 +557,74 @@ class Regression:
             return "event returned as one-off"
 
         self.run_step("event recurrence clear readback", _read_recurrence_clear)
+
+        def _edit_all_day_multiday() -> str:
+            event = event_holder["all_day_multiday"]
+            event_id = event["id"]
+            start_date = self.tomorrow
+            end_date = start_date + dt.timedelta(days=4)
+
+            data = self.client.patch(
+                f"/client/v1/events/{self.encoded(event_id)}",
+                {
+                    "title": f"RT all-day multi-day event edited {self.run_id}",
+                    "startsAt": start_date.isoformat(),
+                    "endsAt": end_date.isoformat(),
+                    "allDay": True,
+                    "description": "Edited by local regression script",
+                    "recurrence": None,
+                },
+            )
+
+            event_holder["all_day_multiday"] = data["event"]
+            return data["event"].get("id", event_id)
+
+        self.run_step("event edit: all-day multi-day", _edit_all_day_multiday)
+
+        def _read_all_day_multiday_edit() -> str:
+            data = self.client.get(
+                "/client/v1/events",
+                query={
+                    "from": self.today.isoformat(),
+                    "to": (self.today + dt.timedelta(days=7)).isoformat(),
+                },
+            )
+
+            expected = f"RT all-day multi-day event edited {self.run_id}"
+            matches = [
+                event
+                for event in data.get("events", [])
+                if event.get("title") == expected
+            ]
+
+            if len(matches) != 1:
+                raise RuntimeError(
+                    f"Expected edited multi-day all-day event once, found {len(matches)}"
+                )
+
+            event = matches[0]
+            expected_end = (self.tomorrow + dt.timedelta(days=4)).isoformat()
+
+            if event.get("allDay") is not True:
+                raise RuntimeError("Edited multi-day event was not returned as all-day")
+
+            if event.get("endsAt") != expected_end:
+                raise RuntimeError(
+                    f"Expected edited all-day exclusive endsAt {expected_end}, got {event.get('endsAt')}"
+                )
+
+            event_holder["all_day_multiday"] = event
+            return f"exclusive endsAt={event.get('endsAt')}"
+
+        self.run_step("event edit readback: all-day multi-day", _read_all_day_multiday_edit)
+
+        def _delete_all_day_multiday() -> str:
+            event = event_holder["all_day_multiday"]
+            event_id = event["id"]
+            self.client.delete(f"/client/v1/events/{self.encoded(event_id)}")
+            return event_id
+
+        self.run_step("event delete: all-day multi-day", _delete_all_day_multiday)
 
         def _delete() -> str:
             event = event_holder["one_off"]
