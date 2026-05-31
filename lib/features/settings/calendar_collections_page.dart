@@ -3,18 +3,38 @@ import 'package:flutter/material.dart';
 import '../../data/api/calee_hub_client.dart';
 import '../../data/models/client_bootstrap.dart';
 import '../../data/models/client_calendar.dart';
+import '../../ui/calee_design.dart';
+
+// ─── File-level helpers ───────────────────────────────────────────────────────
 
 String _formatCollectionPreviewDate(DateTime value) {
   final year = value.year.toString().padLeft(4, '0');
   final month = value.month.toString().padLeft(2, '0');
   final day = value.day.toString().padLeft(2, '0');
-
   return '$year-$month-$day';
 }
 
 String _pluralCount(int count, String singular, [String? plural]) {
   return '$count ${count == 1 ? singular : plural ?? '${singular}s'}';
 }
+
+/// Returns a display colour for [calendar]. Falls back to a type-based
+/// default when no color is set or the stored hex is not a valid 6-digit code.
+Color _collectionColor(ClientCalendar calendar) {
+  final hex = calendar.color?.trim() ?? '';
+  if (hex.isNotEmpty) {
+    final normalized = hex.startsWith('#') ? hex : '#$hex';
+    if (RegExp(r'^#[0-9A-Fa-f]{6}$').hasMatch(normalized)) {
+      final code = int.parse(normalized.substring(1), radix: 16);
+      return Color(0xFF000000 | code);
+    }
+  }
+  if (calendar.isTaskKind) return CaleeColors.dotGreen;
+  if (calendar.isChoreKind) return CaleeColors.dotOrange;
+  return CaleeColors.dotBlue;
+}
+
+// ─── Delete preview model ─────────────────────────────────────────────────────
 
 class _CollectionDeletePreview {
   const _CollectionDeletePreview({
@@ -34,6 +54,8 @@ class _CollectionDeletePreview {
 
   bool get hasItems => lines.isNotEmpty;
 }
+
+// ─── CalendarCollectionsPage ──────────────────────────────────────────────────
 
 class CalendarCollectionsPage extends StatefulWidget {
   const CalendarCollectionsPage({
@@ -63,9 +85,9 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
   List<ClientService> get _calendarServices {
     return widget.services
         .where(
-          (service) =>
-              service.serviceType == 'nextcloud_calendar' &&
-              service.hasConnectedCalendarCredential,
+          (s) =>
+              s.serviceType == 'nextcloud_calendar' &&
+              s.hasConnectedCalendarCredential,
         )
         .toList();
   }
@@ -77,9 +99,7 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
 
     if (widget.autoOpenCreate) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          _openCreateSheet();
-        }
+        if (mounted) _openCreateSheet();
       });
     }
   }
@@ -94,22 +114,24 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
     });
   }
 
+  // ── Create ────────────────────────────────────────────────────────────────
+
   Future<void> _openCreateSheet() async {
     final services = _calendarServices;
 
     if (services.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-            content: Text('No connected calendar service is available.')),
+          content: Text('No connected calendar service is available.'),
+        ),
       );
       return;
     }
 
-    final created = await showModalBottomSheet<bool>(
+    final created = await CaleeBottomSheet.show<bool>(
       context: context,
-      isScrollControlled: true,
-      builder: (context) => _CollectionFormSheet(
-        title: 'Create list or calendar',
+      title: 'Create list or calendar',
+      child: _CollectionFormContent(
         services: services,
         initialPrimaryKind: widget.initialCreateKind ?? 'calendar',
         onSubmit: ({
@@ -125,7 +147,6 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
               message: 'Choose a service',
             );
           }
-
           await widget.hubClient.createCalendar(
             accessToken: widget.accessToken,
             serviceId: selectedService.id,
@@ -137,21 +158,20 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
       ),
     );
 
-    if (created == true && mounted) {
-      _reload();
-    }
+    if (created == true && mounted) _reload();
   }
+
+  // ── Edit ──────────────────────────────────────────────────────────────────
 
   Future<void> _openEditSheet(ClientCalendar calendar) async {
     if (calendar.readOnly || _updatingCalendarIds.contains(calendar.id)) {
       return;
     }
 
-    final updated = await showModalBottomSheet<bool>(
+    final updated = await CaleeBottomSheet.show<bool>(
       context: context,
-      isScrollControlled: true,
-      builder: (context) => _CollectionFormSheet(
-        title: 'Edit list or calendar',
+      title: 'Edit list or calendar',
+      child: _CollectionFormContent(
         initialName: calendar.name,
         initialColor: calendar.color,
         initialPrimaryKind: calendar.primaryKind,
@@ -173,10 +193,10 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
       ),
     );
 
-    if (updated == true && mounted) {
-      _reload();
-    }
+    if (updated == true && mounted) _reload();
   }
+
+  // ── Delete ────────────────────────────────────────────────────────────────
 
   Future<_CollectionDeletePreview> _loadDeletePreview(
     ClientCalendar calendar,
@@ -195,14 +215,10 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
           from: from,
           to: to,
         );
-
         final count = eventList.events
-            .where((event) => event.calendarId == calendar.id)
+            .where((e) => e.calendarId == calendar.id)
             .length;
-
-        if (count > 0) {
-          lines.add(_pluralCount(count, 'visible event occurrence'));
-        }
+        if (count > 0) lines.add(_pluralCount(count, 'visible event occurrence'));
       }
 
       if (calendar.supportsTasks) {
@@ -211,14 +227,9 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
           from: from,
           to: to,
         );
-
-        final count = taskList.tasks
-            .where((task) => task.calendarId == calendar.id)
-            .length;
-
-        if (count > 0) {
-          lines.add(_pluralCount(count, 'task'));
-        }
+        final count =
+            taskList.tasks.where((t) => t.calendarId == calendar.id).length;
+        if (count > 0) lines.add(_pluralCount(count, 'task'));
       }
 
       if (calendar.supportsChores) {
@@ -227,20 +238,13 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
           from: from,
           to: to,
         );
-
-        final chores = choreList.chores
-            .where((chore) => chore.calendarId == calendar.id)
-            .toList();
-
+        final chores =
+            choreList.chores.where((c) => c.calendarId == calendar.id).toList();
         final choreCount =
-            chores.where((chore) => chore.kind == 'baseChore').length;
+            chores.where((c) => c.kind == 'baseChore').length;
         final completionRecordCount =
-            chores.where((chore) => chore.kind == 'completionLog').length;
-
-        if (choreCount > 0) {
-          lines.add(_pluralCount(choreCount, 'chore'));
-        }
-
+            chores.where((c) => c.kind == 'completionLog').length;
+        if (choreCount > 0) lines.add(_pluralCount(choreCount, 'chore'));
         if (completionRecordCount > 0) {
           lines.add(_pluralCount(completionRecordCount, 'completion record'));
         }
@@ -262,10 +266,10 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
     }
 
     final preview = await _loadDeletePreview(calendar);
-    if (!mounted) {
-      return;
-    }
+    if (!mounted) return;
 
+    // Keep a custom AlertDialog so the full item-count preview is clearly
+    // shown — CaleeDestructiveDialog's single-line body is too limited here.
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -289,9 +293,7 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
               ] else if (preview.itemCountsAvailable) ...[
                 Text('No items were found in ${preview.rangeDescription}.'),
               ] else ...[
-                const Text(
-                  'Item counts could not be loaded right now.',
-                ),
+                const Text('Item counts could not be loaded right now.'),
               ],
               const SizedBox(height: 12),
               const Text(
@@ -309,21 +311,21 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
             onPressed: () => Navigator.of(context).pop(false),
             child: const Text('Cancel'),
           ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(context).colorScheme.error,
-              foregroundColor: Theme.of(context).colorScheme.onError,
+          TextButton(
+            style: TextButton.styleFrom(
+              foregroundColor: CaleeColors.destructive,
             ),
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Delete everything'),
+            child: const Text(
+              'Delete everything',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
           ),
         ],
       ),
     );
 
-    if (confirmed != true || !mounted) {
-      return;
-    }
+    if (confirmed != true || !mounted) return;
 
     setState(() {
       _updatingCalendarIds.add(calendar.id);
@@ -335,15 +337,13 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
         calendarId: calendar.id,
         confirmDeleteItems: true,
       );
-
-      if (mounted) {
-        _reload();
-      }
+      if (mounted) _reload();
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(_errorMessage(error, 'Unable to delete collection.')),
+            content:
+                Text(_errorMessage(error, 'Unable to delete collection.')),
           ),
         );
       }
@@ -356,11 +356,12 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
     }
   }
 
+  // ── Helpers ───────────────────────────────────────────────────────────────
+
   String _errorMessage(Object error, String fallback) {
     if (error is CaleeHubException && error.message.trim().isNotEmpty) {
       return error.message;
     }
-
     return fallback;
   }
 
@@ -369,20 +370,92 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
     String primaryKind,
   ) {
     return calendars
-        .where((calendar) => calendar.primaryKind == primaryKind)
+        .where((c) => c.primaryKind == primaryKind)
         .toList();
   }
 
+  // ── Row builder ───────────────────────────────────────────────────────────
+
+  Widget _buildCollectionRow(ClientCalendar calendar) {
+    final isUpdating = _updatingCalendarIds.contains(calendar.id);
+    final isEditable = !calendar.readOnly && !isUpdating;
+    final dotColor = _collectionColor(calendar);
+
+    final subtitleParts = <String>[
+      if (calendar.serviceName.trim().isNotEmpty) calendar.serviceName,
+      if (calendar.readOnly) 'Read-only',
+    ];
+
+    Widget? trailing;
+    if (isUpdating) {
+      trailing = const SizedBox(
+        width: 20,
+        height: 20,
+        child: CircularProgressIndicator(
+          strokeWidth: 2,
+          color: CaleeColors.textTertiary,
+        ),
+      );
+    } else if (isEditable) {
+      trailing = _CollectionMenuButton(
+        onEdit: () => _openEditSheet(calendar),
+        onDelete: () => _deleteCalendar(calendar),
+      );
+    }
+
+    return CaleeListRow(
+      title: calendar.name,
+      subtitle: subtitleParts.isEmpty ? null : subtitleParts.join(' · '),
+      leading: CaleeColorDot(color: dotColor, size: 12),
+      onTap: isEditable ? () => _openEditSheet(calendar) : null,
+      trailing: trailing,
+    );
+  }
+
+  // ── Section builder ───────────────────────────────────────────────────────
+
+  Widget _buildSection(
+    BuildContext context, {
+    required String title,
+    required List<ClientCalendar> calendars,
+    required String emptyMessage,
+  }) {
+    return CaleeSection(
+      title: title,
+      children: [
+        if (calendars.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: CaleeSpacing.md,
+              vertical: CaleeSpacing.sm + 4,
+            ),
+            child: Text(
+              emptyMessage,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: CaleeColors.textSecondary,
+                  ),
+            ),
+          )
+        else
+          for (final calendar in calendars) _buildCollectionRow(calendar),
+      ],
+    );
+  }
+
+  // ── Build ─────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return CaleeScaffold(
       appBar: AppBar(
         title: const Text('Lists & calendars'),
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _openCreateSheet,
-        icon: const Icon(Icons.add),
-        label: const Text('Create'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.add),
+            tooltip: 'Create',
+            onPressed: _openCreateSheet,
+          ),
+        ],
       ),
       body: FutureBuilder<ClientCalendarList>(
         future: _future,
@@ -393,13 +466,14 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
           }
 
           if (snapshot.hasError) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Text(
-                  _errorMessage(snapshot.error!, 'Unable to load collections.'),
-                  textAlign: TextAlign.center,
-                ),
+            return CaleeEmptyState(
+              icon: Icons.error_outline,
+              title: 'Unable to load',
+              body: _errorMessage(
+                  snapshot.error!, 'Unable to load collections.'),
+              action: TextButton(
+                onPressed: _reload,
+                child: const Text('Try again'),
               ),
             );
           }
@@ -410,33 +484,32 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
           return RefreshIndicator(
             onRefresh: () async => _reload(),
             child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
+              padding: const EdgeInsets.fromLTRB(
+                CaleeSpacing.pagePadding,
+                CaleeSpacing.md,
+                CaleeSpacing.pagePadding,
+                96,
+              ),
               children: [
-                _CollectionSection(
+                _buildSection(
+                  context,
                   title: 'Calendars',
-                  emptyMessage: 'No calendars yet.',
                   calendars: _byKind(calendars, 'calendar'),
-                  updatingCalendarIds: _updatingCalendarIds,
-                  onEdit: _openEditSheet,
-                  onDelete: _deleteCalendar,
+                  emptyMessage: 'No calendars yet.',
                 ),
-                const SizedBox(height: 12),
-                _CollectionSection(
+                const SizedBox(height: CaleeSpacing.sectionSpacing),
+                _buildSection(
+                  context,
                   title: 'Task lists',
-                  emptyMessage: 'No task lists yet.',
                   calendars: _byKind(calendars, 'tasks'),
-                  updatingCalendarIds: _updatingCalendarIds,
-                  onEdit: _openEditSheet,
-                  onDelete: _deleteCalendar,
+                  emptyMessage: 'No task lists yet.',
                 ),
-                const SizedBox(height: 12),
-                _CollectionSection(
+                const SizedBox(height: CaleeSpacing.sectionSpacing),
+                _buildSection(
+                  context,
                   title: 'Chore lists',
-                  emptyMessage: 'No chore lists yet.',
                   calendars: _byKind(calendars, 'chores'),
-                  updatingCalendarIds: _updatingCalendarIds,
-                  onEdit: _openEditSheet,
-                  onDelete: _deleteCalendar,
+                  emptyMessage: 'No chore lists yet.',
                 ),
               ],
             ),
@@ -447,134 +520,49 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
   }
 }
 
-class _CollectionSection extends StatelessWidget {
-  const _CollectionSection({
-    required this.title,
-    required this.emptyMessage,
-    required this.calendars,
-    required this.updatingCalendarIds,
+// ─── _CollectionMenuButton ────────────────────────────────────────────────────
+
+class _CollectionMenuButton extends StatelessWidget {
+  const _CollectionMenuButton({
     required this.onEdit,
     required this.onDelete,
   });
 
-  final String title;
-  final String emptyMessage;
-  final List<ClientCalendar> calendars;
-  final Set<String> updatingCalendarIds;
-  final ValueChanged<ClientCalendar> onEdit;
-  final ValueChanged<ClientCalendar> onDelete;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-              child: Text(
-                title,
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-            ),
-            if (calendars.isEmpty)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                child: Text(emptyMessage),
-              ),
-            for (final calendar in calendars)
-              _CollectionTile(
-                calendar: calendar,
-                isUpdating: updatingCalendarIds.contains(calendar.id),
-                onEdit: () => onEdit(calendar),
-                onDelete: () => onDelete(calendar),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _CollectionTile extends StatelessWidget {
-  const _CollectionTile({
-    required this.calendar,
-    required this.isUpdating,
-    required this.onEdit,
-    required this.onDelete,
-  });
-
-  final ClientCalendar calendar;
-  final bool isUpdating;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
 
-  IconData get _icon {
-    if (calendar.isTaskKind) {
-      return Icons.checklist_outlined;
-    }
-
-    if (calendar.isChoreKind) {
-      return Icons.family_restroom_outlined;
-    }
-
-    return Icons.calendar_month_outlined;
-  }
-
   @override
   Widget build(BuildContext context) {
-    final disabled = calendar.readOnly || isUpdating;
-
-    return ListTile(
-      leading: CircleAvatar(
-        child: isUpdating
-            ? const SizedBox(
-                height: 18,
-                width: 18,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            : Icon(_icon),
-      ),
-      title: Text(calendar.name),
-      subtitle: Text(
-        [
-          calendar.serviceName,
-          if (calendar.color != null && calendar.color!.trim().isNotEmpty)
-            calendar.color!,
-          if (calendar.readOnly) 'Read-only',
-        ].where((value) => value.trim().isNotEmpty).join(' · '),
-      ),
-      trailing: PopupMenuButton<String>(
-        enabled: !disabled,
-        onSelected: (value) {
-          if (value == 'edit') {
-            onEdit();
-          }
-
-          if (value == 'delete') {
-            onDelete();
-          }
-        },
-        itemBuilder: (context) => const [
-          PopupMenuItem(
-            value: 'edit',
-            child: Text('Rename'),
+    return GestureDetector(
+      onTap: () => CaleeActionSheet.show(
+        context: context,
+        actions: [
+          CaleeAction(
+            label: 'Rename',
+            icon: Icons.edit_outlined,
+            onTap: onEdit,
           ),
-          PopupMenuItem(
-            value: 'delete',
-            child: Text('Delete'),
+          CaleeAction(
+            label: 'Delete',
+            icon: Icons.delete_outline,
+            isDestructive: true,
+            onTap: onDelete,
           ),
         ],
+      ),
+      child: const Icon(
+        Icons.more_horiz_rounded,
+        color: CaleeColors.textTertiary,
+        size: 22,
       ),
     );
   }
 }
 
-class _CollectionFormSheet extends StatefulWidget {
-  const _CollectionFormSheet({
-    required this.title,
+// ─── _CollectionFormContent ───────────────────────────────────────────────────
+
+class _CollectionFormContent extends StatefulWidget {
+  const _CollectionFormContent({
     required this.services,
     required this.onSubmit,
     this.initialName,
@@ -583,7 +571,6 @@ class _CollectionFormSheet extends StatefulWidget {
     this.allowKindChange = true,
   });
 
-  final String title;
   final List<ClientService> services;
   final String? initialName;
   final String? initialColor;
@@ -597,10 +584,22 @@ class _CollectionFormSheet extends StatefulWidget {
   }) onSubmit;
 
   @override
-  State<_CollectionFormSheet> createState() => _CollectionFormSheetState();
+  State<_CollectionFormContent> createState() => _CollectionFormContentState();
 }
 
-class _CollectionFormSheetState extends State<_CollectionFormSheet> {
+class _CollectionFormContentState extends State<_CollectionFormContent> {
+  static const List<(String, Color)> _colorPalette = [
+    ('#FF3B30', CaleeColors.dotRed),
+    ('#FF9500', CaleeColors.dotOrange),
+    ('#FFCC00', CaleeColors.dotYellow),
+    ('#34C759', CaleeColors.dotGreen),
+    ('#5AC8FA', CaleeColors.dotTeal),
+    ('#007AFF', CaleeColors.dotBlue),
+    ('#AF52DE', CaleeColors.dotPurple),
+    ('#FF2D55', CaleeColors.dotPink),
+    ('#8E8E93', CaleeColors.dotGray),
+  ];
+
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _nameController;
   late final TextEditingController _colorController;
@@ -612,11 +611,13 @@ class _CollectionFormSheetState extends State<_CollectionFormSheet> {
   @override
   void initState() {
     super.initState();
-
     _nameController = TextEditingController(text: widget.initialName ?? '');
     _colorController = TextEditingController(text: widget.initialColor ?? '');
-    _selectedService = widget.services.isEmpty ? null : widget.services.first;
+    _selectedService =
+        widget.services.isEmpty ? null : widget.services.first;
     _selectedKind = widget.initialPrimaryKind;
+    // Rebuild whenever the color text changes so palette swatches update.
+    _colorController.addListener(() => setState(() {}));
   }
 
   @override
@@ -637,14 +638,14 @@ class _CollectionFormSheetState extends State<_CollectionFormSheet> {
     }
   }
 
-  Future<void> _submit() async {
-    if (_isSubmitting || !_formKey.currentState!.validate()) {
-      return;
-    }
+  bool _isPaletteColorSelected(String hex) {
+    return _colorController.text.trim().toUpperCase() == hex.toUpperCase();
+  }
 
-    setState(() {
-      _isSubmitting = true;
-    });
+  Future<void> _submit() async {
+    if (_isSubmitting || !_formKey.currentState!.validate()) return;
+
+    setState(() => _isSubmitting = true);
 
     try {
       await widget.onSubmit(
@@ -655,16 +656,10 @@ class _CollectionFormSheetState extends State<_CollectionFormSheet> {
             : _colorController.text.trim(),
         service: _selectedService,
       );
-
-      if (mounted) {
-        Navigator.of(context).pop(true);
-      }
+      if (mounted) Navigator.of(context).pop(true);
     } catch (error) {
       if (mounted) {
-        setState(() {
-          _isSubmitting = false;
-        });
-
+        setState(() => _isSubmitting = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
@@ -680,151 +675,177 @@ class _CollectionFormSheetState extends State<_CollectionFormSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+    final theme = Theme.of(context);
 
-    return SafeArea(
-      child: Padding(
-        padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + bottomInset),
-        child: Form(
-          key: _formKey,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  widget.title,
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-                const SizedBox(height: 16),
-                if (widget.services.isNotEmpty) ...[
-                  DropdownButtonFormField<ClientService>(
-                    initialValue: _selectedService,
-                    decoration: const InputDecoration(
-                      labelText: 'Service',
-                      border: OutlineInputBorder(),
+    return Form(
+      key: _formKey,
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Service picker — only shown when creating
+            if (widget.services.isNotEmpty) ...[
+              DropdownButtonFormField<ClientService>(
+                value: _selectedService,
+                decoration: const InputDecoration(labelText: 'Service'),
+                items: [
+                  for (final service in widget.services)
+                    DropdownMenuItem(
+                      value: service,
+                      child: Text(service.displayName),
                     ),
-                    items: [
-                      for (final service in widget.services)
-                        DropdownMenuItem(
-                          value: service,
-                          child: Text(service.displayName),
-                        ),
-                    ],
-                    onChanged: _isSubmitting
-                        ? null
-                        : (service) {
-                            setState(() {
-                              _selectedService = service;
-                            });
-                          },
-                    validator: (service) {
-                      if (service == null) {
-                        return 'Choose a service';
-                      }
+                ],
+                onChanged: _isSubmitting
+                    ? null
+                    : (service) =>
+                        setState(() => _selectedService = service),
+                validator: (service) =>
+                    service == null ? 'Choose a service' : null,
+              ),
+              const SizedBox(height: CaleeSpacing.sm + 4),
+            ],
 
-                      return null;
+            // Name
+            TextFormField(
+              controller: _nameController,
+              enabled: !_isSubmitting,
+              autofocus: true,
+              decoration: const InputDecoration(labelText: 'Name'),
+              validator: (value) =>
+                  (value ?? '').trim().isEmpty ? 'Enter a name' : null,
+            ),
+            const SizedBox(height: CaleeSpacing.sm + 4),
+
+            // Type
+            DropdownButtonFormField<String>(
+              value: _selectedKind,
+              decoration: const InputDecoration(labelText: 'Type'),
+              items: const [
+                DropdownMenuItem(value: 'calendar', child: Text('Calendar')),
+                DropdownMenuItem(value: 'tasks', child: Text('Task list')),
+                DropdownMenuItem(value: 'chores', child: Text('Chore list')),
+              ],
+              onChanged: !widget.allowKindChange || _isSubmitting
+                  ? null
+                  : (kind) {
+                      if (kind != null) setState(() => _selectedKind = kind);
                     },
-                  ),
-                  const SizedBox(height: 12),
-                ],
-                TextFormField(
-                  controller: _nameController,
-                  enabled: !_isSubmitting,
-                  autofocus: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Name',
-                    border: OutlineInputBorder(),
-                  ),
-                  validator: (value) {
-                    if ((value ?? '').trim().isEmpty) {
-                      return 'Enter a name';
-                    }
-
-                    return null;
-                  },
+            ),
+            if (!widget.allowKindChange) ...[
+              const SizedBox(height: CaleeSpacing.xs),
+              Text(
+                'Type cannot be changed after creation. '
+                'Current type: ${_kindLabel(_selectedKind)}.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: CaleeColors.textSecondary,
                 ),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
-                  initialValue: _selectedKind,
-                  decoration: const InputDecoration(
-                    labelText: 'Type',
-                    border: OutlineInputBorder(),
-                  ),
-                  items: const [
-                    DropdownMenuItem(
-                      value: 'calendar',
-                      child: Text('Calendar'),
+              ),
+            ],
+
+            const SizedBox(height: CaleeSpacing.md),
+
+            // Color palette
+            Text(
+              'Color',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: CaleeColors.textSecondary,
+              ),
+            ),
+            const SizedBox(height: CaleeSpacing.sm),
+            Wrap(
+              spacing: CaleeSpacing.sm,
+              runSpacing: CaleeSpacing.sm,
+              children: [
+                for (final (hex, color) in _colorPalette)
+                  _ColorSwatch(
+                    hex: hex,
+                    color: color,
+                    isSelected: _isPaletteColorSelected(hex),
+                    onTap: () => setState(
+                      () => _colorController.text = hex,
                     ),
-                    DropdownMenuItem(
-                      value: 'tasks',
-                      child: Text('Task list'),
-                    ),
-                    DropdownMenuItem(
-                      value: 'chores',
-                      child: Text('Chore list'),
-                    ),
-                  ],
-                  onChanged: !widget.allowKindChange || _isSubmitting
-                      ? null
-                      : (kind) {
-                          if (kind != null) {
-                            setState(() {
-                              _selectedKind = kind;
-                            });
-                          }
-                        },
-                ),
-                if (!widget.allowKindChange) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    'Type cannot be changed after creation. Current type: ${_kindLabel(_selectedKind)}.',
-                    style: Theme.of(context).textTheme.bodySmall,
                   ),
-                ],
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _colorController,
-                  enabled: !_isSubmitting,
-                  decoration: const InputDecoration(
-                    labelText: 'Color',
-                    hintText: '#8BC34A',
-                    border: OutlineInputBorder(),
-                  ),
-                  validator: (value) {
-                    final color = (value ?? '').trim();
-
-                    if (color.isEmpty) {
-                      return null;
-                    }
-
-                    final normalized =
-                        color.startsWith('#') ? color : '#$color';
-                    final valid =
-                        RegExp(r'^#[0-9A-Fa-f]{6}$').hasMatch(normalized);
-
-                    if (!valid) {
-                      return 'Use a color like #8BC34A';
-                    }
-
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 16),
-                FilledButton(
-                  onPressed: _isSubmitting ? null : _submit,
-                  child: _isSubmitting
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Text('Save'),
-                ),
               ],
             ),
-          ),
+            const SizedBox(height: CaleeSpacing.sm + 4),
+
+            // Custom hex field
+            TextFormField(
+              controller: _colorController,
+              enabled: !_isSubmitting,
+              decoration: const InputDecoration(
+                labelText: 'Custom color',
+                hintText: '#8BC34A',
+              ),
+              validator: (value) {
+                final color = (value ?? '').trim();
+                if (color.isEmpty) return null;
+                final normalized =
+                    color.startsWith('#') ? color : '#$color';
+                if (!RegExp(r'^#[0-9A-Fa-f]{6}$').hasMatch(normalized)) {
+                  return 'Use a color like #8BC34A';
+                }
+                return null;
+              },
+            ),
+            const SizedBox(height: CaleeSpacing.md),
+
+            // Save button
+            FilledButton(
+              onPressed: _isSubmitting ? null : _submit,
+              child: _isSubmitting
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('Save'),
+            ),
+          ],
         ),
+      ),
+    );
+  }
+}
+
+// ─── _ColorSwatch ─────────────────────────────────────────────────────────────
+
+class _ColorSwatch extends StatelessWidget {
+  const _ColorSwatch({
+    required this.hex,
+    required this.color,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  final String hex;
+  final Color color;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        width: 30,
+        height: 30,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: color,
+          border: isSelected
+              ? Border.all(
+                  color: CaleeColors.textPrimary,
+                  width: 2,
+                  strokeAlign: BorderSide.strokeAlignOutside,
+                )
+              : null,
+        ),
+        child: isSelected
+            ? const Icon(Icons.check, size: 16, color: Colors.white)
+            : null,
       ),
     );
   }
