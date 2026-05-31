@@ -314,11 +314,37 @@ class Regression:
 
         self.run_step("event read: created events visible", _read)
 
-        # Current API gap: there is no event PATCH/DELETE route in routes_client_api.php yet.
-        if self.require_event_crud:
-            raise RuntimeError("Event edit/delete endpoints are not implemented yet")
-        self.record("event edit", "SKIP", "not implemented in current Client API")
-        self.record("event delete", "SKIP", "not implemented in current Client API; deleting test calendar will clean up created events")
+        def _edit() -> str:
+            event = event_holder["one_off"]
+            event_id = event["id"]
+            start = dt.datetime.combine(self.tomorrow, dt.time(hour=11, minute=0))
+            end = start + dt.timedelta(minutes=45)
+
+            data = self.client.patch(
+                f"/client/v1/events/{self.encoded(event_id)}",
+                {
+                    "title": f"RT event edited {self.run_id}",
+                    "startsAt": start.isoformat(),
+                    "endsAt": end.isoformat(),
+                    "allDay": False,
+                    "location": "Regression test edited",
+                    "description": "Edited by local regression script",
+                    "recurrence": None,
+                },
+            )
+
+            event_holder["one_off"] = data["event"]
+            return data["event"].get("id", event_id)
+
+        self.run_step("event edit", _edit)
+
+        def _delete() -> str:
+            event = event_holder["one_off"]
+            event_id = event["id"]
+            self.client.delete(f"/client/v1/events/{self.encoded(event_id)}")
+            return event_id
+
+        self.run_step("event delete", _delete)
 
     def test_tasks(self, task_calendar: dict[str, Any]) -> None:
         task_holder: dict[str, Any] = {}
