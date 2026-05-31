@@ -164,22 +164,55 @@ class _CalendarPageState extends State<CalendarPage> {
     }
 
     if (action == 'edit') {
-      await _openEditEventSheet(event, calendar!);
+      final editScope = await _chooseEditScope(event);
+      if (editScope == null || !mounted) {
+        return;
+      }
+
+      await _openEditEventSheet(event, calendar!, editScope: editScope);
     } else if (action == 'delete') {
       await _confirmDeleteEvent(event);
     }
   }
 
+  Future<String?> _chooseEditScope(ClientEvent event) async {
+    if (!event.recurring) {
+      return 'series';
+    }
+
+    return showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Edit recurring event?'),
+        content: const Text(
+          'Edit only this event. Series editing will be handled separately.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(null),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop('occurrence'),
+            child: const Text('Edit this event'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _openEditEventSheet(
     ClientEvent event,
-    ClientCalendar calendar,
-  ) async {
+    ClientCalendar calendar, {
+    String? editScope,
+  }) async {
     final updated = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
       builder: (context) => _CreateEventSheet(
         calendars: [calendar],
         initialEvent: event,
+        editScope: editScope,
         onCreate: _createEvent,
         onUpdate: _updateEvent,
       ),
@@ -198,16 +231,23 @@ class _CalendarPageState extends State<CalendarPage> {
     required bool allDay,
     String? location,
     String? description,
+    String? recurrence,
+    String? editScope,
   }) async {
+    final editOccurrence = event.recurring && editScope == 'occurrence';
+
     await widget.hubClient.updateEvent(
       accessToken: widget.accessToken,
-      eventId: event.writableEventId,
+      eventId: editOccurrence ? event.id : event.writableEventId,
       title: title,
       startsAt: allDay ? _formatDate(startsAt) : startsAt.toIso8601String(),
       endsAt: allDay ? _formatDate(endsAt) : endsAt.toIso8601String(),
       allDay: allDay,
       location: location,
       description: description,
+      recurrence: editOccurrence ? null : recurrence,
+      includeRecurrence: !editOccurrence,
+      scope: event.recurring ? editScope : null,
     );
   }
 
@@ -563,11 +603,13 @@ class _CreateEventSheet extends StatefulWidget {
     required this.calendars,
     required this.onCreate,
     this.initialEvent,
+    this.editScope,
     this.onUpdate,
   });
 
   final List<ClientCalendar> calendars;
   final ClientEvent? initialEvent;
+  final String? editScope;
   final Future<void> Function({
     required ClientCalendar calendar,
     required String title,
@@ -586,6 +628,8 @@ class _CreateEventSheet extends StatefulWidget {
     required bool allDay,
     String? location,
     String? description,
+    String? recurrence,
+    String? editScope,
   })? onUpdate;
 
   @override
@@ -611,6 +655,10 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
   bool _isSubmitting = false;
 
   bool get _isEditing => widget.initialEvent != null;
+  bool get _isEditingSingleOccurrence =>
+      _isEditing &&
+      widget.initialEvent!.recurring &&
+      widget.editScope == 'occurrence';
 
   @override
   void initState() {
@@ -636,6 +684,10 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
           ? DateTime(end.year, end.month, end.day)
               .subtract(const Duration(days: 1))
           : _selectedDate;
+
+      if (!_isEditingSingleOccurrence) {
+        _applyInitialRecurrence(event.recurrence);
+      }
 
       if (_selectedEndDate.isBefore(_selectedDate)) {
         _selectedEndDate = _selectedDate;
@@ -683,6 +735,73 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
     final hour = value.hour.toString().padLeft(2, '0');
     final minute = value.minute.toString().padLeft(2, '0');
     return '$hour:$minute';
+  }
+
+  Map<String, String> _parseRRule(String? recurrence) {
+    final value = (recurrence ?? '').trim();
+    if (value.isEmpty) {
+      return {};
+    }
+
+    final parts = <String, String>{};
+    for (final part in value.split(';')) {
+      final separator = part.indexOf('=');
+      if (separator <= 0 || separator == part.length - 1) {
+        continue;
+      }
+
+      final key = part.substring(0, separator).trim().toUpperCase();
+      final parsedValue = part.substring(separator + 1).trim().toUpperCase();
+      parts[key] = parsedValue;
+    }
+
+    return parts;
+  }
+
+  DateTime? _dateFromRRuleUntil(String? value) {
+    if (value == null || value.length < 8) {
+      return null;
+    }
+
+    final rawDate = value.substring(0, 8);
+    final year = int.tryParse(rawDate.substring(0, 4));
+    final month = int.tryParse(rawDate.substring(4, 6));
+    final day = int.tryParse(rawDate.substring(6, 8));
+
+    if (year == null || month == null || day == null) {
+      return null;
+    }
+
+    return DateTime(year, month, day);
+  }
+
+  void _applyInitialRecurrence(String? recurrence) {
+    final parts = _parseRRule(recurrence);
+    final frequency = parts['FREQ'];
+
+    _selectedRecurrence = switch (frequency) {
+      'DAILY' => 'daily',
+      'WEEKLY' => 'weekly',
+      'MONTHLY' => 'monthly',
+      'YEARLY' => 'yearly',
+      _ => 'none',
+    };
+
+    final count = parts['COUNT'];
+    final until = parts['UNTIL'];
+
+    if (count != null && count.isNotEmpty) {
+      _recurrenceEnd = 'count';
+      _recurrenceCountController.text = count;
+    } else if (until != null && until.isNotEmpty) {
+      _recurrenceEnd = 'date';
+      final parsedUntil = _dateFromRRuleUntil(until);
+      if (parsedUntil != null) {
+        _recurrenceEndDate = parsedUntil;
+      }
+    } else {
+      _recurrenceEnd = 'never';
+    }
   }
 
   String? _recurrenceValue() {
@@ -878,6 +997,8 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
           allDay: _allDay,
           location: location,
           description: description,
+          recurrence: _isEditingSingleOccurrence ? null : _recurrenceValue(),
+          editScope: widget.editScope,
         );
       } else {
         await widget.onCreate(
@@ -934,9 +1055,11 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
               children: [
                 Text(
                   _isEditing
-                      ? widget.initialEvent!.recurring
-                          ? 'Edit series'
-                          : 'Edit event'
+                      ? _isEditingSingleOccurrence
+                          ? 'Edit this event'
+                          : widget.initialEvent!.recurring
+                              ? 'Edit series'
+                              : 'Edit event'
                       : 'Add event',
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
@@ -1041,65 +1164,34 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                     ],
                   ),
                 ],
-                const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
-                  initialValue: _selectedRecurrence,
-                  decoration: const InputDecoration(
-                    labelText: 'Repeat',
-                    border: OutlineInputBorder(),
-                  ),
-                  items: const [
-                    DropdownMenuItem(
-                      value: 'none',
-                      child: Text('Does not repeat'),
-                    ),
-                    DropdownMenuItem(
-                      value: 'daily',
-                      child: Text('Daily'),
-                    ),
-                    DropdownMenuItem(
-                      value: 'weekly',
-                      child: Text('Weekly'),
-                    ),
-                    DropdownMenuItem(
-                      value: 'monthly',
-                      child: Text('Monthly'),
-                    ),
-                    DropdownMenuItem(
-                      value: 'yearly',
-                      child: Text('Yearly'),
-                    ),
-                  ],
-                  onChanged: _isSubmitting
-                      ? null
-                      : (value) {
-                          if (value != null) {
-                            setState(() {
-                              _selectedRecurrence = value;
-                            });
-                          }
-                        },
-                ),
-                if (_selectedRecurrence != 'none') ...[
+                if (!_isEditingSingleOccurrence) ...[
                   const SizedBox(height: 12),
                   DropdownButtonFormField<String>(
-                    initialValue: _recurrenceEnd,
+                    initialValue: _selectedRecurrence,
                     decoration: const InputDecoration(
-                      labelText: 'Ends',
+                      labelText: 'Repeat',
                       border: OutlineInputBorder(),
                     ),
                     items: const [
                       DropdownMenuItem(
-                        value: 'never',
-                        child: Text('Never'),
+                        value: 'none',
+                        child: Text('Does not repeat'),
                       ),
                       DropdownMenuItem(
-                        value: 'date',
-                        child: Text('On date'),
+                        value: 'daily',
+                        child: Text('Daily'),
                       ),
                       DropdownMenuItem(
-                        value: 'count',
-                        child: Text('After count'),
+                        value: 'weekly',
+                        child: Text('Weekly'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'monthly',
+                        child: Text('Monthly'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'yearly',
+                        child: Text('Yearly'),
                       ),
                     ],
                     onChanged: _isSubmitting
@@ -1107,51 +1199,85 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                         : (value) {
                             if (value != null) {
                               setState(() {
-                                _recurrenceEnd = value;
+                                _selectedRecurrence = value;
                               });
                             }
                           },
                   ),
-                  if (_recurrenceEnd == 'date') ...[
-                    const SizedBox(height: 8),
-                    OutlinedButton.icon(
-                      onPressed: _isSubmitting ? null : _pickRecurrenceEndDate,
-                      icon: const Icon(Icons.event_repeat_outlined),
-                      label: Text(
-                        'Ends ${_dateLabel(_recurrenceEndDate)}',
-                      ),
-                    ),
-                  ],
-                  if (_recurrenceEnd == 'count') ...[
-                    const SizedBox(height: 8),
-                    TextFormField(
-                      controller: _recurrenceCountController,
-                      enabled: !_isSubmitting,
-                      keyboardType: TextInputType.number,
+                  if (_selectedRecurrence != 'none') ...[
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      initialValue: _recurrenceEnd,
                       decoration: const InputDecoration(
-                        labelText: 'Number of repeats',
+                        labelText: 'Ends',
                         border: OutlineInputBorder(),
                       ),
-                      validator: (value) {
-                        if (_selectedRecurrence == 'none' ||
-                            _recurrenceEnd != 'count') {
+                      items: const [
+                        DropdownMenuItem(
+                          value: 'never',
+                          child: Text('Never'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'date',
+                          child: Text('On date'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'count',
+                          child: Text('After count'),
+                        ),
+                      ],
+                      onChanged: _isSubmitting
+                          ? null
+                          : (value) {
+                              if (value != null) {
+                                setState(() {
+                                  _recurrenceEnd = value;
+                                });
+                              }
+                            },
+                    ),
+                    if (_recurrenceEnd == 'date') ...[
+                      const SizedBox(height: 8),
+                      OutlinedButton.icon(
+                        onPressed:
+                            _isSubmitting ? null : _pickRecurrenceEndDate,
+                        icon: const Icon(Icons.event_repeat_outlined),
+                        label: Text(
+                          'Ends ${_dateLabel(_recurrenceEndDate)}',
+                        ),
+                      ),
+                    ],
+                    if (_recurrenceEnd == 'count') ...[
+                      const SizedBox(height: 8),
+                      TextFormField(
+                        controller: _recurrenceCountController,
+                        enabled: !_isSubmitting,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                          labelText: 'Number of repeats',
+                          border: OutlineInputBorder(),
+                        ),
+                        validator: (value) {
+                          if (_selectedRecurrence == 'none' ||
+                              _recurrenceEnd != 'count') {
+                            return null;
+                          }
+
+                          final count = int.tryParse((value ?? '').trim());
+                          if (count == null || count < 1) {
+                            return 'Enter a number of at least 1';
+                          }
+
                           return null;
-                        }
-
-                        final count = int.tryParse((value ?? '').trim());
-                        if (count == null || count < 1) {
-                          return 'Enter a number of at least 1';
-                        }
-
-                        return null;
-                      },
+                        },
+                      ),
+                    ],
+                    const SizedBox(height: 8),
+                    Text(
+                      'Repeats ${_recurrenceLabel(_selectedRecurrence).toLowerCase()}${_recurrenceEnd == 'never' ? '' : _recurrenceEnd == 'date' ? ' until ${_dateLabel(_recurrenceEndDate)}' : ' ${_recurrenceCountController.text.trim().isEmpty ? '' : 'for ${_recurrenceCountController.text.trim()} times'}'}.',
+                      style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ],
-                  const SizedBox(height: 8),
-                  Text(
-                    'Repeats ${_recurrenceLabel(_selectedRecurrence).toLowerCase()}${_recurrenceEnd == 'never' ? '' : _recurrenceEnd == 'date' ? ' until ${_dateLabel(_recurrenceEndDate)}' : ' ${_recurrenceCountController.text.trim().isEmpty ? '' : 'for ${_recurrenceCountController.text.trim()} times'}'}.',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
                 ],
                 const SizedBox(height: 12),
                 TextFormField(
