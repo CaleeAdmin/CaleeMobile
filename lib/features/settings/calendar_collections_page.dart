@@ -687,7 +687,7 @@ class _CollectionFormContentState extends State<_CollectionFormContent> {
             // Service picker — only shown when creating
             if (widget.services.isNotEmpty) ...[
               DropdownButtonFormField<ClientService>(
-                value: _selectedService,
+                initialValue: _selectedService,
                 decoration: const InputDecoration(labelText: 'Service'),
                 items: [
                   for (final service in widget.services)
@@ -719,7 +719,7 @@ class _CollectionFormContentState extends State<_CollectionFormContent> {
 
             // Type
             DropdownButtonFormField<String>(
-              value: _selectedKind,
+              initialValue: _selectedKind,
               decoration: const InputDecoration(labelText: 'Type'),
               items: const [
                 DropdownMenuItem(value: 'calendar', child: Text('Calendar')),
