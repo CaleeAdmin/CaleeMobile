@@ -893,6 +893,97 @@ class Regression:
             _read_one_recurring_occurrence_edit,
         )
 
+        def _edit_series_after_detached_occurrence() -> str:
+            remaining = event_holder["occurrence_edit_remaining"]
+            series_id = remaining[0].get("seriesId") or remaining[0]["id"]
+
+            data = self.client.patch(
+                f"/client/v1/events/{self.encoded(series_id)}",
+                {
+                    "title": f"RT recurring occurrence edit series updated {self.run_id}",
+                    "location": "Series metadata updated after detached occurrence edit",
+                    "description": "Regression test for preserving detached occurrence during series metadata update",
+                },
+            )
+
+            return data["event"].get("id", series_id)
+
+        self.run_step(
+            "recurring event series update after detached edit",
+            _edit_series_after_detached_occurrence,
+        )
+
+        def _read_series_update_preserves_detached_occurrence() -> str:
+            data = self.client.get(
+                "/client/v1/events",
+                query={
+                    "from": self.today.isoformat(),
+                    "to": (self.today + dt.timedelta(days=7)).isoformat(),
+                },
+            )
+
+            original_title = f"RT recurring occurrence edit event {self.run_id}"
+            detached_title = f"RT recurring occurrence edited {self.run_id}"
+            series_title = f"RT recurring occurrence edit series updated {self.run_id}"
+            detached_occurrence_id = event_holder["occurrence_edit_middle"]["id"]
+
+            original_matches = [
+                event
+                for event in data.get("events", [])
+                if event.get("title") == original_title and event.get("recurring") is True
+            ]
+            detached_matches = [
+                event
+                for event in data.get("events", [])
+                if event.get("title") == detached_title and event.get("recurring") is True
+            ]
+            series_matches = [
+                event
+                for event in data.get("events", [])
+                if event.get("title") == series_title and event.get("recurring") is True
+            ]
+
+            if original_matches:
+                raise RuntimeError(
+                    f"Original series title still visible after series update: {len(original_matches)}"
+                )
+
+            if len(detached_matches) != 1:
+                raise RuntimeError(
+                    f"Expected detached edited occurrence to remain once, found {len(detached_matches)}"
+                )
+
+            detached = detached_matches[0]
+            if detached.get("id") != detached_occurrence_id:
+                raise RuntimeError(
+                    f"Detached occurrence id changed from {detached_occurrence_id} to {detached.get('id')}"
+                )
+
+            if len(series_matches) != 2:
+                raise RuntimeError(
+                    f"Expected 2 updated series occurrences excluding detached occurrence, found {len(series_matches)}"
+                )
+
+            series_ids = {
+                event.get("seriesId")
+                for event in series_matches + detached_matches
+            }
+            if len(series_ids) != 1:
+                raise RuntimeError(
+                    "Detached occurrence and updated series occurrences do not share one series id"
+                )
+
+            event_holder["occurrence_edit_remaining"] = series_matches + detached_matches
+            return (
+                f"updated series occurrences={len(series_matches)}, "
+                f"detached occurrences={len(detached_matches)}"
+            )
+
+        self.run_step(
+            "recurring event series update preserves detached occurrence",
+            _read_series_update_preserves_detached_occurrence,
+        )
+
         def _delete_occurrence_edit_series_cleanup() -> str:
             remaining = event_holder["occurrence_edit_remaining"]
             series_id = remaining[0].get("seriesId") or remaining[0]["id"]
