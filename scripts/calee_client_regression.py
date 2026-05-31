@@ -343,6 +343,31 @@ class Regression:
 
         self.run_step("event create: recurring until", _create_recurring_until)
 
+        def _create_recurring_occurrence_delete() -> str:
+            start = dt.datetime.combine(self.tomorrow, dt.time(hour=13, minute=0))
+            end = start + dt.timedelta(minutes=30)
+
+            data = self.client.post(
+                "/client/v1/events",
+                {
+                    "serviceId": calendar["serviceId"],
+                    "calendarId": calendar["id"],
+                    "title": f"RT recurring occurrence delete event {self.run_id}",
+                    "startsAt": start.isoformat(),
+                    "endsAt": end.isoformat(),
+                    "allDay": False,
+                    "recurrence": "FREQ=DAILY;COUNT=3",
+                },
+            )
+
+            event_holder["recurring_occurrence_delete"] = data["event"]
+            return data["event"].get("id", "")
+
+        self.run_step(
+            "event create: recurring occurrence delete",
+            _create_recurring_occurrence_delete,
+        )
+
         def _read() -> str:
             data = self.client.get(
                 "/client/v1/events",
@@ -357,6 +382,7 @@ class Regression:
             expected_all_day_multiday = f"RT all-day multi-day event {self.run_id}"
             expected_recurring_count = f"RT recurring count event {self.run_id}"
             expected_recurring_until = f"RT recurring until event {self.run_id}"
+            expected_occurrence_delete = f"RT recurring occurrence delete event {self.run_id}"
 
             if expected not in titles:
                 raise RuntimeError(f"Created event title not found in events response: {expected}")
@@ -417,6 +443,20 @@ class Regression:
             if not all(event.get("allDay") is True for event in recurring_until_occurrences):
                 raise RuntimeError("UNTIL recurring all-day occurrences were not returned as all-day events")
 
+            occurrence_delete_occurrences = [
+                event
+                for event in events
+                if event.get("title") == expected_occurrence_delete and event.get("recurring") is True
+            ]
+            if len(occurrence_delete_occurrences) != 3:
+                raise RuntimeError(
+                    f"Expected 3 occurrence-delete test occurrences, found {len(occurrence_delete_occurrences)}"
+                )
+
+            occurrence_delete_occurrences.sort(key=lambda event: str(event.get("startsAt", "")))
+            event_holder["occurrence_delete_all"] = occurrence_delete_occurrences
+            event_holder["occurrence_delete_middle"] = occurrence_delete_occurrences[1]
+
             occurrence = recurring_count_occurrences[0]
             occurrence_id = occurrence.get("id", "")
             series_id = occurrence.get("seriesId", "")
@@ -430,7 +470,8 @@ class Regression:
             return (
                 f"{len(events)} events returned; "
                 f"COUNT occurrences={len(recurring_count_occurrences)}, "
-                f"UNTIL occurrences={len(recurring_until_occurrences)}"
+                f"UNTIL occurrences={len(recurring_until_occurrences)}, "
+                f"occurrence-delete occurrences={len(occurrence_delete_occurrences)}"
             )
 
         self.run_step("event read: created events visible", _read)
@@ -642,6 +683,74 @@ class Regression:
             return event_id
 
         self.run_step("event delete", _delete)
+
+        def _delete_one_recurring_occurrence() -> str:
+            occurrence = event_holder["occurrence_delete_middle"]
+            occurrence_id = occurrence["id"]
+
+            self.client.delete(
+                f"/client/v1/events/{self.encoded(occurrence_id)}",
+                {"scope": "occurrence"},
+            )
+
+            return occurrence_id
+
+        self.run_step(
+            "recurring event occurrence delete",
+            _delete_one_recurring_occurrence,
+        )
+
+        def _read_one_recurring_occurrence_delete() -> str:
+            data = self.client.get(
+                "/client/v1/events",
+                query={
+                    "from": self.today.isoformat(),
+                    "to": (self.today + dt.timedelta(days=7)).isoformat(),
+                },
+            )
+
+            deleted_occurrence = event_holder["occurrence_delete_middle"]
+            deleted_occurrence_id = deleted_occurrence["id"]
+            title = f"RT recurring occurrence delete event {self.run_id}"
+
+            remaining = [
+                event
+                for event in data.get("events", [])
+                if event.get("title") == title and event.get("recurring") is True
+            ]
+
+            remaining_ids = {event.get("id") for event in remaining}
+
+            if deleted_occurrence_id in remaining_ids:
+                raise RuntimeError("Deleted recurring occurrence is still visible")
+
+            if len(remaining) != 2:
+                raise RuntimeError(
+                    f"Expected 2 remaining recurring occurrences after occurrence delete, found {len(remaining)}"
+                )
+
+            if len({event.get("seriesId") for event in remaining}) != 1:
+                raise RuntimeError("Remaining occurrences do not belong to one series")
+
+            event_holder["occurrence_delete_remaining"] = remaining
+            return f"remaining occurrences={len(remaining)}"
+
+        self.run_step(
+            "recurring event occurrence delete readback",
+            _read_one_recurring_occurrence_delete,
+        )
+
+        def _delete_occurrence_delete_series_cleanup() -> str:
+            remaining = event_holder["occurrence_delete_remaining"]
+            series_id = remaining[0].get("seriesId") or remaining[0]["id"]
+
+            self.client.delete(f"/client/v1/events/{self.encoded(series_id)}")
+            return series_id
+
+        self.run_step(
+            "recurring event occurrence delete cleanup",
+            _delete_occurrence_delete_series_cleanup,
+        )
 
         def _edit_recurring_series_via_occurrence_id() -> str:
             event = event_holder["recurring_occurrence"]
