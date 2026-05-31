@@ -271,7 +271,7 @@ class _CalendarPageState extends State<CalendarPage> {
       return;
     }
 
-    final writeableCalendar = calendar!;
+    final writeableCalendar = calendar;
 
     CaleeActionSheet.show(
       context: context,
@@ -569,10 +569,6 @@ class _CalendarPageState extends State<CalendarPage> {
       if (value != null) return Color(value);
     }
     return null;
-  }
-
-  String _agendaTimeLabel(ClientEvent event) {
-    return _eventTimeLabel(event);
   }
 
   String _agendaDateLabel(DateTime day) {
