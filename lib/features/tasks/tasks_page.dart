@@ -5,6 +5,8 @@ import '../../data/models/client_bootstrap.dart';
 import '../settings/calendar_collections_page.dart';
 import '../../data/models/client_calendar.dart';
 import '../../data/models/client_task.dart';
+import '../../ui/calee_theme.dart';
+import '../../ui/calee_widgets.dart';
 
 class TasksPage extends StatefulWidget {
   const TasksPage({
@@ -28,6 +30,7 @@ class _TasksPageState extends State<TasksPage> {
   final Set<String> _updatingTaskIds = {};
   final Set<String> _deletingTaskIds = {};
   final Set<String> _editingTaskIds = {};
+  bool _completedExpanded = false;
 
   @override
   void initState() {
@@ -88,10 +91,10 @@ class _TasksPageState extends State<TasksPage> {
       return;
     }
 
-    final created = await showModalBottomSheet<bool>(
+    final created = await CaleeBottomSheet.show<bool>(
       context: context,
-      isScrollControlled: true,
-      builder: (context) => _CreateTaskSheet(
+      title: 'New Task',
+      child: _CreateTaskForm(
         taskCalendars: taskCalendars,
         onCreate: _createTask,
       ),
@@ -170,10 +173,10 @@ class _TasksPageState extends State<TasksPage> {
       return;
     }
 
-    final updated = await showModalBottomSheet<bool>(
+    final updated = await CaleeBottomSheet.show<bool>(
       context: context,
-      isScrollControlled: true,
-      builder: (context) => _EditTaskSheet(
+      title: 'Edit Task',
+      child: _EditTaskForm(
         task: task,
         onUpdate: _updateTask,
       ),
@@ -216,25 +219,14 @@ class _TasksPageState extends State<TasksPage> {
       return;
     }
 
-    final shouldDelete = await showDialog<bool>(
+    final shouldDelete = await CaleeDestructiveDialog.show(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete task?'),
-        content: Text('Delete "${task.title}"? This cannot be undone.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
+      title: 'Delete Task',
+      body: 'Delete "${task.title}"? This cannot be undone.',
+      confirmLabel: 'Delete',
     );
 
-    if (shouldDelete != true || !mounted) {
+    if (!shouldDelete || !mounted) {
       return;
     }
 
@@ -283,9 +275,9 @@ class _TasksPageState extends State<TasksPage> {
     return '$year-$month-$day';
   }
 
-  String _formatDueAt(String? value) {
+  String _formatDueLabel(String? value) {
     if (value == null || value.trim().isEmpty) {
-      return 'No due date';
+      return '';
     }
 
     final parsed = DateTime.tryParse(value);
@@ -294,7 +286,39 @@ class _TasksPageState extends State<TasksPage> {
     }
 
     final local = parsed.toLocal();
+    final now = DateTime.now();
+
+    if (local.year == now.year &&
+        local.month == now.month &&
+        local.day == now.day) {
+      return 'Due today';
+    }
+
+    final tomorrow = now.add(const Duration(days: 1));
+    if (local.year == tomorrow.year &&
+        local.month == tomorrow.month &&
+        local.day == tomorrow.day) {
+      return 'Due tomorrow';
+    }
+
+    final yesterday = now.subtract(const Duration(days: 1));
+    if (local.year == yesterday.year &&
+        local.month == yesterday.month &&
+        local.day == yesterday.day) {
+      return 'Due yesterday';
+    }
+
     return 'Due ${local.day}/${local.month}/${local.year}';
+  }
+
+  String _calendarNameForTask(ClientTask task, List<ClientCalendar> calendars) {
+    for (final cal in calendars) {
+      if (cal.id == task.calendarId ||
+          cal.id == '${task.serviceId}:${task.calendarId}') {
+        return cal.name;
+      }
+    }
+    return task.serviceName.trim().isNotEmpty ? task.serviceName : '';
   }
 
   @override
@@ -303,20 +327,37 @@ class _TasksPageState extends State<TasksPage> {
       future: _overviewFuture,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
+          return const CaleeScaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
         }
 
         if (snapshot.hasError) {
-          return _TasksErrorState(onRetry: _reloadOverview);
+          return CaleeScaffold(
+            body: CaleeEmptyState(
+              icon: Icons.cloud_off_outlined,
+              title: 'Unable to load tasks',
+              body: 'Check your connection, then try again.',
+              action: FilledButton(
+                onPressed: _reloadOverview,
+                child: const Text('Try again'),
+              ),
+            ),
+          );
         }
 
         final overview = snapshot.data;
         if (overview == null) {
-          return _TasksEmptyState(
-            action: FilledButton.icon(
-              onPressed: _openCollectionCreateShortcut,
-              icon: const Icon(Icons.add),
-              label: const Text('Create task list'),
+          return CaleeScaffold(
+            body: CaleeEmptyState(
+              icon: Icons.checklist_outlined,
+              title: 'No task lists yet',
+              body: 'Create a task list to start tracking tasks.',
+              action: FilledButton.icon(
+                onPressed: _openCollectionCreateShortcut,
+                icon: const Icon(Icons.add),
+                label: const Text('Create task list'),
+              ),
             ),
           );
         }
@@ -324,19 +365,29 @@ class _TasksPageState extends State<TasksPage> {
         final taskCalendars = overview.calendarList.calendars
             .where((calendar) => calendar.isTaskKind)
             .toList();
-        final tasks = overview.taskList.tasks;
+        final allTasks = overview.taskList.tasks;
 
-        if (taskCalendars.isEmpty && tasks.isEmpty) {
-          return _TasksEmptyState(
-            action: FilledButton.icon(
-              onPressed: _openCollectionCreateShortcut,
-              icon: const Icon(Icons.add),
-              label: const Text('Create task list'),
+        if (taskCalendars.isEmpty && allTasks.isEmpty) {
+          return CaleeScaffold(
+            body: CaleeEmptyState(
+              icon: Icons.checklist_outlined,
+              title: 'No task lists yet',
+              body: 'Create a task list to start tracking tasks.',
+              action: FilledButton.icon(
+                onPressed: _openCollectionCreateShortcut,
+                icon: const Icon(Icons.add),
+                label: const Text('Create task list'),
+              ),
             ),
           );
         }
 
-        return Scaffold(
+        final openTasks =
+            allTasks.where((t) => !t.isCompleted).toList();
+        final completedTasks =
+            allTasks.where((t) => t.isCompleted).toList();
+
+        return CaleeScaffold(
           floatingActionButton: taskCalendars.isEmpty
               ? null
               : FloatingActionButton.extended(
@@ -352,45 +403,93 @@ class _TasksPageState extends State<TasksPage> {
               await _overviewFuture;
             },
             child: ListView(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.symmetric(
+                horizontal: CaleeSpacing.pagePadding,
+                vertical: CaleeSpacing.md,
+              ),
               children: [
-                _SectionHeader(
-                  title: 'Task lists',
-                  subtitle: '${taskCalendars.length} found',
-                ),
-                const SizedBox(height: 8),
-                if (taskCalendars.isEmpty)
-                  _EmptySectionMessage(
-                    message: 'No task lists found yet.',
-                    action: TextButton.icon(
-                      onPressed: _openCollectionCreateShortcut,
-                      icon: const Icon(Icons.add),
-                      label: const Text('Create task list'),
-                    ),
+                // ── Open tasks ──────────────────────────────────────
+                if (openTasks.isEmpty && taskCalendars.isNotEmpty)
+                  CaleeSection(
+                    title: 'Tasks',
+                    children: [
+                      CaleeListRow(
+                        title: 'No open tasks',
+                        subtitle: 'Tap + Task to add one.',
+                        leading: const Icon(
+                          Icons.check_circle_outline,
+                          color: CaleeColors.textTertiary,
+                          size: 22,
+                        ),
+                      ),
+                    ],
                   )
-                else
-                  ...taskCalendars.map(_TaskListTile.new),
-                const SizedBox(height: 24),
-                _SectionHeader(
-                  title: 'Tasks',
-                  subtitle: '${tasks.length} found',
-                ),
-                const SizedBox(height: 8),
-                if (tasks.isEmpty)
-                  const _EmptySectionMessage(message: 'No tasks found yet.')
-                else
-                  ...tasks.map(
-                    (task) => _TaskTile(
-                      task: task,
-                      dueLabel: _formatDueAt(task.dueAt),
-                      isUpdating: _updatingTaskIds.contains(task.id),
-                      isDeleting: _deletingTaskIds.contains(task.id),
-                      isEditing: _editingTaskIds.contains(task.id),
-                      onToggle: () => _toggleTaskStatus(task),
-                      onEdit: () => _openEditTaskSheet(task),
-                      onDelete: () => _confirmDeleteTask(task),
+                else if (openTasks.isNotEmpty)
+                  CaleeSection(
+                    title: 'Tasks',
+                    trailing: '${openTasks.length}',
+                    children: openTasks
+                        .map(
+                          (task) => _TaskRow(
+                            key: ValueKey(task.id),
+                            task: task,
+                            dueLabel: _formatDueLabel(task.dueAt),
+                            listName: _calendarNameForTask(task, taskCalendars),
+                            isUpdating: _updatingTaskIds.contains(task.id),
+                            isDeleting: _deletingTaskIds.contains(task.id),
+                            isEditing: _editingTaskIds.contains(task.id),
+                            onToggle: () => _toggleTaskStatus(task),
+                            onEdit: () => _openEditTaskSheet(task),
+                            onDelete: () => _confirmDeleteTask(task),
+                          ),
+                        )
+                        .toList(),
+                  ),
+
+                // ── No task lists ────────────────────────────────────
+                if (taskCalendars.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: CaleeSpacing.md),
+                    child: CaleeSection(
+                      footer:
+                          'Connect a task list to start adding tasks.',
+                      children: [
+                        CaleeListRow(
+                          title: 'Add task list',
+                          leading: const Icon(
+                            Icons.add_circle_outline,
+                            color: CaleeColors.primary,
+                            size: 22,
+                          ),
+                          onTap: _openCollectionCreateShortcut,
+                        ),
+                      ],
                     ),
                   ),
+
+                // ── Completed tasks ──────────────────────────────────
+                if (completedTasks.isNotEmpty) ...[
+                  const SizedBox(height: CaleeSpacing.sectionSpacing),
+                  _CompletedSection(
+                    tasks: completedTasks,
+                    calendars: taskCalendars,
+                    isExpanded: _completedExpanded,
+                    onToggleExpanded: () {
+                      setState(() {
+                        _completedExpanded = !_completedExpanded;
+                      });
+                    },
+                    updatingIds: _updatingTaskIds,
+                    deletingIds: _deletingTaskIds,
+                    editingIds: _editingTaskIds,
+                    onToggle: _toggleTaskStatus,
+                    onEdit: _openEditTaskSheet,
+                    onDelete: _confirmDeleteTask,
+                    calendarNameForTask: _calendarNameForTask,
+                    formatDueLabel: _formatDueLabel,
+                  ),
+                ],
+
                 const SizedBox(height: 96),
               ],
             ),
@@ -400,6 +499,204 @@ class _TasksPageState extends State<TasksPage> {
     );
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Completed section with collapse toggle
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _CompletedSection extends StatelessWidget {
+  const _CompletedSection({
+    required this.tasks,
+    required this.calendars,
+    required this.isExpanded,
+    required this.onToggleExpanded,
+    required this.updatingIds,
+    required this.deletingIds,
+    required this.editingIds,
+    required this.onToggle,
+    required this.onEdit,
+    required this.onDelete,
+    required this.calendarNameForTask,
+    required this.formatDueLabel,
+  });
+
+  final List<ClientTask> tasks;
+  final List<ClientCalendar> calendars;
+  final bool isExpanded;
+  final VoidCallback onToggleExpanded;
+  final Set<String> updatingIds;
+  final Set<String> deletingIds;
+  final Set<String> editingIds;
+  final Future<void> Function(ClientTask) onToggle;
+  final Future<void> Function(ClientTask) onEdit;
+  final Future<void> Function(ClientTask) onDelete;
+  final String Function(ClientTask, List<ClientCalendar>) calendarNameForTask;
+  final String Function(String?) formatDueLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Collapsible header row
+        InkWell(
+          onTap: onToggleExpanded,
+          borderRadius: BorderRadius.circular(CaleeRadius.card),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(
+              CaleeSpacing.sm,
+              0,
+              CaleeSpacing.sm,
+              CaleeSpacing.xs,
+            ),
+            child: Row(
+              children: [
+                Text(
+                  'COMPLETED',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: CaleeColors.textSecondary,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+                const SizedBox(width: CaleeSpacing.xs),
+                Text(
+                  '${tasks.length}',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: CaleeColors.textSecondary,
+                  ),
+                ),
+                const Spacer(),
+                Icon(
+                  isExpanded
+                      ? Icons.keyboard_arrow_up
+                      : Icons.keyboard_arrow_down,
+                  size: 16,
+                  color: CaleeColors.textTertiary,
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (isExpanded)
+          CaleeSection(
+            children: tasks
+                .map(
+                  (task) => _TaskRow(
+                    key: ValueKey(task.id),
+                    task: task,
+                    dueLabel: formatDueLabel(task.dueAt),
+                    listName: calendarNameForTask(task, calendars),
+                    isUpdating: updatingIds.contains(task.id),
+                    isDeleting: deletingIds.contains(task.id),
+                    isEditing: editingIds.contains(task.id),
+                    onToggle: () => onToggle(task),
+                    onEdit: () => onEdit(task),
+                    onDelete: () => onDelete(task),
+                  ),
+                )
+                .toList(),
+          ),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Single task row
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _TaskRow extends StatelessWidget {
+  const _TaskRow({
+    required this.task,
+    required this.dueLabel,
+    required this.listName,
+    required this.isUpdating,
+    required this.isDeleting,
+    required this.isEditing,
+    required this.onToggle,
+    required this.onEdit,
+    required this.onDelete,
+    super.key,
+  });
+
+  final ClientTask task;
+  final String dueLabel;
+  final String listName;
+  final bool isUpdating;
+  final bool isDeleting;
+  final bool isEditing;
+  final VoidCallback onToggle;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+
+  String get _subtitle {
+    final parts = <String>[
+      if (dueLabel.isNotEmpty) dueLabel,
+      if (listName.isNotEmpty) listName,
+    ];
+    return parts.join(' · ');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isBusy = isDeleting || isEditing;
+
+    Widget trailing;
+    if (isBusy) {
+      trailing = const SizedBox(
+        width: 20,
+        height: 20,
+        child: CircularProgressIndicator(strokeWidth: 2),
+      );
+    } else {
+      trailing = PopupMenuButton<String>(
+        icon: const Icon(
+          Icons.more_horiz,
+          color: CaleeColors.textTertiary,
+          size: 20,
+        ),
+        onSelected: (value) {
+          if (value == 'edit') onEdit();
+          if (value == 'delete') onDelete();
+        },
+        itemBuilder: (_) => const [
+          PopupMenuItem(value: 'edit', child: Text('Edit')),
+          PopupMenuItem(value: 'delete', child: Text('Delete')),
+        ],
+      );
+    }
+
+    return CaleeListRow(
+      title: task.title,
+      subtitle: _subtitle.isNotEmpty ? _subtitle : null,
+      titleStyle: task.isCompleted
+          ? TextStyle(
+              color: CaleeColors.textTertiary,
+              decoration: TextDecoration.lineThrough,
+              decorationColor: CaleeColors.textTertiary,
+            )
+          : null,
+      subtitleStyle: task.isCompleted
+          ? const TextStyle(color: CaleeColors.textTertiary)
+          : null,
+      leading: CaleeCheckCircle(
+        isChecked: task.isCompleted,
+        onTap: onToggle,
+        isLoading: isUpdating,
+        color: CaleeColors.primary,
+      ),
+      trailing: trailing,
+      enabled: !isBusy,
+      onTap: isBusy ? null : onEdit,
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Internal data holder
+// ─────────────────────────────────────────────────────────────────────────────
 
 class _TasksOverview {
   const _TasksOverview({
@@ -415,8 +712,12 @@ class _TasksOverview {
   final String to;
 }
 
-class _CreateTaskSheet extends StatefulWidget {
-  const _CreateTaskSheet({
+// ─────────────────────────────────────────────────────────────────────────────
+// Create task form (inside CaleeBottomSheet)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _CreateTaskForm extends StatefulWidget {
+  const _CreateTaskForm({
     required this.taskCalendars,
     required this.onCreate,
   });
@@ -430,10 +731,10 @@ class _CreateTaskSheet extends StatefulWidget {
   }) onCreate;
 
   @override
-  State<_CreateTaskSheet> createState() => _CreateTaskSheetState();
+  State<_CreateTaskForm> createState() => _CreateTaskFormState();
 }
 
-class _CreateTaskSheetState extends State<_CreateTaskSheet> {
+class _CreateTaskFormState extends State<_CreateTaskForm> {
   final _formKey = GlobalKey<FormState>();
   final _titleController = TextEditingController();
   final _descriptionController = TextEditingController();
@@ -497,7 +798,8 @@ class _CreateTaskSheetState extends State<_CreateTaskSheet> {
       await widget.onCreate(
         taskCalendar: selectedTaskCalendar,
         title: _titleController.text.trim(),
-        dueAt: _selectedDueDate == null ? null : _formatDate(_selectedDueDate!),
+        dueAt:
+            _selectedDueDate == null ? null : _formatDate(_selectedDueDate!),
         description: _descriptionController.text.trim(),
       );
 
@@ -519,118 +821,101 @@ class _CreateTaskSheetState extends State<_CreateTaskSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
-
-    return SafeArea(
-      child: Padding(
-        padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + bottomInset),
-        child: Form(
-          key: _formKey,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  'New task',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-                const SizedBox(height: 16),
-                DropdownButtonFormField<ClientCalendar>(
-                  initialValue: _selectedTaskCalendar,
-                  items: widget.taskCalendars
-                      .map(
-                        (calendar) => DropdownMenuItem(
-                          value: calendar,
-                          child: Text(
-                              '${calendar.name} · ${calendar.serviceName}'),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: _isSubmitting
-                      ? null
-                      : (calendar) {
-                          setState(() {
-                            _selectedTaskCalendar = calendar;
-                          });
-                        },
-                  decoration: const InputDecoration(
-                    labelText: 'Task list',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _titleController,
-                  enabled: !_isSubmitting,
-                  autofocus: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Title',
-                    border: OutlineInputBorder(),
-                  ),
-                  textInputAction: TextInputAction.next,
-                  validator: (value) {
-                    if ((value ?? '').trim().isEmpty) {
-                      return 'Enter a task title';
-                    }
-
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 12),
-                OutlinedButton.icon(
-                  onPressed: _isSubmitting ? null : _pickDueDate,
-                  icon: const Icon(Icons.event_outlined),
-                  label: Text(
-                    _selectedDueDate == null
-                        ? 'Add due date'
-                        : 'Due ${_formatDate(_selectedDueDate!)}',
-                  ),
-                ),
-                if (_selectedDueDate != null)
-                  TextButton(
-                    onPressed: _isSubmitting
-                        ? null
-                        : () {
-                            setState(() {
-                              _selectedDueDate = null;
-                            });
-                          },
-                    child: const Text('Remove due date'),
-                  ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _descriptionController,
-                  enabled: !_isSubmitting,
-                  decoration: const InputDecoration(
-                    labelText: 'Notes',
-                    border: OutlineInputBorder(),
-                  ),
-                  minLines: 2,
-                  maxLines: 4,
-                ),
-                const SizedBox(height: 16),
-                FilledButton(
-                  onPressed: _isSubmitting ? null : _submit,
-                  child: _isSubmitting
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Text('Create task'),
-                ),
-              ],
+    return Form(
+      key: _formKey,
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            DropdownButtonFormField<ClientCalendar>(
+              value: _selectedTaskCalendar,
+              items: widget.taskCalendars
+                  .map(
+                    (calendar) => DropdownMenuItem(
+                      value: calendar,
+                      child:
+                          Text('${calendar.name} · ${calendar.serviceName}'),
+                    ),
+                  )
+                  .toList(),
+              onChanged: _isSubmitting
+                  ? null
+                  : (calendar) {
+                      setState(() {
+                        _selectedTaskCalendar = calendar;
+                      });
+                    },
+              decoration: const InputDecoration(labelText: 'Task list'),
             ),
-          ),
+            const SizedBox(height: CaleeSpacing.sm),
+            TextFormField(
+              controller: _titleController,
+              enabled: !_isSubmitting,
+              autofocus: true,
+              decoration: const InputDecoration(labelText: 'Title'),
+              textInputAction: TextInputAction.next,
+              validator: (value) {
+                if ((value ?? '').trim().isEmpty) {
+                  return 'Enter a task title';
+                }
+
+                return null;
+              },
+            ),
+            const SizedBox(height: CaleeSpacing.sm),
+            OutlinedButton.icon(
+              onPressed: _isSubmitting ? null : _pickDueDate,
+              icon: const Icon(Icons.event_outlined),
+              label: Text(
+                _selectedDueDate == null
+                    ? 'Add due date'
+                    : 'Due ${_formatDate(_selectedDueDate!)}',
+              ),
+            ),
+            if (_selectedDueDate != null)
+              TextButton(
+                onPressed: _isSubmitting
+                    ? null
+                    : () {
+                        setState(() {
+                          _selectedDueDate = null;
+                        });
+                      },
+                child: const Text('Remove due date'),
+              ),
+            const SizedBox(height: CaleeSpacing.sm),
+            TextFormField(
+              controller: _descriptionController,
+              enabled: !_isSubmitting,
+              decoration: const InputDecoration(labelText: 'Notes'),
+              minLines: 2,
+              maxLines: 4,
+            ),
+            const SizedBox(height: CaleeSpacing.md),
+            FilledButton(
+              onPressed: _isSubmitting ? null : _submit,
+              child: _isSubmitting
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('Create Task'),
+            ),
+          ],
         ),
       ),
     );
   }
 }
 
-class _EditTaskSheet extends StatefulWidget {
-  const _EditTaskSheet({
+// ─────────────────────────────────────────────────────────────────────────────
+// Edit task form (inside CaleeBottomSheet)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _EditTaskForm extends StatefulWidget {
+  const _EditTaskForm({
     required this.task,
     required this.onUpdate,
   });
@@ -644,10 +929,10 @@ class _EditTaskSheet extends StatefulWidget {
   }) onUpdate;
 
   @override
-  State<_EditTaskSheet> createState() => _EditTaskSheetState();
+  State<_EditTaskForm> createState() => _EditTaskFormState();
 }
 
-class _EditTaskSheetState extends State<_EditTaskSheet> {
+class _EditTaskFormState extends State<_EditTaskForm> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _titleController;
   late final TextEditingController _descriptionController;
@@ -712,7 +997,8 @@ class _EditTaskSheetState extends State<_EditTaskSheet> {
       await widget.onUpdate(
         task: widget.task,
         title: _titleController.text.trim(),
-        dueAt: _selectedDueDate == null ? null : _formatDate(_selectedDueDate!),
+        dueAt:
+            _selectedDueDate == null ? null : _formatDate(_selectedDueDate!),
         description: _descriptionController.text.trim(),
       );
 
@@ -734,319 +1020,68 @@ class _EditTaskSheetState extends State<_EditTaskSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
-
-    return SafeArea(
-      child: Padding(
-        padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + bottomInset),
-        child: Form(
-          key: _formKey,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  'Edit task',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-                const SizedBox(height: 16),
-                TextFormField(
-                  controller: _titleController,
-                  enabled: !_isSubmitting,
-                  autofocus: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Title',
-                    border: OutlineInputBorder(),
-                  ),
-                  textInputAction: TextInputAction.next,
-                  validator: (value) {
-                    if ((value ?? '').trim().isEmpty) {
-                      return 'Enter a task title';
-                    }
-
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 12),
-                OutlinedButton.icon(
-                  onPressed: _isSubmitting ? null : _pickDueDate,
-                  icon: const Icon(Icons.event_outlined),
-                  label: Text(
-                    _selectedDueDate == null
-                        ? 'Add due date'
-                        : 'Due ${_formatDate(_selectedDueDate!)}',
-                  ),
-                ),
-                if (_selectedDueDate != null)
-                  TextButton(
-                    onPressed: _isSubmitting
-                        ? null
-                        : () {
-                            setState(() {
-                              _selectedDueDate = null;
-                            });
-                          },
-                    child: const Text('Remove due date'),
-                  ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _descriptionController,
-                  enabled: !_isSubmitting,
-                  decoration: const InputDecoration(
-                    labelText: 'Notes',
-                    border: OutlineInputBorder(),
-                  ),
-                  minLines: 2,
-                  maxLines: 4,
-                ),
-                const SizedBox(height: 16),
-                FilledButton(
-                  onPressed: _isSubmitting ? null : _submit,
-                  child: _isSubmitting
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Text('Save task'),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _TaskListTile extends StatelessWidget {
-  const _TaskListTile(this.calendar);
-
-  final ClientCalendar calendar;
-
-  @override
-  Widget build(BuildContext context) {
-    final firstLetter = calendar.name.trim().isNotEmpty
-        ? calendar.name.trim().characters.first.toUpperCase()
-        : '?';
-
-    return Card(
-      child: ListTile(
-        leading: CircleAvatar(child: Text(firstLetter)),
-        title: Text(calendar.name),
-        subtitle: Text(
-          [
-            if (calendar.serviceName.trim().isNotEmpty)
-              'From ${calendar.serviceName}',
-            if (calendar.readOnly) 'Read-only',
-          ].where((item) => item.trim().isNotEmpty).join(' · '),
-        ),
-      ),
-    );
-  }
-}
-
-class _TaskTile extends StatelessWidget {
-  const _TaskTile({
-    required this.task,
-    required this.dueLabel,
-    required this.isUpdating,
-    required this.isDeleting,
-    required this.isEditing,
-    required this.onToggle,
-    required this.onEdit,
-    required this.onDelete,
-  });
-
-  final ClientTask task;
-  final String dueLabel;
-  final bool isUpdating;
-  final bool isDeleting;
-  final bool isEditing;
-  final VoidCallback onToggle;
-  final VoidCallback onEdit;
-  final VoidCallback onDelete;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: ListTile(
-        leading: isUpdating
-            ? const SizedBox(
-                width: 24,
-                height: 24,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            : IconButton(
-                icon: Icon(
-                  task.isCompleted
-                      ? Icons.check_circle_outline
-                      : Icons.radio_button_unchecked,
-                ),
-                onPressed: onToggle,
-                tooltip: task.isCompleted ? 'Mark as not done' : 'Mark as done',
-              ),
-        title: Text(task.title),
-        trailing: isDeleting || isEditing
-            ? const SizedBox(
-                width: 24,
-                height: 24,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            : PopupMenuButton<String>(
-                onSelected: (value) {
-                  if (value == 'edit') {
-                    onEdit();
-                  }
-                  if (value == 'delete') {
-                    onDelete();
-                  }
-                },
-                itemBuilder: (context) => const [
-                  PopupMenuItem(
-                    value: 'edit',
-                    child: Text('Edit task'),
-                  ),
-                  PopupMenuItem(
-                    value: 'delete',
-                    child: Text('Delete task'),
-                  ),
-                ],
-              ),
-        subtitle: Text(
-          [
-            task.statusLabel,
-            dueLabel,
-            if (task.serviceName.trim().isNotEmpty) 'From ${task.serviceName}',
-            if ((task.description ?? '').trim().isNotEmpty) task.description!,
-          ].where((item) => item.trim().isNotEmpty).join(' · '),
-        ),
-      ),
-    );
-  }
-}
-
-class _SectionHeader extends StatelessWidget {
-  const _SectionHeader({
-    required this.title,
-    required this.subtitle,
-  });
-
-  final String title;
-  final String subtitle;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(title, style: Theme.of(context).textTheme.titleLarge),
-        Text(subtitle, style: Theme.of(context).textTheme.bodyMedium),
-      ],
-    );
-  }
-}
-
-class _EmptySectionMessage extends StatelessWidget {
-  const _EmptySectionMessage({
-    required this.message,
-    this.action,
-  });
-
-  final String message;
-  final Widget? action;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
+    return Form(
+      key: _formKey,
+      child: SingleChildScrollView(
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(message),
-            if (action != null) ...[
-              const SizedBox(height: 8),
-              action!,
-            ],
+            TextFormField(
+              controller: _titleController,
+              enabled: !_isSubmitting,
+              autofocus: true,
+              decoration: const InputDecoration(labelText: 'Title'),
+              textInputAction: TextInputAction.next,
+              validator: (value) {
+                if ((value ?? '').trim().isEmpty) {
+                  return 'Enter a task title';
+                }
+
+                return null;
+              },
+            ),
+            const SizedBox(height: CaleeSpacing.sm),
+            OutlinedButton.icon(
+              onPressed: _isSubmitting ? null : _pickDueDate,
+              icon: const Icon(Icons.event_outlined),
+              label: Text(
+                _selectedDueDate == null
+                    ? 'Add due date'
+                    : 'Due ${_formatDate(_selectedDueDate!)}',
+              ),
+            ),
+            if (_selectedDueDate != null)
+              TextButton(
+                onPressed: _isSubmitting
+                    ? null
+                    : () {
+                        setState(() {
+                          _selectedDueDate = null;
+                        });
+                      },
+                child: const Text('Remove due date'),
+              ),
+            const SizedBox(height: CaleeSpacing.sm),
+            TextFormField(
+              controller: _descriptionController,
+              enabled: !_isSubmitting,
+              decoration: const InputDecoration(labelText: 'Notes'),
+              minLines: 2,
+              maxLines: 4,
+            ),
+            const SizedBox(height: CaleeSpacing.md),
+            FilledButton(
+              onPressed: _isSubmitting ? null : _submit,
+              child: _isSubmitting
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('Save Task'),
+            ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-class _TasksEmptyState extends StatelessWidget {
-  const _TasksEmptyState({
-    this.action,
-  });
-
-  final Widget? action;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Card(
-        margin: const EdgeInsets.all(24),
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                'No task lists or tasks found yet.',
-                textAlign: TextAlign.center,
-              ),
-              if (action != null) ...[
-                const SizedBox(height: 16),
-                action!,
-              ],
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _TasksErrorState extends StatelessWidget {
-  const _TasksErrorState({
-    required this.onRetry,
-  });
-
-  final VoidCallback onRetry;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Card(
-        margin: const EdgeInsets.all(24),
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.cloud_off_outlined, size: 40),
-              const SizedBox(height: 12),
-              Text(
-                'Unable to load tasks from Calee.',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Check your connection, then try again.',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-              const SizedBox(height: 16),
-              FilledButton(
-                onPressed: onRetry,
-                child: const Text('Try again'),
-              ),
-            ],
-          ),
         ),
       ),
     );
