@@ -132,8 +132,14 @@ class CaleeClient:
     def post(self, path: str, body: dict[str, Any]) -> Any:
         return self.data("POST", path, body)
 
-    def patch(self, path: str, body: dict[str, Any]) -> Any:
-        return self.data("PATCH", path, body)
+    def patch(
+        self,
+        path: str,
+        body: dict[str, Any],
+        *,
+        query: dict[str, Any] | None = None,
+    ) -> Any:
+        return self.data("PATCH", path, body, query=query)
 
     def delete(
         self,
@@ -375,6 +381,31 @@ class Regression:
             _create_recurring_occurrence_delete,
         )
 
+        def _create_recurring_occurrence_edit() -> str:
+            start = dt.datetime.combine(self.tomorrow, dt.time(hour=14, minute=0))
+            end = start + dt.timedelta(minutes=30)
+
+            data = self.client.post(
+                "/client/v1/events",
+                {
+                    "serviceId": calendar["serviceId"],
+                    "calendarId": calendar["id"],
+                    "title": f"RT recurring occurrence edit event {self.run_id}",
+                    "startsAt": start.isoformat(),
+                    "endsAt": end.isoformat(),
+                    "allDay": False,
+                    "recurrence": "FREQ=DAILY;COUNT=3",
+                },
+            )
+
+            event_holder["recurring_occurrence_edit"] = data["event"]
+            return data["event"].get("id", "")
+
+        self.run_step(
+            "event create: recurring occurrence edit",
+            _create_recurring_occurrence_edit,
+        )
+
         def _read() -> str:
             data = self.client.get(
                 "/client/v1/events",
@@ -390,6 +421,7 @@ class Regression:
             expected_recurring_count = f"RT recurring count event {self.run_id}"
             expected_recurring_until = f"RT recurring until event {self.run_id}"
             expected_occurrence_delete = f"RT recurring occurrence delete event {self.run_id}"
+            expected_occurrence_edit = f"RT recurring occurrence edit event {self.run_id}"
 
             if expected not in titles:
                 raise RuntimeError(f"Created event title not found in events response: {expected}")
@@ -464,6 +496,20 @@ class Regression:
             event_holder["occurrence_delete_all"] = occurrence_delete_occurrences
             event_holder["occurrence_delete_middle"] = occurrence_delete_occurrences[1]
 
+            occurrence_edit_occurrences = [
+                event
+                for event in events
+                if event.get("title") == expected_occurrence_edit and event.get("recurring") is True
+            ]
+            if len(occurrence_edit_occurrences) != 3:
+                raise RuntimeError(
+                    f"Expected 3 occurrence-edit test occurrences, found {len(occurrence_edit_occurrences)}"
+                )
+
+            occurrence_edit_occurrences.sort(key=lambda event: str(event.get("startsAt", "")))
+            event_holder["occurrence_edit_all"] = occurrence_edit_occurrences
+            event_holder["occurrence_edit_middle"] = occurrence_edit_occurrences[1]
+
             occurrence = recurring_count_occurrences[0]
             occurrence_id = occurrence.get("id", "")
             series_id = occurrence.get("seriesId", "")
@@ -478,7 +524,8 @@ class Regression:
                 f"{len(events)} events returned; "
                 f"COUNT occurrences={len(recurring_count_occurrences)}, "
                 f"UNTIL occurrences={len(recurring_until_occurrences)}, "
-                f"occurrence-delete occurrences={len(occurrence_delete_occurrences)}"
+                f"occurrence-delete occurrences={len(occurrence_delete_occurrences)}, "
+                f"occurrence-edit occurrences={len(occurrence_edit_occurrences)}"
             )
 
         self.run_step("event read: created events visible", _read)
@@ -757,6 +804,105 @@ class Regression:
         self.run_step(
             "recurring event occurrence delete cleanup",
             _delete_occurrence_delete_series_cleanup,
+        )
+
+        def _edit_one_recurring_occurrence() -> str:
+            occurrence = event_holder["occurrence_edit_middle"]
+            occurrence_id = occurrence["id"]
+            start = dt.datetime.combine(
+                self.tomorrow + dt.timedelta(days=1),
+                dt.time(hour=15, minute=15),
+            )
+            end = start + dt.timedelta(minutes=45)
+
+            data = self.client.patch(
+                f"/client/v1/events/{self.encoded(occurrence_id)}",
+                {
+                    "title": f"RT recurring occurrence edited {self.run_id}",
+                    "startsAt": start.isoformat(),
+                    "endsAt": end.isoformat(),
+                    "allDay": False,
+                    "location": "Recurring occurrence regression test edited",
+                    "description": "Edited only this occurrence by local regression script",
+                    "recurrence": None,
+                },
+                query={"scope": "occurrence"},
+            )
+
+            event_holder["occurrence_edit_middle"] = data["event"]
+            return data["event"].get("id", occurrence_id)
+
+        self.run_step(
+            "recurring event occurrence edit",
+            _edit_one_recurring_occurrence,
+        )
+
+        def _read_one_recurring_occurrence_edit() -> str:
+            data = self.client.get(
+                "/client/v1/events",
+                query={
+                    "from": self.today.isoformat(),
+                    "to": (self.today + dt.timedelta(days=7)).isoformat(),
+                },
+            )
+
+            original_title = f"RT recurring occurrence edit event {self.run_id}"
+            edited_title = f"RT recurring occurrence edited {self.run_id}"
+            edited_occurrence = event_holder["occurrence_edit_middle"]
+            edited_occurrence_id = edited_occurrence["id"]
+
+            original_remaining = [
+                event
+                for event in data.get("events", [])
+                if event.get("title") == original_title and event.get("recurring") is True
+            ]
+            edited_matches = [
+                event
+                for event in data.get("events", [])
+                if event.get("title") == edited_title and event.get("recurring") is True
+            ]
+
+            if len(original_remaining) != 2:
+                raise RuntimeError(
+                    f"Expected 2 original recurring occurrences after occurrence edit, found {len(original_remaining)}"
+                )
+
+            if len(edited_matches) != 1:
+                raise RuntimeError(
+                    f"Expected 1 edited detached recurring occurrence, found {len(edited_matches)}"
+                )
+
+            edited = edited_matches[0]
+            if edited.get("id") != edited_occurrence_id:
+                raise RuntimeError(
+                    f"Edited detached occurrence id changed from {edited_occurrence_id} to {edited.get('id')}"
+                )
+
+            series_ids = {event.get("seriesId") for event in original_remaining + edited_matches}
+            if len(series_ids) != 1:
+                raise RuntimeError("Edited detached occurrence does not share the original series id")
+
+            event_holder["occurrence_edit_remaining"] = original_remaining + edited_matches
+            return (
+                f"original occurrences={len(original_remaining)}, "
+                f"edited occurrences={len(edited_matches)}"
+            )
+
+        self.run_step(
+            "recurring event occurrence edit readback",
+            _read_one_recurring_occurrence_edit,
+        )
+
+        def _delete_occurrence_edit_series_cleanup() -> str:
+            remaining = event_holder["occurrence_edit_remaining"]
+            series_id = remaining[0].get("seriesId") or remaining[0]["id"]
+
+            self.client.delete(f"/client/v1/events/{self.encoded(series_id)}")
+            return series_id
+
+        self.run_step(
+            "recurring event occurrence edit cleanup",
+            _delete_occurrence_edit_series_cleanup,
         )
 
         def _edit_recurring_series_via_occurrence_id() -> str:
