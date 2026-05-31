@@ -1252,6 +1252,222 @@ class Regression:
 
         self.run_step("chore undo completion", _undo)
 
+        def _create_recurring_chore(label: str, scheduled_at: dt.date) -> dict[str, Any]:
+            data = self.client.post(
+                "/client/v1/chores",
+                {
+                    "serviceId": chore_calendar["serviceId"],
+                    "calendarId": chore_calendar["id"],
+                    "title": f"RT chore {label} {self.run_id}",
+                    "scheduledAt": scheduled_at.isoformat(),
+                    "description": f"Recurring chore {label} created by local regression script",
+                    "recurrence": "FREQ=DAILY",
+                    "points": 1,
+                },
+            )
+            chore = data["chore"]
+            self.created_chore_ids.append(chore["id"])
+            return chore
+
+        def _chore_uid(chore: dict[str, Any]) -> str:
+            uid = chore.get("choreUid") or chore.get("parentChoreUid")
+            if isinstance(uid, str) and uid.strip():
+                return uid
+
+            chore_id = str(chore.get("id", ""))
+            if ":" in chore_id:
+                return chore_id.split(":", 1)[1]
+
+            raise RuntimeError(f"Unable to determine chore UID for {chore_id}")
+
+        def _list_chores() -> list[dict[str, Any]]:
+            data = self.client.get(
+                "/client/v1/chores",
+                query={
+                    "from": self.today.isoformat(),
+                    "to": (self.today + dt.timedelta(days=14)).isoformat(),
+                },
+            )
+            return data.get("chores", [])
+
+        def _completion_logs_for(chore: dict[str, Any]) -> list[dict[str, Any]]:
+            uid = _chore_uid(chore)
+            return [
+                item
+                for item in _list_chores()
+                if item.get("kind") == "completionLog" and item.get("choreUid") == uid
+            ]
+
+        def _base_chore_by_id(chore_id: str) -> dict[str, Any] | None:
+            for item in _list_chores():
+                if item.get("id") == chore_id and item.get("kind") == "baseChore":
+                    return item
+            return None
+
+        def _create_skip_chore() -> str:
+            chore = _create_recurring_chore("skip", self.today)
+            chore_holder["skip_chore"] = chore
+            return chore["id"]
+
+        self.run_step("recurring chore skip create", _create_skip_chore)
+
+        def _complete_skip_chore() -> str:
+            chore_id = chore_holder["skip_chore"]["id"]
+            self.client.post(
+                f"/client/v1/chores/{self.encoded(chore_id)}/complete",
+                {"date": self.today.isoformat()},
+            )
+            return "completed before skip"
+
+        self.run_step("recurring chore skip completion", _complete_skip_chore)
+
+        def _skip_recurring_chore() -> str:
+            chore_id = chore_holder["skip_chore"]["id"]
+            _, payload = self.client.delete(
+                f"/client/v1/chores/{self.encoded(chore_id)}",
+                query={
+                    "action": "skip",
+                    "date": self.today.isoformat(),
+                },
+            )
+            data = payload.get("data", payload)
+            next_scheduled = data.get("nextScheduledAt")
+            if next_scheduled != self.tomorrow.isoformat():
+                raise RuntimeError(
+                    f"Expected nextScheduledAt={self.tomorrow.isoformat()}, got {next_scheduled}"
+                )
+            return f"nextScheduledAt={next_scheduled}"
+
+        self.run_step("recurring chore skip this time", _skip_recurring_chore)
+
+        def _read_skip_chore() -> str:
+            chore = chore_holder["skip_chore"]
+            base = _base_chore_by_id(chore["id"])
+            if base is None:
+                raise RuntimeError("Skipped recurring chore base item disappeared")
+
+            if base.get("scheduledDate") != self.tomorrow.isoformat():
+                raise RuntimeError(
+                    f"Expected skipped chore scheduledDate={self.tomorrow.isoformat()}, got {base.get('scheduledDate')}"
+                )
+
+            if base.get("recurrence") != "FREQ=DAILY":
+                raise RuntimeError(f"Skipped chore recurrence changed unexpectedly: {base.get('recurrence')}")
+
+            logs = _completion_logs_for(chore)
+            if not logs:
+                raise RuntimeError("Completion history was not preserved after skipping recurring chore")
+
+            return f"scheduledDate={base.get('scheduledDate')}; completion logs={len(logs)}"
+
+        self.run_step("recurring chore skip readback", _read_skip_chore)
+
+        def _create_stop_repeating_chore() -> str:
+            chore = _create_recurring_chore("stop repeating", self.today)
+            chore_holder["stop_repeating_chore"] = chore
+            return chore["id"]
+
+        self.run_step("recurring chore stop repeating create", _create_stop_repeating_chore)
+
+        def _complete_stop_repeating_chore() -> str:
+            chore_id = chore_holder["stop_repeating_chore"]["id"]
+            self.client.post(
+                f"/client/v1/chores/{self.encoded(chore_id)}/complete",
+                {"date": self.today.isoformat()},
+            )
+            return "completed before stop repeating"
+
+        self.run_step("recurring chore stop repeating completion", _complete_stop_repeating_chore)
+
+        def _stop_repeating_chore() -> str:
+            chore_id = chore_holder["stop_repeating_chore"]["id"]
+            _, payload = self.client.delete(
+                f"/client/v1/chores/{self.encoded(chore_id)}",
+                query={"action": "stopRepeating"},
+            )
+            data = payload.get("data", payload)
+            if data.get("stoppedRepeating") is not True:
+                raise RuntimeError(f"Unexpected stopRepeating response: {data}")
+            return chore_id
+
+        self.run_step("recurring chore stop repeating", _stop_repeating_chore)
+
+        def _read_stop_repeating_chore() -> str:
+            chore = chore_holder["stop_repeating_chore"]
+            base = _base_chore_by_id(chore["id"])
+            if base is None:
+                raise RuntimeError("Stop-repeating chore base item disappeared")
+
+            if base.get("recurrence") not in (None, ""):
+                raise RuntimeError(f"Expected recurrence to be removed, got {base.get('recurrence')}")
+
+            logs = _completion_logs_for(chore)
+            if not logs:
+                raise RuntimeError("Completion history was not preserved after stopping recurring chore")
+
+            return f"recurrence removed; completion logs={len(logs)}"
+
+        self.run_step("recurring chore stop repeating readback", _read_stop_repeating_chore)
+
+        def _create_permanent_delete_chore() -> str:
+            chore = _create_recurring_chore("permanent delete", self.today)
+            chore_holder["permanent_delete_chore"] = chore
+            return chore["id"]
+
+        self.run_step("recurring chore permanent delete create", _create_permanent_delete_chore)
+
+        def _complete_permanent_delete_chore() -> str:
+            chore_id = chore_holder["permanent_delete_chore"]["id"]
+            self.client.post(
+                f"/client/v1/chores/{self.encoded(chore_id)}/complete",
+                {"date": self.today.isoformat()},
+            )
+            return "completed before permanent delete"
+
+        self.run_step("recurring chore permanent delete completion", _complete_permanent_delete_chore)
+
+        def _delete_permanent_chore() -> str:
+            chore_id = chore_holder["permanent_delete_chore"]["id"]
+            _, payload = self.client.delete(
+                f"/client/v1/chores/{self.encoded(chore_id)}",
+                query={"action": "deletePermanent"},
+            )
+            data = payload.get("data", payload)
+            if data.get("deleted") is not True:
+                raise RuntimeError(f"Unexpected permanent delete response: {data}")
+
+            self.created_chore_ids.remove(chore_id)
+            return f"deletedCompletionLogs={data.get('deletedCompletionLogs')}"
+
+        self.run_step("recurring chore permanent delete", _delete_permanent_chore)
+
+        def _read_permanent_delete_chore() -> str:
+            chore = chore_holder["permanent_delete_chore"]
+            chore_id = chore["id"]
+            uid = _chore_uid(chore)
+            items = _list_chores()
+
+            base_matches = [
+                item
+                for item in items
+                if item.get("id") == chore_id and item.get("kind") == "baseChore"
+            ]
+            log_matches = [
+                item
+                for item in items
+                if item.get("kind") == "completionLog" and item.get("choreUid") == uid
+            ]
+
+            if base_matches:
+                raise RuntimeError("Permanently deleted recurring chore is still visible")
+
+            if log_matches:
+                raise RuntimeError("Completion logs still exist after permanent chore delete")
+
+            return "base chore and completion logs removed"
+
+        self.run_step("recurring chore permanent delete readback", _read_permanent_delete_chore)
+
         def _delete() -> str:
             chore_id = chore_holder["chore"]["id"]
             self.client.delete(f"/client/v1/chores/{self.encoded(chore_id)}")
