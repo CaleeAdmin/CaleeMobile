@@ -506,7 +506,19 @@ class _EventTile extends StatelessWidget {
     final local = start.toLocal();
 
     if (event.allDay) {
-      return '${local.day}/${local.month} · All day';
+      final end = DateTime.tryParse(event.endsAt)?.toLocal();
+      if (end == null) {
+        return '${local.day}/${local.month} · All day';
+      }
+
+      final visibleEnd = end.subtract(const Duration(days: 1));
+      if (visibleEnd.year == local.year &&
+          visibleEnd.month == local.month &&
+          visibleEnd.day == local.day) {
+        return '${local.day}/${local.month} · All day';
+      }
+
+      return '${local.day}/${local.month} - ${visibleEnd.day}/${visibleEnd.month} · All day';
     }
 
     final hour = local.hour.toString().padLeft(2, '0');
@@ -558,6 +570,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
 
   late ClientCalendar _selectedCalendar;
   late DateTime _selectedDate;
+  late DateTime _selectedEndDate;
   late TimeOfDay _startTime;
   late TimeOfDay _endTime;
   String _selectedRecurrence = 'none';
@@ -585,6 +598,15 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
           start.add(const Duration(hours: 1));
 
       _selectedDate = DateTime(start.year, start.month, start.day);
+      _selectedEndDate = event.allDay
+          ? DateTime(end.year, end.month, end.day)
+              .subtract(const Duration(days: 1))
+          : _selectedDate;
+
+      if (_selectedEndDate.isBefore(_selectedDate)) {
+        _selectedEndDate = _selectedDate;
+      }
+
       _startTime = TimeOfDay(hour: start.hour, minute: start.minute);
       _endTime = TimeOfDay(hour: end.hour, minute: end.minute);
       return;
@@ -592,6 +614,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
 
     final now = DateTime.now();
     _selectedDate = DateTime(now.year, now.month, now.day);
+    _selectedEndDate = _selectedDate;
 
     final nextHour = now.add(const Duration(hours: 1));
     _startTime = TimeOfDay(hour: nextHour.hour, minute: 0);
@@ -667,6 +690,27 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
     if (picked != null && mounted) {
       setState(() {
         _selectedDate = DateTime(picked.year, picked.month, picked.day);
+
+        if (_selectedEndDate.isBefore(_selectedDate)) {
+          _selectedEndDate = _selectedDate;
+        }
+      });
+    }
+  }
+
+  Future<void> _pickEndDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedEndDate.isBefore(_selectedDate)
+          ? _selectedDate
+          : _selectedEndDate,
+      firstDate: _selectedDate,
+      lastDate: DateTime(2100),
+    );
+
+    if (picked != null && mounted) {
+      setState(() {
+        _selectedEndDate = DateTime(picked.year, picked.month, picked.day);
       });
     }
   }
@@ -706,7 +750,15 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
     var endsAt = _dateTimeFor(_endTime);
 
     if (_allDay) {
-      endsAt = _selectedDate.add(const Duration(days: 1));
+      if (_selectedEndDate.isBefore(_selectedDate)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('End date must be on or after start date.')),
+        );
+        return;
+      }
+
+      endsAt = _selectedEndDate.add(const Duration(days: 1));
     } else if (!endsAt.isAfter(startsAt)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('End time must be after start time.')),
@@ -852,12 +904,32 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                           });
                         },
                 ),
-                OutlinedButton.icon(
-                  onPressed: _isSubmitting ? null : _pickDate,
-                  icon: const Icon(Icons.today_outlined),
-                  label: Text(_dateLabel(_selectedDate)),
-                ),
-                if (!_allDay) ...[
+                if (_allDay) ...[
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _isSubmitting ? null : _pickDate,
+                          icon: const Icon(Icons.today_outlined),
+                          label: Text('Start ${_dateLabel(_selectedDate)}'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _isSubmitting ? null : _pickEndDate,
+                          icon: const Icon(Icons.event_available_outlined),
+                          label: Text('End ${_dateLabel(_selectedEndDate)}'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ] else ...[
+                  OutlinedButton.icon(
+                    onPressed: _isSubmitting ? null : _pickDate,
+                    icon: const Icon(Icons.today_outlined),
+                    label: Text(_dateLabel(_selectedDate)),
+                  ),
                   const SizedBox(height: 8),
                   Row(
                     children: [
