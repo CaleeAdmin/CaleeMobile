@@ -275,7 +275,7 @@ class Regression:
 
         self.run_step("event create: one-off", _create_one_off)
 
-        def _create_recurring() -> str:
+        def _create_recurring_count() -> str:
             start = dt.datetime.combine(self.tomorrow, dt.time(hour=10, minute=0))
             end = start + dt.timedelta(minutes=30)
             data = self.client.post(
@@ -283,7 +283,7 @@ class Regression:
                 {
                     "serviceId": calendar["serviceId"],
                     "calendarId": calendar["id"],
-                    "title": f"RT recurring event {self.run_id}",
+                    "title": f"RT recurring count event {self.run_id}",
                     "startsAt": start.isoformat(),
                     "endsAt": end.isoformat(),
                     "allDay": False,
@@ -293,7 +293,29 @@ class Regression:
             event_holder["recurring"] = data["event"]
             return data["event"].get("id", "")
 
-        self.run_step("event create: recurring", _create_recurring)
+        self.run_step("event create: recurring count", _create_recurring_count)
+
+        def _create_recurring_until() -> str:
+            start_date = self.tomorrow
+            end_date = start_date + dt.timedelta(days=1)
+            until_date = start_date + dt.timedelta(days=2)
+
+            data = self.client.post(
+                "/client/v1/events",
+                {
+                    "serviceId": calendar["serviceId"],
+                    "calendarId": calendar["id"],
+                    "title": f"RT recurring until event {self.run_id}",
+                    "startsAt": start_date.isoformat(),
+                    "endsAt": end_date.isoformat(),
+                    "allDay": True,
+                    "recurrence": f"FREQ=DAILY;UNTIL={until_date.strftime('%Y%m%d')}",
+                },
+            )
+            event_holder["recurring_until"] = data["event"]
+            return data["event"].get("id", "")
+
+        self.run_step("event create: recurring until", _create_recurring_until)
 
         def _read() -> str:
             data = self.client.get(
@@ -306,21 +328,36 @@ class Regression:
             events = data.get("events", [])
             titles = [event.get("title", "") for event in events]
             expected = f"RT event {self.run_id}"
-            expected_recurring = f"RT recurring event {self.run_id}"
+            expected_recurring_count = f"RT recurring count event {self.run_id}"
+            expected_recurring_until = f"RT recurring until event {self.run_id}"
+
             if expected not in titles:
                 raise RuntimeError(f"Created event title not found in events response: {expected}")
 
-            recurring_occurrences = [
+            recurring_count_occurrences = [
                 event
                 for event in events
-                if event.get("title") == expected_recurring and event.get("recurring") is True
+                if event.get("title") == expected_recurring_count and event.get("recurring") is True
             ]
-            if not recurring_occurrences:
+            if len(recurring_count_occurrences) != 2:
                 raise RuntimeError(
-                    f"Created recurring event occurrence not found in events response: {expected_recurring}"
+                    f"Expected 2 COUNT recurring occurrences, found {len(recurring_count_occurrences)}"
                 )
 
-            occurrence = recurring_occurrences[0]
+            recurring_until_occurrences = [
+                event
+                for event in events
+                if event.get("title") == expected_recurring_until and event.get("recurring") is True
+            ]
+            if len(recurring_until_occurrences) != 3:
+                raise RuntimeError(
+                    f"Expected 3 UNTIL recurring occurrences, found {len(recurring_until_occurrences)}"
+                )
+
+            if not all(event.get("allDay") is True for event in recurring_until_occurrences):
+                raise RuntimeError("UNTIL recurring all-day occurrences were not returned as all-day events")
+
+            occurrence = recurring_count_occurrences[0]
             occurrence_id = occurrence.get("id", "")
             series_id = occurrence.get("seriesId", "")
 
@@ -330,7 +367,11 @@ class Regression:
                 )
 
             event_holder["recurring_occurrence"] = occurrence
-            return f"{len(events)} events returned"
+            return (
+                f"{len(events)} events returned; "
+                f"COUNT occurrences={len(recurring_count_occurrences)}, "
+                f"UNTIL occurrences={len(recurring_until_occurrences)}"
+            )
 
         self.run_step("event read: created events visible", _read)
 
@@ -375,7 +416,7 @@ class Regression:
             data = self.client.patch(
                 f"/client/v1/events/{self.encoded(occurrence_id)}",
                 {
-                    "title": f"RT recurring event edited {self.run_id}",
+                    "title": f"RT recurring count event edited {self.run_id}",
                     "startsAt": start.isoformat(),
                     "endsAt": end.isoformat(),
                     "allDay": False,
@@ -401,7 +442,7 @@ class Regression:
                 },
             )
 
-            expected = f"RT recurring event edited {self.run_id}"
+            expected = f"RT recurring count event edited {self.run_id}"
             matching = [
                 event for event in data.get("events", [])
                 if event.get("title") == expected and event.get("recurring") is True
@@ -435,7 +476,7 @@ class Regression:
                 },
             )
 
-            deleted_title = f"RT recurring event edited {self.run_id}"
+            deleted_title = f"RT recurring count event edited {self.run_id}"
             matching = [
                 event for event in data.get("events", [])
                 if event.get("title") == deleted_title and event.get("recurring") is True
