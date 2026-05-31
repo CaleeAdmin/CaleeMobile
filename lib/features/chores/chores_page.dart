@@ -1104,6 +1104,29 @@ class _EditChoreSheetState extends State<_EditChoreSheet> {
                   'Edit chore',
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
+                if (widget.chore.isRecurring) ...[
+                  const SizedBox(height: 8),
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(
+                            Icons.repeat,
+                            color: Theme.of(context).colorScheme.primary,
+                          ),
+                          const SizedBox(width: 12),
+                          const Expanded(
+                            child: Text(
+                              'This is a repeating chore. Changes will apply to the recurring chore going forward.',
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 16),
                 TextFormField(
                   controller: _titleController,
