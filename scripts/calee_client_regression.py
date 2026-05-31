@@ -399,6 +399,112 @@ class Regression:
 
         self.run_step("event edit", _edit)
 
+        def _update_one_off_to_recurring() -> str:
+            event = event_holder["one_off"]
+            event_id = event["id"]
+            start = dt.datetime.combine(self.tomorrow, dt.time(hour=11, minute=0))
+            end = start + dt.timedelta(minutes=45)
+
+            data = self.client.patch(
+                f"/client/v1/events/{self.encoded(event_id)}",
+                {
+                    "title": f"RT event recurrence updated {self.run_id}",
+                    "startsAt": start.isoformat(),
+                    "endsAt": end.isoformat(),
+                    "allDay": False,
+                    "location": "Regression test recurrence updated",
+                    "description": "Updated to recurring by local regression script",
+                    "recurrence": "FREQ=DAILY;COUNT=2",
+                },
+            )
+
+            event_holder["one_off"] = data["event"]
+            return data["event"].get("id", event_id)
+
+        self.run_step("event recurrence update: one-off to count", _update_one_off_to_recurring)
+
+        def _read_one_off_to_recurring() -> str:
+            data = self.client.get(
+                "/client/v1/events",
+                query={
+                    "from": self.today.isoformat(),
+                    "to": (self.today + dt.timedelta(days=7)).isoformat(),
+                },
+            )
+
+            expected = f"RT event recurrence updated {self.run_id}"
+            occurrences = [
+                event
+                for event in data.get("events", [])
+                if event.get("title") == expected and event.get("recurring") is True
+            ]
+
+            if len(occurrences) != 2:
+                raise RuntimeError(
+                    f"Expected updated event to have 2 recurring occurrences, found {len(occurrences)}"
+                )
+
+            event_holder["one_off_recurring_occurrence"] = occurrences[0]
+            return f"updated recurring occurrences={len(occurrences)}"
+
+        self.run_step("event recurrence update readback", _read_one_off_to_recurring)
+
+        def _clear_event_recurrence() -> str:
+            event = event_holder["one_off_recurring_occurrence"]
+            event_id = event.get("seriesId") or event["id"]
+            start = dt.datetime.combine(self.tomorrow, dt.time(hour=11, minute=0))
+            end = start + dt.timedelta(minutes=45)
+
+            data = self.client.patch(
+                f"/client/v1/events/{self.encoded(event_id)}",
+                {
+                    "title": f"RT event recurrence cleared {self.run_id}",
+                    "startsAt": start.isoformat(),
+                    "endsAt": end.isoformat(),
+                    "allDay": False,
+                    "location": "Regression test recurrence cleared",
+                    "description": "Cleared recurrence by local regression script",
+                    "recurrence": None,
+                },
+            )
+
+            event_holder["one_off"] = data["event"]
+            return data["event"].get("id", event_id)
+
+        self.run_step("event recurrence clear", _clear_event_recurrence)
+
+        def _read_recurrence_clear() -> str:
+            data = self.client.get(
+                "/client/v1/events",
+                query={
+                    "from": self.today.isoformat(),
+                    "to": (self.today + dt.timedelta(days=7)).isoformat(),
+                },
+            )
+
+            cleared_title = f"RT event recurrence cleared {self.run_id}"
+            recurring_matches = [
+                event
+                for event in data.get("events", [])
+                if event.get("title") == cleared_title and event.get("recurring") is True
+            ]
+            one_off_matches = [
+                event
+                for event in data.get("events", [])
+                if event.get("title") == cleared_title and event.get("recurring") is not True
+            ]
+
+            if recurring_matches:
+                raise RuntimeError("Cleared recurrence event is still returned as recurring")
+
+            if not one_off_matches:
+                raise RuntimeError("Cleared recurrence event was not returned as a one-off event")
+
+            event_holder["one_off"] = one_off_matches[0]
+            return "event returned as one-off"
+
+        self.run_step("event recurrence clear readback", _read_recurrence_clear)
+
         def _delete() -> str:
             event = event_holder["one_off"]
             event_id = event["id"]
