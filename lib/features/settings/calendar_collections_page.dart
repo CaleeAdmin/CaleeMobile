@@ -64,6 +64,7 @@ class CalendarCollectionsPage extends StatefulWidget {
     required this.services,
     this.initialCreateKind,
     this.autoOpenCreate = false,
+    this.autoOpenSubscribe = false,
     super.key,
   });
 
@@ -72,6 +73,7 @@ class CalendarCollectionsPage extends StatefulWidget {
   final List<ClientService> services;
   final String? initialCreateKind;
   final bool autoOpenCreate;
+  final bool autoOpenSubscribe;
 
   @override
   State<CalendarCollectionsPage> createState() =>
@@ -97,9 +99,14 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
     super.initState();
     _future = _loadCalendars();
 
-    if (widget.autoOpenCreate) {
+    if (widget.autoOpenCreate || widget.autoOpenSubscribe) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _openCreateSheet();
+        if (!mounted) return;
+        if (widget.autoOpenSubscribe) {
+          _openSubscribeSheet();
+        } else {
+          _openCreateSheet();
+        }
       });
     }
   }
