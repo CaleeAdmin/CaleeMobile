@@ -121,6 +121,12 @@ class _CalendarPageState extends State<CalendarPage> {
     final calendar = _calendarForEvent(event, calendars);
     final canWrite = calendar != null && !calendar.readOnly;
 
+    final editLabel = event.recurring ? 'Edit series' : 'Edit event';
+    final deleteLabel = event.recurring ? 'Delete series' : 'Delete event';
+    final readOnlyMessage = event.recurring
+        ? 'This recurring event calendar is read-only.'
+        : 'This calendar is read-only.';
+
     final action = await showModalBottomSheet<String>(
       context: context,
       builder: (context) => SafeArea(
@@ -136,17 +142,15 @@ class _CalendarPageState extends State<CalendarPage> {
             ListTile(
               enabled: canWrite,
               leading: const Icon(Icons.edit_outlined),
-              title: const Text('Edit event'),
-              subtitle:
-                  canWrite ? null : const Text('This calendar is read-only.'),
+              title: Text(editLabel),
+              subtitle: canWrite ? null : Text(readOnlyMessage),
               onTap: canWrite ? () => Navigator.of(context).pop('edit') : null,
             ),
             ListTile(
               enabled: canWrite,
               leading: const Icon(Icons.delete_outline),
-              title: const Text('Delete event'),
-              subtitle:
-                  canWrite ? null : const Text('This calendar is read-only.'),
+              title: Text(deleteLabel),
+              subtitle: canWrite ? null : Text(readOnlyMessage),
               onTap:
                   canWrite ? () => Navigator.of(context).pop('delete') : null,
             ),
@@ -197,7 +201,7 @@ class _CalendarPageState extends State<CalendarPage> {
   }) async {
     await widget.hubClient.updateEvent(
       accessToken: widget.accessToken,
-      eventId: event.id,
+      eventId: event.writableEventId,
       title: title,
       startsAt: allDay ? _formatDate(startsAt) : startsAt.toIso8601String(),
       endsAt: allDay ? _formatDate(endsAt) : endsAt.toIso8601String(),
@@ -211,8 +215,12 @@ class _CalendarPageState extends State<CalendarPage> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Delete event?'),
-        content: Text('Delete "${event.title}"?'),
+        title: Text(event.recurring ? 'Delete series?' : 'Delete event?'),
+        content: Text(
+          event.recurring
+              ? 'Delete "${event.title}" and all events in this recurring series?'
+              : 'Delete "${event.title}"?',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
@@ -233,12 +241,16 @@ class _CalendarPageState extends State<CalendarPage> {
     try {
       await widget.hubClient.deleteEvent(
         accessToken: widget.accessToken,
-        eventId: event.id,
+        eventId: event.writableEventId,
       );
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Event deleted.')),
+          SnackBar(
+            content: Text(
+              event.recurring ? 'Recurring series deleted.' : 'Event deleted.',
+            ),
+          ),
         );
         _reloadOverview();
       }
@@ -249,7 +261,9 @@ class _CalendarPageState extends State<CalendarPage> {
             content: Text(
               error is CaleeHubException
                   ? error.message
-                  : 'Unable to delete event.',
+                  : event.recurring
+                      ? 'Unable to delete recurring series.'
+                      : 'Unable to delete event.',
             ),
           ),
         );
@@ -751,7 +765,9 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
               error is CaleeHubException
                   ? error.message
                   : _isEditing
-                      ? 'Unable to update event.'
+                      ? widget.initialEvent!.recurring
+                          ? 'Unable to update recurring series.'
+                          : 'Unable to update event.'
                       : 'Unable to create event.',
             ),
           ),
@@ -775,7 +791,11 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Text(
-                  _isEditing ? 'Edit event' : 'Add event',
+                  _isEditing
+                      ? widget.initialEvent!.recurring
+                          ? 'Edit series'
+                          : 'Edit event'
+                      : 'Add event',
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
                 const SizedBox(height: 16),
@@ -935,7 +955,13 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                           height: 18,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : Text(_isEditing ? 'Update event' : 'Save event'),
+                      : Text(
+                          _isEditing
+                              ? widget.initialEvent!.recurring
+                                  ? 'Update series'
+                                  : 'Update event'
+                              : 'Save event',
+                        ),
                 ),
               ],
             ),

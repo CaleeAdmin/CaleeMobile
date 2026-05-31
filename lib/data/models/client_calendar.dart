@@ -102,8 +102,13 @@ class ClientEvent {
     required this.endsAt,
     required this.allDay,
     required this.source,
+    required this.recurring,
     this.location,
     this.description,
+    this.recurrence,
+    this.seriesId,
+    this.recurrenceId,
+    this.occurrenceId,
   });
 
   factory ClientEvent.fromJson(Map<String, dynamic> json) {
@@ -119,6 +124,11 @@ class ClientEvent {
       location: json['location'] as String?,
       description: json['description'] as String?,
       source: json['source'] as String? ?? '',
+      recurring: json['recurring'] as bool? ?? false,
+      recurrence: json['recurrence'] as String?,
+      seriesId: json['seriesId'] as String?,
+      recurrenceId: json['recurrenceId'] as String?,
+      occurrenceId: json['occurrenceId'] as String?,
     );
   }
 
@@ -133,4 +143,17 @@ class ClientEvent {
   final String? location;
   final String? description;
   final String source;
+  final bool recurring;
+  final String? recurrence;
+  final String? seriesId;
+  final String? recurrenceId;
+  final String? occurrenceId;
+
+  String get writableEventId {
+    if (recurring && (seriesId ?? '').trim().isNotEmpty) {
+      return seriesId!.trim();
+    }
+
+    return id;
+  }
 }
