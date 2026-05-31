@@ -389,11 +389,16 @@ class CaleeHubClient {
   Future<void> deleteEvent({
     required String accessToken,
     required String eventId,
+    String? scope,
   }) async {
     final encodedEventId = Uri.encodeComponent(eventId);
+    final trimmedScope = scope?.trim();
+    final path = trimmedScope == null || trimmedScope.isEmpty
+        ? '/client/v1/events/$encodedEventId'
+        : '/client/v1/events/$encodedEventId?scope=${Uri.encodeQueryComponent(trimmedScope)}';
 
     await _deleteJson(
-      '/client/v1/events/$encodedEventId',
+      path,
       accessToken: accessToken,
     );
   }

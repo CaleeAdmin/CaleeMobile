@@ -212,43 +212,71 @@ class _CalendarPageState extends State<CalendarPage> {
   }
 
   Future<void> _confirmDeleteEvent(ClientEvent event) async {
-    final confirmed = await showDialog<bool>(
+    final deleteScope = await showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text(event.recurring ? 'Delete series?' : 'Delete event?'),
-        content: Text(
-          event.recurring
-              ? 'Delete "${event.title}" and all events in this recurring series?'
-              : 'Delete "${event.title}"?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
+      builder: (context) {
+        if (!event.recurring) {
+          return AlertDialog(
+            title: const Text('Delete event?'),
+            content: Text('Delete "${event.title}"?'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(null),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop('series'),
+                child: const Text('Delete'),
+              ),
+            ],
+          );
+        }
+
+        return AlertDialog(
+          title: const Text('Delete recurring event?'),
+          content: Text(
+            'Delete only this event, or delete "${event.title}" and the entire recurring series?',
           ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(null),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop('occurrence'),
+              child: const Text('Delete this event'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop('series'),
+              child: const Text('Delete entire series'),
+            ),
+          ],
+        );
+      },
     );
 
-    if (confirmed != true) {
+    if (deleteScope == null) {
       return;
     }
+
+    final deleteOccurrence = event.recurring && deleteScope == 'occurrence';
 
     try {
       await widget.hubClient.deleteEvent(
         accessToken: widget.accessToken,
-        eventId: event.writableEventId,
+        eventId: deleteOccurrence ? event.id : event.writableEventId,
+        scope: event.recurring ? deleteScope : null,
       );
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              event.recurring ? 'Recurring series deleted.' : 'Event deleted.',
+              deleteOccurrence
+                  ? 'Recurring event deleted.'
+                  : event.recurring
+                      ? 'Recurring series deleted.'
+                      : 'Event deleted.',
             ),
           ),
         );
@@ -261,9 +289,11 @@ class _CalendarPageState extends State<CalendarPage> {
             content: Text(
               error is CaleeHubException
                   ? error.message
-                  : event.recurring
-                      ? 'Unable to delete recurring series.'
-                      : 'Unable to delete event.',
+                  : deleteOccurrence
+                      ? 'Unable to delete recurring event.'
+                      : event.recurring
+                          ? 'Unable to delete recurring series.'
+                          : 'Unable to delete event.',
             ),
           ),
         );
