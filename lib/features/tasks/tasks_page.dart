@@ -651,20 +651,36 @@ class _TaskRow extends StatelessWidget {
         child: CircularProgressIndicator(strokeWidth: 2),
       );
     } else {
-      trailing = PopupMenuButton<String>(
-        icon: const Icon(
-          Icons.more_horiz,
-          color: CaleeColors.textTertiary,
-          size: 20,
+      trailing = Builder(
+        builder: (context) => SizedBox(
+          width: 28,
+          height: 28,
+          child: IconButton(
+            padding: EdgeInsets.zero,
+            icon: const Icon(
+              Icons.more_horiz,
+              color: CaleeColors.textTertiary,
+              size: 20,
+            ),
+            onPressed: () => CaleeActionSheet.show(
+              context: context,
+              title: task.title,
+              actions: [
+                CaleeAction(
+                  label: 'Edit',
+                  icon: Icons.edit_outlined,
+                  onTap: onEdit,
+                ),
+                CaleeAction(
+                  label: 'Delete',
+                  icon: Icons.delete_outline,
+                  isDestructive: true,
+                  onTap: onDelete,
+                ),
+              ],
+            ),
+          ),
         ),
-        onSelected: (value) {
-          if (value == 'edit') onEdit();
-          if (value == 'delete') onDelete();
-        },
-        itemBuilder: (_) => const [
-          PopupMenuItem(value: 'edit', child: Text('Edit')),
-          PopupMenuItem(value: 'delete', child: Text('Delete')),
-        ],
       );
     }
 

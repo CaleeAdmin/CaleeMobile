@@ -126,7 +126,7 @@ class SettingsPage extends StatelessWidget {
           ],
         ),
 
-        const SizedBox(height: CaleeSpacing.lg),
+        const SizedBox(height: 96),
       ],
     );
   }
@@ -145,13 +145,7 @@ class _ServiceRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final hasMissing = service.hasMissingCalendarCredential;
 
-    String subtitle;
-    if (hasMissing) {
-      subtitle = '${service.baseUrl} · ${service.accessStatus}'
-          '\nSign in required to connect calendar access';
-    } else {
-      subtitle = '${service.baseUrl} · ${service.accessStatus}';
-    }
+    final subtitle = '${service.baseUrl} · ${service.accessStatus}';
 
     return CaleeListRow(
       title: service.displayName,
