@@ -62,6 +62,12 @@ Color? _parseHexColor(String hex) {
   return null;
 }
 
+String? _subscriptionHost(String? url) {
+  if (url == null || url.isEmpty) return null;
+  final host = Uri.tryParse(url)?.host;
+  return (host == null || host.isEmpty) ? null : host;
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 class CalendarPage extends StatefulWidget {
@@ -146,6 +152,10 @@ class _CalendarPageState extends State<CalendarPage> {
             .toList();
         _events = (results[1] as ClientEventList).events;
         _loading = false;
+        // Remove stale hidden IDs for deleted/unsubscribed calendars
+        _hiddenCalendarIds.removeWhere(
+          (id) => !_calendars.any((cal) => cal.id == id),
+        );
       });
     } catch (e) {
       if (!mounted) return;
@@ -260,10 +270,20 @@ class _CalendarPageState extends State<CalendarPage> {
       builder: (_) => _CalendarChooserSheet(
         calendars: _calendars,
         initialHiddenIds: Set.from(_hiddenCalendarIds),
+        hubClient: widget.hubClient,
+        accessToken: widget.accessToken,
         onToggle: _toggleCalendarVisibility,
         onShowAll: _showAllCalendars,
         onNewCalendar: _openCollectionCreateShortcut,
         onSubscribeFromLink: _openCollectionSubscribeShortcut,
+        onCalendarMutated: (String? message) {
+          _loadMonth();
+          if (message != null && mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(message)),
+            );
+          }
+        },
       ),
     );
   }
@@ -1798,18 +1818,24 @@ class _CalendarChooserSheet extends StatefulWidget {
   const _CalendarChooserSheet({
     required this.calendars,
     required this.initialHiddenIds,
+    required this.hubClient,
+    required this.accessToken,
     required this.onToggle,
     required this.onShowAll,
     required this.onNewCalendar,
     required this.onSubscribeFromLink,
+    required this.onCalendarMutated,
   });
 
   final List<ClientCalendar> calendars;
   final Set<String> initialHiddenIds;
+  final CaleeHubClient hubClient;
+  final String accessToken;
   final void Function(String calendarId) onToggle;
   final VoidCallback onShowAll;
   final VoidCallback onNewCalendar;
   final VoidCallback onSubscribeFromLink;
+  final void Function(String? message) onCalendarMutated;
 
   @override
   State<_CalendarChooserSheet> createState() => _CalendarChooserSheetState();
@@ -1853,6 +1879,7 @@ class _CalendarChooserSheetState extends State<_CalendarChooserSheet> {
   String _subtitleFor(ClientCalendar cal) {
     final parts = <String>[];
     if (cal.serviceName.trim().isNotEmpty) parts.add(cal.serviceName.trim());
+    if (cal.isSubscription) parts.add('Subscribed');
     if (cal.readOnly) parts.add('Read-only');
     return parts.join(' · ');
   }
@@ -1936,6 +1963,35 @@ class _CalendarChooserSheetState extends State<_CalendarChooserSheet> {
     );
   }
 
+  void _openCalendarDetailSheet(ClientCalendar cal) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: CaleeColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(CaleeRadius.sheet),
+        ),
+      ),
+      builder: (_) => _CalendarDetailSheet(
+        calendar: cal,
+        color: _calendarColor(cal),
+        hubClient: widget.hubClient,
+        accessToken: widget.accessToken,
+        initiallyVisible: _isVisible(cal),
+        onToggleAndClose: () {
+          _toggle(cal);
+          Navigator.of(context).pop(); // close detail sheet
+        },
+        onMutated: (String? message) {
+          Navigator.of(context).pop(); // close detail sheet (top)
+          Navigator.of(context).pop(); // close chooser sheet
+          widget.onCalendarMutated(message);
+        },
+      ),
+    );
+  }
+
   Widget _buildCalendarSection() {
     if (widget.calendars.isEmpty) {
       return Padding(
@@ -1960,6 +2016,7 @@ class _CalendarChooserSheetState extends State<_CalendarChooserSheet> {
             color: _calendarColor(cal),
             subtitle: _subtitleFor(cal),
             onTap: () => _toggle(cal),
+            onInfoTap: () => _openCalendarDetailSheet(cal),
           ),
       ],
     );
@@ -2020,6 +2077,7 @@ class _CalendarChooserRow extends StatelessWidget {
     required this.color,
     required this.subtitle,
     required this.onTap,
+    required this.onInfoTap,
   });
 
   final ClientCalendar calendar;
@@ -2027,15 +2085,17 @@ class _CalendarChooserRow extends StatelessWidget {
   final Color color;
   final String subtitle;
   final VoidCallback onTap;
+  final VoidCallback onInfoTap;
 
   @override
   Widget build(BuildContext context) {
     return InkWell(
       onTap: onTap,
       child: Padding(
-        padding: const EdgeInsets.symmetric(
-          horizontal: CaleeSpacing.md,
-          vertical: 11,
+        padding: const EdgeInsets.only(
+          left: CaleeSpacing.md,
+          top: 11,
+          bottom: 11,
         ),
         child: Row(
           children: [
@@ -2064,6 +2124,22 @@ class _CalendarChooserRow extends StatelessWidget {
                     ),
                   ],
                 ],
+              ),
+            ),
+            // Info button — independently tappable, does NOT toggle visibility
+            GestureDetector(
+              onTap: onInfoTap,
+              behavior: HitTestBehavior.opaque,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: CaleeSpacing.sm + 2,
+                  vertical: CaleeSpacing.sm,
+                ),
+                child: Icon(
+                  Icons.info_outline,
+                  size: 20,
+                  color: CaleeColors.textTertiary,
+                ),
               ),
             ),
           ],
@@ -2100,6 +2176,552 @@ class _CalendarVisibilityDot extends StatelessWidget {
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         border: Border.all(color: CaleeColors.textTertiary, width: 1.5),
+      ),
+    );
+  }
+}
+
+// ─── Calendar detail sheet ────────────────────────────────────────────────────
+
+const List<(String, Color)> _kDetailColorPalette = [
+  ('#FF3B30', CaleeColors.dotRed),
+  ('#FF9500', CaleeColors.dotOrange),
+  ('#FFCC00', CaleeColors.dotYellow),
+  ('#34C759', CaleeColors.dotGreen),
+  ('#5AC8FA', CaleeColors.dotTeal),
+  ('#007AFF', CaleeColors.dotBlue),
+  ('#AF52DE', CaleeColors.dotPurple),
+  ('#FF2D55', CaleeColors.dotPink),
+  ('#8E8E93', CaleeColors.dotGray),
+];
+
+enum _DetailMode { info, edit }
+
+class _CalendarDetailSheet extends StatefulWidget {
+  const _CalendarDetailSheet({
+    required this.calendar,
+    required this.color,
+    required this.hubClient,
+    required this.accessToken,
+    required this.initiallyVisible,
+    required this.onToggleAndClose,
+    required this.onMutated,
+  });
+
+  final ClientCalendar calendar;
+  final Color color;
+  final CaleeHubClient hubClient;
+  final String accessToken;
+  final bool initiallyVisible;
+  final VoidCallback onToggleAndClose;
+  final void Function(String? message) onMutated;
+
+  @override
+  State<_CalendarDetailSheet> createState() => _CalendarDetailSheetState();
+}
+
+class _CalendarDetailSheetState extends State<_CalendarDetailSheet> {
+  _DetailMode _mode = _DetailMode.info;
+  final _formKey = GlobalKey<FormState>();
+  late TextEditingController _nameController;
+  late TextEditingController _colorController;
+  bool _isSubmitting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController(text: widget.calendar.name);
+    _colorController = TextEditingController(text: widget.calendar.color ?? '');
+    _colorController.addListener(() => setState(() {}));
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _colorController.dispose();
+    super.dispose();
+  }
+
+  bool get _canEdit =>
+      !widget.calendar.readOnly || widget.calendar.isSubscription;
+
+  bool get _canDelete =>
+      !widget.calendar.readOnly || widget.calendar.isSubscription;
+
+  bool _isPaletteSelected(String hex) =>
+      _colorController.text.trim().toUpperCase() == hex.toUpperCase();
+
+  Color get _previewColor {
+    final hex = _colorController.text.trim();
+    if (hex.isEmpty) return widget.color;
+    return _parseHexColor(hex) ?? widget.color;
+  }
+
+  Future<void> _submitEdit() async {
+    if (_isSubmitting || !_formKey.currentState!.validate()) return;
+    setState(() => _isSubmitting = true);
+    try {
+      await widget.hubClient.updateCalendar(
+        accessToken: widget.accessToken,
+        calendarId: widget.calendar.id,
+        name: _nameController.text.trim(),
+        color: _colorController.text.trim().isEmpty
+            ? null
+            : _colorController.text.trim(),
+      );
+      if (mounted) widget.onMutated('Calendar updated.');
+    } catch (error) {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              error is CaleeHubException
+                  ? error.message
+                  : 'Unable to update calendar.',
+            ),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _confirmDelete() async {
+    final cal = widget.calendar;
+    final isSubscription = cal.isSubscription;
+
+    final title = isSubscription
+        ? 'Unsubscribe from Calendar?'
+        : 'Delete Calendar?';
+    final body = isSubscription
+        ? 'This removes "${cal.name}" from Calee. '
+            'The original external calendar and feed are not changed. '
+            'This cannot be undone from Calee.'
+        : 'Delete "${cal.name}" and its events from Calee? '
+            'This cannot be undone.';
+    final confirmLabel = isSubscription ? 'Unsubscribe' : 'Delete Calendar';
+
+    final confirmed = await CaleeDestructiveDialog.show(
+      context: context,
+      title: title,
+      body: body,
+      confirmLabel: confirmLabel,
+    );
+    if (!confirmed || !mounted) return;
+
+    setState(() => _isSubmitting = true);
+    try {
+      await widget.hubClient.deleteCalendar(
+        accessToken: widget.accessToken,
+        calendarId: cal.id,
+        confirmDeleteItems: true,
+      );
+      if (mounted) {
+        widget.onMutated(
+          isSubscription ? 'Calendar unsubscribed.' : 'Calendar deleted.',
+        );
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              error is CaleeHubException
+                  ? error.message
+                  : 'Unable to remove calendar.',
+            ),
+          ),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+    final maxHeight = MediaQuery.of(context).size.height * 0.9;
+
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxHeight: maxHeight),
+      child: SafeArea(
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(
+            CaleeSpacing.md,
+            CaleeSpacing.sm,
+            CaleeSpacing.md,
+            CaleeSpacing.md + bottomInset,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: CaleeSpacing.md),
+                  decoration: BoxDecoration(
+                    color: CaleeColors.separatorOpaque,
+                    borderRadius: BorderRadius.circular(CaleeRadius.dot),
+                  ),
+                ),
+              ),
+              Flexible(
+                child: _mode == _DetailMode.info
+                    ? _buildInfoMode()
+                    : _buildEditMode(),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInfoMode() {
+    final cal = widget.calendar;
+    final host = _subscriptionHost(cal.subscriptionUrl);
+    final theme = Theme.of(context);
+
+    return SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Header: color dot + calendar name
+          Row(
+            children: [
+              Container(
+                width: 20,
+                height: 20,
+                decoration: BoxDecoration(
+                  color: widget.color,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: CaleeSpacing.sm),
+              Expanded(
+                child: Text(
+                  cal.name,
+                  style: theme.textTheme.titleLarge,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: CaleeSpacing.md),
+
+          // Info section
+          CaleeSection(
+            children: [
+              if (cal.serviceName.trim().isNotEmpty)
+                _DetailInfoRow(
+                  label: 'Account',
+                  value: cal.serviceName.trim(),
+                ),
+              _DetailInfoRow(
+                label: 'Visibility',
+                value: widget.initiallyVisible ? 'Shown' : 'Hidden',
+              ),
+              if (cal.isSubscription)
+                const _DetailInfoRow(label: 'Type', value: 'Subscribed'),
+              if (cal.readOnly)
+                const _DetailInfoRow(label: 'Access', value: 'Read-only'),
+              // Show source host only — never the full URL (may contain tokens)
+              if (host != null)
+                _DetailInfoRow(label: 'Source', value: host),
+            ],
+          ),
+          const SizedBox(height: CaleeSpacing.sectionSpacing),
+
+          // Actions section
+          CaleeSection(
+            children: [
+              _DetailActionRow(
+                icon: widget.initiallyVisible
+                    ? Icons.visibility_off_outlined
+                    : Icons.visibility_outlined,
+                title: widget.initiallyVisible
+                    ? 'Hide Calendar'
+                    : 'Show Calendar',
+                onTap: _isSubmitting ? null : widget.onToggleAndClose,
+              ),
+              if (_canEdit)
+                _DetailActionRow(
+                  icon: Icons.edit_outlined,
+                  title: 'Edit Name & Color',
+                  onTap: _isSubmitting
+                      ? null
+                      : () => setState(() => _mode = _DetailMode.edit),
+                ),
+              if (_canDelete)
+                _DetailActionRow(
+                  icon: cal.isSubscription
+                      ? Icons.link_off
+                      : Icons.delete_outline,
+                  title: cal.isSubscription ? 'Unsubscribe' : 'Delete Calendar',
+                  isDestructive: true,
+                  trailing: _isSubmitting
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : null,
+                  onTap: _isSubmitting ? null : _confirmDelete,
+                ),
+            ],
+          ),
+          const SizedBox(height: CaleeSpacing.md),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEditMode() {
+    final theme = Theme.of(context);
+
+    return Form(
+      key: _formKey,
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Header with back button
+            Row(
+              children: [
+                GestureDetector(
+                  onTap: _isSubmitting
+                      ? null
+                      : () => setState(() => _mode = _DetailMode.info),
+                  child: const Icon(
+                    Icons.arrow_back_ios,
+                    size: 20,
+                    color: CaleeColors.primary,
+                  ),
+                ),
+                const SizedBox(width: CaleeSpacing.sm),
+                Text('Edit Calendar', style: theme.textTheme.titleLarge),
+              ],
+            ),
+            const SizedBox(height: CaleeSpacing.md),
+
+            // Color preview dot + name field
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Container(
+                  width: 24,
+                  height: 24,
+                  decoration: BoxDecoration(
+                    color: _previewColor,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: CaleeSpacing.sm),
+                Expanded(
+                  child: TextFormField(
+                    controller: _nameController,
+                    enabled: !_isSubmitting,
+                    autofocus: true,
+                    textCapitalization: TextCapitalization.words,
+                    decoration: const InputDecoration(labelText: 'Name'),
+                    validator: (value) =>
+                        (value ?? '').trim().isEmpty ? 'Enter a name' : null,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: CaleeSpacing.md),
+
+            Text(
+              'Color',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: CaleeColors.textSecondary,
+              ),
+            ),
+            const SizedBox(height: CaleeSpacing.sm),
+
+            Wrap(
+              spacing: CaleeSpacing.sm,
+              runSpacing: CaleeSpacing.sm,
+              children: [
+                for (final (hex, color) in _kDetailColorPalette)
+                  _DetailColorSwatch(
+                    hex: hex,
+                    color: color,
+                    isSelected: _isPaletteSelected(hex),
+                    onTap: () => setState(() => _colorController.text = hex),
+                  ),
+              ],
+            ),
+            const SizedBox(height: CaleeSpacing.sm + 4),
+
+            TextFormField(
+              controller: _colorController,
+              enabled: !_isSubmitting,
+              decoration: const InputDecoration(
+                labelText: 'Custom color',
+                hintText: '#007AFF',
+              ),
+              validator: (value) {
+                final c = (value ?? '').trim();
+                if (c.isEmpty) return null;
+                final norm = c.startsWith('#') ? c : '#$c';
+                if (!RegExp(r'^#[0-9A-Fa-f]{6}$').hasMatch(norm)) {
+                  return 'Use a color like #007AFF';
+                }
+                return null;
+              },
+            ),
+            const SizedBox(height: CaleeSpacing.md),
+
+            FilledButton(
+              onPressed: _isSubmitting ? null : _submitEdit,
+              child: _isSubmitting
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('Save'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Detail info row ──────────────────────────────────────────────────────────
+
+class _DetailInfoRow extends StatelessWidget {
+  const _DetailInfoRow({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: CaleeSpacing.md,
+        vertical: 11,
+      ),
+      child: Row(
+        children: [
+          Text(
+            label,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: CaleeColors.textSecondary,
+            ),
+          ),
+          const Spacer(),
+          Flexible(
+            child: Text(
+              value,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: CaleeColors.textPrimary,
+              ),
+              textAlign: TextAlign.right,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Detail action row ────────────────────────────────────────────────────────
+
+class _DetailActionRow extends StatelessWidget {
+  const _DetailActionRow({
+    required this.icon,
+    required this.title,
+    this.isDestructive = false,
+    this.onTap,
+    this.trailing,
+  });
+
+  final IconData icon;
+  final String title;
+  final bool isDestructive;
+  final VoidCallback? onTap;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final textColor =
+        isDestructive ? CaleeColors.destructive : CaleeColors.textPrimary;
+    final iconColor =
+        isDestructive ? CaleeColors.destructive : CaleeColors.primary;
+
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: CaleeSpacing.md,
+          vertical: 13,
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: iconColor, size: 22),
+            const SizedBox(width: CaleeSpacing.md),
+            Expanded(
+              child: Text(
+                title,
+                style: TextStyle(fontSize: 16, color: textColor),
+              ),
+            ),
+            if (trailing != null) trailing!,
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Detail color swatch ──────────────────────────────────────────────────────
+
+class _DetailColorSwatch extends StatelessWidget {
+  const _DetailColorSwatch({
+    required this.hex,
+    required this.color,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  final String hex;
+  final Color color;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        width: 30,
+        height: 30,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: color,
+          border: isSelected
+              ? Border.all(
+                  color: CaleeColors.textPrimary,
+                  width: 2,
+                  strokeAlign: BorderSide.strokeAlignOutside,
+                )
+              : null,
+        ),
+        child: isSelected
+            ? const Icon(Icons.check, size: 16, color: Colors.white)
+            : null,
       ),
     );
   }
