@@ -704,7 +704,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
     final minute = utc.minute.toString().padLeft(2, '0');
     final second = utc.second.toString().padLeft(2, '0');
 
-    return '${year}${month}${day}T$hour$minute${second}Z';
+    return '$year$month${day}T$hour$minute${second}Z';
   }
 
   String _recurrenceLabel(String value) {
