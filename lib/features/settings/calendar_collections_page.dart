@@ -281,8 +281,9 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
         );
         final count =
             eventList.events.where((e) => e.calendarId == calendar.id).length;
-        if (count > 0)
+        if (count > 0) {
           lines.add(_pluralCount(count, 'visible event occurrence'));
+        }
       }
 
       if (calendar.supportsTasks) {
