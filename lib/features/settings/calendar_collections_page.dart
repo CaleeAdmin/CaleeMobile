@@ -332,7 +332,8 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
   }
 
   Future<void> _deleteCalendar(ClientCalendar calendar) async {
-    if (calendar.readOnly || _updatingCalendarIds.contains(calendar.id)) {
+    if ((!calendar.isSubscription && calendar.readOnly) ||
+        _updatingCalendarIds.contains(calendar.id)) {
       return;
     }
 
