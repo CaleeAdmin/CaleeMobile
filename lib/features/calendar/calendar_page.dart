@@ -227,6 +227,12 @@ class _CalendarPageState extends State<CalendarPage> {
     final created = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
+      backgroundColor: CaleeColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(CaleeRadius.sheet),
+        ),
+      ),
       builder: (context) => _CreateEventSheet(
         calendars: writableCalendars,
         initialDate: _selectedDay,
@@ -250,58 +256,48 @@ class _CalendarPageState extends State<CalendarPage> {
     return null;
   }
 
-  Future<void> _openEventActions(ClientEvent event) async {
+  void _openEventActions(ClientEvent event) {
     final calendar = _calendarForEvent(event);
     final canWrite = calendar != null && !calendar.readOnly;
 
-    final editLabel = event.recurring ? 'Edit series' : 'Edit event';
-    final deleteLabel = event.recurring ? 'Delete series' : 'Delete event';
-    final readOnlyMessage = event.recurring
-        ? 'This recurring event calendar is read-only.'
-        : 'This calendar is read-only.';
-
-    final action = await showModalBottomSheet<String>(
-      context: context,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.event_outlined),
-              title: Text(event.title),
-              subtitle: Text(_agendaTimeLabel(event)),
-            ),
-            const Divider(height: 1),
-            ListTile(
-              enabled: canWrite,
-              leading: const Icon(Icons.edit_outlined),
-              title: Text(editLabel),
-              subtitle: canWrite ? null : Text(readOnlyMessage),
-              onTap:
-                  canWrite ? () => Navigator.of(context).pop('edit') : null,
-            ),
-            ListTile(
-              enabled: canWrite,
-              leading: const Icon(Icons.delete_outline),
-              title: Text(deleteLabel),
-              subtitle: canWrite ? null : Text(readOnlyMessage),
-              onTap:
-                  canWrite ? () => Navigator.of(context).pop('delete') : null,
-            ),
-          ],
-        ),
-      ),
-    );
-
-    if (!mounted) return;
-
-    if (action == 'edit') {
-      final editScope = await _chooseEditScope(event);
-      if (editScope == null || !mounted) return;
-      await _openEditEventSheet(event, calendar!, editScope: editScope);
-    } else if (action == 'delete') {
-      await _confirmDeleteEvent(event);
+    if (!canWrite) {
+      CaleeActionSheet.show(
+        context: context,
+        title: event.recurring
+            ? 'This recurring event is from a read-only calendar.'
+            : 'This event is from a read-only calendar.',
+        actions: const [],
+      );
+      return;
     }
+
+    final writeableCalendar = calendar!;
+
+    CaleeActionSheet.show(
+      context: context,
+      title: event.title,
+      actions: [
+        CaleeAction(
+          label: event.recurring ? 'Edit series' : 'Edit event',
+          icon: Icons.edit_outlined,
+          onTap: () async {
+            final editScope = await _chooseEditScope(event);
+            if (editScope == null || !mounted) return;
+            await _openEditEventSheet(
+              event,
+              writeableCalendar,
+              editScope: editScope,
+            );
+          },
+        ),
+        CaleeAction(
+          label: event.recurring ? 'Delete series' : 'Delete event',
+          icon: Icons.delete_outline,
+          isDestructive: true,
+          onTap: () => _confirmDeleteEvent(event),
+        ),
+      ],
+    );
   }
 
   Future<String?> _chooseEditScope(ClientEvent event) async {
@@ -340,6 +336,12 @@ class _CalendarPageState extends State<CalendarPage> {
     final updated = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
+      backgroundColor: CaleeColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(CaleeRadius.sheet),
+        ),
+      ),
       builder: (context) => _CreateEventSheet(
         calendars: [calendar],
         initialEvent: event,
@@ -393,27 +395,21 @@ class _CalendarPageState extends State<CalendarPage> {
   }
 
   Future<void> _confirmDeleteEvent(ClientEvent event) async {
-    final deleteScope = await showDialog<String>(
-      context: context,
-      builder: (context) {
-        if (!event.recurring) {
-          return AlertDialog(
-            title: const Text('Delete event?'),
-            content: Text('Delete "${event.title}"?'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(null),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.of(context).pop('series'),
-                child: const Text('Delete'),
-              ),
-            ],
-          );
-        }
+    String? deleteScope;
 
-        return AlertDialog(
+    if (!event.recurring) {
+      final confirmed = await CaleeDestructiveDialog.show(
+        context: context,
+        title: 'Delete event?',
+        body: 'Delete "${event.title}"? This cannot be undone.',
+        confirmLabel: 'Delete',
+      );
+      if (!confirmed || !mounted) return;
+      deleteScope = 'series';
+    } else {
+      deleteScope = await showDialog<String>(
+        context: context,
+        builder: (context) => AlertDialog(
           title: const Text('Delete recurring event?'),
           content: Text(
             'Delete only this event, or delete "${event.title}" and the entire recurring series?',
@@ -427,16 +423,21 @@ class _CalendarPageState extends State<CalendarPage> {
               onPressed: () => Navigator.of(context).pop('occurrence'),
               child: const Text('Delete this event'),
             ),
-            FilledButton(
+            TextButton(
+              style: TextButton.styleFrom(
+                foregroundColor: CaleeColors.destructive,
+              ),
               onPressed: () => Navigator.of(context).pop('series'),
-              child: const Text('Delete entire series'),
+              child: const Text(
+                'Delete entire series',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
             ),
           ],
-        );
-      },
-    );
-
-    if (deleteScope == null) return;
+        ),
+      );
+      if (deleteScope == null || !mounted) return;
+    }
 
     final deleteOccurrence = event.recurring && deleteScope == 'occurrence';
 
