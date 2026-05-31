@@ -49,6 +49,19 @@ String _eventTimeLabel(ClientEvent event) {
   return '$h:$m';
 }
 
+Color? _parseHexColor(String hex) {
+  final clean = hex.startsWith('#') ? hex.substring(1) : hex;
+  if (clean.length == 6) {
+    final value = int.tryParse(clean, radix: 16);
+    if (value != null) return Color(0xFF000000 | value);
+  }
+  if (clean.length == 8) {
+    final value = int.tryParse(clean, radix: 16);
+    if (value != null) return Color(value);
+  }
+  return null;
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 class CalendarPage extends StatefulWidget {
@@ -78,6 +91,7 @@ class _CalendarPageState extends State<CalendarPage> {
   List<ClientEvent> _events = [];
   bool _loading = false;
   Object? _error;
+  final Set<String> _hiddenCalendarIds = {};
 
   // Grid start: first Sunday on or before the first of _selectedMonth
   late DateTime _gridStart;
@@ -204,6 +218,43 @@ class _CalendarPageState extends State<CalendarPage> {
         .then((_) {
       if (mounted) _loadMonth();
     });
+  }
+
+  // ── Calendar visibility ────────────────────────────────────────────────────
+
+  bool _isCalendarVisible(String calendarId) =>
+      !_hiddenCalendarIds.contains(calendarId);
+
+  void _toggleCalendarVisibility(String calendarId) {
+    setState(() {
+      if (_hiddenCalendarIds.contains(calendarId)) {
+        _hiddenCalendarIds.remove(calendarId);
+      } else {
+        _hiddenCalendarIds.add(calendarId);
+      }
+    });
+  }
+
+  void _showAllCalendars() => setState(() => _hiddenCalendarIds.clear());
+
+  void _openCalendarChooser() {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: CaleeColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(CaleeRadius.sheet),
+        ),
+      ),
+      builder: (_) => _CalendarChooserSheet(
+        calendars: _calendars,
+        initialHiddenIds: Set.from(_hiddenCalendarIds),
+        onToggle: _toggleCalendarVisibility,
+        onShowAll: _showAllCalendars,
+        onNewCalendar: _openCollectionCreateShortcut,
+      ),
+    );
   }
 
   Future<void> _openCreateEventSheet() async {
@@ -518,6 +569,8 @@ class _CalendarPageState extends State<CalendarPage> {
   List<ClientEvent> _eventsForDay(DateTime day) {
     final result = <ClientEvent>[];
     for (final event in _events) {
+      final cal = _calendarForEvent(event);
+      if (cal != null && !_isCalendarVisible(cal.id)) continue;
       final start = DateTime.tryParse(event.startsAt)?.toLocal();
       if (start == null) continue;
       if (event.allDay) {
@@ -556,19 +609,6 @@ class _CalendarPageState extends State<CalendarPage> {
       if (parsed != null) return parsed;
     }
     return CaleeColors.dotBlue;
-  }
-
-  Color? _parseHexColor(String hex) {
-    final clean = hex.startsWith('#') ? hex.substring(1) : hex;
-    if (clean.length == 6) {
-      final value = int.tryParse(clean, radix: 16);
-      if (value != null) return Color(0xFF000000 | value);
-    }
-    if (clean.length == 8) {
-      final value = int.tryParse(clean, radix: 16);
-      if (value != null) return Color(value);
-    }
-    return null;
   }
 
   String _agendaDateLabel(DateTime day) {
@@ -669,6 +709,15 @@ class _CalendarPageState extends State<CalendarPage> {
             color: CaleeColors.primary,
           ),
           const SizedBox(width: CaleeSpacing.xs),
+          IconButton(
+            onPressed: _openCalendarChooser,
+            icon: const Icon(Icons.tune),
+            iconSize: 22,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+            color: CaleeColors.primary,
+            tooltip: 'Calendars',
+          ),
           IconButton(
             onPressed: _openCreateEventSheet,
             icon: const Icon(Icons.add),
@@ -1750,6 +1799,318 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+// ─── Calendar chooser sheet ───────────────────────────────────────────────────
+
+class _CalendarChooserSheet extends StatefulWidget {
+  const _CalendarChooserSheet({
+    required this.calendars,
+    required this.initialHiddenIds,
+    required this.onToggle,
+    required this.onShowAll,
+    required this.onNewCalendar,
+  });
+
+  final List<ClientCalendar> calendars;
+  final Set<String> initialHiddenIds;
+  final void Function(String calendarId) onToggle;
+  final VoidCallback onShowAll;
+  final VoidCallback onNewCalendar;
+
+  @override
+  State<_CalendarChooserSheet> createState() => _CalendarChooserSheetState();
+}
+
+class _CalendarChooserSheetState extends State<_CalendarChooserSheet> {
+  late Set<String> _hidden;
+
+  @override
+  void initState() {
+    super.initState();
+    _hidden = Set.from(widget.initialHiddenIds);
+  }
+
+  bool _isVisible(ClientCalendar cal) => !_hidden.contains(cal.id);
+
+  void _toggle(ClientCalendar cal) {
+    setState(() {
+      if (_hidden.contains(cal.id)) {
+        _hidden.remove(cal.id);
+      } else {
+        _hidden.add(cal.id);
+      }
+    });
+    widget.onToggle(cal.id);
+  }
+
+  void _showAll() {
+    setState(() => _hidden.clear());
+    widget.onShowAll();
+  }
+
+  Color _calendarColor(ClientCalendar cal) {
+    if (cal.color != null) {
+      final parsed = _parseHexColor(cal.color!);
+      if (parsed != null) return parsed;
+    }
+    return CaleeColors.dotBlue;
+  }
+
+  String _subtitleFor(ClientCalendar cal) {
+    final parts = <String>[];
+    if (cal.serviceName.trim().isNotEmpty) parts.add(cal.serviceName.trim());
+    if (cal.readOnly) parts.add('Read-only');
+    return parts.join(' · ');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final maxHeight = MediaQuery.of(context).size.height * 0.85;
+    final hasHidden = _hidden.isNotEmpty;
+
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxHeight: maxHeight),
+      child: SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: Container(
+                width: 36,
+                height: 4,
+                margin: const EdgeInsets.only(
+                  top: CaleeSpacing.sm,
+                  bottom: CaleeSpacing.md,
+                ),
+                decoration: BoxDecoration(
+                  color: CaleeColors.separatorOpaque,
+                  borderRadius: BorderRadius.circular(CaleeRadius.dot),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                CaleeSpacing.md,
+                0,
+                CaleeSpacing.md,
+                CaleeSpacing.md,
+              ),
+              child: Row(
+                children: [
+                  Text('Calendars', style: theme.textTheme.titleLarge),
+                  const Spacer(),
+                  if (hasHidden)
+                    TextButton(
+                      onPressed: _showAll,
+                      style: TextButton.styleFrom(
+                        foregroundColor: CaleeColors.primary,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: CaleeSpacing.sm,
+                          vertical: CaleeSpacing.xs,
+                        ),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: const Text('Show All'),
+                    ),
+                ],
+              ),
+            ),
+            Flexible(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(
+                  CaleeSpacing.md,
+                  0,
+                  CaleeSpacing.md,
+                  CaleeSpacing.md,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _buildCalendarSection(),
+                    const SizedBox(height: CaleeSpacing.sectionSpacing),
+                    _buildAddSection(),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCalendarSection() {
+    if (widget.calendars.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: CaleeSpacing.lg),
+        child: Text(
+          'No calendars',
+          style: const TextStyle(
+            color: CaleeColors.textTertiary,
+            fontSize: 15,
+          ),
+          textAlign: TextAlign.center,
+        ),
+      );
+    }
+
+    return CaleeSection(
+      children: [
+        for (final cal in widget.calendars)
+          _CalendarChooserRow(
+            calendar: cal,
+            isVisible: _isVisible(cal),
+            color: _calendarColor(cal),
+            subtitle: _subtitleFor(cal),
+            onTap: () => _toggle(cal),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildAddSection() {
+    return CaleeSection(
+      title: 'Add',
+      children: [
+        CaleeListRow(
+          title: 'New Calendar',
+          leading: const Icon(
+            Icons.add_circle_outline,
+            color: CaleeColors.primary,
+            size: 22,
+          ),
+          onTap: () {
+            Navigator.of(context).pop();
+            widget.onNewCalendar();
+          },
+        ),
+        CaleeListRow(
+          title: 'Subscribe from Link',
+          leading: const Icon(
+            Icons.link_outlined,
+            color: CaleeColors.textTertiary,
+            size: 22,
+          ),
+          trailing: const Text(
+            'Coming soon',
+            style: TextStyle(fontSize: 12, color: CaleeColors.textTertiary),
+          ),
+          enabled: false,
+        ),
+        CaleeListRow(
+          title: 'Add Holiday Calendar',
+          leading: const Icon(
+            Icons.public_outlined,
+            color: CaleeColors.textTertiary,
+            size: 22,
+          ),
+          trailing: const Text(
+            'Coming soon',
+            style: TextStyle(fontSize: 12, color: CaleeColors.textTertiary),
+          ),
+          enabled: false,
+        ),
+      ],
+    );
+  }
+}
+
+// ─── Calendar chooser row ─────────────────────────────────────────────────────
+
+class _CalendarChooserRow extends StatelessWidget {
+  const _CalendarChooserRow({
+    required this.calendar,
+    required this.isVisible,
+    required this.color,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  final ClientCalendar calendar;
+  final bool isVisible;
+  final Color color;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: CaleeSpacing.md,
+          vertical: 11,
+        ),
+        child: Row(
+          children: [
+            _CalendarVisibilityDot(color: color, isVisible: isVisible),
+            const SizedBox(width: CaleeSpacing.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    calendar.name,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      color: CaleeColors.textPrimary,
+                    ),
+                  ),
+                  if (subtitle.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: CaleeColors.textSecondary,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Calendar visibility dot ──────────────────────────────────────────────────
+
+class _CalendarVisibilityDot extends StatelessWidget {
+  const _CalendarVisibilityDot({
+    required this.color,
+    required this.isVisible,
+  });
+
+  final Color color;
+  final bool isVisible;
+
+  @override
+  Widget build(BuildContext context) {
+    if (isVisible) {
+      return Container(
+        width: 22,
+        height: 22,
+        decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        child: const Icon(Icons.check, color: Colors.white, size: 14),
+      );
+    }
+    return Container(
+      width: 22,
+      height: 22,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(color: CaleeColors.textTertiary, width: 1.5),
       ),
     );
   }
