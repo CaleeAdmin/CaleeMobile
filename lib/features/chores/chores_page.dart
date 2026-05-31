@@ -232,19 +232,13 @@ class _ChoresPageState extends State<ChoresPage> {
     );
   }
 
-  Future<void> _deleteChore(ClientChore chore) async {
-    final choreId = chore.completionActionId;
-
-    if (choreId.trim().isEmpty || _updatingChoreIds.contains(choreId)) {
-      return;
-    }
-
+  Future<bool> _confirmPermanentChoreDelete(ClientChore chore) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Delete chore?'),
+        title: const Text('Delete permanently?'),
         content: Text(
-          'This will delete "${chore.title}" and its completion history.',
+          'This will permanently delete "${chore.title}" and its completion records. This cannot be undone.',
         ),
         actions: [
           TextButton(
@@ -253,14 +247,92 @@ class _ChoresPageState extends State<ChoresPage> {
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Delete'),
+            child: const Text('Delete permanently'),
           ),
         ],
       ),
     );
 
-    if (confirmed != true || !mounted) {
+    return confirmed == true;
+  }
+
+  Future<void> _deleteChore(ClientChore chore) async {
+    final choreId = chore.completionActionId;
+
+    if (choreId.trim().isEmpty || _updatingChoreIds.contains(choreId)) {
       return;
+    }
+
+    String? action;
+    String? actionDate;
+    var successMessage = 'Chore deleted permanently.';
+
+    if (chore.isRecurring) {
+      action = await showDialog<String>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Recurring chore'),
+          content: Text(
+            'What would you like to do with "${chore.title}"?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop('skip'),
+              child: const Text('Skip this time'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop('stopRepeating'),
+              child: const Text('Stop repeating'),
+            ),
+            TextButton(
+              style: TextButton.styleFrom(
+                foregroundColor: Theme.of(context).colorScheme.error,
+              ),
+              onPressed: () => Navigator.of(context).pop('deletePermanent'),
+              child: const Text('Delete permanently'),
+            ),
+          ],
+        ),
+      );
+
+      if (action == null || !mounted) {
+        return;
+      }
+
+      if (action == 'skip') {
+        final scheduledDate = chore.scheduledDate;
+        actionDate = scheduledDate != null && scheduledDate.trim().isNotEmpty
+            ? scheduledDate.trim()
+            : DateTime.now().toIso8601String().split('T').first;
+        successMessage = 'Skipped this time.';
+      } else if (action == 'stopRepeating') {
+        successMessage = 'Repeating stopped.';
+      } else if (action == 'deletePermanent') {
+        await Future<void>.delayed(Duration.zero);
+        if (!mounted) {
+          return;
+        }
+
+        final confirmedPermanentDelete =
+            await _confirmPermanentChoreDelete(chore);
+
+        if (!confirmedPermanentDelete || !mounted) {
+          return;
+        }
+      }
+    } else {
+      final confirmedPermanentDelete =
+          await _confirmPermanentChoreDelete(chore);
+
+      if (!confirmedPermanentDelete || !mounted) {
+        return;
+      }
+
+      action = 'deletePermanent';
     }
 
     setState(() {
@@ -271,16 +343,27 @@ class _ChoresPageState extends State<ChoresPage> {
       await widget.hubClient.deleteChore(
         accessToken: widget.accessToken,
         choreId: choreId,
+        action: action,
+        date: actionDate,
       );
 
       if (mounted) {
         _reloadOverview();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(successMessage)),
+        );
       }
     } catch (error) {
       if (mounted) {
+        final fallbackMessage = switch (action) {
+          'skip' => 'Unable to skip chore.',
+          'stopRepeating' => 'Unable to stop repeating chore.',
+          _ => 'Unable to delete chore.',
+        };
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(_choreErrorMessage(error, 'Unable to delete chore.')),
+            content: Text(_choreErrorMessage(error, fallbackMessage)),
           ),
         );
       }

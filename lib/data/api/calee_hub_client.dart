@@ -229,11 +229,26 @@ class CaleeHubClient {
   Future<void> deleteChore({
     required String accessToken,
     required String choreId,
+    String? action,
+    String? date,
   }) async {
     final encodedChoreId = Uri.encodeComponent(choreId);
+    var path = '/client/v1/chores/$encodedChoreId';
+
+    final queryParameters = <String, String>{};
+    if (action != null && action.trim().isNotEmpty) {
+      queryParameters['action'] = action.trim();
+    }
+    if (date != null && date.trim().isNotEmpty) {
+      queryParameters['date'] = date.trim();
+    }
+
+    if (queryParameters.isNotEmpty) {
+      path += '?${Uri(queryParameters: queryParameters).query}';
+    }
 
     await _deleteJson(
-      '/client/v1/chores/$encodedChoreId',
+      path,
       accessToken: accessToken,
     );
   }
