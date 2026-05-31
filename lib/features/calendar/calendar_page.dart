@@ -99,6 +99,164 @@ class _CalendarPageState extends State<CalendarPage> {
     }
   }
 
+  ClientCalendar? _calendarForEvent(
+    ClientEvent event,
+    List<ClientCalendar> calendars,
+  ) {
+    for (final calendar in calendars) {
+      if (calendar.id == event.calendarId ||
+          calendar.id.endsWith(':${event.calendarId}') ||
+          event.calendarId.endsWith(':${calendar.id}')) {
+        return calendar;
+      }
+    }
+
+    return null;
+  }
+
+  Future<void> _openEventActions(
+    ClientEvent event,
+    List<ClientCalendar> calendars,
+  ) async {
+    final calendar = _calendarForEvent(event, calendars);
+    final canWrite = calendar != null && !calendar.readOnly;
+
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.event_outlined),
+              title: Text(event.title),
+              subtitle: Text(_EventTile.formatEventTime(event)),
+            ),
+            const Divider(height: 1),
+            ListTile(
+              enabled: canWrite,
+              leading: const Icon(Icons.edit_outlined),
+              title: const Text('Edit event'),
+              subtitle:
+                  canWrite ? null : const Text('This calendar is read-only.'),
+              onTap: canWrite ? () => Navigator.of(context).pop('edit') : null,
+            ),
+            ListTile(
+              enabled: canWrite,
+              leading: const Icon(Icons.delete_outline),
+              title: const Text('Delete event'),
+              subtitle:
+                  canWrite ? null : const Text('This calendar is read-only.'),
+              onTap:
+                  canWrite ? () => Navigator.of(context).pop('delete') : null,
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (!mounted) {
+      return;
+    }
+
+    if (action == 'edit') {
+      await _openEditEventSheet(event, calendar!);
+    } else if (action == 'delete') {
+      await _confirmDeleteEvent(event);
+    }
+  }
+
+  Future<void> _openEditEventSheet(
+    ClientEvent event,
+    ClientCalendar calendar,
+  ) async {
+    final updated = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => _CreateEventSheet(
+        calendars: [calendar],
+        initialEvent: event,
+        onCreate: _createEvent,
+        onUpdate: _updateEvent,
+      ),
+    );
+
+    if (updated == true && mounted) {
+      _reloadOverview();
+    }
+  }
+
+  Future<void> _updateEvent({
+    required ClientEvent event,
+    required String title,
+    required DateTime startsAt,
+    required DateTime endsAt,
+    required bool allDay,
+    String? location,
+    String? description,
+  }) async {
+    await widget.hubClient.updateEvent(
+      accessToken: widget.accessToken,
+      eventId: event.id,
+      title: title,
+      startsAt: allDay ? _formatDate(startsAt) : startsAt.toIso8601String(),
+      endsAt: allDay ? _formatDate(endsAt) : endsAt.toIso8601String(),
+      allDay: allDay,
+      location: location,
+      description: description,
+    );
+  }
+
+  Future<void> _confirmDeleteEvent(ClientEvent event) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete event?'),
+        content: Text('Delete "${event.title}"?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) {
+      return;
+    }
+
+    try {
+      await widget.hubClient.deleteEvent(
+        accessToken: widget.accessToken,
+        eventId: event.id,
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Event deleted.')),
+        );
+        _reloadOverview();
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              error is CaleeHubException
+                  ? error.message
+                  : 'Unable to delete event.',
+            ),
+          ),
+        );
+      }
+    }
+  }
+
   Future<void> _createEvent({
     required ClientCalendar calendar,
     required String title,
@@ -239,7 +397,12 @@ class _CalendarPageState extends State<CalendarPage> {
                         ),
                 )
               else
-                ...events.map(_EventTile.new),
+                ...events.map(
+                  (event) => _EventTile(
+                    event: event,
+                    onTap: () => _openEventActions(event, calendars),
+                  ),
+                ),
             ],
           ),
         );
@@ -292,29 +455,35 @@ class _CalendarTile extends StatelessWidget {
 }
 
 class _EventTile extends StatelessWidget {
-  const _EventTile(this.event);
+  const _EventTile({
+    required this.event,
+    required this.onTap,
+  });
 
   final ClientEvent event;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     return Card(
       child: ListTile(
+        onTap: onTap,
         leading: const Icon(Icons.event_outlined),
         title: Text(event.title),
         subtitle: Text(
           [
-            _formatEventTime(event),
+            formatEventTime(event),
             if (event.serviceName.trim().isNotEmpty)
               'From ${event.serviceName}',
             if ((event.location ?? '').trim().isNotEmpty) event.location!,
           ].where((item) => item.trim().isNotEmpty).join(' · '),
         ),
+        trailing: const Icon(Icons.more_horiz),
       ),
     );
   }
 
-  String _formatEventTime(ClientEvent event) {
+  static String formatEventTime(ClientEvent event) {
     final start = DateTime.tryParse(event.startsAt);
     if (start == null) {
       return event.allDay ? 'All day' : event.startsAt;
@@ -337,9 +506,12 @@ class _CreateEventSheet extends StatefulWidget {
   const _CreateEventSheet({
     required this.calendars,
     required this.onCreate,
+    this.initialEvent,
+    this.onUpdate,
   });
 
   final List<ClientCalendar> calendars;
+  final ClientEvent? initialEvent;
   final Future<void> Function({
     required ClientCalendar calendar,
     required String title,
@@ -350,6 +522,15 @@ class _CreateEventSheet extends StatefulWidget {
     String? description,
     String? recurrence,
   }) onCreate;
+  final Future<void> Function({
+    required ClientEvent event,
+    required String title,
+    required DateTime startsAt,
+    required DateTime endsAt,
+    required bool allDay,
+    String? location,
+    String? description,
+  })? onUpdate;
 
   @override
   State<_CreateEventSheet> createState() => _CreateEventSheetState();
@@ -369,11 +550,32 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
   bool _allDay = false;
   bool _isSubmitting = false;
 
+  bool get _isEditing => widget.initialEvent != null;
+
   @override
   void initState() {
     super.initState();
 
     _selectedCalendar = widget.calendars.first;
+
+    final event = widget.initialEvent;
+    if (event != null) {
+      _titleController.text = event.title;
+      _locationController.text = event.location ?? '';
+      _descriptionController.text = event.description ?? '';
+      _allDay = event.allDay;
+
+      final start =
+          DateTime.tryParse(event.startsAt)?.toLocal() ?? DateTime.now();
+      final end = DateTime.tryParse(event.endsAt)?.toLocal() ??
+          start.add(const Duration(hours: 1));
+
+      _selectedDate = DateTime(start.year, start.month, start.day);
+      _startTime = TimeOfDay(hour: start.hour, minute: start.minute);
+      _endTime = TimeOfDay(hour: end.hour, minute: end.minute);
+      return;
+    }
+
     final now = DateTime.now();
     _selectedDate = DateTime(now.year, now.month, now.day);
 
@@ -503,20 +705,36 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
     });
 
     try {
-      await widget.onCreate(
-        calendar: _selectedCalendar,
-        title: _titleController.text.trim(),
-        startsAt: startsAt,
-        endsAt: endsAt,
-        allDay: _allDay,
-        location: _locationController.text.trim().isEmpty
-            ? null
-            : _locationController.text.trim(),
-        description: _descriptionController.text.trim().isEmpty
-            ? null
-            : _descriptionController.text.trim(),
-        recurrence: _recurrenceValue(_selectedRecurrence),
-      );
+      final title = _titleController.text.trim();
+      final location = _locationController.text.trim().isEmpty
+          ? null
+          : _locationController.text.trim();
+      final description = _descriptionController.text.trim().isEmpty
+          ? null
+          : _descriptionController.text.trim();
+
+      if (_isEditing) {
+        await widget.onUpdate!(
+          event: widget.initialEvent!,
+          title: title,
+          startsAt: startsAt,
+          endsAt: endsAt,
+          allDay: _allDay,
+          location: location,
+          description: description,
+        );
+      } else {
+        await widget.onCreate(
+          calendar: _selectedCalendar,
+          title: title,
+          startsAt: startsAt,
+          endsAt: endsAt,
+          allDay: _allDay,
+          location: location,
+          description: description,
+          recurrence: _recurrenceValue(_selectedRecurrence),
+        );
+      }
 
       if (mounted) {
         Navigator.of(context).pop(true);
@@ -532,7 +750,9 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
             content: Text(
               error is CaleeHubException
                   ? error.message
-                  : 'Unable to create event.',
+                  : _isEditing
+                      ? 'Unable to update event.'
+                      : 'Unable to create event.',
             ),
           ),
         );
@@ -555,7 +775,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Text(
-                  'Add event',
+                  _isEditing ? 'Edit event' : 'Add event',
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
                 const SizedBox(height: 16),
@@ -572,7 +792,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                         child: Text(calendar.name),
                       ),
                   ],
-                  onChanged: _isSubmitting
+                  onChanged: _isSubmitting || _isEditing
                       ? null
                       : (calendar) {
                           if (calendar != null) {
@@ -639,51 +859,53 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                     ],
                   ),
                 ],
-                const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
-                  initialValue: _selectedRecurrence,
-                  decoration: const InputDecoration(
-                    labelText: 'Repeat',
-                    border: OutlineInputBorder(),
+                if (!_isEditing) ...[
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    initialValue: _selectedRecurrence,
+                    decoration: const InputDecoration(
+                      labelText: 'Repeat',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'none',
+                        child: Text('Does not repeat'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'daily',
+                        child: Text('Daily'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'weekly',
+                        child: Text('Weekly'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'monthly',
+                        child: Text('Monthly'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'yearly',
+                        child: Text('Yearly'),
+                      ),
+                    ],
+                    onChanged: _isSubmitting
+                        ? null
+                        : (value) {
+                            if (value != null) {
+                              setState(() {
+                                _selectedRecurrence = value;
+                              });
+                            }
+                          },
                   ),
-                  items: const [
-                    DropdownMenuItem(
-                      value: 'none',
-                      child: Text('Does not repeat'),
-                    ),
-                    DropdownMenuItem(
-                      value: 'daily',
-                      child: Text('Daily'),
-                    ),
-                    DropdownMenuItem(
-                      value: 'weekly',
-                      child: Text('Weekly'),
-                    ),
-                    DropdownMenuItem(
-                      value: 'monthly',
-                      child: Text('Monthly'),
-                    ),
-                    DropdownMenuItem(
-                      value: 'yearly',
-                      child: Text('Yearly'),
+                  if (_selectedRecurrence != 'none') ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      'Repeats ${_recurrenceLabel(_selectedRecurrence).toLowerCase()}.',
+                      style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ],
-                  onChanged: _isSubmitting
-                      ? null
-                      : (value) {
-                          if (value != null) {
-                            setState(() {
-                              _selectedRecurrence = value;
-                            });
-                          }
-                        },
-                ),
-                if (_selectedRecurrence != 'none') ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    'Repeats ${_recurrenceLabel(_selectedRecurrence).toLowerCase()}.',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
                 ],
                 const SizedBox(height: 12),
                 TextFormField(
@@ -713,7 +935,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                           height: 18,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : const Text('Save event'),
+                      : Text(_isEditing ? 'Update event' : 'Save event'),
                 ),
               ],
             ),
