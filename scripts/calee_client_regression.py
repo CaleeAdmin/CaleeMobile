@@ -1572,6 +1572,32 @@ class Regression:
                 service_id,
                 chore_service_id=chore_service_id,
             )
+
+            if service_id != chore_service_id:
+                def _reject_non_portal_chore_create() -> str:
+                    status, _ = self.client.request(
+                        "POST",
+                        "/client/v1/chores",
+                        {
+                            "serviceId": service_id,
+                            "calendarId": calendar_collection["id"],
+                            "title": f"RT rejected non-portal chore {self.run_id}",
+                            "scheduledAt": self.today.isoformat(),
+                            "points": 1,
+                        },
+                        allow_statuses={404},
+                    )
+
+                    if status != 404:
+                        raise RuntimeError(f"Expected HTTP 404 for non-portal chore create, got {status}")
+
+                    return f"rejected serviceId={service_id}"
+
+                self.run_step(
+                    "chore create rejected for non-portal service",
+                    _reject_non_portal_chore_create,
+                )
+
             self.test_event_create_and_read(calendar_collection)
             self.test_tasks(task_collection)
             self.test_chores(chore_collection)
