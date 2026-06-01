@@ -950,26 +950,25 @@ class _CreateTaskFormState extends State<_CreateTaskForm> {
               },
             ),
             const SizedBox(height: CaleeSpacing.sm),
+            _DueDateQuickPicks(
+              selectedDate: _selectedDueDate,
+              enabled: !_isSubmitting,
+              onPick: (date) {
+                setState(() {
+                  _selectedDueDate = date;
+                });
+              },
+            ),
+            const SizedBox(height: CaleeSpacing.xs),
             OutlinedButton.icon(
               onPressed: _isSubmitting ? null : _pickDueDate,
               icon: const Icon(Icons.event_outlined),
               label: Text(
                 _selectedDueDate == null
-                    ? 'Add due date'
+                    ? 'Custom date…'
                     : 'Due ${_formatDate(_selectedDueDate!)}',
               ),
             ),
-            if (_selectedDueDate != null)
-              TextButton(
-                onPressed: _isSubmitting
-                    ? null
-                    : () {
-                        setState(() {
-                          _selectedDueDate = null;
-                        });
-                      },
-                child: const Text('Remove due date'),
-              ),
             const SizedBox(height: CaleeSpacing.sm),
             TextFormField(
               controller: _descriptionController,
@@ -1128,26 +1127,25 @@ class _EditTaskFormState extends State<_EditTaskForm> {
               },
             ),
             const SizedBox(height: CaleeSpacing.sm),
+            _DueDateQuickPicks(
+              selectedDate: _selectedDueDate,
+              enabled: !_isSubmitting,
+              onPick: (date) {
+                setState(() {
+                  _selectedDueDate = date;
+                });
+              },
+            ),
+            const SizedBox(height: CaleeSpacing.xs),
             OutlinedButton.icon(
               onPressed: _isSubmitting ? null : _pickDueDate,
               icon: const Icon(Icons.event_outlined),
               label: Text(
                 _selectedDueDate == null
-                    ? 'Add due date'
+                    ? 'Custom date…'
                     : 'Due ${_formatDate(_selectedDueDate!)}',
               ),
             ),
-            if (_selectedDueDate != null)
-              TextButton(
-                onPressed: _isSubmitting
-                    ? null
-                    : () {
-                        setState(() {
-                          _selectedDueDate = null;
-                        });
-                      },
-                child: const Text('Remove due date'),
-              ),
             const SizedBox(height: CaleeSpacing.sm),
             TextFormField(
               controller: _descriptionController,
@@ -1170,6 +1168,71 @@ class _EditTaskFormState extends State<_EditTaskForm> {
           ],
         ),
       ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Due-date quick-pick chips (Today / Tomorrow / Next Week / No Date)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _DueDateQuickPicks extends StatelessWidget {
+  const _DueDateQuickPicks({
+    required this.selectedDate,
+    required this.enabled,
+    required this.onPick,
+  });
+
+  final DateTime? selectedDate;
+  final bool enabled;
+  final void Function(DateTime? date) onPick;
+
+  bool _isSameDay(DateTime? a, DateTime? b) {
+    if (a == null || b == null) return false;
+    return a.year == b.year && a.month == b.month && a.day == b.day;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final tomorrow = today.add(const Duration(days: 1));
+    final nextWeek = today.add(const Duration(days: 7));
+
+    final isNoDate = selectedDate == null;
+    final isToday = _isSameDay(selectedDate, today);
+    final isTomorrow = _isSameDay(selectedDate, tomorrow);
+    final isNextWeek = _isSameDay(selectedDate, nextWeek);
+
+    return Wrap(
+      spacing: CaleeSpacing.xs,
+      runSpacing: CaleeSpacing.xs,
+      children: [
+        FilterChip(
+          label: const Text('Today'),
+          selected: isToday,
+          onSelected: enabled ? (_) => onPick(today) : null,
+          showCheckmark: false,
+        ),
+        FilterChip(
+          label: const Text('Tomorrow'),
+          selected: isTomorrow,
+          onSelected: enabled ? (_) => onPick(tomorrow) : null,
+          showCheckmark: false,
+        ),
+        FilterChip(
+          label: const Text('Next Week'),
+          selected: isNextWeek,
+          onSelected: enabled ? (_) => onPick(nextWeek) : null,
+          showCheckmark: false,
+        ),
+        FilterChip(
+          label: const Text('No Date'),
+          selected: isNoDate,
+          onSelected: enabled ? (_) => onPick(null) : null,
+          showCheckmark: false,
+        ),
+      ],
     );
   }
 }
