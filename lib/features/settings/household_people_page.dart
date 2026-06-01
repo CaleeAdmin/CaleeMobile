@@ -228,7 +228,7 @@ class _HouseholdPeoplePageState extends State<HouseholdPeoplePage> {
                           vertical: CaleeSpacing.sm,
                         ),
                         child: DropdownButtonFormField<String>(
-                          value: household.id,
+                          initialValue: household.id,
                           decoration: const InputDecoration(
                             labelText: 'Household',
                           ),
@@ -291,6 +291,17 @@ class _HouseholdPeoplePageState extends State<HouseholdPeoplePage> {
                     return CaleeSection(
                       title: 'People',
                       children: [
+                        CaleeListRow(
+                          title: 'Add person',
+                          subtitle:
+                              'Create a child, parent, or household member',
+                          leading: const Icon(
+                            Icons.person_add_alt_1_outlined,
+                            size: 20,
+                            color: CaleeColors.primary,
+                          ),
+                          onTap: _openCreateSheet,
+                        ),
                         if (people.isEmpty)
                           const _EmptyRowText('No people yet.')
                         else
@@ -432,7 +443,7 @@ class _PersonFormContentState extends State<_PersonFormContent> {
         ),
         const SizedBox(height: CaleeSpacing.md),
         DropdownButtonFormField<String>(
-          value: _role,
+          initialValue: _role,
           decoration: const InputDecoration(labelText: 'Role'),
           items: const [
             DropdownMenuItem(value: 'member', child: Text('Member')),
