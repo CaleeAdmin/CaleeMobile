@@ -1497,6 +1497,24 @@ class _CreateChoreSheetState extends State<_CreateChoreSheet> {
                       },
               ),
               const SizedBox(height: CaleeSpacing.sm + 4),
+              DropdownButtonFormField<int>(
+                initialValue: _points,
+                decoration: const InputDecoration(labelText: 'Points'),
+                items: const [
+                  DropdownMenuItem(value: 1, child: Text('1 point')),
+                  DropdownMenuItem(value: 2, child: Text('2 points')),
+                ],
+                onChanged: _isSubmitting
+                    ? null
+                    : (value) {
+                        if (value != null) {
+                          setState(() {
+                            _points = value;
+                          });
+                        }
+                      },
+              ),
+              const SizedBox(height: CaleeSpacing.sm + 4),
               TextFormField(
                 controller: _descriptionController,
                 enabled: !_isSubmitting,
@@ -1727,24 +1745,6 @@ class _EditChoreSheetState extends State<_EditChoreSheet> {
                         setState(() {
                           _selectedRecurrence = value;
                         });
-                      },
-              ),
-              const SizedBox(height: CaleeSpacing.sm + 4),
-              DropdownButtonFormField<int>(
-                initialValue: _points,
-                decoration: const InputDecoration(labelText: 'Points'),
-                items: const [
-                  DropdownMenuItem(value: 1, child: Text('1 point')),
-                  DropdownMenuItem(value: 2, child: Text('2 points')),
-                ],
-                onChanged: _isSubmitting
-                    ? null
-                    : (value) {
-                        if (value != null) {
-                          setState(() {
-                            _points = value;
-                          });
-                        }
                       },
               ),
               const SizedBox(height: CaleeSpacing.sm + 4),
