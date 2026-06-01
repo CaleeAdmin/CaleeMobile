@@ -306,6 +306,34 @@ class _ChoresPageState extends State<ChoresPage> {
       return;
     }
 
+    final household = _metadataHousehold;
+    final choreUid = chore.choreUid?.trim();
+    var people = <ClientPerson>[];
+    ClientChoreMetadata? metadata;
+
+    if (household != null && choreUid != null && choreUid.isNotEmpty) {
+      try {
+        final peopleList = await widget.hubClient.people(
+          accessToken: widget.accessToken,
+          householdId: household.id,
+        );
+        people = peopleList.people.where((person) => person.isActive).toList();
+
+        metadata = await widget.hubClient.choreMetadata(
+          accessToken: widget.accessToken,
+          householdId: household.id,
+          choreUid: choreUid,
+        );
+      } catch (_) {
+        people = <ClientPerson>[];
+        metadata = null;
+      }
+    }
+
+    if (!mounted) {
+      return;
+    }
+
     final updated = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
@@ -317,6 +345,8 @@ class _ChoresPageState extends State<ChoresPage> {
       ),
       builder: (context) => _EditChoreSheet(
         chore: chore,
+        people: people,
+        metadata: metadata,
         onUpdate: _updateChore,
       ),
     );
@@ -332,6 +362,9 @@ class _ChoresPageState extends State<ChoresPage> {
     String? scheduledAt,
     String? description,
     String? recurrence,
+    required String? assigneePersonId,
+    required int points,
+    required String approvalState,
   }) async {
     final choreId = chore.completionActionId;
 
@@ -347,6 +380,20 @@ class _ChoresPageState extends State<ChoresPage> {
       description: description,
       recurrence: recurrence,
     );
+
+    final household = _metadataHousehold;
+    final choreUid = chore.choreUid?.trim();
+
+    if (household != null && choreUid != null && choreUid.isNotEmpty) {
+      await widget.hubClient.updateChoreMetadata(
+        accessToken: widget.accessToken,
+        householdId: household.id,
+        choreUid: choreUid,
+        assigneePersonId: assigneePersonId ?? '',
+        points: points,
+        approvalState: approvalState,
+      );
+    }
   }
 
   Future<void> _toggleChoreCompletion(ClientChore chore) async {
@@ -1612,16 +1659,23 @@ class _CreateChoreSheetState extends State<_CreateChoreSheet> {
 class _EditChoreSheet extends StatefulWidget {
   const _EditChoreSheet({
     required this.chore,
+    required this.people,
+    required this.metadata,
     required this.onUpdate,
   });
 
   final ClientChore chore;
+  final List<ClientPerson> people;
+  final ClientChoreMetadata? metadata;
   final Future<void> Function({
     required ClientChore chore,
     required String title,
     String? scheduledAt,
     String? description,
     String? recurrence,
+    required String? assigneePersonId,
+    required int points,
+    required String approvalState,
   }) onUpdate;
 
   @override
@@ -1632,9 +1686,12 @@ class _EditChoreSheetState extends State<_EditChoreSheet> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _titleController;
   late final TextEditingController _descriptionController;
+  late final TextEditingController _pointsController;
 
   DateTime? _selectedDate;
   String? _selectedRecurrence;
+  String? _assigneePersonId;
+  late String _approvalState;
   bool _isSubmitting = false;
 
   @override
@@ -1646,12 +1703,25 @@ class _EditChoreSheetState extends State<_EditChoreSheet> {
     _selectedDate =
         _parseChoreDate(widget.chore.scheduledDate ?? widget.chore.scheduledAt);
     _selectedRecurrence = _choreRruleToRecurrence(widget.chore.recurrence);
+
+    final activePeopleIds = widget.people.map((person) => person.id).toSet();
+    final existingAssignee =
+        widget.metadata?.assigneePersonId ?? widget.chore.assigneePersonId;
+
+    _assigneePersonId =
+        activePeopleIds.contains(existingAssignee) ? existingAssignee : null;
+    _approvalState =
+        widget.metadata?.approvalState ?? widget.chore.approvalState;
+    _pointsController = TextEditingController(
+      text: (widget.metadata?.points ?? widget.chore.points).toString(),
+    );
   }
 
   @override
   void dispose() {
     _titleController.dispose();
     _descriptionController.dispose();
+    _pointsController.dispose();
     super.dispose();
   }
 
@@ -1676,6 +1746,8 @@ class _EditChoreSheetState extends State<_EditChoreSheet> {
       return;
     }
 
+    final points = int.tryParse(_pointsController.text.trim()) ?? 1;
+
     setState(() {
       _isSubmitting = true;
     });
@@ -1688,6 +1760,9 @@ class _EditChoreSheetState extends State<_EditChoreSheet> {
             _selectedDate == null ? null : _formatChoreDate(_selectedDate!),
         description: _descriptionController.text.trim(),
         recurrence: _choreRecurrenceToRrule(_selectedRecurrence),
+        assigneePersonId: _assigneePersonId,
+        points: points,
+        approvalState: _approvalState,
       );
 
       if (mounted) {
@@ -1809,6 +1884,43 @@ class _EditChoreSheetState extends State<_EditChoreSheet> {
                           _selectedRecurrence = value;
                         });
                       },
+              ),
+              const SizedBox(height: CaleeSpacing.sm + 4),
+              DropdownButtonFormField<String?>(
+                initialValue: _assigneePersonId,
+                decoration: const InputDecoration(labelText: 'Assign to'),
+                items: [
+                  const DropdownMenuItem<String?>(
+                    value: null,
+                    child: Text('Unassigned'),
+                  ),
+                  for (final person in widget.people)
+                    DropdownMenuItem<String?>(
+                      value: person.id,
+                      child: Text(person.displayName),
+                    ),
+                ],
+                onChanged: _isSubmitting
+                    ? null
+                    : (value) {
+                        setState(() {
+                          _assigneePersonId = value;
+                        });
+                      },
+              ),
+              const SizedBox(height: CaleeSpacing.sm + 4),
+              TextFormField(
+                controller: _pointsController,
+                enabled: !_isSubmitting,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Points'),
+                validator: (value) {
+                  final points = int.tryParse((value ?? '').trim());
+                  if (points == null || points < 0 || points > 100000) {
+                    return 'Enter valid points';
+                  }
+                  return null;
+                },
               ),
               const SizedBox(height: CaleeSpacing.sm + 4),
               TextFormField(
