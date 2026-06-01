@@ -2051,7 +2051,7 @@ class _CalendarChooserSheetState extends State<_CalendarChooserSheet> {
           },
         ),
         CaleeListRow(
-          title: 'Add Holiday Calendar',
+          title: 'Add Calee Calendar',
           leading: const Icon(
             Icons.public_outlined,
             color: CaleeColors.textTertiary,
