@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../../data/api/calee_hub_client.dart';
 import '../../data/models/client_bootstrap.dart';
-import '../people/add_person_sheet.dart';
 import '../settings/calendar_collections_page.dart';
+import '../settings/household_people_page.dart';
 import '../../data/models/client_calendar.dart';
 import '../../data/models/client_chore.dart';
 import '../../data/models/client_chore_metadata.dart';
@@ -656,19 +656,19 @@ class _ChoresPageState extends State<ChoresPage> {
       return;
     }
 
-    final created = await CaleeBottomSheet.show<bool>(
-      context: context,
-      title: 'Add Person',
-      child: AddPersonSheet(
-        onAdd: (name) => widget.hubClient.createPerson(
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => HouseholdPeoplePage(
+          hubClient: widget.hubClient,
           accessToken: widget.accessToken,
-          householdId: household.id,
-          displayName: name,
+          households: widget.households,
+          initialHouseholdId: household.id,
+          autoOpenCreate: true,
         ),
       ),
     );
 
-    if (created == true && mounted) {
+    if (mounted) {
       _reloadOverview();
     }
   }
