@@ -5,6 +5,7 @@ import '../../data/models/client_bootstrap.dart';
 import '../../ui/calee_theme.dart';
 import '../../ui/calee_widgets.dart';
 import 'calendar_collections_page.dart';
+import 'household_people_page.dart';
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({
@@ -78,6 +79,31 @@ class SettingsPage extends StatelessWidget {
                   ),
                 );
               },
+            ),
+            CaleeListRow(
+              title: 'Household people',
+              subtitle: bootstrap.contexts.households.isEmpty
+                  ? 'No household available'
+                  : 'Manage people for chores',
+              leading: const Icon(
+                Icons.group_outlined,
+                size: 20,
+                color: CaleeColors.primary,
+              ),
+              enabled: bootstrap.contexts.households.isNotEmpty,
+              onTap: bootstrap.contexts.households.isEmpty
+                  ? null
+                  : () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => HouseholdPeoplePage(
+                            hubClient: hubClient,
+                            accessToken: accessToken,
+                            households: bootstrap.contexts.households,
+                          ),
+                        ),
+                      );
+                    },
             ),
           ],
         ),
