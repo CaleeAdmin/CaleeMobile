@@ -631,8 +631,45 @@ class _ChoresPageState extends State<ChoresPage> {
           });
           Navigator.of(context).pop();
         },
+        onAddPerson: () {
+          Navigator.of(context).pop();
+          _openAddPersonSheet();
+        },
+        onAddChoreList: () {
+          Navigator.of(context).pop();
+          _openCollectionCreateShortcut();
+        },
       ),
     );
+  }
+
+  Future<void> _openAddPersonSheet() async {
+    final household = _metadataHousehold;
+
+    if (household == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No household is available.')),
+        );
+      }
+      return;
+    }
+
+    final created = await CaleeBottomSheet.show<bool>(
+      context: context,
+      title: 'Add Person',
+      child: _AddPersonSheet(
+        onAdd: (name) => widget.hubClient.createPerson(
+          accessToken: widget.accessToken,
+          householdId: household.id,
+          displayName: name,
+        ),
+      ),
+    );
+
+    if (created == true && mounted) {
+      _reloadOverview();
+    }
   }
 
   int _countAllChores(List<ClientChore> chores) => chores.length;
@@ -1122,6 +1159,8 @@ class _AssigneeFilterChooser extends StatelessWidget {
     required this.unassignedCount,
     required this.personCounts,
     required this.onSelect,
+    this.onAddPerson,
+    this.onAddChoreList,
   });
 
   final List<ClientPerson> people;
@@ -1131,6 +1170,8 @@ class _AssigneeFilterChooser extends StatelessWidget {
   final int unassignedCount;
   final Map<String, int> personCounts;
   final ValueChanged<String> onSelect;
+  final VoidCallback? onAddPerson;
+  final VoidCallback? onAddChoreList;
 
   @override
   Widget build(BuildContext context) {
@@ -1184,6 +1225,30 @@ class _AssigneeFilterChooser extends StatelessWidget {
                 ),
                 onTap: () => onSelect('person:${person.id}'),
               ),
+          ],
+        ),
+        const SizedBox(height: CaleeSpacing.md),
+        CaleeSection(
+          title: 'Setup',
+          children: [
+            CaleeListRow(
+              title: 'Add Person',
+              leading: const Icon(
+                Icons.person_add_outlined,
+                color: CaleeColors.primary,
+                size: 22,
+              ),
+              onTap: onAddPerson,
+            ),
+            CaleeListRow(
+              title: 'Add Chore List',
+              leading: const Icon(
+                Icons.playlist_add_outlined,
+                color: CaleeColors.primary,
+                size: 22,
+              ),
+              onTap: onAddChoreList,
+            ),
           ],
         ),
         const SizedBox(height: CaleeSpacing.md),
@@ -1869,6 +1934,109 @@ class _EditChoreSheetState extends State<_EditChoreSheet> {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
+// Add person sheet
+// ─────────────────────────────────────────────
+
+class _AddPersonSheet extends StatefulWidget {
+  const _AddPersonSheet({required this.onAdd});
+
+  final Future<void> Function(String name) onAdd;
+
+  @override
+  State<_AddPersonSheet> createState() => _AddPersonSheetState();
+}
+
+class _AddPersonSheetState extends State<_AddPersonSheet> {
+  final _formKey = GlobalKey<FormState>();
+  final _nameController = TextEditingController();
+  bool _isSubmitting = false;
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (_isSubmitting || !_formKey.currentState!.validate()) return;
+
+    setState(() {
+      _isSubmitting = true;
+    });
+
+    try {
+      await widget.onAdd(_nameController.text.trim());
+      if (mounted) {
+        Navigator.of(context).pop(true);
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _isSubmitting = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(_choreErrorMessage(error, 'Unable to add person.')),
+          ),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Form(
+      key: _formKey,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          TextFormField(
+            controller: _nameController,
+            enabled: !_isSubmitting,
+            autofocus: true,
+            decoration: const InputDecoration(labelText: 'Name'),
+            textInputAction: TextInputAction.done,
+            onFieldSubmitted: (_) => _submit(),
+            validator: (value) {
+              if ((value ?? '').trim().isEmpty) {
+                return 'Enter a name';
+              }
+              return null;
+            },
+          ),
+          const SizedBox(height: CaleeSpacing.md),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed:
+                      _isSubmitting ? null : () => Navigator.of(context).pop(),
+                  child: const Text('Cancel'),
+                ),
+              ),
+              const SizedBox(width: CaleeSpacing.sm),
+              Expanded(
+                child: FilledButton(
+                  onPressed: _isSubmitting ? null : _submit,
+                  child: _isSubmitting
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('Add'),
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
