@@ -32,6 +32,9 @@ class _TasksPageState extends State<TasksPage> {
   final Set<String> _editingTaskIds = {};
   bool _completedExpanded = false;
 
+  // null = All Tasks
+  ClientCalendar? _selectedCalendar;
+
   @override
   void initState() {
     super.initState();
@@ -86,6 +89,28 @@ class _TasksPageState extends State<TasksPage> {
     });
   }
 
+  Future<void> _openTaskListChooser(List<ClientCalendar> taskCalendars) async {
+    await CaleeBottomSheet.show<void>(
+      context: context,
+      title: 'Task Lists',
+      child: _TaskListChooser(
+        taskCalendars: taskCalendars,
+        selectedCalendar: _selectedCalendar,
+        onSelect: (calendar) {
+          setState(() {
+            _selectedCalendar = calendar;
+            _completedExpanded = false;
+          });
+          Navigator.of(context).pop();
+        },
+        onAddTaskList: () {
+          Navigator.of(context).pop();
+          _openCollectionCreateShortcut();
+        },
+      ),
+    );
+  }
+
   Future<void> _openCreateTaskSheet(List<ClientCalendar> taskCalendars) async {
     if (taskCalendars.isEmpty || _isCreatingTask) {
       return;
@@ -96,6 +121,7 @@ class _TasksPageState extends State<TasksPage> {
       title: 'New Task',
       child: _CreateTaskForm(
         taskCalendars: taskCalendars,
+        initialCalendar: _selectedCalendar,
         onCreate: _createTask,
       ),
     );
@@ -421,6 +447,14 @@ class _TasksPageState extends State<TasksPage> {
             .toList();
         final allTasks = overview.taskList.tasks;
 
+        // Reset selected calendar if it no longer exists after reload
+        if (_selectedCalendar != null &&
+            !taskCalendars.any((c) => c.id == _selectedCalendar!.id)) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) setState(() => _selectedCalendar = null);
+          });
+        }
+
         if (taskCalendars.isEmpty && allTasks.isEmpty) {
           return CaleeScaffold(
             body: CaleeEmptyState(
@@ -436,10 +470,20 @@ class _TasksPageState extends State<TasksPage> {
           );
         }
 
+        // Apply task list filter
+        final filteredTasks = _selectedCalendar == null
+            ? allTasks
+            : allTasks.where((t) {
+                final sel = _selectedCalendar!;
+                return t.calendarId == sel.id ||
+                    t.calendarId == _rawCalendarId(sel) ||
+                    '${t.serviceId}:${t.calendarId}' == sel.id;
+              }).toList();
+
         final openTasks =
-            allTasks.where((t) => !t.isCompleted).toList();
+            filteredTasks.where((t) => !t.isCompleted).toList();
         final completedTasks =
-            allTasks.where((t) => t.isCompleted).toList();
+            filteredTasks.where((t) => t.isCompleted).toList();
 
         final now = DateTime.now();
         final today = DateTime(now.year, now.month, now.day);
@@ -484,6 +528,15 @@ class _TasksPageState extends State<TasksPage> {
                 vertical: CaleeSpacing.md,
               ),
               children: [
+                // ── Task list filter pill ─────────────────────────────
+                if (taskCalendars.isNotEmpty)
+                  _TaskListFilterBar(
+                    selectedCalendar: _selectedCalendar,
+                    onTap: () => _openTaskListChooser(taskCalendars),
+                  ),
+                if (taskCalendars.isNotEmpty)
+                  const SizedBox(height: CaleeSpacing.md),
+
                 // ── Empty state when no open tasks ───────────────────
                 if (openTasks.isEmpty && taskCalendars.isNotEmpty)
                   CaleeSection(
@@ -781,6 +834,139 @@ class _TaskRow extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Task list filter bar
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _TaskListFilterBar extends StatelessWidget {
+  const _TaskListFilterBar({
+    required this.selectedCalendar,
+    required this.onTap,
+  });
+
+  final ClientCalendar? selectedCalendar;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final label =
+        selectedCalendar == null ? 'All Tasks' : selectedCalendar!.name;
+
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        decoration: BoxDecoration(
+          color: CaleeColors.surface,
+          borderRadius: BorderRadius.circular(CaleeRadius.card),
+        ),
+        padding: const EdgeInsets.symmetric(
+          horizontal: CaleeSpacing.md,
+          vertical: CaleeSpacing.sm,
+        ),
+        child: Row(
+          children: [
+            Icon(
+              Icons.list_alt_outlined,
+              size: 18,
+              color: CaleeColors.primary,
+            ),
+            const SizedBox(width: CaleeSpacing.sm),
+            Text(
+              label,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: CaleeColors.primary,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            const SizedBox(width: CaleeSpacing.xs),
+            Icon(
+              Icons.keyboard_arrow_down,
+              size: 16,
+              color: CaleeColors.primary,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Task list chooser sheet content
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _TaskListChooser extends StatelessWidget {
+  const _TaskListChooser({
+    required this.taskCalendars,
+    required this.selectedCalendar,
+    required this.onSelect,
+    required this.onAddTaskList,
+  });
+
+  final List<ClientCalendar> taskCalendars;
+  final ClientCalendar? selectedCalendar;
+  final void Function(ClientCalendar? calendar) onSelect;
+  final VoidCallback onAddTaskList;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        CaleeSection(
+          children: [
+            // All Tasks row
+            CaleeListRow(
+              title: 'All Tasks',
+              leading: selectedCalendar == null
+                  ? const Icon(
+                      Icons.check,
+                      size: 20,
+                      color: CaleeColors.primary,
+                    )
+                  : const SizedBox(width: 20),
+              onTap: () => onSelect(null),
+            ),
+            ...taskCalendars.map(
+              (cal) => CaleeListRow(
+                title: cal.name,
+                subtitle: cal.serviceName.trim().isNotEmpty
+                    ? cal.serviceName
+                    : null,
+                leading: selectedCalendar?.id == cal.id
+                    ? const Icon(
+                        Icons.check,
+                        size: 20,
+                        color: CaleeColors.primary,
+                      )
+                    : const SizedBox(width: 20),
+                onTap: () => onSelect(cal),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: CaleeSpacing.sectionSpacing),
+        CaleeSection(
+          children: [
+            CaleeListRow(
+              title: 'New Task List',
+              leading: const Icon(
+                Icons.add_circle_outline,
+                size: 20,
+                color: CaleeColors.primary,
+              ),
+              onTap: onAddTaskList,
+            ),
+          ],
+        ),
+        const SizedBox(height: CaleeSpacing.md),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Internal data holder
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -806,9 +992,11 @@ class _CreateTaskForm extends StatefulWidget {
   const _CreateTaskForm({
     required this.taskCalendars,
     required this.onCreate,
+    this.initialCalendar,
   });
 
   final List<ClientCalendar> taskCalendars;
+  final ClientCalendar? initialCalendar;
   final Future<void> Function({
     required ClientCalendar taskCalendar,
     required String title,
@@ -832,7 +1020,14 @@ class _CreateTaskFormState extends State<_CreateTaskForm> {
   @override
   void initState() {
     super.initState();
-    _selectedTaskCalendar = widget.taskCalendars.first;
+    // Use the pre-selected list if it still exists in the available calendars
+    final initial = widget.initialCalendar;
+    if (initial != null &&
+        widget.taskCalendars.any((c) => c.id == initial.id)) {
+      _selectedTaskCalendar = initial;
+    } else {
+      _selectedTaskCalendar = widget.taskCalendars.first;
+    }
   }
 
   @override
