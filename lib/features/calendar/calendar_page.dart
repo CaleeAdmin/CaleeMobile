@@ -819,6 +819,26 @@ class _CalendarPageState extends State<CalendarPage> {
     );
   }
 
+  Widget _buildAgendaSectionHeading(String label) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        CaleeSpacing.md,
+        CaleeSpacing.sm,
+        CaleeSpacing.md,
+        2,
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          color: CaleeColors.textSecondary,
+          letterSpacing: 0.4,
+        ),
+      ),
+    );
+  }
+
   List<Widget> _buildAgendaItems() {
     final items = <Widget>[];
 
@@ -846,6 +866,8 @@ class _CalendarPageState extends State<CalendarPage> {
     );
 
     final dayEvents = _eventsForDay(_selectedDay);
+    final allDayEvents = dayEvents.where((e) => e.allDay).toList();
+    final timedEvents = dayEvents.where((e) => !e.allDay).toList();
 
     if (dayEvents.isEmpty) {
       items.add(
@@ -866,15 +888,33 @@ class _CalendarPageState extends State<CalendarPage> {
         ),
       );
     } else {
-      for (final event in dayEvents) {
-        items.add(
-          _AgendaEventRow(
-            event: event,
-            color: _eventColor(event),
-            calendarName: _calendarForEvent(event)?.name,
-            onTap: () => _openEventActions(event),
-          ),
-        );
+      if (allDayEvents.isNotEmpty) {
+        items.add(_buildAgendaSectionHeading('All-day'));
+        for (final event in allDayEvents) {
+          items.add(
+            _AgendaEventRow(
+              event: event,
+              color: _eventColor(event),
+              calendarName: _calendarForEvent(event)?.name,
+              hideTime: true,
+              onTap: () => _openEventActions(event),
+            ),
+          );
+        }
+      }
+
+      if (timedEvents.isNotEmpty) {
+        items.add(_buildAgendaSectionHeading('Timed'));
+        for (final event in timedEvents) {
+          items.add(
+            _AgendaEventRow(
+              event: event,
+              color: _eventColor(event),
+              calendarName: _calendarForEvent(event)?.name,
+              onTap: () => _openEventActions(event),
+            ),
+          );
+        }
       }
     }
 
@@ -996,16 +1036,17 @@ class _AgendaEventRow extends StatelessWidget {
     required this.color,
     required this.onTap,
     this.calendarName,
+    this.hideTime = false,
   });
 
   final ClientEvent event;
   final Color color;
   final VoidCallback onTap;
   final String? calendarName;
+  final bool hideTime;
 
   @override
   Widget build(BuildContext context) {
-    final timeLabel = _eventTimeLabel(event);
     final subtitle = [
       if (calendarName != null && calendarName!.trim().isNotEmpty)
         calendarName!.trim(),
@@ -1032,19 +1073,21 @@ class _AgendaEventRow extends StatelessWidget {
               ),
             ),
             const SizedBox(width: CaleeSpacing.sm + 2),
-            // Time
-            SizedBox(
-              width: 42,
-              child: Text(
-                timeLabel,
-                style: const TextStyle(
-                  fontSize: 13,
-                  color: CaleeColors.textSecondary,
-                  height: 1.4,
+            // Time (omitted for all-day rows inside the All-day section)
+            if (!hideTime) ...[
+              SizedBox(
+                width: 42,
+                child: Text(
+                  _eventTimeLabel(event),
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: CaleeColors.textSecondary,
+                    height: 1.4,
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(width: CaleeSpacing.sm),
+              const SizedBox(width: CaleeSpacing.sm),
+            ],
             // Title + subtitle
             Expanded(
               child: Column(
