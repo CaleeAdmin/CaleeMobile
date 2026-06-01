@@ -21,7 +21,8 @@ Usage:
   python3 calee_client_regression.py --base-url https://hub.calee.com.au
 
 Optional:
-  CALEE_TEST_SERVICE_ID="portal" python3 calee_client_regression.py
+  CALEE_TEST_SERVICE_ID="business" python3 calee_client_regression.py
+  CALEE_TEST_CHORE_SERVICE_ID="portal" python3 calee_client_regression.py
   python3 calee_client_regression.py --keep-created
   python3 calee_client_regression.py --require-event-crud
 """
@@ -188,11 +189,21 @@ class Regression:
         text = str(value or "").strip()
         return text[:10] if len(text) >= 10 else text
 
-    def pick_service(self, bootstrap: dict[str, Any]) -> dict[str, Any]:
-        preferred = os.environ.get("CALEE_TEST_SERVICE_ID", "").strip()
+    def bootstrap_services(self, bootstrap: dict[str, Any]) -> list[dict[str, Any]]:
         services = bootstrap.get("bootstrap", {}).get("services", [])
         if not services and "services" in bootstrap:
             services = bootstrap.get("services", [])
+        return list(services)
+
+    def is_calendar_service(self, service: dict[str, Any]) -> bool:
+        return service.get("serviceType") in ("nextcloud_calendar", "nextcloud_portal")
+
+    def has_connected_calendar_credential(self, service: dict[str, Any]) -> bool:
+        return service.get("calendarCredentialStatus") in ("connected", None)
+
+    def pick_service(self, bootstrap: dict[str, Any]) -> dict[str, Any]:
+        preferred = os.environ.get("CALEE_TEST_SERVICE_ID", "").strip()
+        services = self.bootstrap_services(bootstrap)
 
         if preferred:
             for service in services:
@@ -201,17 +212,35 @@ class Regression:
             raise RuntimeError(f"CALEE_TEST_SERVICE_ID={preferred!r} was not found in bootstrap services")
 
         for service in services:
-            if (
-                service.get("serviceType") == "nextcloud_calendar"
-                and service.get("calendarCredentialStatus") in ("connected", None)
-            ):
+            if self.is_calendar_service(service) and self.has_connected_calendar_credential(service):
                 return service
 
         for service in services:
-            if service.get("serviceType") == "nextcloud_calendar":
+            if self.is_calendar_service(service):
                 return service
 
-        raise RuntimeError("No nextcloud_calendar service found in bootstrap")
+        raise RuntimeError("No calendar-capable service found in bootstrap")
+
+    def pick_chore_service(self, bootstrap: dict[str, Any]) -> dict[str, Any]:
+        preferred = os.environ.get("CALEE_TEST_CHORE_SERVICE_ID", "portal").strip() or "portal"
+        services = self.bootstrap_services(bootstrap)
+
+        for service in services:
+            if service.get("id") == preferred:
+                if not self.is_calendar_service(service):
+                    raise RuntimeError(
+                        f"CALEE_TEST_CHORE_SERVICE_ID={preferred!r} is not calendar-capable"
+                    )
+                if not self.has_connected_calendar_credential(service):
+                    raise RuntimeError(
+                        f"CALEE_TEST_CHORE_SERVICE_ID={preferred!r} does not have connected calendar credentials"
+                    )
+                return service
+
+        raise RuntimeError(
+            f"Portal chore service {preferred!r} was not found in bootstrap services. "
+            "Set CALEE_TEST_CHORE_SERVICE_ID to the portal service id."
+        )
 
     def create_collection(self, service_id: str, primary_kind: str, label: str) -> dict[str, Any]:
         name = f"RT {label} {self.run_id}"
@@ -244,16 +273,27 @@ class Regression:
             {"confirmDeleteItems": True},
         )
 
-    def test_collections(self, service_id: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    def test_collections(
+        self,
+        service_id: str,
+        *,
+        chore_service_id: str,
+    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
         created: dict[str, dict[str, Any]] = {}
 
-        for kind, label in [
-            ("calendar", "calendar"),
-            ("tasks", "task-list"),
-            ("chores", "chore-list"),
-        ]:
-            def _create(kind: str = kind, label: str = label) -> str:
-                collection = self.create_collection(service_id, kind, label)
+        collection_specs = [
+            ("calendar", "calendar", service_id),
+            ("tasks", "task-list", service_id),
+            ("chores", "chore-list", chore_service_id),
+        ]
+
+        for kind, label, target_service_id in collection_specs:
+            def _create(
+                kind: str = kind,
+                label: str = label,
+                target_service_id: str = target_service_id,
+            ) -> str:
+                collection = self.create_collection(target_service_id, kind, label)
                 created[kind] = collection
                 return f"{collection['name']} ({collection['id']})"
 
@@ -1520,7 +1560,18 @@ class Regression:
             service_id = service["id"]
             self.record("service selected", "INFO", f"{service_id} ({service.get('displayName', '')})")
 
-            calendar_collection, task_collection, chore_collection = self.test_collections(service_id)
+            chore_service = self.pick_chore_service(bootstrap_holder["payload"])
+            chore_service_id = chore_service["id"]
+            self.record(
+                "chore service selected",
+                "INFO",
+                f"{chore_service_id} ({chore_service.get('displayName', '')})",
+            )
+
+            calendar_collection, task_collection, chore_collection = self.test_collections(
+                service_id,
+                chore_service_id=chore_service_id,
+            )
             self.test_event_create_and_read(calendar_collection)
             self.test_tasks(task_collection)
             self.test_chores(chore_collection)
