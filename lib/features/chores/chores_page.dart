@@ -222,6 +222,7 @@ class _ChoresPageState extends State<ChoresPage> {
       scheduledAt: scheduledAt,
       description: description,
       recurrence: recurrence,
+      points: points,
     );
   }
 
@@ -310,7 +311,6 @@ class _ChoresPageState extends State<ChoresPage> {
       scheduledAt: scheduledAt,
       description: description,
       recurrence: recurrence,
-      points: points,
     );
   }
 
@@ -1375,6 +1375,7 @@ class _CreateChoreSheetState extends State<_CreateChoreSheet> {
             _selectedDate == null ? null : _formatChoreDate(_selectedDate!),
         description: _descriptionController.text.trim(),
         recurrence: _choreRecurrenceToRrule(_selectedRecurrence),
+        points: _points,
       );
 
       if (mounted) {
@@ -1624,7 +1625,6 @@ class _EditChoreSheetState extends State<_EditChoreSheet> {
             _selectedDate == null ? null : _formatChoreDate(_selectedDate!),
         description: _descriptionController.text.trim(),
         recurrence: _choreRecurrenceToRrule(_selectedRecurrence),
-        points: _points,
       );
 
       if (mounted) {
