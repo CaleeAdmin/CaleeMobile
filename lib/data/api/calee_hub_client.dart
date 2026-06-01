@@ -4,6 +4,7 @@ import 'dart:io';
 import '../models/client_bootstrap.dart';
 import '../models/client_calendar.dart';
 import '../models/client_chore.dart';
+import '../models/client_person.dart';
 import '../models/client_task.dart';
 
 class CaleeHubClient {
@@ -51,6 +52,119 @@ class CaleeHubClient {
     );
 
     return ClientCalendarList.fromJson(_data(json));
+  }
+
+  Future<ClientPersonList> people({
+    required String accessToken,
+    required String householdId,
+    bool includeArchived = false,
+  }) async {
+    final encodedHouseholdId = Uri.encodeComponent(householdId);
+    var path = '/client/v1/households/$encodedHouseholdId/people';
+
+    if (includeArchived) {
+      path += '?includeArchived=true';
+    }
+
+    final json = await _getJson(
+      path,
+      accessToken: accessToken,
+    );
+
+    return ClientPersonList.fromJson(_data(json));
+  }
+
+  Future<ClientPerson> createPerson({
+    required String accessToken,
+    required String householdId,
+    required String displayName,
+    String? avatarColor,
+    String role = 'member',
+    int sortOrder = 0,
+  }) async {
+    final encodedHouseholdId = Uri.encodeComponent(householdId);
+
+    final json = await _postJson(
+      '/client/v1/households/$encodedHouseholdId/people',
+      accessToken: accessToken,
+      body: <String, Object?>{
+        'displayName': displayName,
+        if (avatarColor != null && avatarColor.trim().isNotEmpty)
+          'avatarColor': avatarColor.trim(),
+        'role': role,
+        'sortOrder': sortOrder,
+      },
+    );
+
+    return ClientPerson.fromJson(
+      _data(json)['person'] as Map<String, dynamic>,
+    );
+  }
+
+  Future<ClientPerson> updatePerson({
+    required String accessToken,
+    required String householdId,
+    required String personId,
+    String? displayName,
+    String? avatarColor,
+    String? role,
+    int? sortOrder,
+  }) async {
+    final body = <String, dynamic>{};
+
+    if (displayName != null) {
+      body['displayName'] = displayName;
+    }
+
+    if (avatarColor != null) {
+      body['avatarColor'] = avatarColor;
+    }
+
+    if (role != null) {
+      body['role'] = role;
+    }
+
+    if (sortOrder != null) {
+      body['sortOrder'] = sortOrder;
+    }
+
+    if (body.isEmpty) {
+      throw const CaleeHubException(
+        statusCode: 0,
+        message: 'No person updates provided',
+      );
+    }
+
+    final encodedHouseholdId = Uri.encodeComponent(householdId);
+    final encodedPersonId = Uri.encodeComponent(personId);
+
+    final json = await _patchJson(
+      '/client/v1/households/$encodedHouseholdId/people/$encodedPersonId',
+      accessToken: accessToken,
+      body: body,
+    );
+
+    return ClientPerson.fromJson(
+      _data(json)['person'] as Map<String, dynamic>,
+    );
+  }
+
+  Future<ClientPerson> archivePerson({
+    required String accessToken,
+    required String householdId,
+    required String personId,
+  }) async {
+    final encodedHouseholdId = Uri.encodeComponent(householdId);
+    final encodedPersonId = Uri.encodeComponent(personId);
+
+    final json = await _deleteJson(
+      '/client/v1/households/$encodedHouseholdId/people/$encodedPersonId',
+      accessToken: accessToken,
+    );
+
+    return ClientPerson.fromJson(
+      _data(json)['person'] as Map<String, dynamic>,
+    );
   }
 
   Future<ClientCalendar> createCalendar({
@@ -526,7 +640,7 @@ class CaleeHubClient {
     return ClientRefreshResult.fromJson(_data(json));
   }
 
-  Future<void> _deleteJson(
+  Future<Map<String, dynamic>> _deleteJson(
     String path, {
     required String accessToken,
     Map<String, dynamic>? body,
@@ -540,7 +654,7 @@ class CaleeHubClient {
       request.write(jsonEncode(body));
     }
 
-    await _readJsonResponse(await request.close());
+    return _readJsonResponse(await request.close());
   }
 
   Future<Map<String, dynamic>> _patchJson(
