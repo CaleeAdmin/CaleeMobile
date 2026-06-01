@@ -12,12 +12,10 @@ class ClientChoreMetadata {
 
   factory ClientChoreMetadata.fromJson(Map<String, dynamic> json) {
     return ClientChoreMetadata(
-      id: json['id'] == null ? null : json['id'].toString(),
+      id: json['id']?.toString(),
       householdId: json['householdId'] as String? ?? '',
       choreUid: json['choreUid'] as String? ?? '',
-      assigneePersonId: json['assigneePersonId'] == null
-          ? null
-          : json['assigneePersonId'].toString(),
+      assigneePersonId: json['assigneePersonId']?.toString(),
       points: json['points'] is int ? json['points'] as int : 1,
       approvalState: json['approvalState'] as String? ?? 'none',
       createdAt: json['createdAt'] as String?,
