@@ -293,7 +293,7 @@ class CaleeBottomSheet extends StatelessWidget {
               ),
             Text(title, style: theme.textTheme.titleLarge),
             const SizedBox(height: CaleeSpacing.md),
-            child,
+            Flexible(child: child),
           ],
         ),
       ),
@@ -634,8 +634,7 @@ class CaleeCheckCircle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final effectiveColor =
-        color ?? Theme.of(context).colorScheme.primary;
+    final effectiveColor = color ?? Theme.of(context).colorScheme.primary;
 
     if (isLoading) {
       return SizedBox(
