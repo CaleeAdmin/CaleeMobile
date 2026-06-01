@@ -1013,34 +1013,78 @@ class _AssigneeFilterBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final chips = <Widget>[
-      _filterChip(label: 'All', value: 'all'),
-      if (hasUnassigned) _filterChip(label: 'Unassigned', value: 'unassigned'),
-      for (final person in people)
-        _filterChip(
-          label: person.displayName.trim().isEmpty
-              ? 'Unnamed'
-              : person.displayName.trim(),
-          value: 'person:${person.id}',
-        ),
-    ];
-
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
-      child: Row(children: chips),
+      child: Row(
+        children: [
+          _FilterPill(
+            label: 'All',
+            value: 'all',
+            selectedFilter: selectedFilter,
+            onChanged: onChanged,
+          ),
+          if (hasUnassigned) ...[
+            const SizedBox(width: CaleeSpacing.xs),
+            _FilterPill(
+              label: 'Unassigned',
+              value: 'unassigned',
+              selectedFilter: selectedFilter,
+              onChanged: onChanged,
+            ),
+          ],
+          for (final person in people) ...[
+            const SizedBox(width: CaleeSpacing.xs),
+            _FilterPill(
+              label: person.displayName.trim().isEmpty
+                  ? 'Unnamed'
+                  : person.displayName.trim(),
+              value: 'person:${person.id}',
+              selectedFilter: selectedFilter,
+              onChanged: onChanged,
+            ),
+          ],
+        ],
+      ),
     );
   }
+}
 
-  Widget _filterChip({
-    required String label,
-    required String value,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.only(right: CaleeSpacing.sm),
-      child: ChoiceChip(
-        label: Text(label),
-        selected: selectedFilter == value,
-        onSelected: (_) => onChanged(value),
+class _FilterPill extends StatelessWidget {
+  const _FilterPill({
+    required this.label,
+    required this.value,
+    required this.selectedFilter,
+    required this.onChanged,
+  });
+
+  final String label;
+  final String value;
+  final String selectedFilter;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isSelected = selectedFilter == value;
+
+    return GestureDetector(
+      onTap: () => onChanged(value),
+      child: Container(
+        decoration: BoxDecoration(
+          color: isSelected ? CaleeColors.primary : CaleeColors.surface,
+          borderRadius: BorderRadius.circular(CaleeRadius.card),
+        ),
+        padding: const EdgeInsets.symmetric(
+          horizontal: CaleeSpacing.md,
+          vertical: CaleeSpacing.sm,
+        ),
+        child: Text(
+          label,
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: isSelected ? Colors.white : CaleeColors.textSecondary,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
       ),
     );
   }
