@@ -214,7 +214,7 @@ class _ChoresPageState extends State<ChoresPage> {
     String? recurrence,
     required int points,
   }) async {
-    await widget.hubClient.createChore(
+    final createdChore = await widget.hubClient.createChore(
       accessToken: widget.accessToken,
       serviceId: calendar.serviceId,
       calendarId: calendar.id,
@@ -222,8 +222,22 @@ class _ChoresPageState extends State<ChoresPage> {
       scheduledAt: scheduledAt,
       description: description,
       recurrence: recurrence,
-      points: points,
+      points: 1,
     );
+
+    final household = _metadataHousehold;
+    final choreUid = createdChore.choreUid?.trim();
+
+    if (household != null && choreUid != null && choreUid.isNotEmpty) {
+      await widget.hubClient.updateChoreMetadata(
+        accessToken: widget.accessToken,
+        householdId: household.id,
+        choreUid: choreUid,
+        assigneePersonId: '',
+        points: points,
+        approvalState: 'none',
+      );
+    }
   }
 
   Future<void> _openChoreMetadataSheet(ClientChore chore) async {
