@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../data/api/calee_hub_client.dart';
@@ -345,8 +347,8 @@ class _CalendarPageState extends State<CalendarPage> {
       CaleeActionSheet.show(
         context: context,
         title: event.recurring
-            ? 'This recurring event is from a read-only calendar.'
-            : 'This event is from a read-only calendar.',
+            ? 'This recurring event is from a read-only calendar.\nYou can view it, but changes must be made in the original calendar.'
+            : 'This event is from a read-only calendar.\nYou can view it, but changes must be made in the original calendar.',
         actions: const [],
       );
       return;
@@ -359,7 +361,7 @@ class _CalendarPageState extends State<CalendarPage> {
       title: event.title,
       actions: [
         CaleeAction(
-          label: event.recurring ? 'Edit series' : 'Edit event',
+          label: event.recurring ? 'Edit…' : 'Edit Event',
           icon: Icons.edit_outlined,
           onTap: () async {
             final editScope = await _chooseEditScope(event);
@@ -372,7 +374,7 @@ class _CalendarPageState extends State<CalendarPage> {
           },
         ),
         CaleeAction(
-          label: event.recurring ? 'Delete series' : 'Delete event',
+          label: event.recurring ? 'Delete…' : 'Delete Event',
           icon: Icons.delete_outline,
           isDestructive: true,
           onTap: () => _confirmDeleteEvent(event),
@@ -384,29 +386,49 @@ class _CalendarPageState extends State<CalendarPage> {
   Future<String?> _chooseEditScope(ClientEvent event) async {
     if (!event.recurring) return 'series';
 
-    return showDialog<String>(
+    final result = Completer<String?>();
+    await CaleeActionSheet.show(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Edit recurring event?'),
-        content: Text(
-          'Edit only this event, or edit "${event.title}" and the entire recurring series?',
+      title: 'This is a repeating event.',
+      actions: [
+        CaleeAction(
+          label: 'Edit This Event',
+          icon: Icons.edit_outlined,
+          onTap: () => result.complete('occurrence'),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(null),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop('occurrence'),
-            child: const Text('Edit this event'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop('series'),
-            child: const Text('Edit entire series'),
-          ),
-        ],
-      ),
+        CaleeAction(
+          label: 'Edit Entire Series',
+          icon: Icons.edit_outlined,
+          onTap: () => result.complete('series'),
+        ),
+      ],
     );
+    if (!result.isCompleted) result.complete(null);
+    return result.future;
+  }
+
+  Future<String?> _chooseDeleteScope() async {
+    final result = Completer<String?>();
+    await CaleeActionSheet.show(
+      context: context,
+      title: 'This is a repeating event. Choose whether to remove only this event or the entire series.',
+      actions: [
+        CaleeAction(
+          label: 'Delete This Event',
+          icon: Icons.delete_outline,
+          isDestructive: true,
+          onTap: () => result.complete('occurrence'),
+        ),
+        CaleeAction(
+          label: 'Delete Entire Series',
+          icon: Icons.delete_outline,
+          isDestructive: true,
+          onTap: () => result.complete('series'),
+        ),
+      ],
+    );
+    if (!result.isCompleted) result.complete(null);
+    return result.future;
   }
 
   Future<void> _openEditEventSheet(
@@ -487,35 +509,7 @@ class _CalendarPageState extends State<CalendarPage> {
       if (!confirmed || !mounted) return;
       deleteScope = 'series';
     } else {
-      deleteScope = await showDialog<String>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Delete recurring event?'),
-          content: Text(
-            'Delete only this event, or delete "${event.title}" and the entire recurring series?',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(null),
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(context).pop('occurrence'),
-              child: const Text('Delete this event'),
-            ),
-            TextButton(
-              style: TextButton.styleFrom(
-                foregroundColor: CaleeColors.destructive,
-              ),
-              onPressed: () => Navigator.of(context).pop('series'),
-              child: const Text(
-                'Delete entire series',
-                style: TextStyle(fontWeight: FontWeight.w600),
-              ),
-            ),
-          ],
-        ),
-      );
+      deleteScope = await _chooseDeleteScope();
       if (deleteScope == null || !mounted) return;
     }
 
