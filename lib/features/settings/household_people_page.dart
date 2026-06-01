@@ -1,22 +1,28 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 
 import '../../data/api/calee_hub_client.dart';
 import '../../data/models/client_bootstrap.dart';
 import '../../data/models/client_person.dart';
 import '../../ui/calee_theme.dart';
 import '../../ui/calee_widgets.dart';
+import '../people/add_person_sheet.dart';
 
 class HouseholdPeoplePage extends StatefulWidget {
   const HouseholdPeoplePage({
     required this.hubClient,
     required this.accessToken,
     required this.households,
+    this.initialHouseholdId,
+    this.autoOpenCreate = false,
     super.key,
   });
 
   final CaleeHubClient hubClient;
   final String accessToken;
   final List<ClientContext> households;
+  final String? initialHouseholdId;
+  final bool autoOpenCreate;
 
   @override
   State<HouseholdPeoplePage> createState() => _HouseholdPeoplePageState();
@@ -25,13 +31,31 @@ class HouseholdPeoplePage extends StatefulWidget {
 class _HouseholdPeoplePageState extends State<HouseholdPeoplePage> {
   ClientContext? _selectedHousehold;
   Future<ClientPersonList>? _future;
+  bool _didAutoOpen = false;
 
   @override
   void initState() {
     super.initState();
     if (widget.households.isNotEmpty) {
-      _selectedHousehold = widget.households.first;
+      final byId = widget.initialHouseholdId != null
+          ? widget.households
+              .cast<ClientContext?>()
+              .firstWhere(
+                (h) => h!.id == widget.initialHouseholdId,
+                orElse: () => null,
+              )
+          : null;
+      _selectedHousehold = byId ?? widget.households.first;
       _future = _loadPeople();
+    }
+
+    if (widget.autoOpenCreate) {
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !_didAutoOpen && _selectedHousehold != null) {
+          _didAutoOpen = true;
+          _openCreateSheet();
+        }
+      });
     }
   }
 
@@ -59,24 +83,13 @@ class _HouseholdPeoplePageState extends State<HouseholdPeoplePage> {
 
     final saved = await CaleeBottomSheet.show<bool>(
       context: context,
-      title: 'Add person',
-      child: _PersonFormContent(
-        submitLabel: 'Add person',
-        onSubmit: ({
-          required String displayName,
-          required String? avatarColor,
-          required String role,
-          required int sortOrder,
-        }) async {
-          await widget.hubClient.createPerson(
-            accessToken: widget.accessToken,
-            householdId: household.id,
-            displayName: displayName,
-            avatarColor: avatarColor,
-            role: role,
-            sortOrder: sortOrder,
-          );
-        },
+      title: 'Add Person',
+      child: AddPersonSheet(
+        onAdd: (name) => widget.hubClient.createPerson(
+          accessToken: widget.accessToken,
+          householdId: household.id,
+          displayName: name,
+        ),
       ),
     );
 
