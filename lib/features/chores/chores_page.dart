@@ -586,6 +586,55 @@ class _ChoresPageState extends State<ChoresPage> {
     return chores.any((chore) => (chore.assigneePersonId ?? '').trim().isEmpty);
   }
 
+  String _filterLabel(
+    String filter,
+    List<ClientPerson> people,
+    List<ClientChore> allChores,
+  ) {
+    if (filter == 'all') {
+      return 'All Chores · ${_countAllChores(allChores)}';
+    }
+    if (filter == 'unassigned') {
+      return 'Unassigned · ${_countUnassignedChores(allChores)}';
+    }
+    if (filter.startsWith('person:')) {
+      final personId = filter.substring('person:'.length);
+      final matches = people.where((p) => p.id == personId);
+      final name = matches.isNotEmpty && matches.first.displayName.trim().isNotEmpty
+          ? matches.first.displayName.trim()
+          : 'Unnamed';
+      return '$name · ${_countChoresForPerson(allChores, personId)}';
+    }
+    return 'All Chores · ${_countAllChores(allChores)}';
+  }
+
+  Future<void> _openAssigneeFilterChooser({
+    required List<ClientPerson> people,
+    required bool hasUnassigned,
+    required List<ClientChore> allChores,
+  }) async {
+    await CaleeBottomSheet.show<void>(
+      context: context,
+      title: 'Filter Chores',
+      child: _AssigneeFilterChooser(
+        people: people,
+        hasUnassigned: hasUnassigned,
+        selectedFilter: _assigneeFilter,
+        allCount: _countAllChores(allChores),
+        unassignedCount: _countUnassignedChores(allChores),
+        personCounts: {
+          for (final p in people) p.id: _countChoresForPerson(allChores, p.id),
+        },
+        onSelect: (value) {
+          setState(() {
+            _assigneeFilter = value;
+          });
+          Navigator.of(context).pop();
+        },
+      ),
+    );
+  }
+
   int _countAllChores(List<ClientChore> chores) => chores.length;
 
   int _countUnassignedChores(List<ClientChore> chores) =>
@@ -794,21 +843,17 @@ class _ChoresPageState extends State<ChoresPage> {
                 ],
 
                 if (showAssigneeFilters) ...[
-                  _AssigneeFilterBar(
-                    people: overview.people,
-                    hasUnassigned: hasUnassignedChores,
-                    selectedFilter: _assigneeFilter,
-                    allCount: _countAllChores(allChores),
-                    unassignedCount: _countUnassignedChores(allChores),
-                    personCounts: {
-                      for (final p in overview.people)
-                        p.id: _countChoresForPerson(allChores, p.id),
-                    },
-                    onChanged: (value) {
-                      setState(() {
-                        _assigneeFilter = value;
-                      });
-                    },
+                  _AssigneeFilterRow(
+                    label: _filterLabel(
+                      _assigneeFilter,
+                      overview.people,
+                      allChores,
+                    ),
+                    onTap: () => _openAssigneeFilterChooser(
+                      people: overview.people,
+                      hasUnassigned: hasUnassignedChores,
+                      allChores: allChores,
+                    ),
                   ),
                   const SizedBox(height: CaleeSpacing.sectionSpacing),
                 ],
@@ -1012,15 +1057,71 @@ class _PointsBadge extends StatelessWidget {
   }
 }
 
-class _AssigneeFilterBar extends StatelessWidget {
-  const _AssigneeFilterBar({
+class _AssigneeFilterRow extends StatelessWidget {
+  const _AssigneeFilterRow({
+    required this.label,
+    required this.onTap,
+  });
+
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        decoration: BoxDecoration(
+          color: CaleeColors.surface,
+          borderRadius: BorderRadius.circular(CaleeRadius.card),
+        ),
+        padding: const EdgeInsets.symmetric(
+          horizontal: CaleeSpacing.md,
+          vertical: CaleeSpacing.sm,
+        ),
+        child: Row(
+          children: [
+            const Icon(
+              Icons.people_outline,
+              size: 18,
+              color: CaleeColors.primary,
+            ),
+            const SizedBox(width: CaleeSpacing.sm),
+            Expanded(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: CaleeColors.primary,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+            const SizedBox(width: CaleeSpacing.xs),
+            const Icon(
+              Icons.keyboard_arrow_down,
+              size: 16,
+              color: CaleeColors.primary,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AssigneeFilterChooser extends StatelessWidget {
+  const _AssigneeFilterChooser({
     required this.people,
     required this.hasUnassigned,
     required this.selectedFilter,
     required this.allCount,
     required this.unassignedCount,
     required this.personCounts,
-    required this.onChanged,
+    required this.onSelect,
   });
 
   final List<ClientPerson> people;
@@ -1029,81 +1130,64 @@ class _AssigneeFilterBar extends StatelessWidget {
   final int allCount;
   final int unassignedCount;
   final Map<String, int> personCounts;
-  final ValueChanged<String> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: [
-          _FilterPill(
-            label: 'All $allCount',
-            value: 'all',
-            selectedFilter: selectedFilter,
-            onChanged: onChanged,
-          ),
-          if (hasUnassigned) ...[
-            const SizedBox(width: CaleeSpacing.xs),
-            _FilterPill(
-              label: 'Unassigned $unassignedCount',
-              value: 'unassigned',
-              selectedFilter: selectedFilter,
-              onChanged: onChanged,
-            ),
-          ],
-          for (final person in people) ...[
-            const SizedBox(width: CaleeSpacing.xs),
-            _FilterPill(
-              label: '${person.displayName.trim().isEmpty ? 'Unnamed' : person.displayName.trim()} ${personCounts[person.id] ?? 0}',
-              value: 'person:${person.id}',
-              selectedFilter: selectedFilter,
-              onChanged: onChanged,
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _FilterPill extends StatelessWidget {
-  const _FilterPill({
-    required this.label,
-    required this.value,
-    required this.selectedFilter,
-    required this.onChanged,
-  });
-
-  final String label;
-  final String value;
-  final String selectedFilter;
-  final ValueChanged<String> onChanged;
+  final ValueChanged<String> onSelect;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isSelected = selectedFilter == value;
+    final countStyle = theme.textTheme.bodySmall?.copyWith(
+      color: CaleeColors.textSecondary,
+    );
 
-    return GestureDetector(
-      onTap: () => onChanged(value),
-      child: Container(
-        decoration: BoxDecoration(
-          color: isSelected ? CaleeColors.primary : CaleeColors.surface,
-          borderRadius: BorderRadius.circular(CaleeRadius.card),
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        CaleeSection(
+          children: [
+            CaleeListRow(
+              title: 'All Chores',
+              leading: selectedFilter == 'all'
+                  ? const Icon(Icons.check, size: 20, color: CaleeColors.primary)
+                  : const SizedBox(width: 20),
+              trailing: Text('$allCount', style: countStyle),
+              onTap: () => onSelect('all'),
+            ),
+            if (hasUnassigned)
+              CaleeListRow(
+                title: 'Unassigned',
+                leading: selectedFilter == 'unassigned'
+                    ? const Icon(
+                        Icons.check,
+                        size: 20,
+                        color: CaleeColors.primary,
+                      )
+                    : const SizedBox(width: 20),
+                trailing: Text('$unassignedCount', style: countStyle),
+                onTap: () => onSelect('unassigned'),
+              ),
+            for (final person in people)
+              CaleeListRow(
+                title: person.displayName.trim().isEmpty
+                    ? 'Unnamed'
+                    : person.displayName.trim(),
+                leading: selectedFilter == 'person:${person.id}'
+                    ? const Icon(
+                        Icons.check,
+                        size: 20,
+                        color: CaleeColors.primary,
+                      )
+                    : const SizedBox(width: 20),
+                trailing: Text(
+                  '${personCounts[person.id] ?? 0}',
+                  style: countStyle,
+                ),
+                onTap: () => onSelect('person:${person.id}'),
+              ),
+          ],
         ),
-        padding: const EdgeInsets.symmetric(
-          horizontal: CaleeSpacing.md,
-          vertical: CaleeSpacing.sm,
-        ),
-        child: Text(
-          label,
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: isSelected ? Colors.white : CaleeColors.textSecondary,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
-      ),
+        const SizedBox(height: CaleeSpacing.md),
+      ],
     );
   }
 }
