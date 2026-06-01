@@ -923,9 +923,19 @@ class _ChoreRow extends StatelessWidget {
     final isDone = chore.completedToday || chore.section == 'doneToday';
     final isHistory = chore.isCompletionLog || chore.section == 'history';
 
-    // Subtitle: date · recurrence · list name
+    // Subtitle: date · assignee · recurrence · list name
     final subtitleParts = <String>[];
     if (scheduledLabel.isNotEmpty) subtitleParts.add(scheduledLabel);
+
+    if (!isHistory) {
+      final assigneeName = chore.assigneeName?.trim();
+      subtitleParts.add(
+        assigneeName != null && assigneeName.isNotEmpty
+            ? assigneeName
+            : 'Unassigned',
+      );
+    }
+
     final recLabel = _rruleLabel(chore.recurrence);
     if (recLabel.isNotEmpty) subtitleParts.add('Repeats $recLabel');
     if (calendarName.isNotEmpty) subtitleParts.add(calendarName);
