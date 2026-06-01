@@ -89,13 +89,17 @@ class _TasksPageState extends State<TasksPage> {
     });
   }
 
-  Future<void> _openTaskListChooser(List<ClientCalendar> taskCalendars) async {
+  Future<void> _openTaskListChooser(
+    List<ClientCalendar> taskCalendars,
+    List<ClientTask> allTasks,
+  ) async {
     await CaleeBottomSheet.show<void>(
       context: context,
       title: 'Task Lists',
       child: _TaskListChooser(
         taskCalendars: taskCalendars,
         selectedCalendar: _selectedCalendar,
+        allTasks: allTasks,
         onSelect: (calendar) {
           setState(() {
             _selectedCalendar = calendar;
@@ -532,7 +536,7 @@ class _TasksPageState extends State<TasksPage> {
                 if (taskCalendars.isNotEmpty)
                   _TaskListFilterBar(
                     selectedCalendar: _selectedCalendar,
-                    onTap: () => _openTaskListChooser(taskCalendars),
+                    onTap: () => _openTaskListChooser(taskCalendars, allTasks),
                   ),
                 if (taskCalendars.isNotEmpty)
                   const SizedBox(height: CaleeSpacing.md),
@@ -871,11 +875,15 @@ class _TaskListFilterBar extends StatelessWidget {
               color: CaleeColors.primary,
             ),
             const SizedBox(width: CaleeSpacing.sm),
-            Text(
-              label,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: CaleeColors.primary,
-                fontWeight: FontWeight.w500,
+            Expanded(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: CaleeColors.primary,
+                  fontWeight: FontWeight.w500,
+                ),
               ),
             ),
             const SizedBox(width: CaleeSpacing.xs),
@@ -899,17 +907,36 @@ class _TaskListChooser extends StatelessWidget {
   const _TaskListChooser({
     required this.taskCalendars,
     required this.selectedCalendar,
+    required this.allTasks,
     required this.onSelect,
     required this.onAddTaskList,
   });
 
   final List<ClientCalendar> taskCalendars;
   final ClientCalendar? selectedCalendar;
+  final List<ClientTask> allTasks;
   final void Function(ClientCalendar? calendar) onSelect;
   final VoidCallback onAddTaskList;
 
+  int _countForCalendar(ClientCalendar cal) {
+    final prefix = '${cal.serviceId}:';
+    final rawId =
+        cal.id.startsWith(prefix) ? cal.id.substring(prefix.length) : cal.id;
+    return allTasks
+        .where((t) =>
+            t.calendarId == cal.id ||
+            t.calendarId == rawId ||
+            '${t.serviceId}:${t.calendarId}' == cal.id)
+        .length;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final countStyle = theme.textTheme.bodySmall?.copyWith(
+      color: CaleeColors.textSecondary,
+    );
+
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -926,6 +953,7 @@ class _TaskListChooser extends StatelessWidget {
                       color: CaleeColors.primary,
                     )
                   : const SizedBox(width: 20),
+              trailing: Text('${allTasks.length}', style: countStyle),
               onTap: () => onSelect(null),
             ),
             ...taskCalendars.map(
@@ -941,6 +969,7 @@ class _TaskListChooser extends StatelessWidget {
                         color: CaleeColors.primary,
                       )
                     : const SizedBox(width: 20),
+                trailing: Text('${_countForCalendar(cal)}', style: countStyle),
                 onTap: () => onSelect(cal),
               ),
             ),
