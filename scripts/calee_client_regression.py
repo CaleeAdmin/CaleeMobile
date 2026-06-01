@@ -1568,6 +1568,78 @@ class Regression:
                 f"{chore_service_id} ({chore_service.get('displayName', '')})",
             )
 
+            if service_id != chore_service_id:
+                def _reject_non_portal_chore_list_create() -> str:
+                    status, payload = self.client.request(
+                        "POST",
+                        "/client/v1/calendars",
+                        {
+                            "serviceId": service_id,
+                            "name": f"RT rejected chore-list {self.run_id}",
+                            "primaryKind": "chores",
+                            "color": "#3366CC",
+                        },
+                        allow_statuses={404},
+                    )
+
+                    if status != 404:
+                        data = payload.get("data", payload) if isinstance(payload, dict) else {}
+                        calendar = data.get("calendar", {}) if isinstance(data, dict) else {}
+                        calendar_id = calendar.get("id") if isinstance(calendar, dict) else None
+
+                        if isinstance(calendar_id, str) and calendar_id:
+                            try:
+                                self.delete_collection(calendar_id)
+                            except Exception:
+                                pass
+
+                        raise RuntimeError(
+                            f"Expected HTTP 404 for non-portal chore-list create, got {status}"
+                        )
+
+                    return f"rejected serviceId={service_id}"
+
+                self.run_step(
+                    "chore-list create rejected for non-portal service",
+                    _reject_non_portal_chore_list_create,
+                )
+
+            if service_id != chore_service_id:
+                def _reject_non_portal_chore_list_create() -> str:
+                    status, payload = self.client.request(
+                        "POST",
+                        "/client/v1/calendars",
+                        {
+                            "serviceId": service_id,
+                            "name": f"RT rejected chore-list {self.run_id}",
+                            "primaryKind": "chores",
+                            "color": "#3366CC",
+                        },
+                        allow_statuses={404},
+                    )
+
+                    if status != 404:
+                        data = payload.get("data", payload) if isinstance(payload, dict) else {}
+                        calendar = data.get("calendar", {}) if isinstance(data, dict) else {}
+                        calendar_id = calendar.get("id") if isinstance(calendar, dict) else None
+
+                        if isinstance(calendar_id, str) and calendar_id:
+                            try:
+                                self.delete_collection(calendar_id)
+                            except Exception:
+                                pass
+
+                        raise RuntimeError(
+                            f"Expected HTTP 404 for non-portal chore-list create, got {status}"
+                        )
+
+                    return f"rejected serviceId={service_id}"
+
+                self.run_step(
+                    "chore-list create rejected for non-portal service",
+                    _reject_non_portal_chore_list_create,
+                )
+
             calendar_collection, task_collection, chore_collection = self.test_collections(
                 service_id,
                 chore_service_id=chore_service_id,
