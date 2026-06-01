@@ -86,6 +86,13 @@ class _ChoresPageState extends State<ChoresPage> {
   late Future<_ChoresOverview> _overviewFuture;
   final Set<String> _updatingChoreIds = {};
 
+  List<ClientService> get _portalServices =>
+      widget.services.where((service) => service.id == 'portal').toList();
+
+  bool _isPortalCalendar(ClientCalendar calendar) {
+    return calendar.serviceId == 'portal' || calendar.id.startsWith('portal:');
+  }
+
   @override
   void initState() {
     super.initState();
@@ -115,13 +122,22 @@ class _ChoresPageState extends State<ChoresPage> {
   }
 
   void _openCollectionCreateShortcut() {
+    final portalServices = _portalServices;
+
+    if (portalServices.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Calee Portal is not available.')),
+      );
+      return;
+    }
+
     Navigator.of(context)
         .push(
       MaterialPageRoute<void>(
         builder: (_) => CalendarCollectionsPage(
           hubClient: widget.hubClient,
           accessToken: widget.accessToken,
-          services: widget.services,
+          services: portalServices,
           initialCreateKind: 'chores',
           autoOpenCreate: true,
         ),
@@ -532,8 +548,9 @@ class _ChoresPageState extends State<ChoresPage> {
           return CaleeScaffold(
             body: CaleeEmptyState(
               icon: Icons.family_restroom_outlined,
-              title: 'No chore lists yet',
-              body: 'Create a chore list to start tracking family chores.',
+              title: 'No portal chore lists yet',
+              body:
+                  'Create a chore list in Calee Portal to start tracking family chores.',
               action: FilledButton.icon(
                 onPressed: _openCollectionCreateShortcut,
                 icon: const Icon(Icons.add),
@@ -544,7 +561,9 @@ class _ChoresPageState extends State<ChoresPage> {
         }
 
         final choreCalendars = overview.calendarList.calendars
-            .where((calendar) => calendar.isChoreKind)
+            .where(
+              (calendar) => calendar.isChoreKind && _isPortalCalendar(calendar),
+            )
             .toList();
         final chores = overview.choreList.chores;
         final choresBySection = _groupChoresBySection(chores);
@@ -553,8 +572,9 @@ class _ChoresPageState extends State<ChoresPage> {
           return CaleeScaffold(
             body: CaleeEmptyState(
               icon: Icons.family_restroom_outlined,
-              title: 'No chore lists yet',
-              body: 'Create a chore list to start tracking family chores.',
+              title: 'No portal chore lists yet',
+              body:
+                  'Create a chore list in Calee Portal to start tracking family chores.',
               action: FilledButton.icon(
                 onPressed: _openCollectionCreateShortcut,
                 icon: const Icon(Icons.add),
@@ -743,12 +763,9 @@ class _ChoreSummaryStrip extends StatelessWidget {
             label: '$overdueCount overdue',
             color: const Color(0xFFFF9500),
           ),
-        if (todoTodayCount > 0)
-          _StripChip(label: '$todoTodayCount today'),
-        if (doneTodayCount > 0)
-          _StripChip(label: '$doneTodayCount done'),
-        if (pointsToday > 0)
-          _StripChip(label: '$pointsToday pts'),
+        if (todoTodayCount > 0) _StripChip(label: '$todoTodayCount today'),
+        if (doneTodayCount > 0) _StripChip(label: '$doneTodayCount done'),
+        if (pointsToday > 0) _StripChip(label: '$pointsToday pts'),
       ],
     );
   }
@@ -838,10 +855,8 @@ class _ChoreRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDone =
-        chore.completedToday || chore.section == 'doneToday';
-    final isHistory =
-        chore.isCompletionLog || chore.section == 'history';
+    final isDone = chore.completedToday || chore.section == 'doneToday';
+    final isHistory = chore.isCompletionLog || chore.section == 'history';
 
     // Subtitle: date · recurrence · list name
     final subtitleParts = <String>[];
@@ -849,8 +864,7 @@ class _ChoreRow extends StatelessWidget {
     final recLabel = _rruleLabel(chore.recurrence);
     if (recLabel.isNotEmpty) subtitleParts.add('Repeats $recLabel');
     if (calendarName.isNotEmpty) subtitleParts.add(calendarName);
-    final subtitle =
-        subtitleParts.where((p) => p.isNotEmpty).join(' · ');
+    final subtitle = subtitleParts.where((p) => p.isNotEmpty).join(' · ');
 
     // Leading widget
     Widget leading;
@@ -1298,9 +1312,10 @@ class _EditChoreSheetState extends State<_EditChoreSheet> {
                       Expanded(
                         child: Text(
                           'Repeating chore — changes apply going forward.',
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: CaleeColors.primary,
-                              ),
+                          style:
+                              Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: CaleeColors.primary,
+                                  ),
                         ),
                       ),
                     ],
