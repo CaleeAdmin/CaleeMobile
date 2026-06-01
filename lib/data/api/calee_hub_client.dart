@@ -4,6 +4,7 @@ import 'dart:io';
 import '../models/client_bootstrap.dart';
 import '../models/client_calendar.dart';
 import '../models/client_chore.dart';
+import '../models/client_chore_metadata.dart';
 import '../models/client_person.dart';
 import '../models/client_task.dart';
 
@@ -283,6 +284,69 @@ class CaleeHubClient {
     );
 
     return ClientChoreList.fromJson(_data(json));
+  }
+
+  Future<ClientChoreMetadata> choreMetadata({
+    required String accessToken,
+    required String householdId,
+    required String choreUid,
+  }) async {
+    final encodedHouseholdId = Uri.encodeComponent(householdId);
+    final encodedChoreUid = Uri.encodeComponent(choreUid);
+
+    final json = await _getJson(
+      '/client/v1/households/$encodedHouseholdId/chores/$encodedChoreUid/metadata',
+      accessToken: accessToken,
+    );
+
+    return ClientChoreMetadata.fromJson(
+      _data(json)['metadata'] as Map<String, dynamic>,
+    );
+  }
+
+  Future<ClientChoreMetadata> updateChoreMetadata({
+    required String accessToken,
+    required String householdId,
+    required String choreUid,
+    String? assigneePersonId,
+    int? points,
+    String? approvalState,
+  }) async {
+    final body = <String, dynamic>{};
+
+    if (assigneePersonId != null) {
+      body['assigneePersonId'] = assigneePersonId.isEmpty
+          ? null
+          : int.tryParse(assigneePersonId) ?? assigneePersonId;
+    }
+
+    if (points != null) {
+      body['points'] = points;
+    }
+
+    if (approvalState != null) {
+      body['approvalState'] = approvalState;
+    }
+
+    if (body.isEmpty) {
+      throw const CaleeHubException(
+        statusCode: 0,
+        message: 'No chore metadata updates provided',
+      );
+    }
+
+    final encodedHouseholdId = Uri.encodeComponent(householdId);
+    final encodedChoreUid = Uri.encodeComponent(choreUid);
+
+    final json = await _patchJson(
+      '/client/v1/households/$encodedHouseholdId/chores/$encodedChoreUid/metadata',
+      accessToken: accessToken,
+      body: body,
+    );
+
+    return ClientChoreMetadata.fromJson(
+      _data(json)['metadata'] as Map<String, dynamic>,
+    );
   }
 
   Future<ClientChore> createChore({
