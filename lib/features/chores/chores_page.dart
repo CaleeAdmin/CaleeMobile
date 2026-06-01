@@ -186,6 +186,25 @@ class _ChoresPageState extends State<ChoresPage> {
       return;
     }
 
+    final household = _metadataHousehold;
+    var people = <ClientPerson>[];
+
+    if (household != null) {
+      try {
+        final peopleList = await widget.hubClient.people(
+          accessToken: widget.accessToken,
+          householdId: household.id,
+        );
+        people = peopleList.people.where((person) => person.isActive).toList();
+      } catch (_) {
+        people = <ClientPerson>[];
+      }
+    }
+
+    if (!mounted) {
+      return;
+    }
+
     final created = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
@@ -197,6 +216,7 @@ class _ChoresPageState extends State<ChoresPage> {
       ),
       builder: (context) => _CreateChoreSheet(
         calendars: writableCalendars,
+        people: people,
         onCreate: _createChore,
       ),
     );
@@ -212,6 +232,7 @@ class _ChoresPageState extends State<ChoresPage> {
     String? scheduledAt,
     String? description,
     String? recurrence,
+    required String? assigneePersonId,
     required int points,
   }) async {
     final createdChore = await widget.hubClient.createChore(
@@ -233,7 +254,7 @@ class _ChoresPageState extends State<ChoresPage> {
         accessToken: widget.accessToken,
         householdId: household.id,
         choreUid: choreUid,
-        assigneePersonId: '',
+        assigneePersonId: assigneePersonId ?? '',
         points: points,
         approvalState: 'none',
       );
@@ -1315,16 +1336,19 @@ class _ChoreMetadataFormState extends State<_ChoreMetadataForm> {
 class _CreateChoreSheet extends StatefulWidget {
   const _CreateChoreSheet({
     required this.calendars,
+    required this.people,
     required this.onCreate,
   });
 
   final List<ClientCalendar> calendars;
+  final List<ClientPerson> people;
   final Future<void> Function({
     required ClientCalendar calendar,
     required String title,
     String? scheduledAt,
     String? description,
     String? recurrence,
+    required String? assigneePersonId,
     required int points,
   }) onCreate;
 
@@ -1340,19 +1364,22 @@ class _CreateChoreSheetState extends State<_CreateChoreSheet> {
   late ClientCalendar _selectedCalendar;
   DateTime? _selectedDate;
   String? _selectedRecurrence;
-  int _points = 1;
+  late final TextEditingController _pointsController;
+  String? _assigneePersonId;
   bool _isSubmitting = false;
 
   @override
   void initState() {
     super.initState();
     _selectedCalendar = widget.calendars.first;
+    _pointsController = TextEditingController(text: '1');
   }
 
   @override
   void dispose() {
     _titleController.dispose();
     _descriptionController.dispose();
+    _pointsController.dispose();
     super.dispose();
   }
 
@@ -1377,6 +1404,8 @@ class _CreateChoreSheetState extends State<_CreateChoreSheet> {
       return;
     }
 
+    final points = int.tryParse(_pointsController.text.trim()) ?? 1;
+
     setState(() {
       _isSubmitting = true;
     });
@@ -1389,7 +1418,8 @@ class _CreateChoreSheetState extends State<_CreateChoreSheet> {
             _selectedDate == null ? null : _formatChoreDate(_selectedDate!),
         description: _descriptionController.text.trim(),
         recurrence: _choreRecurrenceToRrule(_selectedRecurrence),
-        points: _points,
+        assigneePersonId: _assigneePersonId,
+        points: points,
       );
 
       if (mounted) {
@@ -1512,22 +1542,41 @@ class _CreateChoreSheetState extends State<_CreateChoreSheet> {
                       },
               ),
               const SizedBox(height: CaleeSpacing.sm + 4),
-              DropdownButtonFormField<int>(
-                initialValue: _points,
-                decoration: const InputDecoration(labelText: 'Points'),
-                items: const [
-                  DropdownMenuItem(value: 1, child: Text('1 point')),
-                  DropdownMenuItem(value: 2, child: Text('2 points')),
+              DropdownButtonFormField<String?>(
+                initialValue: _assigneePersonId,
+                decoration: const InputDecoration(labelText: 'Assign to'),
+                items: [
+                  const DropdownMenuItem<String?>(
+                    value: null,
+                    child: Text('Unassigned'),
+                  ),
+                  for (final person in widget.people)
+                    DropdownMenuItem<String?>(
+                      value: person.id,
+                      child: Text(person.displayName),
+                    ),
                 ],
                 onChanged: _isSubmitting
                     ? null
                     : (value) {
-                        if (value != null) {
-                          setState(() {
-                            _points = value;
-                          });
-                        }
+                        setState(() {
+                          _assigneePersonId = value;
+                        });
                       },
+              ),
+              const SizedBox(height: CaleeSpacing.sm + 4),
+              TextFormField(
+                controller: _pointsController,
+                enabled: !_isSubmitting,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Points'),
+                validator: (value) {
+                  final points = int.tryParse((value ?? '').trim());
+                  if (points == null || points < 0 || points > 100000) {
+                    return 'Enter valid points';
+                  }
+                  return null;
+                },
               ),
               const SizedBox(height: CaleeSpacing.sm + 4),
               TextFormField(
