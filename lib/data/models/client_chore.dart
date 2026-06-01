@@ -40,6 +40,11 @@ class ClientChore {
     required this.section,
     required this.recurrence,
     required this.points,
+    required this.metadataPoints,
+    required this.assigneePersonId,
+    required this.assigneeName,
+    required this.assigneeAvatarColor,
+    required this.approvalState,
   });
 
   factory ClientChore.fromJson(Map<String, dynamic> json) {
@@ -61,6 +66,12 @@ class ClientChore {
       section: json['section'] as String? ?? 'future',
       recurrence: json['recurrence'] as String?,
       points: json['points'] is int ? json['points'] as int : 1,
+      metadataPoints:
+          json['metadataPoints'] is int ? json['metadataPoints'] as int : null,
+      assigneePersonId: json['assigneePersonId']?.toString(),
+      assigneeName: json['assigneeName'] as String?,
+      assigneeAvatarColor: json['assigneeAvatarColor'] as String?,
+      approvalState: json['approvalState'] as String? ?? 'none',
     );
   }
 
@@ -81,6 +92,11 @@ class ClientChore {
   final String section;
   final String? recurrence;
   final int points;
+  final int? metadataPoints;
+  final String? assigneePersonId;
+  final String? assigneeName;
+  final String? assigneeAvatarColor;
+  final String approvalState;
 
   String get completionActionId {
     if (isBaseChore && id.trim().isNotEmpty) {
@@ -104,6 +120,12 @@ class ClientChore {
         section == 'overdue' ||
         section == 'doneToday';
   }
+
+  bool get hasAssignee =>
+      assigneePersonId != null &&
+      assigneePersonId!.trim().isNotEmpty &&
+      assigneeName != null &&
+      assigneeName!.trim().isNotEmpty;
 
   bool get isCompletionLog => kind == 'completionLog';
   bool get isBaseChore => kind == 'baseChore';
