@@ -1396,21 +1396,6 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
     return '$year$month${day}T$hour$minute${second}Z';
   }
 
-  String _recurrenceLabel(String value) {
-    switch (value) {
-      case 'daily':
-        return 'Daily';
-      case 'weekly':
-        return 'Weekly';
-      case 'monthly':
-        return 'Monthly';
-      case 'yearly':
-        return 'Yearly';
-      default:
-        return 'Does not repeat';
-    }
-  }
-
   Future<void> _pickDate() async {
     final picked = await showDatePicker(
       context: context,
@@ -1584,270 +1569,491 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
     }
   }
 
+  // ── Submit label ───────────────────────────────────────────────────────────
+
+  String get _submitLabel {
+    if (!_isEditing) return 'Save Event';
+    if (_isEditingSingleOccurrence) return 'Update Event';
+    if (widget.initialEvent!.recurring) return 'Update Series';
+    return 'Update Event';
+  }
+
+  // ── Row builders ────────────────────────────────────────────────────────────
+
+  // Tappable row for date/time pickers — label on left, value + chevron right.
+  Widget _buildPickerRow(String label, String value, VoidCallback? onTap) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: CaleeSpacing.md,
+          vertical: 11,
+        ),
+        child: Row(
+          children: [
+            Text(
+              label,
+              style: const TextStyle(
+                fontSize: 16,
+                color: CaleeColors.textPrimary,
+              ),
+            ),
+            const Spacer(),
+            Text(
+              value,
+              style: const TextStyle(
+                fontSize: 16,
+                color: CaleeColors.textSecondary,
+              ),
+            ),
+            const SizedBox(width: CaleeSpacing.xs),
+            const Icon(
+              Icons.chevron_right,
+              size: 20,
+              color: CaleeColors.textTertiary,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Inline dropdown row — label on left, dropdown value + chevron right.
+  Widget _buildDropdownRow<T extends Object>({
+    required String label,
+    required T value,
+    required List<DropdownMenuItem<T>> items,
+    required void Function(T?)? onChanged,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        CaleeSpacing.md,
+        0,
+        CaleeSpacing.sm,
+        0,
+      ),
+      child: Row(
+        children: [
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 16,
+              color: CaleeColors.textPrimary,
+            ),
+          ),
+          const Spacer(),
+          Flexible(
+            child: DropdownButton<T>(
+              value: value,
+              underline: const SizedBox.shrink(),
+              icon: const Icon(
+                Icons.chevron_right,
+                size: 20,
+                color: CaleeColors.textTertiary,
+              ),
+              items: items,
+              onChanged: onChanged,
+              style: const TextStyle(
+                fontSize: 16,
+                color: CaleeColors.textSecondary,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Build ───────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
 
+    final sheetTitle = _isEditing
+        ? _isEditingSingleOccurrence
+            ? 'Edit this event'
+            : _isEditingRecurringSeriesMetadata
+                ? 'Edit series details'
+                : widget.initialEvent!.recurring
+                    ? 'Edit series'
+                    : 'Edit event'
+        : 'Add event';
+
+    // Borderless text field decoration for fields embedded in section cards.
+    const InputDecoration sectionFieldDecoration = InputDecoration(
+      border: InputBorder.none,
+      enabledBorder: InputBorder.none,
+      focusedBorder: InputBorder.none,
+      errorBorder: InputBorder.none,
+      focusedErrorBorder: InputBorder.none,
+      fillColor: Colors.transparent,
+      filled: false,
+      contentPadding: EdgeInsets.symmetric(vertical: 9),
+    );
+
     return SafeArea(
-      child: Padding(
-        padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + bottomInset),
+      child: Container(
+        color: CaleeColors.scaffoldBackground,
         child: Form(
           key: _formKey,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  _isEditing
-                      ? _isEditingSingleOccurrence
-                          ? 'Edit this event'
-                          : _isEditingRecurringSeriesMetadata
-                              ? 'Edit series details'
-                              : widget.initialEvent!.recurring
-                                  ? 'Edit series'
-                                  : 'Edit event'
-                      : 'Add event',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-                const SizedBox(height: 16),
-                DropdownButtonFormField<ClientCalendar>(
-                  initialValue: _selectedCalendar,
-                  decoration: const InputDecoration(
-                    labelText: 'Calendar',
-                    border: OutlineInputBorder(),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Drag handle
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  margin: const EdgeInsets.only(top: CaleeSpacing.sm),
+                  decoration: BoxDecoration(
+                    color: CaleeColors.separatorOpaque,
+                    borderRadius: BorderRadius.circular(CaleeRadius.dot),
                   ),
-                  items: [
-                    for (final calendar in widget.calendars)
-                      DropdownMenuItem(
-                        value: calendar,
-                        child: Text(calendar.name),
+                ),
+              ),
+              Flexible(
+                child: SingleChildScrollView(
+                  padding: EdgeInsets.fromLTRB(
+                    CaleeSpacing.md,
+                    CaleeSpacing.md,
+                    CaleeSpacing.md,
+                    CaleeSpacing.md + bottomInset,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // Sheet title
+                      Text(
+                        sheetTitle,
+                        style: Theme.of(context).textTheme.titleLarge,
                       ),
-                  ],
-                  onChanged: _isSubmitting || _isEditing
-                      ? null
-                      : (calendar) {
-                          if (calendar != null) {
-                            setState(() {
-                              _selectedCalendar = calendar;
-                            });
-                          }
-                        },
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _titleController,
-                  enabled: !_isSubmitting,
-                  autofocus: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Title',
-                    border: OutlineInputBorder(),
-                  ),
-                  validator: (value) {
-                    if ((value ?? '').trim().isEmpty) {
-                      return 'Enter a title';
-                    }
-                    return null;
-                  },
-                ),
-                if (!_isEditingRecurringSeriesMetadata) ...[
-                  const SizedBox(height: 12),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('All day'),
-                    value: _allDay,
-                    onChanged: _isSubmitting
-                        ? null
-                        : (value) {
-                            setState(() {
-                              _allDay = value;
-                            });
-                          },
-                  ),
-                  if (_allDay) ...[
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: _isSubmitting ? null : _pickDate,
-                            icon: const Icon(Icons.today_outlined),
-                            label: Text('Start ${_dateLabel(_selectedDate)}'),
+                      const SizedBox(height: CaleeSpacing.md),
+
+                      // ── Event ─────────────────────────────────────────────
+                      CaleeSection(
+                        children: [
+                          // Title field
+                          Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: CaleeSpacing.md,
+                              vertical: 2,
+                            ),
+                            child: TextFormField(
+                              controller: _titleController,
+                              enabled: !_isSubmitting,
+                              autofocus: true,
+                              style: const TextStyle(
+                                fontSize: 16,
+                                color: CaleeColors.textPrimary,
+                              ),
+                              decoration: sectionFieldDecoration.copyWith(
+                                hintText: 'Title',
+                              ),
+                              validator: (value) {
+                                if ((value ?? '').trim().isEmpty) {
+                                  return 'Enter a title';
+                                }
+                                return null;
+                              },
+                            ),
                           ),
+                          // Calendar picker
+                          _buildDropdownRow<ClientCalendar>(
+                            label: 'Calendar',
+                            value: _selectedCalendar,
+                            items: [
+                              for (final cal in widget.calendars)
+                                DropdownMenuItem(
+                                  value: cal,
+                                  child: Text(cal.name),
+                                ),
+                            ],
+                            onChanged: _isSubmitting || _isEditing
+                                ? null
+                                : (cal) {
+                                    if (cal != null) {
+                                      setState(() => _selectedCalendar = cal);
+                                    }
+                                  },
+                          ),
+                        ],
+                      ),
+
+                      // ── Time ──────────────────────────────────────────────
+                      if (!_isEditingRecurringSeriesMetadata) ...[
+                        const SizedBox(height: CaleeSpacing.sectionSpacing),
+                        CaleeSection(
+                          children: [
+                            // All day switch
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: CaleeSpacing.md,
+                                vertical: 6,
+                              ),
+                              child: Row(
+                                children: [
+                                  const Text(
+                                    'All day',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      color: CaleeColors.textPrimary,
+                                    ),
+                                  ),
+                                  const Spacer(),
+                                  Switch(
+                                    value: _allDay,
+                                    onChanged: _isSubmitting
+                                        ? null
+                                        : (v) => setState(() => _allDay = v),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            if (_allDay) ...[
+                              _buildPickerRow(
+                                'Date',
+                                _dateLabel(_selectedDate),
+                                _isSubmitting ? null : _pickDate,
+                              ),
+                              _buildPickerRow(
+                                'End',
+                                _dateLabel(_selectedEndDate),
+                                _isSubmitting ? null : _pickEndDate,
+                              ),
+                            ] else ...[
+                              _buildPickerRow(
+                                'Date',
+                                _dateLabel(_selectedDate),
+                                _isSubmitting ? null : _pickDate,
+                              ),
+                              _buildPickerRow(
+                                'Start',
+                                _timeLabel(_startTime),
+                                _isSubmitting ? null : _pickStartTime,
+                              ),
+                              _buildPickerRow(
+                                'End',
+                                _timeLabel(_endTime),
+                                _isSubmitting ? null : _pickEndTime,
+                              ),
+                            ],
+                          ],
                         ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: _isSubmitting ? null : _pickEndDate,
-                            icon: const Icon(Icons.event_available_outlined),
-                            label: Text('End ${_dateLabel(_selectedEndDate)}'),
+                      ],
+
+                      // ── Repeat ────────────────────────────────────────────
+                      if (!_isEditingSingleOccurrence &&
+                          !_isEditingRecurringSeriesMetadata) ...[
+                        const SizedBox(height: CaleeSpacing.sectionSpacing),
+                        CaleeSection(
+                          children: [
+                            _buildDropdownRow<String>(
+                              label: 'Repeat',
+                              value: _selectedRecurrence,
+                              items: const [
+                                DropdownMenuItem(
+                                  value: 'none',
+                                  child: Text('Does not repeat'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'daily',
+                                  child: Text('Daily'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'weekly',
+                                  child: Text('Weekly'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'monthly',
+                                  child: Text('Monthly'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'yearly',
+                                  child: Text('Yearly'),
+                                ),
+                              ],
+                              onChanged: _isSubmitting
+                                  ? null
+                                  : (value) {
+                                      if (value != null) {
+                                        setState(
+                                          () => _selectedRecurrence = value,
+                                        );
+                                      }
+                                    },
+                            ),
+                            if (_selectedRecurrence != 'none') ...[
+                              _buildDropdownRow<String>(
+                                label: 'Ends',
+                                value: _recurrenceEnd,
+                                items: const [
+                                  DropdownMenuItem(
+                                    value: 'never',
+                                    child: Text('Never'),
+                                  ),
+                                  DropdownMenuItem(
+                                    value: 'date',
+                                    child: Text('On date'),
+                                  ),
+                                  DropdownMenuItem(
+                                    value: 'count',
+                                    child: Text('After count'),
+                                  ),
+                                ],
+                                onChanged: _isSubmitting
+                                    ? null
+                                    : (value) {
+                                        if (value != null) {
+                                          setState(
+                                            () => _recurrenceEnd = value,
+                                          );
+                                        }
+                                      },
+                              ),
+                              if (_recurrenceEnd == 'date')
+                                _buildPickerRow(
+                                  'Ends on',
+                                  _dateLabel(_recurrenceEndDate),
+                                  _isSubmitting ? null : _pickRecurrenceEndDate,
+                                ),
+                              if (_recurrenceEnd == 'count')
+                                Padding(
+                                  padding: const EdgeInsets.fromLTRB(
+                                    CaleeSpacing.md,
+                                    2,
+                                    CaleeSpacing.md,
+                                    2,
+                                  ),
+                                  child: Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.center,
+                                    children: [
+                                      const Text(
+                                        'Times',
+                                        style: TextStyle(
+                                          fontSize: 16,
+                                          color: CaleeColors.textPrimary,
+                                        ),
+                                      ),
+                                      const Spacer(),
+                                      SizedBox(
+                                        width: 80,
+                                        child: TextFormField(
+                                          controller:
+                                              _recurrenceCountController,
+                                          enabled: !_isSubmitting,
+                                          keyboardType: TextInputType.number,
+                                          textAlign: TextAlign.right,
+                                          style: const TextStyle(
+                                            fontSize: 16,
+                                            color: CaleeColors.textSecondary,
+                                          ),
+                                          decoration:
+                                              sectionFieldDecoration.copyWith(
+                                            hintText: '10',
+                                          ),
+                                          validator: (value) {
+                                            if (_selectedRecurrence == 'none' ||
+                                                _recurrenceEnd != 'count') {
+                                              return null;
+                                            }
+                                            final count = int.tryParse(
+                                              (value ?? '').trim(),
+                                            );
+                                            if (count == null || count < 1) {
+                                              return 'Enter a number of at least 1';
+                                            }
+                                            return null;
+                                          },
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                            ],
+                          ],
+                        ),
+                      ],
+
+                      // ── Series metadata note ───────────────────────────────
+                      if (_isEditingRecurringSeriesMetadata) ...[
+                        const SizedBox(height: CaleeSpacing.sectionSpacing),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: CaleeSpacing.sm,
+                          ),
+                          child: Text(
+                            'Series date, time, and repeat settings are preserved.',
+                            style:
+                                Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: CaleeColors.textSecondary,
+                                    ),
                           ),
                         ),
                       ],
-                    ),
-                  ] else ...[
-                    OutlinedButton.icon(
-                      onPressed: _isSubmitting ? null : _pickDate,
-                      icon: const Icon(Icons.today_outlined),
-                      label: Text(_dateLabel(_selectedDate)),
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: _isSubmitting ? null : _pickStartTime,
-                            icon: const Icon(Icons.schedule_outlined),
-                            label: Text('Start ${_timeLabel(_startTime)}'),
+
+                      // ── Details ───────────────────────────────────────────
+                      const SizedBox(height: CaleeSpacing.sectionSpacing),
+                      CaleeSection(
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: CaleeSpacing.md,
+                              vertical: 2,
+                            ),
+                            child: TextFormField(
+                              controller: _locationController,
+                              enabled: !_isSubmitting,
+                              style: const TextStyle(
+                                fontSize: 16,
+                                color: CaleeColors.textPrimary,
+                              ),
+                              decoration: sectionFieldDecoration.copyWith(
+                                hintText: 'Location',
+                              ),
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: _isSubmitting ? null : _pickEndTime,
-                            icon: const Icon(Icons.schedule),
-                            label: Text('End ${_timeLabel(_endTime)}'),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: CaleeSpacing.md,
+                              vertical: 2,
+                            ),
+                            child: TextFormField(
+                              controller: _descriptionController,
+                              enabled: !_isSubmitting,
+                              maxLines: 3,
+                              style: const TextStyle(
+                                fontSize: 16,
+                                color: CaleeColors.textPrimary,
+                              ),
+                              decoration: sectionFieldDecoration.copyWith(
+                                hintText: 'Notes',
+                              ),
+                            ),
                           ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ],
-                if (!_isEditingSingleOccurrence &&
-                    !_isEditingRecurringSeriesMetadata) ...[
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<String>(
-                    initialValue: _selectedRecurrence,
-                    decoration: const InputDecoration(
-                      labelText: 'Repeat',
-                      border: OutlineInputBorder(),
-                    ),
-                    items: const [
-                      DropdownMenuItem(
-                          value: 'none', child: Text('Does not repeat')),
-                      DropdownMenuItem(value: 'daily', child: Text('Daily')),
-                      DropdownMenuItem(value: 'weekly', child: Text('Weekly')),
-                      DropdownMenuItem(
-                          value: 'monthly', child: Text('Monthly')),
-                      DropdownMenuItem(value: 'yearly', child: Text('Yearly')),
-                    ],
-                    onChanged: _isSubmitting
-                        ? null
-                        : (value) {
-                            if (value != null) {
-                              setState(() {
-                                _selectedRecurrence = value;
-                              });
-                            }
-                          },
-                  ),
-                  if (_selectedRecurrence != 'none') ...[
-                    const SizedBox(height: 12),
-                    DropdownButtonFormField<String>(
-                      initialValue: _recurrenceEnd,
-                      decoration: const InputDecoration(
-                        labelText: 'Ends',
-                        border: OutlineInputBorder(),
+                        ],
                       ),
-                      items: const [
-                        DropdownMenuItem(value: 'never', child: Text('Never')),
-                        DropdownMenuItem(value: 'date', child: Text('On date')),
-                        DropdownMenuItem(
-                            value: 'count', child: Text('After count')),
-                      ],
-                      onChanged: _isSubmitting
-                          ? null
-                          : (value) {
-                              if (value != null) {
-                                setState(() {
-                                  _recurrenceEnd = value;
-                                });
-                              }
-                            },
-                    ),
-                    if (_recurrenceEnd == 'date') ...[
-                      const SizedBox(height: 8),
-                      OutlinedButton.icon(
-                        onPressed:
-                            _isSubmitting ? null : _pickRecurrenceEndDate,
-                        icon: const Icon(Icons.event_repeat_outlined),
-                        label: Text('Ends ${_dateLabel(_recurrenceEndDate)}'),
+
+                      // ── Submit ────────────────────────────────────────────
+                      const SizedBox(height: CaleeSpacing.lg),
+                      FilledButton(
+                        onPressed: _isSubmitting ? null : _submit,
+                        child: _isSubmitting
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : Text(_submitLabel),
                       ),
                     ],
-                    if (_recurrenceEnd == 'count') ...[
-                      const SizedBox(height: 8),
-                      TextFormField(
-                        controller: _recurrenceCountController,
-                        enabled: !_isSubmitting,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'Number of repeats',
-                          border: OutlineInputBorder(),
-                        ),
-                        validator: (value) {
-                          if (_selectedRecurrence == 'none' ||
-                              _recurrenceEnd != 'count') {
-                            return null;
-                          }
-                          final count = int.tryParse((value ?? '').trim());
-                          if (count == null || count < 1) {
-                            return 'Enter a number of at least 1';
-                          }
-                          return null;
-                        },
-                      ),
-                    ],
-                    const SizedBox(height: 8),
-                    Text(
-                      'Repeats ${_recurrenceLabel(_selectedRecurrence).toLowerCase()}${_recurrenceEnd == 'never' ? '' : _recurrenceEnd == 'date' ? ' until ${_dateLabel(_recurrenceEndDate)}' : ' ${_recurrenceCountController.text.trim().isEmpty ? '' : 'for ${_recurrenceCountController.text.trim()} times'}'}.',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ],
-                ],
-                if (_isEditingRecurringSeriesMetadata) ...[
-                  const SizedBox(height: 12),
-                  Text(
-                    'Series date, time, and repeat settings are preserved.',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ],
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _locationController,
-                  enabled: !_isSubmitting,
-                  decoration: const InputDecoration(
-                    labelText: 'Location',
-                    border: OutlineInputBorder(),
                   ),
                 ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _descriptionController,
-                  enabled: !_isSubmitting,
-                  maxLines: 3,
-                  decoration: const InputDecoration(
-                    labelText: 'Description',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                FilledButton(
-                  onPressed: _isSubmitting ? null : _submit,
-                  child: _isSubmitting
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : Text(
-                          _isEditing
-                              ? widget.initialEvent!.recurring
-                                  ? 'Update series'
-                                  : 'Update event'
-                              : 'Save event',
-                        ),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
