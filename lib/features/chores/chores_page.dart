@@ -89,6 +89,7 @@ class ChoresPage extends StatefulWidget {
 class _ChoresPageState extends State<ChoresPage> {
   late Future<_ChoresOverview> _overviewFuture;
   final Set<String> _updatingChoreIds = {};
+  String _assigneeFilter = 'all';
 
   List<ClientService> get _portalServices =>
       widget.services.where((service) => service.id == 'portal').toList();
@@ -131,9 +132,25 @@ class _ChoresPageState extends State<ChoresPage> {
       to: to,
     );
 
+    final household = _metadataHousehold;
+    var people = <ClientPerson>[];
+
+    if (household != null) {
+      try {
+        final peopleList = await widget.hubClient.people(
+          accessToken: widget.accessToken,
+          householdId: household.id,
+        );
+        people = peopleList.people.where((person) => person.isActive).toList();
+      } catch (_) {
+        people = <ClientPerson>[];
+      }
+    }
+
     return _ChoresOverview(
       calendarList: calendarList,
       choreList: choreList,
+      people: people,
       from: from,
       to: to,
     );
@@ -541,6 +558,34 @@ class _ChoresPageState extends State<ChoresPage> {
     }
   }
 
+  List<ClientChore> _filterChoresByAssignee(List<ClientChore> chores) {
+    final filter = _assigneeFilter.trim();
+
+    if (filter == 'all') {
+      return chores;
+    }
+
+    if (filter == 'unassigned') {
+      return chores
+          .where((chore) => (chore.assigneePersonId ?? '').trim().isEmpty)
+          .toList();
+    }
+
+    if (filter.startsWith('person:')) {
+      final personId = filter.substring('person:'.length);
+
+      return chores
+          .where((chore) => (chore.assigneePersonId ?? '').trim() == personId)
+          .toList();
+    }
+
+    return chores;
+  }
+
+  bool _hasUnassignedChores(List<ClientChore> chores) {
+    return chores.any((chore) => (chore.assigneePersonId ?? '').trim().isEmpty);
+  }
+
   Map<String, List<ClientChore>> _groupChoresBySection(
     List<ClientChore> chores,
   ) {
@@ -663,10 +708,14 @@ class _ChoresPageState extends State<ChoresPage> {
               (calendar) => calendar.isChoreKind && _isPortalCalendar(calendar),
             )
             .toList();
-        final chores = overview.choreList.chores;
+        final allChores = overview.choreList.chores;
+        final chores = _filterChoresByAssignee(allChores);
         final choresBySection = _groupChoresBySection(chores);
+        final hasUnassignedChores = _hasUnassignedChores(allChores);
+        final showAssigneeFilters = allChores.isNotEmpty &&
+            (overview.people.isNotEmpty || hasUnassignedChores);
 
-        if (choreCalendars.isEmpty && chores.isEmpty) {
+        if (choreCalendars.isEmpty && allChores.isEmpty) {
           return CaleeScaffold(
             body: CaleeEmptyState(
               icon: Icons.family_restroom_outlined,
@@ -736,14 +785,32 @@ class _ChoresPageState extends State<ChoresPage> {
                   const SizedBox(height: CaleeSpacing.sectionSpacing),
                 ],
 
+                if (showAssigneeFilters) ...[
+                  _AssigneeFilterBar(
+                    people: overview.people,
+                    hasUnassigned: hasUnassignedChores,
+                    selectedFilter: _assigneeFilter,
+                    onChanged: (value) {
+                      setState(() {
+                        _assigneeFilter = value;
+                      });
+                    },
+                  ),
+                  const SizedBox(height: CaleeSpacing.sectionSpacing),
+                ],
+
                 // ── Chore sections ───────────────────────────────────
                 if (activeSections.isEmpty && choreCalendars.isNotEmpty)
                   CaleeSection(
                     title: 'Chores',
                     children: [
                       CaleeListRow(
-                        title: 'No chores yet',
-                        subtitle: 'Tap + Chore to add your first chore.',
+                        title: allChores.isEmpty
+                            ? 'No chores yet'
+                            : 'No chores for this filter',
+                        subtitle: allChores.isEmpty
+                            ? 'Tap + Chore to add your first chore.'
+                            : 'Choose another assignee filter.',
                         leading: const Icon(
                           Icons.check_circle_outline,
                           color: CaleeColors.textTertiary,
@@ -823,12 +890,14 @@ class _ChoresOverview {
   const _ChoresOverview({
     required this.calendarList,
     required this.choreList,
+    required this.people,
     required this.from,
     required this.to,
   });
 
   final ClientCalendarList calendarList;
   final ClientChoreList choreList;
+  final List<ClientPerson> people;
   final String from;
   final String to;
 }
@@ -924,6 +993,54 @@ class _PointsBadge extends StatelessWidget {
           color: CaleeColors.primary,
           fontWeight: FontWeight.w500,
         ),
+      ),
+    );
+  }
+}
+
+class _AssigneeFilterBar extends StatelessWidget {
+  const _AssigneeFilterBar({
+    required this.people,
+    required this.hasUnassigned,
+    required this.selectedFilter,
+    required this.onChanged,
+  });
+
+  final List<ClientPerson> people;
+  final bool hasUnassigned;
+  final String selectedFilter;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final chips = <Widget>[
+      _filterChip(label: 'All', value: 'all'),
+      if (hasUnassigned) _filterChip(label: 'Unassigned', value: 'unassigned'),
+      for (final person in people)
+        _filterChip(
+          label: person.displayName.trim().isEmpty
+              ? 'Unnamed'
+              : person.displayName.trim(),
+          value: 'person:${person.id}',
+        ),
+    ];
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(children: chips),
+    );
+  }
+
+  Widget _filterChip({
+    required String label,
+    required String value,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(right: CaleeSpacing.sm),
+      child: ChoiceChip(
+        label: Text(label),
+        selected: selectedFilter == value,
+        onSelected: (_) => onChanged(value),
       ),
     );
   }
