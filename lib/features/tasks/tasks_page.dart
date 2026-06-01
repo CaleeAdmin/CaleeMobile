@@ -308,6 +308,12 @@ class _TasksPageState extends State<TasksPage> {
       return 'Due yesterday';
     }
 
+    final todayMidnight = DateTime(now.year, now.month, now.day);
+    final dDay = DateTime(local.year, local.month, local.day);
+    if (dDay.isBefore(todayMidnight)) {
+      return 'Overdue ${local.day}/${local.month}/${local.year}';
+    }
+
     return 'Due ${local.day}/${local.month}/${local.year}';
   }
 
@@ -319,6 +325,54 @@ class _TasksPageState extends State<TasksPage> {
       }
     }
     return task.serviceName.trim().isNotEmpty ? task.serviceName : '';
+  }
+
+  bool _isDueOnOrBefore(String? dueAt, DateTime cutoff) {
+    if (dueAt == null || dueAt.trim().isEmpty) return false;
+    final d = DateTime.tryParse(dueAt)?.toLocal();
+    if (d == null) return false;
+    final dDay = DateTime(d.year, d.month, d.day);
+    return !dDay.isAfter(cutoff);
+  }
+
+  bool _isDueAfter(String? dueAt, DateTime cutoff) {
+    if (dueAt == null || dueAt.trim().isEmpty) return false;
+    final d = DateTime.tryParse(dueAt)?.toLocal();
+    if (d == null) return false;
+    final dDay = DateTime(d.year, d.month, d.day);
+    return dDay.isAfter(cutoff);
+  }
+
+  int _dueSortKey(ClientTask t) {
+    if (t.dueAt == null || t.dueAt!.trim().isEmpty) return 0;
+    return DateTime.tryParse(t.dueAt!)?.millisecondsSinceEpoch ?? 0;
+  }
+
+  Widget _buildSmartSection(
+    String title,
+    List<ClientTask> tasks,
+    List<ClientCalendar> taskCalendars,
+  ) {
+    return CaleeSection(
+      title: title,
+      trailing: '${tasks.length}',
+      children: tasks
+          .map(
+            (task) => _TaskRow(
+              key: ValueKey(task.id),
+              task: task,
+              dueLabel: _formatDueLabel(task.dueAt),
+              listName: _calendarNameForTask(task, taskCalendars),
+              isUpdating: _updatingTaskIds.contains(task.id),
+              isDeleting: _deletingTaskIds.contains(task.id),
+              isEditing: _editingTaskIds.contains(task.id),
+              onToggle: () => _toggleTaskStatus(task),
+              onEdit: () => _openEditTaskSheet(task),
+              onDelete: () => _confirmDeleteTask(task),
+            ),
+          )
+          .toList(),
+    );
   }
 
   @override
@@ -387,6 +441,28 @@ class _TasksPageState extends State<TasksPage> {
         final completedTasks =
             allTasks.where((t) => t.isCompleted).toList();
 
+        final now = DateTime.now();
+        final today = DateTime(now.year, now.month, now.day);
+
+        final todayTasks =
+            openTasks.where((t) => _isDueOnOrBefore(t.dueAt, today)).toList()
+              ..sort((a, b) {
+                final cmp = _dueSortKey(a).compareTo(_dueSortKey(b));
+                return cmp != 0 ? cmp : a.title.compareTo(b.title);
+              });
+
+        final upcomingTasks =
+            openTasks.where((t) => _isDueAfter(t.dueAt, today)).toList()
+              ..sort((a, b) {
+                final cmp = _dueSortKey(a).compareTo(_dueSortKey(b));
+                return cmp != 0 ? cmp : a.title.compareTo(b.title);
+              });
+
+        final noDateTasks = openTasks
+            .where((t) => t.dueAt == null || t.dueAt!.trim().isEmpty)
+            .toList()
+          ..sort((a, b) => a.title.compareTo(b.title));
+
         return CaleeScaffold(
           floatingActionButton: taskCalendars.isEmpty
               ? null
@@ -408,14 +484,13 @@ class _TasksPageState extends State<TasksPage> {
                 vertical: CaleeSpacing.md,
               ),
               children: [
-                // ── Open tasks ──────────────────────────────────────
+                // ── Empty state when no open tasks ───────────────────
                 if (openTasks.isEmpty && taskCalendars.isNotEmpty)
                   CaleeSection(
-                    title: 'Tasks',
                     children: [
                       CaleeListRow(
                         title: 'No open tasks',
-                        subtitle: 'Tap + Task to add one.',
+                        subtitle: 'Add a task when something needs doing.',
                         leading: const Icon(
                           Icons.check_circle_outline,
                           color: CaleeColors.textTertiary,
@@ -423,30 +498,27 @@ class _TasksPageState extends State<TasksPage> {
                         ),
                       ),
                     ],
-                  )
-                else if (openTasks.isNotEmpty)
-                  CaleeSection(
-                    title: 'Tasks',
-                    trailing: '${openTasks.length}',
-                    children: openTasks
-                        .map(
-                          (task) => _TaskRow(
-                            key: ValueKey(task.id),
-                            task: task,
-                            dueLabel: _formatDueLabel(task.dueAt),
-                            listName: _calendarNameForTask(task, taskCalendars),
-                            isUpdating: _updatingTaskIds.contains(task.id),
-                            isDeleting: _deletingTaskIds.contains(task.id),
-                            isEditing: _editingTaskIds.contains(task.id),
-                            onToggle: () => _toggleTaskStatus(task),
-                            onEdit: () => _openEditTaskSheet(task),
-                            onDelete: () => _confirmDeleteTask(task),
-                          ),
-                        )
-                        .toList(),
                   ),
 
-                // ── No task lists ────────────────────────────────────
+                // ── Today (includes overdue) ──────────────────────────
+                if (todayTasks.isNotEmpty) ...[
+                  _buildSmartSection('Today', todayTasks, taskCalendars),
+                  const SizedBox(height: CaleeSpacing.sectionSpacing),
+                ],
+
+                // ── Upcoming ──────────────────────────────────────────
+                if (upcomingTasks.isNotEmpty) ...[
+                  _buildSmartSection('Upcoming', upcomingTasks, taskCalendars),
+                  const SizedBox(height: CaleeSpacing.sectionSpacing),
+                ],
+
+                // ── No Date ───────────────────────────────────────────
+                if (noDateTasks.isNotEmpty) ...[
+                  _buildSmartSection('No Date', noDateTasks, taskCalendars),
+                  const SizedBox(height: CaleeSpacing.sectionSpacing),
+                ],
+
+                // ── No task lists ─────────────────────────────────────
                 if (taskCalendars.isEmpty)
                   Padding(
                     padding: const EdgeInsets.only(top: CaleeSpacing.md),
@@ -467,9 +539,8 @@ class _TasksPageState extends State<TasksPage> {
                     ),
                   ),
 
-                // ── Completed tasks ──────────────────────────────────
-                if (completedTasks.isNotEmpty) ...[
-                  const SizedBox(height: CaleeSpacing.sectionSpacing),
+                // ── Completed tasks ───────────────────────────────────
+                if (completedTasks.isNotEmpty)
                   _CompletedSection(
                     tasks: completedTasks,
                     calendars: taskCalendars,
@@ -488,7 +559,6 @@ class _TasksPageState extends State<TasksPage> {
                     calendarNameForTask: _calendarNameForTask,
                     formatDueLabel: _formatDueLabel,
                   ),
-                ],
 
                 const SizedBox(height: 96),
               ],
