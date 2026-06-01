@@ -2022,6 +2022,34 @@ class _CalendarChooserSheetState extends State<_CalendarChooserSheet> {
     );
   }
 
+  void _showAddCaleeCalendarSheet() {
+    Navigator.of(context).pop();
+    CaleeBottomSheet.show<void>(
+      context: context,
+      title: 'Add Calee Calendar',
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text(
+            'Calee calendars will help you create ready-made public calendars.',
+            style: TextStyle(fontSize: 15, color: CaleeColors.textSecondary),
+          ),
+          const SizedBox(height: CaleeSpacing.xs),
+          const Text(
+            'Examples: School, Sport Events, Holidays',
+            style: TextStyle(fontSize: 13, color: CaleeColors.textTertiary),
+          ),
+          const SizedBox(height: CaleeSpacing.lg),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Got it'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildAddSection() {
     return CaleeSection(
       title: 'Add',
@@ -2054,14 +2082,10 @@ class _CalendarChooserSheetState extends State<_CalendarChooserSheet> {
           title: 'Add Calee Calendar',
           leading: const Icon(
             Icons.public_outlined,
-            color: CaleeColors.textTertiary,
+            color: CaleeColors.primary,
             size: 22,
           ),
-          trailing: const Text(
-            'Coming soon',
-            style: TextStyle(fontSize: 12, color: CaleeColors.textTertiary),
-          ),
-          enabled: false,
+          onTap: () => _showAddCaleeCalendarSheet(),
         ),
       ],
     );
