@@ -222,7 +222,6 @@ class _ChoresPageState extends State<ChoresPage> {
       scheduledAt: scheduledAt,
       description: description,
       recurrence: recurrence,
-      points: points,
     );
   }
 
@@ -297,7 +296,6 @@ class _ChoresPageState extends State<ChoresPage> {
     String? scheduledAt,
     String? description,
     String? recurrence,
-    required int points,
   }) async {
     final choreId = chore.completionActionId;
 
@@ -1377,7 +1375,6 @@ class _CreateChoreSheetState extends State<_CreateChoreSheet> {
             _selectedDate == null ? null : _formatChoreDate(_selectedDate!),
         description: _descriptionController.text.trim(),
         recurrence: _choreRecurrenceToRrule(_selectedRecurrence),
-        points: _points,
       );
 
       if (mounted) {
@@ -1500,24 +1497,6 @@ class _CreateChoreSheetState extends State<_CreateChoreSheet> {
                       },
               ),
               const SizedBox(height: CaleeSpacing.sm + 4),
-              DropdownButtonFormField<int>(
-                initialValue: _points,
-                decoration: const InputDecoration(labelText: 'Points'),
-                items: const [
-                  DropdownMenuItem(value: 1, child: Text('1 point')),
-                  DropdownMenuItem(value: 2, child: Text('2 points')),
-                ],
-                onChanged: _isSubmitting
-                    ? null
-                    : (value) {
-                        if (value != null) {
-                          setState(() {
-                            _points = value;
-                          });
-                        }
-                      },
-              ),
-              const SizedBox(height: CaleeSpacing.sm + 4),
               TextFormField(
                 controller: _descriptionController,
                 enabled: !_isSubmitting,
@@ -1561,7 +1540,6 @@ class _EditChoreSheet extends StatefulWidget {
     String? scheduledAt,
     String? description,
     String? recurrence,
-    required int points,
   }) onUpdate;
 
   @override
@@ -1575,7 +1553,6 @@ class _EditChoreSheetState extends State<_EditChoreSheet> {
 
   DateTime? _selectedDate;
   String? _selectedRecurrence;
-  late int _points;
   bool _isSubmitting = false;
 
   @override
@@ -1587,7 +1564,6 @@ class _EditChoreSheetState extends State<_EditChoreSheet> {
     _selectedDate =
         _parseChoreDate(widget.chore.scheduledDate ?? widget.chore.scheduledAt);
     _selectedRecurrence = _choreRruleToRecurrence(widget.chore.recurrence);
-    _points = widget.chore.points <= 1 ? 1 : 2;
   }
 
   @override
