@@ -29,6 +29,11 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
   int _selectedIndex = 0;
   late final List<_CaleeTab> _tabs;
 
+  bool get _hasPortalService => widget.bootstrap.services.any(
+        (service) =>
+            service.id == 'portal' || service.serviceType == 'nextcloud_portal',
+      );
+
   @override
   void initState() {
     super.initState();
@@ -54,16 +59,17 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
           services: widget.bootstrap.services,
         ),
       ),
-      _CaleeTab(
-        title: 'Chores',
-        icon: Icons.family_restroom_outlined,
-        selectedIcon: Icons.family_restroom,
-        page: ChoresPage(
-          hubClient: widget.hubClient,
-          accessToken: widget.accessToken,
-          services: widget.bootstrap.services,
+      if (_hasPortalService)
+        _CaleeTab(
+          title: 'Chores',
+          icon: Icons.family_restroom_outlined,
+          selectedIcon: Icons.family_restroom,
+          page: ChoresPage(
+            hubClient: widget.hubClient,
+            accessToken: widget.accessToken,
+            services: widget.bootstrap.services,
+          ),
         ),
-      ),
       _CaleeTab(
         title: 'Settings',
         icon: Icons.settings_outlined,
@@ -83,9 +89,7 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
     final tab = _tabs[_selectedIndex];
 
     return Scaffold(
-      appBar: _selectedIndex == 0
-          ? null
-          : AppBar(title: Text(tab.title)),
+      appBar: _selectedIndex == 0 ? null : AppBar(title: Text(tab.title)),
       body: tab.page,
       bottomNavigationBar: NavigationBar(
         selectedIndex: _selectedIndex,
