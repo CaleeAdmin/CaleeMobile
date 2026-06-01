@@ -586,6 +586,14 @@ class _ChoresPageState extends State<ChoresPage> {
     return chores.any((chore) => (chore.assigneePersonId ?? '').trim().isEmpty);
   }
 
+  int _countAllChores(List<ClientChore> chores) => chores.length;
+
+  int _countUnassignedChores(List<ClientChore> chores) =>
+      chores.where((c) => (c.assigneePersonId ?? '').trim().isEmpty).length;
+
+  int _countChoresForPerson(List<ClientChore> chores, String personId) =>
+      chores.where((c) => (c.assigneePersonId ?? '').trim() == personId).length;
+
   Map<String, List<ClientChore>> _groupChoresBySection(
     List<ClientChore> chores,
   ) {
@@ -790,6 +798,12 @@ class _ChoresPageState extends State<ChoresPage> {
                     people: overview.people,
                     hasUnassigned: hasUnassignedChores,
                     selectedFilter: _assigneeFilter,
+                    allCount: _countAllChores(allChores),
+                    unassignedCount: _countUnassignedChores(allChores),
+                    personCounts: {
+                      for (final p in overview.people)
+                        p.id: _countChoresForPerson(allChores, p.id),
+                    },
                     onChanged: (value) {
                       setState(() {
                         _assigneeFilter = value;
@@ -1003,12 +1017,18 @@ class _AssigneeFilterBar extends StatelessWidget {
     required this.people,
     required this.hasUnassigned,
     required this.selectedFilter,
+    required this.allCount,
+    required this.unassignedCount,
+    required this.personCounts,
     required this.onChanged,
   });
 
   final List<ClientPerson> people;
   final bool hasUnassigned;
   final String selectedFilter;
+  final int allCount;
+  final int unassignedCount;
+  final Map<String, int> personCounts;
   final ValueChanged<String> onChanged;
 
   @override
@@ -1018,7 +1038,7 @@ class _AssigneeFilterBar extends StatelessWidget {
       child: Row(
         children: [
           _FilterPill(
-            label: 'All',
+            label: 'All $allCount',
             value: 'all',
             selectedFilter: selectedFilter,
             onChanged: onChanged,
@@ -1026,7 +1046,7 @@ class _AssigneeFilterBar extends StatelessWidget {
           if (hasUnassigned) ...[
             const SizedBox(width: CaleeSpacing.xs),
             _FilterPill(
-              label: 'Unassigned',
+              label: 'Unassigned $unassignedCount',
               value: 'unassigned',
               selectedFilter: selectedFilter,
               onChanged: onChanged,
@@ -1035,9 +1055,7 @@ class _AssigneeFilterBar extends StatelessWidget {
           for (final person in people) ...[
             const SizedBox(width: CaleeSpacing.xs),
             _FilterPill(
-              label: person.displayName.trim().isEmpty
-                  ? 'Unnamed'
-                  : person.displayName.trim(),
+              label: '${person.displayName.trim().isEmpty ? 'Unnamed' : person.displayName.trim()} ${personCounts[person.id] ?? 0}',
               value: 'person:${person.id}',
               selectedFilter: selectedFilter,
               onChanged: onChanged,
