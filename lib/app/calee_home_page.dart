@@ -68,6 +68,7 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
             hubClient: widget.hubClient,
             accessToken: widget.accessToken,
             services: widget.bootstrap.services,
+            households: widget.bootstrap.contexts.households,
           ),
         ),
       _CaleeTab(
