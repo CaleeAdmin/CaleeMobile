@@ -1,0 +1,610 @@
+import 'package:flutter/material.dart';
+
+import '../../data/api/calee_hub_client.dart';
+import '../../data/models/client_bootstrap.dart';
+import '../../data/models/client_person.dart';
+import '../../ui/calee_theme.dart';
+import '../../ui/calee_widgets.dart';
+
+class HouseholdPeoplePage extends StatefulWidget {
+  const HouseholdPeoplePage({
+    required this.hubClient,
+    required this.accessToken,
+    required this.households,
+    super.key,
+  });
+
+  final CaleeHubClient hubClient;
+  final String accessToken;
+  final List<ClientContext> households;
+
+  @override
+  State<HouseholdPeoplePage> createState() => _HouseholdPeoplePageState();
+}
+
+class _HouseholdPeoplePageState extends State<HouseholdPeoplePage> {
+  ClientContext? _selectedHousehold;
+  Future<ClientPersonList>? _future;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.households.isNotEmpty) {
+      _selectedHousehold = widget.households.first;
+      _future = _loadPeople();
+    }
+  }
+
+  Future<ClientPersonList> _loadPeople() {
+    final household = _selectedHousehold;
+    if (household == null) {
+      return Future.value(const ClientPersonList(people: []));
+    }
+
+    return widget.hubClient.people(
+      accessToken: widget.accessToken,
+      householdId: household.id,
+    );
+  }
+
+  void _reload() {
+    setState(() {
+      _future = _loadPeople();
+    });
+  }
+
+  Future<void> _openCreateSheet() async {
+    final household = _selectedHousehold;
+    if (household == null) return;
+
+    final saved = await CaleeBottomSheet.show<bool>(
+      context: context,
+      title: 'Add person',
+      child: _PersonFormContent(
+        submitLabel: 'Add person',
+        onSubmit: ({
+          required String displayName,
+          required String? avatarColor,
+          required String role,
+          required int sortOrder,
+        }) async {
+          await widget.hubClient.createPerson(
+            accessToken: widget.accessToken,
+            householdId: household.id,
+            displayName: displayName,
+            avatarColor: avatarColor,
+            role: role,
+            sortOrder: sortOrder,
+          );
+        },
+      ),
+    );
+
+    if (saved == true && mounted) {
+      _reload();
+    }
+  }
+
+  Future<void> _openEditSheet(ClientPerson person) async {
+    final household = _selectedHousehold;
+    if (household == null) return;
+
+    final saved = await CaleeBottomSheet.show<bool>(
+      context: context,
+      title: 'Edit person',
+      child: _PersonFormContent(
+        initialPerson: person,
+        submitLabel: 'Save changes',
+        onSubmit: ({
+          required String displayName,
+          required String? avatarColor,
+          required String role,
+          required int sortOrder,
+        }) async {
+          await widget.hubClient.updatePerson(
+            accessToken: widget.accessToken,
+            householdId: household.id,
+            personId: person.id,
+            displayName: displayName,
+            avatarColor: avatarColor,
+            role: role,
+            sortOrder: sortOrder,
+          );
+        },
+      ),
+    );
+
+    if (saved == true && mounted) {
+      _reload();
+    }
+  }
+
+  Future<void> _confirmArchive(ClientPerson person) async {
+    final household = _selectedHousehold;
+    if (household == null) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Archive person?'),
+          content: Text(
+            'Archive ${person.displayName}? They will be hidden from the active people list.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Archive'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      await widget.hubClient.archivePerson(
+        accessToken: widget.accessToken,
+        householdId: household.id,
+        personId: person.id,
+      );
+
+      if (!mounted) return;
+      _reload();
+    } catch (error) {
+      if (!mounted) return;
+      _showError(error);
+    }
+  }
+
+  void _openPersonActions(ClientPerson person) {
+    CaleeActionSheet.show(
+      context: context,
+      title: person.displayName,
+      actions: [
+        CaleeAction(
+          label: 'Edit person',
+          icon: Icons.edit_outlined,
+          onTap: () => _openEditSheet(person),
+        ),
+        CaleeAction(
+          label: 'Archive person',
+          icon: Icons.archive_outlined,
+          isDestructive: true,
+          onTap: () => _confirmArchive(person),
+        ),
+      ],
+    );
+  }
+
+  void _showError(Object error) {
+    final message = error is CaleeHubException
+        ? error.message
+        : 'Something went wrong. Please try again.';
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final household = _selectedHousehold;
+
+    return Scaffold(
+      backgroundColor: CaleeColors.scaffoldBackground,
+      appBar: AppBar(
+        title: const Text('Household people'),
+      ),
+      floatingActionButton: household == null
+          ? null
+          : FloatingActionButton(
+              onPressed: _openCreateSheet,
+              child: const Icon(Icons.add),
+            ),
+      body: household == null
+          ? const _EmptyPeopleState(
+              title: 'No household yet',
+              message: 'People can be managed after a household is available.',
+            )
+          : ListView(
+              padding: const EdgeInsets.symmetric(
+                horizontal: CaleeSpacing.pagePadding,
+                vertical: CaleeSpacing.md,
+              ),
+              children: [
+                if (widget.households.length > 1) ...[
+                  CaleeSection(
+                    title: 'Household',
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: CaleeSpacing.md,
+                          vertical: CaleeSpacing.sm,
+                        ),
+                        child: DropdownButtonFormField<String>(
+                          value: household.id,
+                          decoration: const InputDecoration(
+                            labelText: 'Household',
+                          ),
+                          items: [
+                            for (final item in widget.households)
+                              DropdownMenuItem<String>(
+                                value: item.id,
+                                child: Text(
+                                  item.name.isNotEmpty
+                                      ? item.name
+                                      : 'Unnamed household',
+                                ),
+                              ),
+                          ],
+                          onChanged: (value) {
+                            final next = widget.households
+                                .where((item) => item.id == value)
+                                .cast<ClientContext?>()
+                                .firstOrNull;
+
+                            if (next == null) return;
+
+                            setState(() {
+                              _selectedHousehold = next;
+                              _future = _loadPeople();
+                            });
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: CaleeSpacing.sectionSpacing),
+                ],
+                FutureBuilder<ClientPersonList>(
+                  future: _future,
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Padding(
+                        padding: EdgeInsets.only(top: CaleeSpacing.xl),
+                        child: Center(child: CircularProgressIndicator()),
+                      );
+                    }
+
+                    if (snapshot.hasError) {
+                      return CaleeSection(
+                        title: 'People',
+                        children: [
+                          _ErrorRow(
+                            message: snapshot.error is CaleeHubException
+                                ? (snapshot.error as CaleeHubException).message
+                                : 'Could not load people.',
+                            onRetry: _reload,
+                          ),
+                        ],
+                      );
+                    }
+
+                    final people = snapshot.data?.people ?? const [];
+
+                    return CaleeSection(
+                      title: 'People',
+                      children: [
+                        if (people.isEmpty)
+                          const _EmptyRowText('No people yet.')
+                        else
+                          for (final person in people)
+                            CaleeListRow(
+                              title: person.displayName.isNotEmpty
+                                  ? person.displayName
+                                  : 'Unnamed person',
+                              subtitle:
+                                  '${_capitalise(person.role)} · ${_capitalise(person.status)}',
+                              leading: _PersonAvatar(person: person),
+                              onTap: () => _openPersonActions(person),
+                            ),
+                      ],
+                    );
+                  },
+                ),
+                const SizedBox(height: 96),
+              ],
+            ),
+    );
+  }
+}
+
+class _PersonFormContent extends StatefulWidget {
+  const _PersonFormContent({
+    required this.onSubmit,
+    required this.submitLabel,
+    this.initialPerson,
+  });
+
+  final ClientPerson? initialPerson;
+  final String submitLabel;
+  final Future<void> Function({
+    required String displayName,
+    required String? avatarColor,
+    required String role,
+    required int sortOrder,
+  }) onSubmit;
+
+  @override
+  State<_PersonFormContent> createState() => _PersonFormContentState();
+}
+
+class _PersonFormContentState extends State<_PersonFormContent> {
+  late final TextEditingController _displayNameController;
+  late final TextEditingController _avatarColorController;
+  late final TextEditingController _sortOrderController;
+  late String _role;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+
+    final person = widget.initialPerson;
+
+    _displayNameController = TextEditingController(
+      text: person?.displayName ?? '',
+    );
+    _avatarColorController = TextEditingController(
+      text: person?.avatarColor ?? '',
+    );
+    _sortOrderController = TextEditingController(
+      text: (person?.sortOrder ?? 0).toString(),
+    );
+    _role = person?.role ?? 'member';
+  }
+
+  @override
+  void dispose() {
+    _displayNameController.dispose();
+    _avatarColorController.dispose();
+    _sortOrderController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final displayName = _displayNameController.text.trim();
+    if (displayName.isEmpty) {
+      _showSnack('Name is required.');
+      return;
+    }
+
+    final sortOrder = int.tryParse(_sortOrderController.text.trim()) ?? 0;
+    final avatarColor = _avatarColorController.text.trim();
+
+    setState(() => _saving = true);
+
+    try {
+      await widget.onSubmit(
+        displayName: displayName,
+        avatarColor: avatarColor.isEmpty ? null : avatarColor,
+        role: _role,
+        sortOrder: sortOrder,
+      );
+
+      if (!mounted) return;
+      Navigator.of(context).pop(true);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+
+      _showSnack(
+        error is CaleeHubException
+            ? error.message
+            : 'Could not save person. Please try again.',
+      );
+    }
+  }
+
+  void _showSnack(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      shrinkWrap: true,
+      children: [
+        TextField(
+          controller: _displayNameController,
+          decoration: const InputDecoration(
+            labelText: 'Name',
+            hintText: 'e.g. Sam',
+          ),
+          textInputAction: TextInputAction.next,
+        ),
+        const SizedBox(height: CaleeSpacing.md),
+        TextField(
+          controller: _avatarColorController,
+          decoration: const InputDecoration(
+            labelText: 'Avatar colour',
+            hintText: '#FFCC00',
+          ),
+          textInputAction: TextInputAction.next,
+        ),
+        const SizedBox(height: CaleeSpacing.md),
+        DropdownButtonFormField<String>(
+          value: _role,
+          decoration: const InputDecoration(labelText: 'Role'),
+          items: const [
+            DropdownMenuItem(value: 'member', child: Text('Member')),
+            DropdownMenuItem(value: 'child', child: Text('Child')),
+            DropdownMenuItem(value: 'parent', child: Text('Parent')),
+          ],
+          onChanged: _saving
+              ? null
+              : (value) {
+                  if (value == null) return;
+                  setState(() => _role = value);
+                },
+        ),
+        const SizedBox(height: CaleeSpacing.md),
+        TextField(
+          controller: _sortOrderController,
+          decoration: const InputDecoration(
+            labelText: 'Sort order',
+          ),
+          keyboardType: TextInputType.number,
+        ),
+        const SizedBox(height: CaleeSpacing.lg),
+        FilledButton(
+          onPressed: _saving ? null : _submit,
+          child: _saving
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : Text(widget.submitLabel),
+        ),
+      ],
+    );
+  }
+}
+
+class _PersonAvatar extends StatelessWidget {
+  const _PersonAvatar({required this.person});
+
+  final ClientPerson person;
+
+  @override
+  Widget build(BuildContext context) {
+    final color =
+        _parseColor(person.avatarColor) ?? CaleeColors.primary.withAlpha(26);
+
+    return Container(
+      width: 34,
+      height: 34,
+      decoration: BoxDecoration(
+        color: color,
+        shape: BoxShape.circle,
+      ),
+      child: Center(
+        child: Text(
+          person.displayName.trim().isEmpty
+              ? '?'
+              : person.displayName.trim()[0].toUpperCase(),
+          style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                color: CaleeColors.textPrimary,
+                fontWeight: FontWeight.w700,
+              ),
+        ),
+      ),
+    );
+  }
+
+  Color? _parseColor(String? value) {
+    final raw = value?.trim() ?? '';
+    if (raw.isEmpty) return null;
+
+    final normalized = raw.startsWith('#') ? raw : '#$raw';
+    if (!RegExp(r'^#[0-9A-Fa-f]{6}$').hasMatch(normalized)) {
+      return null;
+    }
+
+    return Color(0xFF000000 | int.parse(normalized.substring(1), radix: 16));
+  }
+}
+
+class _ErrorRow extends StatelessWidget {
+  const _ErrorRow({
+    required this.message,
+    required this.onRetry,
+  });
+
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return CaleeListRow(
+      title: message,
+      leading: const Icon(
+        Icons.error_outline,
+        size: 20,
+        color: CaleeColors.destructive,
+      ),
+      trailing: TextButton(
+        onPressed: onRetry,
+        child: const Text('Retry'),
+      ),
+    );
+  }
+}
+
+class _EmptyPeopleState extends StatelessWidget {
+  const _EmptyPeopleState({
+    required this.title,
+    required this.message,
+  });
+
+  final String title;
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(CaleeSpacing.pagePadding),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.group_outlined,
+              size: 40,
+              color: CaleeColors.textTertiary,
+            ),
+            const SizedBox(height: CaleeSpacing.md),
+            Text(
+              title,
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: CaleeSpacing.xs),
+            Text(
+              message,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: CaleeColors.textSecondary,
+                  ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _EmptyRowText extends StatelessWidget {
+  const _EmptyRowText(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: CaleeSpacing.md,
+        vertical: CaleeSpacing.sm + 4,
+      ),
+      child: Text(
+        text,
+        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: CaleeColors.textSecondary,
+            ),
+      ),
+    );
+  }
+}
+
+String _capitalise(String value) {
+  if (value.isEmpty) return value;
+  return value[0].toUpperCase() + value.substring(1);
+}

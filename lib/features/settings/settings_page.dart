@@ -177,16 +177,12 @@ class _ContextRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final typeLabel = this.context.type.isNotEmpty
-        ? _capitalise(this.context.type)
-        : null;
-    final roleLabel = this.context.role.isNotEmpty
-        ? _capitalise(this.context.role)
-        : null;
+    final typeLabel =
+        this.context.type.isNotEmpty ? _capitalise(this.context.type) : null;
+    final roleLabel =
+        this.context.role.isNotEmpty ? _capitalise(this.context.role) : null;
 
-    final subtitle = [typeLabel, roleLabel]
-        .whereType<String>()
-        .join(' · ');
+    final subtitle = [typeLabel, roleLabel].whereType<String>().join(' · ');
 
     return CaleeListRow(
       title: this.context.name.isNotEmpty ? this.context.name : 'Unnamed',
