@@ -8,17 +8,6 @@ import '../../ui/calee_theme.dart';
 import '../../ui/calee_widgets.dart';
 import '../people/add_person_sheet.dart';
 
-const _sectionFieldDecoration = InputDecoration(
-  border: InputBorder.none,
-  enabledBorder: InputBorder.none,
-  focusedBorder: InputBorder.none,
-  errorBorder: InputBorder.none,
-  focusedErrorBorder: InputBorder.none,
-  fillColor: Colors.transparent,
-  filled: false,
-  contentPadding: EdgeInsets.symmetric(vertical: 9),
-);
-
 class HouseholdPeoplePage extends StatefulWidget {
   const HouseholdPeoplePage({
     required this.hubClient,
@@ -467,7 +456,7 @@ class _PersonFormContentState extends State<_PersonFormContent> {
                 child: TextField(
                   controller: _displayNameController,
                   enabled: !_saving,
-                  decoration: _sectionFieldDecoration.copyWith(
+                  decoration: caleeSectionFieldDecoration.copyWith(
                     hintText: 'Name',
                   ),
                   textInputAction: TextInputAction.next,
@@ -481,7 +470,7 @@ class _PersonFormContentState extends State<_PersonFormContent> {
                 child: TextField(
                   controller: _avatarColorController,
                   enabled: !_saving,
-                  decoration: _sectionFieldDecoration.copyWith(
+                  decoration: caleeSectionFieldDecoration.copyWith(
                     hintText: 'Avatar colour  (#FFCC00)',
                   ),
                   textInputAction: TextInputAction.next,
@@ -546,7 +535,7 @@ class _PersonFormContentState extends State<_PersonFormContent> {
                 child: TextField(
                   controller: _sortOrderController,
                   enabled: !_saving,
-                  decoration: _sectionFieldDecoration.copyWith(
+                  decoration: caleeSectionFieldDecoration.copyWith(
                     hintText: 'Sort order',
                   ),
                   keyboardType: TextInputType.number,
