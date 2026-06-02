@@ -823,44 +823,67 @@ class CaleeSectionDropdownRow<T> extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        CaleeSpacing.md,
-        0,
-        CaleeSpacing.sm,
-        0,
-      ),
-      child: Row(
-        children: [
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 16,
-              color:
-                  enabled ? CaleeColors.textPrimary : CaleeColors.textTertiary,
-            ),
-          ),
-          const Spacer(),
-          Flexible(
-            child: DropdownButton<T>(
-              value: value,
-              underline: const SizedBox.shrink(),
-              icon: const Icon(
-                Icons.chevron_right,
-                size: 20,
-                color: CaleeColors.textTertiary,
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: CaleeSpacing.rowHeight),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          CaleeSpacing.md,
+          0,
+          CaleeSpacing.sm,
+          0,
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 16,
+                  color: enabled
+                      ? CaleeColors.textPrimary
+                      : CaleeColors.textTertiary,
+                ),
               ),
-              style: TextStyle(
-                fontSize: 16,
-                color: enabled
-                    ? CaleeColors.textSecondary
-                    : CaleeColors.textTertiary,
-              ),
-              items: items,
-              onChanged: enabled ? onChanged : null,
             ),
-          ),
-        ],
+            const SizedBox(width: CaleeSpacing.sm),
+            Expanded(
+              child: DropdownButton<T>(
+                value: value,
+                isExpanded: true,
+                underline: const SizedBox.shrink(),
+                icon: const Icon(
+                  Icons.chevron_right,
+                  size: 20,
+                  color: CaleeColors.textTertiary,
+                ),
+                style: TextStyle(
+                  fontSize: 16,
+                  color: enabled
+                      ? CaleeColors.textSecondary
+                      : CaleeColors.textTertiary,
+                ),
+                selectedItemBuilder: (context) => items
+                    .map(
+                      (item) => Align(
+                        alignment: Alignment.centerRight,
+                        child: DefaultTextStyle.merge(
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.right,
+                          child: item.child,
+                        ),
+                      ),
+                    )
+                    .toList(),
+                items: items,
+                onChanged: enabled ? onChanged : null,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
