@@ -687,6 +687,55 @@ const caleeSectionFieldDecoration = InputDecoration(
 );
 
 // ─────────────────────────────────────────────
+// CaleeSectionSwitchRow
+// ─────────────────────────────────────────────
+
+/// A labelled switch row for use inside a [CaleeSection].
+/// Shows [label] on the left and a [Switch] on the right.
+/// Pass [enabled] = false to disable the switch.
+class CaleeSectionSwitchRow extends StatelessWidget {
+  const CaleeSectionSwitchRow({
+    super.key,
+    required this.label,
+    required this.value,
+    required this.onChanged,
+    this.enabled = true,
+  });
+
+  final String label;
+  final bool value;
+  final ValueChanged<bool>? onChanged;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: CaleeSpacing.md,
+        vertical: 6,
+      ),
+      child: Row(
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 16,
+              color: enabled
+                  ? CaleeColors.textPrimary
+                  : CaleeColors.textTertiary,
+            ),
+          ),
+          const Spacer(),
+          Switch(
+            value: value,
+            onChanged: enabled ? onChanged : null,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 // CaleeSectionPickerRow
 // ─────────────────────────────────────────────
 

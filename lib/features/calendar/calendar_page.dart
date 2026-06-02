@@ -1669,30 +1669,11 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                         const SizedBox(height: CaleeSpacing.sectionSpacing),
                         CaleeSection(
                           children: [
-                            // All day switch
-                            Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: CaleeSpacing.md,
-                                vertical: 6,
-                              ),
-                              child: Row(
-                                children: [
-                                  const Text(
-                                    'All day',
-                                    style: TextStyle(
-                                      fontSize: 16,
-                                      color: CaleeColors.textPrimary,
-                                    ),
-                                  ),
-                                  const Spacer(),
-                                  Switch(
-                                    value: _allDay,
-                                    onChanged: _isSubmitting
-                                        ? null
-                                        : (v) => setState(() => _allDay = v),
-                                  ),
-                                ],
-                              ),
+                            CaleeSectionSwitchRow(
+                              label: 'All day',
+                              value: _allDay,
+                              enabled: !_isSubmitting,
+                              onChanged: (v) => setState(() => _allDay = v),
                             ),
                             if (_allDay) ...[
                               CaleeSectionPickerRow(
