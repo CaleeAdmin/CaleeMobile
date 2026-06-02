@@ -419,33 +419,17 @@ class _PersonFormContentState extends State<_PersonFormContent> {
           // ── Person ─────────────────────────────────────────────────────
           CaleeSection(
             children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: CaleeSpacing.md,
-                  vertical: 2,
-                ),
-                child: TextField(
-                  controller: _displayNameController,
-                  enabled: !_saving,
-                  decoration: caleeSectionFieldDecoration.copyWith(
-                    hintText: 'Name',
-                  ),
-                  textInputAction: TextInputAction.next,
-                ),
+              CaleeSectionTextFormField(
+                controller: _displayNameController,
+                enabled: !_saving,
+                hintText: 'Name',
+                textInputAction: TextInputAction.next,
               ),
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: CaleeSpacing.md,
-                  vertical: 2,
-                ),
-                child: TextField(
-                  controller: _avatarColorController,
-                  enabled: !_saving,
-                  decoration: caleeSectionFieldDecoration.copyWith(
-                    hintText: 'Avatar colour  (#FFCC00)',
-                  ),
-                  textInputAction: TextInputAction.next,
-                ),
+              CaleeSectionTextFormField(
+                controller: _avatarColorController,
+                enabled: !_saving,
+                hintText: 'Avatar colour  (#FFCC00)',
+                textInputAction: TextInputAction.next,
               ),
             ],
           ),
@@ -468,19 +452,11 @@ class _PersonFormContentState extends State<_PersonFormContent> {
                 },
                 enabled: !_saving,
               ),
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: CaleeSpacing.md,
-                  vertical: 2,
-                ),
-                child: TextField(
-                  controller: _sortOrderController,
-                  enabled: !_saving,
-                  decoration: caleeSectionFieldDecoration.copyWith(
-                    hintText: 'Sort order',
-                  ),
-                  keyboardType: TextInputType.number,
-                ),
+              CaleeSectionTextFormField(
+                controller: _sortOrderController,
+                enabled: !_saving,
+                hintText: 'Sort order',
+                keyboardType: TextInputType.number,
               ),
             ],
           ),
