@@ -619,7 +619,7 @@ class CaleeColorDot extends StatelessWidget {
 class CaleeCheckCircle extends StatelessWidget {
   const CaleeCheckCircle({
     required this.isChecked,
-    required this.onTap,
+    this.onTap,
     this.isLoading = false,
     this.color,
     this.size = 24,
@@ -627,7 +627,7 @@ class CaleeCheckCircle extends StatelessWidget {
   });
 
   final bool isChecked;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
   final bool isLoading;
   final Color? color;
   final double size;
@@ -647,24 +647,26 @@ class CaleeCheckCircle extends StatelessWidget {
       );
     }
 
+    final icon = isChecked
+        ? Icon(
+            Icons.check_circle,
+            size: size,
+            color: onTap != null ? effectiveColor : CaleeColors.textTertiary,
+          )
+        : Icon(
+            Icons.radio_button_unchecked,
+            size: size,
+            color: CaleeColors.textTertiary,
+          );
+
+    if (onTap == null) {
+      return SizedBox(width: size, height: size, child: icon);
+    }
+
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
-      child: SizedBox(
-        width: size,
-        height: size,
-        child: isChecked
-            ? Icon(
-                Icons.check_circle,
-                size: size,
-                color: effectiveColor,
-              )
-            : Icon(
-                Icons.radio_button_unchecked,
-                size: size,
-                color: CaleeColors.textTertiary,
-              ),
-      ),
+      child: SizedBox(width: size, height: size, child: icon),
     );
   }
 }

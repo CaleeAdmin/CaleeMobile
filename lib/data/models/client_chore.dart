@@ -112,13 +112,9 @@ class ClientChore {
   }
 
   bool get canToggleCompletion {
-    if (completionActionId.trim().isEmpty) {
-      return false;
-    }
-
-    return section == 'todoToday' ||
-        section == 'overdue' ||
-        section == 'doneToday';
+    if (completionActionId.trim().isEmpty) return false;
+    if (isCompletionLog || section == 'history') return false;
+    return true;
   }
 
   bool get hasAssignee =>
