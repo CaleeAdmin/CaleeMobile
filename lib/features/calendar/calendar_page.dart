@@ -1867,40 +1867,16 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                       const SizedBox(height: CaleeSpacing.sectionSpacing),
                       CaleeSection(
                         children: [
-                          Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: CaleeSpacing.md,
-                              vertical: 2,
-                            ),
-                            child: TextFormField(
-                              controller: _locationController,
-                              enabled: !_isSubmitting,
-                              style: const TextStyle(
-                                fontSize: 16,
-                                color: CaleeColors.textPrimary,
-                              ),
-                              decoration: caleeSectionFieldDecoration.copyWith(
-                                hintText: 'Location',
-                              ),
-                            ),
+                          CaleeSectionTextFormField(
+                            controller: _locationController,
+                            enabled: !_isSubmitting,
+                            hintText: 'Location',
                           ),
-                          Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: CaleeSpacing.md,
-                              vertical: 2,
-                            ),
-                            child: TextFormField(
-                              controller: _descriptionController,
-                              enabled: !_isSubmitting,
-                              maxLines: 3,
-                              style: const TextStyle(
-                                fontSize: 16,
-                                color: CaleeColors.textPrimary,
-                              ),
-                              decoration: caleeSectionFieldDecoration.copyWith(
-                                hintText: 'Notes',
-                              ),
-                            ),
+                          CaleeSectionTextFormField(
+                            controller: _descriptionController,
+                            enabled: !_isSubmitting,
+                            hintText: 'Notes',
+                            maxLines: 3,
                           ),
                         ],
                       ),
