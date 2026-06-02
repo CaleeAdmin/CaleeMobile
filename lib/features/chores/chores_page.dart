@@ -1662,45 +1662,19 @@ class _CreateChoreSheetState extends State<_CreateChoreSheet> {
                       });
                     },
                   ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: CaleeSpacing.md,
-                      vertical: 2,
-                    ),
-                    child: Row(
-                      children: [
-                        const Text(
-                          'Points',
-                          style: TextStyle(
-                            fontSize: 16,
-                            color: CaleeColors.textPrimary,
-                          ),
-                        ),
-                        Expanded(
-                          child: TextFormField(
-                            controller: _pointsController,
-                            enabled: !_isSubmitting,
-                            keyboardType: TextInputType.number,
-                            textAlign: TextAlign.right,
-                            style: const TextStyle(
-                              fontSize: 16,
-                              color: CaleeColors.textSecondary,
-                            ),
-                            decoration: caleeSectionFieldDecoration,
-                            validator: (value) {
-                              final points =
-                                  int.tryParse((value ?? '').trim());
-                              if (points == null ||
-                                  points < 0 ||
-                                  points > 100000) {
-                                return 'Enter valid points';
-                              }
-                              return null;
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
+                  CaleeSectionLabeledTextFormField(
+                    label: 'Points',
+                    controller: _pointsController,
+                    enabled: !_isSubmitting,
+                    keyboardType: TextInputType.number,
+                    textAlign: TextAlign.right,
+                    validator: (value) {
+                      final points = int.tryParse((value ?? '').trim());
+                      if (points == null || points < 0 || points > 100000) {
+                        return 'Enter valid points';
+                      }
+                      return null;
+                    },
                   ),
                 ],
               ),
@@ -2023,45 +1997,19 @@ class _EditChoreSheetState extends State<_EditChoreSheet> {
                       });
                     },
                   ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: CaleeSpacing.md,
-                      vertical: 2,
-                    ),
-                    child: Row(
-                      children: [
-                        const Text(
-                          'Points',
-                          style: TextStyle(
-                            fontSize: 16,
-                            color: CaleeColors.textPrimary,
-                          ),
-                        ),
-                        Expanded(
-                          child: TextFormField(
-                            controller: _pointsController,
-                            enabled: !_isSubmitting,
-                            keyboardType: TextInputType.number,
-                            textAlign: TextAlign.right,
-                            style: const TextStyle(
-                              fontSize: 16,
-                              color: CaleeColors.textSecondary,
-                            ),
-                            decoration: caleeSectionFieldDecoration,
-                            validator: (value) {
-                              final points =
-                                  int.tryParse((value ?? '').trim());
-                              if (points == null ||
-                                  points < 0 ||
-                                  points > 100000) {
-                                return 'Enter valid points';
-                              }
-                              return null;
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
+                  CaleeSectionLabeledTextFormField(
+                    label: 'Points',
+                    controller: _pointsController,
+                    enabled: !_isSubmitting,
+                    keyboardType: TextInputType.number,
+                    textAlign: TextAlign.right,
+                    validator: (value) {
+                      final points = int.tryParse((value ?? '').trim());
+                      if (points == null || points < 0 || points > 100000) {
+                        return 'Enter valid points';
+                      }
+                      return null;
+                    },
                   ),
                 ],
               ),
