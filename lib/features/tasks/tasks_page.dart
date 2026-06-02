@@ -1053,6 +1053,7 @@ class _TaskListChooser extends StatelessWidget {
         ),
         const SizedBox(height: CaleeSpacing.sectionSpacing),
         CaleeSection(
+          title: 'Add',
           children: [
             CaleeListRow(
               title: 'New Task List',
