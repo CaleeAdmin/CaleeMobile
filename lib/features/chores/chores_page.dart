@@ -7,6 +7,7 @@ import '../settings/household_people_page.dart';
 import '../../data/models/client_calendar.dart';
 import '../../data/models/client_chore.dart';
 import '../../data/models/client_chore_metadata.dart';
+import 'chore_grouping.dart';
 import '../../data/models/client_person.dart';
 import '../../ui/calee_theme.dart';
 import '../../ui/calee_widgets.dart';
@@ -57,14 +58,6 @@ String _choreErrorMessage(Object error, String fallback) {
   return fallback;
 }
 
-String _rruleLabel(String? recurrence) {
-  final rrule = recurrence?.trim().toUpperCase();
-  if (rrule == 'FREQ=DAILY') return 'Daily';
-  if (rrule == 'FREQ=WEEKLY') return 'Weekly';
-  if (rrule == 'FREQ=MONTHLY') return 'Monthly';
-  return '';
-}
-
 // ─────────────────────────────────────────────
 // ChoresPage
 // ─────────────────────────────────────────────
@@ -91,6 +84,7 @@ class _ChoresPageState extends State<ChoresPage> {
   late Future<_ChoresOverview> _overviewFuture;
   final Set<String> _updatingChoreIds = {};
   String _assigneeFilter = 'all';
+  bool _historyExpanded = false;
 
   List<ClientService> get _portalServices =>
       widget.services.where((service) => service.id == 'portal').toList();
@@ -721,24 +715,7 @@ class _ChoresPageState extends State<ChoresPage> {
   Map<String, List<ClientChore>> _groupChoresBySection(
     List<ClientChore> chores,
   ) {
-    final grouped = <String, List<ClientChore>>{};
-
-    for (final chore in chores) {
-      final section = chore.section.trim().isEmpty ? 'future' : chore.section;
-      grouped.putIfAbsent(section, () => []).add(chore);
-    }
-
-    for (final group in grouped.values) {
-      group.sort((a, b) {
-        final aDate = a.scheduledDate ?? a.scheduledAt ?? '';
-        final bDate = b.scheduledDate ?? b.scheduledAt ?? '';
-        final dateCompare = aDate.compareTo(bDate);
-        if (dateCompare != 0) return dateCompare;
-        return a.title.toLowerCase().compareTo(b.title.toLowerCase());
-      });
-    }
-
-    return grouped;
+    return groupChoresBySection(chores, DateTime.now());
   }
 
   int _todayCompletionPoints(List<ClientChore> chores) {
@@ -786,11 +763,71 @@ class _ChoresPageState extends State<ChoresPage> {
         return 'Done today';
       case 'future':
         return 'Upcoming';
+      case 'tomorrow':
+        return 'Tomorrow';
+      case 'laterThisWeek':
+        return 'Later this week';
+      case 'later':
+        return 'Later';
       case 'history':
         return 'History';
       default:
         return 'Other';
     }
+  }
+
+  Widget _buildSectionWidget(
+    String section,
+    List<ClientChore> sectionChores,
+    List<ClientCalendar> choreCalendars,
+  ) {
+    if (section == 'history' && !_historyExpanded) {
+      return CaleeSection(
+        children: [
+          CaleeListRow(
+            leading: const Icon(
+              Icons.history_outlined,
+              size: 22,
+              color: CaleeColors.textTertiary,
+            ),
+            title: 'Show history',
+            trailing: Text(
+              '${sectionChores.length}',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: CaleeColors.textSecondary,
+                  ),
+            ),
+            onTap: () => setState(() => _historyExpanded = true),
+          ),
+        ],
+      );
+    }
+
+    return CaleeSection(
+      title: _sectionTitle(section),
+      trailing: '${sectionChores.length}',
+      children: sectionChores
+          .map(
+            (chore) => _ChoreRow(
+              key: ValueKey(chore.completionActionId.isNotEmpty
+                  ? chore.completionActionId
+                  : chore.id),
+              chore: chore,
+              calendarName: _calendarNameForChore(chore, choreCalendars),
+              scheduledLabel: _formatScheduledAt(chore),
+              isUpdating: _updatingChoreIds.contains(chore.completionActionId),
+              onToggleCompletion: chore.canToggleCompletion
+                  ? () => _toggleChoreCompletion(chore)
+                  : null,
+              onMoreTap: chore.completionActionId.trim().isNotEmpty &&
+                      !chore.isCompletionLog &&
+                      chore.section != 'history'
+                  ? () => _showChoreActions(chore)
+                  : null,
+            ),
+          )
+          .toList(),
+    );
   }
 
   @override
@@ -867,12 +904,14 @@ class _ChoresPageState extends State<ChoresPage> {
             choreCalendars.where((c) => !c.readOnly).toList();
         final hasWritable = writableCalendars.isNotEmpty;
 
-        // Section order: urgent first, then today, done, upcoming, history
+        // Section order: urgent first, then today, done, upcoming split, history
         const sectionOrder = [
           'overdue',
           'todoToday',
           'doneToday',
-          'future',
+          'tomorrow',
+          'laterThisWeek',
+          'later',
           'history',
         ];
 
@@ -955,33 +994,10 @@ class _ChoresPageState extends State<ChoresPage> {
                   )
                 else
                   for (final section in activeSections) ...[
-                    CaleeSection(
-                      title: _sectionTitle(section),
-                      trailing: '${choresBySection[section]!.length}',
-                      children: choresBySection[section]!
-                          .map(
-                            (chore) => _ChoreRow(
-                              key: ValueKey(chore.completionActionId.isNotEmpty
-                                  ? chore.completionActionId
-                                  : chore.id),
-                              chore: chore,
-                              calendarName:
-                                  _calendarNameForChore(chore, choreCalendars),
-                              scheduledLabel: _formatScheduledAt(chore),
-                              isUpdating: _updatingChoreIds
-                                  .contains(chore.completionActionId),
-                              onToggleCompletion: chore.canToggleCompletion
-                                  ? () => _toggleChoreCompletion(chore)
-                                  : null,
-                              onMoreTap:
-                                  chore.completionActionId.trim().isNotEmpty &&
-                                          !chore.isCompletionLog &&
-                                          chore.section != 'history'
-                                      ? () => _showChoreActions(chore)
-                                      : null,
-                            ),
-                          )
-                          .toList(),
+                    _buildSectionWidget(
+                      section,
+                      choresBySection[section]!,
+                      choreCalendars,
                     ),
                     const SizedBox(height: CaleeSpacing.sectionSpacing),
                   ],
@@ -1322,22 +1338,12 @@ class _ChoreRow extends StatelessWidget {
     final isDone = chore.completedToday || chore.section == 'doneToday';
     final isHistory = chore.isCompletionLog || chore.section == 'history';
 
-    // Subtitle: date · assignee · recurrence · list name
-    final subtitleParts = <String>[];
-    if (scheduledLabel.isNotEmpty) subtitleParts.add(scheduledLabel);
-
-    if (!isHistory) {
-      final assigneeName = chore.assigneeName?.trim();
-      subtitleParts.add(
-        assigneeName != null && assigneeName.isNotEmpty
-            ? assigneeName
-            : 'Unassigned',
-      );
-    }
-
-    final recLabel = _rruleLabel(chore.recurrence);
-    if (recLabel.isNotEmpty) subtitleParts.add('Repeats $recLabel');
-    if (calendarName.isNotEmpty) subtitleParts.add(calendarName);
+    // Subtitle: assignee · pts · repeat · list name  (history: date · list name)
+    final subtitleParts = choreSubtitleParts(
+      chore: chore,
+      calendarName: calendarName,
+      scheduledLabel: scheduledLabel,
+    );
     final subtitle = subtitleParts.where((p) => p.isNotEmpty).join(' · ');
 
     // Leading widget
