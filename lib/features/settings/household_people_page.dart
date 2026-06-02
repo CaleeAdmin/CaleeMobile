@@ -8,6 +8,17 @@ import '../../ui/calee_theme.dart';
 import '../../ui/calee_widgets.dart';
 import '../people/add_person_sheet.dart';
 
+const _sectionFieldDecoration = InputDecoration(
+  border: InputBorder.none,
+  enabledBorder: InputBorder.none,
+  focusedBorder: InputBorder.none,
+  errorBorder: InputBorder.none,
+  focusedErrorBorder: InputBorder.none,
+  fillColor: Colors.transparent,
+  filled: false,
+  contentPadding: EdgeInsets.symmetric(vertical: 9),
+);
+
 class HouseholdPeoplePage extends StatefulWidget {
   const HouseholdPeoplePage({
     required this.hubClient,
@@ -104,10 +115,10 @@ class _HouseholdPeoplePageState extends State<HouseholdPeoplePage> {
 
     final saved = await CaleeBottomSheet.show<bool>(
       context: context,
-      title: 'Edit person',
+      title: 'Edit Person',
       child: _PersonFormContent(
         initialPerson: person,
-        submitLabel: 'Save changes',
+        submitLabel: 'Save Changes',
         onSubmit: ({
           required String displayName,
           required String? avatarColor,
@@ -136,29 +147,15 @@ class _HouseholdPeoplePageState extends State<HouseholdPeoplePage> {
     final household = _selectedHousehold;
     if (household == null) return;
 
-    final confirmed = await showDialog<bool>(
+    final confirmed = await CaleeDestructiveDialog.show(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Archive person?'),
-          content: Text(
-            'Archive ${person.displayName}? They will be hidden from the active people list.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Archive'),
-            ),
-          ],
-        );
-      },
+      title: 'Archive Person?',
+      body:
+          'Archive "${person.displayName}"? They will be hidden from the active people list.',
+      confirmLabel: 'Archive',
     );
 
-    if (confirmed != true) return;
+    if (!confirmed) return;
 
     try {
       await widget.hubClient.archivePerson(
@@ -181,12 +178,12 @@ class _HouseholdPeoplePageState extends State<HouseholdPeoplePage> {
       title: person.displayName,
       actions: [
         CaleeAction(
-          label: 'Edit person',
+          label: 'Edit Person',
           icon: Icons.edit_outlined,
           onTap: () => _openEditSheet(person),
         ),
         CaleeAction(
-          label: 'Archive person',
+          label: 'Archive Person',
           icon: Icons.archive_outlined,
           isDestructive: true,
           onTap: () => _confirmArchive(person),
@@ -209,10 +206,9 @@ class _HouseholdPeoplePageState extends State<HouseholdPeoplePage> {
   Widget build(BuildContext context) {
     final household = _selectedHousehold;
 
-    return Scaffold(
-      backgroundColor: CaleeColors.scaffoldBackground,
+    return CaleeScaffold(
       appBar: AppBar(
-        title: const Text('Household people'),
+        title: const Text('Household People'),
       ),
       floatingActionButton: household == null
           ? null
@@ -236,39 +232,60 @@ class _HouseholdPeoplePageState extends State<HouseholdPeoplePage> {
                     title: 'Household',
                     children: [
                       Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: CaleeSpacing.md,
-                          vertical: CaleeSpacing.sm,
+                        padding: const EdgeInsets.fromLTRB(
+                          CaleeSpacing.md,
+                          0,
+                          CaleeSpacing.sm,
+                          0,
                         ),
-                        child: DropdownButtonFormField<String>(
-                          initialValue: household.id,
-                          decoration: const InputDecoration(
-                            labelText: 'Household',
-                          ),
-                          items: [
-                            for (final item in widget.households)
-                              DropdownMenuItem<String>(
-                                value: item.id,
-                                child: Text(
-                                  item.name.isNotEmpty
-                                      ? item.name
-                                      : 'Unnamed household',
-                                ),
+                        child: Row(
+                          children: [
+                            const Text(
+                              'Household',
+                              style: TextStyle(
+                                fontSize: 16,
+                                color: CaleeColors.textPrimary,
                               ),
+                            ),
+                            const Spacer(),
+                            DropdownButton<String>(
+                              value: household.id,
+                              underline: const SizedBox.shrink(),
+                              icon: const Icon(
+                                Icons.chevron_right,
+                                size: 20,
+                                color: CaleeColors.textTertiary,
+                              ),
+                              style: const TextStyle(
+                                fontSize: 16,
+                                color: CaleeColors.textSecondary,
+                              ),
+                              items: [
+                                for (final item in widget.households)
+                                  DropdownMenuItem<String>(
+                                    value: item.id,
+                                    child: Text(
+                                      item.name.isNotEmpty
+                                          ? item.name
+                                          : 'Unnamed household',
+                                    ),
+                                  ),
+                              ],
+                              onChanged: (value) {
+                                final next = widget.households
+                                    .where((item) => item.id == value)
+                                    .cast<ClientContext?>()
+                                    .firstOrNull;
+
+                                if (next == null) return;
+
+                                setState(() {
+                                  _selectedHousehold = next;
+                                  _future = _loadPeople();
+                                });
+                              },
+                            ),
                           ],
-                          onChanged: (value) {
-                            final next = widget.households
-                                .where((item) => item.id == value)
-                                .cast<ClientContext?>()
-                                .firstOrNull;
-
-                            if (next == null) return;
-
-                            setState(() {
-                              _selectedHousehold = next;
-                              _future = _loadPeople();
-                            });
-                          },
                         ),
                       ),
                     ],
@@ -305,7 +322,7 @@ class _HouseholdPeoplePageState extends State<HouseholdPeoplePage> {
                       title: 'People',
                       children: [
                         CaleeListRow(
-                          title: 'Add person',
+                          title: 'Add Person',
                           subtitle:
                               'Create a child, parent, or household member',
                           leading: const Icon(
@@ -434,62 +451,122 @@ class _PersonFormContentState extends State<_PersonFormContent> {
 
   @override
   Widget build(BuildContext context) {
-    return ListView(
-      shrinkWrap: true,
-      children: [
-        TextField(
-          controller: _displayNameController,
-          decoration: const InputDecoration(
-            labelText: 'Name',
-            hintText: 'e.g. Sam',
+    return SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // ── Person ─────────────────────────────────────────────────────
+          CaleeSection(
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: CaleeSpacing.md,
+                  vertical: 2,
+                ),
+                child: TextField(
+                  controller: _displayNameController,
+                  enabled: !_saving,
+                  decoration: _sectionFieldDecoration.copyWith(
+                    hintText: 'Name',
+                  ),
+                  textInputAction: TextInputAction.next,
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: CaleeSpacing.md,
+                  vertical: 2,
+                ),
+                child: TextField(
+                  controller: _avatarColorController,
+                  enabled: !_saving,
+                  decoration: _sectionFieldDecoration.copyWith(
+                    hintText: 'Avatar colour  (#FFCC00)',
+                  ),
+                  textInputAction: TextInputAction.next,
+                ),
+              ),
+            ],
           ),
-          textInputAction: TextInputAction.next,
-        ),
-        const SizedBox(height: CaleeSpacing.md),
-        TextField(
-          controller: _avatarColorController,
-          decoration: const InputDecoration(
-            labelText: 'Avatar colour',
-            hintText: '#FFCC00',
+          const SizedBox(height: CaleeSpacing.md),
+          // ── Details ────────────────────────────────────────────────────
+          CaleeSection(
+            title: 'Details',
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  CaleeSpacing.md,
+                  0,
+                  CaleeSpacing.sm,
+                  0,
+                ),
+                child: Row(
+                  children: [
+                    const Text(
+                      'Role',
+                      style: TextStyle(
+                        fontSize: 16,
+                        color: CaleeColors.textPrimary,
+                      ),
+                    ),
+                    const Spacer(),
+                    DropdownButton<String>(
+                      value: _role,
+                      underline: const SizedBox.shrink(),
+                      icon: const Icon(
+                        Icons.chevron_right,
+                        size: 20,
+                        color: CaleeColors.textTertiary,
+                      ),
+                      style: const TextStyle(
+                        fontSize: 16,
+                        color: CaleeColors.textSecondary,
+                      ),
+                      items: const [
+                        DropdownMenuItem(value: 'member', child: Text('Member')),
+                        DropdownMenuItem(value: 'child', child: Text('Child')),
+                        DropdownMenuItem(value: 'parent', child: Text('Parent')),
+                      ],
+                      onChanged: _saving
+                          ? null
+                          : (value) {
+                              if (value == null) return;
+                              setState(() => _role = value);
+                            },
+                    ),
+                  ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: CaleeSpacing.md,
+                  vertical: 2,
+                ),
+                child: TextField(
+                  controller: _sortOrderController,
+                  enabled: !_saving,
+                  decoration: _sectionFieldDecoration.copyWith(
+                    hintText: 'Sort order',
+                  ),
+                  keyboardType: TextInputType.number,
+                ),
+              ),
+            ],
           ),
-          textInputAction: TextInputAction.next,
-        ),
-        const SizedBox(height: CaleeSpacing.md),
-        DropdownButtonFormField<String>(
-          initialValue: _role,
-          decoration: const InputDecoration(labelText: 'Role'),
-          items: const [
-            DropdownMenuItem(value: 'member', child: Text('Member')),
-            DropdownMenuItem(value: 'child', child: Text('Child')),
-            DropdownMenuItem(value: 'parent', child: Text('Parent')),
-          ],
-          onChanged: _saving
-              ? null
-              : (value) {
-                  if (value == null) return;
-                  setState(() => _role = value);
-                },
-        ),
-        const SizedBox(height: CaleeSpacing.md),
-        TextField(
-          controller: _sortOrderController,
-          decoration: const InputDecoration(
-            labelText: 'Sort order',
+          const SizedBox(height: CaleeSpacing.lg),
+          FilledButton(
+            onPressed: _saving ? null : _submit,
+            child: _saving
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Text(widget.submitLabel),
           ),
-          keyboardType: TextInputType.number,
-        ),
-        const SizedBox(height: CaleeSpacing.lg),
-        FilledButton(
-          onPressed: _saving ? null : _submit,
-          child: _saving
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : Text(widget.submitLabel),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
