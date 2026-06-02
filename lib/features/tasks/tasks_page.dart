@@ -420,8 +420,8 @@ class _TasksPageState extends State<TasksPage> {
           return CaleeScaffold(
             body: CaleeEmptyState(
               icon: Icons.cloud_off_outlined,
-              title: 'Unable to load tasks',
-              body: 'Check your connection, then try again.',
+              title: 'We couldn\'t load your tasks',
+              body: 'Check your connection and try again.',
               action: FilledButton(
                 onPressed: _reloadOverview,
                 child: const Text('Try again'),
@@ -436,7 +436,7 @@ class _TasksPageState extends State<TasksPage> {
             body: CaleeEmptyState(
               icon: Icons.checklist_outlined,
               title: 'No task lists yet',
-              body: 'Create a task list to start tracking tasks.',
+              body: 'Create a task list to start keeping track.',
               action: FilledButton.icon(
                 onPressed: _openCollectionCreateShortcut,
                 icon: const Icon(Icons.add),
@@ -464,7 +464,7 @@ class _TasksPageState extends State<TasksPage> {
             body: CaleeEmptyState(
               icon: Icons.checklist_outlined,
               title: 'No task lists yet',
-              body: 'Create a task list to start tracking tasks.',
+              body: 'Create a task list to start keeping track.',
               action: FilledButton.icon(
                 onPressed: _openCollectionCreateShortcut,
                 icon: const Icon(Icons.add),
@@ -547,7 +547,7 @@ class _TasksPageState extends State<TasksPage> {
                     children: [
                       CaleeListRow(
                         title: 'No open tasks',
-                        subtitle: 'Add a task when something needs doing.',
+                        subtitle: 'You\'re all caught up.',
                         leading: const Icon(
                           Icons.check_circle_outline,
                           color: CaleeColors.textTertiary,
