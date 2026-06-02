@@ -1630,29 +1630,18 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                       CaleeSection(
                         children: [
                           // Title field
-                          Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: CaleeSpacing.md,
-                              vertical: 2,
-                            ),
-                            child: TextFormField(
-                              controller: _titleController,
-                              enabled: !_isSubmitting,
-                              autofocus: true,
-                              style: const TextStyle(
-                                fontSize: 16,
-                                color: CaleeColors.textPrimary,
-                              ),
-                              decoration: caleeSectionFieldDecoration.copyWith(
-                                hintText: 'Title',
-                              ),
-                              validator: (value) {
-                                if ((value ?? '').trim().isEmpty) {
-                                  return 'Enter a title';
-                                }
-                                return null;
-                              },
-                            ),
+                          CaleeSectionTextFormField(
+                            controller: _titleController,
+                            enabled: !_isSubmitting,
+                            autofocus: true,
+                            hintText: 'Title',
+                            textInputAction: TextInputAction.next,
+                            validator: (value) {
+                              if ((value ?? '').trim().isEmpty) {
+                                return 'Enter a title';
+                              }
+                              return null;
+                            },
                           ),
                           // Calendar picker
                           CaleeSectionDropdownRow<ClientCalendar>(
