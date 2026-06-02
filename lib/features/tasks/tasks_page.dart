@@ -1173,55 +1173,23 @@ class _CreateTaskFormState extends State<_CreateTaskForm> {
                     },
                   ),
                 ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(
-                    CaleeSpacing.md,
-                    0,
-                    CaleeSpacing.sm,
-                    0,
-                  ),
-                  child: Row(
-                    children: [
-                      const Text(
-                        'Task List',
-                        style: TextStyle(
-                          fontSize: 16,
-                          color: CaleeColors.textPrimary,
+                CaleeSectionDropdownRow<ClientCalendar>(
+                  label: 'Task List',
+                  value: _selectedTaskCalendar,
+                  enabled: !_isSubmitting,
+                  items: widget.taskCalendars
+                      .map(
+                        (calendar) => DropdownMenuItem(
+                          value: calendar,
+                          child: Text(calendar.name),
                         ),
-                      ),
-                      const Spacer(),
-                      Flexible(
-                        child: DropdownButton<ClientCalendar>(
-                          value: _selectedTaskCalendar,
-                          underline: const SizedBox.shrink(),
-                          icon: const Icon(
-                            Icons.chevron_right,
-                            size: 20,
-                            color: CaleeColors.textTertiary,
-                          ),
-                          style: const TextStyle(
-                            fontSize: 16,
-                            color: CaleeColors.textSecondary,
-                          ),
-                          items: widget.taskCalendars
-                              .map(
-                                (calendar) => DropdownMenuItem(
-                                  value: calendar,
-                                  child: Text(calendar.name),
-                                ),
-                              )
-                              .toList(),
-                          onChanged: _isSubmitting
-                              ? null
-                              : (calendar) {
-                                  setState(() {
-                                    _selectedTaskCalendar = calendar;
-                                  });
-                                },
-                        ),
-                      ),
-                    ],
-                  ),
+                      )
+                      .toList(),
+                  onChanged: (calendar) {
+                    setState(() {
+                      _selectedTaskCalendar = calendar;
+                    });
+                  },
                 ),
               ],
             ),
