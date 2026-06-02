@@ -92,32 +92,38 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Future<void> _setFirstDayOfWeek(FirstDayOfWeek value) async {
     await _prefs.saveFirstDayOfWeek(value);
-    if (mounted) setState(() => _preferences = StoredPreferences(
-          firstDayOfWeek: value,
-          timeFormat: _preferences.timeFormat,
-          defaultCalendarId: _preferences.defaultCalendarId,
-          defaultTaskListId: _preferences.defaultTaskListId,
-        ));
+    if (mounted) {
+      setState(() => _preferences = StoredPreferences(
+            firstDayOfWeek: value,
+            timeFormat: _preferences.timeFormat,
+            defaultCalendarId: _preferences.defaultCalendarId,
+            defaultTaskListId: _preferences.defaultTaskListId,
+          ));
+    }
   }
 
   Future<void> _setTimeFormat(TimeFormatPref value) async {
     await _prefs.saveTimeFormat(value);
-    if (mounted) setState(() => _preferences = StoredPreferences(
-          firstDayOfWeek: _preferences.firstDayOfWeek,
-          timeFormat: value,
-          defaultCalendarId: _preferences.defaultCalendarId,
-          defaultTaskListId: _preferences.defaultTaskListId,
-        ));
+    if (mounted) {
+      setState(() => _preferences = StoredPreferences(
+            firstDayOfWeek: _preferences.firstDayOfWeek,
+            timeFormat: value,
+            defaultCalendarId: _preferences.defaultCalendarId,
+            defaultTaskListId: _preferences.defaultTaskListId,
+          ));
+    }
   }
 
   Future<void> _setDefaultCalendar(ClientCalendar? cal) async {
     await _prefs.saveDefaultCalendarId(cal?.id);
-    if (mounted) setState(() => _preferences = StoredPreferences(
-          firstDayOfWeek: _preferences.firstDayOfWeek,
-          timeFormat: _preferences.timeFormat,
-          defaultCalendarId: cal?.id,
-          defaultTaskListId: _preferences.defaultTaskListId,
-        ));
+    if (mounted) {
+      setState(() => _preferences = StoredPreferences(
+            firstDayOfWeek: _preferences.firstDayOfWeek,
+            timeFormat: _preferences.timeFormat,
+            defaultCalendarId: cal?.id,
+            defaultTaskListId: _preferences.defaultTaskListId,
+          ));
+    }
   }
 
   ClientCalendar? _findById(List<ClientCalendar> list, String id) {
@@ -129,12 +135,14 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Future<void> _setDefaultTaskList(ClientCalendar? cal) async {
     await _prefs.saveDefaultTaskListId(cal?.id);
-    if (mounted) setState(() => _preferences = StoredPreferences(
-          firstDayOfWeek: _preferences.firstDayOfWeek,
-          timeFormat: _preferences.timeFormat,
-          defaultCalendarId: _preferences.defaultCalendarId,
-          defaultTaskListId: cal?.id,
-        ));
+    if (mounted) {
+      setState(() => _preferences = StoredPreferences(
+            firstDayOfWeek: _preferences.firstDayOfWeek,
+            timeFormat: _preferences.timeFormat,
+            defaultCalendarId: _preferences.defaultCalendarId,
+            defaultTaskListId: cal?.id,
+          ));
+    }
   }
 
   @override
