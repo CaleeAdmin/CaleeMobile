@@ -420,7 +420,14 @@ class _ChoresPageState extends State<ChoresPage> {
     final choreId = chore.completionActionId;
     if (choreId.trim().isEmpty) return;
 
+    final isDone = chore.completedToday || chore.section == 'doneToday';
     final actions = <CaleeAction>[
+      if (chore.canToggleCompletion)
+        CaleeAction(
+          label: isDone ? 'Undo Done' : 'Mark Done',
+          icon: isDone ? Icons.unpublished_outlined : Icons.check_circle_outline,
+          onTap: () => _toggleChoreCompletion(chore),
+        ),
       CaleeAction(
         label: 'Edit Chore',
         icon: Icons.edit_outlined,
@@ -1355,11 +1362,16 @@ class _ChoreRow extends StatelessWidget {
         color: CaleeColors.textTertiary,
       );
     } else {
-      leading = CaleeCheckCircle(
-        isChecked: isDone,
-        onTap: onToggleCompletion ?? () {},
-        isLoading: isUpdating,
-        size: 22,
+      leading = Semantics(
+        label: isDone ? 'Mark chore not complete' : 'Mark chore complete',
+        button: true,
+        excludeSemantics: true,
+        child: CaleeCheckCircle(
+          isChecked: isDone,
+          onTap: onToggleCompletion,
+          isLoading: isUpdating,
+          size: 22,
+        ),
       );
     }
 
@@ -1400,12 +1412,18 @@ class _ChoreRow extends StatelessWidget {
       titleStyle = const TextStyle(color: CaleeColors.textTertiary);
     }
 
+    // When the row is tappable, ensure trailing is non-null to suppress the
+    // auto-chevron that CaleeListRow adds when onTap is set and trailing is null.
+    final effectiveTrailing =
+        trailing ?? (onToggleCompletion != null ? const SizedBox.shrink() : null);
+
     return CaleeListRow(
       leading: leading,
       title: chore.title,
       subtitle: subtitle.isNotEmpty ? subtitle : null,
-      trailing: trailing,
+      trailing: effectiveTrailing,
       titleStyle: titleStyle,
+      onTap: onToggleCompletion,
     );
   }
 }
