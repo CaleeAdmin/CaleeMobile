@@ -62,7 +62,8 @@ class SettingsPage extends StatelessWidget {
           title: 'Manage',
           children: [
             CaleeListRow(
-              title: 'Lists & calendars',
+              title: 'Calendars & Lists',
+              subtitle: 'Manage calendars, task lists, and chore lists',
               leading: const Icon(
                 Icons.calendar_month_outlined,
                 size: 20,
@@ -81,10 +82,10 @@ class SettingsPage extends StatelessWidget {
               },
             ),
             CaleeListRow(
-              title: 'Household people',
+              title: 'Household People',
               subtitle: bootstrap.contexts.households.isEmpty
                   ? 'No household available'
-                  : 'Manage people for chores',
+                  : 'Manage people used for chores',
               leading: const Icon(
                 Icons.group_outlined,
                 size: 20,
