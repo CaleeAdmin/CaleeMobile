@@ -1574,44 +1574,6 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
 
   // ── Row builders ────────────────────────────────────────────────────────────
 
-  // Tappable row for date/time pickers — label on left, value + chevron right.
-  Widget _buildPickerRow(String label, String value, VoidCallback? onTap) {
-    return InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(
-          horizontal: CaleeSpacing.md,
-          vertical: 11,
-        ),
-        child: Row(
-          children: [
-            Text(
-              label,
-              style: const TextStyle(
-                fontSize: 16,
-                color: CaleeColors.textPrimary,
-              ),
-            ),
-            const Spacer(),
-            Text(
-              value,
-              style: const TextStyle(
-                fontSize: 16,
-                color: CaleeColors.textSecondary,
-              ),
-            ),
-            const SizedBox(width: CaleeSpacing.xs),
-            const Icon(
-              Icons.chevron_right,
-              size: 20,
-              color: CaleeColors.textTertiary,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   // Inline dropdown row — label on left, dropdown value + chevron right.
   Widget _buildDropdownRow<T extends Object>({
     required String label,
@@ -1674,18 +1636,6 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                     : 'Edit event'
         : 'Add event';
 
-    // Borderless text field decoration for fields embedded in section cards.
-    const InputDecoration sectionFieldDecoration = InputDecoration(
-      border: InputBorder.none,
-      enabledBorder: InputBorder.none,
-      focusedBorder: InputBorder.none,
-      errorBorder: InputBorder.none,
-      focusedErrorBorder: InputBorder.none,
-      fillColor: Colors.transparent,
-      filled: false,
-      contentPadding: EdgeInsets.symmetric(vertical: 9),
-    );
-
     return SafeArea(
       child: Container(
         color: CaleeColors.scaffoldBackground,
@@ -1741,7 +1691,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                                 fontSize: 16,
                                 color: CaleeColors.textPrimary,
                               ),
-                              decoration: sectionFieldDecoration.copyWith(
+                              decoration: caleeSectionFieldDecoration.copyWith(
                                 hintText: 'Title',
                               ),
                               validator: (value) {
@@ -1805,31 +1755,36 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                               ),
                             ),
                             if (_allDay) ...[
-                              _buildPickerRow(
-                                'Date',
-                                _dateLabel(_selectedDate),
-                                _isSubmitting ? null : _pickDate,
+                              CaleeSectionPickerRow(
+                                label: 'Date',
+                                value: _dateLabel(_selectedDate),
+                                onTap: _isSubmitting ? null : _pickDate,
+                                enabled: !_isSubmitting,
                               ),
-                              _buildPickerRow(
-                                'End',
-                                _dateLabel(_selectedEndDate),
-                                _isSubmitting ? null : _pickEndDate,
+                              CaleeSectionPickerRow(
+                                label: 'End',
+                                value: _dateLabel(_selectedEndDate),
+                                onTap: _isSubmitting ? null : _pickEndDate,
+                                enabled: !_isSubmitting,
                               ),
                             ] else ...[
-                              _buildPickerRow(
-                                'Date',
-                                _dateLabel(_selectedDate),
-                                _isSubmitting ? null : _pickDate,
+                              CaleeSectionPickerRow(
+                                label: 'Date',
+                                value: _dateLabel(_selectedDate),
+                                onTap: _isSubmitting ? null : _pickDate,
+                                enabled: !_isSubmitting,
                               ),
-                              _buildPickerRow(
-                                'Start',
-                                _timeLabel(_startTime),
-                                _isSubmitting ? null : _pickStartTime,
+                              CaleeSectionPickerRow(
+                                label: 'Start',
+                                value: _timeLabel(_startTime),
+                                onTap: _isSubmitting ? null : _pickStartTime,
+                                enabled: !_isSubmitting,
                               ),
-                              _buildPickerRow(
-                                'End',
-                                _timeLabel(_endTime),
-                                _isSubmitting ? null : _pickEndTime,
+                              CaleeSectionPickerRow(
+                                label: 'End',
+                                value: _timeLabel(_endTime),
+                                onTap: _isSubmitting ? null : _pickEndTime,
+                                enabled: !_isSubmitting,
                               ),
                             ],
                           ],
@@ -1906,10 +1861,13 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                                       },
                               ),
                               if (_recurrenceEnd == 'date')
-                                _buildPickerRow(
-                                  'Ends on',
-                                  _dateLabel(_recurrenceEndDate),
-                                  _isSubmitting ? null : _pickRecurrenceEndDate,
+                                CaleeSectionPickerRow(
+                                  label: 'Ends on',
+                                  value: _dateLabel(_recurrenceEndDate),
+                                  onTap: _isSubmitting
+                                      ? null
+                                      : _pickRecurrenceEndDate,
+                                  enabled: !_isSubmitting,
                                 ),
                               if (_recurrenceEnd == 'count')
                                 Padding(
@@ -1944,7 +1902,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                                             color: CaleeColors.textSecondary,
                                           ),
                                           decoration:
-                                              sectionFieldDecoration.copyWith(
+                                              caleeSectionFieldDecoration.copyWith(
                                             hintText: '10',
                                           ),
                                           validator: (value) {
@@ -2003,7 +1961,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                                 fontSize: 16,
                                 color: CaleeColors.textPrimary,
                               ),
-                              decoration: sectionFieldDecoration.copyWith(
+                              decoration: caleeSectionFieldDecoration.copyWith(
                                 hintText: 'Location',
                               ),
                             ),
@@ -2021,7 +1979,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                                 fontSize: 16,
                                 color: CaleeColors.textPrimary,
                               ),
-                              decoration: sectionFieldDecoration.copyWith(
+                              decoration: caleeSectionFieldDecoration.copyWith(
                                 hintText: 'Notes',
                               ),
                             ),
