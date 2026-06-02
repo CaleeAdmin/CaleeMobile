@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../data/api/calee_hub_client.dart';
+import '../../data/auth/calee_preferences.dart';
 import '../../data/models/client_bootstrap.dart';
 import '../settings/calendar_collections_page.dart';
 import '../../data/models/client_calendar.dart';
@@ -39,6 +40,10 @@ class _TasksPageState extends State<TasksPage> {
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
 
+  // Preferences
+  final _caleePrefs = CaleePreferences();
+  StoredPreferences _prefs = const StoredPreferences();
+
   @override
   void dispose() {
     _searchController.dispose();
@@ -57,14 +62,18 @@ class _TasksPageState extends State<TasksPage> {
     final from = _formatDate(DateTime(today.year - 2, 1, 1));
     final to = _formatDate(DateTime(today.year + 2, 12, 31));
 
-    final calendarList = await widget.hubClient.calendars(
-      accessToken: widget.accessToken,
-    );
-    final taskList = await widget.hubClient.tasks(
-      accessToken: widget.accessToken,
-      from: from,
-      to: to,
-    );
+    final results = await Future.wait([
+      _caleePrefs.load(),
+      widget.hubClient.calendars(accessToken: widget.accessToken),
+      widget.hubClient.tasks(accessToken: widget.accessToken, from: from, to: to),
+    ]);
+
+    final freshPrefs = results[0] as StoredPreferences;
+    final calendarList = results[1] as ClientCalendarList;
+    final taskList = results[2] as ClientTaskList;
+
+    // Update preferences (fire-and-forget; UI rebuilds on next setState).
+    _prefs = freshPrefs;
 
     return _TasksOverview(
       calendarList: calendarList,
@@ -137,6 +146,7 @@ class _TasksPageState extends State<TasksPage> {
       child: _CreateTaskForm(
         taskCalendars: taskCalendars,
         initialCalendar: _selectedCalendar,
+        defaultTaskListId: _prefs.defaultTaskListId,
         onCreate: _createTask,
       ),
     );
@@ -1089,10 +1099,12 @@ class _CreateTaskForm extends StatefulWidget {
     required this.taskCalendars,
     required this.onCreate,
     this.initialCalendar,
+    this.defaultTaskListId,
   });
 
   final List<ClientCalendar> taskCalendars;
   final ClientCalendar? initialCalendar;
+  final String? defaultTaskListId;
   final Future<void> Function({
     required ClientCalendar taskCalendar,
     required String title,
@@ -1116,11 +1128,20 @@ class _CreateTaskFormState extends State<_CreateTaskForm> {
   @override
   void initState() {
     super.initState();
-    // Use the pre-selected list if it still exists in the available calendars
+    // Priority: explicit filter selection > default task list pref > first list
     final initial = widget.initialCalendar;
     if (initial != null &&
         widget.taskCalendars.any((c) => c.id == initial.id)) {
       _selectedTaskCalendar = initial;
+    } else if (widget.defaultTaskListId != null) {
+      ClientCalendar? found;
+      for (final c in widget.taskCalendars) {
+        if (c.id == widget.defaultTaskListId) {
+          found = c;
+          break;
+        }
+      }
+      _selectedTaskCalendar = found ?? widget.taskCalendars.first;
     } else {
       _selectedTaskCalendar = widget.taskCalendars.first;
     }

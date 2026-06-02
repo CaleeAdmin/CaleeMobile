@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../data/api/calee_hub_client.dart';
 import '../../data/models/client_bootstrap.dart';
@@ -80,22 +81,16 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
-  void _openUrl(String url) {
-    // Show the URL as a fallback since url_launcher is not in the project.
-    // TODO: Add url_launcher and call launchUrl(Uri.parse(url)) directly.
-    showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Open in browser'),
-        content: SelectableText(url),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
+  Future<void> _openUrl(String url) async {
+    final uri = Uri.tryParse(url);
+    if (uri == null) return;
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open link.')),
+        );
+      }
+    }
   }
 
   @override

@@ -47,9 +47,41 @@ class _SettingsPageState extends State<SettingsPage> {
         widget.hubClient.calendars(accessToken: widget.accessToken),
       ]);
       if (!mounted) return;
+
+      var prefs = results[0] as StoredPreferences;
+      final allCalendars = (results[1] as ClientCalendarList).calendars;
+
+      // Clear stale default calendar if the stored calendar no longer exists.
+      final calId = prefs.defaultCalendarId;
+      final writableCalendars =
+          allCalendars.where((c) => c.isCalendarKind && !c.readOnly).toList();
+      if (calId != null && !writableCalendars.any((c) => c.id == calId)) {
+        await _prefs.saveDefaultCalendarId(null);
+        prefs = StoredPreferences(
+          firstDayOfWeek: prefs.firstDayOfWeek,
+          timeFormat: prefs.timeFormat,
+          defaultCalendarId: null,
+          defaultTaskListId: prefs.defaultTaskListId,
+        );
+      }
+
+      // Clear stale default task list if the stored list no longer exists.
+      final taskListId = prefs.defaultTaskListId;
+      final taskCalendars = allCalendars.where((c) => c.isTaskKind).toList();
+      if (taskListId != null && !taskCalendars.any((c) => c.id == taskListId)) {
+        await _prefs.saveDefaultTaskListId(null);
+        prefs = StoredPreferences(
+          firstDayOfWeek: prefs.firstDayOfWeek,
+          timeFormat: prefs.timeFormat,
+          defaultCalendarId: prefs.defaultCalendarId,
+          defaultTaskListId: null,
+        );
+      }
+
+      if (!mounted) return;
       setState(() {
-        _preferences = results[0] as StoredPreferences;
-        _calendars = (results[1] as ClientCalendarList).calendars;
+        _preferences = prefs;
+        _calendars = allCalendars;
         _loadingPrefs = false;
       });
     } catch (_) {

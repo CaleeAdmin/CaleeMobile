@@ -166,6 +166,8 @@ class _CalendarPageState extends State<CalendarPage> {
       freshPrefs = _prefs;
     }
 
+    if (!mounted) return;
+
     final gridStart = _computeGridStart(_selectedMonth, freshPrefs.firstDayOfWeek);
     final gridEnd = gridStart.add(const Duration(days: 41)); // 6 weeks − 1 day
 
