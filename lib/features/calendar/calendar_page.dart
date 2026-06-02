@@ -1254,15 +1254,22 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
     // Use initialDate from calendar selection if provided, else today
     final initial = widget.initialDate;
     final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
     _selectedDate = initial != null
         ? DateTime(initial.year, initial.month, initial.day)
-        : DateTime(now.year, now.month, now.day);
+        : today;
     _selectedEndDate = _selectedDate;
     _recurrenceEndDate = _selectedDate.add(const Duration(days: 30));
 
-    final nextHour = now.add(const Duration(hours: 1));
-    _startTime = TimeOfDay(hour: nextHour.hour, minute: 0);
-    _endTime = TimeOfDay(hour: (nextHour.hour + 1) % 24, minute: 0);
+    // Default times: 9:00–10:00 for future dates, next hour for today
+    if (_isSameDay(_selectedDate, today)) {
+      final nextHour = now.add(const Duration(hours: 1));
+      _startTime = TimeOfDay(hour: nextHour.hour, minute: 0);
+      _endTime = TimeOfDay(hour: (nextHour.hour + 1) % 24, minute: 0);
+    } else {
+      _startTime = const TimeOfDay(hour: 9, minute: 0);
+      _endTime = const TimeOfDay(hour: 10, minute: 0);
+    }
   }
 
   @override
