@@ -882,6 +882,81 @@ class CaleeSectionTextFormField extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────
+// CaleeSectionLabeledTextFormField
+// ─────────────────────────────────────────────
+
+/// A left-label / right-field row for use inside a [CaleeSection].
+/// Shows [label] on the left and a [TextFormField] on the right.
+/// Applies standard section padding and the borderless
+/// [caleeSectionFieldDecoration]. Supports validation, keyboard type,
+/// and text alignment overrides.
+class CaleeSectionLabeledTextFormField extends StatelessWidget {
+  const CaleeSectionLabeledTextFormField({
+    super.key,
+    required this.label,
+    required this.controller,
+    this.hintText,
+    this.enabled = true,
+    this.keyboardType,
+    this.textAlign = TextAlign.right,
+    this.validator,
+    this.style,
+    this.fieldWidth,
+  });
+
+  final String label;
+  final TextEditingController controller;
+  final String? hintText;
+  final bool enabled;
+  final TextInputType? keyboardType;
+  final TextAlign textAlign;
+  final FormFieldValidator<String>? validator;
+  final TextStyle? style;
+  final double? fieldWidth;
+
+  @override
+  Widget build(BuildContext context) {
+    final field = TextFormField(
+      controller: controller,
+      enabled: enabled,
+      keyboardType: keyboardType,
+      textAlign: textAlign,
+      validator: validator,
+      style: style ??
+          const TextStyle(
+            fontSize: 16,
+            color: CaleeColors.textSecondary,
+          ),
+      decoration: caleeSectionFieldDecoration.copyWith(hintText: hintText),
+    );
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: CaleeSpacing.md,
+        vertical: 2,
+      ),
+      child: Row(
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 16,
+              color: enabled
+                  ? CaleeColors.textPrimary
+                  : CaleeColors.textTertiary,
+            ),
+          ),
+          if (fieldWidth != null)
+            SizedBox(width: fieldWidth, child: field)
+          else
+            Expanded(child: field),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
 // CaleeDateHeader
 // ─────────────────────────────────────────────
 
