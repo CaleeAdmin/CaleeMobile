@@ -324,6 +324,9 @@ class _CalendarPageState extends State<CalendarPage> {
     );
 
     if (created == true && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Event created.')),
+      );
       _loadMonth();
     }
   }
@@ -455,6 +458,9 @@ class _CalendarPageState extends State<CalendarPage> {
     );
 
     if (updated == true && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Event updated.')),
+      );
       _loadMonth();
     }
   }
