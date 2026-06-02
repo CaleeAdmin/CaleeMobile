@@ -1368,6 +1368,62 @@ class _ChoreRow extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────
+// Form helpers (create / edit sheets)
+// ─────────────────────────────────────────────
+
+const _choreSectionFieldDecoration = InputDecoration(
+  border: InputBorder.none,
+  enabledBorder: InputBorder.none,
+  focusedBorder: InputBorder.none,
+  errorBorder: InputBorder.none,
+  focusedErrorBorder: InputBorder.none,
+  fillColor: Colors.transparent,
+  filled: false,
+  contentPadding: EdgeInsets.symmetric(vertical: 9),
+);
+
+Widget _buildChorePickerRow({
+  required String label,
+  required String value,
+  required VoidCallback? onTap,
+}) {
+  return InkWell(
+    onTap: onTap,
+    child: Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: CaleeSpacing.md,
+        vertical: 11,
+      ),
+      child: Row(
+        children: [
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 16,
+              color: CaleeColors.textPrimary,
+            ),
+          ),
+          const Spacer(),
+          Text(
+            value,
+            style: const TextStyle(
+              fontSize: 16,
+              color: CaleeColors.textSecondary,
+            ),
+          ),
+          const SizedBox(width: CaleeSpacing.xs),
+          const Icon(
+            Icons.chevron_right,
+            size: 20,
+            color: CaleeColors.textTertiary,
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+// ─────────────────────────────────────────────
 // Create chore sheet
 // ─────────────────────────────────────────────
 
@@ -1487,144 +1543,323 @@ class _CreateChoreSheetState extends State<_CreateChoreSheet> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              DropdownButtonFormField<ClientCalendar>(
-                initialValue: _selectedCalendar,
-                decoration: const InputDecoration(labelText: 'Chore list'),
-                items: widget.calendars
-                    .map(
-                      (calendar) => DropdownMenuItem(
-                        value: calendar,
+              // ── Chore ──────────────────────────────────────────────────
+              CaleeSection(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: CaleeSpacing.md,
+                      vertical: 2,
+                    ),
+                    child: TextFormField(
+                      controller: _titleController,
+                      enabled: !_isSubmitting,
+                      autofocus: true,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        color: CaleeColors.textPrimary,
+                      ),
+                      decoration: _choreSectionFieldDecoration.copyWith(
+                        hintText: 'Title',
+                      ),
+                      textInputAction: TextInputAction.next,
+                      validator: (value) {
+                        if ((value ?? '').trim().isEmpty) {
+                          return 'Enter a chore title';
+                        }
+                        return null;
+                      },
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      CaleeSpacing.md,
+                      0,
+                      CaleeSpacing.sm,
+                      0,
+                    ),
+                    child: Row(
+                      children: [
+                        const Text(
+                          'Chore List',
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: CaleeColors.textPrimary,
+                          ),
+                        ),
+                        const Spacer(),
+                        Flexible(
+                          child: DropdownButton<ClientCalendar>(
+                            value: _selectedCalendar,
+                            underline: const SizedBox.shrink(),
+                            icon: const Icon(
+                              Icons.chevron_right,
+                              size: 20,
+                              color: CaleeColors.textTertiary,
+                            ),
+                            style: const TextStyle(
+                              fontSize: 16,
+                              color: CaleeColors.textSecondary,
+                            ),
+                            items: widget.calendars
+                                .map(
+                                  (calendar) => DropdownMenuItem(
+                                    value: calendar,
+                                    child: Text(
+                                      [
+                                        calendar.name,
+                                        if (calendar.serviceName
+                                            .trim()
+                                            .isNotEmpty)
+                                          calendar.serviceName,
+                                      ].join(' · '),
+                                    ),
+                                  ),
+                                )
+                                .toList(),
+                            onChanged: _isSubmitting
+                                ? null
+                                : (value) {
+                                    if (value != null) {
+                                      setState(() {
+                                        _selectedCalendar = value;
+                                      });
+                                    }
+                                  },
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: CaleeSpacing.sectionSpacing),
+
+              // ── Schedule ───────────────────────────────────────────────
+              CaleeSection(
+                children: [
+                  _buildChorePickerRow(
+                    label: 'Date',
+                    value: _selectedDate == null
+                        ? 'No Date'
+                        : '${_selectedDate!.day}/${_selectedDate!.month}/${_selectedDate!.year}',
+                    onTap: _isSubmitting ? null : _pickDate,
+                  ),
+                  if (_selectedDate != null)
+                    InkWell(
+                      onTap: _isSubmitting
+                          ? null
+                          : () {
+                              setState(() {
+                                _selectedDate = null;
+                              });
+                            },
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: CaleeSpacing.md,
+                          vertical: 11,
+                        ),
                         child: Text(
-                          [
-                            calendar.name,
-                            if (calendar.serviceName.trim().isNotEmpty)
-                              calendar.serviceName,
-                          ].join(' · '),
+                          'Clear Date',
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: _isSubmitting
+                                ? CaleeColors.textTertiary
+                                : CaleeColors.primary,
+                          ),
                         ),
                       ),
-                    )
-                    .toList(),
-                onChanged: _isSubmitting
-                    ? null
-                    : (value) {
-                        if (value != null) {
-                          setState(() {
-                            _selectedCalendar = value;
-                          });
-                        }
-                      },
-              ),
-              const SizedBox(height: CaleeSpacing.sm + 4),
-              TextFormField(
-                controller: _titleController,
-                enabled: !_isSubmitting,
-                autofocus: true,
-                decoration: const InputDecoration(labelText: 'Title'),
-                textInputAction: TextInputAction.next,
-                validator: (value) {
-                  if ((value ?? '').trim().isEmpty) {
-                    return 'Enter a chore title';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: CaleeSpacing.sm + 4),
-              OutlinedButton.icon(
-                onPressed: _isSubmitting ? null : _pickDate,
-                icon: const Icon(Icons.event_outlined),
-                label: Text(
-                  _selectedDate == null
-                      ? 'Add scheduled date'
-                      : 'Scheduled ${_formatChoreDate(_selectedDate!)}',
-                ),
-              ),
-              if (_selectedDate != null)
-                TextButton(
-                  onPressed: _isSubmitting
-                      ? null
-                      : () {
-                          setState(() {
-                            _selectedDate = null;
-                          });
-                        },
-                  child: const Text('Remove scheduled date'),
-                ),
-              const SizedBox(height: CaleeSpacing.sm + 4),
-              DropdownButtonFormField<String?>(
-                initialValue: _selectedRecurrence,
-                decoration: const InputDecoration(labelText: 'Repeat'),
-                items: const [
-                  DropdownMenuItem<String?>(
-                    value: null,
-                    child: Text('Does not repeat'),
-                  ),
-                  DropdownMenuItem<String?>(
-                    value: 'daily',
-                    child: Text('Daily'),
-                  ),
-                  DropdownMenuItem<String?>(
-                    value: 'weekly',
-                    child: Text('Weekly'),
-                  ),
-                  DropdownMenuItem<String?>(
-                    value: 'monthly',
-                    child: Text('Monthly'),
-                  ),
-                ],
-                onChanged: _isSubmitting
-                    ? null
-                    : (value) {
-                        setState(() {
-                          _selectedRecurrence = value;
-                        });
-                      },
-              ),
-              const SizedBox(height: CaleeSpacing.sm + 4),
-              DropdownButtonFormField<String?>(
-                initialValue: _assigneePersonId,
-                decoration: const InputDecoration(labelText: 'Assign to'),
-                items: [
-                  const DropdownMenuItem<String?>(
-                    value: null,
-                    child: Text('Unassigned'),
-                  ),
-                  for (final person in widget.people)
-                    DropdownMenuItem<String?>(
-                      value: person.id,
-                      child: Text(person.displayName),
                     ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      CaleeSpacing.md,
+                      0,
+                      CaleeSpacing.sm,
+                      0,
+                    ),
+                    child: Row(
+                      children: [
+                        const Text(
+                          'Repeat',
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: CaleeColors.textPrimary,
+                          ),
+                        ),
+                        const Spacer(),
+                        Flexible(
+                          child: DropdownButton<String?>(
+                            value: _selectedRecurrence,
+                            underline: const SizedBox.shrink(),
+                            icon: const Icon(
+                              Icons.chevron_right,
+                              size: 20,
+                              color: CaleeColors.textTertiary,
+                            ),
+                            style: const TextStyle(
+                              fontSize: 16,
+                              color: CaleeColors.textSecondary,
+                            ),
+                            items: const [
+                              DropdownMenuItem<String?>(
+                                value: null,
+                                child: Text('Does not repeat'),
+                              ),
+                              DropdownMenuItem<String?>(
+                                value: 'daily',
+                                child: Text('Daily'),
+                              ),
+                              DropdownMenuItem<String?>(
+                                value: 'weekly',
+                                child: Text('Weekly'),
+                              ),
+                              DropdownMenuItem<String?>(
+                                value: 'monthly',
+                                child: Text('Monthly'),
+                              ),
+                            ],
+                            onChanged: _isSubmitting
+                                ? null
+                                : (value) {
+                                    setState(() {
+                                      _selectedRecurrence = value;
+                                    });
+                                  },
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ],
-                onChanged: _isSubmitting
-                    ? null
-                    : (value) {
-                        setState(() {
-                          _assigneePersonId = value;
-                        });
-                      },
               ),
-              const SizedBox(height: CaleeSpacing.sm + 4),
-              TextFormField(
-                controller: _pointsController,
-                enabled: !_isSubmitting,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'Points'),
-                validator: (value) {
-                  final points = int.tryParse((value ?? '').trim());
-                  if (points == null || points < 0 || points > 100000) {
-                    return 'Enter valid points';
-                  }
-                  return null;
-                },
+              const SizedBox(height: CaleeSpacing.sectionSpacing),
+
+              // ── Assignment ─────────────────────────────────────────────
+              CaleeSection(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      CaleeSpacing.md,
+                      0,
+                      CaleeSpacing.sm,
+                      0,
+                    ),
+                    child: Row(
+                      children: [
+                        const Text(
+                          'Assign to',
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: CaleeColors.textPrimary,
+                          ),
+                        ),
+                        const Spacer(),
+                        Flexible(
+                          child: DropdownButton<String?>(
+                            value: _assigneePersonId,
+                            underline: const SizedBox.shrink(),
+                            icon: const Icon(
+                              Icons.chevron_right,
+                              size: 20,
+                              color: CaleeColors.textTertiary,
+                            ),
+                            style: const TextStyle(
+                              fontSize: 16,
+                              color: CaleeColors.textSecondary,
+                            ),
+                            items: [
+                              const DropdownMenuItem<String?>(
+                                value: null,
+                                child: Text('Unassigned'),
+                              ),
+                              for (final person in widget.people)
+                                DropdownMenuItem<String?>(
+                                  value: person.id,
+                                  child: Text(person.displayName),
+                                ),
+                            ],
+                            onChanged: _isSubmitting
+                                ? null
+                                : (value) {
+                                    setState(() {
+                                      _assigneePersonId = value;
+                                    });
+                                  },
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: CaleeSpacing.md,
+                      vertical: 2,
+                    ),
+                    child: Row(
+                      children: [
+                        const Text(
+                          'Points',
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: CaleeColors.textPrimary,
+                          ),
+                        ),
+                        Expanded(
+                          child: TextFormField(
+                            controller: _pointsController,
+                            enabled: !_isSubmitting,
+                            keyboardType: TextInputType.number,
+                            textAlign: TextAlign.right,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              color: CaleeColors.textSecondary,
+                            ),
+                            decoration: _choreSectionFieldDecoration,
+                            validator: (value) {
+                              final points =
+                                  int.tryParse((value ?? '').trim());
+                              if (points == null ||
+                                  points < 0 ||
+                                  points > 100000) {
+                                return 'Enter valid points';
+                              }
+                              return null;
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: CaleeSpacing.sm + 4),
-              TextFormField(
-                controller: _descriptionController,
-                enabled: !_isSubmitting,
-                decoration: const InputDecoration(labelText: 'Notes'),
-                minLines: 2,
-                maxLines: 4,
+              const SizedBox(height: CaleeSpacing.sectionSpacing),
+
+              // ── Details ────────────────────────────────────────────────
+              CaleeSection(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: CaleeSpacing.md,
+                      vertical: 2,
+                    ),
+                    child: TextFormField(
+                      controller: _descriptionController,
+                      enabled: !_isSubmitting,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        color: CaleeColors.textPrimary,
+                      ),
+                      decoration: _choreSectionFieldDecoration.copyWith(
+                        hintText: 'Notes',
+                      ),
+                      minLines: 2,
+                      maxLines: 4,
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: CaleeSpacing.md),
+
               FilledButton(
                 onPressed: _isSubmitting ? null : _submit,
                 child: _isSubmitting
@@ -1785,7 +2020,10 @@ class _EditChoreSheetState extends State<_EditChoreSheet> {
             children: [
               if (widget.chore.isRecurring) ...[
                 Container(
-                  padding: const EdgeInsets.all(CaleeSpacing.sm + 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: CaleeSpacing.md,
+                    vertical: CaleeSpacing.sm,
+                  ),
                   decoration: BoxDecoration(
                     color: CaleeColors.primary.withAlpha(15),
                     borderRadius: BorderRadius.circular(CaleeRadius.card),
@@ -1810,118 +2048,266 @@ class _EditChoreSheetState extends State<_EditChoreSheet> {
                     ],
                   ),
                 ),
-                const SizedBox(height: CaleeSpacing.sm + 4),
+                const SizedBox(height: CaleeSpacing.sectionSpacing),
               ],
-              TextFormField(
-                controller: _titleController,
-                enabled: !_isSubmitting,
-                autofocus: true,
-                decoration: const InputDecoration(labelText: 'Title'),
-                textInputAction: TextInputAction.next,
-                validator: (value) {
-                  if ((value ?? '').trim().isEmpty) {
-                    return 'Enter a chore title';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: CaleeSpacing.sm + 4),
-              OutlinedButton.icon(
-                onPressed: _isSubmitting ? null : _pickDate,
-                icon: const Icon(Icons.event_outlined),
-                label: Text(
-                  _selectedDate == null
-                      ? 'Add scheduled date'
-                      : 'Scheduled ${_formatChoreDate(_selectedDate!)}',
-                ),
-              ),
-              if (_selectedDate != null)
-                TextButton(
-                  onPressed: _isSubmitting
-                      ? null
-                      : () {
-                          setState(() {
-                            _selectedDate = null;
-                          });
-                        },
-                  child: const Text('Remove scheduled date'),
-                ),
-              const SizedBox(height: CaleeSpacing.sm + 4),
-              DropdownButtonFormField<String?>(
-                initialValue: _selectedRecurrence,
-                decoration: const InputDecoration(labelText: 'Repeat'),
-                items: const [
-                  DropdownMenuItem<String?>(
-                    value: null,
-                    child: Text('Does not repeat'),
-                  ),
-                  DropdownMenuItem<String?>(
-                    value: 'daily',
-                    child: Text('Daily'),
-                  ),
-                  DropdownMenuItem<String?>(
-                    value: 'weekly',
-                    child: Text('Weekly'),
-                  ),
-                  DropdownMenuItem<String?>(
-                    value: 'monthly',
-                    child: Text('Monthly'),
-                  ),
-                ],
-                onChanged: _isSubmitting
-                    ? null
-                    : (value) {
-                        setState(() {
-                          _selectedRecurrence = value;
-                        });
-                      },
-              ),
-              const SizedBox(height: CaleeSpacing.sm + 4),
-              DropdownButtonFormField<String?>(
-                initialValue: _assigneePersonId,
-                decoration: const InputDecoration(labelText: 'Assign to'),
-                items: [
-                  const DropdownMenuItem<String?>(
-                    value: null,
-                    child: Text('Unassigned'),
-                  ),
-                  for (final person in widget.people)
-                    DropdownMenuItem<String?>(
-                      value: person.id,
-                      child: Text(person.displayName),
+
+              // ── Chore ────────────────────────────────────────────────
+              CaleeSection(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: CaleeSpacing.md,
+                      vertical: 2,
                     ),
-                ],
-                onChanged: _isSubmitting
-                    ? null
-                    : (value) {
-                        setState(() {
-                          _assigneePersonId = value;
-                        });
+                    child: TextFormField(
+                      controller: _titleController,
+                      enabled: !_isSubmitting,
+                      autofocus: true,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        color: CaleeColors.textPrimary,
+                      ),
+                      decoration: _choreSectionFieldDecoration.copyWith(
+                        hintText: 'Title',
+                      ),
+                      textInputAction: TextInputAction.next,
+                      validator: (value) {
+                        if ((value ?? '').trim().isEmpty) {
+                          return 'Enter a chore title';
+                        }
+                        return null;
                       },
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: CaleeSpacing.sm + 4),
-              TextFormField(
-                controller: _pointsController,
-                enabled: !_isSubmitting,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'Points'),
-                validator: (value) {
-                  final points = int.tryParse((value ?? '').trim());
-                  if (points == null || points < 0 || points > 100000) {
-                    return 'Enter valid points';
-                  }
-                  return null;
-                },
+              const SizedBox(height: CaleeSpacing.sectionSpacing),
+
+              // ── Schedule ─────────────────────────────────────────────
+              CaleeSection(
+                children: [
+                  _buildChorePickerRow(
+                    label: 'Date',
+                    value: _selectedDate == null
+                        ? 'No Date'
+                        : '${_selectedDate!.day}/${_selectedDate!.month}/${_selectedDate!.year}',
+                    onTap: _isSubmitting ? null : _pickDate,
+                  ),
+                  if (_selectedDate != null)
+                    InkWell(
+                      onTap: _isSubmitting
+                          ? null
+                          : () {
+                              setState(() {
+                                _selectedDate = null;
+                              });
+                            },
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: CaleeSpacing.md,
+                          vertical: 11,
+                        ),
+                        child: Text(
+                          'Clear Date',
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: _isSubmitting
+                                ? CaleeColors.textTertiary
+                                : CaleeColors.primary,
+                          ),
+                        ),
+                      ),
+                    ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      CaleeSpacing.md,
+                      0,
+                      CaleeSpacing.sm,
+                      0,
+                    ),
+                    child: Row(
+                      children: [
+                        const Text(
+                          'Repeat',
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: CaleeColors.textPrimary,
+                          ),
+                        ),
+                        const Spacer(),
+                        Flexible(
+                          child: DropdownButton<String?>(
+                            value: _selectedRecurrence,
+                            underline: const SizedBox.shrink(),
+                            icon: const Icon(
+                              Icons.chevron_right,
+                              size: 20,
+                              color: CaleeColors.textTertiary,
+                            ),
+                            style: const TextStyle(
+                              fontSize: 16,
+                              color: CaleeColors.textSecondary,
+                            ),
+                            items: const [
+                              DropdownMenuItem<String?>(
+                                value: null,
+                                child: Text('Does not repeat'),
+                              ),
+                              DropdownMenuItem<String?>(
+                                value: 'daily',
+                                child: Text('Daily'),
+                              ),
+                              DropdownMenuItem<String?>(
+                                value: 'weekly',
+                                child: Text('Weekly'),
+                              ),
+                              DropdownMenuItem<String?>(
+                                value: 'monthly',
+                                child: Text('Monthly'),
+                              ),
+                            ],
+                            onChanged: _isSubmitting
+                                ? null
+                                : (value) {
+                                    setState(() {
+                                      _selectedRecurrence = value;
+                                    });
+                                  },
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: CaleeSpacing.sm + 4),
-              TextFormField(
-                controller: _descriptionController,
-                enabled: !_isSubmitting,
-                decoration: const InputDecoration(labelText: 'Notes'),
-                minLines: 2,
-                maxLines: 4,
+              const SizedBox(height: CaleeSpacing.sectionSpacing),
+
+              // ── Assignment ───────────────────────────────────────────
+              CaleeSection(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      CaleeSpacing.md,
+                      0,
+                      CaleeSpacing.sm,
+                      0,
+                    ),
+                    child: Row(
+                      children: [
+                        const Text(
+                          'Assign to',
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: CaleeColors.textPrimary,
+                          ),
+                        ),
+                        const Spacer(),
+                        Flexible(
+                          child: DropdownButton<String?>(
+                            value: _assigneePersonId,
+                            underline: const SizedBox.shrink(),
+                            icon: const Icon(
+                              Icons.chevron_right,
+                              size: 20,
+                              color: CaleeColors.textTertiary,
+                            ),
+                            style: const TextStyle(
+                              fontSize: 16,
+                              color: CaleeColors.textSecondary,
+                            ),
+                            items: [
+                              const DropdownMenuItem<String?>(
+                                value: null,
+                                child: Text('Unassigned'),
+                              ),
+                              for (final person in widget.people)
+                                DropdownMenuItem<String?>(
+                                  value: person.id,
+                                  child: Text(person.displayName),
+                                ),
+                            ],
+                            onChanged: _isSubmitting
+                                ? null
+                                : (value) {
+                                    setState(() {
+                                      _assigneePersonId = value;
+                                    });
+                                  },
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: CaleeSpacing.md,
+                      vertical: 2,
+                    ),
+                    child: Row(
+                      children: [
+                        const Text(
+                          'Points',
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: CaleeColors.textPrimary,
+                          ),
+                        ),
+                        Expanded(
+                          child: TextFormField(
+                            controller: _pointsController,
+                            enabled: !_isSubmitting,
+                            keyboardType: TextInputType.number,
+                            textAlign: TextAlign.right,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              color: CaleeColors.textSecondary,
+                            ),
+                            decoration: _choreSectionFieldDecoration,
+                            validator: (value) {
+                              final points =
+                                  int.tryParse((value ?? '').trim());
+                              if (points == null ||
+                                  points < 0 ||
+                                  points > 100000) {
+                                return 'Enter valid points';
+                              }
+                              return null;
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: CaleeSpacing.sectionSpacing),
+
+              // ── Details ──────────────────────────────────────────────
+              CaleeSection(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: CaleeSpacing.md,
+                      vertical: 2,
+                    ),
+                    child: TextFormField(
+                      controller: _descriptionController,
+                      enabled: !_isSubmitting,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        color: CaleeColors.textPrimary,
+                      ),
+                      decoration: _choreSectionFieldDecoration.copyWith(
+                        hintText: 'Notes',
+                      ),
+                      minLines: 2,
+                      maxLines: 4,
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: CaleeSpacing.md),
+
               FilledButton(
                 onPressed: _isSubmitting ? null : _submit,
                 child: _isSubmitting
