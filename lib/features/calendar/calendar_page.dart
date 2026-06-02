@@ -1819,58 +1819,27 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                                   enabled: !_isSubmitting,
                                 ),
                               if (_recurrenceEnd == 'count')
-                                Padding(
-                                  padding: const EdgeInsets.fromLTRB(
-                                    CaleeSpacing.md,
-                                    2,
-                                    CaleeSpacing.md,
-                                    2,
-                                  ),
-                                  child: Row(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.center,
-                                    children: [
-                                      const Text(
-                                        'Times',
-                                        style: TextStyle(
-                                          fontSize: 16,
-                                          color: CaleeColors.textPrimary,
-                                        ),
-                                      ),
-                                      const Spacer(),
-                                      SizedBox(
-                                        width: 80,
-                                        child: TextFormField(
-                                          controller:
-                                              _recurrenceCountController,
-                                          enabled: !_isSubmitting,
-                                          keyboardType: TextInputType.number,
-                                          textAlign: TextAlign.right,
-                                          style: const TextStyle(
-                                            fontSize: 16,
-                                            color: CaleeColors.textSecondary,
-                                          ),
-                                          decoration:
-                                              caleeSectionFieldDecoration.copyWith(
-                                            hintText: '10',
-                                          ),
-                                          validator: (value) {
-                                            if (_selectedRecurrence == 'none' ||
-                                                _recurrenceEnd != 'count') {
-                                              return null;
-                                            }
-                                            final count = int.tryParse(
-                                              (value ?? '').trim(),
-                                            );
-                                            if (count == null || count < 1) {
-                                              return 'Enter a number of at least 1';
-                                            }
-                                            return null;
-                                          },
-                                        ),
-                                      ),
-                                    ],
-                                  ),
+                                CaleeSectionLabeledTextFormField(
+                                  label: 'Times',
+                                  controller: _recurrenceCountController,
+                                  enabled: !_isSubmitting,
+                                  keyboardType: TextInputType.number,
+                                  textAlign: TextAlign.right,
+                                  hintText: '10',
+                                  fieldWidth: 80,
+                                  validator: (value) {
+                                    if (_selectedRecurrence == 'none' ||
+                                        _recurrenceEnd != 'count') {
+                                      return null;
+                                    }
+                                    final count = int.tryParse(
+                                      (value ?? '').trim(),
+                                    );
+                                    if (count == null || count < 1) {
+                                      return 'Enter a number of at least 1';
+                                    }
+                                    return null;
+                                  },
                                 ),
                             ],
                           ],
