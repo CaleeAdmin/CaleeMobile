@@ -220,62 +220,33 @@ class _HouseholdPeoplePageState extends State<HouseholdPeoplePage> {
                   CaleeSection(
                     title: 'Household',
                     children: [
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(
-                          CaleeSpacing.md,
-                          0,
-                          CaleeSpacing.sm,
-                          0,
-                        ),
-                        child: Row(
-                          children: [
-                            const Text(
-                              'Household',
-                              style: TextStyle(
-                                fontSize: 16,
-                                color: CaleeColors.textPrimary,
+                      CaleeSectionDropdownRow<String>(
+                        label: 'Household',
+                        value: household.id,
+                        items: [
+                          for (final item in widget.households)
+                            DropdownMenuItem<String>(
+                              value: item.id,
+                              child: Text(
+                                item.name.isNotEmpty
+                                    ? item.name
+                                    : 'Unnamed household',
                               ),
                             ),
-                            const Spacer(),
-                            DropdownButton<String>(
-                              value: household.id,
-                              underline: const SizedBox.shrink(),
-                              icon: const Icon(
-                                Icons.chevron_right,
-                                size: 20,
-                                color: CaleeColors.textTertiary,
-                              ),
-                              style: const TextStyle(
-                                fontSize: 16,
-                                color: CaleeColors.textSecondary,
-                              ),
-                              items: [
-                                for (final item in widget.households)
-                                  DropdownMenuItem<String>(
-                                    value: item.id,
-                                    child: Text(
-                                      item.name.isNotEmpty
-                                          ? item.name
-                                          : 'Unnamed household',
-                                    ),
-                                  ),
-                              ],
-                              onChanged: (value) {
-                                final next = widget.households
-                                    .where((item) => item.id == value)
-                                    .cast<ClientContext?>()
-                                    .firstOrNull;
+                        ],
+                        onChanged: (value) {
+                          final next = widget.households
+                              .where((item) => item.id == value)
+                              .cast<ClientContext?>()
+                              .firstOrNull;
 
-                                if (next == null) return;
+                          if (next == null) return;
 
-                                setState(() {
-                                  _selectedHousehold = next;
-                                  _future = _loadPeople();
-                                });
-                              },
-                            ),
-                          ],
-                        ),
+                          setState(() {
+                            _selectedHousehold = next;
+                            _future = _loadPeople();
+                          });
+                        },
                       ),
                     ],
                   ),
@@ -483,49 +454,19 @@ class _PersonFormContentState extends State<_PersonFormContent> {
           CaleeSection(
             title: 'Details',
             children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  CaleeSpacing.md,
-                  0,
-                  CaleeSpacing.sm,
-                  0,
-                ),
-                child: Row(
-                  children: [
-                    const Text(
-                      'Role',
-                      style: TextStyle(
-                        fontSize: 16,
-                        color: CaleeColors.textPrimary,
-                      ),
-                    ),
-                    const Spacer(),
-                    DropdownButton<String>(
-                      value: _role,
-                      underline: const SizedBox.shrink(),
-                      icon: const Icon(
-                        Icons.chevron_right,
-                        size: 20,
-                        color: CaleeColors.textTertiary,
-                      ),
-                      style: const TextStyle(
-                        fontSize: 16,
-                        color: CaleeColors.textSecondary,
-                      ),
-                      items: const [
-                        DropdownMenuItem(value: 'member', child: Text('Member')),
-                        DropdownMenuItem(value: 'child', child: Text('Child')),
-                        DropdownMenuItem(value: 'parent', child: Text('Parent')),
-                      ],
-                      onChanged: _saving
-                          ? null
-                          : (value) {
-                              if (value == null) return;
-                              setState(() => _role = value);
-                            },
-                    ),
-                  ],
-                ),
+              CaleeSectionDropdownRow<String>(
+                label: 'Role',
+                value: _role,
+                items: const [
+                  DropdownMenuItem(value: 'member', child: Text('Member')),
+                  DropdownMenuItem(value: 'child', child: Text('Child')),
+                  DropdownMenuItem(value: 'parent', child: Text('Parent')),
+                ],
+                onChanged: (value) {
+                  if (value == null) return;
+                  setState(() => _role = value);
+                },
+                enabled: !_saving,
               ),
               Padding(
                 padding: const EdgeInsets.symmetric(
