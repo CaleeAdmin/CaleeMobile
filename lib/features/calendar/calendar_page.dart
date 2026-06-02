@@ -775,7 +775,7 @@ class _CalendarPageState extends State<CalendarPage> {
           children: [
             _buildTopBar(),
             _buildWeekdayHeader(),
-            _buildMonthGrid(),
+            Flexible(fit: FlexFit.loose, child: _buildMonthGrid()),
             const Divider(height: 1),
             Expanded(
               child: RefreshIndicator(
@@ -940,8 +940,12 @@ class _CalendarPageState extends State<CalendarPage> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final cellSize = constraints.maxWidth / 7;
+        final desiredHeight = cellSize * 6;
+        final height = constraints.hasBoundedHeight
+            ? desiredHeight.clamp(0.0, constraints.maxHeight)
+            : desiredHeight;
         return SizedBox(
-          height: cellSize * 6,
+          height: height,
           child: GridView.builder(
             physics: const NeverScrollableScrollPhysics(),
             gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
