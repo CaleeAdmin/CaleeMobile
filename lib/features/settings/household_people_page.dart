@@ -197,7 +197,7 @@ class _HouseholdPeoplePageState extends State<HouseholdPeoplePage> {
 
     return CaleeScaffold(
       appBar: AppBar(
-        title: const Text('Household People'),
+        title: const Text('Family Members'),
       ),
       floatingActionButton: household == null
           ? null
@@ -207,8 +207,8 @@ class _HouseholdPeoplePageState extends State<HouseholdPeoplePage> {
             ),
       body: household == null
           ? const _EmptyPeopleState(
-              title: 'No household yet',
-              message: 'People can be managed after a household is available.',
+              title: 'No family yet',
+              message: 'People can be managed after a family is set up.',
             )
           : ListView(
               padding: const EdgeInsets.symmetric(
@@ -218,10 +218,10 @@ class _HouseholdPeoplePageState extends State<HouseholdPeoplePage> {
               children: [
                 if (widget.households.length > 1) ...[
                   CaleeSection(
-                    title: 'Household',
+                    title: 'Family',
                     children: [
                       CaleeSectionDropdownRow<String>(
-                        label: 'Household',
+                        label: 'Family',
                         value: household.id,
                         items: [
                           for (final item in widget.households)
@@ -230,7 +230,7 @@ class _HouseholdPeoplePageState extends State<HouseholdPeoplePage> {
                               child: Text(
                                 item.name.isNotEmpty
                                     ? item.name
-                                    : 'Unnamed household',
+                                    : 'Unnamed family',
                               ),
                             ),
                         ],
@@ -284,7 +284,7 @@ class _HouseholdPeoplePageState extends State<HouseholdPeoplePage> {
                         CaleeListRow(
                           title: 'Add Person',
                           subtitle:
-                              'Create a child, parent, or household member',
+                              'Create a child, parent, or family member',
                           leading: const Icon(
                             Icons.person_add_alt_1_outlined,
                             size: 20,

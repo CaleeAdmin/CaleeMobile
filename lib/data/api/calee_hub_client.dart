@@ -63,6 +63,19 @@ class CaleeHubClient {
     return ClientBootstrap.fromJson(_data(json));
   }
 
+  Future<ClientContext> ensureDefaultFamily({
+    required String accessToken,
+  }) async {
+    final json = await _postJson(
+      '/client/v1/households',
+      accessToken: accessToken,
+      body: {'name': 'My Family'},
+    );
+    return ClientContext.fromJson(
+      _data(json)['household'] as Map<String, dynamic>,
+    );
+  }
+
   Future<ClientCalendarList> calendars({
     required String accessToken,
   }) async {

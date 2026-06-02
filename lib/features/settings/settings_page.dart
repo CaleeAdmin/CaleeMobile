@@ -7,6 +7,7 @@ import '../../data/models/client_calendar.dart';
 import '../../ui/calee_theme.dart';
 import '../../ui/calee_widgets.dart';
 import 'calendar_collections_page.dart';
+import 'family_setup_page.dart';
 import 'household_people_page.dart';
 
 class SettingsPage extends StatefulWidget {
@@ -33,6 +34,70 @@ class _SettingsPageState extends State<SettingsPage> {
   StoredPreferences _preferences = const StoredPreferences();
   List<ClientCalendar> _calendars = [];
   bool _loadingPrefs = true;
+  bool _openingFamily = false;
+
+  Future<void> _openFamilyMembers() async {
+    final households = widget.bootstrap.contexts.households;
+
+    if (households.isNotEmpty) {
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => HouseholdPeoplePage(
+            hubClient: widget.hubClient,
+            accessToken: widget.accessToken,
+            households: households,
+          ),
+        ),
+      );
+      return;
+    }
+
+    setState(() => _openingFamily = true);
+
+    try {
+      await widget.hubClient
+          .ensureDefaultFamily(accessToken: widget.accessToken);
+      final fresh =
+          await widget.hubClient.bootstrap(accessToken: widget.accessToken);
+
+      if (!mounted) return;
+      setState(() => _openingFamily = false);
+
+      final freshHouseholds = fresh.contexts.households;
+      if (freshHouseholds.isEmpty) {
+        _showFamilySetupPage();
+        return;
+      }
+
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => HouseholdPeoplePage(
+            hubClient: widget.hubClient,
+            accessToken: widget.accessToken,
+            households: freshHouseholds,
+            autoOpenCreate: true,
+          ),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _openingFamily = false);
+      _showFamilySetupPage();
+    }
+  }
+
+  void _showFamilySetupPage() {
+    final portalUrl = widget.bootstrap.services
+        .where((s) => s.launchUrl.trim().isNotEmpty)
+        .map((s) => s.launchUrl)
+        .firstOrNull;
+
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => FamilySetupPage(portalUrl: portalUrl),
+      ),
+    );
+  }
 
   @override
   void initState() {
@@ -307,30 +372,22 @@ class _SettingsPageState extends State<SettingsPage> {
               },
             ),
             CaleeListRow(
-              title: 'Household People',
-              subtitle: widget.bootstrap.contexts.households.isEmpty
-                  ? 'No household available'
+              title: 'Family Members',
+              subtitle: _openingFamily
+                  ? 'Setting up family…'
                   : 'Manage people used for chores',
-              leading: const Icon(
-                Icons.group_outlined,
-                size: 20,
-                color: CaleeColors.primary,
-              ),
-              enabled: widget.bootstrap.contexts.households.isNotEmpty,
-              onTap: widget.bootstrap.contexts.households.isEmpty
-                  ? null
-                  : () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute<void>(
-                          builder: (_) => HouseholdPeoplePage(
-                            hubClient: widget.hubClient,
-                            accessToken: widget.accessToken,
-                            households:
-                                widget.bootstrap.contexts.households,
-                          ),
-                        ),
-                      );
-                    },
+              leading: _openingFamily
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(
+                      Icons.group_outlined,
+                      size: 20,
+                      color: CaleeColors.primary,
+                    ),
+              onTap: _openingFamily ? null : _openFamilyMembers,
             ),
           ],
         ),
@@ -346,20 +403,6 @@ class _SettingsPageState extends State<SettingsPage> {
             else
               for (final service in widget.bootstrap.services)
                 _ServiceRow(service: service),
-          ],
-        ),
-
-        const SizedBox(height: CaleeSpacing.sectionSpacing),
-
-        // ── Contexts ─────────────────────────────────
-        CaleeSection(
-          title: 'Contexts',
-          children: [
-            if (widget.bootstrap.availableContexts.isEmpty)
-              _EmptyRowText('No household or organisation contexts yet.')
-            else
-              for (final ctx in widget.bootstrap.availableContexts)
-                _ContextRow(context: ctx),
           ],
         ),
 
@@ -416,42 +459,6 @@ class _ServiceRow extends StatelessWidget {
             )
           : const SizedBox.shrink(),
     );
-  }
-}
-
-// ─────────────────────────────────────────────
-// _ContextRow
-// ─────────────────────────────────────────────
-
-class _ContextRow extends StatelessWidget {
-  const _ContextRow({required this.context});
-
-  final ClientContext context;
-
-  @override
-  Widget build(BuildContext context) {
-    final typeLabel =
-        this.context.type.isNotEmpty ? _capitalise(this.context.type) : null;
-    final roleLabel =
-        this.context.role.isNotEmpty ? _capitalise(this.context.role) : null;
-
-    final subtitle = [typeLabel, roleLabel].whereType<String>().join(' · ');
-
-    return CaleeListRow(
-      title: this.context.name.isNotEmpty ? this.context.name : 'Unnamed',
-      subtitle: subtitle.isNotEmpty ? subtitle : null,
-      leading: const Icon(
-        Icons.group_outlined,
-        size: 20,
-        color: CaleeColors.textTertiary,
-      ),
-      trailing: const SizedBox.shrink(),
-    );
-  }
-
-  String _capitalise(String value) {
-    if (value.isEmpty) return value;
-    return value[0].toUpperCase() + value.substring(1);
   }
 }
 
