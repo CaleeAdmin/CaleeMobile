@@ -14,7 +14,7 @@ class _FakeHubClient extends CaleeHubClient {
     required this.freshBootstrap,
   }) : super(baseUri: Uri.parse('http://localhost'));
 
-  final Object? ensureResult; // null = success with household; Exception = throw
+  final Object? ensureResult; // null = succeed; Exception subtype = throw
   final ClientBootstrap freshBootstrap;
 
   @override
@@ -94,6 +94,11 @@ ClientBootstrap _bootstrapWithHousehold() => ClientBootstrap(
     );
 
 // ── Widget wrapper ─────────────────────────────────────────────────────────────
+//
+// SettingsPage.build() returns a ListView directly (no Scaffold) because in
+// production it lives inside CaleeHomePage's Scaffold body. Tests must supply
+// their own Scaffold so that InkWell / DropdownButton widgets can find the
+// required Material ancestor.
 
 Widget _wrapSettings({
   required CaleeHubClient client,
@@ -101,14 +106,28 @@ Widget _wrapSettings({
   void Function(ClientBootstrap)? onBootstrapRefreshed,
 }) {
   return MaterialApp(
-    home: SettingsPage(
-      hubClient: client,
-      accessToken: 'test-token',
-      bootstrap: bootstrap,
-      onSignOut: () {},
-      onBootstrapRefreshed: onBootstrapRefreshed,
+    home: Scaffold(
+      body: SettingsPage(
+        hubClient: client,
+        accessToken: 'test-token',
+        bootstrap: bootstrap,
+        onSignOut: () {},
+        onBootstrapRefreshed: onBootstrapRefreshed,
+      ),
     ),
   );
+}
+
+// Scrolls the first Scrollable until 'Family Members' is visible, then taps it.
+// Required because SettingsPage uses a lazy ListView that may not build
+// off-screen items in a constrained test viewport.
+Future<void> _tapFamilyMembers(WidgetTester tester) async {
+  await tester.scrollUntilVisible(
+    find.text('Family Members'),
+    300.0,
+    scrollable: find.byType(Scrollable).first,
+  );
+  await tester.tap(find.text('Family Members'));
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
@@ -130,19 +149,18 @@ void main() {
         onBootstrapRefreshed: (b) => receivedBootstrap = b,
       ));
 
-      // Let initState and _loadAll settle.
+      // Wait for _loadAll to complete.
       await tester.pumpAndSettle();
 
-      // Tap Family Members row.
-      await tester.tap(find.text('Family Members'));
+      await _tapFamilyMembers(tester);
       await tester.pumpAndSettle();
 
       // HouseholdPeoplePage is pushed (not FamilySetupPage).
       expect(find.text('Family setup needed'), findsNothing);
-      // autoOpenCreate fires _openCreateSheet: AddPersonSheet shows Cancel/Add buttons.
+      // autoOpenCreate fires _openCreateSheet — AddPersonSheet shows Cancel/Add buttons.
       expect(find.text('Cancel'), findsOneWidget);
 
-      // Callback should have been called with the fresh bootstrap.
+      // Callback fired with the fresh bootstrap.
       expect(receivedBootstrap, isNotNull);
       expect(receivedBootstrap!.contexts.households, hasLength(1));
     });
@@ -161,10 +179,10 @@ void main() {
       ));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Family Members'));
+      await _tapFamilyMembers(tester);
       await tester.pumpAndSettle();
 
-      // HouseholdPeoplePage pushed directly (no ensure needed) — shows Add Person row.
+      // HouseholdPeoplePage pushed directly — shows Add Person row, not the fallback.
       expect(find.text('Family setup needed'), findsNothing);
       expect(find.text('Add Person'), findsAtLeastNWidgets(1));
     });
@@ -186,17 +204,17 @@ void main() {
       ));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Family Members'));
+      await _tapFamilyMembers(tester);
       await tester.pumpAndSettle();
 
-      // FamilySetupPage body shows this text.
+      // FamilySetupPage body text is shown.
       expect(find.text('Family setup needed'), findsOneWidget);
     });
 
     testWidgets(
         'ensureDefaultFamily succeeds but bootstrap still empty → shows family setup fallback',
         (tester) async {
-      // ensureDefaultFamily "succeeds" but fresh bootstrap still has no households.
+      // ensureDefaultFamily returns a household but the fresh bootstrap has none.
       final client = _FakeHubClient(
         ensureResult: null,
         freshBootstrap: _emptyBootstrap(),
@@ -208,7 +226,7 @@ void main() {
       ));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Family Members'));
+      await _tapFamilyMembers(tester);
       await tester.pumpAndSettle();
 
       expect(find.text('Family setup needed'), findsOneWidget);
