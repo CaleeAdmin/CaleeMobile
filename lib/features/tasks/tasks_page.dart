@@ -1013,61 +1013,6 @@ class _TasksOverview {
   final String to;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Shared form helpers
-// ─────────────────────────────────────────────────────────────────────────────
-
-const _sectionFieldDecoration = InputDecoration(
-  border: InputBorder.none,
-  enabledBorder: InputBorder.none,
-  focusedBorder: InputBorder.none,
-  errorBorder: InputBorder.none,
-  focusedErrorBorder: InputBorder.none,
-  fillColor: Colors.transparent,
-  filled: false,
-  contentPadding: EdgeInsets.symmetric(vertical: 9),
-);
-
-Widget _buildDatePickerRow({
-  required String label,
-  required String value,
-  required VoidCallback? onTap,
-}) {
-  return InkWell(
-    onTap: onTap,
-    child: Padding(
-      padding: const EdgeInsets.symmetric(
-        horizontal: CaleeSpacing.md,
-        vertical: 11,
-      ),
-      child: Row(
-        children: [
-          Text(
-            label,
-            style: const TextStyle(
-              fontSize: 16,
-              color: CaleeColors.textPrimary,
-            ),
-          ),
-          const Spacer(),
-          Text(
-            value,
-            style: const TextStyle(
-              fontSize: 16,
-              color: CaleeColors.textSecondary,
-            ),
-          ),
-          const SizedBox(width: CaleeSpacing.xs),
-          const Icon(
-            Icons.chevron_right,
-            size: 20,
-            color: CaleeColors.textTertiary,
-          ),
-        ],
-      ),
-    ),
-  );
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Create task form (inside CaleeBottomSheet)
@@ -1216,7 +1161,7 @@ class _CreateTaskFormState extends State<_CreateTaskForm> {
                       fontSize: 16,
                       color: CaleeColors.textPrimary,
                     ),
-                    decoration: _sectionFieldDecoration.copyWith(
+                    decoration: caleeSectionFieldDecoration.copyWith(
                       hintText: 'Title',
                     ),
                     textInputAction: TextInputAction.next,
@@ -1302,10 +1247,11 @@ class _CreateTaskFormState extends State<_CreateTaskForm> {
                     },
                   ),
                 ),
-                _buildDatePickerRow(
+                CaleeSectionPickerRow(
                   label: 'Date',
                   value: _dueDateLabel(),
                   onTap: _isSubmitting ? null : _pickDueDate,
+                  enabled: !_isSubmitting,
                 ),
               ],
             ),
@@ -1326,7 +1272,7 @@ class _CreateTaskFormState extends State<_CreateTaskForm> {
                       fontSize: 16,
                       color: CaleeColors.textPrimary,
                     ),
-                    decoration: _sectionFieldDecoration.copyWith(
+                    decoration: caleeSectionFieldDecoration.copyWith(
                       hintText: 'Notes',
                     ),
                     minLines: 2,
@@ -1493,7 +1439,7 @@ class _EditTaskFormState extends State<_EditTaskForm> {
                       fontSize: 16,
                       color: CaleeColors.textPrimary,
                     ),
-                    decoration: _sectionFieldDecoration.copyWith(
+                    decoration: caleeSectionFieldDecoration.copyWith(
                       hintText: 'Title',
                     ),
                     textInputAction: TextInputAction.next,
@@ -1529,10 +1475,11 @@ class _EditTaskFormState extends State<_EditTaskForm> {
                     },
                   ),
                 ),
-                _buildDatePickerRow(
+                CaleeSectionPickerRow(
                   label: 'Date',
                   value: _dueDateLabel(),
                   onTap: _isSubmitting ? null : _pickDueDate,
+                  enabled: !_isSubmitting,
                 ),
               ],
             ),
@@ -1553,7 +1500,7 @@ class _EditTaskFormState extends State<_EditTaskForm> {
                       fontSize: 16,
                       color: CaleeColors.textPrimary,
                     ),
-                    decoration: _sectionFieldDecoration.copyWith(
+                    decoration: caleeSectionFieldDecoration.copyWith(
                       hintText: 'Notes',
                     ),
                     minLines: 2,

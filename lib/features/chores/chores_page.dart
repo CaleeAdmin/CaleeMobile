@@ -1405,62 +1405,6 @@ class _ChoreRow extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────
-// Form helpers (create / edit sheets)
-// ─────────────────────────────────────────────
-
-const _choreSectionFieldDecoration = InputDecoration(
-  border: InputBorder.none,
-  enabledBorder: InputBorder.none,
-  focusedBorder: InputBorder.none,
-  errorBorder: InputBorder.none,
-  focusedErrorBorder: InputBorder.none,
-  fillColor: Colors.transparent,
-  filled: false,
-  contentPadding: EdgeInsets.symmetric(vertical: 9),
-);
-
-Widget _buildChorePickerRow({
-  required String label,
-  required String value,
-  required VoidCallback? onTap,
-}) {
-  return InkWell(
-    onTap: onTap,
-    child: Padding(
-      padding: const EdgeInsets.symmetric(
-        horizontal: CaleeSpacing.md,
-        vertical: 11,
-      ),
-      child: Row(
-        children: [
-          Text(
-            label,
-            style: const TextStyle(
-              fontSize: 16,
-              color: CaleeColors.textPrimary,
-            ),
-          ),
-          const Spacer(),
-          Text(
-            value,
-            style: const TextStyle(
-              fontSize: 16,
-              color: CaleeColors.textSecondary,
-            ),
-          ),
-          const SizedBox(width: CaleeSpacing.xs),
-          const Icon(
-            Icons.chevron_right,
-            size: 20,
-            color: CaleeColors.textTertiary,
-          ),
-        ],
-      ),
-    ),
-  );
-}
-
-// ─────────────────────────────────────────────
 // Create chore sheet
 // ─────────────────────────────────────────────
 
@@ -1596,7 +1540,7 @@ class _CreateChoreSheetState extends State<_CreateChoreSheet> {
                         fontSize: 16,
                         color: CaleeColors.textPrimary,
                       ),
-                      decoration: _choreSectionFieldDecoration.copyWith(
+                      decoration: caleeSectionFieldDecoration.copyWith(
                         hintText: 'Title',
                       ),
                       textInputAction: TextInputAction.next,
@@ -1675,12 +1619,13 @@ class _CreateChoreSheetState extends State<_CreateChoreSheet> {
               // ── Schedule ───────────────────────────────────────────────
               CaleeSection(
                 children: [
-                  _buildChorePickerRow(
+                  CaleeSectionPickerRow(
                     label: 'Date',
                     value: _selectedDate == null
                         ? 'No Date'
                         : '${_selectedDate!.day}/${_selectedDate!.month}/${_selectedDate!.year}',
                     onTap: _isSubmitting ? null : _pickDate,
+                    enabled: !_isSubmitting,
                   ),
                   if (_selectedDate != null)
                     InkWell(
@@ -1851,7 +1796,7 @@ class _CreateChoreSheetState extends State<_CreateChoreSheet> {
                               fontSize: 16,
                               color: CaleeColors.textSecondary,
                             ),
-                            decoration: _choreSectionFieldDecoration,
+                            decoration: caleeSectionFieldDecoration,
                             validator: (value) {
                               final points =
                                   int.tryParse((value ?? '').trim());
@@ -1886,7 +1831,7 @@ class _CreateChoreSheetState extends State<_CreateChoreSheet> {
                         fontSize: 16,
                         color: CaleeColors.textPrimary,
                       ),
-                      decoration: _choreSectionFieldDecoration.copyWith(
+                      decoration: caleeSectionFieldDecoration.copyWith(
                         hintText: 'Notes',
                       ),
                       minLines: 2,
@@ -2104,7 +2049,7 @@ class _EditChoreSheetState extends State<_EditChoreSheet> {
                         fontSize: 16,
                         color: CaleeColors.textPrimary,
                       ),
-                      decoration: _choreSectionFieldDecoration.copyWith(
+                      decoration: caleeSectionFieldDecoration.copyWith(
                         hintText: 'Title',
                       ),
                       textInputAction: TextInputAction.next,
@@ -2123,12 +2068,13 @@ class _EditChoreSheetState extends State<_EditChoreSheet> {
               // ── Schedule ─────────────────────────────────────────────
               CaleeSection(
                 children: [
-                  _buildChorePickerRow(
+                  CaleeSectionPickerRow(
                     label: 'Date',
                     value: _selectedDate == null
                         ? 'No Date'
                         : '${_selectedDate!.day}/${_selectedDate!.month}/${_selectedDate!.year}',
                     onTap: _isSubmitting ? null : _pickDate,
+                    enabled: !_isSubmitting,
                   ),
                   if (_selectedDate != null)
                     InkWell(
@@ -2299,7 +2245,7 @@ class _EditChoreSheetState extends State<_EditChoreSheet> {
                               fontSize: 16,
                               color: CaleeColors.textSecondary,
                             ),
-                            decoration: _choreSectionFieldDecoration,
+                            decoration: caleeSectionFieldDecoration,
                             validator: (value) {
                               final points =
                                   int.tryParse((value ?? '').trim());
@@ -2334,7 +2280,7 @@ class _EditChoreSheetState extends State<_EditChoreSheet> {
                         fontSize: 16,
                         color: CaleeColors.textPrimary,
                       ),
-                      decoration: _choreSectionFieldDecoration.copyWith(
+                      decoration: caleeSectionFieldDecoration.copyWith(
                         hintText: 'Notes',
                       ),
                       minLines: 2,

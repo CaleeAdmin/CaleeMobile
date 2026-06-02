@@ -670,6 +670,86 @@ class CaleeCheckCircle extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────
+// caleeSectionFieldDecoration
+// ─────────────────────────────────────────────
+
+/// Borderless [InputDecoration] for [TextField]s inside a [CaleeSection].
+/// Use with `.copyWith(hintText: ...)` to set a hint.
+const caleeSectionFieldDecoration = InputDecoration(
+  border: InputBorder.none,
+  enabledBorder: InputBorder.none,
+  focusedBorder: InputBorder.none,
+  errorBorder: InputBorder.none,
+  focusedErrorBorder: InputBorder.none,
+  fillColor: Colors.transparent,
+  filled: false,
+  contentPadding: EdgeInsets.symmetric(vertical: 9),
+);
+
+// ─────────────────────────────────────────────
+// CaleeSectionPickerRow
+// ─────────────────────────────────────────────
+
+/// A tappable picker row for use inside a [CaleeSection].
+/// Shows [label] on the left, [value] on the right, and a chevron.
+class CaleeSectionPickerRow extends StatelessWidget {
+  const CaleeSectionPickerRow({
+    required this.label,
+    required this.value,
+    this.onTap,
+    this.enabled = true,
+    super.key,
+  });
+
+  final String label;
+  final String value;
+  final VoidCallback? onTap;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: enabled ? onTap : null,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: CaleeSpacing.md,
+          vertical: 11,
+        ),
+        child: Row(
+          children: [
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 16,
+                color: enabled
+                    ? CaleeColors.textPrimary
+                    : CaleeColors.textTertiary,
+              ),
+            ),
+            const Spacer(),
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: 16,
+                color: enabled
+                    ? CaleeColors.textSecondary
+                    : CaleeColors.textTertiary,
+              ),
+            ),
+            const SizedBox(width: CaleeSpacing.xs),
+            const Icon(
+              Icons.chevron_right,
+              size: 20,
+              color: CaleeColors.textTertiary,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
 // CaleeDateHeader
 // ─────────────────────────────────────────────
 
