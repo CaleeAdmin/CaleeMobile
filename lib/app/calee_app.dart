@@ -19,13 +19,47 @@ class _CaleeAppState extends State<CaleeApp> {
   final _sessionStore = SessionStore();
 
   String? _accessToken;
+  String? _refreshToken;
   ClientBootstrap? _bootstrap;
   bool _isRestoringSession = true;
 
   @override
   void initState() {
     super.initState();
+    _hubClient.onUnauthorized = _handleUnauthorized;
     _restoreSession();
+  }
+
+  // Called transparently by CaleeHubClient when any authenticated request
+  // receives a 401. Refreshes once, saves the new token, and returns it.
+  // Returns null and signs the user out if refresh fails.
+  Future<String?> _handleUnauthorized() async {
+    final storedRefreshToken = _refreshToken;
+    if (storedRefreshToken == null) {
+      await _signOut();
+      return null;
+    }
+
+    try {
+      final refreshed =
+          await _hubClient.refresh(refreshToken: storedRefreshToken);
+      final newToken = refreshed.accessToken;
+      await _sessionStore.saveAccessToken(newToken);
+      if (mounted) {
+        setState(() => _accessToken = newToken);
+      }
+      return newToken;
+    } catch (_) {
+      await _sessionStore.clear();
+      if (mounted) {
+        setState(() {
+          _accessToken = null;
+          _refreshToken = null;
+          _bootstrap = null;
+        });
+      }
+      return null;
+    }
   }
 
   Future<void> _restoreSession() async {
@@ -60,6 +94,7 @@ class _CaleeAppState extends State<CaleeApp> {
 
       setState(() {
         _accessToken = accessToken;
+        _refreshToken = refreshToken;
         _bootstrap = bootstrap;
         _isRestoringSession = false;
       });
@@ -81,6 +116,7 @@ class _CaleeAppState extends State<CaleeApp> {
 
       setState(() {
         _accessToken = refreshed.accessToken;
+        _refreshToken = refreshToken;
         _bootstrap = bootstrap;
         _isRestoringSession = false;
       });
@@ -94,6 +130,7 @@ class _CaleeAppState extends State<CaleeApp> {
 
     setState(() {
       _accessToken = null;
+      _refreshToken = null;
       _bootstrap = null;
       _isRestoringSession = false;
     });
@@ -115,6 +152,7 @@ class _CaleeAppState extends State<CaleeApp> {
 
     setState(() {
       _accessToken = accessToken;
+      _refreshToken = refreshToken;
       _bootstrap = bootstrap;
     });
   }
@@ -128,6 +166,7 @@ class _CaleeAppState extends State<CaleeApp> {
 
     setState(() {
       _accessToken = null;
+      _refreshToken = null;
       _bootstrap = null;
     });
   }

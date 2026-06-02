@@ -1,7 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 
 import '../../data/api/calee_hub_client.dart';
 import '../../data/models/client_bootstrap.dart';
+
+// TODO: Replace with the production password-reset URL when available.
+const _kForgotPasswordUrl = 'https://hub.calee.com.au/reset-password';
+
+// TODO: Replace with the production privacy policy and support URLs.
+const _kPrivacyPolicyUrl = 'https://hub.calee.com.au/privacy';
+const _kSupportUrl = 'https://hub.calee.com.au/support';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({
@@ -11,7 +19,8 @@ class LoginPage extends StatefulWidget {
   });
 
   final CaleeHubClient hubClient;
-  final void Function(String accessToken, String refreshToken, ClientBootstrap bootstrap) onSignedIn;
+  final void Function(String accessToken, String refreshToken,
+      ClientBootstrap bootstrap) onSignedIn;
 
   @override
   State<LoginPage> createState() => _LoginPageState();
@@ -23,6 +32,7 @@ class _LoginPageState extends State<LoginPage> {
   final _passwordController = TextEditingController();
 
   bool _isLoading = false;
+  bool _obscurePassword = true;
   String? _errorMessage;
 
   @override
@@ -52,7 +62,8 @@ class _LoginPageState extends State<LoginPage> {
         return;
       }
 
-      widget.onSignedIn(result.accessToken, result.refreshToken, result.bootstrap);
+      widget.onSignedIn(
+          result.accessToken, result.refreshToken, result.bootstrap);
     } on CaleeHubException catch (e) {
       setState(() {
         _errorMessage = e.message;
@@ -70,8 +81,28 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
+  void _openUrl(String url) {
+    // Show the URL as a fallback since url_launcher is not in the project.
+    // TODO: Add url_launcher and call launchUrl(Uri.parse(url)) directly.
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Open in browser'),
+        content: SelectableText(url),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return Scaffold(
       body: SafeArea(
         minimum: const EdgeInsets.all(24),
@@ -86,16 +117,16 @@ class _LoginPageState extends State<LoginPage> {
                   Text(
                     'Calee',
                     textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color: Theme.of(context).colorScheme.primary,
-                        ),
+                    style: theme.textTheme.displaySmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                      color: theme.colorScheme.primary,
+                    ),
                   ),
                   const SizedBox(height: 8),
                   Text(
                     'Sign in with your Calee Hub account',
                     textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.titleMedium,
+                    style: theme.textTheme.titleMedium,
                   ),
                   const SizedBox(height: 32),
                   TextFormField(
@@ -111,35 +142,62 @@ class _LoginPageState extends State<LoginPage> {
                       if (value == null || value.trim().isEmpty) {
                         return 'Enter your email';
                       }
-
                       return null;
                     },
                   ),
                   const SizedBox(height: 16),
                   TextFormField(
                     controller: _passwordController,
-                    obscureText: true,
+                    obscureText: _obscurePassword,
                     textInputAction: TextInputAction.done,
                     autofillHints: const [AutofillHints.password],
                     onFieldSubmitted: (_) => _isLoading ? null : _signIn(),
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       labelText: 'Password',
-                      border: OutlineInputBorder(),
+                      border: const OutlineInputBorder(),
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          _obscurePassword
+                              ? Icons.visibility_outlined
+                              : Icons.visibility_off_outlined,
+                          size: 20,
+                        ),
+                        onPressed: () => setState(
+                            () => _obscurePassword = !_obscurePassword),
+                        tooltip: _obscurePassword
+                            ? 'Show password'
+                            : 'Hide password',
+                      ),
                     ),
                     validator: (value) {
                       if (value == null || value.isEmpty) {
                         return 'Enter your password';
                       }
-
                       return null;
                     },
                   ),
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: () => _openUrl(_kForgotPasswordUrl),
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 0,
+                          vertical: 4,
+                        ),
+                        minimumSize: const Size(0, 36),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: const Text('Forgot password?'),
+                    ),
+                  ),
                   if (_errorMessage != null) ...[
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 8),
                     Text(
                       _errorMessage!,
                       style: TextStyle(
-                        color: Theme.of(context).colorScheme.error,
+                        color: theme.colorScheme.error,
                       ),
                     ),
                   ],
@@ -149,9 +207,43 @@ class _LoginPageState extends State<LoginPage> {
                     child: _isLoading
                         ? const SizedBox.square(
                             dimension: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
+                            child:
+                                CircularProgressIndicator(strokeWidth: 2),
                           )
                         : const Text('Sign in'),
+                  ),
+                  const SizedBox(height: 32),
+                  // Privacy & support links
+                  Center(
+                    child: RichText(
+                      textAlign: TextAlign.center,
+                      text: TextSpan(
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                        children: [
+                          TextSpan(
+                            text: 'Privacy Policy',
+                            style: TextStyle(
+                              color: theme.colorScheme.primary,
+                              decoration: TextDecoration.underline,
+                            ),
+                            recognizer: TapGestureRecognizer()
+                              ..onTap = () => _openUrl(_kPrivacyPolicyUrl),
+                          ),
+                          const TextSpan(text: '  ·  '),
+                          TextSpan(
+                            text: 'Support',
+                            style: TextStyle(
+                              color: theme.colorScheme.primary,
+                              decoration: TextDecoration.underline,
+                            ),
+                            recognizer: TapGestureRecognizer()
+                              ..onTap = () => _openUrl(_kSupportUrl),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                 ],
               ),

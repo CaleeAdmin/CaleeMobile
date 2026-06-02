@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -13,10 +14,25 @@ class CaleeHubClient {
     Uri? baseUri,
     HttpClient? httpClient,
   })  : baseUri = baseUri ?? Uri.parse('https://hub.calee.com.au'),
-        _httpClient = httpClient ?? HttpClient();
+        _httpClient = httpClient ??
+            (HttpClient()
+              ..connectionTimeout = const Duration(seconds: 25)
+              ..idleTimeout = const Duration(seconds: 30));
 
   final Uri baseUri;
   final HttpClient _httpClient;
+
+  static const _kTimeout = Duration(seconds: 25);
+
+  // Set by CaleeApp after construction to enable transparent 401 refresh+retry.
+  // The callback should refresh the access token and return the new one,
+  // or return null (or throw) if refresh fails, which causes the original
+  // CaleeHubException(401) to be rethrown to the caller.
+  Future<String?> Function()? onUnauthorized;
+
+  // The most recently refreshed access token. Used transparently so feature
+  // pages don't need to update their stored token before the next request.
+  String? _refreshedToken;
 
   Future<ClientLoginResult> login({
     required String email,
@@ -704,66 +720,181 @@ class CaleeHubClient {
     return ClientRefreshResult.fromJson(_data(json));
   }
 
+  // ── Auth retry helper ────────────────────────────────────────────────────────
+  //
+  // On 401, calls onUnauthorized() once to get a fresh token and retries.
+  // Also uses any previously refreshed token so feature pages don't need to
+  // update their stored access token before the next request.
+
+  Future<Map<String, dynamic>> _withRetry(
+    Future<Map<String, dynamic>> Function(String token) doRequest,
+    String accessToken,
+  ) async {
+    final effectiveToken = _refreshedToken ?? accessToken;
+    try {
+      return await doRequest(effectiveToken);
+    } on CaleeHubException catch (e) {
+      if (e.statusCode != 401 || onUnauthorized == null) rethrow;
+      _refreshedToken = null;
+      final newToken = await onUnauthorized!();
+      if (newToken == null) rethrow;
+      _refreshedToken = newToken;
+      return doRequest(newToken);
+    }
+  }
+
+  // ── Low-level HTTP helpers ────────────────────────────────────────────────────
+
   Future<Map<String, dynamic>> _deleteJson(
     String path, {
     required String accessToken,
     Map<String, dynamic>? body,
-  }) async {
-    final request = await _httpClient.deleteUrl(baseUri.resolve(path));
-    request.headers.set(HttpHeaders.acceptHeader, 'application/json');
-    request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $accessToken');
+  }) {
+    return _withRetry(
+      (token) => _doDeleteJson(path, accessToken: token, body: body),
+      accessToken,
+    );
+  }
 
-    if (body != null) {
-      request.headers.contentType = ContentType.json;
-      request.write(jsonEncode(body));
-    }
+  Future<Map<String, dynamic>> _doDeleteJson(
+    String path, {
+    required String accessToken,
+    Map<String, dynamic>? body,
+  }) {
+    return _executeRequest(() async {
+      final request = await _httpClient.deleteUrl(baseUri.resolve(path));
+      request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+      request.headers
+          .set(HttpHeaders.authorizationHeader, 'Bearer $accessToken');
 
-    return _readJsonResponse(await request.close());
+      if (body != null) {
+        request.headers.contentType = ContentType.json;
+        request.write(jsonEncode(body));
+      }
+
+      return _readJsonResponse(await request.close());
+    });
   }
 
   Future<Map<String, dynamic>> _patchJson(
     String path, {
     required String accessToken,
     required Map<String, dynamic> body,
-  }) async {
-    final request = await _httpClient.openUrl('PATCH', baseUri.resolve(path));
-    request.headers.contentType = ContentType.json;
-    request.headers.set(HttpHeaders.acceptHeader, 'application/json');
-    request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $accessToken');
-    request.write(jsonEncode(body));
+  }) {
+    return _withRetry(
+      (token) => _doPatchJson(path, accessToken: token, body: body),
+      accessToken,
+    );
+  }
 
-    return _readJsonResponse(await request.close());
+  Future<Map<String, dynamic>> _doPatchJson(
+    String path, {
+    required String accessToken,
+    required Map<String, dynamic> body,
+  }) {
+    return _executeRequest(() async {
+      final request =
+          await _httpClient.openUrl('PATCH', baseUri.resolve(path));
+      request.headers.contentType = ContentType.json;
+      request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+      request.headers
+          .set(HttpHeaders.authorizationHeader, 'Bearer $accessToken');
+      request.write(jsonEncode(body));
+
+      return _readJsonResponse(await request.close());
+    });
   }
 
   Future<Map<String, dynamic>> _postJson(
     String path, {
     String? accessToken,
     required Map<String, dynamic> body,
-  }) async {
-    final request = await _httpClient.postUrl(baseUri.resolve(path));
-    request.headers.contentType = ContentType.json;
-    request.headers.set(HttpHeaders.acceptHeader, 'application/json');
-    if (accessToken != null && accessToken.trim().isNotEmpty) {
-      request.headers
-          .set(HttpHeaders.authorizationHeader, 'Bearer $accessToken');
+  }) {
+    // Unauthenticated calls (login, refresh) skip retry.
+    if (accessToken == null) {
+      return _executeRequest(() async {
+        final request = await _httpClient.postUrl(baseUri.resolve(path));
+        request.headers.contentType = ContentType.json;
+        request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+        request.write(jsonEncode(body));
+        return _readJsonResponse(await request.close());
+      });
     }
-    request.write(jsonEncode(body));
+    return _withRetry(
+      (token) => _doPostJson(path, accessToken: token, body: body),
+      accessToken,
+    );
+  }
 
-    return _readJsonResponse(await request.close());
+  Future<Map<String, dynamic>> _doPostJson(
+    String path, {
+    required String? accessToken,
+    required Map<String, dynamic> body,
+  }) {
+    return _executeRequest(() async {
+      final request = await _httpClient.postUrl(baseUri.resolve(path));
+      request.headers.contentType = ContentType.json;
+      request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+      if (accessToken != null && accessToken.trim().isNotEmpty) {
+        request.headers
+            .set(HttpHeaders.authorizationHeader, 'Bearer $accessToken');
+      }
+      request.write(jsonEncode(body));
+
+      return _readJsonResponse(await request.close());
+    });
   }
 
   Future<Map<String, dynamic>> _getJson(
     String path, {
     required String accessToken,
-  }) async {
-    final request = await _httpClient.getUrl(baseUri.resolve(path));
-    request.headers.set(HttpHeaders.acceptHeader, 'application/json');
-    request.headers.set(
-      HttpHeaders.authorizationHeader,
-      'Bearer $accessToken',
+  }) {
+    return _withRetry(
+      (token) => _doGetJson(path, accessToken: token),
+      accessToken,
     );
+  }
 
-    return _readJsonResponse(await request.close());
+  Future<Map<String, dynamic>> _doGetJson(
+    String path, {
+    required String accessToken,
+  }) {
+    return _executeRequest(() async {
+      final request = await _httpClient.getUrl(baseUri.resolve(path));
+      request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+      request.headers.set(
+        HttpHeaders.authorizationHeader,
+        'Bearer $accessToken',
+      );
+
+      return _readJsonResponse(await request.close());
+    });
+  }
+
+  // Wraps a request with a timeout and converts network errors to friendly messages.
+  Future<Map<String, dynamic>> _executeRequest(
+    Future<Map<String, dynamic>> Function() fn,
+  ) async {
+    try {
+      return await fn().timeout(_kTimeout);
+    } on CaleeHubException {
+      rethrow;
+    } on TimeoutException {
+      throw const CaleeHubException(
+        statusCode: 0,
+        message: 'Check your connection and try again.',
+      );
+    } on SocketException {
+      throw const CaleeHubException(
+        statusCode: 0,
+        message: 'Check your connection and try again.',
+      );
+    } on HandshakeException {
+      throw const CaleeHubException(
+        statusCode: 0,
+        message: 'Check your connection and try again.',
+      );
+    }
   }
 
   Future<Map<String, dynamic>> _readJsonResponse(

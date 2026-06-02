@@ -1,11 +1,19 @@
-name: Build Signed iOS Artifacts
+name: Build Unsigned iOS Artifacts
+
+# Note: This workflow builds an UNSIGNED IPA using --no-codesign.
+# To produce a properly signed TestFlight / App Store IPA, the following
+# secrets must be added and the codesign steps below must be enabled:
+#   IOS_CERTIFICATE_BASE64        – base64-encoded .p12 distribution certificate
+#   IOS_CERTIFICATE_PASSWORD      – password for the .p12 certificate
+#   IOS_PROVISIONING_PROFILE_BASE64 – base64-encoded .mobileprovision profile
+#   IOS_EXPORT_OPTIONS_PLIST_BASE64 – base64-encoded ExportOptions.plist
 
 on:
   workflow_dispatch:
 
 jobs:
-  build-signed-ios:
-    name: Generate signed release iOS archive and IPA
+  build-unsigned-ios:
+    name: Generate calee-mobile unsigned iOS archive and IPA
     runs-on: macos-latest
 
     steps:
@@ -48,25 +56,25 @@ jobs:
           set -euo pipefail
           find build/ios -maxdepth 8 -type f \( -name "*.xcarchive" -o -name "*.ipa" \) -print
 
-      - name: Rename IPA with build name
+      - name: Rename IPA with build name (unsigned)
         shell: bash
         run: |
           set -euo pipefail
           src="build/ios/ipa/Runner.ipa"
-          dst="build/ios/ipa/caleesync-${{ steps.build_meta.outputs.sanitized_build_name }}.ipa"
+          dst="build/ios/ipa/calee-mobile-unsigned-${{ steps.build_meta.outputs.sanitized_build_name }}.ipa"
           mv "$src" "$dst"
           echo "Renamed IPA to $dst"
 
-      - name: Upload iOS IPA artifact
+      - name: Upload iOS IPA artifact (unsigned)
         uses: actions/upload-artifact@v4
         with:
-          name: caleesync-ios-ipa-${{ steps.build_meta.outputs.sanitized_build_name }}
-          path: build/ios/ipa/caleesync-${{ steps.build_meta.outputs.sanitized_build_name }}.ipa
+          name: calee-mobile-ios-unsigned-ipa-${{ steps.build_meta.outputs.sanitized_build_name }}
+          path: build/ios/ipa/calee-mobile-unsigned-${{ steps.build_meta.outputs.sanitized_build_name }}.ipa
           if-no-files-found: error
 
       - name: Upload iOS archive artifact
         uses: actions/upload-artifact@v4
         with:
-          name: caleesync-ios-xcarchive-${{ steps.build_meta.outputs.sanitized_build_name }}
+          name: calee-mobile-ios-xcarchive-${{ steps.build_meta.outputs.sanitized_build_name }}
           path: build/ios/archive/Runner.xcarchive
           if-no-files-found: error
