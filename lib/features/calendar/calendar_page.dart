@@ -8,6 +8,7 @@ import '../../data/models/client_bootstrap.dart';
 import '../../data/models/client_calendar.dart';
 import '../../ui/calee_design.dart';
 import '../settings/calendar_collections_page.dart';
+import 'calendar_utils.dart';
 
 // ─── Label helpers ────────────────────────────────────────────────────────────
 
@@ -48,22 +49,8 @@ String _monthYearLabel(DateTime d) => '${_kMonthNames[d.month - 1]} ${d.year}';
 bool _isSameDay(DateTime a, DateTime b) =>
     a.year == b.year && a.month == b.month && a.day == b.day;
 
-String _eventTimeLabel(ClientEvent event, {bool use24h = true}) {
-  final start = DateTime.tryParse(event.startsAt)?.toLocal();
-  if (start == null) return event.allDay ? 'All day' : '';
-  if (event.allDay) return 'All day';
-  if (use24h) {
-    final h = start.hour.toString().padLeft(2, '0');
-    final m = start.minute.toString().padLeft(2, '0');
-    return '$h:$m';
-  } else {
-    final hour12 = start.hour % 12;
-    final displayHour = hour12 == 0 ? 12 : hour12;
-    final m = start.minute.toString().padLeft(2, '0');
-    final period = start.hour < 12 ? 'am' : 'pm';
-    return '$displayHour:$m $period';
-  }
-}
+String _eventTimeLabel(ClientEvent event, {bool use24h = true}) =>
+    eventTimeLabel(event, use24h: use24h);
 
 Color? _parseHexColor(String hex) {
   final clean = hex.startsWith('#') ? hex.substring(1) : hex;
@@ -1262,9 +1249,12 @@ class _AgendaEventRow extends StatelessWidget {
             // Time (omitted for all-day rows inside the All-day section)
             if (!hideTime) ...[
               SizedBox(
-                width: 42,
+                width: 62,
                 child: Text(
                   _eventTimeLabel(event, use24h: use24h),
+                  maxLines: 1,
+                  softWrap: false,
+                  overflow: TextOverflow.clip,
                   style: const TextStyle(
                     fontSize: 13,
                     color: CaleeColors.textSecondary,
