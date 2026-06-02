@@ -162,6 +162,7 @@ class Regression:
         self.created_calendar_ids: list[str] = []
         self.created_task_ids: list[str] = []
         self.created_chore_ids: list[str] = []
+        self.created_person_ids: list[tuple[str, str]] = []  # (household_id, person_id)
         self.run_id = dt.datetime.utcnow().strftime("%Y%m%d%H%M%S")
         self.today = dt.date.today()
         self.tomorrow = self.today + dt.timedelta(days=1)
@@ -1516,10 +1517,136 @@ class Regression:
 
         self.run_step("chore delete", _delete)
 
+    def test_household_and_people(self) -> None:
+        """
+        Regression: login → (possibly no household) → ensure default family →
+        bootstrap includes household → create person → list and verify → cleanup.
+        """
+        # ── 1. Record initial bootstrap household count ────────────────────
+        initial_holder: dict[str, Any] = {}
+
+        def _check_initial_bootstrap() -> str:
+            bootstrap = self.client.get("/client/v1/bootstrap")
+            households = bootstrap.get("contexts", {}).get("households", [])
+            initial_holder["count"] = len(households)
+            return f"initial households={len(households)}"
+
+        self.run_step("household bootstrap initial", _check_initial_bootstrap)
+
+        # ── 2. Ensure default family (idempotent) ────────────────────────────
+        household_holder: dict[str, Any] = {}
+
+        def _ensure_default_family() -> str:
+            # Try idempotent endpoint first (mirrors CaleeHubClient behaviour).
+            status, payload = self.client.request(
+                "POST",
+                "/client/v1/households/default",
+                {},
+                allow_statuses={404, 405},
+            )
+            if status not in (404, 405):
+                data = payload.get("data", payload) if isinstance(payload, dict) else {}
+                household = (
+                    data.get("household")
+                    or data.get("context")
+                    or (data if isinstance(data, dict) and data.get("id") else None)
+                )
+                if isinstance(household, dict) and household.get("id"):
+                    household_holder["household"] = household
+                    return f"idempotent endpoint ok: id={household['id']}"
+
+            # Fall back to create endpoint.
+            data = self.client.post(
+                "/client/v1/households",
+                {"name": "My Family"},
+            )
+            household = (
+                data.get("household")
+                or data.get("context")
+                or (data if isinstance(data, dict) and data.get("id") else None)
+            )
+            if not isinstance(household, dict) or not household.get("id"):
+                raise RuntimeError(
+                    f"ensureDefaultFamily: unexpected response shape: {data}"
+                )
+            household_holder["household"] = household
+            return f"created via /households: id={household['id']}"
+
+        self.run_step("household ensure default family", _ensure_default_family)
+
+        # ── 3. Verify bootstrap now contains the household ───────────────────
+        def _check_bootstrap_has_household() -> str:
+            bootstrap = self.client.get("/client/v1/bootstrap")
+            households = bootstrap.get("contexts", {}).get("households", [])
+            if not households:
+                raise RuntimeError(
+                    "Bootstrap still has no households after ensureDefaultFamily"
+                )
+            household_id = household_holder["household"].get("id", "")
+            ids = [h.get("id") for h in households]
+            if household_id and household_id not in ids:
+                raise RuntimeError(
+                    f"Expected household {household_id} in bootstrap, got {ids}"
+                )
+            return f"households={len(households)}, target id present={household_id in ids}"
+
+        self.run_step("household bootstrap after ensure", _check_bootstrap_has_household)
+
+        # ── 4. Create a test person ──────────────────────────────────────────
+        person_holder: dict[str, Any] = {}
+
+        def _create_person() -> str:
+            household_id = household_holder["household"]["id"]
+            data = self.client.post(
+                f"/client/v1/households/{self.encoded(household_id)}/people",
+                {
+                    "displayName": f"RT Person {self.run_id}",
+                    "role": "member",
+                    "sortOrder": 0,
+                },
+            )
+            person = data.get("person")
+            if not isinstance(person, dict) or not person.get("id"):
+                raise RuntimeError(f"createPerson: unexpected response: {data}")
+            person_holder["person"] = person
+            self.created_person_ids.append((household_id, person["id"]))
+            return f"id={person['id']}, name={person.get('displayName')}"
+
+        self.run_step("household create person", _create_person)
+
+        # ── 5. List people and verify created person is present ──────────────
+        def _list_people() -> str:
+            household_id = household_holder["household"]["id"]
+            data = self.client.get(
+                f"/client/v1/households/{self.encoded(household_id)}/people"
+            )
+            people = data.get("people", [])
+            person_id = person_holder["person"]["id"]
+            ids = [p.get("id") for p in people]
+            if person_id not in ids:
+                raise RuntimeError(
+                    f"Created person {person_id} not found in list {ids}"
+                )
+            return f"found person {person_id} among {len(people)} active people"
+
+        self.run_step("household list people", _list_people)
+
     def cleanup(self) -> None:
         if self.keep_created:
             self.record("cleanup", "SKIP", "--keep-created enabled")
             return
+
+        # Archive test people (soft delete — keeps data integrity).
+        for household_id, person_id in list(self.created_person_ids):
+            try:
+                self.client.delete(
+                    f"/client/v1/households/{self.encoded(household_id)}/people/{self.encoded(person_id)}",
+                    allow_statuses={404},
+                )
+                self.created_person_ids.remove((household_id, person_id))
+                self.record("cleanup person", "PASS", person_id)
+            except Exception as e:
+                self.record("cleanup person", "FAIL", f"{person_id}: {e}")
 
         # Delete leaf items first. Calendar collection deletion is the main cleanup, but this gives better diagnostics.
         for task_id in list(self.created_task_ids):
@@ -1637,6 +1764,7 @@ class Regression:
             self.test_event_create_and_read(calendar_collection)
             self.test_tasks(task_collection)
             self.test_chores(chore_collection)
+            self.test_household_and_people()
 
             return 0
         finally:

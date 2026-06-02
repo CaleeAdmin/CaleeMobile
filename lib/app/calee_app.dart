@@ -139,6 +139,11 @@ class _CaleeAppState extends State<CaleeApp> {
     });
   }
 
+  void _onBootstrapRefreshed(ClientBootstrap bootstrap) {
+    if (!mounted) return;
+    setState(() => _bootstrap = bootstrap);
+  }
+
   Future<void> _signOut() async {
     _hubClient.clearAuthCache();
     await _sessionStore.clear();
@@ -181,6 +186,7 @@ class _CaleeAppState extends State<CaleeApp> {
       accessToken: _accessToken!,
       bootstrap: _bootstrap!,
       onSignOut: _signOut,
+      onBootstrapRefreshed: _onBootstrapRefreshed,
     );
   }
 }
