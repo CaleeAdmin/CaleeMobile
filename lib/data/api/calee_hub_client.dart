@@ -66,14 +66,42 @@ class CaleeHubClient {
   Future<ClientContext> ensureDefaultFamily({
     required String accessToken,
   }) async {
+    // Try idempotent endpoint first; fall back to create if backend returns 404/405.
+    try {
+      final json = await _postJson(
+        '/client/v1/households/default',
+        accessToken: accessToken,
+        body: {},
+      );
+      return _parseHouseholdContext(_data(json));
+    } on CaleeHubException catch (e) {
+      if (e.statusCode != 404 && e.statusCode != 405) rethrow;
+    }
+
     final json = await _postJson(
       '/client/v1/households',
       accessToken: accessToken,
       body: {'name': 'My Family'},
     );
-    return ClientContext.fromJson(
-      _data(json)['household'] as Map<String, dynamic>,
-    );
+    return _parseHouseholdContext(_data(json));
+  }
+
+  ClientContext _parseHouseholdContext(Map<String, dynamic> data) {
+    final raw = data['household'] ?? data['context'] ?? data;
+    if (raw is! Map<String, dynamic>) {
+      throw const CaleeHubException(
+        statusCode: 0,
+        message: 'Could not set up your family. Please try again.',
+      );
+    }
+    try {
+      return ClientContext.fromJson(raw);
+    } catch (_) {
+      throw const CaleeHubException(
+        statusCode: 0,
+        message: 'Could not set up your family. Please try again.',
+      );
+    }
   }
 
   Future<ClientCalendarList> calendars({

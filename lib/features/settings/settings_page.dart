@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../data/api/calee_hub_client.dart';
@@ -16,6 +17,7 @@ class SettingsPage extends StatefulWidget {
     required this.accessToken,
     required this.bootstrap,
     required this.onSignOut,
+    this.onBootstrapRefreshed,
     super.key,
   });
 
@@ -23,6 +25,7 @@ class SettingsPage extends StatefulWidget {
   final String accessToken;
   final ClientBootstrap bootstrap;
   final VoidCallback onSignOut;
+  final void Function(ClientBootstrap)? onBootstrapRefreshed;
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
@@ -31,13 +34,14 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   final _prefs = CaleePreferences();
 
+  late ClientBootstrap _bootstrap;
   StoredPreferences _preferences = const StoredPreferences();
   List<ClientCalendar> _calendars = [];
   bool _loadingPrefs = true;
   bool _openingFamily = false;
 
   Future<void> _openFamilyMembers() async {
-    final households = widget.bootstrap.contexts.households;
+    final households = _bootstrap.contexts.households;
 
     if (households.isNotEmpty) {
       Navigator.of(context).push(
@@ -61,7 +65,11 @@ class _SettingsPageState extends State<SettingsPage> {
           await widget.hubClient.bootstrap(accessToken: widget.accessToken);
 
       if (!mounted) return;
-      setState(() => _openingFamily = false);
+      setState(() {
+        _bootstrap = fresh;
+        _openingFamily = false;
+      });
+      widget.onBootstrapRefreshed?.call(fresh);
 
       final freshHouseholds = fresh.contexts.households;
       if (freshHouseholds.isEmpty) {
@@ -79,15 +87,21 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
         ),
       );
-    } catch (_) {
+    } catch (e, st) {
       if (!mounted) return;
       setState(() => _openingFamily = false);
+      debugPrint('[SettingsPage] Family setup failed: $e\n$st');
+      if (kDebugMode) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Family setup error: $e')),
+        );
+      }
       _showFamilySetupPage();
     }
   }
 
   void _showFamilySetupPage() {
-    final portalUrl = widget.bootstrap.services
+    final portalUrl = _bootstrap.services
         .where((s) => s.launchUrl.trim().isNotEmpty)
         .map((s) => s.launchUrl)
         .firstOrNull;
@@ -102,6 +116,7 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   void initState() {
     super.initState();
+    _bootstrap = widget.bootstrap;
     _loadAll();
   }
 
@@ -212,7 +227,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final account = widget.bootstrap.account;
+    final account = _bootstrap.account;
     final writableCalendars =
         _calendars.where((c) => c.isCalendarKind && !c.readOnly).toList();
     final taskCalendars =
@@ -362,7 +377,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     builder: (_) => CalendarCollectionsPage(
                       hubClient: widget.hubClient,
                       accessToken: widget.accessToken,
-                      services: widget.bootstrap.services,
+                      services: _bootstrap.services,
                     ),
                   ),
                 )
@@ -398,10 +413,10 @@ class _SettingsPageState extends State<SettingsPage> {
         CaleeSection(
           title: 'Services',
           children: [
-            if (widget.bootstrap.services.isEmpty)
+            if (_bootstrap.services.isEmpty)
               _EmptyRowText('No services connected.')
             else
-              for (final service in widget.bootstrap.services)
+              for (final service in _bootstrap.services)
                 _ServiceRow(service: service),
           ],
         ),
