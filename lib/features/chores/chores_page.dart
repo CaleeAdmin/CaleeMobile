@@ -1527,30 +1527,18 @@ class _CreateChoreSheetState extends State<_CreateChoreSheet> {
               // ── Chore ──────────────────────────────────────────────────
               CaleeSection(
                 children: [
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: CaleeSpacing.md,
-                      vertical: 2,
-                    ),
-                    child: TextFormField(
-                      controller: _titleController,
-                      enabled: !_isSubmitting,
-                      autofocus: true,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        color: CaleeColors.textPrimary,
-                      ),
-                      decoration: caleeSectionFieldDecoration.copyWith(
-                        hintText: 'Title',
-                      ),
-                      textInputAction: TextInputAction.next,
-                      validator: (value) {
-                        if ((value ?? '').trim().isEmpty) {
-                          return 'Enter a chore title';
-                        }
-                        return null;
-                      },
-                    ),
+                  CaleeSectionTextFormField(
+                    controller: _titleController,
+                    enabled: !_isSubmitting,
+                    autofocus: true,
+                    hintText: 'Title',
+                    textInputAction: TextInputAction.next,
+                    validator: (value) {
+                      if ((value ?? '').trim().isEmpty) {
+                        return 'Enter a chore title';
+                      }
+                      return null;
+                    },
                   ),
                   CaleeSectionDropdownRow<ClientCalendar>(
                     label: 'Chore List',
@@ -1721,24 +1709,12 @@ class _CreateChoreSheetState extends State<_CreateChoreSheet> {
               // ── Details ────────────────────────────────────────────────
               CaleeSection(
                 children: [
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: CaleeSpacing.md,
-                      vertical: 2,
-                    ),
-                    child: TextFormField(
-                      controller: _descriptionController,
-                      enabled: !_isSubmitting,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        color: CaleeColors.textPrimary,
-                      ),
-                      decoration: caleeSectionFieldDecoration.copyWith(
-                        hintText: 'Notes',
-                      ),
-                      minLines: 2,
-                      maxLines: 4,
-                    ),
+                  CaleeSectionTextFormField(
+                    controller: _descriptionController,
+                    enabled: !_isSubmitting,
+                    hintText: 'Notes',
+                    minLines: 2,
+                    maxLines: 4,
                   ),
                 ],
               ),
@@ -1938,30 +1914,18 @@ class _EditChoreSheetState extends State<_EditChoreSheet> {
               // ── Chore ────────────────────────────────────────────────
               CaleeSection(
                 children: [
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: CaleeSpacing.md,
-                      vertical: 2,
-                    ),
-                    child: TextFormField(
-                      controller: _titleController,
-                      enabled: !_isSubmitting,
-                      autofocus: true,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        color: CaleeColors.textPrimary,
-                      ),
-                      decoration: caleeSectionFieldDecoration.copyWith(
-                        hintText: 'Title',
-                      ),
-                      textInputAction: TextInputAction.next,
-                      validator: (value) {
-                        if ((value ?? '').trim().isEmpty) {
-                          return 'Enter a chore title';
-                        }
-                        return null;
-                      },
-                    ),
+                  CaleeSectionTextFormField(
+                    controller: _titleController,
+                    enabled: !_isSubmitting,
+                    autofocus: true,
+                    hintText: 'Title',
+                    textInputAction: TextInputAction.next,
+                    validator: (value) {
+                      if ((value ?? '').trim().isEmpty) {
+                        return 'Enter a chore title';
+                      }
+                      return null;
+                    },
                   ),
                 ],
               ),
@@ -2106,24 +2070,12 @@ class _EditChoreSheetState extends State<_EditChoreSheet> {
               // ── Details ──────────────────────────────────────────────
               CaleeSection(
                 children: [
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: CaleeSpacing.md,
-                      vertical: 2,
-                    ),
-                    child: TextFormField(
-                      controller: _descriptionController,
-                      enabled: !_isSubmitting,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        color: CaleeColors.textPrimary,
-                      ),
-                      decoration: caleeSectionFieldDecoration.copyWith(
-                        hintText: 'Notes',
-                      ),
-                      minLines: 2,
-                      maxLines: 4,
-                    ),
+                  CaleeSectionTextFormField(
+                    controller: _descriptionController,
+                    enabled: !_isSubmitting,
+                    hintText: 'Notes',
+                    minLines: 2,
+                    maxLines: 4,
                   ),
                 ],
               ),

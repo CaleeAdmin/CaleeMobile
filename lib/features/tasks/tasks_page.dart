@@ -1148,30 +1148,18 @@ class _CreateTaskFormState extends State<_CreateTaskForm> {
             // ── Task ──────────────────────────────────────────────────────
             CaleeSection(
               children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: CaleeSpacing.md,
-                    vertical: 2,
-                  ),
-                  child: TextFormField(
-                    controller: _titleController,
-                    enabled: !_isSubmitting,
-                    autofocus: true,
-                    style: const TextStyle(
-                      fontSize: 16,
-                      color: CaleeColors.textPrimary,
-                    ),
-                    decoration: caleeSectionFieldDecoration.copyWith(
-                      hintText: 'Title',
-                    ),
-                    textInputAction: TextInputAction.next,
-                    validator: (value) {
-                      if ((value ?? '').trim().isEmpty) {
-                        return 'Enter a task title';
-                      }
-                      return null;
-                    },
-                  ),
+                CaleeSectionTextFormField(
+                  controller: _titleController,
+                  enabled: !_isSubmitting,
+                  autofocus: true,
+                  hintText: 'Title',
+                  textInputAction: TextInputAction.next,
+                  validator: (value) {
+                    if ((value ?? '').trim().isEmpty) {
+                      return 'Enter a task title';
+                    }
+                    return null;
+                  },
                 ),
                 CaleeSectionDropdownRow<ClientCalendar>(
                   label: 'Task List',
@@ -1228,24 +1216,12 @@ class _CreateTaskFormState extends State<_CreateTaskForm> {
             // ── Details ───────────────────────────────────────────────────
             CaleeSection(
               children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: CaleeSpacing.md,
-                    vertical: 2,
-                  ),
-                  child: TextFormField(
-                    controller: _descriptionController,
-                    enabled: !_isSubmitting,
-                    style: const TextStyle(
-                      fontSize: 16,
-                      color: CaleeColors.textPrimary,
-                    ),
-                    decoration: caleeSectionFieldDecoration.copyWith(
-                      hintText: 'Notes',
-                    ),
-                    minLines: 2,
-                    maxLines: 4,
-                  ),
+                CaleeSectionTextFormField(
+                  controller: _descriptionController,
+                  enabled: !_isSubmitting,
+                  hintText: 'Notes',
+                  minLines: 2,
+                  maxLines: 4,
                 ),
               ],
             ),
@@ -1394,30 +1370,18 @@ class _EditTaskFormState extends State<_EditTaskForm> {
             // ── Task ──────────────────────────────────────────────────────
             CaleeSection(
               children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: CaleeSpacing.md,
-                    vertical: 2,
-                  ),
-                  child: TextFormField(
-                    controller: _titleController,
-                    enabled: !_isSubmitting,
-                    autofocus: true,
-                    style: const TextStyle(
-                      fontSize: 16,
-                      color: CaleeColors.textPrimary,
-                    ),
-                    decoration: caleeSectionFieldDecoration.copyWith(
-                      hintText: 'Title',
-                    ),
-                    textInputAction: TextInputAction.next,
-                    validator: (value) {
-                      if ((value ?? '').trim().isEmpty) {
-                        return 'Enter a task title';
-                      }
-                      return null;
-                    },
-                  ),
+                CaleeSectionTextFormField(
+                  controller: _titleController,
+                  enabled: !_isSubmitting,
+                  autofocus: true,
+                  hintText: 'Title',
+                  textInputAction: TextInputAction.next,
+                  validator: (value) {
+                    if ((value ?? '').trim().isEmpty) {
+                      return 'Enter a task title';
+                    }
+                    return null;
+                  },
                 ),
               ],
             ),
@@ -1456,24 +1420,12 @@ class _EditTaskFormState extends State<_EditTaskForm> {
             // ── Details ───────────────────────────────────────────────────
             CaleeSection(
               children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: CaleeSpacing.md,
-                    vertical: 2,
-                  ),
-                  child: TextFormField(
-                    controller: _descriptionController,
-                    enabled: !_isSubmitting,
-                    style: const TextStyle(
-                      fontSize: 16,
-                      color: CaleeColors.textPrimary,
-                    ),
-                    decoration: caleeSectionFieldDecoration.copyWith(
-                      hintText: 'Notes',
-                    ),
-                    minLines: 2,
-                    maxLines: 4,
-                  ),
+                CaleeSectionTextFormField(
+                  controller: _descriptionController,
+                  enabled: !_isSubmitting,
+                  hintText: 'Notes',
+                  minLines: 2,
+                  maxLines: 4,
                 ),
               ],
             ),

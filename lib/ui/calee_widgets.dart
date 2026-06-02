@@ -818,6 +818,70 @@ class CaleeSectionDropdownRow<T> extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────
+// CaleeSectionTextFormField
+// ─────────────────────────────────────────────
+
+/// A [TextFormField] row for use inside a [CaleeSection].
+/// Applies standard section padding and the borderless
+/// [caleeSectionFieldDecoration]. Supports validation, autofocus,
+/// multi-line, and keyboard/alignment overrides.
+class CaleeSectionTextFormField extends StatelessWidget {
+  const CaleeSectionTextFormField({
+    super.key,
+    required this.controller,
+    this.hintText,
+    this.enabled = true,
+    this.autofocus = false,
+    this.textInputAction,
+    this.keyboardType,
+    this.textAlign = TextAlign.start,
+    this.minLines,
+    this.maxLines = 1,
+    this.validator,
+    this.style,
+  });
+
+  final TextEditingController controller;
+  final String? hintText;
+  final bool enabled;
+  final bool autofocus;
+  final TextInputAction? textInputAction;
+  final TextInputType? keyboardType;
+  final TextAlign textAlign;
+  final int? minLines;
+  final int? maxLines;
+  final FormFieldValidator<String>? validator;
+  final TextStyle? style;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: CaleeSpacing.md,
+        vertical: 2,
+      ),
+      child: TextFormField(
+        controller: controller,
+        enabled: enabled,
+        autofocus: autofocus,
+        textInputAction: textInputAction,
+        keyboardType: keyboardType,
+        textAlign: textAlign,
+        minLines: minLines,
+        maxLines: maxLines,
+        validator: validator,
+        style: style ??
+            const TextStyle(
+              fontSize: 16,
+              color: CaleeColors.textPrimary,
+            ),
+        decoration: caleeSectionFieldDecoration.copyWith(hintText: hintText),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
 // CaleeDateHeader
 // ─────────────────────────────────────────────
 
