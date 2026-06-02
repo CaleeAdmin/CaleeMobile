@@ -428,7 +428,7 @@ class _ChoresPageState extends State<ChoresPage> {
 
     final actions = <CaleeAction>[
       CaleeAction(
-        label: 'Edit',
+        label: 'Edit Chore',
         icon: Icons.edit_outlined,
         onTap: () => _openEditChoreSheet(chore),
       ),
@@ -437,17 +437,18 @@ class _ChoresPageState extends State<ChoresPage> {
     if (chore.isRecurring) {
       actions.addAll([
         CaleeAction(
-          label: 'Skip this time',
+          label: 'Skip This Time',
           icon: Icons.event_busy_outlined,
           onTap: () => _skipChore(chore),
         ),
         CaleeAction(
-          label: 'Stop repeating',
+          label: 'Stop Repeating',
           icon: Icons.repeat_one_outlined,
+          isDestructive: true,
           onTap: () => _stopRepeatingChore(chore),
         ),
         CaleeAction(
-          label: 'Delete permanently',
+          label: 'Delete Permanently',
           icon: Icons.delete_outline,
           isDestructive: true,
           onTap: () => _confirmAndDeletePermanentChore(chore),
@@ -455,7 +456,7 @@ class _ChoresPageState extends State<ChoresPage> {
       ]);
     } else {
       actions.add(CaleeAction(
-        label: 'Delete',
+        label: 'Delete Chore',
         icon: Icons.delete_outline,
         isDestructive: true,
         onTap: () => _confirmAndDeletePermanentChore(chore),
@@ -469,36 +470,72 @@ class _ChoresPageState extends State<ChoresPage> {
     );
   }
 
-  void _skipChore(ClientChore chore) {
-    final scheduledDate = chore.scheduledDate;
-    final actionDate = scheduledDate != null && scheduledDate.trim().isNotEmpty
-        ? scheduledDate.trim()
-        : DateTime.now().toIso8601String().split('T').first;
-    _performChoreAction(
-      chore: chore,
-      action: 'skip',
-      actionDate: actionDate,
-      successMessage: 'Skipped this time.',
-      failureMessage: 'Unable to skip chore.',
+  Future<void> _skipChore(ClientChore chore) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Skip this chore?'),
+        content: const Text(
+          'This will skip only the current scheduled occurrence.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text(
+              'Skip',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
+      ),
     );
+
+    if (confirmed == true && mounted) {
+      final scheduledDate = chore.scheduledDate;
+      final actionDate =
+          scheduledDate != null && scheduledDate.trim().isNotEmpty
+              ? scheduledDate.trim()
+              : DateTime.now().toIso8601String().split('T').first;
+      _performChoreAction(
+        chore: chore,
+        action: 'skip',
+        actionDate: actionDate,
+        successMessage: 'Skipped this time.',
+        failureMessage: 'Unable to skip chore.',
+      );
+    }
   }
 
-  void _stopRepeatingChore(ClientChore chore) {
-    _performChoreAction(
-      chore: chore,
-      action: 'stopRepeating',
-      successMessage: 'Repeating stopped.',
-      failureMessage: 'Unable to stop repeating chore.',
+  Future<void> _stopRepeatingChore(ClientChore chore) async {
+    final confirmed = await CaleeDestructiveDialog.show(
+      context: context,
+      title: 'Stop repeating?',
+      body:
+          'This chore will stop repeating after the current schedule. Existing completion history will remain.',
+      confirmLabel: 'Stop Repeating',
     );
+
+    if (confirmed && mounted) {
+      _performChoreAction(
+        chore: chore,
+        action: 'stopRepeating',
+        successMessage: 'Repeating stopped.',
+        failureMessage: 'Unable to stop repeating chore.',
+      );
+    }
   }
 
   Future<void> _confirmAndDeletePermanentChore(ClientChore chore) async {
     final confirmed = await CaleeDestructiveDialog.show(
       context: context,
-      title: 'Delete permanently?',
+      title: 'Delete chore permanently?',
       body:
           'This will permanently delete "${chore.title}" and its completion records. This cannot be undone.',
-      confirmLabel: 'Delete permanently',
+      confirmLabel: 'Delete Permanently',
     );
 
     if (confirmed && mounted) {
