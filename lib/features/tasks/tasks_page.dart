@@ -519,7 +519,7 @@ class _TasksPageState extends State<TasksPage> {
                       ? null
                       : () => _openCreateTaskSheet(taskCalendars),
                   icon: const Icon(Icons.add),
-                  label: const Text('Task'),
+                  label: const Text('New Task'),
                 ),
           body: RefreshIndicator(
             onRefresh: () async {
