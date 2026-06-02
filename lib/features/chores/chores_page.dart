@@ -1283,7 +1283,7 @@ class _AssigneeFilterChooser extends StatelessWidget {
         ),
         const SizedBox(height: CaleeSpacing.md),
         CaleeSection(
-          title: 'Setup',
+          title: 'Add',
           children: [
             CaleeListRow(
               title: 'Add Person',
@@ -1295,7 +1295,7 @@ class _AssigneeFilterChooser extends StatelessWidget {
               onTap: onAddPerson,
             ),
             CaleeListRow(
-              title: 'Add Chore List',
+              title: 'New Chore List',
               leading: const Icon(
                 Icons.playlist_add_outlined,
                 color: CaleeColors.primary,
