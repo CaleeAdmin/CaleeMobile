@@ -1552,65 +1552,31 @@ class _CreateChoreSheetState extends State<_CreateChoreSheet> {
                       },
                     ),
                   ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(
-                      CaleeSpacing.md,
-                      0,
-                      CaleeSpacing.sm,
-                      0,
-                    ),
-                    child: Row(
-                      children: [
-                        const Text(
-                          'Chore List',
-                          style: TextStyle(
-                            fontSize: 16,
-                            color: CaleeColors.textPrimary,
-                          ),
-                        ),
-                        const Spacer(),
-                        Flexible(
-                          child: DropdownButton<ClientCalendar>(
-                            value: _selectedCalendar,
-                            underline: const SizedBox.shrink(),
-                            icon: const Icon(
-                              Icons.chevron_right,
-                              size: 20,
-                              color: CaleeColors.textTertiary,
+                  CaleeSectionDropdownRow<ClientCalendar>(
+                    label: 'Chore List',
+                    value: _selectedCalendar,
+                    enabled: !_isSubmitting,
+                    items: widget.calendars
+                        .map(
+                          (calendar) => DropdownMenuItem(
+                            value: calendar,
+                            child: Text(
+                              [
+                                calendar.name,
+                                if (calendar.serviceName.trim().isNotEmpty)
+                                  calendar.serviceName,
+                              ].join(' · '),
                             ),
-                            style: const TextStyle(
-                              fontSize: 16,
-                              color: CaleeColors.textSecondary,
-                            ),
-                            items: widget.calendars
-                                .map(
-                                  (calendar) => DropdownMenuItem(
-                                    value: calendar,
-                                    child: Text(
-                                      [
-                                        calendar.name,
-                                        if (calendar.serviceName
-                                            .trim()
-                                            .isNotEmpty)
-                                          calendar.serviceName,
-                                      ].join(' · '),
-                                    ),
-                                  ),
-                                )
-                                .toList(),
-                            onChanged: _isSubmitting
-                                ? null
-                                : (value) {
-                                    if (value != null) {
-                                      setState(() {
-                                        _selectedCalendar = value;
-                                      });
-                                    }
-                                  },
                           ),
-                        ),
-                      ],
-                    ),
+                        )
+                        .toList(),
+                    onChanged: (value) {
+                      if (value != null) {
+                        setState(() {
+                          _selectedCalendar = value;
+                        });
+                      }
+                    },
                   ),
                 ],
               ),
@@ -1652,65 +1618,33 @@ class _CreateChoreSheetState extends State<_CreateChoreSheet> {
                         ),
                       ),
                     ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(
-                      CaleeSpacing.md,
-                      0,
-                      CaleeSpacing.sm,
-                      0,
-                    ),
-                    child: Row(
-                      children: [
-                        const Text(
-                          'Repeat',
-                          style: TextStyle(
-                            fontSize: 16,
-                            color: CaleeColors.textPrimary,
-                          ),
-                        ),
-                        const Spacer(),
-                        Flexible(
-                          child: DropdownButton<String?>(
-                            value: _selectedRecurrence,
-                            underline: const SizedBox.shrink(),
-                            icon: const Icon(
-                              Icons.chevron_right,
-                              size: 20,
-                              color: CaleeColors.textTertiary,
-                            ),
-                            style: const TextStyle(
-                              fontSize: 16,
-                              color: CaleeColors.textSecondary,
-                            ),
-                            items: const [
-                              DropdownMenuItem<String?>(
-                                value: null,
-                                child: Text('Does not repeat'),
-                              ),
-                              DropdownMenuItem<String?>(
-                                value: 'daily',
-                                child: Text('Daily'),
-                              ),
-                              DropdownMenuItem<String?>(
-                                value: 'weekly',
-                                child: Text('Weekly'),
-                              ),
-                              DropdownMenuItem<String?>(
-                                value: 'monthly',
-                                child: Text('Monthly'),
-                              ),
-                            ],
-                            onChanged: _isSubmitting
-                                ? null
-                                : (value) {
-                                    setState(() {
-                                      _selectedRecurrence = value;
-                                    });
-                                  },
-                          ),
-                        ),
-                      ],
-                    ),
+                  CaleeSectionDropdownRow<String?>(
+                    label: 'Repeat',
+                    value: _selectedRecurrence,
+                    enabled: !_isSubmitting,
+                    items: const [
+                      DropdownMenuItem<String?>(
+                        value: null,
+                        child: Text('Does not repeat'),
+                      ),
+                      DropdownMenuItem<String?>(
+                        value: 'daily',
+                        child: Text('Daily'),
+                      ),
+                      DropdownMenuItem<String?>(
+                        value: 'weekly',
+                        child: Text('Weekly'),
+                      ),
+                      DropdownMenuItem<String?>(
+                        value: 'monthly',
+                        child: Text('Monthly'),
+                      ),
+                    ],
+                    onChanged: (value) {
+                      setState(() {
+                        _selectedRecurrence = value;
+                      });
+                    },
                   ),
                 ],
               ),
@@ -1719,58 +1653,26 @@ class _CreateChoreSheetState extends State<_CreateChoreSheet> {
               // ── Assignment ─────────────────────────────────────────────
               CaleeSection(
                 children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(
-                      CaleeSpacing.md,
-                      0,
-                      CaleeSpacing.sm,
-                      0,
-                    ),
-                    child: Row(
-                      children: [
-                        const Text(
-                          'Assign to',
-                          style: TextStyle(
-                            fontSize: 16,
-                            color: CaleeColors.textPrimary,
-                          ),
+                  CaleeSectionDropdownRow<String?>(
+                    label: 'Assign to',
+                    value: _assigneePersonId,
+                    enabled: !_isSubmitting,
+                    items: [
+                      const DropdownMenuItem<String?>(
+                        value: null,
+                        child: Text('Unassigned'),
+                      ),
+                      for (final person in widget.people)
+                        DropdownMenuItem<String?>(
+                          value: person.id,
+                          child: Text(person.displayName),
                         ),
-                        const Spacer(),
-                        Flexible(
-                          child: DropdownButton<String?>(
-                            value: _assigneePersonId,
-                            underline: const SizedBox.shrink(),
-                            icon: const Icon(
-                              Icons.chevron_right,
-                              size: 20,
-                              color: CaleeColors.textTertiary,
-                            ),
-                            style: const TextStyle(
-                              fontSize: 16,
-                              color: CaleeColors.textSecondary,
-                            ),
-                            items: [
-                              const DropdownMenuItem<String?>(
-                                value: null,
-                                child: Text('Unassigned'),
-                              ),
-                              for (final person in widget.people)
-                                DropdownMenuItem<String?>(
-                                  value: person.id,
-                                  child: Text(person.displayName),
-                                ),
-                            ],
-                            onChanged: _isSubmitting
-                                ? null
-                                : (value) {
-                                    setState(() {
-                                      _assigneePersonId = value;
-                                    });
-                                  },
-                          ),
-                        ),
-                      ],
-                    ),
+                    ],
+                    onChanged: (value) {
+                      setState(() {
+                        _assigneePersonId = value;
+                      });
+                    },
                   ),
                   Padding(
                     padding: const EdgeInsets.symmetric(
@@ -2101,65 +2003,33 @@ class _EditChoreSheetState extends State<_EditChoreSheet> {
                         ),
                       ),
                     ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(
-                      CaleeSpacing.md,
-                      0,
-                      CaleeSpacing.sm,
-                      0,
-                    ),
-                    child: Row(
-                      children: [
-                        const Text(
-                          'Repeat',
-                          style: TextStyle(
-                            fontSize: 16,
-                            color: CaleeColors.textPrimary,
-                          ),
-                        ),
-                        const Spacer(),
-                        Flexible(
-                          child: DropdownButton<String?>(
-                            value: _selectedRecurrence,
-                            underline: const SizedBox.shrink(),
-                            icon: const Icon(
-                              Icons.chevron_right,
-                              size: 20,
-                              color: CaleeColors.textTertiary,
-                            ),
-                            style: const TextStyle(
-                              fontSize: 16,
-                              color: CaleeColors.textSecondary,
-                            ),
-                            items: const [
-                              DropdownMenuItem<String?>(
-                                value: null,
-                                child: Text('Does not repeat'),
-                              ),
-                              DropdownMenuItem<String?>(
-                                value: 'daily',
-                                child: Text('Daily'),
-                              ),
-                              DropdownMenuItem<String?>(
-                                value: 'weekly',
-                                child: Text('Weekly'),
-                              ),
-                              DropdownMenuItem<String?>(
-                                value: 'monthly',
-                                child: Text('Monthly'),
-                              ),
-                            ],
-                            onChanged: _isSubmitting
-                                ? null
-                                : (value) {
-                                    setState(() {
-                                      _selectedRecurrence = value;
-                                    });
-                                  },
-                          ),
-                        ),
-                      ],
-                    ),
+                  CaleeSectionDropdownRow<String?>(
+                    label: 'Repeat',
+                    value: _selectedRecurrence,
+                    enabled: !_isSubmitting,
+                    items: const [
+                      DropdownMenuItem<String?>(
+                        value: null,
+                        child: Text('Does not repeat'),
+                      ),
+                      DropdownMenuItem<String?>(
+                        value: 'daily',
+                        child: Text('Daily'),
+                      ),
+                      DropdownMenuItem<String?>(
+                        value: 'weekly',
+                        child: Text('Weekly'),
+                      ),
+                      DropdownMenuItem<String?>(
+                        value: 'monthly',
+                        child: Text('Monthly'),
+                      ),
+                    ],
+                    onChanged: (value) {
+                      setState(() {
+                        _selectedRecurrence = value;
+                      });
+                    },
                   ),
                 ],
               ),
@@ -2168,58 +2038,26 @@ class _EditChoreSheetState extends State<_EditChoreSheet> {
               // ── Assignment ───────────────────────────────────────────
               CaleeSection(
                 children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(
-                      CaleeSpacing.md,
-                      0,
-                      CaleeSpacing.sm,
-                      0,
-                    ),
-                    child: Row(
-                      children: [
-                        const Text(
-                          'Assign to',
-                          style: TextStyle(
-                            fontSize: 16,
-                            color: CaleeColors.textPrimary,
-                          ),
+                  CaleeSectionDropdownRow<String?>(
+                    label: 'Assign to',
+                    value: _assigneePersonId,
+                    enabled: !_isSubmitting,
+                    items: [
+                      const DropdownMenuItem<String?>(
+                        value: null,
+                        child: Text('Unassigned'),
+                      ),
+                      for (final person in widget.people)
+                        DropdownMenuItem<String?>(
+                          value: person.id,
+                          child: Text(person.displayName),
                         ),
-                        const Spacer(),
-                        Flexible(
-                          child: DropdownButton<String?>(
-                            value: _assigneePersonId,
-                            underline: const SizedBox.shrink(),
-                            icon: const Icon(
-                              Icons.chevron_right,
-                              size: 20,
-                              color: CaleeColors.textTertiary,
-                            ),
-                            style: const TextStyle(
-                              fontSize: 16,
-                              color: CaleeColors.textSecondary,
-                            ),
-                            items: [
-                              const DropdownMenuItem<String?>(
-                                value: null,
-                                child: Text('Unassigned'),
-                              ),
-                              for (final person in widget.people)
-                                DropdownMenuItem<String?>(
-                                  value: person.id,
-                                  child: Text(person.displayName),
-                                ),
-                            ],
-                            onChanged: _isSubmitting
-                                ? null
-                                : (value) {
-                                    setState(() {
-                                      _assigneePersonId = value;
-                                    });
-                                  },
-                          ),
-                        ),
-                      ],
-                    ),
+                    ],
+                    onChanged: (value) {
+                      setState(() {
+                        _assigneePersonId = value;
+                      });
+                    },
                   ),
                   Padding(
                     padding: const EdgeInsets.symmetric(

@@ -750,6 +750,74 @@ class CaleeSectionPickerRow extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────
+// CaleeSectionDropdownRow
+// ─────────────────────────────────────────────
+
+/// A labelled dropdown row for use inside a [CaleeSection].
+/// Shows [label] on the left, a [DropdownButton] on the right, no underline,
+/// and a chevron-right icon. Pass [enabled] = false to disable interaction.
+class CaleeSectionDropdownRow<T> extends StatelessWidget {
+  const CaleeSectionDropdownRow({
+    super.key,
+    required this.label,
+    required this.value,
+    required this.items,
+    required this.onChanged,
+    this.enabled = true,
+  });
+
+  final String label;
+  final T? value;
+  final List<DropdownMenuItem<T>> items;
+  final ValueChanged<T?>? onChanged;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        CaleeSpacing.md,
+        0,
+        CaleeSpacing.sm,
+        0,
+      ),
+      child: Row(
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 16,
+              color:
+                  enabled ? CaleeColors.textPrimary : CaleeColors.textTertiary,
+            ),
+          ),
+          const Spacer(),
+          Flexible(
+            child: DropdownButton<T>(
+              value: value,
+              underline: const SizedBox.shrink(),
+              icon: const Icon(
+                Icons.chevron_right,
+                size: 20,
+                color: CaleeColors.textTertiary,
+              ),
+              style: TextStyle(
+                fontSize: 16,
+                color: enabled
+                    ? CaleeColors.textSecondary
+                    : CaleeColors.textTertiary,
+              ),
+              items: items,
+              onChanged: enabled ? onChanged : null,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
 // CaleeDateHeader
 // ─────────────────────────────────────────────
 
