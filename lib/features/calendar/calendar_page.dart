@@ -878,7 +878,7 @@ class _CalendarPageState extends State<CalendarPage> {
           ),
           child: Center(
             child: Text(
-              'No events',
+              'No events this day',
               style: TextStyle(
                 fontSize: 15,
                 color: CaleeColors.textTertiary,
@@ -1132,8 +1132,8 @@ class _CalendarErrorState extends StatelessWidget {
   Widget build(BuildContext context) {
     return CaleeEmptyState(
       icon: Icons.cloud_off_outlined,
-      title: 'Unable to load calendar',
-      body: 'Check your connection, then try again.',
+      title: 'We couldn\'t load your calendar',
+      body: 'Check your connection and try again.',
       action: FilledButton(
         onPressed: onRetry,
         child: const Text('Try again'),
