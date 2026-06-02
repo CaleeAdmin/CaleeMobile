@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../data/api/calee_hub_client.dart';
+import '../../data/auth/calee_preferences.dart';
 import '../../data/models/client_bootstrap.dart';
 import '../settings/calendar_collections_page.dart';
 import '../../data/models/client_calendar.dart';
@@ -35,6 +36,20 @@ class _TasksPageState extends State<TasksPage> {
   // null = All Tasks
   ClientCalendar? _selectedCalendar;
 
+  // Search
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+
+  // Preferences
+  final _caleePrefs = CaleePreferences();
+  StoredPreferences _prefs = const StoredPreferences();
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
   @override
   void initState() {
     super.initState();
@@ -43,17 +58,22 @@ class _TasksPageState extends State<TasksPage> {
 
   Future<_TasksOverview> _loadOverview() async {
     final today = DateTime.now();
-    final from = _formatDate(DateTime(today.year, 1, 1));
-    final to = _formatDate(DateTime(today.year, 12, 31));
+    // Load 2 years back and 2 years forward so overdue and future tasks are not hidden.
+    final from = _formatDate(DateTime(today.year - 2, 1, 1));
+    final to = _formatDate(DateTime(today.year + 2, 12, 31));
 
-    final calendarList = await widget.hubClient.calendars(
-      accessToken: widget.accessToken,
-    );
-    final taskList = await widget.hubClient.tasks(
-      accessToken: widget.accessToken,
-      from: from,
-      to: to,
-    );
+    final results = await Future.wait([
+      _caleePrefs.load(),
+      widget.hubClient.calendars(accessToken: widget.accessToken),
+      widget.hubClient.tasks(accessToken: widget.accessToken, from: from, to: to),
+    ]);
+
+    final freshPrefs = results[0] as StoredPreferences;
+    final calendarList = results[1] as ClientCalendarList;
+    final taskList = results[2] as ClientTaskList;
+
+    // Update preferences (fire-and-forget; UI rebuilds on next setState).
+    _prefs = freshPrefs;
 
     return _TasksOverview(
       calendarList: calendarList,
@@ -126,6 +146,7 @@ class _TasksPageState extends State<TasksPage> {
       child: _CreateTaskForm(
         taskCalendars: taskCalendars,
         initialCalendar: _selectedCalendar,
+        defaultTaskListId: _prefs.defaultTaskListId,
         onCreate: _createTask,
       ),
     );
@@ -286,6 +307,21 @@ class _TasksPageState extends State<TasksPage> {
         });
       }
     }
+  }
+
+  bool _matchesSearch(
+    ClientTask task,
+    String query,
+    List<ClientCalendar> taskCalendars,
+  ) {
+    final q = query.toLowerCase();
+    if ((task.title).toLowerCase().contains(q)) return true;
+    if ((task.description ?? '').toLowerCase().contains(q)) return true;
+    if (_calendarNameForTask(task, taskCalendars).toLowerCase().contains(q)) {
+      return true;
+    }
+    if (_formatDueLabel(task.dueAt).toLowerCase().contains(q)) return true;
+    return false;
   }
 
   String _rawCalendarId(ClientCalendar calendar) {
@@ -474,8 +510,8 @@ class _TasksPageState extends State<TasksPage> {
           );
         }
 
-        // Apply task list filter
-        final filteredTasks = _selectedCalendar == null
+        // Apply task list filter then search query
+        var filteredTasks = _selectedCalendar == null
             ? allTasks
             : allTasks.where((t) {
                 final sel = _selectedCalendar!;
@@ -483,6 +519,13 @@ class _TasksPageState extends State<TasksPage> {
                     t.calendarId == _rawCalendarId(sel) ||
                     '${t.serviceId}:${t.calendarId}' == sel.id;
               }).toList();
+
+        if (_searchQuery.trim().isNotEmpty) {
+          filteredTasks = filteredTasks
+              .where((t) =>
+                  _matchesSearch(t, _searchQuery, taskCalendars))
+              .toList();
+        }
 
         final openTasks =
             filteredTasks.where((t) => !t.isCompleted).toList();
@@ -539,6 +582,33 @@ class _TasksPageState extends State<TasksPage> {
                     onTap: () => _openTaskListChooser(taskCalendars, allTasks),
                   ),
                 if (taskCalendars.isNotEmpty)
+                  const SizedBox(height: CaleeSpacing.sm),
+
+                // ── Search field ─────────────────────────────────────
+                if (taskCalendars.isNotEmpty)
+                  TextField(
+                    controller: _searchController,
+                    onChanged: (v) => setState(() => _searchQuery = v),
+                    textInputAction: TextInputAction.search,
+                    decoration: InputDecoration(
+                      hintText: 'Search tasks…',
+                      prefixIcon: const Icon(Icons.search, size: 20),
+                      suffixIcon: _searchQuery.isNotEmpty
+                          ? IconButton(
+                              icon: const Icon(Icons.close, size: 18),
+                              onPressed: () {
+                                _searchController.clear();
+                                setState(() => _searchQuery = '');
+                              },
+                            )
+                          : null,
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: CaleeSpacing.md,
+                        vertical: CaleeSpacing.sm,
+                      ),
+                    ),
+                  ),
+                if (taskCalendars.isNotEmpty)
                   const SizedBox(height: CaleeSpacing.md),
 
                 // ── Empty state when no open tasks ───────────────────
@@ -546,10 +616,16 @@ class _TasksPageState extends State<TasksPage> {
                   CaleeSection(
                     children: [
                       CaleeListRow(
-                        title: 'No open tasks',
-                        subtitle: 'You\'re all caught up.',
-                        leading: const Icon(
-                          Icons.check_circle_outline,
+                        title: _searchQuery.trim().isNotEmpty
+                            ? 'No tasks match your search.'
+                            : 'No open tasks',
+                        subtitle: _searchQuery.trim().isNotEmpty
+                            ? null
+                            : 'You\'re all caught up.',
+                        leading: Icon(
+                          _searchQuery.trim().isNotEmpty
+                              ? Icons.search_off
+                              : Icons.check_circle_outline,
                           color: CaleeColors.textTertiary,
                           size: 22,
                         ),
@@ -1023,10 +1099,12 @@ class _CreateTaskForm extends StatefulWidget {
     required this.taskCalendars,
     required this.onCreate,
     this.initialCalendar,
+    this.defaultTaskListId,
   });
 
   final List<ClientCalendar> taskCalendars;
   final ClientCalendar? initialCalendar;
+  final String? defaultTaskListId;
   final Future<void> Function({
     required ClientCalendar taskCalendar,
     required String title,
@@ -1050,11 +1128,20 @@ class _CreateTaskFormState extends State<_CreateTaskForm> {
   @override
   void initState() {
     super.initState();
-    // Use the pre-selected list if it still exists in the available calendars
+    // Priority: explicit filter selection > default task list pref > first list
     final initial = widget.initialCalendar;
     if (initial != null &&
         widget.taskCalendars.any((c) => c.id == initial.id)) {
       _selectedTaskCalendar = initial;
+    } else if (widget.defaultTaskListId != null) {
+      ClientCalendar? found;
+      for (final c in widget.taskCalendars) {
+        if (c.id == widget.defaultTaskListId) {
+          found = c;
+          break;
+        }
+      }
+      _selectedTaskCalendar = found ?? widget.taskCalendars.first;
     } else {
       _selectedTaskCalendar = widget.taskCalendars.first;
     }

@@ -5,7 +5,7 @@ on:
 
 jobs:
   build-signed-android:
-    name: Generate signed release APK and AAB
+    name: Generate calee-mobile signed release APK and AAB
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -219,7 +219,7 @@ jobs:
         run: |
           set -euo pipefail
           src="build/app/outputs/flutter-apk/app-release.apk"
-          dst="build/app/outputs/flutter-apk/caleesync-${{ steps.build_meta.outputs.sanitized_build_name }}.apk"
+          dst="build/app/outputs/flutter-apk/calee-mobile-${{ steps.build_meta.outputs.sanitized_build_name }}.apk"
           mv "$src" "$dst"
           echo "Renamed APK to $dst"
 
@@ -228,7 +228,7 @@ jobs:
         run: |
           set -euo pipefail
           src="build/app/outputs/bundle/release/app-release.aab"
-          dst="build/app/outputs/bundle/release/caleesync-${{ steps.build_meta.outputs.sanitized_build_name }}.aab"
+          dst="build/app/outputs/bundle/release/calee-mobile-${{ steps.build_meta.outputs.sanitized_build_name }}.aab"
           mv "$src" "$dst"
           echo "Renamed AAB to $dst"
 
@@ -236,8 +236,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          apk="build/app/outputs/flutter-apk/caleesync-${{ steps.build_meta.outputs.sanitized_build_name }}.apk"
-          aab="build/app/outputs/bundle/release/caleesync-${{ steps.build_meta.outputs.sanitized_build_name }}.aab"
+          apk="build/app/outputs/flutter-apk/calee-mobile-${{ steps.build_meta.outputs.sanitized_build_name }}.apk"
+          aab="build/app/outputs/bundle/release/calee-mobile-${{ steps.build_meta.outputs.sanitized_build_name }}.aab"
 
           latest_build_tools="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -n1)"
           apksigner_bin="$ANDROID_HOME/build-tools/$latest_build_tools/apksigner"
@@ -259,22 +259,21 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: signed-release-apk
-          path: build/app/outputs/flutter-apk/caleesync-${{ steps.build_meta.outputs.sanitized_build_name }}.apk
+          name: calee-mobile-signed-apk-${{ steps.build_meta.outputs.sanitized_build_name }}
+          path: build/app/outputs/flutter-apk/calee-mobile-${{ steps.build_meta.outputs.sanitized_build_name }}.apk
           if-no-files-found: error
 
       - name: Upload AAB artifact
         uses: actions/upload-artifact@v4
         with:
-          name: signed-release-aab
-          path: build/app/outputs/bundle/release/caleesync-${{ steps.build_meta.outputs.sanitized_build_name }}.aab
+          name: calee-mobile-signed-aab-${{ steps.build_meta.outputs.sanitized_build_name }}
+          path: build/app/outputs/bundle/release/calee-mobile-${{ steps.build_meta.outputs.sanitized_build_name }}.aab
           if-no-files-found: error
 
       - name: Upload native debug symbols zip artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
-          name: native-debug-symbols
-          archive: false
+          name: calee-mobile-native-debug-symbols-${{ steps.build_meta.outputs.sanitized_build_name }}
           path: ${{ steps.native_symbols.outputs.zip_path }}
           if-no-files-found: error
 

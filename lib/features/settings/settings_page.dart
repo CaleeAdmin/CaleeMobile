@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
 
 import '../../data/api/calee_hub_client.dart';
+import '../../data/auth/calee_preferences.dart';
 import '../../data/models/client_bootstrap.dart';
+import '../../data/models/client_calendar.dart';
 import '../../ui/calee_theme.dart';
 import '../../ui/calee_widgets.dart';
 import 'calendar_collections_page.dart';
 import 'household_people_page.dart';
 
-class SettingsPage extends StatelessWidget {
+class SettingsPage extends StatefulWidget {
   const SettingsPage({
     required this.hubClient,
     required this.accessToken,
@@ -22,8 +24,146 @@ class SettingsPage extends StatelessWidget {
   final VoidCallback onSignOut;
 
   @override
+  State<SettingsPage> createState() => _SettingsPageState();
+}
+
+class _SettingsPageState extends State<SettingsPage> {
+  final _prefs = CaleePreferences();
+
+  StoredPreferences _preferences = const StoredPreferences();
+  List<ClientCalendar> _calendars = [];
+  bool _loadingPrefs = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAll();
+  }
+
+  Future<void> _loadAll() async {
+    try {
+      final results = await Future.wait([
+        _prefs.load(),
+        widget.hubClient.calendars(accessToken: widget.accessToken),
+      ]);
+      if (!mounted) return;
+
+      var prefs = results[0] as StoredPreferences;
+      final allCalendars = (results[1] as ClientCalendarList).calendars;
+
+      // Clear stale default calendar if the stored calendar no longer exists.
+      final calId = prefs.defaultCalendarId;
+      final writableCalendars =
+          allCalendars.where((c) => c.isCalendarKind && !c.readOnly).toList();
+      if (calId != null && !writableCalendars.any((c) => c.id == calId)) {
+        await _prefs.saveDefaultCalendarId(null);
+        prefs = StoredPreferences(
+          firstDayOfWeek: prefs.firstDayOfWeek,
+          timeFormat: prefs.timeFormat,
+          defaultCalendarId: null,
+          defaultTaskListId: prefs.defaultTaskListId,
+        );
+      }
+
+      // Clear stale default task list if the stored list no longer exists.
+      final taskListId = prefs.defaultTaskListId;
+      final taskCalendars = allCalendars.where((c) => c.isTaskKind).toList();
+      if (taskListId != null && !taskCalendars.any((c) => c.id == taskListId)) {
+        await _prefs.saveDefaultTaskListId(null);
+        prefs = StoredPreferences(
+          firstDayOfWeek: prefs.firstDayOfWeek,
+          timeFormat: prefs.timeFormat,
+          defaultCalendarId: prefs.defaultCalendarId,
+          defaultTaskListId: null,
+        );
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _preferences = prefs;
+        _calendars = allCalendars;
+        _loadingPrefs = false;
+      });
+    } catch (_) {
+      // Preferences are non-critical; show the page without them.
+      if (mounted) setState(() => _loadingPrefs = false);
+    }
+  }
+
+  Future<void> _setFirstDayOfWeek(FirstDayOfWeek value) async {
+    await _prefs.saveFirstDayOfWeek(value);
+    if (mounted) {
+      setState(() => _preferences = StoredPreferences(
+            firstDayOfWeek: value,
+            timeFormat: _preferences.timeFormat,
+            defaultCalendarId: _preferences.defaultCalendarId,
+            defaultTaskListId: _preferences.defaultTaskListId,
+          ));
+    }
+  }
+
+  Future<void> _setTimeFormat(TimeFormatPref value) async {
+    await _prefs.saveTimeFormat(value);
+    if (mounted) {
+      setState(() => _preferences = StoredPreferences(
+            firstDayOfWeek: _preferences.firstDayOfWeek,
+            timeFormat: value,
+            defaultCalendarId: _preferences.defaultCalendarId,
+            defaultTaskListId: _preferences.defaultTaskListId,
+          ));
+    }
+  }
+
+  Future<void> _setDefaultCalendar(ClientCalendar? cal) async {
+    await _prefs.saveDefaultCalendarId(cal?.id);
+    if (mounted) {
+      setState(() => _preferences = StoredPreferences(
+            firstDayOfWeek: _preferences.firstDayOfWeek,
+            timeFormat: _preferences.timeFormat,
+            defaultCalendarId: cal?.id,
+            defaultTaskListId: _preferences.defaultTaskListId,
+          ));
+    }
+  }
+
+  ClientCalendar? _findById(List<ClientCalendar> list, String id) {
+    for (final c in list) {
+      if (c.id == id) return c;
+    }
+    return null;
+  }
+
+  Future<void> _setDefaultTaskList(ClientCalendar? cal) async {
+    await _prefs.saveDefaultTaskListId(cal?.id);
+    if (mounted) {
+      setState(() => _preferences = StoredPreferences(
+            firstDayOfWeek: _preferences.firstDayOfWeek,
+            timeFormat: _preferences.timeFormat,
+            defaultCalendarId: _preferences.defaultCalendarId,
+            defaultTaskListId: cal?.id,
+          ));
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final account = bootstrap.account;
+    final account = widget.bootstrap.account;
+    final writableCalendars =
+        _calendars.where((c) => c.isCalendarKind && !c.readOnly).toList();
+    final taskCalendars =
+        _calendars.where((c) => c.isTaskKind).toList();
+
+    // Validate stored defaults against current calendar list so deleted
+    // calendars/lists don't leave a broken preference.
+    final storedCalId = _preferences.defaultCalendarId;
+    final defaultCal = storedCalId != null
+        ? _findById(writableCalendars, storedCalId)
+        : null;
+
+    final storedTaskId = _preferences.defaultTaskListId;
+    final defaultTask = storedTaskId != null
+        ? _findById(taskCalendars, storedTaskId)
+        : null;
 
     return ListView(
       padding: const EdgeInsets.symmetric(
@@ -57,6 +197,87 @@ class SettingsPage extends StatelessWidget {
 
         const SizedBox(height: CaleeSpacing.sectionSpacing),
 
+        // ── Preferences ──────────────────────────────
+        CaleeSection(
+          title: 'Preferences',
+          children: [
+            if (_loadingPrefs)
+              const Padding(
+                padding: EdgeInsets.symmetric(
+                  horizontal: CaleeSpacing.md,
+                  vertical: CaleeSpacing.md,
+                ),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else ...[
+              CaleeSectionDropdownRow<FirstDayOfWeek>(
+                label: 'First day of week',
+                value: _preferences.firstDayOfWeek,
+                items: FirstDayOfWeek.values
+                    .map((v) => DropdownMenuItem(
+                          value: v,
+                          child: Text(v.displayLabel),
+                        ))
+                    .toList(),
+                onChanged: (v) {
+                  if (v != null) _setFirstDayOfWeek(v);
+                },
+              ),
+              CaleeSectionDropdownRow<TimeFormatPref>(
+                label: 'Time format',
+                value: _preferences.timeFormat,
+                items: TimeFormatPref.values
+                    .map((v) => DropdownMenuItem(
+                          value: v,
+                          child: Text(v.displayLabel),
+                        ))
+                    .toList(),
+                onChanged: (v) {
+                  if (v != null) _setTimeFormat(v);
+                },
+              ),
+              if (writableCalendars.isNotEmpty)
+                CaleeSectionDropdownRow<ClientCalendar?>(
+                  label: 'Default calendar',
+                  value: defaultCal,
+                  items: [
+                    const DropdownMenuItem(
+                      value: null,
+                      child: Text('None'),
+                    ),
+                    ...writableCalendars.map(
+                      (c) => DropdownMenuItem(
+                        value: c,
+                        child: Text(c.name),
+                      ),
+                    ),
+                  ],
+                  onChanged: _setDefaultCalendar,
+                ),
+              if (taskCalendars.isNotEmpty)
+                CaleeSectionDropdownRow<ClientCalendar?>(
+                  label: 'Default task list',
+                  value: defaultTask,
+                  items: [
+                    const DropdownMenuItem(
+                      value: null,
+                      child: Text('None'),
+                    ),
+                    ...taskCalendars.map(
+                      (c) => DropdownMenuItem(
+                        value: c,
+                        child: Text(c.name),
+                      ),
+                    ),
+                  ],
+                  onChanged: _setDefaultTaskList,
+                ),
+            ],
+          ],
+        ),
+
+        const SizedBox(height: CaleeSpacing.sectionSpacing),
+
         // ── Manage ───────────────────────────────────
         CaleeSection(
           title: 'Manage',
@@ -70,20 +291,24 @@ class SettingsPage extends StatelessWidget {
                 color: CaleeColors.primary,
               ),
               onTap: () {
-                Navigator.of(context).push(
+                Navigator.of(context)
+                    .push(
                   MaterialPageRoute<void>(
                     builder: (_) => CalendarCollectionsPage(
-                      hubClient: hubClient,
-                      accessToken: accessToken,
-                      services: bootstrap.services,
+                      hubClient: widget.hubClient,
+                      accessToken: widget.accessToken,
+                      services: widget.bootstrap.services,
                     ),
                   ),
-                );
+                )
+                    .then((_) {
+                  if (mounted) _loadAll();
+                });
               },
             ),
             CaleeListRow(
               title: 'Household People',
-              subtitle: bootstrap.contexts.households.isEmpty
+              subtitle: widget.bootstrap.contexts.households.isEmpty
                   ? 'No household available'
                   : 'Manage people used for chores',
               leading: const Icon(
@@ -91,16 +316,17 @@ class SettingsPage extends StatelessWidget {
                 size: 20,
                 color: CaleeColors.primary,
               ),
-              enabled: bootstrap.contexts.households.isNotEmpty,
-              onTap: bootstrap.contexts.households.isEmpty
+              enabled: widget.bootstrap.contexts.households.isNotEmpty,
+              onTap: widget.bootstrap.contexts.households.isEmpty
                   ? null
                   : () {
                       Navigator.of(context).push(
                         MaterialPageRoute<void>(
                           builder: (_) => HouseholdPeoplePage(
-                            hubClient: hubClient,
-                            accessToken: accessToken,
-                            households: bootstrap.contexts.households,
+                            hubClient: widget.hubClient,
+                            accessToken: widget.accessToken,
+                            households:
+                                widget.bootstrap.contexts.households,
                           ),
                         ),
                       );
@@ -115,10 +341,10 @@ class SettingsPage extends StatelessWidget {
         CaleeSection(
           title: 'Services',
           children: [
-            if (bootstrap.services.isEmpty)
+            if (widget.bootstrap.services.isEmpty)
               _EmptyRowText('No services connected.')
             else
-              for (final service in bootstrap.services)
+              for (final service in widget.bootstrap.services)
                 _ServiceRow(service: service),
           ],
         ),
@@ -129,10 +355,10 @@ class SettingsPage extends StatelessWidget {
         CaleeSection(
           title: 'Contexts',
           children: [
-            if (bootstrap.availableContexts.isEmpty)
+            if (widget.bootstrap.availableContexts.isEmpty)
               _EmptyRowText('No household or organisation contexts yet.')
             else
-              for (final ctx in bootstrap.availableContexts)
+              for (final ctx in widget.bootstrap.availableContexts)
                 _ContextRow(context: ctx),
           ],
         ),
@@ -147,7 +373,7 @@ class SettingsPage extends StatelessWidget {
               titleStyle: Theme.of(context).textTheme.bodyLarge?.copyWith(
                     color: CaleeColors.destructive,
                   ),
-              onTap: onSignOut,
+              onTap: widget.onSignOut,
               trailing: const SizedBox.shrink(),
             ),
           ],
