@@ -195,7 +195,7 @@ void main() {
       refreshed = fresh;
 
       expect(refreshed, isNotNull);
-      expect(refreshed!.contexts.households, hasLength(1));
+      expect(refreshed.contexts.households, hasLength(1));
       expect(refreshed.contexts.households.first.id, 'h1');
     });
   });
