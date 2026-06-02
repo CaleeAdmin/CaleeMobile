@@ -144,5 +144,45 @@ void main() {
       expect(receivedTokens[1], contains('fresh-token'));
       expect(receivedTokens[2], contains('fresh-token'));
     });
+
+    test('clearAuthCache discards cached token so next call uses the passed token', () async {
+      int requestCount = 0;
+      final receivedTokens = <String>[];
+
+      server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      server.listen((req) async {
+        requestCount++;
+        final auth = req.headers.value(HttpHeaders.authorizationHeader) ?? '';
+        receivedTokens.add(auth);
+
+        if (requestCount == 1) {
+          req.response.statusCode = HttpStatus.unauthorized;
+          req.response.headers.contentType = ContentType.json;
+          req.response.write(jsonEncode({'error': 'Unauthorized', 'message': 'Token expired'}));
+        } else {
+          req.response.statusCode = HttpStatus.ok;
+          req.response.headers.contentType = ContentType.json;
+          req.response.write(jsonEncode({'data': {'calendars': []}}));
+        }
+        await req.response.close();
+      });
+
+      final client = CaleeHubClient(
+        baseUri: Uri.parse('http://127.0.0.1:${server.port}'),
+      );
+      client.onUnauthorized = () async => 'fresh-token';
+
+      // First call triggers refresh and caches 'fresh-token'.
+      await client.calendars(accessToken: 'stale-token');
+
+      // Clear the cache (simulates sign-out / sign-in).
+      client.clearAuthCache();
+
+      // Next call with a brand-new token should use 'new-token', not 'fresh-token'.
+      await client.calendars(accessToken: 'new-token');
+
+      expect(requestCount, 3);
+      expect(receivedTokens[2], contains('new-token'));
+    });
   });
 }

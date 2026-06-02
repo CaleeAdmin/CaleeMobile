@@ -34,6 +34,9 @@ class CaleeHubClient {
   // pages don't need to update their stored token before the next request.
   String? _refreshedToken;
 
+  // Call this when signing out or signing in to discard any cached token.
+  void clearAuthCache() => _refreshedToken = null;
+
   Future<ClientLoginResult> login({
     required String email,
     required String password,

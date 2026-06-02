@@ -85,42 +85,23 @@ class _CaleeAppState extends State<CaleeApp> {
     required String accessToken,
     required String refreshToken,
   }) async {
-    try {
-      final bootstrap = await _hubClient.bootstrap(accessToken: accessToken);
+    // Set refresh token early so _handleUnauthorized can transparently refresh
+    // a 401 from bootstrap() — it reads _refreshToken synchronously.
+    _refreshToken = refreshToken;
+    _hubClient.clearAuthCache();
 
-      if (!mounted) {
-        return;
-      }
+    final bootstrap = await _hubClient.bootstrap(accessToken: accessToken);
 
-      setState(() {
-        _accessToken = accessToken;
-        _refreshToken = refreshToken;
-        _bootstrap = bootstrap;
-        _isRestoringSession = false;
-      });
-    } on CaleeHubException catch (e) {
-      if (e.statusCode != 401) {
-        rethrow;
-      }
+    if (!mounted) return;
 
-      final refreshed = await _hubClient.refresh(refreshToken: refreshToken);
-      await _sessionStore.saveAccessToken(refreshed.accessToken);
-
-      final bootstrap = await _hubClient.bootstrap(
-        accessToken: refreshed.accessToken,
-      );
-
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _accessToken = refreshed.accessToken;
-        _refreshToken = refreshToken;
-        _bootstrap = bootstrap;
-        _isRestoringSession = false;
-      });
-    }
+    setState(() {
+      // _accessToken may already have been updated by _handleUnauthorized
+      // during a transparent retry, so keep the refreshed value if present.
+      _accessToken ??= accessToken;
+      _refreshToken = refreshToken;
+      _bootstrap = bootstrap;
+      _isRestoringSession = false;
+    });
   }
 
   void _finishRestoreWithoutSession() {
@@ -141,6 +122,7 @@ class _CaleeAppState extends State<CaleeApp> {
     String refreshToken,
     ClientBootstrap bootstrap,
   ) async {
+    _hubClient.clearAuthCache();
     await _sessionStore.saveSession(
       accessToken: accessToken,
       refreshToken: refreshToken,
@@ -158,6 +140,7 @@ class _CaleeAppState extends State<CaleeApp> {
   }
 
   Future<void> _signOut() async {
+    _hubClient.clearAuthCache();
     await _sessionStore.clear();
 
     if (!mounted) {

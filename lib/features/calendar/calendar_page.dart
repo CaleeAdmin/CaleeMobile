@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../data/api/calee_hub_client.dart';
+import '../../data/auth/calee_preferences.dart';
 import '../../data/models/client_bootstrap.dart';
 import '../../data/models/client_calendar.dart';
 import '../../ui/calee_design.dart';
@@ -47,13 +48,21 @@ String _monthYearLabel(DateTime d) => '${_kMonthNames[d.month - 1]} ${d.year}';
 bool _isSameDay(DateTime a, DateTime b) =>
     a.year == b.year && a.month == b.month && a.day == b.day;
 
-String _eventTimeLabel(ClientEvent event) {
+String _eventTimeLabel(ClientEvent event, {bool use24h = true}) {
   final start = DateTime.tryParse(event.startsAt)?.toLocal();
   if (start == null) return event.allDay ? 'All day' : '';
   if (event.allDay) return 'All day';
-  final h = start.hour.toString().padLeft(2, '0');
-  final m = start.minute.toString().padLeft(2, '0');
-  return '$h:$m';
+  if (use24h) {
+    final h = start.hour.toString().padLeft(2, '0');
+    final m = start.minute.toString().padLeft(2, '0');
+    return '$h:$m';
+  } else {
+    final hour12 = start.hour % 12;
+    final displayHour = hour12 == 0 ? 12 : hour12;
+    final m = start.minute.toString().padLeft(2, '0');
+    final period = start.hour < 12 ? 'am' : 'pm';
+    return '$displayHour:$m $period';
+  }
 }
 
 Color? _parseHexColor(String hex) {
@@ -106,6 +115,10 @@ class _CalendarPageState extends State<CalendarPage> {
   Object? _error;
   final Set<String> _hiddenCalendarIds = {};
 
+  // ── Preferences ───────────────────────────────────────────────────────────
+  final _caleePrefs = CaleePreferences();
+  StoredPreferences _prefs = const StoredPreferences();
+
   // ── Search ────────────────────────────────────────────────────────────────
   final TextEditingController _searchController = TextEditingController();
 
@@ -127,23 +140,37 @@ class _CalendarPageState extends State<CalendarPage> {
     _today = DateTime(now.year, now.month, now.day);
     _selectedDay = _today;
     _selectedMonth = DateTime(now.year, now.month, 1);
-    _gridStart = _computeGridStart(_selectedMonth);
+    _gridStart = _computeGridStart(_selectedMonth, _prefs.firstDayOfWeek);
     _loadMonth();
   }
 
   // ── Data loading ───────────────────────────────────────────────────────────
 
-  static DateTime _computeGridStart(DateTime firstOfMonth) {
-    // weekday: Mon=1 … Sun=7 → Sunday-first offset: (weekday % 7) gives Sun=0
-    final offset = firstOfMonth.weekday % 7;
+  static DateTime _computeGridStart(
+    DateTime firstOfMonth,
+    FirstDayOfWeek firstDay,
+  ) {
+    // Sunday-first: offset = weekday % 7  (Mon=1→1, …, Sun=7→0)
+    // Monday-first: offset = (weekday+6) % 7  (Mon=1→0, …, Sun=7→6)
+    final offset = firstDay == FirstDayOfWeek.monday
+        ? (firstOfMonth.weekday + 6) % 7
+        : firstOfMonth.weekday % 7;
     return firstOfMonth.subtract(Duration(days: offset));
   }
 
   Future<void> _loadMonth() async {
-    final gridStart = _computeGridStart(_selectedMonth);
+    StoredPreferences freshPrefs;
+    try {
+      freshPrefs = await _caleePrefs.load();
+    } catch (_) {
+      freshPrefs = _prefs;
+    }
+
+    final gridStart = _computeGridStart(_selectedMonth, freshPrefs.firstDayOfWeek);
     final gridEnd = gridStart.add(const Duration(days: 41)); // 6 weeks − 1 day
 
     setState(() {
+      _prefs = freshPrefs;
       _gridStart = gridStart;
       _loading = true;
       _error = null;
@@ -201,24 +228,24 @@ class _CalendarPageState extends State<CalendarPage> {
   }
 
   void _prevMonth() {
-    final newMonth = DateTime(_selectedMonth.year, _selectedMonth.month - 1, 1);
     setState(() {
-      _selectedMonth = newMonth;
-      if (_selectedDay.year != newMonth.year ||
-          _selectedDay.month != newMonth.month) {
-        _selectedDay = newMonth;
+      _selectedMonth = DateTime(
+          _selectedMonth.year, _selectedMonth.month - 1, 1);
+      if (_selectedDay.year != _selectedMonth.year ||
+          _selectedDay.month != _selectedMonth.month) {
+        _selectedDay = _selectedMonth;
       }
     });
     _loadMonth();
   }
 
   void _nextMonth() {
-    final newMonth = DateTime(_selectedMonth.year, _selectedMonth.month + 1, 1);
     setState(() {
-      _selectedMonth = newMonth;
-      if (_selectedDay.year != newMonth.year ||
-          _selectedDay.month != newMonth.month) {
-        _selectedDay = newMonth;
+      _selectedMonth = DateTime(
+          _selectedMonth.year, _selectedMonth.month + 1, 1);
+      if (_selectedDay.year != _selectedMonth.year ||
+          _selectedDay.month != _selectedMonth.month) {
+        _selectedDay = _selectedMonth;
       }
     });
     _loadMonth();
@@ -333,6 +360,7 @@ class _CalendarPageState extends State<CalendarPage> {
       builder: (context) => _CreateEventSheet(
         calendars: writableCalendars,
         initialDate: _selectedDay,
+        defaultCalendarId: _prefs.defaultCalendarId,
         onCreate: _createEvent,
       ),
     );
@@ -660,6 +688,12 @@ class _CalendarPageState extends State<CalendarPage> {
     return '$weekday ${day.day} ${_kMonthNames[day.month - 1]}';
   }
 
+  bool _use24h(BuildContext context) => switch (_prefs.timeFormat) {
+        TimeFormatPref.h24 => true,
+        TimeFormatPref.h12 => false,
+        TimeFormatPref.system => MediaQuery.alwaysUse24HourFormatOf(context),
+      };
+
   // ── Search ─────────────────────────────────────────────────────────────────
 
   String _calendarNameForEvent(ClientEvent event) {
@@ -699,6 +733,7 @@ class _CalendarPageState extends State<CalendarPage> {
         searchEvents: _searchEvents,
         calendarNameForEvent: _calendarNameForEvent,
         eventColor: _eventColor,
+        use24h: _use24h(context),
         onResultTap: (event) {
           Navigator.of(sheetContext).pop();
           final start = DateTime.tryParse(event.startsAt)?.toLocal();
@@ -756,93 +791,120 @@ class _CalendarPageState extends State<CalendarPage> {
   }
 
   Widget _buildTopBar() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(
-        horizontal: CaleeSpacing.sm,
-        vertical: CaleeSpacing.xs,
-      ),
-      child: Row(
-        children: [
-          Tooltip(
-            message: 'Go to today',
-            child: TextButton(
-              onPressed: _goToToday,
-              style: TextButton.styleFrom(
-                foregroundColor: CaleeColors.primary,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: CaleeSpacing.sm,
-                  vertical: CaleeSpacing.xs,
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Row 1: month navigation
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            CaleeSpacing.xs,
+            CaleeSpacing.xs,
+            CaleeSpacing.xs,
+            0,
+          ),
+          child: Row(
+            children: [
+              IconButton(
+                onPressed: _prevMonth,
+                icon: const Icon(Icons.chevron_left),
+                iconSize: 24,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                color: CaleeColors.primary,
+                tooltip: 'Previous month',
+              ),
+              Expanded(
+                child: Text(
+                  _monthYearLabel(_selectedMonth),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w600,
+                    color: CaleeColors.textPrimary,
+                  ),
                 ),
-                minimumSize: const Size(44, 44),
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
-              child: const Text(
-                'Today',
-                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+              IconButton(
+                onPressed: _nextMonth,
+                icon: const Icon(Icons.chevron_right),
+                iconSize: 24,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                color: CaleeColors.primary,
+                tooltip: 'Next month',
               ),
-            ),
+            ],
           ),
-          const SizedBox(width: CaleeSpacing.xs),
-          IconButton(
-            onPressed: _prevMonth,
-            icon: const Icon(Icons.chevron_left),
-            iconSize: 22,
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
-            color: CaleeColors.primary,
-            tooltip: 'Previous month',
+        ),
+        // Row 2: Today + action icons
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            CaleeSpacing.sm,
+            0,
+            CaleeSpacing.xs,
+            CaleeSpacing.xs,
           ),
-          Expanded(
-            child: Text(
-              _monthYearLabel(_selectedMonth),
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 17,
-                fontWeight: FontWeight.w600,
-                color: CaleeColors.textPrimary,
+          child: Row(
+            children: [
+              Tooltip(
+                message: 'Go to today',
+                child: TextButton(
+                  onPressed: _goToToday,
+                  style: TextButton.styleFrom(
+                    foregroundColor: CaleeColors.primary,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: CaleeSpacing.sm,
+                      vertical: CaleeSpacing.xs,
+                    ),
+                    minimumSize: const Size(44, 36),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: const Text(
+                    'Today',
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                  ),
+                ),
               ),
-            ),
+              const Spacer(),
+              IconButton(
+                onPressed: _openSearchSheet,
+                icon: const Icon(Icons.search),
+                iconSize: 22,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 44, minHeight: 36),
+                color: CaleeColors.primary,
+                tooltip: 'Search events',
+              ),
+              IconButton(
+                onPressed: _openCalendarChooser,
+                icon: const Icon(Icons.tune),
+                iconSize: 22,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 44, minHeight: 36),
+                color: CaleeColors.primary,
+                tooltip: 'Calendars',
+              ),
+              IconButton(
+                onPressed: _openCreateEventSheet,
+                icon: const Icon(Icons.add),
+                iconSize: 22,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 44, minHeight: 36),
+                color: CaleeColors.primary,
+                tooltip: 'Add event',
+              ),
+            ],
           ),
-          IconButton(
-            onPressed: _nextMonth,
-            icon: const Icon(Icons.chevron_right),
-            iconSize: 22,
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
-            color: CaleeColors.primary,
-            tooltip: 'Next month',
-          ),
-          const SizedBox(width: CaleeSpacing.xs),
-          IconButton(
-            onPressed: _openSearchSheet,
-            icon: const Icon(Icons.search),
-            iconSize: 22,
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
-            color: CaleeColors.primary,
-            tooltip: 'Search events',
-          ),
-          IconButton(
-            onPressed: _openCalendarChooser,
-            icon: const Icon(Icons.tune),
-            iconSize: 22,
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
-            color: CaleeColors.primary,
-            tooltip: 'Calendars',
-          ),
-          IconButton(
-            onPressed: _openCreateEventSheet,
-            icon: const Icon(Icons.add),
-            iconSize: 22,
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
-            color: CaleeColors.primary,
-            tooltip: 'Add event',
-          ),
-        ],
-      ),
+        ),
+      ],
     );
+  }
+
+  List<String> get _weekdayAbbr {
+    if (_prefs.firstDayOfWeek == FirstDayOfWeek.monday) {
+      return const ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+    }
+    return _kDayAbbr;
   }
 
   Widget _buildWeekdayHeader() {
@@ -852,7 +914,7 @@ class _CalendarPageState extends State<CalendarPage> {
         vertical: 2,
       ),
       child: Row(
-        children: _kDayAbbr
+        children: _weekdayAbbr
             .map(
               (d) => Expanded(
                 child: Center(
@@ -936,6 +998,7 @@ class _CalendarPageState extends State<CalendarPage> {
 
   List<Widget> _buildAgendaItems() {
     final items = <Widget>[];
+    final use24h = _use24h(context);
 
     // Date header
     items.add(
@@ -992,6 +1055,7 @@ class _CalendarPageState extends State<CalendarPage> {
               color: _eventColor(event),
               calendarName: _calendarForEvent(event)?.name,
               hideTime: true,
+              use24h: use24h,
               onTap: () => _openEventActions(event),
             ),
           );
@@ -1006,6 +1070,7 @@ class _CalendarPageState extends State<CalendarPage> {
               event: event,
               color: _eventColor(event),
               calendarName: _calendarForEvent(event)?.name,
+              use24h: use24h,
               onTap: () => _openEventActions(event),
             ),
           );
@@ -1150,6 +1215,7 @@ class _AgendaEventRow extends StatelessWidget {
     required this.onTap,
     this.calendarName,
     this.hideTime = false,
+    this.use24h = true,
   });
 
   final ClientEvent event;
@@ -1157,6 +1223,7 @@ class _AgendaEventRow extends StatelessWidget {
   final VoidCallback onTap;
   final String? calendarName;
   final bool hideTime;
+  final bool use24h;
 
   @override
   Widget build(BuildContext context) {
@@ -1191,7 +1258,7 @@ class _AgendaEventRow extends StatelessWidget {
               SizedBox(
                 width: 42,
                 child: Text(
-                  _eventTimeLabel(event),
+                  _eventTimeLabel(event, use24h: use24h),
                   style: const TextStyle(
                     fontSize: 13,
                     color: CaleeColors.textSecondary,
@@ -1243,6 +1310,7 @@ class _CalendarSearchSheet extends StatefulWidget {
     required this.calendarNameForEvent,
     required this.eventColor,
     required this.onResultTap,
+    this.use24h = true,
   });
 
   final TextEditingController searchController;
@@ -1250,6 +1318,7 @@ class _CalendarSearchSheet extends StatefulWidget {
   final String Function(ClientEvent) calendarNameForEvent;
   final Color Function(ClientEvent) eventColor;
   final void Function(ClientEvent) onResultTap;
+  final bool use24h;
 
   @override
   State<_CalendarSearchSheet> createState() => _CalendarSearchSheetState();
@@ -1340,6 +1409,7 @@ class _CalendarSearchSheetState extends State<_CalendarSearchSheet> {
                         event: event,
                         color: widget.eventColor(event),
                         calendarName: widget.calendarNameForEvent(event),
+                        use24h: widget.use24h,
                         onTap: () => widget.onResultTap(event),
                       );
                     },
@@ -1382,6 +1452,7 @@ class _CreateEventSheet extends StatefulWidget {
     this.initialDate,
     this.initialEvent,
     this.editScope,
+    this.defaultCalendarId,
     this.onUpdate,
   });
 
@@ -1389,6 +1460,7 @@ class _CreateEventSheet extends StatefulWidget {
   final DateTime? initialDate;
   final ClientEvent? initialEvent;
   final String? editScope;
+  final String? defaultCalendarId;
   final Future<void> Function({
     required ClientCalendar calendar,
     required String title,
@@ -1449,6 +1521,14 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
     super.initState();
 
     _selectedCalendar = widget.calendars.first;
+    if (widget.defaultCalendarId != null) {
+      for (final cal in widget.calendars) {
+        if (cal.id == widget.defaultCalendarId) {
+          _selectedCalendar = cal;
+          break;
+        }
+      }
+    }
 
     final event = widget.initialEvent;
     if (event != null) {
