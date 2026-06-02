@@ -1014,6 +1014,62 @@ class _TasksOverview {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Shared form helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+const _sectionFieldDecoration = InputDecoration(
+  border: InputBorder.none,
+  enabledBorder: InputBorder.none,
+  focusedBorder: InputBorder.none,
+  errorBorder: InputBorder.none,
+  focusedErrorBorder: InputBorder.none,
+  fillColor: Colors.transparent,
+  filled: false,
+  contentPadding: EdgeInsets.symmetric(vertical: 9),
+);
+
+Widget _buildDatePickerRow({
+  required String label,
+  required String value,
+  required VoidCallback? onTap,
+}) {
+  return InkWell(
+    onTap: onTap,
+    child: Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: CaleeSpacing.md,
+        vertical: 11,
+      ),
+      child: Row(
+        children: [
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 16,
+              color: CaleeColors.textPrimary,
+            ),
+          ),
+          const Spacer(),
+          Text(
+            value,
+            style: const TextStyle(
+              fontSize: 16,
+              color: CaleeColors.textSecondary,
+            ),
+          ),
+          const SizedBox(width: CaleeSpacing.xs),
+          const Icon(
+            Icons.chevron_right,
+            size: 20,
+            color: CaleeColors.textTertiary,
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Create task form (inside CaleeBottomSheet)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1072,6 +1128,12 @@ class _CreateTaskFormState extends State<_CreateTaskForm> {
     final day = value.day.toString().padLeft(2, '0');
 
     return '$year-$month-$day';
+  }
+
+  String _dueDateLabel() {
+    final d = _selectedDueDate;
+    if (d == null) return 'No Date';
+    return '${d.day}/${d.month}/${d.year}';
   }
 
   Future<void> _pickDueDate() async {
@@ -1138,70 +1200,143 @@ class _CreateTaskFormState extends State<_CreateTaskForm> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            DropdownButtonFormField<ClientCalendar>(
-              initialValue: _selectedTaskCalendar,
-              items: widget.taskCalendars
-                  .map(
-                    (calendar) => DropdownMenuItem(
-                      value: calendar,
-                      child:
-                          Text('${calendar.name} · ${calendar.serviceName}'),
+            // ── Task ──────────────────────────────────────────────────────
+            CaleeSection(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: CaleeSpacing.md,
+                    vertical: 2,
+                  ),
+                  child: TextFormField(
+                    controller: _titleController,
+                    enabled: !_isSubmitting,
+                    autofocus: true,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      color: CaleeColors.textPrimary,
                     ),
-                  )
-                  .toList(),
-              onChanged: _isSubmitting
-                  ? null
-                  : (calendar) {
+                    decoration: _sectionFieldDecoration.copyWith(
+                      hintText: 'Title',
+                    ),
+                    textInputAction: TextInputAction.next,
+                    validator: (value) {
+                      if ((value ?? '').trim().isEmpty) {
+                        return 'Enter a task title';
+                      }
+                      return null;
+                    },
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    CaleeSpacing.md,
+                    0,
+                    CaleeSpacing.sm,
+                    0,
+                  ),
+                  child: Row(
+                    children: [
+                      const Text(
+                        'Task List',
+                        style: TextStyle(
+                          fontSize: 16,
+                          color: CaleeColors.textPrimary,
+                        ),
+                      ),
+                      const Spacer(),
+                      Flexible(
+                        child: DropdownButton<ClientCalendar>(
+                          value: _selectedTaskCalendar,
+                          underline: const SizedBox.shrink(),
+                          icon: const Icon(
+                            Icons.chevron_right,
+                            size: 20,
+                            color: CaleeColors.textTertiary,
+                          ),
+                          style: const TextStyle(
+                            fontSize: 16,
+                            color: CaleeColors.textSecondary,
+                          ),
+                          items: widget.taskCalendars
+                              .map(
+                                (calendar) => DropdownMenuItem(
+                                  value: calendar,
+                                  child: Text(calendar.name),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: _isSubmitting
+                              ? null
+                              : (calendar) {
+                                  setState(() {
+                                    _selectedTaskCalendar = calendar;
+                                  });
+                                },
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: CaleeSpacing.sectionSpacing),
+
+            // ── Due ───────────────────────────────────────────────────────
+            CaleeSection(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    CaleeSpacing.md,
+                    CaleeSpacing.sm,
+                    CaleeSpacing.md,
+                    CaleeSpacing.xs,
+                  ),
+                  child: _DueDateQuickPicks(
+                    selectedDate: _selectedDueDate,
+                    enabled: !_isSubmitting,
+                    onPick: (date) {
                       setState(() {
-                        _selectedTaskCalendar = calendar;
+                        _selectedDueDate = date;
                       });
                     },
-              decoration: const InputDecoration(labelText: 'Task list'),
+                  ),
+                ),
+                _buildDatePickerRow(
+                  label: 'Date',
+                  value: _dueDateLabel(),
+                  onTap: _isSubmitting ? null : _pickDueDate,
+                ),
+              ],
             ),
-            const SizedBox(height: CaleeSpacing.sm),
-            TextFormField(
-              controller: _titleController,
-              enabled: !_isSubmitting,
-              autofocus: true,
-              decoration: const InputDecoration(labelText: 'Title'),
-              textInputAction: TextInputAction.next,
-              validator: (value) {
-                if ((value ?? '').trim().isEmpty) {
-                  return 'Enter a task title';
-                }
+            const SizedBox(height: CaleeSpacing.sectionSpacing),
 
-                return null;
-              },
-            ),
-            const SizedBox(height: CaleeSpacing.sm),
-            _DueDateQuickPicks(
-              selectedDate: _selectedDueDate,
-              enabled: !_isSubmitting,
-              onPick: (date) {
-                setState(() {
-                  _selectedDueDate = date;
-                });
-              },
-            ),
-            const SizedBox(height: CaleeSpacing.xs),
-            OutlinedButton.icon(
-              onPressed: _isSubmitting ? null : _pickDueDate,
-              icon: const Icon(Icons.event_outlined),
-              label: Text(
-                _selectedDueDate == null
-                    ? 'Custom date…'
-                    : 'Due ${_formatDate(_selectedDueDate!)}',
-              ),
-            ),
-            const SizedBox(height: CaleeSpacing.sm),
-            TextFormField(
-              controller: _descriptionController,
-              enabled: !_isSubmitting,
-              decoration: const InputDecoration(labelText: 'Notes'),
-              minLines: 2,
-              maxLines: 4,
+            // ── Details ───────────────────────────────────────────────────
+            CaleeSection(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: CaleeSpacing.md,
+                    vertical: 2,
+                  ),
+                  child: TextFormField(
+                    controller: _descriptionController,
+                    enabled: !_isSubmitting,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      color: CaleeColors.textPrimary,
+                    ),
+                    decoration: _sectionFieldDecoration.copyWith(
+                      hintText: 'Notes',
+                    ),
+                    minLines: 2,
+                    maxLines: 4,
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: CaleeSpacing.md),
+
             FilledButton(
               onPressed: _isSubmitting ? null : _submit,
               child: _isSubmitting
@@ -1277,6 +1412,12 @@ class _EditTaskFormState extends State<_EditTaskForm> {
     return '$year-$month-$day';
   }
 
+  String _dueDateLabel() {
+    final d = _selectedDueDate;
+    if (d == null) return 'No Date';
+    return '${d.day}/${d.month}/${d.year}';
+  }
+
   Future<void> _pickDueDate() async {
     final now = DateTime.now();
     final picked = await showDatePicker(
@@ -1336,49 +1477,93 @@ class _EditTaskFormState extends State<_EditTaskForm> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            TextFormField(
-              controller: _titleController,
-              enabled: !_isSubmitting,
-              autofocus: true,
-              decoration: const InputDecoration(labelText: 'Title'),
-              textInputAction: TextInputAction.next,
-              validator: (value) {
-                if ((value ?? '').trim().isEmpty) {
-                  return 'Enter a task title';
-                }
+            // ── Task ──────────────────────────────────────────────────────
+            CaleeSection(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: CaleeSpacing.md,
+                    vertical: 2,
+                  ),
+                  child: TextFormField(
+                    controller: _titleController,
+                    enabled: !_isSubmitting,
+                    autofocus: true,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      color: CaleeColors.textPrimary,
+                    ),
+                    decoration: _sectionFieldDecoration.copyWith(
+                      hintText: 'Title',
+                    ),
+                    textInputAction: TextInputAction.next,
+                    validator: (value) {
+                      if ((value ?? '').trim().isEmpty) {
+                        return 'Enter a task title';
+                      }
+                      return null;
+                    },
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: CaleeSpacing.sectionSpacing),
 
-                return null;
-              },
+            // ── Due ───────────────────────────────────────────────────────
+            CaleeSection(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    CaleeSpacing.md,
+                    CaleeSpacing.sm,
+                    CaleeSpacing.md,
+                    CaleeSpacing.xs,
+                  ),
+                  child: _DueDateQuickPicks(
+                    selectedDate: _selectedDueDate,
+                    enabled: !_isSubmitting,
+                    onPick: (date) {
+                      setState(() {
+                        _selectedDueDate = date;
+                      });
+                    },
+                  ),
+                ),
+                _buildDatePickerRow(
+                  label: 'Date',
+                  value: _dueDateLabel(),
+                  onTap: _isSubmitting ? null : _pickDueDate,
+                ),
+              ],
             ),
-            const SizedBox(height: CaleeSpacing.sm),
-            _DueDateQuickPicks(
-              selectedDate: _selectedDueDate,
-              enabled: !_isSubmitting,
-              onPick: (date) {
-                setState(() {
-                  _selectedDueDate = date;
-                });
-              },
-            ),
-            const SizedBox(height: CaleeSpacing.xs),
-            OutlinedButton.icon(
-              onPressed: _isSubmitting ? null : _pickDueDate,
-              icon: const Icon(Icons.event_outlined),
-              label: Text(
-                _selectedDueDate == null
-                    ? 'Custom date…'
-                    : 'Due ${_formatDate(_selectedDueDate!)}',
-              ),
-            ),
-            const SizedBox(height: CaleeSpacing.sm),
-            TextFormField(
-              controller: _descriptionController,
-              enabled: !_isSubmitting,
-              decoration: const InputDecoration(labelText: 'Notes'),
-              minLines: 2,
-              maxLines: 4,
+            const SizedBox(height: CaleeSpacing.sectionSpacing),
+
+            // ── Details ───────────────────────────────────────────────────
+            CaleeSection(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: CaleeSpacing.md,
+                    vertical: 2,
+                  ),
+                  child: TextFormField(
+                    controller: _descriptionController,
+                    enabled: !_isSubmitting,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      color: CaleeColors.textPrimary,
+                    ),
+                    decoration: _sectionFieldDecoration.copyWith(
+                      hintText: 'Notes',
+                    ),
+                    minLines: 2,
+                    maxLines: 4,
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: CaleeSpacing.md),
+
             FilledButton(
               onPressed: _isSubmitting ? null : _submit,
               child: _isSubmitting
