@@ -1572,54 +1572,6 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
     return 'Update Event';
   }
 
-  // ── Row builders ────────────────────────────────────────────────────────────
-
-  // Inline dropdown row — label on left, dropdown value + chevron right.
-  Widget _buildDropdownRow<T extends Object>({
-    required String label,
-    required T value,
-    required List<DropdownMenuItem<T>> items,
-    required void Function(T?)? onChanged,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        CaleeSpacing.md,
-        0,
-        CaleeSpacing.sm,
-        0,
-      ),
-      child: Row(
-        children: [
-          Text(
-            label,
-            style: const TextStyle(
-              fontSize: 16,
-              color: CaleeColors.textPrimary,
-            ),
-          ),
-          const Spacer(),
-          Flexible(
-            child: DropdownButton<T>(
-              value: value,
-              underline: const SizedBox.shrink(),
-              icon: const Icon(
-                Icons.chevron_right,
-                size: 20,
-                color: CaleeColors.textTertiary,
-              ),
-              items: items,
-              onChanged: onChanged,
-              style: const TextStyle(
-                fontSize: 16,
-                color: CaleeColors.textSecondary,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   // ── Build ───────────────────────────────────────────────────────────────────
 
   @override
@@ -1703,7 +1655,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                             ),
                           ),
                           // Calendar picker
-                          _buildDropdownRow<ClientCalendar>(
+                          CaleeSectionDropdownRow<ClientCalendar>(
                             label: 'Calendar',
                             value: _selectedCalendar,
                             items: [
@@ -1713,13 +1665,12 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                                   child: Text(cal.name),
                                 ),
                             ],
-                            onChanged: _isSubmitting || _isEditing
-                                ? null
-                                : (cal) {
-                                    if (cal != null) {
-                                      setState(() => _selectedCalendar = cal);
-                                    }
-                                  },
+                            onChanged: (cal) {
+                              if (cal != null) {
+                                setState(() => _selectedCalendar = cal);
+                              }
+                            },
+                            enabled: !_isSubmitting && !_isEditing,
                           ),
                         ],
                       ),
@@ -1797,7 +1748,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                         const SizedBox(height: CaleeSpacing.sectionSpacing),
                         CaleeSection(
                           children: [
-                            _buildDropdownRow<String>(
+                            CaleeSectionDropdownRow<String>(
                               label: 'Repeat',
                               value: _selectedRecurrence,
                               items: const [
@@ -1822,18 +1773,17 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                                   child: Text('Yearly'),
                                 ),
                               ],
-                              onChanged: _isSubmitting
-                                  ? null
-                                  : (value) {
-                                      if (value != null) {
-                                        setState(
-                                          () => _selectedRecurrence = value,
-                                        );
-                                      }
-                                    },
+                              onChanged: (value) {
+                                if (value != null) {
+                                  setState(
+                                    () => _selectedRecurrence = value,
+                                  );
+                                }
+                              },
+                              enabled: !_isSubmitting,
                             ),
                             if (_selectedRecurrence != 'none') ...[
-                              _buildDropdownRow<String>(
+                              CaleeSectionDropdownRow<String>(
                                 label: 'Ends',
                                 value: _recurrenceEnd,
                                 items: const [
@@ -1850,15 +1800,14 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                                     child: Text('After count'),
                                   ),
                                 ],
-                                onChanged: _isSubmitting
-                                    ? null
-                                    : (value) {
-                                        if (value != null) {
-                                          setState(
-                                            () => _recurrenceEnd = value,
-                                          );
-                                        }
-                                      },
+                                onChanged: (value) {
+                                  if (value != null) {
+                                    setState(
+                                      () => _recurrenceEnd = value,
+                                    );
+                                  }
+                                },
+                                enabled: !_isSubmitting,
                               ),
                               if (_recurrenceEnd == 'date')
                                 CaleeSectionPickerRow(
