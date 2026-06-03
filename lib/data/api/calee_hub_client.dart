@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import '../models/client_bootstrap.dart';
+import '../models/client_caldav_account.dart';
 import '../models/client_calendar.dart';
 import '../models/client_chore.dart';
 import '../models/client_chore_metadata.dart';
@@ -102,6 +103,18 @@ class CaleeHubClient {
         message: 'Could not set up your family. Please try again.',
       );
     }
+  }
+
+  Future<ClientCalDavAccount> caldavAccount({
+    required String accessToken,
+    required String serviceId,
+  }) async {
+    final encodedServiceId = Uri.encodeComponent(serviceId);
+    final json = await _getJson(
+      '/client/v1/services/$encodedServiceId/caldav-account',
+      accessToken: accessToken,
+    );
+    return ClientCalDavAccount.fromJson(_data(json));
   }
 
   Future<ClientCalendarList> calendars({

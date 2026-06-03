@@ -10,6 +10,7 @@ import '../../ui/calee_widgets.dart';
 import 'calendar_collections_page.dart';
 import 'family_setup_page.dart';
 import 'household_people_page.dart';
+import 'service_details_page.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({
@@ -109,6 +110,18 @@ class _SettingsPageState extends State<SettingsPage> {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => FamilySetupPage(portalUrl: portalUrl),
+      ),
+    );
+  }
+
+  void _openServiceDetails(ClientService service) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ServiceDetailsPage(
+          hubClient: widget.hubClient,
+          accessToken: widget.accessToken,
+          service: service,
+        ),
       ),
     );
   }
@@ -417,7 +430,10 @@ class _SettingsPageState extends State<SettingsPage> {
               _EmptyRowText('No services connected.')
             else
               for (final service in _bootstrap.services)
-                _ServiceRow(service: service),
+                _ServiceRow(
+                  service: service,
+                  onTap: () => _openServiceDetails(service),
+                ),
           ],
         ),
 
@@ -448,14 +464,17 @@ class _SettingsPageState extends State<SettingsPage> {
 // ─────────────────────────────────────────────
 
 class _ServiceRow extends StatelessWidget {
-  const _ServiceRow({required this.service});
+  const _ServiceRow({
+    required this.service,
+    required this.onTap,
+  });
 
   final ClientService service;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final hasMissing = service.hasMissingCalendarCredential;
-
     final subtitle = '${service.baseUrl} · ${service.accessStatus}';
 
     return CaleeListRow(
@@ -472,7 +491,8 @@ class _ServiceRow extends StatelessWidget {
               size: 16,
               color: CaleeColors.dotOrange,
             )
-          : const SizedBox.shrink(),
+          : null,
+      onTap: onTap,
     );
   }
 }
