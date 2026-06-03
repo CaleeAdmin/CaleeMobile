@@ -58,6 +58,9 @@ String _choreErrorMessage(Object error, String fallback) {
   return fallback;
 }
 
+bool _isValidChorePoints(int? points) =>
+    points != null && points >= 1 && points <= 100;
+
 // ─────────────────────────────────────────────
 // ChoresPage
 // ─────────────────────────────────────────────
@@ -1742,8 +1745,8 @@ class _CreateChoreSheetState extends State<_CreateChoreSheet> {
                     textAlign: TextAlign.right,
                     validator: (value) {
                       final points = int.tryParse((value ?? '').trim());
-                      if (points == null || points < 0 || points > 100000) {
-                        return 'Enter valid points';
+                      if (!_isValidChorePoints(points)) {
+                        return 'Enter points from 1 to 100';
                       }
                       return null;
                     },
@@ -2077,8 +2080,8 @@ class _EditChoreSheetState extends State<_EditChoreSheet> {
                     textAlign: TextAlign.right,
                     validator: (value) {
                       final points = int.tryParse((value ?? '').trim());
-                      if (points == null || points < 0 || points > 100000) {
-                        return 'Enter valid points';
+                      if (!_isValidChorePoints(points)) {
+                        return 'Enter points from 1 to 100';
                       }
                       return null;
                     },
