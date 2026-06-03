@@ -73,6 +73,7 @@ class ClientService {
     required this.accessStatus,
     required this.calendarCredentialStatus,
     required this.source,
+    required this.capabilities,
   });
 
   factory ClientService.fromJson(Map<String, dynamic> json) {
@@ -86,6 +87,9 @@ class ClientService {
       calendarCredentialStatus:
           json['calendarCredentialStatus'] as String? ?? 'unsupported',
       source: json['source'] as String? ?? '',
+      capabilities: Map<String, dynamic>.from(
+        json['capabilities'] as Map<String, dynamic>? ?? const {},
+      ),
     );
   }
 
@@ -97,13 +101,50 @@ class ClientService {
   final String accessStatus;
   final String calendarCredentialStatus;
   final String source;
+  final Map<String, dynamic> capabilities;
 
   bool get hasConnectedCalendarCredential =>
       calendarCredentialStatus == 'connected';
   bool get hasMissingCalendarCredential =>
       calendarCredentialStatus == 'missing';
-  bool get supportsCalendarCredential =>
-      calendarCredentialStatus != 'unsupported';
+
+  bool get supportsCalendar => capabilities['calendar'] == true;
+
+  bool get supportsTasks => capabilities['tasks'] == true;
+
+  bool get supportsChores {
+    if (capabilities.containsKey('chores')) {
+      return capabilities['chores'] == true;
+    }
+    // Backwards compatibility with old deployed backend.
+    return id == 'portal' || serviceType == 'nextcloud_portal';
+  }
+
+  bool get supportsChoreMetadata {
+    if (capabilities.containsKey('choreMetadata')) {
+      return capabilities['choreMetadata'] == true;
+    }
+    // Backwards compatibility with old deployed backend.
+    return supportsChores;
+  }
+
+  bool get supportsCalendarCredentials {
+    if (capabilities.containsKey('calendarCredentials')) {
+      return capabilities['calendarCredentials'] == true;
+    }
+    // Backwards compatibility with old deployed backend.
+    return calendarCredentialStatus != 'unsupported';
+  }
+
+  bool get supportsCalendarAppSetup {
+    if (capabilities.containsKey('calendarAppSetup')) {
+      return capabilities['calendarAppSetup'] == true;
+    }
+    // Backwards compatibility with old deployed backend.
+    return supportsCalendarCredentials;
+  }
+
+  bool get supportsCalendarCredential => supportsCalendarCredentials;
 }
 
 class ClientContexts {
