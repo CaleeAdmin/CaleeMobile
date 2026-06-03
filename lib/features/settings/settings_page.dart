@@ -11,6 +11,8 @@ import 'calendar_collections_page.dart';
 import 'family_setup_page.dart';
 import 'household_people_page.dart';
 import 'service_details_page.dart';
+import 'settings_controller.dart';
+import 'settings_repository.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({
@@ -33,16 +35,30 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
-  final _prefs = CaleePreferences();
+  late final SettingsController _controller;
 
-  late ClientBootstrap _bootstrap;
-  StoredPreferences _preferences = const StoredPreferences();
-  List<ClientCalendar> _calendars = [];
-  bool _loadingPrefs = true;
-  bool _openingFamily = false;
+  @override
+  void initState() {
+    super.initState();
+    final repository = SettingsRepository(
+      hubClient: widget.hubClient,
+      accessToken: widget.accessToken,
+    );
+    _controller = SettingsController(
+      repository: repository,
+      initialBootstrap: widget.bootstrap,
+    );
+    _controller.load();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
 
   Future<void> _openFamilyMembers() async {
-    final households = _bootstrap.contexts.households;
+    final households = _controller.bootstrap.contexts.households;
 
     if (households.isNotEmpty) {
       Navigator.of(context).push(
@@ -57,19 +73,11 @@ class _SettingsPageState extends State<SettingsPage> {
       return;
     }
 
-    setState(() => _openingFamily = true);
-
     try {
-      await widget.hubClient
-          .ensureDefaultFamily(accessToken: widget.accessToken);
       final fresh =
-          await widget.hubClient.bootstrap(accessToken: widget.accessToken);
+          await _controller.ensureDefaultFamilyAndRefreshBootstrap();
 
       if (!mounted) return;
-      setState(() {
-        _bootstrap = fresh;
-        _openingFamily = false;
-      });
       widget.onBootstrapRefreshed?.call(fresh);
 
       final freshHouseholds = fresh.contexts.households;
@@ -90,7 +98,6 @@ class _SettingsPageState extends State<SettingsPage> {
       );
     } catch (e, st) {
       if (!mounted) return;
-      setState(() => _openingFamily = false);
       debugPrint('[SettingsPage] Family setup failed: $e\n$st');
       if (kDebugMode) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -102,7 +109,7 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   void _showFamilySetupPage() {
-    final portalUrl = _bootstrap.services
+    final portalUrl = _controller.bootstrap.services
         .where((s) => s.launchUrl.trim().isNotEmpty)
         .map((s) => s.launchUrl)
         .firstOrNull;
@@ -126,99 +133,6 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  @override
-  void initState() {
-    super.initState();
-    _bootstrap = widget.bootstrap;
-    _loadAll();
-  }
-
-  Future<void> _loadAll() async {
-    try {
-      final results = await Future.wait([
-        _prefs.load(),
-        widget.hubClient.calendars(accessToken: widget.accessToken),
-      ]);
-      if (!mounted) return;
-
-      var prefs = results[0] as StoredPreferences;
-      final allCalendars = (results[1] as ClientCalendarList).calendars;
-
-      // Clear stale default calendar if the stored calendar no longer exists.
-      final calId = prefs.defaultCalendarId;
-      final writableCalendars =
-          allCalendars.where((c) => c.isCalendarKind && !c.readOnly).toList();
-      if (calId != null && !writableCalendars.any((c) => c.id == calId)) {
-        await _prefs.saveDefaultCalendarId(null);
-        prefs = StoredPreferences(
-          firstDayOfWeek: prefs.firstDayOfWeek,
-          timeFormat: prefs.timeFormat,
-          defaultCalendarId: null,
-          defaultTaskListId: prefs.defaultTaskListId,
-        );
-      }
-
-      // Clear stale default task list if the stored list no longer exists.
-      final taskListId = prefs.defaultTaskListId;
-      final taskCalendars = allCalendars.where((c) => c.isTaskKind).toList();
-      if (taskListId != null && !taskCalendars.any((c) => c.id == taskListId)) {
-        await _prefs.saveDefaultTaskListId(null);
-        prefs = StoredPreferences(
-          firstDayOfWeek: prefs.firstDayOfWeek,
-          timeFormat: prefs.timeFormat,
-          defaultCalendarId: prefs.defaultCalendarId,
-          defaultTaskListId: null,
-        );
-      }
-
-      if (!mounted) return;
-      setState(() {
-        _preferences = prefs;
-        _calendars = allCalendars;
-        _loadingPrefs = false;
-      });
-    } catch (_) {
-      // Preferences are non-critical; show the page without them.
-      if (mounted) setState(() => _loadingPrefs = false);
-    }
-  }
-
-  Future<void> _setFirstDayOfWeek(FirstDayOfWeek value) async {
-    await _prefs.saveFirstDayOfWeek(value);
-    if (mounted) {
-      setState(() => _preferences = StoredPreferences(
-            firstDayOfWeek: value,
-            timeFormat: _preferences.timeFormat,
-            defaultCalendarId: _preferences.defaultCalendarId,
-            defaultTaskListId: _preferences.defaultTaskListId,
-          ));
-    }
-  }
-
-  Future<void> _setTimeFormat(TimeFormatPref value) async {
-    await _prefs.saveTimeFormat(value);
-    if (mounted) {
-      setState(() => _preferences = StoredPreferences(
-            firstDayOfWeek: _preferences.firstDayOfWeek,
-            timeFormat: value,
-            defaultCalendarId: _preferences.defaultCalendarId,
-            defaultTaskListId: _preferences.defaultTaskListId,
-          ));
-    }
-  }
-
-  Future<void> _setDefaultCalendar(ClientCalendar? cal) async {
-    await _prefs.saveDefaultCalendarId(cal?.id);
-    if (mounted) {
-      setState(() => _preferences = StoredPreferences(
-            firstDayOfWeek: _preferences.firstDayOfWeek,
-            timeFormat: _preferences.timeFormat,
-            defaultCalendarId: cal?.id,
-            defaultTaskListId: _preferences.defaultTaskListId,
-          ));
-    }
-  }
-
   ClientCalendar? _findById(List<ClientCalendar> list, String id) {
     for (final c in list) {
       if (c.id == id) return c;
@@ -226,37 +140,32 @@ class _SettingsPageState extends State<SettingsPage> {
     return null;
   }
 
-  Future<void> _setDefaultTaskList(ClientCalendar? cal) async {
-    await _prefs.saveDefaultTaskListId(cal?.id);
-    if (mounted) {
-      setState(() => _preferences = StoredPreferences(
-            firstDayOfWeek: _preferences.firstDayOfWeek,
-            timeFormat: _preferences.timeFormat,
-            defaultCalendarId: _preferences.defaultCalendarId,
-            defaultTaskListId: cal?.id,
-          ));
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    final account = _bootstrap.account;
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, _) => _buildContent(context),
+    );
+  }
+
+  Widget _buildContent(BuildContext context) {
+    final account = _controller.bootstrap.account;
+    final calendars = _controller.calendars;
+    final preferences = _controller.preferences;
+    final isLoadingPrefs = _controller.isLoadingPreferences;
+    final isOpeningFamily = _controller.isOpeningFamily;
+
     final writableCalendars =
-        _calendars.where((c) => c.isCalendarKind && !c.readOnly).toList();
-    final taskCalendars =
-        _calendars.where((c) => c.isTaskKind).toList();
+        calendars.where((c) => c.isCalendarKind && !c.readOnly).toList();
+    final taskCalendars = calendars.where((c) => c.isTaskKind).toList();
 
-    // Validate stored defaults against current calendar list so deleted
-    // calendars/lists don't leave a broken preference.
-    final storedCalId = _preferences.defaultCalendarId;
-    final defaultCal = storedCalId != null
-        ? _findById(writableCalendars, storedCalId)
-        : null;
+    final storedCalId = preferences.defaultCalendarId;
+    final defaultCal =
+        storedCalId != null ? _findById(writableCalendars, storedCalId) : null;
 
-    final storedTaskId = _preferences.defaultTaskListId;
-    final defaultTask = storedTaskId != null
-        ? _findById(taskCalendars, storedTaskId)
-        : null;
+    final storedTaskId = preferences.defaultTaskListId;
+    final defaultTask =
+        storedTaskId != null ? _findById(taskCalendars, storedTaskId) : null;
 
     return ListView(
       padding: const EdgeInsets.symmetric(
@@ -294,7 +203,7 @@ class _SettingsPageState extends State<SettingsPage> {
         CaleeSection(
           title: 'Preferences',
           children: [
-            if (_loadingPrefs)
+            if (isLoadingPrefs)
               const Padding(
                 padding: EdgeInsets.symmetric(
                   horizontal: CaleeSpacing.md,
@@ -305,7 +214,7 @@ class _SettingsPageState extends State<SettingsPage> {
             else ...[
               CaleeSectionDropdownRow<FirstDayOfWeek>(
                 label: 'First day of week',
-                value: _preferences.firstDayOfWeek,
+                value: preferences.firstDayOfWeek,
                 items: FirstDayOfWeek.values
                     .map((v) => DropdownMenuItem(
                           value: v,
@@ -313,12 +222,12 @@ class _SettingsPageState extends State<SettingsPage> {
                         ))
                     .toList(),
                 onChanged: (v) {
-                  if (v != null) _setFirstDayOfWeek(v);
+                  if (v != null) _controller.setFirstDayOfWeek(v);
                 },
               ),
               CaleeSectionDropdownRow<TimeFormatPref>(
                 label: 'Time format',
-                value: _preferences.timeFormat,
+                value: preferences.timeFormat,
                 items: TimeFormatPref.values
                     .map((v) => DropdownMenuItem(
                           value: v,
@@ -326,7 +235,7 @@ class _SettingsPageState extends State<SettingsPage> {
                         ))
                     .toList(),
                 onChanged: (v) {
-                  if (v != null) _setTimeFormat(v);
+                  if (v != null) _controller.setTimeFormat(v);
                 },
               ),
               if (writableCalendars.isNotEmpty)
@@ -345,7 +254,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       ),
                     ),
                   ],
-                  onChanged: _setDefaultCalendar,
+                  onChanged: _controller.setDefaultCalendar,
                 ),
               if (taskCalendars.isNotEmpty)
                 CaleeSectionDropdownRow<ClientCalendar?>(
@@ -363,7 +272,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       ),
                     ),
                   ],
-                  onChanged: _setDefaultTaskList,
+                  onChanged: _controller.setDefaultTaskList,
                 ),
             ],
           ],
@@ -390,21 +299,21 @@ class _SettingsPageState extends State<SettingsPage> {
                     builder: (_) => CalendarCollectionsPage(
                       hubClient: widget.hubClient,
                       accessToken: widget.accessToken,
-                      services: _bootstrap.services,
+                      services: _controller.bootstrap.services,
                     ),
                   ),
                 )
                     .then((_) {
-                  if (mounted) _loadAll();
+                  if (mounted) _controller.refresh();
                 });
               },
             ),
             CaleeListRow(
               title: 'Family Members',
-              subtitle: _openingFamily
+              subtitle: isOpeningFamily
                   ? 'Setting up family…'
                   : 'Manage people used for chores',
-              leading: _openingFamily
+              leading: isOpeningFamily
                   ? const SizedBox(
                       width: 20,
                       height: 20,
@@ -415,7 +324,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       size: 20,
                       color: CaleeColors.primary,
                     ),
-              onTap: _openingFamily ? null : _openFamilyMembers,
+              onTap: isOpeningFamily ? null : _openFamilyMembers,
             ),
           ],
         ),
@@ -426,10 +335,10 @@ class _SettingsPageState extends State<SettingsPage> {
         CaleeSection(
           title: 'Services',
           children: [
-            if (_bootstrap.services.isEmpty)
+            if (_controller.bootstrap.services.isEmpty)
               _EmptyRowText('No services connected.')
             else
-              for (final service in _bootstrap.services)
+              for (final service in _controller.bootstrap.services)
                 _ServiceRow(
                   service: service,
                   onTap: () => _openServiceDetails(service),
