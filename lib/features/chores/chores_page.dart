@@ -103,8 +103,14 @@ class _ChoresPageState extends State<ChoresPage> {
     return null;
   }
 
-  bool _isPortalCalendar(ClientCalendar calendar) {
-    return calendar.serviceId == 'portal' || calendar.id.startsWith('portal:');
+  Set<String> get _choreServiceIds => widget.services
+      .where((service) => service.supportsChores)
+      .map((service) => service.id)
+      .where((id) => id.trim().isNotEmpty)
+      .toSet();
+
+  bool _isChoreServiceCalendar(ClientCalendar calendar) {
+    return calendar.isChoreKind && _choreServiceIds.contains(calendar.serviceId);
   }
 
   @override
@@ -879,9 +885,7 @@ class _ChoresPageState extends State<ChoresPage> {
         }
 
         final choreCalendars = overview.calendarList.calendars
-            .where(
-              (calendar) => calendar.isChoreKind && _isPortalCalendar(calendar),
-            )
+            .where(_isChoreServiceCalendar)
             .toList();
         final allChores = overview.choreList.chores;
         final chores = _filterChoresByAssignee(allChores);
