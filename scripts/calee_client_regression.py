@@ -1644,6 +1644,136 @@ class Regression:
 
         self.run_step("chore atomic metadata: cleanup", _atomic_cleanup)
 
+        # ── Points boundary checks ────────────────────────────────────────────
+        boundary_holder: dict[str, Any] = {}
+
+        def _points_boundary_create_zero() -> str:
+            status, _ = self.client.request(
+                "POST",
+                "/client/v1/chores",
+                {
+                    "serviceId": chore_calendar["serviceId"],
+                    "calendarId": chore_calendar["id"],
+                    "title": f"RT chore boundary zero {self.run_id}",
+                    "scheduledAt": self.today.isoformat(),
+                    "points": 1,
+                    "householdId": atomic_holder["household"]["id"],
+                    "assigneePersonId": "",
+                    "metadataPoints": 0,
+                    "approvalState": "none",
+                },
+                allow_statuses={400},
+            )
+            if status != 400:
+                raise RuntimeError(f"Expected HTTP 400 for metadataPoints=0, got {status}")
+            return "rejected metadataPoints=0"
+
+        self.run_step("chore points boundary: create metadataPoints=0 rejected", _points_boundary_create_zero)
+
+        def _points_boundary_create_over() -> str:
+            status, _ = self.client.request(
+                "POST",
+                "/client/v1/chores",
+                {
+                    "serviceId": chore_calendar["serviceId"],
+                    "calendarId": chore_calendar["id"],
+                    "title": f"RT chore boundary over {self.run_id}",
+                    "scheduledAt": self.today.isoformat(),
+                    "points": 1,
+                    "householdId": atomic_holder["household"]["id"],
+                    "assigneePersonId": "",
+                    "metadataPoints": 101,
+                    "approvalState": "none",
+                },
+                allow_statuses={400},
+            )
+            if status != 400:
+                raise RuntimeError(f"Expected HTTP 400 for metadataPoints=101, got {status}")
+            return "rejected metadataPoints=101"
+
+        self.run_step("chore points boundary: create metadataPoints=101 rejected", _points_boundary_create_over)
+
+        def _points_boundary_patch_setup() -> str:
+            data = self.client.post(
+                "/client/v1/chores",
+                {
+                    "serviceId": chore_calendar["serviceId"],
+                    "calendarId": chore_calendar["id"],
+                    "title": f"RT chore boundary patch {self.run_id}",
+                    "scheduledAt": self.today.isoformat(),
+                    "points": 1,
+                    "householdId": atomic_holder["household"]["id"],
+                    "assigneePersonId": "",
+                    "metadataPoints": 5,
+                    "approvalState": "none",
+                },
+            )
+            chore = data["chore"]
+            boundary_holder["patch_chore"] = chore
+            self.created_chore_ids.append(chore["id"])
+            return chore["id"]
+
+        self.run_step("chore points boundary: patch setup", _points_boundary_patch_setup)
+
+        def _points_boundary_patch_zero() -> str:
+            chore = boundary_holder["patch_chore"]
+            chore_id = chore["id"]
+            uid = _chore_uid(chore)
+            household_id = atomic_holder["household"]["id"]
+            status, _ = self.client.request(
+                "PATCH",
+                f"/client/v1/chores/{self.encoded(chore_id)}",
+                {
+                    "title": chore.get("title", ""),
+                    "points": 1,
+                    "householdId": household_id,
+                    "choreUid": uid,
+                    "assigneePersonId": "",
+                    "metadataPoints": 0,
+                    "approvalState": "none",
+                },
+                allow_statuses={400},
+            )
+            if status != 400:
+                raise RuntimeError(f"Expected HTTP 400 for PATCH metadataPoints=0, got {status}")
+            return "rejected PATCH metadataPoints=0"
+
+        self.run_step("chore points boundary: patch metadataPoints=0 rejected", _points_boundary_patch_zero)
+
+        def _points_boundary_patch_over() -> str:
+            chore = boundary_holder["patch_chore"]
+            chore_id = chore["id"]
+            uid = _chore_uid(chore)
+            household_id = atomic_holder["household"]["id"]
+            status, _ = self.client.request(
+                "PATCH",
+                f"/client/v1/chores/{self.encoded(chore_id)}",
+                {
+                    "title": chore.get("title", ""),
+                    "points": 1,
+                    "householdId": household_id,
+                    "choreUid": uid,
+                    "assigneePersonId": "",
+                    "metadataPoints": 101,
+                    "approvalState": "none",
+                },
+                allow_statuses={400},
+            )
+            if status != 400:
+                raise RuntimeError(f"Expected HTTP 400 for PATCH metadataPoints=101, got {status}")
+            return "rejected PATCH metadataPoints=101"
+
+        self.run_step("chore points boundary: patch metadataPoints=101 rejected", _points_boundary_patch_over)
+
+        def _points_boundary_patch_cleanup() -> str:
+            chore_id = boundary_holder["patch_chore"]["id"]
+            self.client.delete(f"/client/v1/chores/{self.encoded(chore_id)}", allow_statuses={404})
+            if chore_id in self.created_chore_ids:
+                self.created_chore_ids.remove(chore_id)
+            return chore_id
+
+        self.run_step("chore points boundary: patch cleanup", _points_boundary_patch_cleanup)
+
     def test_household_and_people(self) -> None:
         """
         Regression: login → (possibly no household) → ensure default family →
