@@ -183,8 +183,8 @@ class Regression:
             self.record(name, "FAIL", str(e))
             raise
 
-    def encoded(self, value: str) -> str:
-        return urllib.parse.quote(value, safe="")
+    def encoded(self, value: Any) -> str:
+        return urllib.parse.quote(str(value), safe="")
 
     def event_date(self, value: Any) -> str:
         text = str(value or "").strip()
