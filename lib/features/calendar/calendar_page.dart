@@ -8,6 +8,8 @@ import '../../data/models/client_bootstrap.dart';
 import '../../data/models/client_calendar.dart';
 import '../../ui/calee_design.dart';
 import '../settings/calendar_collections_page.dart';
+import 'calendar_controller.dart';
+import 'calendar_repository.dart';
 import 'calendar_utils.dart';
 
 // ─── Label helpers ────────────────────────────────────────────────────────────
@@ -90,157 +92,31 @@ class CalendarPage extends StatefulWidget {
 }
 
 class _CalendarPageState extends State<CalendarPage> {
-  // ── State ──────────────────────────────────────────────────────────────────
+  // ── Controller / search ───────────────────────────────────────────────────
 
-  late DateTime _today;
-  late DateTime _selectedMonth; // always the 1st of the displayed month
-  late DateTime _selectedDay;
-
-  List<ClientCalendar> _calendars = [];
-  List<ClientEvent> _events = [];
-  bool _loading = false;
-  Object? _error;
-  final Set<String> _hiddenCalendarIds = {};
-
-  // ── Preferences ───────────────────────────────────────────────────────────
-  final _caleePrefs = CaleePreferences();
-  StoredPreferences _prefs = const StoredPreferences();
-
-  // ── Search ────────────────────────────────────────────────────────────────
+  late CalendarController _controller;
   final TextEditingController _searchController = TextEditingController();
-
-  @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
-  }
-
-  // Grid start: first Sunday on or before the first of _selectedMonth
-  late DateTime _gridStart;
-
-  // ── Lifecycle ──────────────────────────────────────────────────────────────
 
   @override
   void initState() {
     super.initState();
-    final now = DateTime.now();
-    _today = DateTime(now.year, now.month, now.day);
-    _selectedDay = _today;
-    _selectedMonth = DateTime(now.year, now.month, 1);
-    _gridStart = _computeGridStart(_selectedMonth, _prefs.firstDayOfWeek);
-    _loadMonth();
+    final repository = CalendarRepository(
+      hubClient: widget.hubClient,
+      accessToken: widget.accessToken,
+      preferences: CaleePreferences(),
+    );
+    _controller = CalendarController(repository: repository);
+    _controller.loadMonth();
   }
 
-  // ── Data loading ───────────────────────────────────────────────────────────
-
-  static DateTime _computeGridStart(
-    DateTime firstOfMonth,
-    FirstDayOfWeek firstDay,
-  ) {
-    // Sunday-first: offset = weekday % 7  (Mon=1→1, …, Sun=7→0)
-    // Monday-first: offset = (weekday+6) % 7  (Mon=1→0, …, Sun=7→6)
-    final offset = firstDay == FirstDayOfWeek.monday
-        ? (firstOfMonth.weekday + 6) % 7
-        : firstOfMonth.weekday % 7;
-    return firstOfMonth.subtract(Duration(days: offset));
+  @override
+  void dispose() {
+    _controller.dispose();
+    _searchController.dispose();
+    super.dispose();
   }
 
-  Future<void> _loadMonth() async {
-    StoredPreferences freshPrefs;
-    try {
-      freshPrefs = await _caleePrefs.load();
-    } catch (_) {
-      freshPrefs = _prefs;
-    }
-
-    if (!mounted) return;
-
-    final gridStart = _computeGridStart(_selectedMonth, freshPrefs.firstDayOfWeek);
-    final gridEnd = gridStart.add(const Duration(days: 41)); // 6 weeks − 1 day
-
-    setState(() {
-      _prefs = freshPrefs;
-      _gridStart = gridStart;
-      _loading = true;
-      _error = null;
-    });
-
-    try {
-      final results = await Future.wait([
-        widget.hubClient.calendars(accessToken: widget.accessToken),
-        widget.hubClient.events(
-          accessToken: widget.accessToken,
-          from: _formatDate(gridStart),
-          to: _formatDate(gridEnd),
-        ),
-      ]);
-
-      if (!mounted) return;
-
-      setState(() {
-        _calendars = (results[0] as ClientCalendarList)
-            .calendars
-            .where((c) => c.isCalendarKind)
-            .toList();
-        _events = (results[1] as ClientEventList).events;
-        _loading = false;
-        // Remove stale hidden IDs for deleted/unsubscribed calendars
-        _hiddenCalendarIds.removeWhere(
-          (id) => !_calendars.any((cal) => cal.id == id),
-        );
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _error = e;
-        _loading = false;
-      });
-    }
-  }
-
-  // ── Month navigation ───────────────────────────────────────────────────────
-
-  void _goToToday() {
-    final now = DateTime.now();
-    final newToday = DateTime(now.year, now.month, now.day);
-    final newMonth = DateTime(now.year, now.month, 1);
-    final sameMonth = newMonth.year == _selectedMonth.year &&
-        newMonth.month == _selectedMonth.month;
-    setState(() {
-      _today = newToday;
-      _selectedDay = newToday;
-      _selectedMonth = newMonth;
-    });
-    if (!sameMonth) {
-      _loadMonth();
-    }
-  }
-
-  void _prevMonth() {
-    setState(() {
-      _selectedMonth = DateTime(
-          _selectedMonth.year, _selectedMonth.month - 1, 1);
-      if (_selectedDay.year != _selectedMonth.year ||
-          _selectedDay.month != _selectedMonth.month) {
-        _selectedDay = _selectedMonth;
-      }
-    });
-    _loadMonth();
-  }
-
-  void _nextMonth() {
-    setState(() {
-      _selectedMonth = DateTime(
-          _selectedMonth.year, _selectedMonth.month + 1, 1);
-      if (_selectedDay.year != _selectedMonth.year ||
-          _selectedDay.month != _selectedMonth.month) {
-        _selectedDay = _selectedMonth;
-      }
-    });
-    _loadMonth();
-  }
-
-  // ── CRUD (preserved) ───────────────────────────────────────────────────────
+  // ── CRUD shortcuts ────────────────────────────────────────────────────────
 
   void _openCollectionCreateShortcut() {
     _openCalendarCollectionsShortcut(autoOpenCreate: true);
@@ -268,26 +144,11 @@ class _CalendarPageState extends State<CalendarPage> {
       ),
     )
         .then((_) {
-      if (mounted) _loadMonth();
+      if (mounted) _controller.refresh();
     });
   }
 
   // ── Calendar visibility ────────────────────────────────────────────────────
-
-  bool _isCalendarVisible(String calendarId) =>
-      !_hiddenCalendarIds.contains(calendarId);
-
-  void _toggleCalendarVisibility(String calendarId) {
-    setState(() {
-      if (_hiddenCalendarIds.contains(calendarId)) {
-        _hiddenCalendarIds.remove(calendarId);
-      } else {
-        _hiddenCalendarIds.add(calendarId);
-      }
-    });
-  }
-
-  void _showAllCalendars() => setState(() => _hiddenCalendarIds.clear());
 
   void _openCalendarChooser() {
     showModalBottomSheet<void>(
@@ -300,16 +161,16 @@ class _CalendarPageState extends State<CalendarPage> {
         ),
       ),
       builder: (_) => _CalendarChooserSheet(
-        calendars: _calendars,
-        initialHiddenIds: Set.from(_hiddenCalendarIds),
+        calendars: _controller.calendars,
+        initialHiddenIds: Set.from(_controller.hiddenCalendarIds),
         hubClient: widget.hubClient,
         accessToken: widget.accessToken,
-        onToggle: _toggleCalendarVisibility,
-        onShowAll: _showAllCalendars,
+        onToggle: _controller.toggleCalendarVisibility,
+        onShowAll: _controller.showAllCalendars,
         onNewCalendar: _openCollectionCreateShortcut,
         onSubscribeFromLink: _openCollectionSubscribeShortcut,
         onCalendarMutated: (String? message) {
-          _loadMonth();
+          _controller.refresh();
           if (message != null && mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(content: Text(message)),
@@ -320,8 +181,11 @@ class _CalendarPageState extends State<CalendarPage> {
     );
   }
 
+  // ── Create event ──────────────────────────────────────────────────────────
+
   Future<void> _openCreateEventSheet() async {
-    final writableCalendars = _calendars.where((c) => !c.readOnly).toList();
+    final writableCalendars =
+        _controller.calendars.where((c) => !c.readOnly).toList();
 
     if (writableCalendars.isEmpty) {
       if (!mounted) return;
@@ -348,9 +212,9 @@ class _CalendarPageState extends State<CalendarPage> {
       ),
       builder: (context) => _CreateEventSheet(
         calendars: writableCalendars,
-        initialDate: _selectedDay,
-        defaultCalendarId: _prefs.defaultCalendarId,
-        onCreate: _createEvent,
+        initialDate: _controller.selectedDay,
+        defaultCalendarId: _controller.preferences.defaultCalendarId,
+        onCreate: _controller.createEvent,
       ),
     );
 
@@ -358,23 +222,13 @@ class _CalendarPageState extends State<CalendarPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Event created.')),
       );
-      _loadMonth();
     }
   }
 
-  ClientCalendar? _calendarForEvent(ClientEvent event) {
-    for (final calendar in _calendars) {
-      if (calendar.id == event.calendarId ||
-          calendar.id.endsWith(':${event.calendarId}') ||
-          event.calendarId.endsWith(':${calendar.id}')) {
-        return calendar;
-      }
-    }
-    return null;
-  }
+  // ── Edit / delete event ───────────────────────────────────────────────────
 
   void _openEventActions(ClientEvent event) {
-    final calendar = _calendarForEvent(event);
+    final calendar = _controller.calendarForEvent(event);
     final canWrite = calendar != null && !calendar.readOnly;
 
     if (!canWrite) {
@@ -483,8 +337,8 @@ class _CalendarPageState extends State<CalendarPage> {
         calendars: [calendar],
         initialEvent: event,
         editScope: editScope,
-        onCreate: _createEvent,
-        onUpdate: _updateEvent,
+        onCreate: _controller.createEvent,
+        onUpdate: _controller.updateEvent,
       ),
     );
 
@@ -492,45 +346,7 @@ class _CalendarPageState extends State<CalendarPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Event updated.')),
       );
-      _loadMonth();
     }
-  }
-
-  Future<void> _updateEvent({
-    required ClientEvent event,
-    required String title,
-    required DateTime? startsAt,
-    required DateTime? endsAt,
-    required bool? allDay,
-    String? location,
-    String? description,
-    String? recurrence,
-    String? editScope,
-  }) async {
-    final editOccurrence = event.recurring && editScope == 'occurrence';
-    final editSeriesMetadataOnly = event.recurring && editScope == 'series';
-
-    await widget.hubClient.updateEvent(
-      accessToken: widget.accessToken,
-      eventId: editOccurrence ? event.id : event.writableEventId,
-      title: title,
-      startsAt: editSeriesMetadataOnly || startsAt == null
-          ? null
-          : allDay == true
-              ? _formatDate(startsAt)
-              : startsAt.toIso8601String(),
-      endsAt: editSeriesMetadataOnly || endsAt == null
-          ? null
-          : allDay == true
-              ? _formatDate(endsAt)
-              : endsAt.toIso8601String(),
-      allDay: editSeriesMetadataOnly ? null : allDay,
-      location: location,
-      description: description,
-      recurrence: editOccurrence || editSeriesMetadataOnly ? null : recurrence,
-      includeRecurrence: !editOccurrence && !editSeriesMetadataOnly,
-      scope: event.recurring ? editScope : null,
-    );
   }
 
   Future<void> _confirmDeleteEvent(ClientEvent event) async {
@@ -553,11 +369,7 @@ class _CalendarPageState extends State<CalendarPage> {
     final deleteOccurrence = event.recurring && deleteScope == 'occurrence';
 
     try {
-      await widget.hubClient.deleteEvent(
-        accessToken: widget.accessToken,
-        eventId: deleteOccurrence ? event.id : event.writableEventId,
-        scope: event.recurring ? deleteScope : null,
-      );
+      await _controller.deleteEvent(event: event, deleteScope: deleteScope);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -571,7 +383,6 @@ class _CalendarPageState extends State<CalendarPage> {
             ),
           ),
         );
-        _loadMonth();
       }
     } catch (error) {
       if (mounted) {
@@ -592,78 +403,10 @@ class _CalendarPageState extends State<CalendarPage> {
     }
   }
 
-  Future<void> _createEvent({
-    required ClientCalendar calendar,
-    required String title,
-    required DateTime startsAt,
-    required DateTime endsAt,
-    required bool allDay,
-    String? location,
-    String? description,
-    String? recurrence,
-  }) async {
-    await widget.hubClient.createEvent(
-      accessToken: widget.accessToken,
-      serviceId: calendar.serviceId,
-      calendarId: calendar.id,
-      title: title,
-      startsAt: allDay ? _formatDate(startsAt) : startsAt.toIso8601String(),
-      endsAt: allDay ? _formatDate(endsAt) : endsAt.toIso8601String(),
-      allDay: allDay,
-      location: location,
-      description: description,
-      recurrence: recurrence,
-    );
-  }
-
   // ── Helpers ────────────────────────────────────────────────────────────────
 
-  String _formatDate(DateTime value) {
-    final local = value.toLocal();
-    final year = local.year.toString().padLeft(4, '0');
-    final month = local.month.toString().padLeft(2, '0');
-    final day = local.day.toString().padLeft(2, '0');
-    return '$year-$month-$day';
-  }
-
-  List<ClientEvent> _eventsForDay(DateTime day) {
-    final result = <ClientEvent>[];
-    for (final event in _events) {
-      final cal = _calendarForEvent(event);
-      if (cal != null && !_isCalendarVisible(cal.id)) continue;
-      final start = DateTime.tryParse(event.startsAt)?.toLocal();
-      if (start == null) continue;
-      if (event.allDay) {
-        final end = DateTime.tryParse(event.endsAt)?.toLocal();
-        final startDate = DateTime(start.year, start.month, start.day);
-        // all-day endsAt is exclusive
-        final endDate = end != null
-            ? DateTime(end.year, end.month, end.day)
-                .subtract(const Duration(days: 1))
-            : startDate;
-        final check = DateTime(day.year, day.month, day.day);
-        if (!check.isBefore(startDate) && !check.isAfter(endDate)) {
-          result.add(event);
-        }
-      } else {
-        if (start.year == day.year &&
-            start.month == day.month &&
-            start.day == day.day) {
-          result.add(event);
-        }
-      }
-    }
-    result.sort((a, b) {
-      final at = DateTime.tryParse(a.startsAt);
-      final bt = DateTime.tryParse(b.startsAt);
-      if (at == null || bt == null) return 0;
-      return at.compareTo(bt);
-    });
-    return result;
-  }
-
   Color _eventColor(ClientEvent event) {
-    final cal = _calendarForEvent(event);
+    final cal = _controller.calendarForEvent(event);
     if (cal?.color != null) {
       final parsed = _parseHexColor(cal!.color!);
       if (parsed != null) return parsed;
@@ -672,12 +415,13 @@ class _CalendarPageState extends State<CalendarPage> {
   }
 
   String _agendaDateLabel(DateTime day) {
-    if (_isSameDay(day, _today)) return 'Today';
+    if (_isSameDay(day, _controller.today)) return 'Today';
     final weekday = _kFullDayNames[day.weekday % 7]; // Sun=0
     return '$weekday ${day.day} ${_kMonthNames[day.month - 1]}';
   }
 
-  bool _use24h(BuildContext context) => switch (_prefs.timeFormat) {
+  bool _use24h(BuildContext context) =>
+      switch (_controller.preferences.timeFormat) {
         TimeFormatPref.h24 => true,
         TimeFormatPref.h12 => false,
         TimeFormatPref.system => MediaQuery.alwaysUse24HourFormatOf(context),
@@ -686,26 +430,7 @@ class _CalendarPageState extends State<CalendarPage> {
   // ── Search ─────────────────────────────────────────────────────────────────
 
   String _calendarNameForEvent(ClientEvent event) {
-    return _calendarForEvent(event)?.name ?? '';
-  }
-
-  List<ClientEvent> _searchEvents(String query) {
-    final q = query.trim().toLowerCase();
-    if (q.isEmpty) return [];
-    return _events.where((e) {
-      final cal = _calendarForEvent(e);
-      if (cal != null && !_isCalendarVisible(cal.id)) return false;
-      return (e.title).toLowerCase().contains(q) ||
-          (e.location ?? '').toLowerCase().contains(q) ||
-          (e.description ?? '').toLowerCase().contains(q) ||
-          (cal?.name ?? '').toLowerCase().contains(q);
-    }).toList()
-      ..sort((a, b) {
-        final at = DateTime.tryParse(a.startsAt);
-        final bt = DateTime.tryParse(b.startsAt);
-        if (at == null || bt == null) return 0;
-        return at.compareTo(bt);
-      });
+    return _controller.calendarForEvent(event)?.name ?? '';
   }
 
   void _openSearchSheet() {
@@ -719,22 +444,13 @@ class _CalendarPageState extends State<CalendarPage> {
       ),
       builder: (sheetContext) => _CalendarSearchSheet(
         searchController: _searchController,
-        searchEvents: _searchEvents,
+        searchEvents: _controller.searchEvents,
         calendarNameForEvent: _calendarNameForEvent,
         eventColor: _eventColor,
         use24h: _use24h(context),
         onResultTap: (event) {
           Navigator.of(sheetContext).pop();
-          final start = DateTime.tryParse(event.startsAt)?.toLocal();
-          if (start == null) return;
-          final tapMonth = DateTime(start.year, start.month, 1);
-          final sameMonth = tapMonth.year == _selectedMonth.year &&
-              tapMonth.month == _selectedMonth.month;
-          setState(() {
-            _selectedDay = DateTime(start.year, start.month, start.day);
-            if (!sameMonth) _selectedMonth = tapMonth;
-          });
-          if (!sameMonth) _loadMonth();
+          _controller.selectSearchResult(event);
         },
       ),
     );
@@ -744,38 +460,47 @@ class _CalendarPageState extends State<CalendarPage> {
 
   @override
   Widget build(BuildContext context) {
-    if (_loading && _calendars.isEmpty && _events.isEmpty) {
-      return CaleeScaffold(
-        body: const Center(child: CircularProgressIndicator()),
-      );
-    }
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, _) {
+        if (_controller.isLoading &&
+            _controller.calendars.isEmpty &&
+            _controller.events.isEmpty) {
+          return CaleeScaffold(
+            body: const Center(child: CircularProgressIndicator()),
+          );
+        }
 
-    if (_error != null && _calendars.isEmpty && _events.isEmpty) {
-      return CaleeScaffold(
-        body: _CalendarErrorState(onRetry: _loadMonth),
-      );
-    }
+        if (_controller.error != null &&
+            _controller.calendars.isEmpty &&
+            _controller.events.isEmpty) {
+          return CaleeScaffold(
+            body: _CalendarErrorState(onRetry: _controller.refresh),
+          );
+        }
 
-    return CaleeScaffold(
-      body: SafeArea(
-        child: Column(
-          children: [
-            _buildTopBar(),
-            _buildWeekdayHeader(),
-            Flexible(fit: FlexFit.loose, child: _buildMonthGrid()),
-            const Divider(height: 1),
-            Expanded(
-              child: RefreshIndicator(
-                onRefresh: _loadMonth,
-                child: ListView(
-                  padding: EdgeInsets.zero,
-                  children: _buildAgendaItems(),
+        return CaleeScaffold(
+          body: SafeArea(
+            child: Column(
+              children: [
+                _buildTopBar(),
+                _buildWeekdayHeader(),
+                Flexible(fit: FlexFit.loose, child: _buildMonthGrid()),
+                const Divider(height: 1),
+                Expanded(
+                  child: RefreshIndicator(
+                    onRefresh: _controller.refresh,
+                    child: ListView(
+                      padding: EdgeInsets.zero,
+                      children: _buildAgendaItems(),
+                    ),
+                  ),
                 ),
-              ),
+              ],
             ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 
@@ -794,7 +519,7 @@ class _CalendarPageState extends State<CalendarPage> {
           child: Row(
             children: [
               IconButton(
-                onPressed: _prevMonth,
+                onPressed: _controller.previousMonth,
                 icon: const Icon(Icons.chevron_left),
                 iconSize: 24,
                 padding: EdgeInsets.zero,
@@ -804,7 +529,7 @@ class _CalendarPageState extends State<CalendarPage> {
               ),
               Expanded(
                 child: Text(
-                  _monthYearLabel(_selectedMonth),
+                  _monthYearLabel(_controller.selectedMonth),
                   textAlign: TextAlign.center,
                   style: const TextStyle(
                     fontSize: 17,
@@ -814,7 +539,7 @@ class _CalendarPageState extends State<CalendarPage> {
                 ),
               ),
               IconButton(
-                onPressed: _nextMonth,
+                onPressed: _controller.nextMonth,
                 icon: const Icon(Icons.chevron_right),
                 iconSize: 24,
                 padding: EdgeInsets.zero,
@@ -838,7 +563,7 @@ class _CalendarPageState extends State<CalendarPage> {
               Tooltip(
                 message: 'Go to today',
                 child: TextButton(
-                  onPressed: _goToToday,
+                  onPressed: _controller.goToToday,
                   style: TextButton.styleFrom(
                     foregroundColor: CaleeColors.primary,
                     padding: const EdgeInsets.symmetric(
@@ -890,7 +615,7 @@ class _CalendarPageState extends State<CalendarPage> {
   }
 
   List<String> get _weekdayAbbr {
-    if (_prefs.firstDayOfWeek == FirstDayOfWeek.monday) {
+    if (_controller.preferences.firstDayOfWeek == FirstDayOfWeek.monday) {
       return const ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
     }
     return _kDayAbbr;
@@ -940,27 +665,18 @@ class _CalendarPageState extends State<CalendarPage> {
             ),
             itemCount: 42,
             itemBuilder: (context, index) {
-              final date = _gridStart.add(Duration(days: index));
-              final dayEvents = _eventsForDay(date);
+              final date = _controller.gridStart.add(Duration(days: index));
+              final dayEvents = _controller.eventsForDay(date);
               final dotColors = dayEvents.take(3).map(_eventColor).toList();
               return _DayCell(
                 date: date,
-                isCurrentMonth: date.month == _selectedMonth.month,
-                isToday: _isSameDay(date, _today),
-                isSelected: _isSameDay(date, _selectedDay),
+                isCurrentMonth:
+                    date.month == _controller.selectedMonth.month,
+                isToday: _isSameDay(date, _controller.today),
+                isSelected: _isSameDay(date, _controller.selectedDay),
                 dotColors: dotColors,
                 eventCount: dayEvents.length,
-                onTap: () {
-                  final tapMonth = DateTime(date.year, date.month, 1);
-                  final sameMonth =
-                      tapMonth.year == _selectedMonth.year &&
-                      tapMonth.month == _selectedMonth.month;
-                  setState(() {
-                    _selectedDay = date;
-                    if (!sameMonth) _selectedMonth = tapMonth;
-                  });
-                  if (!sameMonth) _loadMonth();
-                },
+                onTap: () => _controller.selectDay(date),
               );
             },
           ),
@@ -1003,11 +719,11 @@ class _CalendarPageState extends State<CalendarPage> {
           CaleeSpacing.xs,
         ),
         child: Text(
-          _agendaDateLabel(_selectedDay),
+          _agendaDateLabel(_controller.selectedDay),
           style: TextStyle(
             fontSize: 13,
             fontWeight: FontWeight.w600,
-            color: _isSameDay(_selectedDay, _today)
+            color: _isSameDay(_controller.selectedDay, _controller.today)
                 ? CaleeColors.primary
                 : CaleeColors.textSecondary,
             letterSpacing: 0.2,
@@ -1016,7 +732,7 @@ class _CalendarPageState extends State<CalendarPage> {
       ),
     );
 
-    final dayEvents = _eventsForDay(_selectedDay);
+    final dayEvents = _controller.eventsForDay(_controller.selectedDay);
     final allDayEvents = dayEvents.where((e) => e.allDay).toList();
     final timedEvents = dayEvents.where((e) => !e.allDay).toList();
 
@@ -1046,7 +762,7 @@ class _CalendarPageState extends State<CalendarPage> {
             _AgendaEventRow(
               event: event,
               color: _eventColor(event),
-              calendarName: _calendarForEvent(event)?.name,
+              calendarName: _controller.calendarForEvent(event)?.name,
               hideTime: true,
               use24h: use24h,
               onTap: () => _openEventActions(event),
@@ -1062,7 +778,7 @@ class _CalendarPageState extends State<CalendarPage> {
             _AgendaEventRow(
               event: event,
               color: _eventColor(event),
-              calendarName: _calendarForEvent(event)?.name,
+              calendarName: _controller.calendarForEvent(event)?.name,
               use24h: use24h,
               onTap: () => _openEventActions(event),
             ),
