@@ -171,7 +171,8 @@ void main() {
     });
 
     test('populates calendars on success', () async {
-      final ctrl = _makeController(calendars: [_calendar('c1'), _calendar('c2')]);
+      final ctrl =
+          _makeController(calendars: [_calendar('c1'), _calendar('c2')]);
 
       await ctrl.loadMonth();
 
@@ -185,7 +186,6 @@ void main() {
   group('CalendarController navigation', () {
     test('previousMonth decrements month', () async {
       final ctrl = _makeController();
-      final initial = ctrl.selectedMonth;
 
       // Override selectedMonth to a known value for a deterministic test
       ctrl.selectedMonth = DateTime(2026, 6, 1);
