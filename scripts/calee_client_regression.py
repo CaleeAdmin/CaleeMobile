@@ -1517,6 +1517,133 @@ class Regression:
 
         self.run_step("chore delete", _delete)
 
+        # ── Atomic metadata create/update regression ──────────────────────
+        # Fetch the household needed for metadata assertions.
+        atomic_holder: dict[str, Any] = {}
+
+        def _fetch_household_for_atomic() -> str:
+            status, payload = self.client.request(
+                "POST",
+                "/client/v1/households/default",
+                {},
+                allow_statuses={404, 405},
+            )
+            if status not in (404, 405):
+                data = payload.get("data", payload) if isinstance(payload, dict) else {}
+                household = (
+                    data.get("household")
+                    or data.get("context")
+                    or (data if isinstance(data, dict) and data.get("id") else None)
+                )
+                if isinstance(household, dict) and household.get("id"):
+                    atomic_holder["household"] = household
+                    return f"id={household['id']}"
+            data = self.client.post("/client/v1/households", {"name": "My Family"})
+            household = (
+                data.get("household")
+                or data.get("context")
+                or (data if isinstance(data, dict) and data.get("id") else None)
+            )
+            if not isinstance(household, dict) or not household.get("id"):
+                raise RuntimeError(f"Could not resolve household: {data}")
+            atomic_holder["household"] = household
+            return f"id={household['id']}"
+
+        self.run_step("chore atomic metadata: fetch household", _fetch_household_for_atomic)
+
+        def _atomic_create() -> str:
+            household_id = atomic_holder["household"]["id"]
+            data = self.client.post(
+                "/client/v1/chores",
+                {
+                    "serviceId": chore_calendar["serviceId"],
+                    "calendarId": chore_calendar["id"],
+                    "title": f"RT chore atomic {self.run_id}",
+                    "scheduledAt": self.today.isoformat(),
+                    "description": "Atomic metadata create regression",
+                    "points": 1,
+                    "householdId": household_id,
+                    "assigneePersonId": "",
+                    "metadataPoints": 5,
+                    "approvalState": "none",
+                },
+            )
+            chore = data["chore"]
+            atomic_holder["chore"] = chore
+            self.created_chore_ids.append(chore["id"])
+            return chore["id"]
+
+        self.run_step("chore atomic metadata: create with metadata", _atomic_create)
+
+        def _atomic_create_metadata_verify() -> str:
+            household_id = atomic_holder["household"]["id"]
+            chore = atomic_holder["chore"]
+            uid = _chore_uid(chore)
+            data = self.client.get(
+                f"/client/v1/households/{self.encoded(household_id)}/chores/{self.encoded(uid)}/metadata"
+            )
+            metadata = data.get("metadata", {})
+            actual_points = metadata.get("points")
+            actual_state = metadata.get("approvalState")
+            if actual_points != 5:
+                raise RuntimeError(f"Expected metadataPoints=5, got {actual_points}")
+            if actual_state != "none":
+                raise RuntimeError(f"Expected approvalState='none', got {actual_state}")
+            return f"points={actual_points}, approvalState={actual_state}"
+
+        self.run_step("chore atomic metadata: verify after create", _atomic_create_metadata_verify)
+
+        def _atomic_update() -> str:
+            chore_id = atomic_holder["chore"]["id"]
+            household_id = atomic_holder["household"]["id"]
+            chore = atomic_holder["chore"]
+            uid = _chore_uid(chore)
+            data = self.client.patch(
+                f"/client/v1/chores/{self.encoded(chore_id)}",
+                {
+                    "title": f"RT chore atomic edited {self.run_id}",
+                    "scheduledAt": self.tomorrow.isoformat(),
+                    "description": "Atomic metadata update regression",
+                    "points": 1,
+                    "householdId": household_id,
+                    "choreUid": uid,
+                    "assigneePersonId": "",
+                    "metadataPoints": 10,
+                    "approvalState": "approved",
+                },
+            )
+            atomic_holder["chore"] = data["chore"]
+            return data["chore"]["title"]
+
+        self.run_step("chore atomic metadata: update with metadata", _atomic_update)
+
+        def _atomic_update_metadata_verify() -> str:
+            household_id = atomic_holder["household"]["id"]
+            chore = atomic_holder["chore"]
+            uid = _chore_uid(chore)
+            data = self.client.get(
+                f"/client/v1/households/{self.encoded(household_id)}/chores/{self.encoded(uid)}/metadata"
+            )
+            metadata = data.get("metadata", {})
+            actual_points = metadata.get("points")
+            actual_state = metadata.get("approvalState")
+            if actual_points != 10:
+                raise RuntimeError(f"Expected metadataPoints=10, got {actual_points}")
+            if actual_state != "approved":
+                raise RuntimeError(f"Expected approvalState='approved', got {actual_state}")
+            return f"points={actual_points}, approvalState={actual_state}"
+
+        self.run_step("chore atomic metadata: verify after update", _atomic_update_metadata_verify)
+
+        def _atomic_cleanup() -> str:
+            chore_id = atomic_holder["chore"]["id"]
+            self.client.delete(f"/client/v1/chores/{self.encoded(chore_id)}", allow_statuses={404})
+            if chore_id in self.created_chore_ids:
+                self.created_chore_ids.remove(chore_id)
+            return chore_id
+
+        self.run_step("chore atomic metadata: cleanup", _atomic_cleanup)
+
     def test_household_and_people(self) -> None:
         """
         Regression: login → (possibly no household) → ensure default family →

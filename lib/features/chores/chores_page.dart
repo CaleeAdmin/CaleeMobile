@@ -253,29 +253,53 @@ class _ChoresPageState extends State<ChoresPage> {
     required String? assigneePersonId,
     required int points,
   }) async {
-    final createdChore = await widget.hubClient.createChore(
-      accessToken: widget.accessToken,
-      serviceId: calendar.serviceId,
-      calendarId: calendar.id,
-      title: title,
-      scheduledAt: scheduledAt,
-      description: description,
-      recurrence: recurrence,
-      points: 1,
-    );
-
     final household = _metadataHousehold;
-    final choreUid = createdChore.choreUid?.trim();
+    ClientChore createdChore;
+    bool atomicSucceeded = false;
 
-    if (household != null && choreUid != null && choreUid.isNotEmpty) {
-      await widget.hubClient.updateChoreMetadata(
+    try {
+      createdChore = await widget.hubClient.createChore(
         accessToken: widget.accessToken,
-        householdId: household.id,
-        choreUid: choreUid,
+        serviceId: calendar.serviceId,
+        calendarId: calendar.id,
+        title: title,
+        scheduledAt: scheduledAt,
+        description: description,
+        recurrence: recurrence,
+        points: 1,
+        householdId: household?.id,
         assigneePersonId: assigneePersonId ?? '',
-        points: points,
+        metadataPoints: points,
         approvalState: 'none',
       );
+      atomicSucceeded = true;
+    } on CaleeHubException catch (e) {
+      if (e.statusCode != 400) rethrow;
+      // Backend does not yet support atomic metadata fields — fall back to two-step.
+      createdChore = await widget.hubClient.createChore(
+        accessToken: widget.accessToken,
+        serviceId: calendar.serviceId,
+        calendarId: calendar.id,
+        title: title,
+        scheduledAt: scheduledAt,
+        description: description,
+        recurrence: recurrence,
+        points: 1,
+      );
+    }
+
+    if (!atomicSucceeded) {
+      final choreUid = createdChore.choreUid?.trim();
+      if (household != null && choreUid != null && choreUid.isNotEmpty) {
+        await widget.hubClient.updateChoreMetadata(
+          accessToken: widget.accessToken,
+          householdId: household.id,
+          choreUid: choreUid,
+          assigneePersonId: assigneePersonId ?? '',
+          points: points,
+          approvalState: 'none',
+        );
+      }
     }
   }
 
@@ -352,27 +376,49 @@ class _ChoresPageState extends State<ChoresPage> {
       throw StateError('Missing chore id');
     }
 
-    await widget.hubClient.updateChore(
-      accessToken: widget.accessToken,
-      choreId: choreId,
-      title: title,
-      scheduledAt: scheduledAt,
-      description: description,
-      recurrence: recurrence,
-    );
-
     final household = _metadataHousehold;
     final choreUid = chore.choreUid?.trim();
+    bool atomicSucceeded = false;
 
-    if (household != null && choreUid != null && choreUid.isNotEmpty) {
-      await widget.hubClient.updateChoreMetadata(
+    try {
+      await widget.hubClient.updateChore(
         accessToken: widget.accessToken,
-        householdId: household.id,
+        choreId: choreId,
+        title: title,
+        scheduledAt: scheduledAt,
+        description: description,
+        recurrence: recurrence,
+        householdId: household?.id,
         choreUid: choreUid,
         assigneePersonId: assigneePersonId ?? '',
-        points: points,
+        metadataPoints: points,
         approvalState: approvalState,
       );
+      atomicSucceeded = true;
+    } on CaleeHubException catch (e) {
+      if (e.statusCode != 400) rethrow;
+      // Backend does not yet support atomic metadata fields — fall back to two-step.
+      await widget.hubClient.updateChore(
+        accessToken: widget.accessToken,
+        choreId: choreId,
+        title: title,
+        scheduledAt: scheduledAt,
+        description: description,
+        recurrence: recurrence,
+      );
+    }
+
+    if (!atomicSucceeded) {
+      if (household != null && choreUid != null && choreUid.isNotEmpty) {
+        await widget.hubClient.updateChoreMetadata(
+          accessToken: widget.accessToken,
+          householdId: household.id,
+          choreUid: choreUid,
+          assigneePersonId: assigneePersonId ?? '',
+          points: points,
+          approvalState: approvalState,
+        );
+      }
     }
   }
 

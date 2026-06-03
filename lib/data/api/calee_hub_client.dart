@@ -431,6 +431,10 @@ class CaleeHubClient {
     String? description,
     String? recurrence,
     int points = 1,
+    String? householdId,
+    String? assigneePersonId,
+    int? metadataPoints,
+    String? approvalState,
   }) async {
     final body = <String, Object?>{
       'serviceId': serviceId,
@@ -443,6 +447,11 @@ class CaleeHubClient {
         'description': description.trim(),
       if (recurrence != null && recurrence.trim().isNotEmpty)
         'recurrence': recurrence.trim(),
+      if (householdId != null && householdId.trim().isNotEmpty)
+        'householdId': householdId.trim(),
+      if (assigneePersonId != null) 'assigneePersonId': assigneePersonId,
+      if (metadataPoints != null) 'metadataPoints': metadataPoints,
+      if (approvalState != null) 'approvalState': approvalState,
     };
 
     final json = await _postJson(
@@ -462,6 +471,11 @@ class CaleeHubClient {
     String? description,
     String? recurrence,
     int points = 1,
+    String? householdId,
+    String? choreUid,
+    String? assigneePersonId,
+    int? metadataPoints,
+    String? approvalState,
   }) async {
     final encodedChoreId = Uri.encodeComponent(choreId);
     final body = <String, Object?>{
@@ -470,6 +484,13 @@ class CaleeHubClient {
       'scheduledAt': scheduledAt,
       'description': description ?? '',
       'recurrence': recurrence,
+      if (householdId != null && householdId.trim().isNotEmpty)
+        'householdId': householdId.trim(),
+      if (choreUid != null && choreUid.trim().isNotEmpty)
+        'choreUid': choreUid.trim(),
+      if (assigneePersonId != null) 'assigneePersonId': assigneePersonId,
+      if (metadataPoints != null) 'metadataPoints': metadataPoints,
+      if (approvalState != null) 'approvalState': approvalState,
     };
 
     final json = await _patchJson(
