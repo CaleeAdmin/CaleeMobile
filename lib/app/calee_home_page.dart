@@ -31,9 +31,8 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
   int _selectedIndex = 0;
   late final List<_CaleeTab> _tabs;
 
-  bool get _hasPortalService => widget.bootstrap.services.any(
-        (service) =>
-            service.id == 'portal' || service.serviceType == 'nextcloud_portal',
+  bool get _hasChoreService => widget.bootstrap.services.any(
+        (service) => service.supportsChores,
       );
 
   @override
@@ -61,7 +60,7 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
           services: widget.bootstrap.services,
         ),
       ),
-      if (_hasPortalService)
+      if (_hasChoreService)
         _CaleeTab(
           title: 'Chores',
           icon: Icons.family_restroom_outlined,

@@ -86,8 +86,8 @@ class _ChoresPageState extends State<ChoresPage> {
   String _assigneeFilter = 'all';
   bool _historyExpanded = false;
 
-  List<ClientService> get _portalServices =>
-      widget.services.where((service) => service.id == 'portal').toList();
+  List<ClientService> get _choreServices =>
+      widget.services.where((service) => service.supportsChores).toList();
 
   ClientContext? get _metadataHousehold {
     for (final household in widget.households) {
@@ -152,11 +152,11 @@ class _ChoresPageState extends State<ChoresPage> {
   }
 
   void _openCollectionCreateShortcut() {
-    final portalServices = _portalServices;
+    final choreServices = _choreServices;
 
-    if (portalServices.isEmpty) {
+    if (choreServices.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Calee Portal is not available.')),
+        const SnackBar(content: Text('No chore service is available.')),
       );
       return;
     }
@@ -167,7 +167,7 @@ class _ChoresPageState extends State<ChoresPage> {
         builder: (_) => CalendarCollectionsPage(
           hubClient: widget.hubClient,
           accessToken: widget.accessToken,
-          services: portalServices,
+          services: choreServices,
           initialCreateKind: 'chores',
           autoOpenCreate: true,
         ),
@@ -867,9 +867,8 @@ class _ChoresPageState extends State<ChoresPage> {
           return CaleeScaffold(
             body: CaleeEmptyState(
               icon: Icons.family_restroom_outlined,
-              title: 'No portal chore lists yet',
-              body:
-                  'Create a chore list in Calee Portal to start tracking family chores.',
+              title: 'No chore lists yet',
+              body: 'Create a chore list to start tracking family chores.',
               action: FilledButton.icon(
                 onPressed: _openCollectionCreateShortcut,
                 icon: const Icon(Icons.add),
@@ -895,9 +894,8 @@ class _ChoresPageState extends State<ChoresPage> {
           return CaleeScaffold(
             body: CaleeEmptyState(
               icon: Icons.family_restroom_outlined,
-              title: 'No portal chore lists yet',
-              body:
-                  'Create a chore list in Calee Portal to start tracking family chores.',
+              title: 'No chore lists yet',
+              body: 'Create a chore list to start tracking family chores.',
               action: FilledButton.icon(
                 onPressed: _openCollectionCreateShortcut,
                 icon: const Icon(Icons.add),
