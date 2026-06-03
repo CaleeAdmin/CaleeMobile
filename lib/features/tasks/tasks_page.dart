@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
 
 import '../../data/api/calee_hub_client.dart';
-import '../../data/auth/calee_preferences.dart';
 import '../../data/models/client_bootstrap.dart';
 import '../settings/calendar_collections_page.dart';
 import '../../data/models/client_calendar.dart';
 import '../../data/models/client_task.dart';
 import '../../ui/calee_theme.dart';
 import '../../ui/calee_widgets.dart';
+import 'tasks_controller.dart';
+import 'tasks_repository.dart';
 
 class TasksPage extends StatefulWidget {
   const TasksPage({
@@ -26,61 +27,26 @@ class TasksPage extends StatefulWidget {
 }
 
 class _TasksPageState extends State<TasksPage> {
-  late Future<_TasksOverview> _overviewFuture;
-  bool _isCreatingTask = false;
-  final Set<String> _updatingTaskIds = {};
-  final Set<String> _deletingTaskIds = {};
-  final Set<String> _editingTaskIds = {};
-  bool _completedExpanded = false;
-
-  // null = All Tasks
-  ClientCalendar? _selectedCalendar;
-
-  // Search
+  late final TasksController _controller;
   final TextEditingController _searchController = TextEditingController();
-  String _searchQuery = '';
-
-  // Preferences
-  final _caleePrefs = CaleePreferences();
-  StoredPreferences _prefs = const StoredPreferences();
-
-  @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
-  }
 
   @override
   void initState() {
     super.initState();
-    _overviewFuture = _loadOverview();
+    final repository = TasksRepository(
+      hubClient: widget.hubClient,
+      accessToken: widget.accessToken,
+      services: widget.services,
+    );
+    _controller = TasksController(repository: repository);
+    _controller.load();
   }
 
-  Future<_TasksOverview> _loadOverview() async {
-    final today = DateTime.now();
-    // Load 2 years back and 2 years forward so overdue and future tasks are not hidden.
-    final from = _formatDate(DateTime(today.year - 2, 1, 1));
-    final to = _formatDate(DateTime(today.year + 2, 12, 31));
-
-    final results = await Future.wait([
-      _caleePrefs.load(),
-      widget.hubClient.calendars(accessToken: widget.accessToken),
-      widget.hubClient.tasks(accessToken: widget.accessToken, from: from, to: to),
-    ]);
-
-    final freshPrefs = results[0] as StoredPreferences;
-    final calendarList = results[1] as ClientCalendarList;
-    final taskList = results[2] as ClientTaskList;
-
-    // Update preferences (fire-and-forget; UI rebuilds on next setState).
-    _prefs = freshPrefs;
-
-    return _TasksOverview(
-      calendarList: calendarList,
-      taskList: taskList,
-      from: from,
-      to: to,
-    );
+  @override
+  void dispose() {
+    _controller.dispose();
+    _searchController.dispose();
+    super.dispose();
   }
 
   void _openCollectionCreateShortcut() {
@@ -98,14 +64,8 @@ class _TasksPageState extends State<TasksPage> {
     )
         .then((_) {
       if (mounted) {
-        _reloadOverview();
+        _controller.refresh();
       }
-    });
-  }
-
-  void _reloadOverview() {
-    setState(() {
-      _overviewFuture = _loadOverview();
     });
   }
 
@@ -118,13 +78,10 @@ class _TasksPageState extends State<TasksPage> {
       title: 'Task Lists',
       child: _TaskListChooser(
         taskCalendars: taskCalendars,
-        selectedCalendar: _selectedCalendar,
+        selectedCalendar: _controller.selectedCalendar,
         allTasks: allTasks,
         onSelect: (calendar) {
-          setState(() {
-            _selectedCalendar = calendar;
-            _completedExpanded = false;
-          });
+          _controller.setSelectedCalendar(calendar);
           Navigator.of(context).pop();
         },
         onAddTaskList: () {
@@ -136,137 +93,65 @@ class _TasksPageState extends State<TasksPage> {
   }
 
   Future<void> _openCreateTaskSheet(List<ClientCalendar> taskCalendars) async {
-    if (taskCalendars.isEmpty || _isCreatingTask) {
+    if (taskCalendars.isEmpty || _controller.isCreatingTask) {
       return;
     }
 
-    final created = await CaleeBottomSheet.show<bool>(
+    await CaleeBottomSheet.show<bool>(
       context: context,
       title: 'New Task',
       child: _CreateTaskForm(
         taskCalendars: taskCalendars,
-        initialCalendar: _selectedCalendar,
-        defaultTaskListId: _prefs.defaultTaskListId,
-        onCreate: _createTask,
+        initialCalendar: _controller.selectedCalendar,
+        defaultTaskListId:
+            _controller.overview?.preferences.defaultTaskListId,
+        onCreate: ({
+          required taskCalendar,
+          required title,
+          dueAt,
+          description,
+        }) async {
+          await _controller.createTask(
+            taskCalendar: taskCalendar,
+            title: title,
+            dueAt: dueAt,
+            description: description,
+          );
+        },
       ),
     );
-
-    if (created == true && mounted) {
-      _reloadOverview();
-    }
-  }
-
-  Future<void> _createTask({
-    required ClientCalendar taskCalendar,
-    required String title,
-    String? dueAt,
-    String? description,
-  }) async {
-    setState(() {
-      _isCreatingTask = true;
-    });
-
-    try {
-      await widget.hubClient.createTask(
-        accessToken: widget.accessToken,
-        serviceId: taskCalendar.serviceId,
-        calendarId: _rawCalendarId(taskCalendar),
-        title: title,
-        dueAt: dueAt,
-        description: description,
-      );
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isCreatingTask = false;
-        });
-      }
-    }
-  }
-
-  Future<void> _toggleTaskStatus(ClientTask task) async {
-    if (_updatingTaskIds.contains(task.id)) {
-      return;
-    }
-
-    setState(() {
-      _updatingTaskIds.add(task.id);
-    });
-
-    try {
-      await widget.hubClient.updateTaskStatus(
-        accessToken: widget.accessToken,
-        taskId: task.id,
-        completed: !task.isCompleted,
-      );
-
-      if (mounted) {
-        _reloadOverview();
-      }
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Unable to update task.')),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _updatingTaskIds.remove(task.id);
-        });
-      }
-    }
   }
 
   Future<void> _openEditTaskSheet(ClientTask task) async {
-    if (_editingTaskIds.contains(task.id) ||
-        _deletingTaskIds.contains(task.id)) {
+    if (_controller.editingTaskIds.contains(task.id) ||
+        _controller.deletingTaskIds.contains(task.id)) {
       return;
     }
 
-    final updated = await CaleeBottomSheet.show<bool>(
+    await CaleeBottomSheet.show<bool>(
       context: context,
       title: 'Edit Task',
       child: _EditTaskForm(
         task: task,
-        onUpdate: _updateTask,
+        onUpdate: ({
+          required task,
+          required title,
+          dueAt,
+          description,
+        }) async {
+          await _controller.updateTask(
+            task: task,
+            title: title,
+            dueAt: dueAt,
+            description: description,
+          );
+        },
       ),
     );
-
-    if (updated == true && mounted) {
-      _reloadOverview();
-    }
-  }
-
-  Future<void> _updateTask({
-    required ClientTask task,
-    required String title,
-    String? dueAt,
-    String? description,
-  }) async {
-    setState(() {
-      _editingTaskIds.add(task.id);
-    });
-
-    try {
-      await widget.hubClient.updateTask(
-        accessToken: widget.accessToken,
-        taskId: task.id,
-        title: title,
-        dueAt: dueAt,
-        description: description,
-      );
-    } finally {
-      if (mounted) {
-        setState(() {
-          _editingTaskIds.remove(task.id);
-        });
-      }
-    }
   }
 
   Future<void> _confirmDeleteTask(ClientTask task) async {
-    if (_deletingTaskIds.contains(task.id)) {
+    if (_controller.deletingTaskIds.contains(task.id)) {
       return;
     }
 
@@ -281,30 +166,25 @@ class _TasksPageState extends State<TasksPage> {
       return;
     }
 
-    setState(() {
-      _deletingTaskIds.add(task.id);
-    });
-
     try {
-      await widget.hubClient.deleteTask(
-        accessToken: widget.accessToken,
-        taskId: task.id,
-      );
-
-      if (mounted) {
-        _reloadOverview();
-      }
+      await _controller.deleteTask(task);
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Unable to delete task.')),
         );
       }
-    } finally {
+    }
+  }
+
+  Future<void> _toggleTaskStatus(ClientTask task) async {
+    try {
+      await _controller.toggleTaskStatus(task);
+    } catch (_) {
       if (mounted) {
-        setState(() {
-          _deletingTaskIds.remove(task.id);
-        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Unable to update task.')),
+        );
       }
     }
   }
@@ -329,16 +209,7 @@ class _TasksPageState extends State<TasksPage> {
     if (calendar.id.startsWith(prefix)) {
       return calendar.id.substring(prefix.length);
     }
-
     return calendar.id;
-  }
-
-  String _formatDate(DateTime value) {
-    final year = value.year.toString().padLeft(4, '0');
-    final month = value.month.toString().padLeft(2, '0');
-    final day = value.day.toString().padLeft(2, '0');
-
-    return '$year-$month-$day';
   }
 
   String _formatDueLabel(String? value) {
@@ -429,9 +300,9 @@ class _TasksPageState extends State<TasksPage> {
               task: task,
               dueLabel: _formatDueLabel(task.dueAt),
               listName: _calendarNameForTask(task, taskCalendars),
-              isUpdating: _updatingTaskIds.contains(task.id),
-              isDeleting: _deletingTaskIds.contains(task.id),
-              isEditing: _editingTaskIds.contains(task.id),
+              isUpdating: _controller.updatingTaskIds.contains(task.id),
+              isDeleting: _controller.deletingTaskIds.contains(task.id),
+              isEditing: _controller.editingTaskIds.contains(task.id),
               onToggle: () => _toggleTaskStatus(task),
               onEdit: () => _openEditTaskSheet(task),
               onDelete: () => _confirmDeleteTask(task),
@@ -443,30 +314,30 @@ class _TasksPageState extends State<TasksPage> {
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<_TasksOverview>(
-      future: _overviewFuture,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, _) {
+        if (_controller.isLoading && _controller.overview == null) {
           return const CaleeScaffold(
             body: Center(child: CircularProgressIndicator()),
           );
         }
 
-        if (snapshot.hasError) {
+        if (_controller.error != null && _controller.overview == null) {
           return CaleeScaffold(
             body: CaleeEmptyState(
               icon: Icons.cloud_off_outlined,
               title: 'We couldn\'t load your tasks',
               body: 'Check your connection and try again.',
               action: FilledButton(
-                onPressed: _reloadOverview,
+                onPressed: _controller.refresh,
                 child: const Text('Try again'),
               ),
             ),
           );
         }
 
-        final overview = snapshot.data;
+        final overview = _controller.overview;
         if (overview == null) {
           return CaleeScaffold(
             body: CaleeEmptyState(
@@ -488,10 +359,11 @@ class _TasksPageState extends State<TasksPage> {
         final allTasks = overview.taskList.tasks;
 
         // Reset selected calendar if it no longer exists after reload
-        if (_selectedCalendar != null &&
-            !taskCalendars.any((c) => c.id == _selectedCalendar!.id)) {
+        final selectedCalendar = _controller.selectedCalendar;
+        if (selectedCalendar != null &&
+            !taskCalendars.any((c) => c.id == selectedCalendar.id)) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted) setState(() => _selectedCalendar = null);
+            if (mounted) _controller.setSelectedCalendar(null);
           });
         }
 
@@ -511,24 +383,23 @@ class _TasksPageState extends State<TasksPage> {
         }
 
         // Apply task list filter then search query
-        var filteredTasks = _selectedCalendar == null
+        var filteredTasks = selectedCalendar == null
             ? allTasks
             : allTasks.where((t) {
-                final sel = _selectedCalendar!;
+                final sel = selectedCalendar;
                 return t.calendarId == sel.id ||
                     t.calendarId == _rawCalendarId(sel) ||
                     '${t.serviceId}:${t.calendarId}' == sel.id;
               }).toList();
 
-        if (_searchQuery.trim().isNotEmpty) {
+        final searchQuery = _controller.searchQuery;
+        if (searchQuery.trim().isNotEmpty) {
           filteredTasks = filteredTasks
-              .where((t) =>
-                  _matchesSearch(t, _searchQuery, taskCalendars))
+              .where((t) => _matchesSearch(t, searchQuery, taskCalendars))
               .toList();
         }
 
-        final openTasks =
-            filteredTasks.where((t) => !t.isCompleted).toList();
+        final openTasks = filteredTasks.where((t) => !t.isCompleted).toList();
         final completedTasks =
             filteredTasks.where((t) => t.isCompleted).toList();
 
@@ -558,17 +429,14 @@ class _TasksPageState extends State<TasksPage> {
           floatingActionButton: taskCalendars.isEmpty
               ? null
               : FloatingActionButton.extended(
-                  onPressed: _isCreatingTask
+                  onPressed: _controller.isCreatingTask
                       ? null
                       : () => _openCreateTaskSheet(taskCalendars),
                   icon: const Icon(Icons.add),
                   label: const Text('New Task'),
                 ),
           body: RefreshIndicator(
-            onRefresh: () async {
-              _reloadOverview();
-              await _overviewFuture;
-            },
+            onRefresh: () => _controller.refresh(),
             child: ListView(
               padding: const EdgeInsets.symmetric(
                 horizontal: CaleeSpacing.pagePadding,
@@ -578,8 +446,9 @@ class _TasksPageState extends State<TasksPage> {
                 // ── Task list filter pill ─────────────────────────────
                 if (taskCalendars.isNotEmpty)
                   _TaskListFilterBar(
-                    selectedCalendar: _selectedCalendar,
-                    onTap: () => _openTaskListChooser(taskCalendars, allTasks),
+                    selectedCalendar: _controller.selectedCalendar,
+                    onTap: () =>
+                        _openTaskListChooser(taskCalendars, allTasks),
                   ),
                 if (taskCalendars.isNotEmpty)
                   const SizedBox(height: CaleeSpacing.sm),
@@ -588,17 +457,17 @@ class _TasksPageState extends State<TasksPage> {
                 if (taskCalendars.isNotEmpty)
                   TextField(
                     controller: _searchController,
-                    onChanged: (v) => setState(() => _searchQuery = v),
+                    onChanged: (v) => _controller.setSearchQuery(v),
                     textInputAction: TextInputAction.search,
                     decoration: InputDecoration(
                       hintText: 'Search tasks…',
                       prefixIcon: const Icon(Icons.search, size: 20),
-                      suffixIcon: _searchQuery.isNotEmpty
+                      suffixIcon: searchQuery.isNotEmpty
                           ? IconButton(
                               icon: const Icon(Icons.close, size: 18),
                               onPressed: () {
                                 _searchController.clear();
-                                setState(() => _searchQuery = '');
+                                _controller.setSearchQuery('');
                               },
                             )
                           : null,
@@ -616,14 +485,14 @@ class _TasksPageState extends State<TasksPage> {
                   CaleeSection(
                     children: [
                       CaleeListRow(
-                        title: _searchQuery.trim().isNotEmpty
+                        title: searchQuery.trim().isNotEmpty
                             ? 'No tasks match your search.'
                             : 'No open tasks',
-                        subtitle: _searchQuery.trim().isNotEmpty
+                        subtitle: searchQuery.trim().isNotEmpty
                             ? null
                             : 'You\'re all caught up.',
                         leading: Icon(
-                          _searchQuery.trim().isNotEmpty
+                          searchQuery.trim().isNotEmpty
                               ? Icons.search_off
                               : Icons.check_circle_outline,
                           color: CaleeColors.textTertiary,
@@ -641,7 +510,8 @@ class _TasksPageState extends State<TasksPage> {
 
                 // ── Upcoming ──────────────────────────────────────────
                 if (upcomingTasks.isNotEmpty) ...[
-                  _buildSmartSection('Upcoming', upcomingTasks, taskCalendars),
+                  _buildSmartSection(
+                      'Upcoming', upcomingTasks, taskCalendars),
                   const SizedBox(height: CaleeSpacing.sectionSpacing),
                 ],
 
@@ -677,15 +547,14 @@ class _TasksPageState extends State<TasksPage> {
                   _CompletedSection(
                     tasks: completedTasks,
                     calendars: taskCalendars,
-                    isExpanded: _completedExpanded,
+                    isExpanded: _controller.completedExpanded,
                     onToggleExpanded: () {
-                      setState(() {
-                        _completedExpanded = !_completedExpanded;
-                      });
+                      _controller.setCompletedExpanded(
+                          !_controller.completedExpanded);
                     },
-                    updatingIds: _updatingTaskIds,
-                    deletingIds: _deletingTaskIds,
-                    editingIds: _editingTaskIds,
+                    updatingIds: _controller.updatingTaskIds,
+                    deletingIds: _controller.deletingTaskIds,
+                    editingIds: _controller.editingTaskIds,
                     onToggle: _toggleTaskStatus,
                     onEdit: _openEditTaskSheet,
                     onDelete: _confirmDeleteTask,
@@ -1071,25 +940,6 @@ class _TaskListChooser extends StatelessWidget {
     );
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Internal data holder
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _TasksOverview {
-  const _TasksOverview({
-    required this.calendarList,
-    required this.taskList,
-    required this.from,
-    required this.to,
-  });
-
-  final ClientCalendarList calendarList;
-  final ClientTaskList taskList;
-  final String from;
-  final String to;
-}
-
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Create task form (inside CaleeBottomSheet)
