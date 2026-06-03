@@ -1,1 +1,0 @@
-// Service details page placeholder.
