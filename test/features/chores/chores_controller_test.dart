@@ -52,6 +52,7 @@ class _SuccessHubClient extends CaleeHubClient {
   Future<ClientPersonList> people({
     required String accessToken,
     required String householdId,
+    bool includeArchived = false,
   }) =>
       Future.value(_emptyPeopleList());
 }

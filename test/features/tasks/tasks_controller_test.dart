@@ -206,11 +206,23 @@ class _ToggleTrackingHubClient extends CaleeHubClient {
       Future.value(ClientTaskList(from: from, to: to, tasks: []));
 
   @override
-  Future<void> updateTaskStatus({
+  Future<ClientTask> updateTaskStatus({
     required String accessToken,
     required String taskId,
     required bool completed,
   }) async {
     onUpdateStatus();
+    return const ClientTask(
+      id: 'task-1',
+      calendarId: 'calendar-1',
+      serviceId: 'service-1',
+      serviceName: 'Service',
+      title: 'Task',
+      status: 'completed',
+      dueAt: null,
+      completedAt: null,
+      description: null,
+      source: 'test',
+    );
   }
 }
