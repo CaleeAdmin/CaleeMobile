@@ -481,13 +481,26 @@ class _CalendarPageState extends State<CalendarPage> {
           );
         }
 
+        final screenHeight = MediaQuery.sizeOf(context).height;
+        final compactHeight = screenHeight < 520;
+        final veryCompactHeight = screenHeight < 430;
+
         return CaleeScaffold(
           body: SafeArea(
             child: Column(
               children: [
-                _buildTopBar(),
-                _buildWeekdayHeader(),
-                Flexible(fit: FlexFit.loose, child: _buildMonthGrid()),
+                _buildTopBar(
+                  compactHeight: compactHeight,
+                  veryCompactHeight: veryCompactHeight,
+                ),
+                _buildWeekdayHeader(compactHeight: compactHeight),
+                Flexible(
+                  fit: FlexFit.loose,
+                  child: _buildMonthGrid(
+                    compactHeight: compactHeight,
+                    veryCompactHeight: veryCompactHeight,
+                  ),
+                ),
                 const Divider(height: 1),
                 Expanded(
                   child: RefreshIndicator(
@@ -506,15 +519,22 @@ class _CalendarPageState extends State<CalendarPage> {
     );
   }
 
-  Widget _buildTopBar() {
+  Widget _buildTopBar({
+    bool compactHeight = false,
+    bool veryCompactHeight = false,
+  }) {
+    final outerPad = veryCompactHeight ? 2.0 : compactHeight ? 4.0 : CaleeSpacing.xs;
+    final navIconMinH = compactHeight ? 36.0 : 44.0;
+    final actionIconMinH = compactHeight ? 32.0 : 36.0;
+
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         // Row 1: month navigation
         Padding(
-          padding: const EdgeInsets.fromLTRB(
+          padding: EdgeInsets.fromLTRB(
             CaleeSpacing.xs,
-            CaleeSpacing.xs,
+            outerPad,
             CaleeSpacing.xs,
             0,
           ),
@@ -525,7 +545,7 @@ class _CalendarPageState extends State<CalendarPage> {
                 icon: const Icon(Icons.chevron_left),
                 iconSize: 24,
                 padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                constraints: BoxConstraints(minWidth: 44, minHeight: navIconMinH),
                 color: CaleeColors.primary,
                 tooltip: 'Previous month',
               ),
@@ -545,7 +565,7 @@ class _CalendarPageState extends State<CalendarPage> {
                 icon: const Icon(Icons.chevron_right),
                 iconSize: 24,
                 padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                constraints: BoxConstraints(minWidth: 44, minHeight: navIconMinH),
                 color: CaleeColors.primary,
                 tooltip: 'Next month',
               ),
@@ -554,11 +574,11 @@ class _CalendarPageState extends State<CalendarPage> {
         ),
         // Row 2: Today + action icons
         Padding(
-          padding: const EdgeInsets.fromLTRB(
+          padding: EdgeInsets.fromLTRB(
             CaleeSpacing.sm,
             0,
             CaleeSpacing.xs,
-            CaleeSpacing.xs,
+            outerPad,
           ),
           child: Row(
             children: [
@@ -572,7 +592,7 @@ class _CalendarPageState extends State<CalendarPage> {
                       horizontal: CaleeSpacing.sm,
                       vertical: CaleeSpacing.xs,
                     ),
-                    minimumSize: const Size(44, 36),
+                    minimumSize: Size(44, actionIconMinH),
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
                   child: const Text(
@@ -587,7 +607,7 @@ class _CalendarPageState extends State<CalendarPage> {
                 icon: const Icon(Icons.search),
                 iconSize: 22,
                 padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 44, minHeight: 36),
+                constraints: BoxConstraints(minWidth: 44, minHeight: actionIconMinH),
                 color: CaleeColors.primary,
                 tooltip: 'Search events',
               ),
@@ -596,7 +616,7 @@ class _CalendarPageState extends State<CalendarPage> {
                 icon: const Icon(Icons.tune),
                 iconSize: 22,
                 padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 44, minHeight: 36),
+                constraints: BoxConstraints(minWidth: 44, minHeight: actionIconMinH),
                 color: CaleeColors.primary,
                 tooltip: 'Calendars',
               ),
@@ -605,7 +625,7 @@ class _CalendarPageState extends State<CalendarPage> {
                 icon: const Icon(Icons.add),
                 iconSize: 22,
                 padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 44, minHeight: 36),
+                constraints: BoxConstraints(minWidth: 44, minHeight: actionIconMinH),
                 color: CaleeColors.primary,
                 tooltip: 'Add event',
               ),
@@ -623,11 +643,14 @@ class _CalendarPageState extends State<CalendarPage> {
     return _kDayAbbr;
   }
 
-  Widget _buildWeekdayHeader() {
+  Widget _buildWeekdayHeader({bool compactHeight = false}) {
+    final vertPad = compactHeight ? 1.0 : 2.0;
+    final fontSize = compactHeight ? 11.0 : 12.0;
+
     return Padding(
-      padding: const EdgeInsets.symmetric(
+      padding: EdgeInsets.symmetric(
         horizontal: CaleeSpacing.xs,
-        vertical: 2,
+        vertical: vertPad,
       ),
       child: Row(
         children: _weekdayAbbr
@@ -636,8 +659,8 @@ class _CalendarPageState extends State<CalendarPage> {
                 child: Center(
                   child: Text(
                     d,
-                    style: const TextStyle(
-                      fontSize: 12,
+                    style: TextStyle(
+                      fontSize: fontSize,
                       fontWeight: FontWeight.w500,
                       color: CaleeColors.textSecondary,
                     ),
@@ -650,7 +673,10 @@ class _CalendarPageState extends State<CalendarPage> {
     );
   }
 
-  Widget _buildMonthGrid() {
+  Widget _buildMonthGrid({
+    bool compactHeight = false,
+    bool veryCompactHeight = false,
+  }) {
     return LayoutBuilder(
       builder: (context, constraints) {
         final cellSize = constraints.maxWidth / 7;
@@ -678,6 +704,8 @@ class _CalendarPageState extends State<CalendarPage> {
                 isSelected: _isSameDay(date, _controller.selectedDay),
                 dotColors: dotColors,
                 eventCount: dayEvents.length,
+                compactHeight: compactHeight,
+                veryCompactHeight: veryCompactHeight,
                 onTap: () => _controller.selectDay(date),
               );
             },
@@ -807,6 +835,8 @@ class _DayCell extends StatelessWidget {
     required this.dotColors,
     required this.eventCount,
     required this.onTap,
+    this.compactHeight = false,
+    this.veryCompactHeight = false,
   });
 
   final DateTime date;
@@ -816,6 +846,8 @@ class _DayCell extends StatelessWidget {
   final List<Color> dotColors;
   final int eventCount;
   final VoidCallback onTap;
+  final bool compactHeight;
+  final bool veryCompactHeight;
 
   String get _semanticLabel {
     final parts = <String>[
@@ -833,21 +865,45 @@ class _DayCell extends StatelessWidget {
     final Color numberColor;
     final Color? bgColor;
 
-    if (isToday && isSelected) {
-      bgColor = CaleeColors.primary;
-      numberColor = Colors.white;
-    } else if (isToday) {
-      bgColor = CaleeColors.primary;
-      numberColor = Colors.white;
-    } else if (isSelected) {
-      bgColor = CaleeColors.primary.withAlpha(30);
-      numberColor = CaleeColors.primary;
+    if (isToday || isSelected) {
+      bgColor = isToday ? CaleeColors.primary : CaleeColors.primary.withAlpha(30);
+      numberColor = isToday ? Colors.white : CaleeColors.primary;
     } else if (isCurrentMonth) {
       bgColor = null;
       numberColor = CaleeColors.textPrimary;
     } else {
       bgColor = null;
       numberColor = CaleeColors.textTertiary;
+    }
+
+    final double circleSize;
+    final double fontSize;
+    final double dotSize;
+    final double dotGap;
+    final double verticalGap;
+    final bool showDots;
+
+    if (veryCompactHeight) {
+      circleSize = 22;
+      fontSize = 12;
+      dotSize = 4;
+      dotGap = 1.5;
+      verticalGap = 0;
+      showDots = false;
+    } else if (compactHeight) {
+      circleSize = 24;
+      fontSize = 12;
+      dotSize = 4;
+      dotGap = 1.5;
+      verticalGap = 1;
+      showDots = true;
+    } else {
+      circleSize = 30;
+      fontSize = 14;
+      dotSize = 5;
+      dotGap = 2;
+      verticalGap = 3;
+      showDots = true;
     }
 
     return Semantics(
@@ -857,28 +913,36 @@ class _DayCell extends StatelessWidget {
       child: GestureDetector(
         onTap: onTap,
         behavior: HitTestBehavior.opaque,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 30,
-              height: 30,
-              decoration: bgColor != null
-                  ? BoxDecoration(color: bgColor, shape: BoxShape.circle)
-                  : null,
-              alignment: Alignment.center,
-              child: Text(
-                '${date.day}',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: isToday ? FontWeight.w700 : FontWeight.w400,
-                  color: numberColor,
+        child: ClipRect(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: circleSize,
+                height: circleSize,
+                decoration: bgColor != null
+                    ? BoxDecoration(color: bgColor, shape: BoxShape.circle)
+                    : null,
+                alignment: Alignment.center,
+                child: Text(
+                  '${date.day}',
+                  style: TextStyle(
+                    fontSize: fontSize,
+                    fontWeight: isToday ? FontWeight.w700 : FontWeight.w400,
+                    color: numberColor,
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 3),
-            _EventDots(colors: dotColors),
-          ],
+              if (verticalGap > 0) SizedBox(height: verticalGap),
+              _EventDots(
+                colors: showDots ? dotColors : const [],
+                dotSize: dotSize,
+                gap: dotGap,
+                hidden: !showDots,
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -888,24 +952,34 @@ class _DayCell extends StatelessWidget {
 // ─── Event dots row ───────────────────────────────────────────────────────────
 
 class _EventDots extends StatelessWidget {
-  const _EventDots({required this.colors});
+  const _EventDots({
+    required this.colors,
+    this.dotSize = 5,
+    this.gap = 2,
+    this.hidden = false,
+  });
 
   final List<Color> colors;
+  final double dotSize;
+  final double gap;
+  final bool hidden;
 
   @override
   Widget build(BuildContext context) {
+    if (hidden) return const SizedBox.shrink();
+
     if (colors.isEmpty) {
-      return const SizedBox(height: 5);
+      return SizedBox(height: dotSize);
     }
 
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
         for (int i = 0; i < colors.length; i++) ...[
-          if (i > 0) const SizedBox(width: 2),
+          if (i > 0) SizedBox(width: gap),
           Container(
-            width: 5,
-            height: 5,
+            width: dotSize,
+            height: dotSize,
             decoration: BoxDecoration(
               color: colors[i],
               shape: BoxShape.circle,
