@@ -97,12 +97,14 @@ class ServiceDetailsPage extends StatelessWidget {
               ),
               CaleeListRow(
                 title: 'Calendar Sharing Address',
-                subtitle: 'Receive shared calendar invitations',
-                enabled: service.supportsCalendarCredential,
-                onTap: service.supportsCalendarCredential
+                subtitle: service.supportsCalendarSharingAddress
+                    ? 'Receive shared calendar invitations'
+                    : 'Not available for this service',
+                enabled: service.supportsCalendarSharingAddress,
+                onTap: service.supportsCalendarSharingAddress
                     ? () => _openCalendarSharingAddress(context)
                     : null,
-                trailing: service.supportsCalendarCredential
+                trailing: service.supportsCalendarSharingAddress
                     ? null
                     : const SizedBox.shrink(),
               ),
