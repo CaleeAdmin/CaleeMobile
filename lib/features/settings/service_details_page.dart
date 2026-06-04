@@ -5,6 +5,7 @@ import '../../data/models/client_bootstrap.dart';
 import '../../ui/calee_theme.dart';
 import '../../ui/calee_widgets.dart';
 import 'calendar_app_setup_page.dart';
+import 'calendar_sharing_address_page.dart';
 
 class ServiceDetailsPage extends StatelessWidget {
   const ServiceDetailsPage({
@@ -22,6 +23,18 @@ class ServiceDetailsPage extends StatelessWidget {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => CalendarAppSetupPage(
+          hubClient: hubClient,
+          accessToken: accessToken,
+          serviceId: service.id,
+        ),
+      ),
+    );
+  }
+
+  void _openCalendarSharingAddress(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => CalendarSharingAddressPage(
           hubClient: hubClient,
           accessToken: accessToken,
           serviceId: service.id,
@@ -84,9 +97,14 @@ class ServiceDetailsPage extends StatelessWidget {
               ),
               CaleeListRow(
                 title: 'Calendar Sharing Address',
-                subtitle: 'Coming soon',
-                enabled: false,
-                trailing: const SizedBox.shrink(),
+                subtitle: 'Receive shared calendar invitations',
+                enabled: service.supportsCalendarCredential,
+                onTap: service.supportsCalendarCredential
+                    ? () => _openCalendarSharingAddress(context)
+                    : null,
+                trailing: service.supportsCalendarCredential
+                    ? null
+                    : const SizedBox.shrink(),
               ),
             ],
           ),
