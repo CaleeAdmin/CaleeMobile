@@ -850,7 +850,7 @@ class CaleeHubClient {
         request.write(jsonEncode(body));
       }
 
-      return _readJsonResponse(await request.close());
+      return _readJsonResponse(await request.close(), endpoint: path);
     });
   }
 
@@ -879,7 +879,7 @@ class CaleeHubClient {
           .set(HttpHeaders.authorizationHeader, 'Bearer $accessToken');
       request.write(jsonEncode(body));
 
-      return _readJsonResponse(await request.close());
+      return _readJsonResponse(await request.close(), endpoint: path);
     });
   }
 
@@ -895,7 +895,7 @@ class CaleeHubClient {
         request.headers.contentType = ContentType.json;
         request.headers.set(HttpHeaders.acceptHeader, 'application/json');
         request.write(jsonEncode(body));
-        return _readJsonResponse(await request.close());
+        return _readJsonResponse(await request.close(), endpoint: path);
       });
     }
     return _withRetry(
@@ -919,7 +919,7 @@ class CaleeHubClient {
       }
       request.write(jsonEncode(body));
 
-      return _readJsonResponse(await request.close());
+      return _readJsonResponse(await request.close(), endpoint: path);
     });
   }
 
@@ -945,7 +945,7 @@ class CaleeHubClient {
         'Bearer $accessToken',
       );
 
-      return _readJsonResponse(await request.close());
+      return _readJsonResponse(await request.close(), endpoint: path);
     });
   }
 
@@ -960,46 +960,70 @@ class CaleeHubClient {
     } on TimeoutException {
       throw const CaleeHubException(
         statusCode: 0,
+        code: 'TIMEOUT',
         message: 'Check your connection and try again.',
       );
     } on SocketException {
       throw const CaleeHubException(
         statusCode: 0,
+        code: 'NETWORK_ERROR',
         message: 'Check your connection and try again.',
       );
     } on HandshakeException {
       throw const CaleeHubException(
         statusCode: 0,
+        code: 'NETWORK_ERROR',
         message: 'Check your connection and try again.',
       );
     }
   }
 
   Future<Map<String, dynamic>> _readJsonResponse(
-    HttpClientResponse response,
-  ) async {
+    HttpClientResponse response, {
+    String? endpoint,
+  }) async {
     final body = await response.transform(utf8.decoder).join();
     final decoded = body.isEmpty ? null : jsonDecode(body);
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      final message = decoded is Map<String, dynamic>
-          ? decoded['error'] is Map<String, dynamic>
-              ? (decoded['error'] as Map<String, dynamic>)['message']
-              : decoded['message']
-          : null;
+      String? code;
+      String? message;
+      String? metaRequestId;
+
+      if (decoded is Map<String, dynamic>) {
+        final errorMap = decoded['error'];
+        if (errorMap is Map<String, dynamic>) {
+          code = errorMap['code'] as String?;
+          message = errorMap['message'] as String?;
+        } else {
+          message = decoded['message'] as String?;
+        }
+        final meta = decoded['meta'];
+        if (meta is Map<String, dynamic>) {
+          metaRequestId = meta['requestId'] as String?;
+        }
+      }
+
+      final requestId = response.headers.value('x-calee-request-id') ??
+          response.headers.value('x-request-id') ??
+          metaRequestId;
 
       throw CaleeHubException(
         statusCode: response.statusCode,
         message: message is String && message.trim().isNotEmpty
             ? message
             : 'Hub request failed',
+        code: code,
+        requestId: requestId,
+        endpoint: endpoint,
       );
     }
 
     if (decoded is! Map<String, dynamic>) {
-      throw const CaleeHubException(
+      throw CaleeHubException(
         statusCode: 0,
         message: 'Invalid Hub response',
+        endpoint: endpoint,
       );
     }
 
@@ -1024,10 +1048,25 @@ class CaleeHubException implements Exception {
   const CaleeHubException({
     required this.statusCode,
     required this.message,
+    this.code,
+    this.requestId,
+    this.endpoint,
   });
 
   final int statusCode;
   final String message;
+  final String? code;
+  final String? requestId;
+  final String? endpoint;
+
+  String get debugSummary {
+    final parts = <String>['HTTP $statusCode'];
+    if (code != null) parts.add('code: $code');
+    parts.add('message: $message');
+    if (requestId != null) parts.add('requestId: $requestId');
+    if (endpoint != null) parts.add('endpoint: $endpoint');
+    return parts.join(' | ');
+  }
 
   @override
   String toString() => message;

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
@@ -182,9 +183,10 @@ class _HouseholdPeoplePageState extends State<HouseholdPeoplePage> {
   }
 
   void _showError(Object error) {
-    final message = error is CaleeHubException
-        ? error.message
-        : 'Something went wrong. Please try again.';
+    const friendly = 'Could not set up Family Members. Please try again.';
+    final message = kDebugMode && error is CaleeHubException
+        ? '$friendly\nDebug: ${error.debugSummary}'
+        : friendly;
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message)),
@@ -395,10 +397,11 @@ class _PersonFormContentState extends State<_PersonFormContent> {
       if (!mounted) return;
       setState(() => _saving = false);
 
+      const friendly = 'Could not save person. Please try again.';
       _showSnack(
-        error is CaleeHubException
-            ? error.message
-            : 'Could not save person. Please try again.',
+        kDebugMode && error is CaleeHubException
+            ? '$friendly\nDebug: ${error.debugSummary}'
+            : friendly,
       );
     }
   }

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../data/api/calee_hub_client.dart';
@@ -386,16 +387,17 @@ class _CalendarPageState extends State<CalendarPage> {
       }
     } catch (error) {
       if (mounted) {
+        final friendly = deleteOccurrence
+            ? 'Unable to delete recurring event.'
+            : event.recurring
+                ? 'Unable to delete recurring series.'
+                : 'Unable to delete event.';
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              error is CaleeHubException
-                  ? error.message
-                  : deleteOccurrence
-                      ? 'Unable to delete recurring event.'
-                      : event.recurring
-                          ? 'Unable to delete recurring series.'
-                          : 'Unable to delete event.',
+              kDebugMode && error is CaleeHubException
+                  ? '$friendly\nDebug: ${error.debugSummary}'
+                  : friendly,
             ),
           ),
         );
@@ -1582,16 +1584,13 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
           _isSubmitting = false;
         });
 
+        final friendly = 'Could not save this event. Please try again.';
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              error is CaleeHubException
-                  ? error.message
-                  : _isEditing
-                      ? widget.initialEvent!.recurring
-                          ? 'Unable to update recurring series.'
-                          : 'Unable to update event.'
-                      : 'Unable to create event.',
+              kDebugMode && error is CaleeHubException
+                  ? '$friendly\nDebug: ${error.debugSummary}'
+                  : friendly,
             ),
           ),
         );
@@ -2398,12 +2397,13 @@ class _CalendarDetailSheetState extends State<_CalendarDetailSheet> {
     } catch (error) {
       if (mounted) {
         setState(() => _isSubmitting = false);
+        const friendly = 'Unable to update calendar.';
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              error is CaleeHubException
-                  ? error.message
-                  : 'Unable to update calendar.',
+              kDebugMode && error is CaleeHubException
+                  ? '$friendly\nDebug: ${error.debugSummary}'
+                  : friendly,
             ),
           ),
         );
@@ -2449,12 +2449,13 @@ class _CalendarDetailSheetState extends State<_CalendarDetailSheet> {
     } catch (error) {
       if (mounted) {
         setState(() => _isSubmitting = false);
+        const friendly = 'Unable to remove calendar.';
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              error is CaleeHubException
-                  ? error.message
-                  : 'Unable to remove calendar.',
+              kDebugMode && error is CaleeHubException
+                  ? '$friendly\nDebug: ${error.debugSummary}'
+                  : friendly,
             ),
           ),
         );

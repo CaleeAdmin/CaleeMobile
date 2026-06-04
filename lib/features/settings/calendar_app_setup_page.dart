@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -49,11 +50,12 @@ class _CalendarAppSetupPageState extends State<CalendarAppSetupPage> {
         _account = account;
         _loading = false;
       });
-    } catch (_) {
+    } catch (error) {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = 'Could not load Calendar App Setup. Please try again.';
+        _error = 'Could not load Calendar App Setup. Please try again.'
+            '${kDebugMode && error is CaleeHubException ? '\nDebug: ${error.debugSummary}' : ''}';
       });
     }
   }
