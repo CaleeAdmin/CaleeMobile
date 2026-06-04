@@ -145,6 +145,13 @@ class ClientService {
   }
 
   bool get supportsCalendarCredential => supportsCalendarCredentials;
+
+  bool get supportsCalendarSharingAddress {
+    if (capabilities.containsKey('calendarSharingAddress')) {
+      return capabilities['calendarSharingAddress'] == true;
+    }
+    return false;
+  }
 }
 
 class ClientContexts {
