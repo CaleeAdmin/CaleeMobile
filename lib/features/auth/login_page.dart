@@ -5,12 +5,8 @@ import '../../data/models/client_bootstrap.dart';
 import 'auth_repository.dart';
 import 'login_controller.dart';
 
-// TODO: Replace with the production password-reset URL when available.
-const _kForgotPasswordUrl = 'https://hub.calee.com.au/reset-password';
-
-// TODO: Replace with the production privacy policy and support URLs.
-const _kPrivacyPolicyUrl = 'https://hub.calee.com.au/privacy';
-const _kSupportUrl = 'https://hub.calee.com.au/support';
+const _kForgotPasswordUrl = 'https://hub.calee.com.au/login';
+const _kTermsAndConditionsUrl = 'https://portal.calee.com.au/terms';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({
@@ -66,7 +62,7 @@ class _LoginPageState extends State<LoginPage> {
   Future<void> _openUrl(String url) async {
     final uri = Uri.tryParse(url);
     if (uri == null) return;
-    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+    if (!await launchUrl(uri, mode: LaunchMode.platformDefault)) {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -194,51 +190,24 @@ class _LoginPageState extends State<LoginPage> {
                             : const Text('Sign in'),
                       ),
                       const SizedBox(height: 32),
-                      // Privacy & support links
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          TextButton(
-                            onPressed: () => _openUrl(_kPrivacyPolicyUrl),
-                            style: TextButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 4,
-                              ),
-                              minimumSize: const Size(0, 36),
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      Center(
+                        child: TextButton(
+                          onPressed: () => _openUrl(_kTermsAndConditionsUrl),
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
                             ),
-                            child: Text(
-                              'Privacy Policy',
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: theme.colorScheme.primary,
-                              ),
-                            ),
+                            minimumSize: const Size(0, 36),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                           ),
-                          Text(
-                            '·',
+                          child: Text(
+                            'Terms and Conditions',
                             style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.onSurfaceVariant,
+                              color: theme.colorScheme.primary,
                             ),
                           ),
-                          TextButton(
-                            onPressed: () => _openUrl(_kSupportUrl),
-                            style: TextButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 4,
-                              ),
-                              minimumSize: const Size(0, 36),
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            ),
-                            child: Text(
-                              'Support',
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: theme.colorScheme.primary,
-                              ),
-                            ),
-                          ),
-                        ],
+                        ),
                       ),
                     ],
                   );
