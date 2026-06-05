@@ -68,8 +68,10 @@ class CalendarRepository {
       freshPrefs = const StoredPreferences();
     }
 
-    final gridStart =
-        computeGridStart(selectedMonth, freshPrefs.firstDayOfWeek);
+    final gridStart = computeGridStart(
+      selectedMonth,
+      freshPrefs.firstDayOfWeek,
+    );
     final gridEnd = gridStart.add(const Duration(days: 41)); // 6 weeks − 1 day
 
     final results = await Future.wait([
@@ -81,8 +83,7 @@ class CalendarRepository {
       ),
     ]);
 
-    final calendars = (results[0] as ClientCalendarList)
-        .calendars
+    final calendars = (results[0] as ClientCalendarList).calendars
         .where((c) => c.isCalendarKind)
         .toList();
     final events = (results[1] as ClientEventList).events;
@@ -143,13 +144,13 @@ class CalendarRepository {
       startsAt: editSeriesMetadataOnly || startsAt == null
           ? null
           : allDay == true
-              ? formatDate(startsAt)
-              : startsAt.toIso8601String(),
+          ? formatDate(startsAt)
+          : startsAt.toIso8601String(),
       endsAt: editSeriesMetadataOnly || endsAt == null
           ? null
           : allDay == true
-              ? formatDate(endsAt)
-              : endsAt.toIso8601String(),
+          ? formatDate(endsAt)
+          : endsAt.toIso8601String(),
       allDay: editSeriesMetadataOnly ? null : allDay,
       location: location,
       description: description,

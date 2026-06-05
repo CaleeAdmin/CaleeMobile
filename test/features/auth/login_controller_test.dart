@@ -8,13 +8,13 @@ import 'package:calee_mobile/features/auth/login_controller.dart';
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 ClientLoginResult _makeLoginResult() => ClientLoginResult(
-      accessToken: 'at',
-      refreshToken: 'rt',
-      tokenType: 'Bearer',
-      expiresIn: 3600,
-      refreshExpiresIn: 86400,
-      bootstrap: ClientBootstrap.fromJson({}),
-    );
+  accessToken: 'at',
+  refreshToken: 'rt',
+  tokenType: 'Bearer',
+  expiresIn: 3600,
+  refreshExpiresIn: 86400,
+  bootstrap: ClientBootstrap.fromJson({}),
+);
 
 // ─── Stub repository ──────────────────────────────────────────────────────────
 
@@ -29,8 +29,10 @@ class _FakeRepository implements AuthRepository {
   Exception? loginError;
 
   @override
-  Future<ClientLoginResult> login(
-      {required String email, required String password}) async {
+  Future<ClientLoginResult> login({
+    required String email,
+    required String password,
+  }) async {
     if (loginError != null) throw loginError!;
     return loginResult!;
   }
@@ -47,9 +49,10 @@ class _FakeRepository implements AuthRepository {
       throw UnimplementedError();
 
   @override
-  Future<void> saveSession(
-          {required String accessToken, required String refreshToken}) =>
-      throw UnimplementedError();
+  Future<void> saveSession({
+    required String accessToken,
+    required String refreshToken,
+  }) => throw UnimplementedError();
 
   @override
   Future<void> saveAccessToken(String accessToken) =>
@@ -83,7 +86,9 @@ void main() {
       controller.errorMessage = 'stale error';
 
       final result = await controller.signIn(
-          email: 'user@example.com', password: 'secret');
+        email: 'user@example.com',
+        password: 'secret',
+      );
 
       expect(result, isNotNull);
       expect(result!.accessToken, 'at');
@@ -97,7 +102,9 @@ void main() {
       );
 
       final result = await controller.signIn(
-          email: 'user@example.com', password: 'wrong');
+        email: 'user@example.com',
+        password: 'wrong',
+      );
 
       expect(result, isNull);
       expect(controller.errorMessage, 'Invalid credentials');
@@ -107,7 +114,9 @@ void main() {
       repo.loginError = Exception('unexpected');
 
       final result = await controller.signIn(
-          email: 'user@example.com', password: 'secret');
+        email: 'user@example.com',
+        password: 'secret',
+      );
 
       expect(result, isNull);
       expect(controller.errorMessage, 'Unable to sign in. Please try again.');

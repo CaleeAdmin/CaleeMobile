@@ -11,10 +11,7 @@ String _errorMessage(Object error, String fallback) {
 }
 
 class AddPersonSheet extends StatefulWidget {
-  const AddPersonSheet({
-    super.key,
-    required this.onAdd,
-  });
+  const AddPersonSheet({super.key, required this.onAdd});
 
   final Future<void> Function(String name) onAdd;
 
@@ -86,8 +83,9 @@ class _AddPersonSheetState extends State<AddPersonSheet> {
             children: [
               Expanded(
                 child: OutlinedButton(
-                  onPressed:
-                      _isSubmitting ? null : () => Navigator.of(context).pop(),
+                  onPressed: _isSubmitting
+                      ? null
+                      : () => Navigator.of(context).pop(),
                   child: const Text('Cancel'),
                 ),
               ),

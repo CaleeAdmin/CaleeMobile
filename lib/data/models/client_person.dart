@@ -1,7 +1,5 @@
 class ClientPersonList {
-  const ClientPersonList({
-    required this.people,
-  });
+  const ClientPersonList({required this.people});
 
   factory ClientPersonList.fromJson(Map<String, dynamic> json) {
     return ClientPersonList(

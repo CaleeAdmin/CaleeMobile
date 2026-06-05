@@ -19,31 +19,19 @@ class SessionStore {
       return null;
     }
 
-    return StoredSession(
-      accessToken: accessToken,
-      refreshToken: refreshToken,
-    );
+    return StoredSession(accessToken: accessToken, refreshToken: refreshToken);
   }
 
   Future<void> saveSession({
     required String accessToken,
     required String refreshToken,
   }) async {
-    await _secureStorage.write(
-      key: _accessTokenKey,
-      value: accessToken,
-    );
-    await _secureStorage.write(
-      key: _refreshTokenKey,
-      value: refreshToken,
-    );
+    await _secureStorage.write(key: _accessTokenKey, value: accessToken);
+    await _secureStorage.write(key: _refreshTokenKey, value: refreshToken);
   }
 
   Future<void> saveAccessToken(String accessToken) {
-    return _secureStorage.write(
-      key: _accessTokenKey,
-      value: accessToken,
-    );
+    return _secureStorage.write(key: _accessTokenKey, value: accessToken);
   }
 
   Future<void> clear() async {
@@ -53,10 +41,7 @@ class SessionStore {
 }
 
 class StoredSession {
-  const StoredSession({
-    required this.accessToken,
-    required this.refreshToken,
-  });
+  const StoredSession({required this.accessToken, required this.refreshToken});
 
   final String accessToken;
   final String refreshToken;

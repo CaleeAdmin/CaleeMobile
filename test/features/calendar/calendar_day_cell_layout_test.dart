@@ -60,7 +60,9 @@ void main() {
   // Each cell is 844/7 ≈ 120.6 wide × (grid_height/6) tall.
   // With compact sizes and clamped height the cell must not overflow.
 
-  testWidgets('normal cell renders without overflow at 390 height', (tester) async {
+  testWidgets('normal cell renders without overflow at 390 height', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(844, 390);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);
@@ -88,32 +90,35 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('veryCompact cell (no dots) renders without overflow at tight height', (tester) async {
-    tester.view.physicalSize = const Size(667, 375);
-    tester.view.devicePixelRatio = 1.0;
-    addTearDown(tester.view.resetPhysicalSize);
+  testWidgets(
+    'veryCompact cell (no dots) renders without overflow at tight height',
+    (tester) async {
+      tester.view.physicalSize = const Size(667, 375);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
 
-    const cellHeight = 26.0;
+      const cellHeight = 26.0;
 
-    await tester.pumpWidget(
-      MaterialApp(
-        home: SizedBox(
-          width: 667 / 7,
-          height: cellHeight,
-          child: _buildDayCellLike(
-            circleSize: 22,
-            fontSize: 12,
-            dotSize: 0,
-            gap: 0,
-            verticalGap: 0,
-            showDots: false,
+      await tester.pumpWidget(
+        MaterialApp(
+          home: SizedBox(
+            width: 667 / 7,
+            height: cellHeight,
+            child: _buildDayCellLike(
+              circleSize: 22,
+              fontSize: 12,
+              dotSize: 0,
+              gap: 0,
+              verticalGap: 0,
+              showDots: false,
+            ),
           ),
         ),
-      ),
-    );
+      );
 
-    expect(tester.takeException(), isNull);
-  });
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('compact cell fits inside 29px cell height', (tester) async {
     // compact: circle 24 + gap 1 + dot 4 = 29px total

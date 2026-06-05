@@ -116,8 +116,7 @@ abstract final class CaleeTheme {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(CaleeRadius.button),
-          borderSide:
-              const BorderSide(color: CaleeColors.primary, width: 1.5),
+          borderSide: const BorderSide(color: CaleeColors.primary, width: 1.5),
         ),
         contentPadding: const EdgeInsets.symmetric(
           horizontal: CaleeSpacing.md,
@@ -145,9 +144,7 @@ abstract final class CaleeTheme {
         ),
       ),
       textButtonTheme: TextButtonThemeData(
-        style: TextButton.styleFrom(
-          foregroundColor: CaleeColors.primary,
-        ),
+        style: TextButton.styleFrom(foregroundColor: CaleeColors.primary),
       ),
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,

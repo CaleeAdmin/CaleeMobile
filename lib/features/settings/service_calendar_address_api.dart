@@ -62,15 +62,17 @@ class ServiceCalendarAddressApi {
         request.write(jsonEncode(<String, dynamic>{}));
       }
 
-      final response = await request.close().timeout(const Duration(seconds: 25));
+      final response = await request.close().timeout(
+        const Duration(seconds: 25),
+      );
       final body = await response.transform(utf8.decoder).join();
       final decoded = body.isEmpty ? null : jsonDecode(body);
 
       if (response.statusCode < 200 || response.statusCode >= 300) {
         final message = decoded is Map<String, dynamic>
             ? decoded['error'] is Map<String, dynamic>
-                ? (decoded['error'] as Map<String, dynamic>)['message']
-                : decoded['message']
+                  ? (decoded['error'] as Map<String, dynamic>)['message']
+                  : decoded['message']
             : null;
         throw CaleeHubException(
           statusCode: response.statusCode,

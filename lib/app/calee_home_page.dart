@@ -31,9 +31,8 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
   int _selectedIndex = 0;
   late final List<_CaleeTab> _tabs;
 
-  bool get _hasChoreService => widget.bootstrap.services.any(
-        (service) => service.supportsChores,
-      );
+  bool get _hasChoreService =>
+      widget.bootstrap.services.any((service) => service.supportsChores);
 
   @override
   void initState() {

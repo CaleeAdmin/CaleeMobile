@@ -3,8 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 /// Returns true when tapping [tappedDate] should trigger a month switch
 /// away from [currentMonth] (always the 1st of the displayed month).
 bool shouldSwitchMonth(DateTime tappedDate, DateTime currentMonth) {
-  assert(currentMonth.day == 1,
-      'currentMonth must be the 1st of the month');
+  assert(currentMonth.day == 1, 'currentMonth must be the 1st of the month');
   final tapMonth = DateTime(tappedDate.year, tappedDate.month, 1);
   return tapMonth.year != currentMonth.year ||
       tapMonth.month != currentMonth.month;

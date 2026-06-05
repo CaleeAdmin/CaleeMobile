@@ -53,8 +53,9 @@ class SessionController extends ChangeNotifier {
     }
 
     try {
-      final refreshed =
-          await repository.refresh(refreshToken: storedRefreshToken);
+      final refreshed = await repository.refresh(
+        refreshToken: storedRefreshToken,
+      );
       final newToken = refreshed.accessToken;
       await repository.saveAccessToken(newToken);
       accessToken = newToken;

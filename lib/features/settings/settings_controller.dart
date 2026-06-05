@@ -86,8 +86,7 @@ class SettingsController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final fresh =
-          await repository.ensureDefaultFamilyAndRefreshBootstrap();
+      final fresh = await repository.ensureDefaultFamilyAndRefreshBootstrap();
       bootstrap = fresh;
       error = null;
       return fresh;

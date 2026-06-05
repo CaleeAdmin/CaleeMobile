@@ -116,7 +116,8 @@ class _ChoresPageState extends State<ChoresPage> {
       .toSet();
 
   bool _isChoreServiceCalendar(ClientCalendar calendar) {
-    return calendar.isChoreKind && _choreServiceIds.contains(calendar.serviceId);
+    return calendar.isChoreKind &&
+        _choreServiceIds.contains(calendar.serviceId);
   }
 
   void _openCollectionCreateShortcut() {
@@ -131,27 +132,29 @@ class _ChoresPageState extends State<ChoresPage> {
 
     Navigator.of(context)
         .push(
-      MaterialPageRoute<void>(
-        builder: (_) => CalendarCollectionsPage(
-          hubClient: widget.hubClient,
-          accessToken: widget.accessToken,
-          services: choreServices,
-          initialCreateKind: 'chores',
-          autoOpenCreate: true,
-        ),
-      ),
-    )
+          MaterialPageRoute<void>(
+            builder: (_) => CalendarCollectionsPage(
+              hubClient: widget.hubClient,
+              accessToken: widget.accessToken,
+              services: choreServices,
+              initialCreateKind: 'chores',
+              autoOpenCreate: true,
+            ),
+          ),
+        )
         .then((_) {
-      if (mounted) {
-        _controller.refresh();
-      }
-    });
+          if (mounted) {
+            _controller.refresh();
+          }
+        });
   }
 
   Future<void> _openCreateChoreSheet(
-      List<ClientCalendar> choreCalendars) async {
-    final writableCalendars =
-        choreCalendars.where((calendar) => !calendar.readOnly).toList();
+    List<ClientCalendar> choreCalendars,
+  ) async {
+    final writableCalendars = choreCalendars
+        .where((calendar) => !calendar.readOnly)
+        .toList();
 
     if (writableCalendars.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -176,24 +179,24 @@ class _ChoresPageState extends State<ChoresPage> {
       builder: (context) => _CreateChoreSheet(
         calendars: writableCalendars,
         people: people,
-        onCreate: ({
-          required ClientCalendar calendar,
-          required String title,
-          String? scheduledAt,
-          String? description,
-          String? recurrence,
-          required String? assigneePersonId,
-          required int points,
-        }) =>
-            _controller.createChore(
-          calendar: calendar,
-          title: title,
-          scheduledAt: scheduledAt,
-          description: description,
-          recurrence: recurrence,
-          assigneePersonId: assigneePersonId,
-          points: points,
-        ),
+        onCreate:
+            ({
+              required ClientCalendar calendar,
+              required String title,
+              String? scheduledAt,
+              String? description,
+              String? recurrence,
+              required String? assigneePersonId,
+              required int points,
+            }) => _controller.createChore(
+              calendar: calendar,
+              title: title,
+              scheduledAt: scheduledAt,
+              description: description,
+              recurrence: recurrence,
+              assigneePersonId: assigneePersonId,
+              points: points,
+            ),
       ),
     );
 
@@ -228,26 +231,26 @@ class _ChoresPageState extends State<ChoresPage> {
         chore: chore,
         people: people,
         metadata: metadata,
-        onUpdate: ({
-          required ClientChore chore,
-          required String title,
-          String? scheduledAt,
-          String? description,
-          String? recurrence,
-          required String? assigneePersonId,
-          required int points,
-          required String approvalState,
-        }) =>
-            _controller.updateChore(
-          chore: chore,
-          title: title,
-          scheduledAt: scheduledAt,
-          description: description,
-          recurrence: recurrence,
-          assigneePersonId: assigneePersonId,
-          points: points,
-          approvalState: approvalState,
-        ),
+        onUpdate:
+            ({
+              required ClientChore chore,
+              required String title,
+              String? scheduledAt,
+              String? description,
+              String? recurrence,
+              required String? assigneePersonId,
+              required int points,
+              required String approvalState,
+            }) => _controller.updateChore(
+              chore: chore,
+              title: title,
+              scheduledAt: scheduledAt,
+              description: description,
+              recurrence: recurrence,
+              assigneePersonId: assigneePersonId,
+              points: points,
+              approvalState: approvalState,
+            ),
       ),
     );
     // Controller reloads after updateChore; nothing more needed.
@@ -276,7 +279,9 @@ class _ChoresPageState extends State<ChoresPage> {
       if (chore.canToggleCompletion)
         CaleeAction(
           label: isDone ? 'Undo Done' : 'Mark Done',
-          icon: isDone ? Icons.unpublished_outlined : Icons.check_circle_outline,
+          icon: isDone
+              ? Icons.unpublished_outlined
+              : Icons.check_circle_outline,
           onTap: () => _toggleChoreCompletion(chore),
         ),
       CaleeAction(
@@ -307,12 +312,14 @@ class _ChoresPageState extends State<ChoresPage> {
         ),
       ]);
     } else {
-      actions.add(CaleeAction(
-        label: 'Delete Chore',
-        icon: Icons.delete_outline,
-        isDestructive: true,
-        onTap: () => _confirmAndDeletePermanentChore(chore),
-      ));
+      actions.add(
+        CaleeAction(
+          label: 'Delete Chore',
+          icon: Icons.delete_outline,
+          isDestructive: true,
+          onTap: () => _confirmAndDeletePermanentChore(chore),
+        ),
+      );
     }
 
     CaleeActionSheet.show(
@@ -350,16 +357,15 @@ class _ChoresPageState extends State<ChoresPage> {
       try {
         await _controller.skipRecurringChore(chore);
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Skipped this time.')),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('Skipped this time.')));
         }
       } catch (error) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content:
-                  Text(_choreErrorMessage(error, 'Unable to skip chore.')),
+              content: Text(_choreErrorMessage(error, 'Unable to skip chore.')),
             ),
           );
         }
@@ -380,16 +386,17 @@ class _ChoresPageState extends State<ChoresPage> {
       try {
         await _controller.stopRepeatingChore(chore);
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Repeating stopped.')),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('Repeating stopped.')));
         }
       } catch (error) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
-                  _choreErrorMessage(error, 'Unable to stop repeating chore.')),
+                _choreErrorMessage(error, 'Unable to stop repeating chore.'),
+              ),
             ),
           );
         }
@@ -418,8 +425,9 @@ class _ChoresPageState extends State<ChoresPage> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content:
-                  Text(_choreErrorMessage(error, 'Unable to delete chore.')),
+              content: Text(
+                _choreErrorMessage(error, 'Unable to delete chore.'),
+              ),
             ),
           );
         }
@@ -468,8 +476,8 @@ class _ChoresPageState extends State<ChoresPage> {
       final matches = people.where((p) => p.id == personId);
       final name =
           matches.isNotEmpty && matches.first.displayName.trim().isNotEmpty
-              ? matches.first.displayName.trim()
-              : 'Unnamed';
+          ? matches.first.displayName.trim()
+          : 'Unnamed';
       return '$name · ${_countChoresForPerson(allChores, personId)}';
     }
     return 'All Chores · ${_countAllChores(allChores)}';
@@ -576,7 +584,9 @@ class _ChoresPageState extends State<ChoresPage> {
   }
 
   String _calendarNameForChore(
-      ClientChore chore, List<ClientCalendar> calendars) {
+    ClientChore chore,
+    List<ClientCalendar> calendars,
+  ) {
     for (final cal in calendars) {
       if (cal.id == chore.calendarId ||
           cal.id == '${chore.serviceId}:${chore.calendarId}') {
@@ -626,9 +636,9 @@ class _ChoresPageState extends State<ChoresPage> {
             title: 'Show history',
             trailing: Text(
               '${sectionChores.length}',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: CaleeColors.textSecondary,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: CaleeColors.textSecondary),
             ),
             onTap: () => setState(() => _historyExpanded = true),
           ),
@@ -642,18 +652,22 @@ class _ChoresPageState extends State<ChoresPage> {
       children: sectionChores
           .map(
             (chore) => _ChoreRow(
-              key: ValueKey(chore.completionActionId.isNotEmpty
-                  ? chore.completionActionId
-                  : chore.id),
+              key: ValueKey(
+                chore.completionActionId.isNotEmpty
+                    ? chore.completionActionId
+                    : chore.id,
+              ),
               chore: chore,
               calendarName: _calendarNameForChore(chore, choreCalendars),
               scheduledLabel: _formatScheduledAt(chore),
-              isUpdating:
-                  _controller.updatingChoreIds.contains(chore.completionActionId),
+              isUpdating: _controller.updatingChoreIds.contains(
+                chore.completionActionId,
+              ),
               onToggleCompletion: chore.canToggleCompletion
                   ? () => _toggleChoreCompletion(chore)
                   : null,
-              onMoreTap: chore.completionActionId.trim().isNotEmpty &&
+              onMoreTap:
+                  chore.completionActionId.trim().isNotEmpty &&
                       !chore.isCompletionLog &&
                       chore.section != 'history'
                   ? () => _showChoreActions(chore)
@@ -712,7 +726,8 @@ class _ChoresPageState extends State<ChoresPage> {
         final chores = _filterChoresByAssignee(allChores);
         final choresBySection = _groupChoresBySection(chores);
         final hasUnassignedChores = _hasUnassignedChores(allChores);
-        final showAssigneeFilters = allChores.isNotEmpty &&
+        final showAssigneeFilters =
+            allChores.isNotEmpty &&
             (overview.people.isNotEmpty || hasUnassignedChores);
 
         if (choreCalendars.isEmpty && allChores.isEmpty) {
@@ -730,8 +745,9 @@ class _ChoresPageState extends State<ChoresPage> {
           );
         }
 
-        final writableCalendars =
-            choreCalendars.where((c) => !c.readOnly).toList();
+        final writableCalendars = choreCalendars
+            .where((c) => !c.readOnly)
+            .toList();
         final hasWritable = writableCalendars.isNotEmpty;
 
         const sectionOrder = [
@@ -892,10 +908,7 @@ class _ChoreSummaryStrip extends StatelessWidget {
 }
 
 class _StripChip extends StatelessWidget {
-  const _StripChip({
-    required this.label,
-    this.color,
-  });
+  const _StripChip({required this.label, this.color});
 
   final String label;
   final Color? color;
@@ -952,10 +965,7 @@ class _PointsBadge extends StatelessWidget {
 }
 
 class _AssigneeFilterRow extends StatelessWidget {
-  const _AssigneeFilterRow({
-    required this.label,
-    required this.onTap,
-  });
+  const _AssigneeFilterRow({required this.label, required this.onTap});
 
   final String label;
   final VoidCallback onTap;
@@ -1046,7 +1056,11 @@ class _AssigneeFilterChooser extends StatelessWidget {
             CaleeListRow(
               title: 'All Chores',
               leading: selectedFilter == 'all'
-                  ? const Icon(Icons.check, size: 20, color: CaleeColors.primary)
+                  ? const Icon(
+                      Icons.check,
+                      size: 20,
+                      color: CaleeColors.primary,
+                    )
                   : const SizedBox(width: 20),
               trailing: Text('$allCount', style: countStyle),
               onTap: () => onSelect('all'),
@@ -1205,7 +1219,8 @@ class _ChoreRow extends StatelessWidget {
     }
 
     final effectiveTrailing =
-        trailing ?? (onToggleCompletion != null ? const SizedBox.shrink() : null);
+        trailing ??
+        (onToggleCompletion != null ? const SizedBox.shrink() : null);
 
     return CaleeListRow(
       leading: leading,
@@ -1239,7 +1254,8 @@ class _CreateChoreSheet extends StatefulWidget {
     String? recurrence,
     required String? assigneePersonId,
     required int points,
-  }) onCreate;
+  })
+  onCreate;
 
   @override
   State<_CreateChoreSheet> createState() => _CreateChoreSheetState();
@@ -1301,8 +1317,9 @@ class _CreateChoreSheetState extends State<_CreateChoreSheet> {
       await widget.onCreate(
         calendar: _selectedCalendar,
         title: _titleController.text.trim(),
-        scheduledAt:
-            _selectedDate == null ? null : _formatChoreDate(_selectedDate!),
+        scheduledAt: _selectedDate == null
+            ? null
+            : _formatChoreDate(_selectedDate!),
         description: _descriptionController.text.trim(),
         recurrence: _choreRecurrenceToRrule(_selectedRecurrence),
         assigneePersonId: _assigneePersonId,
@@ -1544,7 +1561,8 @@ class _EditChoreSheet extends StatefulWidget {
     required String? assigneePersonId,
     required int points,
     required String approvalState,
-  }) onUpdate;
+  })
+  onUpdate;
 
   @override
   State<_EditChoreSheet> createState() => _EditChoreSheetState();
@@ -1566,18 +1584,21 @@ class _EditChoreSheetState extends State<_EditChoreSheet> {
   void initState() {
     super.initState();
     _titleController = TextEditingController(text: widget.chore.title);
-    _descriptionController =
-        TextEditingController(text: widget.chore.description ?? '');
-    _selectedDate =
-        _parseChoreDate(widget.chore.scheduledDate ?? widget.chore.scheduledAt);
+    _descriptionController = TextEditingController(
+      text: widget.chore.description ?? '',
+    );
+    _selectedDate = _parseChoreDate(
+      widget.chore.scheduledDate ?? widget.chore.scheduledAt,
+    );
     _selectedRecurrence = _choreRruleToRecurrence(widget.chore.recurrence);
 
     final activePeopleIds = widget.people.map((person) => person.id).toSet();
     final existingAssignee =
         widget.metadata?.assigneePersonId ?? widget.chore.assigneePersonId;
 
-    _assigneePersonId =
-        activePeopleIds.contains(existingAssignee) ? existingAssignee : null;
+    _assigneePersonId = activePeopleIds.contains(existingAssignee)
+        ? existingAssignee
+        : null;
     _approvalState =
         widget.metadata?.approvalState ?? widget.chore.approvalState;
     _pointsController = TextEditingController(
@@ -1622,8 +1643,9 @@ class _EditChoreSheetState extends State<_EditChoreSheet> {
       await widget.onUpdate(
         chore: widget.chore,
         title: _titleController.text.trim(),
-        scheduledAt:
-            _selectedDate == null ? null : _formatChoreDate(_selectedDate!),
+        scheduledAt: _selectedDate == null
+            ? null
+            : _formatChoreDate(_selectedDate!),
         description: _descriptionController.text.trim(),
         recurrence: _choreRecurrenceToRrule(_selectedRecurrence),
         assigneePersonId: _assigneePersonId,
@@ -1679,10 +1701,8 @@ class _EditChoreSheetState extends State<_EditChoreSheet> {
                       Expanded(
                         child: Text(
                           'Repeating chore — changes apply going forward.',
-                          style:
-                              Theme.of(context).textTheme.bodySmall?.copyWith(
-                                    color: CaleeColors.primary,
-                                  ),
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(color: CaleeColors.primary),
                         ),
                       ),
                     ],

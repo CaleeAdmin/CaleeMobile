@@ -12,24 +12,22 @@ ClientBootstrap _makeBootstrap() => ClientBootstrap.fromJson({});
 ClientLoginResult _makeLoginResult({
   String accessToken = 'access-token',
   String refreshToken = 'refresh-token',
-}) =>
-    ClientLoginResult(
-      accessToken: accessToken,
-      refreshToken: refreshToken,
-      tokenType: 'Bearer',
-      expiresIn: 3600,
-      refreshExpiresIn: 86400,
-      bootstrap: _makeBootstrap(),
-    );
+}) => ClientLoginResult(
+  accessToken: accessToken,
+  refreshToken: refreshToken,
+  tokenType: 'Bearer',
+  expiresIn: 3600,
+  refreshExpiresIn: 86400,
+  bootstrap: _makeBootstrap(),
+);
 
 ClientRefreshResult _makeRefreshResult({
   String accessToken = 'new-access-token',
-}) =>
-    ClientRefreshResult(
-      accessToken: accessToken,
-      tokenType: 'Bearer',
-      expiresIn: 3600,
-    );
+}) => ClientRefreshResult(
+  accessToken: accessToken,
+  tokenType: 'Bearer',
+  expiresIn: 3600,
+);
 
 // ─── Stub repository ──────────────────────────────────────────────────────────
 
@@ -54,13 +52,13 @@ class _FakeRepository implements AuthRepository {
   Future<StoredSession?> loadStoredSession() async => storedSession;
 
   @override
-  Future<ClientLoginResult> login(
-          {required String email, required String password}) =>
-      throw UnimplementedError();
+  Future<ClientLoginResult> login({
+    required String email,
+    required String password,
+  }) => throw UnimplementedError();
 
   @override
-  Future<ClientRefreshResult> refresh(
-      {required String refreshToken}) async {
+  Future<ClientRefreshResult> refresh({required String refreshToken}) async {
     if (refreshError != null) throw refreshError!;
     return refreshResult!;
   }
@@ -72,8 +70,10 @@ class _FakeRepository implements AuthRepository {
   }
 
   @override
-  Future<void> saveSession(
-      {required String accessToken, required String refreshToken}) async {
+  Future<void> saveSession({
+    required String accessToken,
+    required String refreshToken,
+  }) async {
     savedSessionAccessToken = accessToken;
     savedSessionRefreshToken = refreshToken;
   }
@@ -113,36 +113,43 @@ void main() {
     // ── restoreSession ────────────────────────────────────────────────────────
 
     test(
-        'restoreSession with no stored session sets isRestoringSession=false and signed out',
-        () async {
-      repo.storedSession = null;
+      'restoreSession with no stored session sets isRestoringSession=false and signed out',
+      () async {
+        repo.storedSession = null;
 
-      await controller.restoreSession();
+        await controller.restoreSession();
 
-      expect(controller.isRestoringSession, isFalse);
-      expect(controller.isSignedIn, isFalse);
-      expect(controller.accessToken, isNull);
-      expect(controller.bootstrap, isNull);
-    });
+        expect(controller.isRestoringSession, isFalse);
+        expect(controller.isSignedIn, isFalse);
+        expect(controller.accessToken, isNull);
+        expect(controller.bootstrap, isNull);
+      },
+    );
 
-    test('restoreSession with stored session loads bootstrap and signs in',
-        () async {
-      repo.storedSession =
-          const StoredSession(accessToken: 'at', refreshToken: 'rt');
+    test(
+      'restoreSession with stored session loads bootstrap and signs in',
+      () async {
+        repo.storedSession = const StoredSession(
+          accessToken: 'at',
+          refreshToken: 'rt',
+        );
 
-      await controller.restoreSession();
+        await controller.restoreSession();
 
-      expect(controller.isRestoringSession, isFalse);
-      expect(controller.isSignedIn, isTrue);
-      expect(controller.accessToken, 'at');
-      expect(controller.refreshToken, 'rt');
-      expect(controller.bootstrap, isNotNull);
-      expect(repo.clearAuthCacheCalled, isTrue);
-    });
+        expect(controller.isRestoringSession, isFalse);
+        expect(controller.isSignedIn, isTrue);
+        expect(controller.accessToken, 'at');
+        expect(controller.refreshToken, 'rt');
+        expect(controller.bootstrap, isNotNull);
+        expect(repo.clearAuthCacheCalled, isTrue);
+      },
+    );
 
     test('restoreSession failure clears session and signs out', () async {
-      repo.storedSession =
-          const StoredSession(accessToken: 'at', refreshToken: 'rt');
+      repo.storedSession = const StoredSession(
+        accessToken: 'at',
+        refreshToken: 'rt',
+      );
       repo.bootstrapError = Exception('network error');
 
       await controller.restoreSession();
@@ -155,43 +162,47 @@ void main() {
     // ── handleUnauthorized ────────────────────────────────────────────────────
 
     test(
-        'handleUnauthorized without refresh token signs out and returns null',
-        () async {
-      controller.refreshToken = null;
+      'handleUnauthorized without refresh token signs out and returns null',
+      () async {
+        controller.refreshToken = null;
 
-      final result = await controller.handleUnauthorized();
+        final result = await controller.handleUnauthorized();
 
-      expect(result, isNull);
-      expect(controller.isSignedIn, isFalse);
-      expect(repo.clearSessionCalled, isTrue);
-    });
+        expect(result, isNull);
+        expect(controller.isSignedIn, isFalse);
+        expect(repo.clearSessionCalled, isTrue);
+      },
+    );
 
     test(
-        'handleUnauthorized with refresh success saves access token and returns it',
-        () async {
-      controller.refreshToken = 'rt';
-      repo.refreshResult = _makeRefreshResult(accessToken: 'new-at');
+      'handleUnauthorized with refresh success saves access token and returns it',
+      () async {
+        controller.refreshToken = 'rt';
+        repo.refreshResult = _makeRefreshResult(accessToken: 'new-at');
 
-      final result = await controller.handleUnauthorized();
+        final result = await controller.handleUnauthorized();
 
-      expect(result, 'new-at');
-      expect(controller.accessToken, 'new-at');
-      expect(repo.savedAccessToken, 'new-at');
-    });
+        expect(result, 'new-at');
+        expect(controller.accessToken, 'new-at');
+        expect(repo.savedAccessToken, 'new-at');
+      },
+    );
 
-    test('handleUnauthorized refresh failure clears session and returns null',
-        () async {
-      controller.refreshToken = 'rt';
-      repo.refreshError = Exception('refresh failed');
+    test(
+      'handleUnauthorized refresh failure clears session and returns null',
+      () async {
+        controller.refreshToken = 'rt';
+        repo.refreshError = Exception('refresh failed');
 
-      final result = await controller.handleUnauthorized();
+        final result = await controller.handleUnauthorized();
 
-      expect(result, isNull);
-      expect(controller.accessToken, isNull);
-      expect(controller.refreshToken, isNull);
-      expect(controller.bootstrap, isNull);
-      expect(repo.clearSessionCalled, isTrue);
-    });
+        expect(result, isNull);
+        expect(controller.accessToken, isNull);
+        expect(controller.refreshToken, isNull);
+        expect(controller.bootstrap, isNull);
+        expect(repo.clearSessionCalled, isTrue);
+      },
+    );
 
     // ── completeSignIn ────────────────────────────────────────────────────────
 

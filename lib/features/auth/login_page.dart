@@ -68,9 +68,9 @@ class _LoginPageState extends State<LoginPage> {
     if (uri == null) return;
     if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not open link.')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Could not open link.')));
       }
     }
   }
@@ -144,7 +144,8 @@ class _LoginPageState extends State<LoginPage> {
                               size: 20,
                             ),
                             onPressed: () => setState(
-                                () => _obscurePassword = !_obscurePassword),
+                              () => _obscurePassword = !_obscurePassword,
+                            ),
                             tooltip: _obscurePassword
                                 ? 'Show password'
                                 : 'Hide password',
@@ -177,9 +178,7 @@ class _LoginPageState extends State<LoginPage> {
                         const SizedBox(height: 8),
                         Text(
                           errorMessage,
-                          style: TextStyle(
-                            color: theme.colorScheme.error,
-                          ),
+                          style: TextStyle(color: theme.colorScheme.error),
                         ),
                       ],
                       const SizedBox(height: 24),
@@ -189,7 +188,8 @@ class _LoginPageState extends State<LoginPage> {
                             ? const SizedBox.square(
                                 dimension: 20,
                                 child: CircularProgressIndicator(
-                                    strokeWidth: 2),
+                                  strokeWidth: 2,
+                                ),
                               )
                             : const Text('Sign in'),
                       ),

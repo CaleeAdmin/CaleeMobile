@@ -11,14 +11,13 @@ import '../models/client_person.dart';
 import '../models/client_task.dart';
 
 class CaleeHubClient {
-  CaleeHubClient({
-    Uri? baseUri,
-    HttpClient? httpClient,
-  })  : baseUri = baseUri ?? Uri.parse('https://hub.calee.com.au'),
-        _httpClient = httpClient ??
-            (HttpClient()
-              ..connectionTimeout = const Duration(seconds: 25)
-              ..idleTimeout = const Duration(seconds: 30));
+  CaleeHubClient({Uri? baseUri, HttpClient? httpClient})
+    : baseUri = baseUri ?? Uri.parse('https://hub.calee.com.au'),
+      _httpClient =
+          httpClient ??
+          (HttpClient()
+            ..connectionTimeout = const Duration(seconds: 25)
+            ..idleTimeout = const Duration(seconds: 30));
 
   final Uri baseUri;
   final HttpClient _httpClient;
@@ -44,18 +43,13 @@ class CaleeHubClient {
   }) async {
     final json = await _postJson(
       '/client/v1/auth/login',
-      body: {
-        'email': email,
-        'password': password,
-      },
+      body: {'email': email, 'password': password},
     );
 
     return ClientLoginResult.fromJson(_data(json));
   }
 
-  Future<ClientBootstrap> bootstrap({
-    required String accessToken,
-  }) async {
+  Future<ClientBootstrap> bootstrap({required String accessToken}) async {
     final json = await _getJson(
       '/client/v1/bootstrap',
       accessToken: accessToken,
@@ -117,9 +111,7 @@ class CaleeHubClient {
     return ClientCalDavAccount.fromJson(_data(json));
   }
 
-  Future<ClientCalendarList> calendars({
-    required String accessToken,
-  }) async {
+  Future<ClientCalendarList> calendars({required String accessToken}) async {
     final json = await _getJson(
       '/client/v1/calendars',
       accessToken: accessToken,
@@ -140,10 +132,7 @@ class CaleeHubClient {
       path += '?includeArchived=true';
     }
 
-    final json = await _getJson(
-      path,
-      accessToken: accessToken,
-    );
+    final json = await _getJson(path, accessToken: accessToken);
 
     return ClientPersonList.fromJson(_data(json));
   }
@@ -170,9 +159,7 @@ class CaleeHubClient {
       },
     );
 
-    return ClientPerson.fromJson(
-      _data(json)['person'] as Map<String, dynamic>,
-    );
+    return ClientPerson.fromJson(_data(json)['person'] as Map<String, dynamic>);
   }
 
   Future<ClientPerson> updatePerson({
@@ -218,9 +205,7 @@ class CaleeHubClient {
       body: body,
     );
 
-    return ClientPerson.fromJson(
-      _data(json)['person'] as Map<String, dynamic>,
-    );
+    return ClientPerson.fromJson(_data(json)['person'] as Map<String, dynamic>);
   }
 
   Future<ClientPerson> archivePerson({
@@ -236,9 +221,7 @@ class CaleeHubClient {
       accessToken: accessToken,
     );
 
-    return ClientPerson.fromJson(
-      _data(json)['person'] as Map<String, dynamic>,
-    );
+    return ClientPerson.fromJson(_data(json)['person'] as Map<String, dynamic>);
   }
 
   Future<ClientCalendar> createCalendar({
@@ -332,9 +315,7 @@ class CaleeHubClient {
     await _deleteJson(
       '/client/v1/calendars/$encodedCalendarId',
       accessToken: accessToken,
-      body: <String, dynamic>{
-        'confirmDeleteItems': confirmDeleteItems,
-      },
+      body: <String, dynamic>{'confirmDeleteItems': confirmDeleteItems},
     );
   }
 
@@ -345,16 +326,10 @@ class CaleeHubClient {
   }) async {
     final uri = Uri(
       path: '/client/v1/chores',
-      queryParameters: {
-        'from': from,
-        'to': to,
-      },
+      queryParameters: {'from': from, 'to': to},
     );
 
-    final json = await _getJson(
-      uri.toString(),
-      accessToken: accessToken,
-    );
+    final json = await _getJson(uri.toString(), accessToken: accessToken);
 
     return ClientChoreList.fromJson(_data(json));
   }
@@ -542,10 +517,7 @@ class CaleeHubClient {
       path += '?${Uri(queryParameters: queryParameters).query}';
     }
 
-    await _deleteJson(
-      path,
-      accessToken: accessToken,
-    );
+    await _deleteJson(path, accessToken: accessToken);
   }
 
   Future<void> undoChoreCompletion({
@@ -589,10 +561,7 @@ class CaleeHubClient {
     final json = await _patchJson(
       '/client/v1/tasks',
       accessToken: accessToken,
-      body: {
-        'taskId': taskId,
-        'completed': completed,
-      },
+      body: {'taskId': taskId, 'completed': completed},
     );
 
     return ClientTask.fromJson(_data(json)['task'] as Map<String, dynamic>);
@@ -643,16 +612,10 @@ class CaleeHubClient {
   }) async {
     final uri = Uri(
       path: '/client/v1/tasks',
-      queryParameters: {
-        'from': from,
-        'to': to,
-      },
+      queryParameters: {'from': from, 'to': to},
     );
 
-    final json = await _getJson(
-      uri.toString(),
-      accessToken: accessToken,
-    );
+    final json = await _getJson(uri.toString(), accessToken: accessToken);
 
     return ClientTaskList.fromJson(_data(json));
   }
@@ -681,7 +644,8 @@ class CaleeHubClient {
     if (hasDateUpdate) {
       if (startsAt == null || endsAt == null || allDay == null) {
         throw ArgumentError(
-            'startsAt, endsAt, and allDay must be supplied together.');
+          'startsAt, endsAt, and allDay must be supplied together.',
+        );
       }
 
       body['startsAt'] = startsAt;
@@ -702,11 +666,7 @@ class CaleeHubClient {
         ? '/client/v1/events/$encodedEventId'
         : '/client/v1/events/$encodedEventId?scope=${Uri.encodeQueryComponent(trimmedScope)}';
 
-    final json = await _patchJson(
-      path,
-      accessToken: accessToken,
-      body: body,
-    );
+    final json = await _patchJson(path, accessToken: accessToken, body: body);
 
     return ClientEvent.fromJson(_data(json)['event'] as Map<String, dynamic>);
   }
@@ -722,10 +682,7 @@ class CaleeHubClient {
         ? '/client/v1/events/$encodedEventId'
         : '/client/v1/events/$encodedEventId?scope=${Uri.encodeQueryComponent(trimmedScope)}';
 
-    await _deleteJson(
-      path,
-      accessToken: accessToken,
-    );
+    await _deleteJson(path, accessToken: accessToken);
   }
 
   Future<ClientEvent> createEvent({
@@ -771,28 +728,18 @@ class CaleeHubClient {
   }) async {
     final uri = Uri(
       path: '/client/v1/events',
-      queryParameters: {
-        'from': from,
-        'to': to,
-      },
+      queryParameters: {'from': from, 'to': to},
     );
 
-    final json = await _getJson(
-      uri.toString(),
-      accessToken: accessToken,
-    );
+    final json = await _getJson(uri.toString(), accessToken: accessToken);
 
     return ClientEventList.fromJson(_data(json));
   }
 
-  Future<ClientRefreshResult> refresh({
-    required String refreshToken,
-  }) async {
+  Future<ClientRefreshResult> refresh({required String refreshToken}) async {
     final json = await _postJson(
       '/client/v1/auth/refresh',
-      body: {
-        'refreshToken': refreshToken,
-      },
+      body: {'refreshToken': refreshToken},
     );
 
     return ClientRefreshResult.fromJson(_data(json));
@@ -842,8 +789,10 @@ class CaleeHubClient {
     return _executeRequest(() async {
       final request = await _httpClient.deleteUrl(baseUri.resolve(path));
       request.headers.set(HttpHeaders.acceptHeader, 'application/json');
-      request.headers
-          .set(HttpHeaders.authorizationHeader, 'Bearer $accessToken');
+      request.headers.set(
+        HttpHeaders.authorizationHeader,
+        'Bearer $accessToken',
+      );
 
       if (body != null) {
         request.headers.contentType = ContentType.json;
@@ -871,12 +820,13 @@ class CaleeHubClient {
     required Map<String, dynamic> body,
   }) {
     return _executeRequest(() async {
-      final request =
-          await _httpClient.openUrl('PATCH', baseUri.resolve(path));
+      final request = await _httpClient.openUrl('PATCH', baseUri.resolve(path));
       request.headers.contentType = ContentType.json;
       request.headers.set(HttpHeaders.acceptHeader, 'application/json');
-      request.headers
-          .set(HttpHeaders.authorizationHeader, 'Bearer $accessToken');
+      request.headers.set(
+        HttpHeaders.authorizationHeader,
+        'Bearer $accessToken',
+      );
       request.write(jsonEncode(body));
 
       return _readJsonResponse(await request.close(), endpoint: path);
@@ -914,8 +864,10 @@ class CaleeHubClient {
       request.headers.contentType = ContentType.json;
       request.headers.set(HttpHeaders.acceptHeader, 'application/json');
       if (accessToken != null && accessToken.trim().isNotEmpty) {
-        request.headers
-            .set(HttpHeaders.authorizationHeader, 'Bearer $accessToken');
+        request.headers.set(
+          HttpHeaders.authorizationHeader,
+          'Bearer $accessToken',
+        );
       }
       request.write(jsonEncode(body));
 
@@ -1004,7 +956,8 @@ class CaleeHubClient {
         }
       }
 
-      final requestId = response.headers.value('x-calee-request-id') ??
+      final requestId =
+          response.headers.value('x-calee-request-id') ??
           response.headers.value('x-request-id') ??
           metaRequestId;
 

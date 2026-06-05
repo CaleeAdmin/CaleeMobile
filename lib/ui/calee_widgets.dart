@@ -97,9 +97,7 @@ class CaleeSection extends StatelessWidget {
             borderRadius: BorderRadius.circular(CaleeRadius.card),
           ),
           clipBehavior: Clip.hardEdge,
-          child: Column(
-            children: _intersperse(children),
-          ),
+          child: Column(children: _intersperse(children)),
         ),
         if (footer != null)
           Padding(
@@ -126,10 +124,7 @@ class CaleeSection extends StatelessWidget {
     for (var i = 0; i < items.length; i++) {
       result.add(items[i]);
       if (i < items.length - 1) {
-        result.add(const Divider(
-          indent: CaleeSpacing.md,
-          endIndent: 0,
-        ));
+        result.add(const Divider(indent: CaleeSpacing.md, endIndent: 0));
       }
     }
     return result;
@@ -188,7 +183,8 @@ class CaleeListRow extends StatelessWidget {
                 children: [
                   Text(
                     title,
-                    style: titleStyle ??
+                    style:
+                        titleStyle ??
                         theme.textTheme.bodyLarge?.copyWith(
                           color: enabled
                               ? CaleeColors.textPrimary
@@ -200,7 +196,8 @@ class CaleeListRow extends StatelessWidget {
                       padding: const EdgeInsets.only(top: 2),
                       child: Text(
                         subtitle!,
-                        style: subtitleStyle ??
+                        style:
+                            subtitleStyle ??
                             theme.textTheme.bodySmall?.copyWith(
                               color: CaleeColors.textSecondary,
                             ),
@@ -323,11 +320,7 @@ class CaleeAction {
 /// Calee-style action sheet. Shows a list of [CaleeAction]s in a modal bottom
 /// sheet with an optional [title]. Automatically adds a Cancel row.
 class CaleeActionSheet extends StatelessWidget {
-  const CaleeActionSheet({
-    required this.actions,
-    this.title,
-    super.key,
-  });
+  const CaleeActionSheet({required this.actions, this.title, super.key});
 
   final String? title;
   final List<CaleeAction> actions;
@@ -507,9 +500,7 @@ class CaleeDestructiveDialog extends StatelessWidget {
           child: Text(cancelLabel),
         ),
         TextButton(
-          style: TextButton.styleFrom(
-            foregroundColor: CaleeColors.destructive,
-          ),
+          style: TextButton.styleFrom(foregroundColor: CaleeColors.destructive),
           onPressed: () => Navigator.of(context).pop(true),
           child: Text(
             confirmLabel,
@@ -550,11 +541,7 @@ class CaleeEmptyState extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              icon,
-              size: 48,
-              color: CaleeColors.textTertiary,
-            ),
+            Icon(icon, size: 48, color: CaleeColors.textTertiary),
             const SizedBox(height: CaleeSpacing.md),
             Text(
               title,
@@ -588,11 +575,7 @@ class CaleeEmptyState extends StatelessWidget {
 
 /// A small filled circle used to represent a calendar or list colour.
 class CaleeColorDot extends StatelessWidget {
-  const CaleeColorDot({
-    required this.color,
-    this.size = 10,
-    super.key,
-  });
+  const CaleeColorDot({required this.color, this.size = 10, super.key});
 
   final Color color;
   final double size;
@@ -602,10 +585,7 @@ class CaleeColorDot extends StatelessWidget {
     return Container(
       width: size,
       height: size,
-      decoration: BoxDecoration(
-        color: color,
-        shape: BoxShape.circle,
-      ),
+      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
     );
   }
 }
@@ -640,10 +620,7 @@ class CaleeCheckCircle extends StatelessWidget {
       return SizedBox(
         width: size,
         height: size,
-        child: CircularProgressIndicator(
-          strokeWidth: 2,
-          color: effectiveColor,
-        ),
+        child: CircularProgressIndicator(strokeWidth: 2, color: effectiveColor),
       );
     }
 
@@ -728,10 +705,7 @@ class CaleeSectionSwitchRow extends StatelessWidget {
             ),
           ),
           const Spacer(),
-          Switch(
-            value: value,
-            onChanged: enabled ? onChanged : null,
-          ),
+          Switch(value: value, onChanged: enabled ? onChanged : null),
         ],
       ),
     );
@@ -944,11 +918,9 @@ class CaleeSectionTextFormField extends StatelessWidget {
         minLines: minLines,
         maxLines: maxLines,
         validator: validator,
-        style: style ??
-            const TextStyle(
-              fontSize: 16,
-              color: CaleeColors.textPrimary,
-            ),
+        style:
+            style ??
+            const TextStyle(fontSize: 16, color: CaleeColors.textPrimary),
         decoration: caleeSectionFieldDecoration.copyWith(hintText: hintText),
       ),
     );
@@ -996,11 +968,9 @@ class CaleeSectionLabeledTextFormField extends StatelessWidget {
       keyboardType: keyboardType,
       textAlign: textAlign,
       validator: validator,
-      style: style ??
-          const TextStyle(
-            fontSize: 16,
-            color: CaleeColors.textSecondary,
-          ),
+      style:
+          style ??
+          const TextStyle(fontSize: 16, color: CaleeColors.textSecondary),
       decoration: caleeSectionFieldDecoration.copyWith(hintText: hintText),
     );
 
@@ -1037,11 +1007,7 @@ class CaleeSectionLabeledTextFormField extends StatelessWidget {
 /// A lightweight date heading row (e.g. "Today", "Monday 2 June").
 /// Appears above a group of items that share the same date.
 class CaleeDateHeader extends StatelessWidget {
-  const CaleeDateHeader({
-    required this.label,
-    this.isToday = false,
-    super.key,
-  });
+  const CaleeDateHeader({required this.label, this.isToday = false, super.key});
 
   final String label;
   final bool isToday;

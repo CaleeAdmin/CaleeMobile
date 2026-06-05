@@ -52,21 +52,21 @@ class _TasksPageState extends State<TasksPage> {
   void _openCollectionCreateShortcut() {
     Navigator.of(context)
         .push(
-      MaterialPageRoute<void>(
-        builder: (_) => CalendarCollectionsPage(
-          hubClient: widget.hubClient,
-          accessToken: widget.accessToken,
-          services: widget.services,
-          initialCreateKind: 'tasks',
-          autoOpenCreate: true,
-        ),
-      ),
-    )
+          MaterialPageRoute<void>(
+            builder: (_) => CalendarCollectionsPage(
+              hubClient: widget.hubClient,
+              accessToken: widget.accessToken,
+              services: widget.services,
+              initialCreateKind: 'tasks',
+              autoOpenCreate: true,
+            ),
+          ),
+        )
         .then((_) {
-      if (mounted) {
-        _controller.refresh();
-      }
-    });
+          if (mounted) {
+            _controller.refresh();
+          }
+        });
   }
 
   Future<void> _openTaskListChooser(
@@ -103,21 +103,21 @@ class _TasksPageState extends State<TasksPage> {
       child: _CreateTaskForm(
         taskCalendars: taskCalendars,
         initialCalendar: _controller.selectedCalendar,
-        defaultTaskListId:
-            _controller.overview?.preferences.defaultTaskListId,
-        onCreate: ({
-          required taskCalendar,
-          required title,
-          dueAt,
-          description,
-        }) async {
-          await _controller.createTask(
-            taskCalendar: taskCalendar,
-            title: title,
-            dueAt: dueAt,
-            description: description,
-          );
-        },
+        defaultTaskListId: _controller.overview?.preferences.defaultTaskListId,
+        onCreate:
+            ({
+              required taskCalendar,
+              required title,
+              dueAt,
+              description,
+            }) async {
+              await _controller.createTask(
+                taskCalendar: taskCalendar,
+                title: title,
+                dueAt: dueAt,
+                description: description,
+              );
+            },
       ),
     );
   }
@@ -133,12 +133,7 @@ class _TasksPageState extends State<TasksPage> {
       title: 'Edit Task',
       child: _EditTaskForm(
         task: task,
-        onUpdate: ({
-          required task,
-          required title,
-          dueAt,
-          description,
-        }) async {
+        onUpdate: ({required task, required title, dueAt, description}) async {
           await _controller.updateTask(
             task: task,
             title: title,
@@ -170,9 +165,9 @@ class _TasksPageState extends State<TasksPage> {
       await _controller.deleteTask(task);
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Unable to delete task.')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Unable to delete task.')));
       }
     }
   }
@@ -182,9 +177,9 @@ class _TasksPageState extends State<TasksPage> {
       await _controller.toggleTaskStatus(task);
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Unable to update task.')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Unable to update task.')));
       }
     }
   }
@@ -400,8 +395,9 @@ class _TasksPageState extends State<TasksPage> {
         }
 
         final openTasks = filteredTasks.where((t) => !t.isCompleted).toList();
-        final completedTasks =
-            filteredTasks.where((t) => t.isCompleted).toList();
+        final completedTasks = filteredTasks
+            .where((t) => t.isCompleted)
+            .toList();
 
         final now = DateTime.now();
         final today = DateTime(now.year, now.month, now.day);
@@ -420,10 +416,11 @@ class _TasksPageState extends State<TasksPage> {
                 return cmp != 0 ? cmp : a.title.compareTo(b.title);
               });
 
-        final noDateTasks = openTasks
-            .where((t) => t.dueAt == null || t.dueAt!.trim().isEmpty)
-            .toList()
-          ..sort((a, b) => a.title.compareTo(b.title));
+        final noDateTasks =
+            openTasks
+                .where((t) => t.dueAt == null || t.dueAt!.trim().isEmpty)
+                .toList()
+              ..sort((a, b) => a.title.compareTo(b.title));
 
         return CaleeScaffold(
           floatingActionButton: taskCalendars.isEmpty
@@ -447,8 +444,7 @@ class _TasksPageState extends State<TasksPage> {
                 if (taskCalendars.isNotEmpty)
                   _TaskListFilterBar(
                     selectedCalendar: _controller.selectedCalendar,
-                    onTap: () =>
-                        _openTaskListChooser(taskCalendars, allTasks),
+                    onTap: () => _openTaskListChooser(taskCalendars, allTasks),
                   ),
                 if (taskCalendars.isNotEmpty)
                   const SizedBox(height: CaleeSpacing.sm),
@@ -510,8 +506,7 @@ class _TasksPageState extends State<TasksPage> {
 
                 // ── Upcoming ──────────────────────────────────────────
                 if (upcomingTasks.isNotEmpty) ...[
-                  _buildSmartSection(
-                      'Upcoming', upcomingTasks, taskCalendars),
+                  _buildSmartSection('Upcoming', upcomingTasks, taskCalendars),
                   const SizedBox(height: CaleeSpacing.sectionSpacing),
                 ],
 
@@ -526,8 +521,7 @@ class _TasksPageState extends State<TasksPage> {
                   Padding(
                     padding: const EdgeInsets.only(top: CaleeSpacing.md),
                     child: CaleeSection(
-                      footer:
-                          'Connect a task list to start adding tasks.',
+                      footer: 'Connect a task list to start adding tasks.',
                       children: [
                         CaleeListRow(
                           title: 'Add task list',
@@ -550,7 +544,8 @@ class _TasksPageState extends State<TasksPage> {
                     isExpanded: _controller.completedExpanded,
                     onToggleExpanded: () {
                       _controller.setCompletedExpanded(
-                          !_controller.completedExpanded);
+                        !_controller.completedExpanded,
+                      );
                     },
                     updatingIds: _controller.updatingTaskIds,
                     deletingIds: _controller.deletingTaskIds,
@@ -798,8 +793,9 @@ class _TaskListFilterBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final label =
-        selectedCalendar == null ? 'All Tasks' : selectedCalendar!.name;
+    final label = selectedCalendar == null
+        ? 'All Tasks'
+        : selectedCalendar!.name;
 
     return GestureDetector(
       onTap: onTap,
@@ -814,11 +810,7 @@ class _TaskListFilterBar extends StatelessWidget {
         ),
         child: Row(
           children: [
-            Icon(
-              Icons.list_alt_outlined,
-              size: 18,
-              color: CaleeColors.primary,
-            ),
+            Icon(Icons.list_alt_outlined, size: 18, color: CaleeColors.primary),
             const SizedBox(width: CaleeSpacing.sm),
             Expanded(
               child: Text(
@@ -865,13 +857,16 @@ class _TaskListChooser extends StatelessWidget {
 
   int _countForCalendar(ClientCalendar cal) {
     final prefix = '${cal.serviceId}:';
-    final rawId =
-        cal.id.startsWith(prefix) ? cal.id.substring(prefix.length) : cal.id;
+    final rawId = cal.id.startsWith(prefix)
+        ? cal.id.substring(prefix.length)
+        : cal.id;
     return allTasks
-        .where((t) =>
-            t.calendarId == cal.id ||
-            t.calendarId == rawId ||
-            '${t.serviceId}:${t.calendarId}' == cal.id)
+        .where(
+          (t) =>
+              t.calendarId == cal.id ||
+              t.calendarId == rawId ||
+              '${t.serviceId}:${t.calendarId}' == cal.id,
+        )
         .length;
   }
 
@@ -961,7 +956,8 @@ class _CreateTaskForm extends StatefulWidget {
     required String title,
     String? dueAt,
     String? description,
-  }) onCreate;
+  })
+  onCreate;
 
   @override
   State<_CreateTaskForm> createState() => _CreateTaskFormState();
@@ -1053,8 +1049,7 @@ class _CreateTaskFormState extends State<_CreateTaskForm> {
       await widget.onCreate(
         taskCalendar: selectedTaskCalendar,
         title: _titleController.text.trim(),
-        dueAt:
-            _selectedDueDate == null ? null : _formatDate(_selectedDueDate!),
+        dueAt: _selectedDueDate == null ? null : _formatDate(_selectedDueDate!),
         description: _descriptionController.text.trim(),
       );
 
@@ -1067,9 +1062,9 @@ class _CreateTaskFormState extends State<_CreateTaskForm> {
           _isSubmitting = false;
         });
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Unable to create task.')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Unable to create task.')));
       }
     }
   }
@@ -1187,10 +1182,7 @@ class _CreateTaskFormState extends State<_CreateTaskForm> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _EditTaskForm extends StatefulWidget {
-  const _EditTaskForm({
-    required this.task,
-    required this.onUpdate,
-  });
+  const _EditTaskForm({required this.task, required this.onUpdate});
 
   final ClientTask task;
   final Future<void> Function({
@@ -1198,7 +1190,8 @@ class _EditTaskForm extends StatefulWidget {
     required String title,
     String? dueAt,
     String? description,
-  }) onUpdate;
+  })
+  onUpdate;
 
   @override
   State<_EditTaskForm> createState() => _EditTaskFormState();
@@ -1216,8 +1209,9 @@ class _EditTaskFormState extends State<_EditTaskForm> {
   void initState() {
     super.initState();
     _titleController = TextEditingController(text: widget.task.title);
-    _descriptionController =
-        TextEditingController(text: widget.task.description ?? '');
+    _descriptionController = TextEditingController(
+      text: widget.task.description ?? '',
+    );
 
     final dueAt = widget.task.dueAt;
     if (dueAt != null && dueAt.trim().isNotEmpty) {
@@ -1275,8 +1269,7 @@ class _EditTaskFormState extends State<_EditTaskForm> {
       await widget.onUpdate(
         task: widget.task,
         title: _titleController.text.trim(),
-        dueAt:
-            _selectedDueDate == null ? null : _formatDate(_selectedDueDate!),
+        dueAt: _selectedDueDate == null ? null : _formatDate(_selectedDueDate!),
         description: _descriptionController.text.trim(),
       );
 
@@ -1289,9 +1282,9 @@ class _EditTaskFormState extends State<_EditTaskForm> {
           _isSubmitting = false;
         });
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Unable to update task.')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Unable to update task.')));
       }
     }
   }

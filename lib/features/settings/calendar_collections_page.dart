@@ -44,9 +44,9 @@ class _CollectionDeletePreview {
   });
 
   const _CollectionDeletePreview.unavailable()
-      : lines = const [],
-        rangeDescription = '',
-        itemCountsAvailable = false;
+    : lines = const [],
+      rangeDescription = '',
+      itemCountsAvailable = false;
 
   final List<String> lines;
   final String rangeDescription;
@@ -159,27 +159,28 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
       child: _CollectionFormContent(
         services: services,
         initialPrimaryKind: widget.initialCreateKind ?? 'calendar',
-        onSubmit: ({
-          required String name,
-          required String primaryKind,
-          required String? color,
-          required ClientService? service,
-        }) async {
-          final selectedService = service;
-          if (selectedService == null) {
-            throw const CaleeHubException(
-              statusCode: 0,
-              message: 'Choose a service',
-            );
-          }
-          await widget.hubClient.createCalendar(
-            accessToken: widget.accessToken,
-            serviceId: selectedService.id,
-            name: name,
-            primaryKind: primaryKind,
-            color: color,
-          );
-        },
+        onSubmit:
+            ({
+              required String name,
+              required String primaryKind,
+              required String? color,
+              required ClientService? service,
+            }) async {
+              final selectedService = service;
+              if (selectedService == null) {
+                throw const CaleeHubException(
+                  statusCode: 0,
+                  message: 'Choose a service',
+                );
+              }
+              await widget.hubClient.createCalendar(
+                accessToken: widget.accessToken,
+                serviceId: selectedService.id,
+                name: name,
+                primaryKind: primaryKind,
+                color: color,
+              );
+            },
       ),
     );
 
@@ -203,28 +204,29 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
       title: 'Subscribe from link',
       child: _SubscriptionFormContent(
         services: services,
-        onSubmit: ({
-          required String name,
-          required String url,
-          required String? color,
-          required ClientService? service,
-        }) async {
-          final selectedService = service;
-          if (selectedService == null) {
-            throw const CaleeHubException(
-              statusCode: 0,
-              message: 'Choose a service',
-            );
-          }
+        onSubmit:
+            ({
+              required String name,
+              required String url,
+              required String? color,
+              required ClientService? service,
+            }) async {
+              final selectedService = service;
+              if (selectedService == null) {
+                throw const CaleeHubException(
+                  statusCode: 0,
+                  message: 'Choose a service',
+                );
+              }
 
-          await widget.hubClient.subscribeCalendarFromLink(
-            accessToken: widget.accessToken,
-            serviceId: selectedService.id,
-            name: name,
-            url: url,
-            color: color,
-          );
-        },
+              await widget.hubClient.subscribeCalendarFromLink(
+                accessToken: widget.accessToken,
+                serviceId: selectedService.id,
+                name: name,
+                url: url,
+                color: color,
+              );
+            },
       ),
     );
 
@@ -248,19 +250,20 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
         initialPrimaryKind: calendar.primaryKind,
         allowKindChange: false,
         services: const [],
-        onSubmit: ({
-          required String name,
-          required String primaryKind,
-          required String? color,
-          required ClientService? service,
-        }) async {
-          await widget.hubClient.updateCalendar(
-            accessToken: widget.accessToken,
-            calendarId: calendar.id,
-            name: name,
-            color: color,
-          );
-        },
+        onSubmit:
+            ({
+              required String name,
+              required String primaryKind,
+              required String? color,
+              required ClientService? service,
+            }) async {
+              await widget.hubClient.updateCalendar(
+                accessToken: widget.accessToken,
+                calendarId: calendar.id,
+                name: name,
+                color: color,
+              );
+            },
       ),
     );
 
@@ -286,8 +289,9 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
           from: from,
           to: to,
         );
-        final count =
-            eventList.events.where((e) => e.calendarId == calendar.id).length;
+        final count = eventList.events
+            .where((e) => e.calendarId == calendar.id)
+            .length;
         if (count > 0) {
           lines.add(_pluralCount(count, 'visible event occurrence'));
         }
@@ -299,8 +303,9 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
           from: from,
           to: to,
         );
-        final count =
-            taskList.tasks.where((t) => t.calendarId == calendar.id).length;
+        final count = taskList.tasks
+            .where((t) => t.calendarId == calendar.id)
+            .length;
         if (count > 0) lines.add(_pluralCount(count, 'task'));
       }
 
@@ -310,11 +315,13 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
           from: from,
           to: to,
         );
-        final chores =
-            choreList.chores.where((c) => c.calendarId == calendar.id).toList();
+        final chores = choreList.chores
+            .where((c) => c.calendarId == calendar.id)
+            .toList();
         final choreCount = chores.where((c) => c.kind == 'baseChore').length;
-        final completionRecordCount =
-            chores.where((c) => c.kind == 'completionLog').length;
+        final completionRecordCount = chores
+            .where((c) => c.kind == 'completionLog')
+            .length;
         if (choreCount > 0) lines.add(_pluralCount(choreCount, 'chore'));
         if (completionRecordCount > 0) {
           lines.add(_pluralCount(completionRecordCount, 'completion record'));
@@ -504,8 +511,8 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
             child: Text(
               emptyMessage,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: CaleeColors.textSecondary,
-                  ),
+                color: CaleeColors.textSecondary,
+              ),
             ),
           )
         else
@@ -541,8 +548,10 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
             return CaleeEmptyState(
               icon: Icons.error_outline,
               title: 'Unable to load',
-              body:
-                  _errorMessage(snapshot.error!, 'Unable to load collections.'),
+              body: _errorMessage(
+                snapshot.error!,
+                'Unable to load collections.',
+              ),
               action: TextButton(
                 onPressed: _reload,
                 child: const Text('Try again'),
@@ -595,10 +604,7 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
 // ─── _CollectionMenuButton ────────────────────────────────────────────────────
 
 class _CollectionMenuButton extends StatelessWidget {
-  const _CollectionMenuButton({
-    required this.onEdit,
-    required this.onDelete,
-  });
+  const _CollectionMenuButton({required this.onEdit, required this.onDelete});
 
   final VoidCallback? onEdit;
   final VoidCallback? onDelete;
@@ -655,7 +661,8 @@ class _CollectionFormContent extends StatefulWidget {
     required String primaryKind,
     required String? color,
     required ClientService? service,
-  }) onSubmit;
+  })
+  onSubmit;
 
   @override
   State<_CollectionFormContent> createState() => _CollectionFormContentState();
@@ -834,9 +841,7 @@ class _CollectionFormContentState extends State<_CollectionFormContent> {
                     hex: hex,
                     color: color,
                     isSelected: _isPaletteColorSelected(hex),
-                    onTap: () => setState(
-                      () => _colorController.text = hex,
-                    ),
+                    onTap: () => setState(() => _colorController.text = hex),
                   ),
               ],
             ),
@@ -894,7 +899,8 @@ class _SubscriptionFormContent extends StatefulWidget {
     required String url,
     required String? color,
     required ClientService? service,
-  }) onSubmit;
+  })
+  onSubmit;
 
   @override
   State<_SubscriptionFormContent> createState() =>

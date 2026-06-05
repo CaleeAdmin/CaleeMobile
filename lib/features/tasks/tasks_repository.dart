@@ -106,10 +106,7 @@ class TasksRepository {
   }
 
   Future<void> deleteTask(ClientTask task) async {
-    await hubClient.deleteTask(
-      accessToken: accessToken,
-      taskId: task.id,
-    );
+    await hubClient.deleteTask(accessToken: accessToken, taskId: task.id);
   }
 
   String _rawCalendarId(ClientCalendar calendar) {

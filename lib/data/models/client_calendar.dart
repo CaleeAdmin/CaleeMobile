@@ -1,7 +1,5 @@
 class ClientCalendarList {
-  const ClientCalendarList({
-    required this.calendars,
-  });
+  const ClientCalendarList({required this.calendars});
 
   factory ClientCalendarList.fromJson(Map<String, dynamic> json) {
     return ClientCalendarList(

@@ -66,8 +66,9 @@ class ClientChore {
       section: json['section'] as String? ?? 'future',
       recurrence: json['recurrence'] as String?,
       points: json['points'] is int ? json['points'] as int : 1,
-      metadataPoints:
-          json['metadataPoints'] is int ? json['metadataPoints'] as int : null,
+      metadataPoints: json['metadataPoints'] is int
+          ? json['metadataPoints'] as int
+          : null,
       assigneePersonId: json['assigneePersonId']?.toString(),
       assigneeName: json['assigneeName'] as String?,
       assigneeAvatarColor: json['assigneeAvatarColor'] as String?,

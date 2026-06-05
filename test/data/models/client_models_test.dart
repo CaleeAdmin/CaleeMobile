@@ -6,33 +6,32 @@ ClientEvent _event({
   required String id,
   bool recurring = false,
   String? seriesId,
-}) =>
-    ClientEvent(
-      id: id,
-      calendarId: '',
-      serviceId: '',
-      serviceName: '',
-      title: '',
-      startsAt: '',
-      endsAt: '',
-      allDay: false,
-      source: '',
-      recurring: recurring,
-      seriesId: seriesId,
-    );
+}) => ClientEvent(
+  id: id,
+  calendarId: '',
+  serviceId: '',
+  serviceName: '',
+  title: '',
+  startsAt: '',
+  endsAt: '',
+  allDay: false,
+  source: '',
+  recurring: recurring,
+  seriesId: seriesId,
+);
 
 ClientTask _task(String status) => ClientTask(
-      id: '',
-      calendarId: '',
-      serviceId: '',
-      serviceName: '',
-      title: '',
-      status: status,
-      dueAt: null,
-      completedAt: null,
-      description: null,
-      source: '',
-    );
+  id: '',
+  calendarId: '',
+  serviceId: '',
+  serviceName: '',
+  title: '',
+  status: status,
+  dueAt: null,
+  completedAt: null,
+  description: null,
+  source: '',
+);
 
 void main() {
   group('ClientEvent.writableEventId', () {

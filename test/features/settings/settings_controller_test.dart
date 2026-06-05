@@ -66,9 +66,9 @@ class _StubHubClient extends CaleeHubClient {
     List<ClientCalendar>? calendars,
     ClientBootstrap? bootstrap,
     bool failEnsure = false,
-  })  : _calendars = calendars ?? [],
-        _bootstrap = bootstrap ?? _emptyBootstrap(),
-        _failEnsure = failEnsure;
+  }) : _calendars = calendars ?? [],
+       _bootstrap = bootstrap ?? _emptyBootstrap(),
+       _failEnsure = failEnsure;
 
   final List<ClientCalendar> _calendars;
   final ClientBootstrap _bootstrap;
@@ -83,8 +83,9 @@ class _StubHubClient extends CaleeHubClient {
       _bootstrap;
 
   @override
-  Future<ClientContext> ensureDefaultFamily(
-      {required String accessToken}) async {
+  Future<ClientContext> ensureDefaultFamily({
+    required String accessToken,
+  }) async {
     if (_failEnsure) {
       throw const CaleeHubException(statusCode: 500, message: 'Server error');
     }
@@ -101,64 +102,63 @@ class _StubHubClient extends CaleeHubClient {
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
 ClientBootstrap _emptyBootstrap() => ClientBootstrap(
-      account: const ClientAccount(
-        id: 'acc1',
-        displayName: 'Test User',
-        primaryEmail: 'test@example.com',
-        timeZone: null,
-        status: 'active',
-      ),
-      services: const [],
-      contexts: const ClientContexts(households: [], organisations: []),
-      availableContexts: const [],
-      capabilities: const {},
-    );
+  account: const ClientAccount(
+    id: 'acc1',
+    displayName: 'Test User',
+    primaryEmail: 'test@example.com',
+    timeZone: null,
+    status: 'active',
+  ),
+  services: const [],
+  contexts: const ClientContexts(households: [], organisations: []),
+  availableContexts: const [],
+  capabilities: const {},
+);
 
 ClientBootstrap _bootstrapWithHousehold() => ClientBootstrap(
-      account: const ClientAccount(
-        id: 'acc1',
-        displayName: 'Test User',
-        primaryEmail: 'test@example.com',
-        timeZone: null,
+  account: const ClientAccount(
+    id: 'acc1',
+    displayName: 'Test User',
+    primaryEmail: 'test@example.com',
+    timeZone: null,
+    status: 'active',
+  ),
+  services: const [],
+  contexts: ClientContexts(
+    households: [
+      const ClientContext(
+        id: 'h1',
+        type: 'household',
+        name: 'My Family',
+        role: 'admin',
         status: 'active',
       ),
-      services: const [],
-      contexts: ClientContexts(
-        households: [
-          const ClientContext(
-            id: 'h1',
-            type: 'household',
-            name: 'My Family',
-            role: 'admin',
-            status: 'active',
-          ),
-        ],
-        organisations: const [],
-      ),
-      availableContexts: const [],
-      capabilities: const {},
-    );
+    ],
+    organisations: const [],
+  ),
+  availableContexts: const [],
+  capabilities: const {},
+);
 
 ClientCalendar _calendar({
   required String id,
   String kind = 'calendar',
   bool readOnly = false,
-}) =>
-    ClientCalendar(
-      id: id,
-      serviceId: 'svc1',
-      serviceName: 'Service',
-      name: id,
-      color: '#ff0000',
-      components: const [],
-      primaryKind: kind,
-      supportsEvents: kind == 'calendar',
-      supportsTasks: kind == 'tasks',
-      supportsChores: false,
-      readOnly: readOnly,
-      isSubscription: false,
-      source: '',
-    );
+}) => ClientCalendar(
+  id: id,
+  serviceId: 'svc1',
+  serviceName: 'Service',
+  name: id,
+  color: '#ff0000',
+  components: const [],
+  primaryKind: kind,
+  supportsEvents: kind == 'calendar',
+  supportsTasks: kind == 'tasks',
+  supportsChores: false,
+  readOnly: readOnly,
+  isSubscription: false,
+  source: '',
+);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -217,19 +217,21 @@ void main() {
       expect(ctrl.error, isNotNull);
     });
 
-    test('clears stale default calendar if missing from writable calendars',
-        () async {
-      final prefs = _StubPreferences();
-      prefs.seed(const StoredPreferences(defaultCalendarId: 'gone-cal'));
+    test(
+      'clears stale default calendar if missing from writable calendars',
+      () async {
+        final prefs = _StubPreferences();
+        prefs.seed(const StoredPreferences(defaultCalendarId: 'gone-cal'));
 
-      final controller = _makeController(
-        calendars: [_calendar(id: 'other-cal')],
-        prefs: prefs,
-      );
-      await controller.load();
+        final controller = _makeController(
+          calendars: [_calendar(id: 'other-cal')],
+          prefs: prefs,
+        );
+        await controller.load();
 
-      expect(controller.preferences.defaultCalendarId, isNull);
-    });
+        expect(controller.preferences.defaultCalendarId, isNull);
+      },
+    );
 
     test('retains default calendar if it exists and is writable', () async {
       final prefs = _StubPreferences();
@@ -244,19 +246,21 @@ void main() {
       expect(controller.preferences.defaultCalendarId, 'cal1');
     });
 
-    test('clears stale default task list if missing from task calendars',
-        () async {
-      final prefs = _StubPreferences();
-      prefs.seed(const StoredPreferences(defaultTaskListId: 'gone-task'));
+    test(
+      'clears stale default task list if missing from task calendars',
+      () async {
+        final prefs = _StubPreferences();
+        prefs.seed(const StoredPreferences(defaultTaskListId: 'gone-task'));
 
-      final controller = _makeController(
-        calendars: [_calendar(id: 'other-task', kind: 'tasks')],
-        prefs: prefs,
-      );
-      await controller.load();
+        final controller = _makeController(
+          calendars: [_calendar(id: 'other-task', kind: 'tasks')],
+          prefs: prefs,
+        );
+        await controller.load();
 
-      expect(controller.preferences.defaultTaskListId, isNull);
-    });
+        expect(controller.preferences.defaultTaskListId, isNull);
+      },
+    );
 
     test('retains default task list if it exists in task calendars', () async {
       final prefs = _StubPreferences();
@@ -313,51 +317,50 @@ void main() {
   });
 
   group('SettingsController.ensureDefaultFamilyAndRefreshBootstrap', () {
-    test('sets isOpeningFamily true then false and updates bootstrap', () async {
-      final controller = _makeController(
-        bootstrap: _bootstrapWithHousehold(),
-      );
+    test(
+      'sets isOpeningFamily true then false and updates bootstrap',
+      () async {
+        final controller = _makeController(
+          bootstrap: _bootstrapWithHousehold(),
+        );
 
-      final states = <bool>[];
-      controller
-          .addListener(() => states.add(controller.isOpeningFamily));
+        final states = <bool>[];
+        controller.addListener(() => states.add(controller.isOpeningFamily));
 
-      final fresh =
-          await controller.ensureDefaultFamilyAndRefreshBootstrap();
+        final fresh = await controller.ensureDefaultFamilyAndRefreshBootstrap();
 
-      expect(states, [true, false]);
-      expect(fresh.contexts.households, hasLength(1));
-      expect(controller.bootstrap.contexts.households, hasLength(1));
-      expect(controller.error, isNull);
-    });
+        expect(states, [true, false]);
+        expect(fresh.contexts.households, hasLength(1));
+        expect(controller.bootstrap.contexts.households, hasLength(1));
+        expect(controller.error, isNull);
+      },
+    );
 
-    test('propagates error so SettingsPage can show debug/fallback behavior',
-        () async {
-      final controller = _makeController(failEnsure: true);
+    test(
+      'propagates error so SettingsPage can show debug/fallback behavior',
+      () async {
+        final controller = _makeController(failEnsure: true);
 
-      final states = <bool>[];
-      controller
-          .addListener(() => states.add(controller.isOpeningFamily));
+        final states = <bool>[];
+        controller.addListener(() => states.add(controller.isOpeningFamily));
 
-      await expectLater(
-        controller.ensureDefaultFamilyAndRefreshBootstrap(),
-        throwsA(isA<CaleeHubException>()),
-      );
+        await expectLater(
+          controller.ensureDefaultFamilyAndRefreshBootstrap(),
+          throwsA(isA<CaleeHubException>()),
+        );
 
-      expect(states, [true, false]);
-      expect(controller.isOpeningFamily, isFalse);
-      expect(controller.error, isA<CaleeHubException>());
-    });
+        expect(states, [true, false]);
+        expect(controller.isOpeningFamily, isFalse);
+        expect(controller.error, isA<CaleeHubException>());
+      },
+    );
   });
 }
 
 // ── Failing repository stub ───────────────────────────────────────────────────
 
 class _FailingRepository extends SettingsRepository {
-  _FailingRepository({
-    required super.hubClient,
-    required super.accessToken,
-  });
+  _FailingRepository({required super.hubClient, required super.accessToken});
 
   @override
   Future<SettingsOverview> loadOverview() => Future.error(Exception('fail'));

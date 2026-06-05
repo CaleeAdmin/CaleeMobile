@@ -213,10 +213,7 @@ class ChoresRepository {
   Future<void> completeChore(ClientChore chore) async {
     final choreId = chore.completionActionId;
     if (choreId.trim().isEmpty) throw StateError('Missing chore id');
-    await hubClient.completeChore(
-      accessToken: accessToken,
-      choreId: choreId,
-    );
+    await hubClient.completeChore(accessToken: accessToken, choreId: choreId);
   }
 
   Future<void> undoCompletion(ClientChore chore) async {

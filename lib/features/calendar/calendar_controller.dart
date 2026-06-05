@@ -67,7 +67,8 @@ class CalendarController extends ChangeNotifier {
     final now = DateTime.now();
     final newToday = DateTime(now.year, now.month, now.day);
     final newMonth = DateTime(now.year, now.month, 1);
-    final sameMonth = newMonth.year == selectedMonth.year &&
+    final sameMonth =
+        newMonth.year == selectedMonth.year &&
         newMonth.month == selectedMonth.month;
     today = newToday;
     selectedDay = newToday;
@@ -77,8 +78,7 @@ class CalendarController extends ChangeNotifier {
   }
 
   void previousMonth() {
-    selectedMonth =
-        DateTime(selectedMonth.year, selectedMonth.month - 1, 1);
+    selectedMonth = DateTime(selectedMonth.year, selectedMonth.month - 1, 1);
     if (selectedDay.year != selectedMonth.year ||
         selectedDay.month != selectedMonth.month) {
       selectedDay = selectedMonth;
@@ -88,8 +88,7 @@ class CalendarController extends ChangeNotifier {
   }
 
   void nextMonth() {
-    selectedMonth =
-        DateTime(selectedMonth.year, selectedMonth.month + 1, 1);
+    selectedMonth = DateTime(selectedMonth.year, selectedMonth.month + 1, 1);
     if (selectedDay.year != selectedMonth.year ||
         selectedDay.month != selectedMonth.month) {
       selectedDay = selectedMonth;
@@ -100,7 +99,8 @@ class CalendarController extends ChangeNotifier {
 
   void selectDay(DateTime day) {
     final tapMonth = DateTime(day.year, day.month, 1);
-    final sameMonth = tapMonth.year == selectedMonth.year &&
+    final sameMonth =
+        tapMonth.year == selectedMonth.year &&
         tapMonth.month == selectedMonth.month;
     selectedDay = day;
     if (!sameMonth) selectedMonth = tapMonth;
@@ -112,7 +112,8 @@ class CalendarController extends ChangeNotifier {
     final start = DateTime.tryParse(event.startsAt)?.toLocal();
     if (start == null) return;
     final tapMonth = DateTime(start.year, start.month, 1);
-    final sameMonth = tapMonth.year == selectedMonth.year &&
+    final sameMonth =
+        tapMonth.year == selectedMonth.year &&
         tapMonth.month == selectedMonth.month;
     selectedDay = DateTime(start.year, start.month, start.day);
     if (!sameMonth) selectedMonth = tapMonth;
@@ -222,8 +223,11 @@ class CalendarController extends ChangeNotifier {
         final startDate = DateTime(start.year, start.month, start.day);
         // all-day endsAt is exclusive
         final endDate = end != null
-            ? DateTime(end.year, end.month, end.day)
-                .subtract(const Duration(days: 1))
+            ? DateTime(
+                end.year,
+                end.month,
+                end.day,
+              ).subtract(const Duration(days: 1))
             : startDate;
         final check = DateTime(day.year, day.month, day.day);
         if (!check.isBefore(startDate) && !check.isAfter(endDate)) {
@@ -256,12 +260,11 @@ class CalendarController extends ChangeNotifier {
           (e.location ?? '').toLowerCase().contains(q) ||
           (e.description ?? '').toLowerCase().contains(q) ||
           (cal?.name ?? '').toLowerCase().contains(q);
-    }).toList()
-      ..sort((a, b) {
-        final at = DateTime.tryParse(a.startsAt);
-        final bt = DateTime.tryParse(b.startsAt);
-        if (at == null || bt == null) return 0;
-        return at.compareTo(bt);
-      });
+    }).toList()..sort((a, b) {
+      final at = DateTime.tryParse(a.startsAt);
+      final bt = DateTime.tryParse(b.startsAt);
+      if (at == null || bt == null) return 0;
+      return at.compareTo(bt);
+    });
   }
 }

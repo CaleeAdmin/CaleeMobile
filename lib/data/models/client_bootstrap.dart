@@ -155,10 +155,7 @@ class ClientService {
 }
 
 class ClientContexts {
-  const ClientContexts({
-    required this.households,
-    required this.organisations,
-  });
+  const ClientContexts({required this.households, required this.organisations});
 
   factory ClientContexts.fromJson(Map<String, dynamic> json) {
     return ClientContexts(

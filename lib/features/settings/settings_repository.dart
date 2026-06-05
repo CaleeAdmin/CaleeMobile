@@ -6,10 +6,7 @@ import '../../data/models/client_calendar.dart';
 // ─── Public model ─────────────────────────────────────────────────────────────
 
 class SettingsOverview {
-  const SettingsOverview({
-    required this.preferences,
-    required this.calendars,
-  });
+  const SettingsOverview({required this.preferences, required this.calendars});
 
   final StoredPreferences preferences;
   final List<ClientCalendar> calendars;
@@ -37,8 +34,9 @@ class SettingsRepository {
     var prefs = results[0] as StoredPreferences;
     final allCalendars = (results[1] as ClientCalendarList).calendars;
 
-    final writableCalendars =
-        allCalendars.where((c) => c.isCalendarKind && !c.readOnly).toList();
+    final writableCalendars = allCalendars
+        .where((c) => c.isCalendarKind && !c.readOnly)
+        .toList();
     final calId = prefs.defaultCalendarId;
     if (calId != null && !writableCalendars.any((c) => c.id == calId)) {
       await _caleePrefs.saveDefaultCalendarId(null);

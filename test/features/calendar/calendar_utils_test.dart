@@ -3,17 +3,17 @@ import 'package:calee_mobile/data/models/client_calendar.dart';
 import 'package:calee_mobile/features/calendar/calendar_utils.dart';
 
 ClientEvent _event(String startsAt, {bool allDay = false}) => ClientEvent(
-      id: 'test',
-      calendarId: 'cal',
-      serviceId: 'svc',
-      serviceName: 'Test',
-      title: 'Test Event',
-      startsAt: startsAt,
-      endsAt: startsAt,
-      allDay: allDay,
-      source: 'test',
-      recurring: false,
-    );
+  id: 'test',
+  calendarId: 'cal',
+  serviceId: 'svc',
+  serviceName: 'Test',
+  title: 'Test Event',
+  startsAt: startsAt,
+  endsAt: startsAt,
+  allDay: allDay,
+  source: 'test',
+  recurring: false,
+);
 
 void main() {
   group('eventTimeLabel', () {

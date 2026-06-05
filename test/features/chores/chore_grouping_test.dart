@@ -147,20 +147,46 @@ void main() {
     });
 
     test('equal assignee → sort by date', () {
-      final early = _chore(id: 'a', assigneeName: 'Mia', scheduledDate: '2026-06-01');
-      final late = _chore(id: 'b', assigneeName: 'Mia', scheduledDate: '2026-06-10');
+      final early = _chore(
+        id: 'a',
+        assigneeName: 'Mia',
+        scheduledDate: '2026-06-01',
+      );
+      final late = _chore(
+        id: 'b',
+        assigneeName: 'Mia',
+        scheduledDate: '2026-06-10',
+      );
       expect(compareChores(early, late), isNegative);
     });
 
     test('equal assignee and date → sort by title', () {
-      final apple = _chore(id: 'a', assigneeName: 'Mia', scheduledDate: '2026-06-01', title: 'Apple');
-      final banana = _chore(id: 'b', assigneeName: 'Mia', scheduledDate: '2026-06-01', title: 'Banana');
+      final apple = _chore(
+        id: 'a',
+        assigneeName: 'Mia',
+        scheduledDate: '2026-06-01',
+        title: 'Apple',
+      );
+      final banana = _chore(
+        id: 'b',
+        assigneeName: 'Mia',
+        scheduledDate: '2026-06-01',
+        title: 'Banana',
+      );
       expect(compareChores(apple, banana), isNegative);
     });
 
     test('two unassigned sorted by date then title', () {
-      final first = _chore(id: 'a', scheduledDate: '2026-06-01', title: 'Alpha');
-      final second = _chore(id: 'b', scheduledDate: '2026-06-01', title: 'Beta');
+      final first = _chore(
+        id: 'a',
+        scheduledDate: '2026-06-01',
+        title: 'Alpha',
+      );
+      final second = _chore(
+        id: 'b',
+        scheduledDate: '2026-06-01',
+        title: 'Beta',
+      );
       expect(compareChores(first, second), isNegative);
     });
   });

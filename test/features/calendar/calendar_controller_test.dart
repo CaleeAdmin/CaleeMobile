@@ -21,9 +21,9 @@ class _StubHubClient extends CaleeHubClient {
     List<ClientCalendar>? calendars,
     List<ClientEvent>? events,
     this.failCalendars = false,
-  })  : _calendars = calendars ?? [],
-        _events = events ?? [],
-        super();
+  }) : _calendars = calendars ?? [],
+       _events = events ?? [],
+       super();
 
   final List<ClientCalendar> _calendars;
   final List<ClientEvent> _events;
@@ -70,19 +70,18 @@ ClientEvent _event(
   String startsAt = '2026-06-15T09:00:00',
   String endsAt = '2026-06-15T10:00:00',
   bool recurring = false,
-}) =>
-    ClientEvent(
-      id: id,
-      calendarId: calendarId,
-      serviceId: 'svc',
-      serviceName: 'Test',
-      title: 'Event $id',
-      startsAt: startsAt,
-      endsAt: endsAt,
-      allDay: allDay,
-      recurring: recurring,
-      source: 'test',
-    );
+}) => ClientEvent(
+  id: id,
+  calendarId: calendarId,
+  serviceId: 'svc',
+  serviceName: 'Test',
+  title: 'Event $id',
+  startsAt: startsAt,
+  endsAt: endsAt,
+  allDay: allDay,
+  recurring: recurring,
+  source: 'test',
+);
 
 CalendarController _makeController({
   List<ClientCalendar>? calendars,
@@ -111,11 +110,13 @@ void main() {
   group('CalendarRepository.loadMonth', () {
     test('filters calendars to isCalendarKind', () async {
       final repo = CalendarRepository(
-        hubClient: _StubHubClient(calendars: [
-          _calendar('cal-calendar', primaryKind: 'calendar'),
-          _calendar('cal-tasks', primaryKind: 'tasks'),
-          _calendar('cal-chores', primaryKind: 'chores'),
-        ]),
+        hubClient: _StubHubClient(
+          calendars: [
+            _calendar('cal-calendar', primaryKind: 'calendar'),
+            _calendar('cal-tasks', primaryKind: 'tasks'),
+            _calendar('cal-chores', primaryKind: 'chores'),
+          ],
+        ),
         accessToken: 'tok',
         preferences: _StubPrefs(const StoredPreferences()),
       );
@@ -171,8 +172,9 @@ void main() {
     });
 
     test('populates calendars on success', () async {
-      final ctrl =
-          _makeController(calendars: [_calendar('c1'), _calendar('c2')]);
+      final ctrl = _makeController(
+        calendars: [_calendar('c1'), _calendar('c2')],
+      );
 
       await ctrl.loadMonth();
 

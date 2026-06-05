@@ -106,9 +106,9 @@ class _CalendarSharingAddressPageState
         _address = address;
         _rotating = false;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Sharing address reset')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Sharing address reset')));
     } catch (e, st) {
       debugPrint('[CalendarSharingAddressPage] rotate failed: $e\n$st');
       if (!mounted) return;
@@ -123,9 +123,9 @@ class _CalendarSharingAddressPageState
 
   void _copy(BuildContext context, String value) {
     Clipboard.setData(ClipboardData(text: value));
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Copied')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Copied')));
   }
 
   @override
@@ -146,10 +146,7 @@ class _CalendarSharingAddressPageState
         icon: Icons.error_outline,
         title: 'Something went wrong',
         body: _error!,
-        action: TextButton(
-          onPressed: _load,
-          child: const Text('Try again'),
-        ),
+        action: TextButton(onPressed: _load, child: const Text('Try again')),
       );
     }
 
@@ -169,9 +166,9 @@ class _CalendarSharingAddressPageState
           ),
           child: Text(
             'Use this email address when another calendar service asks who to share the calendar with.',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: CaleeColors.textSecondary,
-                ),
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(color: CaleeColors.textSecondary),
           ),
         ),
         CaleeSection(
@@ -187,9 +184,9 @@ class _CalendarSharingAddressPageState
           padding: const EdgeInsets.symmetric(horizontal: CaleeSpacing.sm),
           child: Text(
             'This address is only for receiving shared calendar invitations. It is not your login email.',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: CaleeColors.textSecondary,
-                ),
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: CaleeColors.textSecondary),
           ),
         ),
         if (_error != null) ...[
@@ -198,9 +195,9 @@ class _CalendarSharingAddressPageState
             padding: const EdgeInsets.symmetric(horizontal: CaleeSpacing.sm),
             child: Text(
               _error!,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: CaleeColors.destructive,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: CaleeColors.destructive),
             ),
           ),
         ],
@@ -213,9 +210,9 @@ class _CalendarSharingAddressPageState
                   'Use only if this address was shared with the wrong person.',
               enabled: !_rotating,
               onTap: _rotating ? null : _rotate,
-              titleStyle: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                    color: CaleeColors.destructive,
-                  ),
+              titleStyle: Theme.of(
+                context,
+              ).textTheme.bodyLarge?.copyWith(color: CaleeColors.destructive),
               trailing: _rotating
                   ? const SizedBox(
                       width: 18,
@@ -233,10 +230,7 @@ class _CalendarSharingAddressPageState
 }
 
 class _AddressRow extends StatelessWidget {
-  const _AddressRow({
-    required this.value,
-    required this.onCopy,
-  });
+  const _AddressRow({required this.value, required this.onCopy});
 
   final String value;
   final VoidCallback onCopy;
@@ -278,8 +272,7 @@ class _AddressRow extends StatelessWidget {
           TextButton(
             onPressed: onCopy,
             style: TextButton.styleFrom(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: CaleeSpacing.sm),
+              padding: const EdgeInsets.symmetric(horizontal: CaleeSpacing.sm),
               minimumSize: Size.zero,
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),

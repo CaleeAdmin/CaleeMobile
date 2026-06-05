@@ -39,12 +39,10 @@ class _HouseholdPeoplePageState extends State<HouseholdPeoplePage> {
     super.initState();
     if (widget.households.isNotEmpty) {
       final byId = widget.initialHouseholdId != null
-          ? widget.households
-              .cast<ClientContext?>()
-              .firstWhere(
-                (h) => h!.id == widget.initialHouseholdId,
-                orElse: () => null,
-              )
+          ? widget.households.cast<ClientContext?>().firstWhere(
+              (h) => h!.id == widget.initialHouseholdId,
+              orElse: () => null,
+            )
           : null;
       _selectedHousehold = byId ?? widget.households.first;
       _future = _loadPeople();
@@ -109,22 +107,23 @@ class _HouseholdPeoplePageState extends State<HouseholdPeoplePage> {
       child: _PersonFormContent(
         initialPerson: person,
         submitLabel: 'Save Changes',
-        onSubmit: ({
-          required String displayName,
-          required String? avatarColor,
-          required String role,
-          required int sortOrder,
-        }) async {
-          await widget.hubClient.updatePerson(
-            accessToken: widget.accessToken,
-            householdId: household.id,
-            personId: person.id,
-            displayName: displayName,
-            avatarColor: avatarColor,
-            role: role,
-            sortOrder: sortOrder,
-          );
-        },
+        onSubmit:
+            ({
+              required String displayName,
+              required String? avatarColor,
+              required String role,
+              required int sortOrder,
+            }) async {
+              await widget.hubClient.updatePerson(
+                accessToken: widget.accessToken,
+                householdId: household.id,
+                personId: person.id,
+                displayName: displayName,
+                avatarColor: avatarColor,
+                role: role,
+                sortOrder: sortOrder,
+              );
+            },
       ),
     );
 
@@ -188,9 +187,9 @@ class _HouseholdPeoplePageState extends State<HouseholdPeoplePage> {
         ? '$friendly\nDebug: ${error.debugSummary}'
         : friendly;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -198,9 +197,7 @@ class _HouseholdPeoplePageState extends State<HouseholdPeoplePage> {
     final household = _selectedHousehold;
 
     return CaleeScaffold(
-      appBar: AppBar(
-        title: const Text('Family Members'),
-      ),
+      appBar: AppBar(title: const Text('Family Members')),
       floatingActionButton: household == null
           ? null
           : FloatingActionButton(
@@ -285,8 +282,7 @@ class _HouseholdPeoplePageState extends State<HouseholdPeoplePage> {
                       children: [
                         CaleeListRow(
                           title: 'Add Person',
-                          subtitle:
-                              'Create a child, parent, or family member',
+                          subtitle: 'Create a child, parent, or family member',
                           leading: const Icon(
                             Icons.person_add_alt_1_outlined,
                             size: 20,
@@ -332,7 +328,8 @@ class _PersonFormContent extends StatefulWidget {
     required String? avatarColor,
     required String role,
     required int sortOrder,
-  }) onSubmit;
+  })
+  onSubmit;
 
   @override
   State<_PersonFormContent> createState() => _PersonFormContentState();
@@ -407,9 +404,9 @@ class _PersonFormContentState extends State<_PersonFormContent> {
   }
 
   void _showSnack(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -493,19 +490,16 @@ class _PersonAvatar extends StatelessWidget {
     return Container(
       width: 34,
       height: 34,
-      decoration: BoxDecoration(
-        color: color,
-        shape: BoxShape.circle,
-      ),
+      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
       child: Center(
         child: Text(
           person.displayName.trim().isEmpty
               ? '?'
               : person.displayName.trim()[0].toUpperCase(),
           style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                color: CaleeColors.textPrimary,
-                fontWeight: FontWeight.w700,
-              ),
+            color: CaleeColors.textPrimary,
+            fontWeight: FontWeight.w700,
+          ),
         ),
       ),
     );
@@ -525,10 +519,7 @@ class _PersonAvatar extends StatelessWidget {
 }
 
 class _ErrorRow extends StatelessWidget {
-  const _ErrorRow({
-    required this.message,
-    required this.onRetry,
-  });
+  const _ErrorRow({required this.message, required this.onRetry});
 
   final String message;
   final VoidCallback onRetry;
@@ -542,19 +533,13 @@ class _ErrorRow extends StatelessWidget {
         size: 20,
         color: CaleeColors.destructive,
       ),
-      trailing: TextButton(
-        onPressed: onRetry,
-        child: const Text('Retry'),
-      ),
+      trailing: TextButton(onPressed: onRetry, child: const Text('Retry')),
     );
   }
 }
 
 class _EmptyPeopleState extends StatelessWidget {
-  const _EmptyPeopleState({
-    required this.title,
-    required this.message,
-  });
+  const _EmptyPeopleState({required this.title, required this.message});
 
   final String title;
   final String message;
@@ -573,16 +558,13 @@ class _EmptyPeopleState extends StatelessWidget {
               color: CaleeColors.textTertiary,
             ),
             const SizedBox(height: CaleeSpacing.md),
-            Text(
-              title,
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
+            Text(title, style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: CaleeSpacing.xs),
             Text(
               message,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: CaleeColors.textSecondary,
-                  ),
+                color: CaleeColors.textSecondary,
+              ),
               textAlign: TextAlign.center,
             ),
           ],
@@ -606,9 +588,9 @@ class _EmptyRowText extends StatelessWidget {
       ),
       child: Text(
         text,
-        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: CaleeColors.textSecondary,
-            ),
+        style: Theme.of(
+          context,
+        ).textTheme.bodyMedium?.copyWith(color: CaleeColors.textSecondary),
       ),
     );
   }

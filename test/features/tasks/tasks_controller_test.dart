@@ -9,11 +9,8 @@ import 'package:flutter_test/flutter_test.dart';
 
 // ── Minimal stubs ─────────────────────────────────────────────────────────────
 
-ClientTaskList _emptyTaskList() => ClientTaskList(
-      from: '2024-01-01',
-      to: '2027-12-31',
-      tasks: [],
-    );
+ClientTaskList _emptyTaskList() =>
+    ClientTaskList(from: '2024-01-01', to: '2027-12-31', tasks: []);
 
 ClientCalendarList _emptyCalendarList() => ClientCalendarList(calendars: []);
 
@@ -27,8 +24,7 @@ class _AlwaysFailHubClient extends CaleeHubClient {
     required String accessToken,
     required String from,
     required String to,
-  }) =>
-      Future.error(Exception('network error'));
+  }) => Future.error(Exception('network error'));
 }
 
 class _SuccessHubClient extends CaleeHubClient {
@@ -41,8 +37,7 @@ class _SuccessHubClient extends CaleeHubClient {
     required String accessToken,
     required String from,
     required String to,
-  }) =>
-      Future.value(_emptyTaskList());
+  }) => Future.value(_emptyTaskList());
 }
 
 class _FakePreferences extends CaleePreferences {
@@ -53,23 +48,23 @@ class _FakePreferences extends CaleePreferences {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 TasksRepository _repositoryWith(CaleeHubClient client) => TasksRepository(
-      hubClient: client,
-      accessToken: 'token',
-      services: [],
-      preferences: _FakePreferences(),
-    );
+  hubClient: client,
+  accessToken: 'token',
+  services: [],
+  preferences: _FakePreferences(),
+);
 
 ClientService _svc(String id, Map<String, dynamic> caps) => ClientService(
-      id: id,
-      displayName: id,
-      baseUrl: '',
-      launchUrl: '',
-      serviceType: '',
-      accessStatus: 'active',
-      calendarCredentialStatus: 'unsupported',
-      source: '',
-      capabilities: caps,
-    );
+  id: id,
+  displayName: id,
+  baseUrl: '',
+  launchUrl: '',
+  serviceType: '',
+  accessStatus: 'active',
+  calendarCredentialStatus: 'unsupported',
+  source: '',
+  capabilities: caps,
+);
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
@@ -97,8 +92,9 @@ void main() {
 
   group('TasksController loading state', () {
     test('sets isLoading true then false on success', () async {
-      final controller =
-          TasksController(repository: _repositoryWith(_SuccessHubClient()));
+      final controller = TasksController(
+        repository: _repositoryWith(_SuccessHubClient()),
+      );
 
       final states = <bool>[];
       controller.addListener(() => states.add(controller.isLoading));
@@ -114,8 +110,9 @@ void main() {
     });
 
     test('sets error and clears overview on failure', () async {
-      final controller =
-          TasksController(repository: _repositoryWith(_AlwaysFailHubClient()));
+      final controller = TasksController(
+        repository: _repositoryWith(_AlwaysFailHubClient()),
+      );
 
       await controller.load();
 
@@ -172,8 +169,9 @@ void main() {
 
   group('TasksController search query', () {
     test('setSearchQuery updates state and notifies', () {
-      final controller =
-          TasksController(repository: _repositoryWith(_SuccessHubClient()));
+      final controller = TasksController(
+        repository: _repositoryWith(_SuccessHubClient()),
+      );
 
       String? notified;
       controller.addListener(() => notified = controller.searchQuery);
@@ -202,8 +200,7 @@ class _ToggleTrackingHubClient extends CaleeHubClient {
     required String accessToken,
     required String from,
     required String to,
-  }) =>
-      Future.value(ClientTaskList(from: from, to: to, tasks: []));
+  }) => Future.value(ClientTaskList(from: from, to: to, tasks: []));
 
   @override
   Future<ClientTask> updateTaskStatus({

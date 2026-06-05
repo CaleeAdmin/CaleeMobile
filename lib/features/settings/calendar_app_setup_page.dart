@@ -54,7 +54,8 @@ class _CalendarAppSetupPageState extends State<CalendarAppSetupPage> {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = 'Could not load Calendar App Setup. Please try again.'
+        _error =
+            'Could not load Calendar App Setup. Please try again.'
             '${kDebugMode && error is CaleeHubException ? '\nDebug: ${error.debugSummary}' : ''}';
       });
     }
@@ -62,9 +63,9 @@ class _CalendarAppSetupPageState extends State<CalendarAppSetupPage> {
 
   void _copy(BuildContext context, String value) {
     Clipboard.setData(ClipboardData(text: value));
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Copied')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Copied')));
   }
 
   @override
@@ -85,10 +86,7 @@ class _CalendarAppSetupPageState extends State<CalendarAppSetupPage> {
         icon: Icons.error_outline,
         title: 'Something went wrong',
         body: _error!,
-        action: TextButton(
-          onPressed: _load,
-          child: const Text('Try again'),
-        ),
+        action: TextButton(onPressed: _load, child: const Text('Try again')),
       );
     }
 
@@ -108,9 +106,9 @@ class _CalendarAppSetupPageState extends State<CalendarAppSetupPage> {
           ),
           child: Text(
             'Use these details to add this Calee calendar service to Apple Calendar or another app that supports CalDAV.',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: CaleeColors.textSecondary,
-                ),
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(color: CaleeColors.textSecondary),
           ),
         ),
         CaleeSection(
@@ -193,8 +191,7 @@ class _FieldRow extends StatelessWidget {
           TextButton(
             onPressed: onCopy,
             style: TextButton.styleFrom(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: CaleeSpacing.sm),
+              padding: const EdgeInsets.symmetric(horizontal: CaleeSpacing.sm),
               minimumSize: Size.zero,
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
@@ -236,10 +233,7 @@ class _PasswordRow extends StatelessWidget {
             width: 96,
             child: Text(
               'Password',
-              style: TextStyle(
-                fontSize: 16,
-                color: CaleeColors.textPrimary,
-              ),
+              style: TextStyle(fontSize: 16, color: CaleeColors.textPrimary),
             ),
           ),
           Expanded(
@@ -256,8 +250,7 @@ class _PasswordRow extends StatelessWidget {
           TextButton(
             onPressed: onToggleVisibility,
             style: TextButton.styleFrom(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: CaleeSpacing.xs),
+              padding: const EdgeInsets.symmetric(horizontal: CaleeSpacing.xs),
               minimumSize: Size.zero,
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
@@ -266,8 +259,7 @@ class _PasswordRow extends StatelessWidget {
           TextButton(
             onPressed: onCopy,
             style: TextButton.styleFrom(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: CaleeSpacing.xs),
+              padding: const EdgeInsets.symmetric(horizontal: CaleeSpacing.xs),
               minimumSize: Size.zero,
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),

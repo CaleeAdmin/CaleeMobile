@@ -20,10 +20,10 @@ class CaleePreferences {
       final prefs = await SharedPreferences.getInstance();
       await _migrateIfNeeded(prefs);
       return StoredPreferences(
-        firstDayOfWeek:
-            FirstDayOfWeek.fromString(prefs.getString(_firstDayOfWeekKey)),
-        timeFormat:
-            TimeFormatPref.fromString(prefs.getString(_timeFormatKey)),
+        firstDayOfWeek: FirstDayOfWeek.fromString(
+          prefs.getString(_firstDayOfWeekKey),
+        ),
+        timeFormat: TimeFormatPref.fromString(prefs.getString(_timeFormatKey)),
         defaultCalendarId: prefs.getString(_defaultCalendarIdKey),
         defaultTaskListId: prefs.getString(_defaultTaskListIdKey),
       );
@@ -119,9 +119,9 @@ enum FirstDayOfWeek {
   String get storageValue => name;
 
   String get displayLabel => switch (this) {
-        FirstDayOfWeek.sunday => 'Sunday',
-        FirstDayOfWeek.monday => 'Monday',
-      };
+    FirstDayOfWeek.sunday => 'Sunday',
+    FirstDayOfWeek.monday => 'Monday',
+  };
 }
 
 enum TimeFormatPref {
@@ -138,8 +138,8 @@ enum TimeFormatPref {
   String get storageValue => name;
 
   String get displayLabel => switch (this) {
-        TimeFormatPref.system => 'System default',
-        TimeFormatPref.h12 => '12-hour',
-        TimeFormatPref.h24 => '24-hour',
-      };
+    TimeFormatPref.system => 'System default',
+    TimeFormatPref.h12 => '12-hour',
+    TimeFormatPref.h24 => '24-hour',
+  };
 }

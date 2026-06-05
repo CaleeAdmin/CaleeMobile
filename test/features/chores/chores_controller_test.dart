@@ -9,11 +9,8 @@ import 'package:flutter_test/flutter_test.dart';
 
 // ── Minimal stubs ─────────────────────────────────────────────────────────────
 
-ClientChoreList _emptyChoreList() => ClientChoreList(
-      from: '2026-01-01',
-      to: '2026-12-31',
-      chores: [],
-    );
+ClientChoreList _emptyChoreList() =>
+    ClientChoreList(from: '2026-01-01', to: '2026-12-31', chores: []);
 
 ClientCalendarList _emptyCalendarList() => ClientCalendarList(calendars: []);
 
@@ -30,8 +27,7 @@ class _AlwaysFailHubClient extends CaleeHubClient {
     required String accessToken,
     required String from,
     required String to,
-  }) =>
-      Future.error(Exception('network error'));
+  }) => Future.error(Exception('network error'));
 }
 
 // A CaleeHubClient that always succeeds with empty data.
@@ -45,26 +41,24 @@ class _SuccessHubClient extends CaleeHubClient {
     required String accessToken,
     required String from,
     required String to,
-  }) =>
-      Future.value(_emptyChoreList());
+  }) => Future.value(_emptyChoreList());
 
   @override
   Future<ClientPersonList> people({
     required String accessToken,
     required String householdId,
     bool includeArchived = false,
-  }) =>
-      Future.value(_emptyPeopleList());
+  }) => Future.value(_emptyPeopleList());
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 ChoresRepository _repositoryWith(CaleeHubClient client) => ChoresRepository(
-      hubClient: client,
-      accessToken: 'token',
-      services: [],
-      households: [],
-    );
+  hubClient: client,
+  accessToken: 'token',
+  services: [],
+  households: [],
+);
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
@@ -72,16 +66,16 @@ void main() {
   group('ChoresRepository.choreServices', () {
     test('returns only services where supportsChores is true', () {
       ClientService svc(String id, Map<String, dynamic> caps) => ClientService(
-            id: id,
-            displayName: id,
-            baseUrl: '',
-            launchUrl: '',
-            serviceType: '',
-            accessStatus: 'active',
-            calendarCredentialStatus: 'unsupported',
-            source: '',
-            capabilities: caps,
-          );
+        id: id,
+        displayName: id,
+        baseUrl: '',
+        launchUrl: '',
+        serviceType: '',
+        accessStatus: 'active',
+        calendarCredentialStatus: 'unsupported',
+        source: '',
+        capabilities: caps,
+      );
 
       final services = [
         svc('svc-chores', {'chores': true}),
@@ -104,8 +98,9 @@ void main() {
 
   group('ChoresController loading state', () {
     test('sets isLoading true then false on success', () async {
-      final controller =
-          ChoresController(repository: _repositoryWith(_SuccessHubClient()));
+      final controller = ChoresController(
+        repository: _repositoryWith(_SuccessHubClient()),
+      );
 
       final states = <bool>[];
       controller.addListener(() => states.add(controller.isLoading));
@@ -121,8 +116,9 @@ void main() {
     });
 
     test('sets error and clears overview on failure', () async {
-      final controller =
-          ChoresController(repository: _repositoryWith(_AlwaysFailHubClient()));
+      final controller = ChoresController(
+        repository: _repositoryWith(_AlwaysFailHubClient()),
+      );
 
       await controller.load();
 

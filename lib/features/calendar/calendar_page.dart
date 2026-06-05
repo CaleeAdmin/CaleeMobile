@@ -16,8 +16,18 @@ import 'calendar_utils.dart';
 // ─── Label helpers ────────────────────────────────────────────────────────────
 
 const _kMonthAbbr = [
-  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
 ];
 
 const _kMonthNames = [
@@ -133,20 +143,20 @@ class _CalendarPageState extends State<CalendarPage> {
   }) {
     Navigator.of(context)
         .push(
-      MaterialPageRoute<void>(
-        builder: (_) => CalendarCollectionsPage(
-          hubClient: widget.hubClient,
-          accessToken: widget.accessToken,
-          services: widget.services,
-          initialCreateKind: autoOpenCreate ? 'calendar' : null,
-          autoOpenCreate: autoOpenCreate,
-          autoOpenSubscribe: autoOpenSubscribe,
-        ),
-      ),
-    )
+          MaterialPageRoute<void>(
+            builder: (_) => CalendarCollectionsPage(
+              hubClient: widget.hubClient,
+              accessToken: widget.accessToken,
+              services: widget.services,
+              initialCreateKind: autoOpenCreate ? 'calendar' : null,
+              autoOpenCreate: autoOpenCreate,
+              autoOpenSubscribe: autoOpenSubscribe,
+            ),
+          ),
+        )
         .then((_) {
-      if (mounted) _controller.refresh();
-    });
+          if (mounted) _controller.refresh();
+        });
   }
 
   // ── Calendar visibility ────────────────────────────────────────────────────
@@ -173,9 +183,9 @@ class _CalendarPageState extends State<CalendarPage> {
         onCalendarMutated: (String? message) {
           _controller.refresh();
           if (message != null && mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text(message)),
-            );
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(SnackBar(content: Text(message)));
           }
         },
       ),
@@ -185,8 +195,9 @@ class _CalendarPageState extends State<CalendarPage> {
   // ── Create event ──────────────────────────────────────────────────────────
 
   Future<void> _openCreateEventSheet() async {
-    final writableCalendars =
-        _controller.calendars.where((c) => !c.readOnly).toList();
+    final writableCalendars = _controller.calendars
+        .where((c) => !c.readOnly)
+        .toList();
 
     if (writableCalendars.isEmpty) {
       if (!mounted) return;
@@ -220,9 +231,9 @@ class _CalendarPageState extends State<CalendarPage> {
     );
 
     if (created == true && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Event created.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Event created.')));
     }
   }
 
@@ -300,7 +311,8 @@ class _CalendarPageState extends State<CalendarPage> {
     final result = Completer<String?>();
     await CaleeActionSheet.show(
       context: context,
-      title: 'This is a repeating event. Choose whether to remove only this event or the entire series.',
+      title:
+          'This is a repeating event. Choose whether to remove only this event or the entire series.',
       actions: [
         CaleeAction(
           label: 'Delete This Event',
@@ -344,9 +356,9 @@ class _CalendarPageState extends State<CalendarPage> {
     );
 
     if (updated == true && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Event updated.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Event updated.')));
     }
   }
 
@@ -379,8 +391,8 @@ class _CalendarPageState extends State<CalendarPage> {
               deleteOccurrence
                   ? 'Recurring event deleted.'
                   : event.recurring
-                      ? 'Recurring series deleted.'
-                      : 'Event deleted.',
+                  ? 'Recurring series deleted.'
+                  : 'Event deleted.',
             ),
           ),
         );
@@ -390,8 +402,8 @@ class _CalendarPageState extends State<CalendarPage> {
         final friendly = deleteOccurrence
             ? 'Unable to delete recurring event.'
             : event.recurring
-                ? 'Unable to delete recurring series.'
-                : 'Unable to delete event.';
+            ? 'Unable to delete recurring series.'
+            : 'Unable to delete event.';
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
@@ -442,7 +454,9 @@ class _CalendarPageState extends State<CalendarPage> {
       isScrollControlled: true,
       backgroundColor: CaleeColors.surface,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(CaleeRadius.sheet)),
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(CaleeRadius.sheet),
+        ),
       ),
       builder: (sheetContext) => _CalendarSearchSheet(
         searchController: _searchController,
@@ -523,7 +537,11 @@ class _CalendarPageState extends State<CalendarPage> {
     bool compactHeight = false,
     bool veryCompactHeight = false,
   }) {
-    final outerPad = veryCompactHeight ? 2.0 : compactHeight ? 4.0 : CaleeSpacing.xs;
+    final outerPad = veryCompactHeight
+        ? 2.0
+        : compactHeight
+        ? 4.0
+        : CaleeSpacing.xs;
     final navIconMinH = compactHeight ? 36.0 : 44.0;
     final actionIconMinH = compactHeight ? 32.0 : 36.0;
 
@@ -545,7 +563,10 @@ class _CalendarPageState extends State<CalendarPage> {
                 icon: const Icon(Icons.chevron_left),
                 iconSize: 24,
                 padding: EdgeInsets.zero,
-                constraints: BoxConstraints(minWidth: 44, minHeight: navIconMinH),
+                constraints: BoxConstraints(
+                  minWidth: 44,
+                  minHeight: navIconMinH,
+                ),
                 color: CaleeColors.primary,
                 tooltip: 'Previous month',
               ),
@@ -565,7 +586,10 @@ class _CalendarPageState extends State<CalendarPage> {
                 icon: const Icon(Icons.chevron_right),
                 iconSize: 24,
                 padding: EdgeInsets.zero,
-                constraints: BoxConstraints(minWidth: 44, minHeight: navIconMinH),
+                constraints: BoxConstraints(
+                  minWidth: 44,
+                  minHeight: navIconMinH,
+                ),
                 color: CaleeColors.primary,
                 tooltip: 'Next month',
               ),
@@ -607,7 +631,10 @@ class _CalendarPageState extends State<CalendarPage> {
                 icon: const Icon(Icons.search),
                 iconSize: 22,
                 padding: EdgeInsets.zero,
-                constraints: BoxConstraints(minWidth: 44, minHeight: actionIconMinH),
+                constraints: BoxConstraints(
+                  minWidth: 44,
+                  minHeight: actionIconMinH,
+                ),
                 color: CaleeColors.primary,
                 tooltip: 'Search events',
               ),
@@ -616,7 +643,10 @@ class _CalendarPageState extends State<CalendarPage> {
                 icon: const Icon(Icons.tune),
                 iconSize: 22,
                 padding: EdgeInsets.zero,
-                constraints: BoxConstraints(minWidth: 44, minHeight: actionIconMinH),
+                constraints: BoxConstraints(
+                  minWidth: 44,
+                  minHeight: actionIconMinH,
+                ),
                 color: CaleeColors.primary,
                 tooltip: 'Calendars',
               ),
@@ -625,7 +655,10 @@ class _CalendarPageState extends State<CalendarPage> {
                 icon: const Icon(Icons.add),
                 iconSize: 22,
                 padding: EdgeInsets.zero,
-                constraints: BoxConstraints(minWidth: 44, minHeight: actionIconMinH),
+                constraints: BoxConstraints(
+                  minWidth: 44,
+                  minHeight: actionIconMinH,
+                ),
                 color: CaleeColors.primary,
                 tooltip: 'Add event',
               ),
@@ -698,8 +731,7 @@ class _CalendarPageState extends State<CalendarPage> {
               final dotColors = dayEvents.take(3).map(_eventColor).toList();
               return _DayCell(
                 date: date,
-                isCurrentMonth:
-                    date.month == _controller.selectedMonth.month,
+                isCurrentMonth: date.month == _controller.selectedMonth.month,
                 isToday: _isSameDay(date, _controller.today),
                 isSelected: _isSameDay(date, _controller.selectedDay),
                 dotColors: dotColors,
@@ -776,10 +808,7 @@ class _CalendarPageState extends State<CalendarPage> {
           child: Center(
             child: Text(
               'No events this day',
-              style: TextStyle(
-                fontSize: 15,
-                color: CaleeColors.textTertiary,
-              ),
+              style: TextStyle(fontSize: 15, color: CaleeColors.textTertiary),
             ),
           ),
         ),
@@ -866,7 +895,9 @@ class _DayCell extends StatelessWidget {
     final Color? bgColor;
 
     if (isToday || isSelected) {
-      bgColor = isToday ? CaleeColors.primary : CaleeColors.primary.withAlpha(30);
+      bgColor = isToday
+          ? CaleeColors.primary
+          : CaleeColors.primary.withAlpha(30);
       numberColor = isToday ? Colors.white : CaleeColors.primary;
     } else if (isCurrentMonth) {
       bgColor = null;
@@ -980,10 +1011,7 @@ class _EventDots extends StatelessWidget {
           Container(
             width: dotSize,
             height: dotSize,
-            decoration: BoxDecoration(
-              color: colors[i],
-              shape: BoxShape.circle,
-            ),
+            decoration: BoxDecoration(color: colors[i], shape: BoxShape.circle),
           ),
         ],
       ],
@@ -1223,10 +1251,7 @@ class _CalendarErrorState extends StatelessWidget {
       icon: Icons.cloud_off_outlined,
       title: 'We couldn\'t load your calendar',
       body: 'Check your connection and try again.',
-      action: FilledButton(
-        onPressed: onRetry,
-        child: const Text('Try again'),
-      ),
+      action: FilledButton(onPressed: onRetry, child: const Text('Try again')),
     );
   }
 }
@@ -1258,7 +1283,8 @@ class _CreateEventSheet extends StatefulWidget {
     String? location,
     String? description,
     String? recurrence,
-  }) onCreate;
+  })
+  onCreate;
   final Future<void> Function({
     required ClientEvent event,
     required String title,
@@ -1269,7 +1295,8 @@ class _CreateEventSheet extends StatefulWidget {
     String? description,
     String? recurrence,
     String? editScope,
-  })? onUpdate;
+  })?
+  onUpdate;
 
   @override
   State<_CreateEventSheet> createState() => _CreateEventSheetState();
@@ -1327,14 +1354,18 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
 
       final start =
           DateTime.tryParse(event.startsAt)?.toLocal() ?? DateTime.now();
-      final end = DateTime.tryParse(event.endsAt)?.toLocal() ??
+      final end =
+          DateTime.tryParse(event.endsAt)?.toLocal() ??
           start.add(const Duration(hours: 1));
 
       _selectedDate = DateTime(start.year, start.month, start.day);
       _recurrenceEndDate = _selectedDate.add(const Duration(days: 30));
       _selectedEndDate = event.allDay
-          ? DateTime(end.year, end.month, end.day)
-              .subtract(const Duration(days: 1))
+          ? DateTime(
+              end.year,
+              end.month,
+              end.day,
+            ).subtract(const Duration(days: 1))
           : _selectedDate;
 
       if (!_isEditingSingleOccurrence) {
@@ -1488,8 +1519,14 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
       return '$year$month$day';
     }
 
-    final localEndOfDay =
-        DateTime(value.year, value.month, value.day, 23, 59, 59);
+    final localEndOfDay = DateTime(
+      value.year,
+      value.month,
+      value.day,
+      23,
+      59,
+      59,
+    );
     final utc = localEndOfDay.toUtc();
 
     final year = utc.year.toString().padLeft(4, '0');
@@ -1689,12 +1726,12 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
 
     final sheetTitle = _isEditing
         ? _isEditingSingleOccurrence
-            ? 'Edit this event'
-            : _isEditingRecurringSeriesMetadata
-                ? 'Edit series details'
-                : widget.initialEvent!.recurring
-                    ? 'Edit series'
-                    : 'Edit event'
+              ? 'Edit this event'
+              : _isEditingRecurringSeriesMetadata
+              ? 'Edit series details'
+              : widget.initialEvent!.recurring
+              ? 'Edit series'
+              : 'Edit event'
         : 'Add event';
 
     return SafeArea(
@@ -1854,9 +1891,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                               ],
                               onChanged: (value) {
                                 if (value != null) {
-                                  setState(
-                                    () => _selectedRecurrence = value,
-                                  );
+                                  setState(() => _selectedRecurrence = value);
                                 }
                               },
                               enabled: !_isSubmitting,
@@ -1881,9 +1916,7 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                                 ],
                                 onChanged: (value) {
                                   if (value != null) {
-                                    setState(
-                                      () => _recurrenceEnd = value,
-                                    );
+                                    setState(() => _recurrenceEnd = value);
                                   }
                                 },
                                 enabled: !_isSubmitting,
@@ -1934,10 +1967,8 @@ class _CreateEventSheetState extends State<_CreateEventSheet> {
                           ),
                           child: Text(
                             'Series date, time, and repeat settings are preserved.',
-                            style:
-                                Theme.of(context).textTheme.bodySmall?.copyWith(
-                                      color: CaleeColors.textSecondary,
-                                    ),
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(color: CaleeColors.textSecondary),
                           ),
                         ),
                       ],
@@ -2172,10 +2203,7 @@ class _CalendarChooserSheetState extends State<_CalendarChooserSheet> {
         padding: const EdgeInsets.symmetric(vertical: CaleeSpacing.lg),
         child: Text(
           'No calendars',
-          style: const TextStyle(
-            color: CaleeColors.textTertiary,
-            fontSize: 15,
-          ),
+          style: const TextStyle(color: CaleeColors.textTertiary, fontSize: 15),
           textAlign: TextAlign.center,
         ),
       );
@@ -2350,10 +2378,7 @@ class _CalendarChooserRow extends StatelessWidget {
 // ─── Calendar visibility dot ──────────────────────────────────────────────────
 
 class _CalendarVisibilityDot extends StatelessWidget {
-  const _CalendarVisibilityDot({
-    required this.color,
-    required this.isVisible,
-  });
+  const _CalendarVisibilityDot({required this.color, required this.isVisible});
 
   final Color color;
   final bool isVisible;
@@ -2494,10 +2519,10 @@ class _CalendarDetailSheetState extends State<_CalendarDetailSheet> {
         : 'Delete Calendar?';
     final body = isSubscription
         ? 'This removes "${cal.name}" from Calee. '
-            'The original external calendar and feed are not changed. '
-            'This cannot be undone from Calee.'
+              'The original external calendar and feed are not changed. '
+              'This cannot be undone from Calee.'
         : 'Delete "${cal.name}" and its events from Calee? '
-            'This cannot be undone.';
+              'This cannot be undone.';
     final confirmLabel = isSubscription ? 'Unsubscribe' : 'Delete Calendar';
 
     final confirmed = await CaleeDestructiveDialog.show(
@@ -2617,10 +2642,7 @@ class _CalendarDetailSheetState extends State<_CalendarDetailSheet> {
           CaleeSection(
             children: [
               if (cal.serviceName.trim().isNotEmpty)
-                _DetailInfoRow(
-                  label: 'Account',
-                  value: cal.serviceName.trim(),
-                ),
+                _DetailInfoRow(label: 'Account', value: cal.serviceName.trim()),
               _DetailInfoRow(
                 label: 'Visibility',
                 value: widget.initiallyVisible ? 'Shown' : 'Hidden',
@@ -2630,8 +2652,7 @@ class _CalendarDetailSheetState extends State<_CalendarDetailSheet> {
               if (cal.readOnly)
                 const _DetailInfoRow(label: 'Access', value: 'Read-only'),
               // Show source host only — never the full URL (may contain tokens)
-              if (host != null)
-                _DetailInfoRow(label: 'Source', value: host),
+              if (host != null) _DetailInfoRow(label: 'Source', value: host),
             ],
           ),
           const SizedBox(height: CaleeSpacing.sectionSpacing),
@@ -2855,10 +2876,12 @@ class _DetailActionRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final textColor =
-        isDestructive ? CaleeColors.destructive : CaleeColors.textPrimary;
-    final iconColor =
-        isDestructive ? CaleeColors.destructive : CaleeColors.primary;
+    final textColor = isDestructive
+        ? CaleeColors.destructive
+        : CaleeColors.textPrimary;
+    final iconColor = isDestructive
+        ? CaleeColors.destructive
+        : CaleeColors.primary;
 
     return InkWell(
       onTap: onTap,

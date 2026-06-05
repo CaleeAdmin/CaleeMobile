@@ -33,8 +33,8 @@ class FamilySetupPage extends StatelessWidget {
               Text(
                 'Family members are used to assign chores. Please complete family setup in Calee Portal first.',
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: CaleeColors.textSecondary,
-                    ),
+                  color: CaleeColors.textSecondary,
+                ),
                 textAlign: TextAlign.center,
               ),
               if (portalUrl != null) ...[
@@ -43,7 +43,10 @@ class FamilySetupPage extends StatelessWidget {
                   onPressed: () async {
                     final uri = Uri.tryParse(portalUrl!);
                     if (uri != null) {
-                      await launchUrl(uri, mode: LaunchMode.externalApplication);
+                      await launchUrl(
+                        uri,
+                        mode: LaunchMode.externalApplication,
+                      );
                     }
                   },
                   child: const Text('Open Calee Portal'),

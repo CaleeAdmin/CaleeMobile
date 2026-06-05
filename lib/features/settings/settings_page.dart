@@ -74,8 +74,7 @@ class _SettingsPageState extends State<SettingsPage> {
     }
 
     try {
-      final fresh =
-          await _controller.ensureDefaultFamilyAndRefreshBootstrap();
+      final fresh = await _controller.ensureDefaultFamilyAndRefreshBootstrap();
 
       if (!mounted) return;
       widget.onBootstrapRefreshed?.call(fresh);
@@ -100,9 +99,9 @@ class _SettingsPageState extends State<SettingsPage> {
       if (!mounted) return;
       debugPrint('[SettingsPage] Family setup failed: $e\n$st');
       if (kDebugMode) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Family setup error: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Family setup error: $e')));
       }
       _showFamilySetupPage();
     }
@@ -155,17 +154,20 @@ class _SettingsPageState extends State<SettingsPage> {
     final isLoadingPrefs = _controller.isLoadingPreferences;
     final isOpeningFamily = _controller.isOpeningFamily;
 
-    final writableCalendars =
-        calendars.where((c) => c.isCalendarKind && !c.readOnly).toList();
+    final writableCalendars = calendars
+        .where((c) => c.isCalendarKind && !c.readOnly)
+        .toList();
     final taskCalendars = calendars.where((c) => c.isTaskKind).toList();
 
     final storedCalId = preferences.defaultCalendarId;
-    final defaultCal =
-        storedCalId != null ? _findById(writableCalendars, storedCalId) : null;
+    final defaultCal = storedCalId != null
+        ? _findById(writableCalendars, storedCalId)
+        : null;
 
     final storedTaskId = preferences.defaultTaskListId;
-    final defaultTask =
-        storedTaskId != null ? _findById(taskCalendars, storedTaskId) : null;
+    final defaultTask = storedTaskId != null
+        ? _findById(taskCalendars, storedTaskId)
+        : null;
 
     return ListView(
       padding: const EdgeInsets.symmetric(
@@ -216,10 +218,12 @@ class _SettingsPageState extends State<SettingsPage> {
                 label: 'First day of week',
                 value: preferences.firstDayOfWeek,
                 items: FirstDayOfWeek.values
-                    .map((v) => DropdownMenuItem(
-                          value: v,
-                          child: Text(v.displayLabel),
-                        ))
+                    .map(
+                      (v) => DropdownMenuItem(
+                        value: v,
+                        child: Text(v.displayLabel),
+                      ),
+                    )
                     .toList(),
                 onChanged: (v) {
                   if (v != null) _controller.setFirstDayOfWeek(v);
@@ -229,10 +233,12 @@ class _SettingsPageState extends State<SettingsPage> {
                 label: 'Time format',
                 value: preferences.timeFormat,
                 items: TimeFormatPref.values
-                    .map((v) => DropdownMenuItem(
-                          value: v,
-                          child: Text(v.displayLabel),
-                        ))
+                    .map(
+                      (v) => DropdownMenuItem(
+                        value: v,
+                        child: Text(v.displayLabel),
+                      ),
+                    )
                     .toList(),
                 onChanged: (v) {
                   if (v != null) _controller.setTimeFormat(v);
@@ -243,15 +249,9 @@ class _SettingsPageState extends State<SettingsPage> {
                   label: 'Default calendar',
                   value: defaultCal,
                   items: [
-                    const DropdownMenuItem(
-                      value: null,
-                      child: Text('None'),
-                    ),
+                    const DropdownMenuItem(value: null, child: Text('None')),
                     ...writableCalendars.map(
-                      (c) => DropdownMenuItem(
-                        value: c,
-                        child: Text(c.name),
-                      ),
+                      (c) => DropdownMenuItem(value: c, child: Text(c.name)),
                     ),
                   ],
                   onChanged: _controller.setDefaultCalendar,
@@ -261,15 +261,9 @@ class _SettingsPageState extends State<SettingsPage> {
                   label: 'Default task list',
                   value: defaultTask,
                   items: [
-                    const DropdownMenuItem(
-                      value: null,
-                      child: Text('None'),
-                    ),
+                    const DropdownMenuItem(value: null, child: Text('None')),
                     ...taskCalendars.map(
-                      (c) => DropdownMenuItem(
-                        value: c,
-                        child: Text(c.name),
-                      ),
+                      (c) => DropdownMenuItem(value: c, child: Text(c.name)),
                     ),
                   ],
                   onChanged: _controller.setDefaultTaskList,
@@ -295,17 +289,17 @@ class _SettingsPageState extends State<SettingsPage> {
               onTap: () {
                 Navigator.of(context)
                     .push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => CalendarCollectionsPage(
-                      hubClient: widget.hubClient,
-                      accessToken: widget.accessToken,
-                      services: _controller.bootstrap.services,
-                    ),
-                  ),
-                )
+                      MaterialPageRoute<void>(
+                        builder: (_) => CalendarCollectionsPage(
+                          hubClient: widget.hubClient,
+                          accessToken: widget.accessToken,
+                          services: _controller.bootstrap.services,
+                        ),
+                      ),
+                    )
                     .then((_) {
-                  if (mounted) _controller.refresh();
-                });
+                      if (mounted) _controller.refresh();
+                    });
               },
             ),
             CaleeListRow(
@@ -353,9 +347,9 @@ class _SettingsPageState extends State<SettingsPage> {
           children: [
             CaleeListRow(
               title: 'Sign out',
-              titleStyle: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                    color: CaleeColors.destructive,
-                  ),
+              titleStyle: Theme.of(
+                context,
+              ).textTheme.bodyLarge?.copyWith(color: CaleeColors.destructive),
               onTap: widget.onSignOut,
               trailing: const SizedBox.shrink(),
             ),
@@ -373,10 +367,7 @@ class _SettingsPageState extends State<SettingsPage> {
 // ─────────────────────────────────────────────
 
 class _ServiceRow extends StatelessWidget {
-  const _ServiceRow({
-    required this.service,
-    required this.onTap,
-  });
+  const _ServiceRow({required this.service, required this.onTap});
 
   final ClientService service;
   final VoidCallback onTap;
@@ -424,9 +415,9 @@ class _EmptyRowText extends StatelessWidget {
       ),
       child: Text(
         text,
-        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: CaleeColors.textSecondary,
-            ),
+        style: Theme.of(
+          context,
+        ).textTheme.bodyMedium?.copyWith(color: CaleeColors.textSecondary),
       ),
     );
   }
