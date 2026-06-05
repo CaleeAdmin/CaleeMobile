@@ -65,10 +65,9 @@ class _StubHubClient extends CaleeHubClient {
   _StubHubClient({
     List<ClientCalendar>? calendars,
     ClientBootstrap? bootstrap,
-    bool failEnsure = false,
+    this._failEnsure = false,
   }) : _calendars = calendars ?? [],
-       _bootstrap = bootstrap ?? _emptyBootstrap(),
-       _failEnsure = failEnsure;
+       _bootstrap = bootstrap ?? _emptyBootstrap();
 
   final List<ClientCalendar> _calendars;
   final ClientBootstrap _bootstrap;
