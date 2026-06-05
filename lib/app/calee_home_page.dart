@@ -89,11 +89,14 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
 
   @override
   Widget build(BuildContext context) {
-    final tab = _tabs[_selectedIndex];
-
     return Scaffold(
-      appBar: _selectedIndex == 0 ? null : AppBar(title: Text(tab.title)),
-      body: tab.page,
+      appBar: _selectedIndex == 0
+          ? null
+          : AppBar(title: Text(_tabs[_selectedIndex].title)),
+      body: IndexedStack(
+        index: _selectedIndex,
+        children: _tabs.map((tab) => tab.page).toList(),
+      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _selectedIndex,
         onDestinationSelected: (index) {
