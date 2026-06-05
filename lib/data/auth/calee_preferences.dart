@@ -1,8 +1,8 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
-/// Lightweight local user preferences stored via flutter_secure_storage.
-/// These are non-sensitive UI preferences; secure_storage is used simply
-/// because it is already a project dependency.
+/// Lightweight local user preferences stored in SharedPreferences.
+/// One-time migration from FlutterSecureStorage is performed on first load.
 class CaleePreferences {
   CaleePreferences();
 
@@ -11,19 +11,21 @@ class CaleePreferences {
   static const _defaultCalendarIdKey = 'calee_pref_default_calendar_id';
   static const _defaultTaskListIdKey = 'calee_pref_default_task_list_id';
 
-  final FlutterSecureStorage _storage = const FlutterSecureStorage();
+  static const _migrationDoneKey = 'calee_pref_migrated_to_shared_prefs';
 
   // ── Load all ─────────────────────────────────────────────────────────────
 
   Future<StoredPreferences> load() async {
     try {
-      final all = await _storage.readAll();
+      final prefs = await SharedPreferences.getInstance();
+      await _migrateIfNeeded(prefs);
       return StoredPreferences(
         firstDayOfWeek:
-            FirstDayOfWeek.fromString(all[_firstDayOfWeekKey]),
-        timeFormat: TimeFormatPref.fromString(all[_timeFormatKey]),
-        defaultCalendarId: all[_defaultCalendarIdKey],
-        defaultTaskListId: all[_defaultTaskListIdKey],
+            FirstDayOfWeek.fromString(prefs.getString(_firstDayOfWeekKey)),
+        timeFormat:
+            TimeFormatPref.fromString(prefs.getString(_timeFormatKey)),
+        defaultCalendarId: prefs.getString(_defaultCalendarIdKey),
+        defaultTaskListId: prefs.getString(_defaultTaskListIdKey),
       );
     } catch (_) {
       return const StoredPreferences();
@@ -32,26 +34,60 @@ class CaleePreferences {
 
   // ── Save individual ───────────────────────────────────────────────────────
 
-  Future<void> saveFirstDayOfWeek(FirstDayOfWeek value) =>
-      _storage.write(key: _firstDayOfWeekKey, value: value.storageValue);
+  Future<void> saveFirstDayOfWeek(FirstDayOfWeek value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_firstDayOfWeekKey, value.storageValue);
+  }
 
-  Future<void> saveTimeFormat(TimeFormatPref value) =>
-      _storage.write(key: _timeFormatKey, value: value.storageValue);
+  Future<void> saveTimeFormat(TimeFormatPref value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_timeFormatKey, value.storageValue);
+  }
 
   Future<void> saveDefaultCalendarId(String? calendarId) async {
+    final prefs = await SharedPreferences.getInstance();
     if (calendarId == null) {
-      await _storage.delete(key: _defaultCalendarIdKey);
+      await prefs.remove(_defaultCalendarIdKey);
     } else {
-      await _storage.write(key: _defaultCalendarIdKey, value: calendarId);
+      await prefs.setString(_defaultCalendarIdKey, calendarId);
     }
   }
 
-  Future<void> saveDefaultTaskListId(String? calendarId) async {
-    if (calendarId == null) {
-      await _storage.delete(key: _defaultTaskListIdKey);
+  Future<void> saveDefaultTaskListId(String? taskListId) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (taskListId == null) {
+      await prefs.remove(_defaultTaskListIdKey);
     } else {
-      await _storage.write(key: _defaultTaskListIdKey, value: calendarId);
+      await prefs.setString(_defaultTaskListIdKey, taskListId);
     }
+  }
+
+  // ── Migration ─────────────────────────────────────────────────────────────
+
+  Future<void> _migrateIfNeeded(SharedPreferences prefs) async {
+    if (prefs.getBool(_migrationDoneKey) == true) return;
+
+    try {
+      const secure = FlutterSecureStorage();
+      final all = await secure.readAll();
+
+      for (final key in [
+        _firstDayOfWeekKey,
+        _timeFormatKey,
+        _defaultCalendarIdKey,
+        _defaultTaskListIdKey,
+      ]) {
+        final value = all[key];
+        if (value != null && value.isNotEmpty) {
+          await prefs.setString(key, value);
+          await secure.delete(key: key);
+        }
+      }
+    } catch (_) {
+      // Migration is best-effort; failures should not block app startup.
+    }
+
+    await prefs.setBool(_migrationDoneKey, true);
   }
 }
 
