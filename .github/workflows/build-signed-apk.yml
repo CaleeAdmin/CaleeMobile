@@ -102,6 +102,8 @@ jobs:
       - name: Build signed APK
         run: |
           flutter build apk --release \
+            --obfuscate \
+            --split-debug-info=build/symbols \
             --build-name="${{ steps.build_meta.outputs.build_name }}" \
             --build-number="${{ steps.build_meta.outputs.build_number }}"
         env:
@@ -119,6 +121,8 @@ jobs:
       - name: Build signed Android App Bundle
         run: |
           flutter build appbundle --release \
+            --obfuscate \
+            --split-debug-info=build/symbols \
             --build-name="${{ steps.build_meta.outputs.build_name }}" \
             --build-number="${{ steps.build_meta.outputs.build_number }}"
         env:
@@ -275,6 +279,13 @@ jobs:
         with:
           name: calee-mobile-native-debug-symbols-${{ steps.build_meta.outputs.sanitized_build_name }}
           path: ${{ steps.native_symbols.outputs.zip_path }}
+          if-no-files-found: error
+
+      - name: Upload Dart obfuscation symbols artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: calee-mobile-dart-symbols-${{ steps.build_meta.outputs.sanitized_build_name }}
+          path: build/symbols
           if-no-files-found: error
 
       - name: Clean up signing files
