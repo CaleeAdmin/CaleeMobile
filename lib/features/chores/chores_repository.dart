@@ -89,6 +89,14 @@ class ChoresRepository {
     );
   }
 
+  String _rawCalendarId(ClientCalendar calendar) {
+    final prefix = '${calendar.serviceId}:';
+    if (calendar.id.startsWith(prefix)) {
+      return calendar.id.substring(prefix.length);
+    }
+    return calendar.id;
+  }
+
   Future<void> createChore({
     required ClientCalendar calendar,
     required String title,
@@ -99,6 +107,7 @@ class ChoresRepository {
     required int points,
   }) async {
     final household = primaryHousehold;
+    final calendarId = _rawCalendarId(calendar);
     ClientChore createdChore;
     bool atomicSucceeded = false;
 
@@ -106,7 +115,7 @@ class ChoresRepository {
       createdChore = await hubClient.createChore(
         accessToken: accessToken,
         serviceId: calendar.serviceId,
-        calendarId: calendar.id,
+        calendarId: calendarId,
         title: title,
         scheduledAt: scheduledAt,
         description: description,
@@ -124,7 +133,7 @@ class ChoresRepository {
       createdChore = await hubClient.createChore(
         accessToken: accessToken,
         serviceId: calendar.serviceId,
-        calendarId: calendar.id,
+        calendarId: calendarId,
         title: title,
         scheduledAt: scheduledAt,
         description: description,

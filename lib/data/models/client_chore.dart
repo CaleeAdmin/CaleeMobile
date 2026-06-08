@@ -1,3 +1,43 @@
+String normalizeChoreKind(String? value) {
+  final raw = value?.trim() ?? '';
+  if (raw.isEmpty) return 'baseChore';
+
+  switch (raw) {
+    case 'chore':
+    case 'base_chore':
+    case 'baseChore':
+      return 'baseChore';
+    case 'completion_log':
+    case 'completionLog':
+      return 'completionLog';
+    default:
+      return raw;
+  }
+}
+
+String normalizeChoreSection(String? value) {
+  final raw = value?.trim() ?? '';
+  if (raw.isEmpty) return 'todoToday';
+
+  switch (raw) {
+    case 'today':
+    case 'todo_today':
+    case 'todoToday':
+      return 'todoToday';
+    case 'done_today':
+    case 'done-today':
+    case 'completedToday':
+    case 'doneToday':
+      return 'doneToday';
+    case 'future':
+    case 'history':
+    case 'overdue':
+      return raw;
+    default:
+      return raw;
+  }
+}
+
 class ClientChoreList {
   const ClientChoreList({
     required this.from,
@@ -58,12 +98,12 @@ class ClientChore {
       scheduledDate: json['scheduledDate'] as String?,
       description: json['description'] as String?,
       source: json['source'] as String? ?? '',
-      kind: json['kind'] as String? ?? 'baseChore',
+      kind: normalizeChoreKind(json['kind'] as String?),
       choreUid: json['choreUid'] as String?,
       parentChoreUid: json['parentChoreUid'] as String?,
       completionLogId: json['completionLogId'] as String?,
       completedToday: json['completedToday'] as bool? ?? false,
-      section: json['section'] as String? ?? 'future',
+      section: normalizeChoreSection(json['section'] as String?),
       recurrence: json['recurrence'] as String?,
       points: json['points'] is int ? json['points'] as int : 1,
       metadataPoints: json['metadataPoints'] is int
@@ -114,7 +154,7 @@ class ClientChore {
 
   bool get canToggleCompletion {
     if (completionActionId.trim().isEmpty) return false;
-    if (isCompletionLog || section == 'history') return false;
+    if (isCompletionLog || normalizedSection == 'history') return false;
     return true;
   }
 
@@ -124,7 +164,10 @@ class ClientChore {
       assigneeName != null &&
       assigneeName!.trim().isNotEmpty;
 
-  bool get isCompletionLog => kind == 'completionLog';
-  bool get isBaseChore => kind == 'baseChore';
+  String get normalizedKind => normalizeChoreKind(kind);
+  String get normalizedSection => normalizeChoreSection(section);
+
+  bool get isCompletionLog => normalizedKind == 'completionLog';
+  bool get isBaseChore => normalizedKind == 'baseChore';
   bool get isRecurring => recurrence != null && recurrence!.trim().isNotEmpty;
 }
