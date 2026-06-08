@@ -24,7 +24,7 @@ Map<String, List<ClientChore>> groupChoresBySection(
   final grouped = <String, List<ClientChore>>{};
 
   for (final chore in chores) {
-    final apiSection = chore.section.trim().isEmpty ? 'future' : chore.section;
+    final apiSection = chore.normalizedSection;
     final uiSection = apiSection == 'future'
         ? _futureSubsection(
             chore,
@@ -91,7 +91,8 @@ List<String> choreSubtitleParts({
   required String calendarName,
   required String scheduledLabel,
 }) {
-  final isHistory = chore.isCompletionLog || chore.section == 'history';
+  final isHistory =
+      chore.isCompletionLog || chore.normalizedSection == 'history';
 
   if (isHistory) {
     return [

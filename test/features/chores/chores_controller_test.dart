@@ -2,6 +2,7 @@ import 'package:calee_mobile/data/api/calee_hub_client.dart';
 import 'package:calee_mobile/data/models/client_bootstrap.dart';
 import 'package:calee_mobile/data/models/client_calendar.dart';
 import 'package:calee_mobile/data/models/client_chore.dart';
+import 'package:calee_mobile/data/models/client_chore_metadata.dart';
 import 'package:calee_mobile/data/models/client_person.dart';
 import 'package:calee_mobile/features/chores/chores_controller.dart';
 import 'package:calee_mobile/features/chores/chores_repository.dart';
@@ -28,6 +29,190 @@ class _AlwaysFailHubClient extends CaleeHubClient {
     required String from,
     required String to,
   }) => Future.error(Exception('network error'));
+}
+
+// Helpers for repository mutation tests.
+ClientCalendar _calendar(String id) => ClientCalendar(
+  id: id,
+  serviceId: 'portal',
+  serviceName: 'Portal',
+  name: 'Chores',
+  components: const ['VTODO'],
+  primaryKind: 'chores',
+  supportsEvents: false,
+  supportsTasks: false,
+  supportsChores: true,
+  readOnly: false,
+  isSubscription: false,
+  source: '',
+);
+
+ClientContext _household() => const ClientContext(
+  id: 'household-1',
+  type: 'household',
+  name: 'Household',
+  role: 'admin',
+  status: 'active',
+);
+
+ClientChore _chore({String id = 'chore-1', String? choreUid = 'uid-1'}) =>
+    ClientChore(
+      id: id,
+      calendarId: 'cal-1',
+      serviceId: 'portal',
+      serviceName: 'Portal',
+      title: 'Chore',
+      scheduledAt: null,
+      scheduledDate: null,
+      description: null,
+      source: '',
+      kind: 'baseChore',
+      choreUid: choreUid,
+      parentChoreUid: null,
+      completionLogId: null,
+      completedToday: false,
+      section: 'todoToday',
+      recurrence: null,
+      points: 1,
+      metadataPoints: null,
+      assigneePersonId: null,
+      assigneeName: null,
+      assigneeAvatarColor: null,
+      approvalState: 'none',
+    );
+
+class _CreateTrackingHubClient extends CaleeHubClient {
+  _CreateTrackingHubClient({this.failAtomicCreate = false});
+
+  final bool failAtomicCreate;
+  final createCalls = <Map<String, Object?>>[];
+  final metadataCalls = <Map<String, Object?>>[];
+
+  @override
+  Future<ClientChore> createChore({
+    required String accessToken,
+    required String serviceId,
+    required String calendarId,
+    required String title,
+    String? scheduledAt,
+    String? description,
+    String? recurrence,
+    int points = 1,
+    String? householdId,
+    String? assigneePersonId,
+    int? metadataPoints,
+    String? approvalState,
+  }) async {
+    createCalls.add({
+      'serviceId': serviceId,
+      'calendarId': calendarId,
+      'assigneePersonId': assigneePersonId,
+      'householdId': householdId,
+      'metadataPoints': metadataPoints,
+      'approvalState': approvalState,
+    });
+
+    if (failAtomicCreate && createCalls.length == 1) {
+      throw const CaleeHubException(statusCode: 400, message: 'unsupported');
+    }
+
+    return _chore();
+  }
+
+  @override
+  Future<ClientChoreMetadata> updateChoreMetadata({
+    required String accessToken,
+    required String householdId,
+    required String choreUid,
+    String? assigneePersonId,
+    int? points,
+    String? approvalState,
+  }) async {
+    metadataCalls.add({
+      'householdId': householdId,
+      'choreUid': choreUid,
+      'assigneePersonId': assigneePersonId,
+      'points': points,
+      'approvalState': approvalState,
+    });
+    return ClientChoreMetadata(
+      id: null,
+      householdId: householdId,
+      choreUid: choreUid,
+      assigneePersonId: assigneePersonId,
+      points: points ?? 1,
+      approvalState: approvalState ?? 'none',
+      createdAt: null,
+      updatedAt: null,
+    );
+  }
+}
+
+class _UpdateTrackingHubClient extends CaleeHubClient {
+  _UpdateTrackingHubClient({this.failAtomicUpdate = false});
+
+  final bool failAtomicUpdate;
+  final updateCalls = <Map<String, Object?>>[];
+  final metadataCalls = <Map<String, Object?>>[];
+
+  @override
+  Future<ClientChore> updateChore({
+    required String accessToken,
+    required String choreId,
+    required String title,
+    String? scheduledAt,
+    String? description,
+    String? recurrence,
+    int points = 1,
+    String? householdId,
+    String? choreUid,
+    String? assigneePersonId,
+    int? metadataPoints,
+    String? approvalState,
+  }) async {
+    updateCalls.add({
+      'choreId': choreId,
+      'assigneePersonId': assigneePersonId,
+      'householdId': householdId,
+      'choreUid': choreUid,
+      'metadataPoints': metadataPoints,
+      'approvalState': approvalState,
+    });
+
+    if (failAtomicUpdate && updateCalls.length == 1) {
+      throw const CaleeHubException(statusCode: 400, message: 'unsupported');
+    }
+
+    return _chore(id: choreId);
+  }
+
+  @override
+  Future<ClientChoreMetadata> updateChoreMetadata({
+    required String accessToken,
+    required String householdId,
+    required String choreUid,
+    String? assigneePersonId,
+    int? points,
+    String? approvalState,
+  }) async {
+    metadataCalls.add({
+      'householdId': householdId,
+      'choreUid': choreUid,
+      'assigneePersonId': assigneePersonId,
+      'points': points,
+      'approvalState': approvalState,
+    });
+    return ClientChoreMetadata(
+      id: null,
+      householdId: householdId,
+      choreUid: choreUid,
+      assigneePersonId: assigneePersonId,
+      points: points ?? 1,
+      approvalState: approvalState ?? 'none',
+      createdAt: null,
+      updatedAt: null,
+    );
+  }
 }
 
 // A CaleeHubClient that always succeeds with empty data.
@@ -59,6 +244,14 @@ ChoresRepository _repositoryWith(CaleeHubClient client) => ChoresRepository(
   services: [],
   households: [],
 );
+
+ChoresRepository _repositoryWithHousehold(CaleeHubClient client) =>
+    ChoresRepository(
+      hubClient: client,
+      accessToken: 'token',
+      services: const [],
+      households: [_household()],
+    );
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
@@ -128,6 +321,106 @@ void main() {
 
       controller.dispose();
     });
+  });
+
+  group('ChoresRepository createChore', () {
+    test('strips service-prefixed calendar id before create POST', () async {
+      final client = _CreateTrackingHubClient();
+      final repo = _repositoryWithHousehold(client);
+
+      await repo.createChore(
+        calendar: _calendar('portal:cal-1'),
+        title: 'Chore',
+        assigneePersonId: 'person-1',
+        points: 3,
+      );
+
+      expect(client.createCalls.single['serviceId'], 'portal');
+      expect(client.createCalls.single['calendarId'], 'cal-1');
+    });
+
+    test('keeps raw calendar id raw before create POST', () async {
+      final client = _CreateTrackingHubClient();
+      final repo = _repositoryWithHousehold(client);
+
+      await repo.createChore(
+        calendar: _calendar('cal-1'),
+        title: 'Chore',
+        assigneePersonId: 'person-1',
+        points: 3,
+      );
+
+      expect(client.createCalls.single['calendarId'], 'cal-1');
+    });
+
+    test('unassigned atomic create sends empty assignee string', () async {
+      final client = _CreateTrackingHubClient();
+      final repo = _repositoryWithHousehold(client);
+
+      await repo.createChore(
+        calendar: _calendar('cal-1'),
+        title: 'Chore',
+        assigneePersonId: null,
+        points: 3,
+      );
+
+      expect(client.createCalls.single['assigneePersonId'], '');
+    });
+
+    test(
+      'unassigned create fallback metadata sends empty assignee string',
+      () async {
+        final client = _CreateTrackingHubClient(failAtomicCreate: true);
+        final repo = _repositoryWithHousehold(client);
+
+        await repo.createChore(
+          calendar: _calendar('portal:cal-1'),
+          title: 'Chore',
+          assigneePersonId: null,
+          points: 3,
+        );
+
+        expect(client.createCalls.first['assigneePersonId'], '');
+        expect(client.createCalls.last['calendarId'], 'cal-1');
+        expect(client.metadataCalls.single['assigneePersonId'], '');
+      },
+    );
+  });
+
+  group('ChoresRepository updateChore', () {
+    test('unassigned atomic update sends empty assignee string', () async {
+      final client = _UpdateTrackingHubClient();
+      final repo = _repositoryWithHousehold(client);
+
+      await repo.updateChore(
+        chore: _chore(),
+        title: 'Chore',
+        assigneePersonId: null,
+        points: 3,
+        approvalState: 'none',
+      );
+
+      expect(client.updateCalls.single['assigneePersonId'], '');
+    });
+
+    test(
+      'unassigned update fallback metadata sends empty assignee string',
+      () async {
+        final client = _UpdateTrackingHubClient(failAtomicUpdate: true);
+        final repo = _repositoryWithHousehold(client);
+
+        await repo.updateChore(
+          chore: _chore(),
+          title: 'Chore',
+          assigneePersonId: null,
+          points: 3,
+          approvalState: 'none',
+        );
+
+        expect(client.updateCalls.first['assigneePersonId'], '');
+        expect(client.metadataCalls.single['assigneePersonId'], '');
+      },
+    );
   });
 
   group('points validation', () {

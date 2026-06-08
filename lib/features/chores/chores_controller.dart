@@ -97,7 +97,7 @@ class ChoresController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      if (chore.completedToday || chore.section == 'doneToday') {
+      if (chore.completedToday || chore.normalizedSection == 'doneToday') {
         await repository.undoCompletion(chore);
       } else {
         await repository.completeChore(chore);

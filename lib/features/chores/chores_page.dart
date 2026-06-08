@@ -274,7 +274,8 @@ class _ChoresPageState extends State<ChoresPage> {
     final choreId = chore.completionActionId;
     if (choreId.trim().isEmpty) return;
 
-    final isDone = chore.completedToday || chore.section == 'doneToday';
+    final isDone =
+        chore.completedToday || chore.normalizedSection == 'doneToday';
     final actions = <CaleeAction>[
       if (chore.canToggleCompletion)
         CaleeAction(
@@ -561,13 +562,17 @@ class _ChoresPageState extends State<ChoresPage> {
 
   int _todayCompletionPoints(List<ClientChore> chores) {
     return chores
-        .where((chore) => chore.section == 'doneToday' || chore.completedToday)
+        .where(
+          (chore) =>
+              chore.normalizedSection == 'doneToday' || chore.completedToday,
+        )
         .fold<int>(0, (total, chore) => total + chore.points);
   }
 
   String _formatScheduledAt(ClientChore chore) {
     final value = chore.scheduledDate ?? chore.scheduledAt;
-    final isHistory = chore.isCompletionLog || chore.section == 'history';
+    final isHistory =
+        chore.isCompletionLog || chore.normalizedSection == 'history';
 
     if (value == null || value.trim().isEmpty) {
       return isHistory ? 'Completed date unknown' : 'No scheduled date';
@@ -669,7 +674,7 @@ class _ChoresPageState extends State<ChoresPage> {
               onMoreTap:
                   chore.completionActionId.trim().isNotEmpty &&
                       !chore.isCompletionLog &&
-                      chore.section != 'history'
+                      chore.normalizedSection != 'history'
                   ? () => _showChoreActions(chore)
                   : null,
             ),
@@ -1152,8 +1157,10 @@ class _ChoreRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDone = chore.completedToday || chore.section == 'doneToday';
-    final isHistory = chore.isCompletionLog || chore.section == 'history';
+    final isDone =
+        chore.completedToday || chore.normalizedSection == 'doneToday';
+    final isHistory =
+        chore.isCompletionLog || chore.normalizedSection == 'history';
 
     final subtitleParts = choreSubtitleParts(
       chore: chore,

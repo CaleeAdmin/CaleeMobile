@@ -47,6 +47,26 @@ ClientChore _chore({
 final _monday = DateTime(2026, 6, 1); // weekday = 1
 
 void main() {
+  group('ClientChore kind normalization', () {
+    test('base chore aliases are treated as base chores', () {
+      expect(_chore(kind: 'baseChore').isBaseChore, isTrue);
+      expect(_chore(kind: 'chore').isBaseChore, isTrue);
+      expect(_chore(kind: 'base_chore').isBaseChore, isTrue);
+    });
+
+    test('completion log aliases are treated as completion logs', () {
+      expect(_chore(kind: 'completionLog').isCompletionLog, isTrue);
+      expect(_chore(kind: 'completion_log').isCompletionLog, isTrue);
+    });
+
+    test('chore alias keeps completion actions actionable', () {
+      final chore = _chore(id: 'chore-1', kind: 'chore', section: 'today');
+
+      expect(chore.completionActionId, 'chore-1');
+      expect(chore.canToggleCompletion, isTrue);
+    });
+  });
+
   // ── groupChoresBySection ─────────────────────────────────────────────────
 
   group('groupChoresBySection', () {
@@ -117,15 +137,30 @@ void main() {
       expect(groups['laterThisWeek'], isNotNull);
     });
 
-    test('empty string section treated as future', () {
-      final tomorrow = _monday.add(const Duration(days: 1));
-      final chore = _chore(
-        section: '',
-        scheduledDate:
-            '${tomorrow.year}-${tomorrow.month.toString().padLeft(2, '0')}-${tomorrow.day.toString().padLeft(2, '0')}',
+    test('section aliases are normalized into canonical groups', () {
+      final chores = [
+        _chore(id: 'today', section: 'today'),
+        _chore(id: 'todo_today', section: 'todo_today'),
+        _chore(id: 'done_today', section: 'done_today'),
+        _chore(id: 'completedToday', section: 'completedToday'),
+      ];
+
+      final groups = groupChoresBySection(chores, _monday);
+
+      expect(
+        groups['todoToday']?.map((c) => c.id),
+        containsAll(['today', 'todo_today']),
       );
+      expect(
+        groups['doneToday']?.map((c) => c.id),
+        containsAll(['done_today', 'completedToday']),
+      );
+    });
+
+    test('empty string section treated as todoToday', () {
+      final chore = _chore(section: '');
       final groups = groupChoresBySection([chore], _monday);
-      expect(groups['tomorrow'], isNotNull);
+      expect(groups['todoToday'], isNotNull);
     });
   });
 
