@@ -2,7 +2,7 @@ name: calee_mobile
 description: "Mobile calendar, tasks, chores, and household planning for Calee families."
 publish_to: 'none'
 
-version: 0.0.1+1
+version: 0.0.2+2
 
 environment:
   sdk: ^3.12.0
