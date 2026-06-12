@@ -65,6 +65,9 @@ class CalendarCollectionsPage extends StatefulWidget {
     this.initialCreateKind,
     this.autoOpenCreate = false,
     this.autoOpenSubscribe = false,
+    this.autoOpenSubscribeForm = false,
+    this.initialSubscriptionUrl,
+    this.initialSubscriptionName,
     super.key,
   });
 
@@ -74,6 +77,12 @@ class CalendarCollectionsPage extends StatefulWidget {
   final String? initialCreateKind;
   final bool autoOpenCreate;
   final bool autoOpenSubscribe;
+
+  /// When true, auto-opens the subscribe sheet with [initialSubscriptionUrl]
+  /// and [initialSubscriptionName] pre-filled.
+  final bool autoOpenSubscribeForm;
+  final String? initialSubscriptionUrl;
+  final String? initialSubscriptionName;
 
   @override
   State<CalendarCollectionsPage> createState() =>
@@ -99,10 +108,12 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
     super.initState();
     _future = _loadCalendars();
 
-    if (widget.autoOpenCreate || widget.autoOpenSubscribe) {
+    if (widget.autoOpenCreate ||
+        widget.autoOpenSubscribe ||
+        widget.autoOpenSubscribeForm) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        if (widget.autoOpenSubscribe) {
+        if (widget.autoOpenSubscribe || widget.autoOpenSubscribeForm) {
           _openSubscribeSheet();
         } else {
           _openCreateSheet();
@@ -204,6 +215,8 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
       title: 'Subscribe from link',
       child: _SubscriptionFormContent(
         services: services,
+        initialName: widget.initialSubscriptionName,
+        initialUrl: widget.initialSubscriptionUrl,
         onSubmit:
             ({
               required String name,
@@ -347,8 +360,6 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
     final preview = await _loadDeletePreview(calendar);
     if (!mounted) return;
 
-    // Keep a custom AlertDialog so the full item-count preview is clearly
-    // shown — CaleeDestructiveDialog's single-line body is too limited here.
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -360,20 +371,21 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
             children: [
               Text('This will permanently delete "${calendar.name}".'),
               const SizedBox(height: 12),
-              if (preview.itemCountsAvailable && preview.hasItems) ...[
-                Text('Known items found in ${preview.rangeDescription}:'),
-                const SizedBox(height: 4),
-                ...preview.lines.map(
-                  (line) => Padding(
-                    padding: const EdgeInsets.only(top: 4),
-                    child: Text('• $line'),
+              if (preview.itemCountsAvailable && preview.hasItems) ...
+                [
+                  Text('Known items found in ${preview.rangeDescription}:'),
+                  const SizedBox(height: 4),
+                  ...preview.lines.map(
+                    (line) => Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text('• $line'),
+                    ),
                   ),
-                ),
-              ] else if (preview.itemCountsAvailable) ...[
-                Text('No items were found in ${preview.rangeDescription}.'),
-              ] else ...[
-                const Text('Item counts could not be loaded right now.'),
-              ],
+                ]
+              else if (preview.itemCountsAvailable) ...
+                [Text('No items were found in ${preview.rangeDescription}.')]
+              else ...
+                [const Text('Item counts could not be loaded right now.')],
               const SizedBox(height: 12),
               const Text(
                 'Older or future items may not be shown in this preview.',
@@ -696,7 +708,6 @@ class _CollectionFormContentState extends State<_CollectionFormContent> {
     _colorController = TextEditingController(text: widget.initialColor ?? '');
     _selectedService = widget.services.isEmpty ? null : widget.services.first;
     _selectedKind = widget.initialPrimaryKind;
-    // Rebuild whenever the color text changes so palette swatches update.
     _colorController.addListener(() => setState(() {}));
   }
 
@@ -764,28 +775,27 @@ class _CollectionFormContentState extends State<_CollectionFormContent> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Service picker — only shown when creating
-            if (widget.services.isNotEmpty) ...[
-              DropdownButtonFormField<ClientService>(
-                initialValue: _selectedService,
-                decoration: const InputDecoration(labelText: 'Service'),
-                items: [
-                  for (final service in widget.services)
-                    DropdownMenuItem(
-                      value: service,
-                      child: Text(service.displayName),
-                    ),
-                ],
-                onChanged: _isSubmitting
-                    ? null
-                    : (service) => setState(() => _selectedService = service),
-                validator: (service) =>
-                    service == null ? 'Choose a service' : null,
-              ),
-              const SizedBox(height: CaleeSpacing.sm + 4),
-            ],
-
-            // Name
+            if (widget.services.isNotEmpty) ...
+              [
+                DropdownButtonFormField<ClientService>(
+                  initialValue: _selectedService,
+                  decoration: const InputDecoration(labelText: 'Service'),
+                  items: [
+                    for (final service in widget.services)
+                      DropdownMenuItem(
+                        value: service,
+                        child: Text(service.displayName),
+                      ),
+                  ],
+                  onChanged: _isSubmitting
+                      ? null
+                      : (service) =>
+                          setState(() => _selectedService = service),
+                  validator: (service) =>
+                      service == null ? 'Choose a service' : null,
+                ),
+                const SizedBox(height: CaleeSpacing.sm + 4),
+              ],
             TextFormField(
               controller: _nameController,
               enabled: !_isSubmitting,
@@ -795,8 +805,6 @@ class _CollectionFormContentState extends State<_CollectionFormContent> {
                   (value ?? '').trim().isEmpty ? 'Enter a name' : null,
             ),
             const SizedBox(height: CaleeSpacing.sm + 4),
-
-            // Type
             DropdownButtonFormField<String>(
               initialValue: _selectedKind,
               decoration: const InputDecoration(labelText: 'Type'),
@@ -811,20 +819,18 @@ class _CollectionFormContentState extends State<_CollectionFormContent> {
                       if (kind != null) setState(() => _selectedKind = kind);
                     },
             ),
-            if (!widget.allowKindChange) ...[
-              const SizedBox(height: CaleeSpacing.xs),
-              Text(
-                'Type cannot be changed after creation. '
-                'Current type: ${_kindLabel(_selectedKind)}.',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: CaleeColors.textSecondary,
+            if (!widget.allowKindChange) ...
+              [
+                const SizedBox(height: CaleeSpacing.xs),
+                Text(
+                  'Type cannot be changed after creation. '
+                  'Current type: ${_kindLabel(_selectedKind)}.',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: CaleeColors.textSecondary,
+                  ),
                 ),
-              ),
-            ],
-
+              ],
             const SizedBox(height: CaleeSpacing.md),
-
-            // Color palette
             Text(
               'Color',
               style: theme.textTheme.bodySmall?.copyWith(
@@ -846,8 +852,6 @@ class _CollectionFormContentState extends State<_CollectionFormContent> {
               ],
             ),
             const SizedBox(height: CaleeSpacing.sm + 4),
-
-            // Custom hex field
             TextFormField(
               controller: _colorController,
               enabled: !_isSubmitting,
@@ -866,8 +870,6 @@ class _CollectionFormContentState extends State<_CollectionFormContent> {
               },
             ),
             const SizedBox(height: CaleeSpacing.md),
-
-            // Save button
             FilledButton(
               onPressed: _isSubmitting ? null : _submit,
               child: _isSubmitting
@@ -891,9 +893,13 @@ class _SubscriptionFormContent extends StatefulWidget {
   const _SubscriptionFormContent({
     required this.services,
     required this.onSubmit,
+    this.initialName,
+    this.initialUrl,
   });
 
   final List<ClientService> services;
+  final String? initialName;
+  final String? initialUrl;
   final Future<void> Function({
     required String name,
     required String url,
@@ -921,8 +927,8 @@ class _SubscriptionFormContentState extends State<_SubscriptionFormContent> {
   ];
 
   final _formKey = GlobalKey<FormState>();
-  final _nameController = TextEditingController();
-  final _urlController = TextEditingController();
+  late final TextEditingController _nameController;
+  late final TextEditingController _urlController;
   final _colorController = TextEditingController(text: '#007AFF');
 
   ClientService? _selectedService;
@@ -931,6 +937,8 @@ class _SubscriptionFormContentState extends State<_SubscriptionFormContent> {
   @override
   void initState() {
     super.initState();
+    _nameController = TextEditingController(text: widget.initialName ?? '');
+    _urlController = TextEditingController(text: widget.initialUrl ?? '');
     _selectedService = widget.services.isEmpty ? null : widget.services.first;
     _colorController.addListener(() => setState(() {}));
   }
