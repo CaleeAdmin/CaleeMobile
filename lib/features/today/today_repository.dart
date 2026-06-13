@@ -55,14 +55,12 @@ class TodayRepository {
       calendarError = e;
     }
 
-    // Tasks — load a wide range and filter locally
+    // Tasks — match the wide range used by TasksController (±2 years)
     try {
-      final yesterday = now.subtract(const Duration(days: 1));
-      final future = now.add(const Duration(days: 30));
       final taskList = await hubClient.tasks(
         accessToken: accessToken,
-        from: _formatDate(yesterday),
-        to: _formatDate(future),
+        from: _formatDate(DateTime(now.year - 2, 1, 1)),
+        to: _formatDate(DateTime(now.year + 2, 12, 31)),
       );
       final split = _splitTasks(taskList.tasks, now);
       tasksDueToday = split.$1;
@@ -71,14 +69,13 @@ class TodayRepository {
       tasksError = e;
     }
 
-    // Chores — only if any service supports it
+    // Chores — only if any service supports it; match ChoresController range (current year)
     if (_hasChoreService) {
       try {
-        final yesterday = now.subtract(const Duration(days: 1));
         final choreList = await hubClient.chores(
           accessToken: accessToken,
-          from: _formatDate(yesterday),
-          to: todayStr,
+          from: _formatDate(DateTime(now.year, 1, 1)),
+          to: _formatDate(DateTime(now.year, 12, 31)),
         );
         final split = _splitChores(choreList.chores);
         choresDueToday = split.$1;
