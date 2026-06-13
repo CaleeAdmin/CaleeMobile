@@ -10,20 +10,20 @@ import 'package:flutter_test/flutter_test.dart';
 
 class _StubHubClient extends CaleeHubClient {
   _StubHubClient({
-    this.events,
-    this.tasks,
-    this.chores,
+    ClientEventList? events,
+    ClientTaskList? tasks,
+    ClientChoreList? chores,
     this.failEvents = false,
     this.failTasks = false,
-    this.failChores = false,
-  });
+  }) : stubEvents = events,
+       stubTasks = tasks,
+       stubChores = chores;
 
-  final ClientEventList? events;
-  final ClientTaskList? tasks;
-  final ClientChoreList? chores;
+  final ClientEventList? stubEvents;
+  final ClientTaskList? stubTasks;
+  final ClientChoreList? stubChores;
   final bool failEvents;
   final bool failTasks;
-  final bool failChores;
 
   @override
   Future<ClientEventList> events({
@@ -33,7 +33,7 @@ class _StubHubClient extends CaleeHubClient {
   }) {
     if (failEvents) return Future.error(Exception('events error'));
     return Future.value(
-      this.events ?? ClientEventList(from: from, to: to, events: const []),
+      stubEvents ?? ClientEventList(from: from, to: to, events: const []),
     );
   }
 
@@ -45,7 +45,7 @@ class _StubHubClient extends CaleeHubClient {
   }) {
     if (failTasks) return Future.error(Exception('tasks error'));
     return Future.value(
-      this.tasks ?? ClientTaskList(from: from, to: to, tasks: const []),
+      stubTasks ?? ClientTaskList(from: from, to: to, tasks: const []),
     );
   }
 
@@ -55,9 +55,8 @@ class _StubHubClient extends CaleeHubClient {
     required String from,
     required String to,
   }) {
-    if (failChores) return Future.error(Exception('chores error'));
     return Future.value(
-      this.chores ?? ClientChoreList(from: from, to: to, chores: const []),
+      stubChores ?? ClientChoreList(from: from, to: to, chores: const []),
     );
   }
 }
@@ -182,7 +181,6 @@ void main() {
     });
 
     test('does not load chores when no chore service', () async {
-      var choresCalled = false;
       final client = _StubHubClient(
         chores: ClientChoreList(
           from: '',

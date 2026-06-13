@@ -181,6 +181,8 @@ class _TodayPageState extends State<TodayPage> {
     if (overview == null) return [];
 
     return [
+      _buildSummarySection(overview),
+      const SizedBox(height: CaleeSpacing.sectionSpacing),
       _buildCalendarSection(overview),
       const SizedBox(height: CaleeSpacing.sectionSpacing),
       _buildTasksSection(overview),
@@ -188,7 +190,38 @@ class _TodayPageState extends State<TodayPage> {
         const SizedBox(height: CaleeSpacing.sectionSpacing),
         _buildChoresSection(overview),
       ],
+      const SizedBox(height: CaleeSpacing.sectionSpacing),
+      _buildDisplayPlaceholder(),
     ];
+  }
+
+  // ── Summary strip ─────────────────────────────────────────────────────────
+
+  Widget _buildSummarySection(TodayOverview overview) {
+    final eventCount = overview.hasCalendarError
+        ? null
+        : overview.eventsToday.length;
+    final taskCount = overview.hasTasksError
+        ? null
+        : overview.tasksDueToday.length + overview.overdueTasks.length;
+    final choreCount = (!_hasChoreService || overview.hasChoresError)
+        ? null
+        : overview.choresDueToday.length + overview.overdueChores.length;
+
+    Widget countText(int? count) => Text(
+      count != null ? '$count' : '—',
+      style: const TextStyle(fontSize: 15, color: CaleeColors.textSecondary),
+    );
+
+    return CaleeSection(
+      title: 'Summary',
+      children: [
+        CaleeListRow(title: 'Events', trailing: countText(eventCount)),
+        CaleeListRow(title: 'Tasks', trailing: countText(taskCount)),
+        if (_hasChoreService)
+          CaleeListRow(title: 'Chores', trailing: countText(choreCount)),
+      ],
+    );
   }
 
   // ── Calendar section ─────────────────────────────────────────────────────
@@ -322,6 +355,21 @@ class _TodayPageState extends State<TodayPage> {
     );
   }
 
+  // ── Display placeholder ──────────────────────────────────────────────────
+
+  Widget _buildDisplayPlaceholder() {
+    return CaleeSection(
+      title: 'Calee Display',
+      footer: 'You will be able to link and check your Calee display here.',
+      children: [
+        const CaleeListRow(
+          title: 'Display status and setup are coming soon.',
+          titleStyle: TextStyle(fontSize: 15, color: CaleeColors.textSecondary),
+        ),
+      ],
+    );
+  }
+
   // ── Fatal error ──────────────────────────────────────────────────────────
 
   Widget _buildFatalError() {
@@ -378,4 +426,3 @@ class _TodayPageState extends State<TodayPage> {
     );
   }
 }
-
