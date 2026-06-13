@@ -145,9 +145,9 @@ class _CaleeAppState extends State<CaleeApp> {
       if (!mounted) return;
       final context = _navigatorKey.currentContext;
       if (context == null) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
     });
   }
 
@@ -181,7 +181,10 @@ class _CaleeAppState extends State<CaleeApp> {
       navigatorKey: _navigatorKey,
       theme: CaleeTheme.buildThemeData(),
       home: AnimatedBuilder(
-        animation: Listenable.merge([_sessionController, _followLinkController]),
+        animation: Listenable.merge([
+          _sessionController,
+          _followLinkController,
+        ]),
         builder: (context, _) => _buildHome(),
       ),
     );

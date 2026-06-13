@@ -57,7 +57,9 @@ class _CalendarSharingAddressPageState
         _loading = false;
       });
     } catch (e, st) {
-      debugPrint('[CalendarSharingAddressPage] load failed: $e\n$st');
+      if (kDebugMode) {
+        debugPrint('[CalendarSharingAddressPage] load failed: $e\n$st');
+      }
       if (!mounted) return;
       setState(() {
         _loading = false;
@@ -110,7 +112,9 @@ class _CalendarSharingAddressPageState
         context,
       ).showSnackBar(const SnackBar(content: Text('Sharing address reset')));
     } catch (e, st) {
-      debugPrint('[CalendarSharingAddressPage] rotate failed: $e\n$st');
+      if (kDebugMode) {
+        debugPrint('[CalendarSharingAddressPage] rotate failed: $e\n$st');
+      }
       if (!mounted) return;
       setState(() {
         _rotating = false;
