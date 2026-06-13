@@ -91,19 +91,25 @@ class _LoginPageState extends State<LoginPage> {
                   return ListView(
                     shrinkWrap: true,
                     children: [
-                      Text(
-                        'Calee',
-                        textAlign: TextAlign.center,
-                        style: theme.textTheme.displaySmall?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color: theme.colorScheme.primary,
+                      Center(
+                        child: Image.asset(
+                          'assets/calee_logo.png',
+                          width: 150,
+                          fit: BoxFit.contain,
+                          semanticLabel: 'Calee',
                         ),
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        'Sign in with your Calee Hub account',
+                        'Sign in to Calee',
                         textAlign: TextAlign.center,
                         style: theme.textTheme.titleMedium,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Manage calendars, tasks and displays connected to your Calee account.',
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.bodyMedium,
                       ),
                       const SizedBox(height: 32),
                       TextFormField(
