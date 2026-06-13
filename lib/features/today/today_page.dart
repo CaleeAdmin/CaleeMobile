@@ -140,8 +140,12 @@ class _TodayPageState extends State<TodayPage> {
   // ── Calendar section ─────────────────────────────────────────────────────
 
   Widget _buildCalendarSection(ThemeData theme, TodayOverview overview) {
+    final count = overview.eventsToday.length;
     return _Section(
       title: 'Calendar',
+      countLabel: overview.hasCalendarError || count == 0
+          ? null
+          : '$count ${count == 1 ? 'event' : 'events'} today',
       onViewAll: widget.onNavigateToCalendar,
       viewAllLabel: 'View Calendar',
       child: overview.hasCalendarError
@@ -151,7 +155,11 @@ class _TodayPageState extends State<TodayPage> {
           : Column(
               children: overview.eventsToday
                   .take(5)
-                  .map((e) => _EventRow(event: e, theme: theme))
+                  .map((e) => _EventRow(
+                        event: e,
+                        theme: theme,
+                        onTap: widget.onNavigateToCalendar,
+                      ))
                   .toList(),
             ),
     );
@@ -163,8 +171,23 @@ class _TodayPageState extends State<TodayPage> {
     final hasItems =
         overview.overdueTasks.isNotEmpty || overview.tasksDueToday.isNotEmpty;
 
+    String? countLabel;
+    if (!overview.hasTasksError && hasItems) {
+      final parts = <String>[];
+      if (overview.tasksDueToday.isNotEmpty) {
+        final n = overview.tasksDueToday.length;
+        parts.add('$n due today');
+      }
+      if (overview.overdueTasks.isNotEmpty) {
+        final n = overview.overdueTasks.length;
+        parts.add('$n overdue');
+      }
+      countLabel = parts.join(', ');
+    }
+
     return _Section(
       title: 'Tasks',
+      countLabel: countLabel,
       onViewAll: widget.onNavigateToTasks,
       viewAllLabel: 'View Tasks',
       child: overview.hasTasksError
@@ -175,12 +198,20 @@ class _TodayPageState extends State<TodayPage> {
               children: [
                 ...overview.overdueTasks
                     .take(5)
-                    .map((t) => _TaskRow(task: t, theme: theme, overdue: true)),
+                    .map((t) => _TaskRow(
+                          task: t,
+                          theme: theme,
+                          overdue: true,
+                          onTap: widget.onNavigateToTasks,
+                        )),
                 ...overview.tasksDueToday
                     .take(5)
-                    .map(
-                      (t) => _TaskRow(task: t, theme: theme, overdue: false),
-                    ),
+                    .map((t) => _TaskRow(
+                          task: t,
+                          theme: theme,
+                          overdue: false,
+                          onTap: widget.onNavigateToTasks,
+                        )),
               ],
             ),
     );
@@ -192,8 +223,23 @@ class _TodayPageState extends State<TodayPage> {
     final hasItems =
         overview.overdueChores.isNotEmpty || overview.choresDueToday.isNotEmpty;
 
+    String? countLabel;
+    if (!overview.hasChoresError && hasItems) {
+      final parts = <String>[];
+      if (overview.choresDueToday.isNotEmpty) {
+        final n = overview.choresDueToday.length;
+        parts.add('$n due today');
+      }
+      if (overview.overdueChores.isNotEmpty) {
+        final n = overview.overdueChores.length;
+        parts.add('$n overdue');
+      }
+      countLabel = parts.join(', ');
+    }
+
     return _Section(
       title: 'Chores',
+      countLabel: countLabel,
       onViewAll: widget.onNavigateToChores,
       viewAllLabel: 'View Chores',
       child: overview.hasChoresError
@@ -204,12 +250,20 @@ class _TodayPageState extends State<TodayPage> {
               children: [
                 ...overview.overdueChores
                     .take(5)
-                    .map((c) => _ChoreRow(chore: c, theme: theme, overdue: true)),
+                    .map((c) => _ChoreRow(
+                          chore: c,
+                          theme: theme,
+                          overdue: true,
+                          onTap: widget.onNavigateToChores,
+                        )),
                 ...overview.choresDueToday
                     .take(5)
-                    .map(
-                      (c) => _ChoreRow(chore: c, theme: theme, overdue: false),
-                    ),
+                    .map((c) => _ChoreRow(
+                          chore: c,
+                          theme: theme,
+                          overdue: false,
+                          onTap: widget.onNavigateToChores,
+                        )),
               ],
             ),
     );
@@ -223,7 +277,7 @@ class _TodayPageState extends State<TodayPage> {
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
         child: Text(
-          'Display status is coming soon.',
+          'Display status and setup are coming soon.',
           style: theme.textTheme.bodyMedium?.copyWith(
             color: theme.colorScheme.onSurfaceVariant,
             fontStyle: FontStyle.italic,
@@ -265,11 +319,13 @@ class _Section extends StatelessWidget {
   const _Section({
     required this.title,
     required this.child,
+    this.countLabel,
     this.onViewAll,
     this.viewAllLabel,
   });
 
   final String title;
+  final String? countLabel;
   final Widget child;
   final VoidCallback? onViewAll;
   final String? viewAllLabel;
@@ -284,14 +340,22 @@ class _Section extends StatelessWidget {
         children: [
           Row(
             children: [
-              Expanded(
-                child: Text(
-                  title,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
+              Text(
+                title,
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
                 ),
               ),
+              if (countLabel != null) ...[
+                const SizedBox(width: 8),
+                Text(
+                  countLabel!,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+              const Spacer(),
               if (onViewAll != null && viewAllLabel != null)
                 TextButton(
                   onPressed: onViewAll,
@@ -367,15 +431,17 @@ class _ErrorRow extends StatelessWidget {
 }
 
 class _EventRow extends StatelessWidget {
-  const _EventRow({required this.event, required this.theme});
+  const _EventRow({required this.event, required this.theme, this.onTap});
   final ClientEvent event;
   final ThemeData theme;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     final timeLabel = eventTimeLabel(event);
     return ListTile(
       dense: true,
+      onTap: onTap,
       leading: Icon(
         event.allDay ? Icons.event_available : Icons.schedule,
         size: 18,
@@ -397,15 +463,18 @@ class _TaskRow extends StatelessWidget {
     required this.task,
     required this.theme,
     required this.overdue,
+    this.onTap,
   });
   final ClientTask task;
   final ThemeData theme;
   final bool overdue;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     return ListTile(
       dense: true,
+      onTap: onTap,
       leading: Icon(
         Icons.radio_button_unchecked,
         size: 18,
@@ -429,15 +498,18 @@ class _ChoreRow extends StatelessWidget {
     required this.chore,
     required this.theme,
     required this.overdue,
+    this.onTap,
   });
   final ClientChore chore;
   final ThemeData theme;
   final bool overdue;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     return ListTile(
       dense: true,
+      onTap: onTap,
       leading: Icon(
         Icons.check_circle_outline,
         size: 18,
