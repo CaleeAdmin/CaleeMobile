@@ -217,8 +217,20 @@ class _CaleeAppState extends State<CaleeApp> {
           onSignIn: () => setState(() => _showingFollowSignIn = true),
           onFollowLocally: alreadyFollowed
               ? () {
-                  // Already followed — clear intent to reveal local screen
                   _followLinkController.clearPending();
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (!mounted) return;
+                    final ctx = _navigatorKey.currentContext;
+                    if (ctx != null) {
+                      ScaffoldMessenger.of(ctx).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            "You're already following this calendar on this phone.",
+                          ),
+                        ),
+                      );
+                    }
+                  });
                 }
               : () => _handleFollowLocally(pendingIntent),
           onCancel: () {

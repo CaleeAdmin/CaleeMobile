@@ -68,12 +68,15 @@ class FollowCalendarPage extends StatelessWidget {
                   child: const Text('Continue with Calee account'),
                 ),
                 const SizedBox(height: 12),
-                if (!alreadyFollowed)
-                  FilledButton.tonal(
-                    onPressed: onFollowLocally,
-                    child: const Text('Follow on this phone only'),
+                FilledButton.tonal(
+                  onPressed: onFollowLocally,
+                  child: Text(
+                    alreadyFollowed
+                        ? 'Open local calendar'
+                        : 'Follow on this phone only',
                   ),
-                if (!alreadyFollowed) const SizedBox(height: 12),
+                ),
+                const SizedBox(height: 12),
                 OutlinedButton(
                   onPressed: onCancel,
                   child: const Text('Cancel'),
