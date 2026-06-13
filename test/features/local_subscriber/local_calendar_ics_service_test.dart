@@ -32,17 +32,15 @@ void main() {
   String fmtDateTime(DateTime dt) =>
       '${fmtDate(dt)}T${_pad(dt.hour)}${_pad(dt.minute)}${_pad(dt.second)}';
 
-  // Anchored to a clean local time so tests are deterministic.
+  // Anchored to a clean local time so tests are date-arithmetic-deterministic.
   final now = DateTime.now();
   final tomorrow = DateTime(now.year, now.month, now.day, 10, 0, 0)
       .add(const Duration(days: 1));
-  final nextWeekDate = DateTime(now.year, now.month, now.day, 10, 0, 0)
-      .add(const Duration(days: 7));
 
-  // ── parseBody tests ───────────────────────────────────────────────────────
+  // ── 1. One-off timed VEVENT ───────────────────────────────────────────────
 
-  group('parseBody — one-off events', () {
-    test('timed event is parsed and returned', () {
+  group('one-off timed VEVENT', () {
+    test('is parsed and returned with correct fields', () {
       final start = tomorrow;
       final end = tomorrow.add(const Duration(hours: 1));
       final ics = icsWrap([
@@ -60,15 +58,35 @@ void main() {
       expect(events[0].isAllDay, isFalse);
       expect(events[0].start.hour, 10);
       expect(events[0].end, isNotNull);
+      expect(events[0].subscriptionId, 'test_id');
     });
 
-    test('all-day event is parsed and returned', () {
+    test('UTC datetime is parsed correctly', () {
+      final ics = icsWrap([
+        'BEGIN:VEVENT',
+        'UID:utc@example.com',
+        'SUMMARY:UTC Event',
+        'DTSTART:${fmtDate(tomorrow)}T080000Z',
+        'END:VEVENT',
+      ].join('\r\n'));
+
+      final events = service.parseBody(ics, fakeSub());
+      expect(events.length, 1);
+      expect(events[0].start.isUtc, isTrue);
+    });
+  });
+
+  // ── 2. One-off all-day VEVENT ─────────────────────────────────────────────
+
+  group('one-off all-day VEVENT', () {
+    test('is parsed and flagged isAllDay=true', () {
+      final nextWeek = tomorrow.add(const Duration(days: 6));
       final ics = icsWrap([
         'BEGIN:VEVENT',
         'UID:allday@example.com',
         'SUMMARY:Public Holiday',
         'DTSTART;VALUE=DATE:${fmtDate(tomorrow)}',
-        'DTEND;VALUE=DATE:${fmtDate(nextWeekDate)}',
+        'DTEND;VALUE=DATE:${fmtDate(nextWeek)}',
         'END:VEVENT',
       ].join('\r\n'));
 
@@ -77,54 +95,191 @@ void main() {
       expect(events[0].title, 'Public Holiday');
       expect(events[0].isAllDay, isTrue);
     });
+  });
 
-    test('event outside window is not returned', () {
-      // 400 days from now — beyond the 365-day window
-      final farFuture = DateTime(now.year, now.month, now.day)
-          .add(const Duration(days: 400));
+  // ── 3. SUMMARY with parameters ────────────────────────────────────────────
+
+  group('SUMMARY with parameters', () {
+    test('SUMMARY;LANGUAGE=en:Title is parsed correctly', () {
       final ics = icsWrap([
         'BEGIN:VEVENT',
-        'UID:future@example.com',
-        'SUMMARY:Far Future',
-        'DTSTART:${fmtDateTime(farFuture)}',
+        'UID:lang@example.com',
+        'SUMMARY;LANGUAGE=en:Multilingual Event',
+        'DTSTART:${fmtDateTime(tomorrow)}',
         'END:VEVENT',
       ].join('\r\n'));
 
       final events = service.parseBody(ics, fakeSub());
-      expect(events, isEmpty);
+      expect(events.length, 1);
+      expect(events[0].title, 'Multilingual Event');
+    });
+
+    test('SUMMARY;LANGUAGE=fr:Titre is parsed correctly', () {
+      final ics = icsWrap([
+        'BEGIN:VEVENT',
+        'UID:langfr@example.com',
+        'SUMMARY;LANGUAGE=fr:Réunion hebdomadaire',
+        'DTSTART:${fmtDateTime(tomorrow)}',
+        'END:VEVENT',
+      ].join('\r\n'));
+
+      final events = service.parseBody(ics, fakeSub());
+      expect(events.length, 1);
+      expect(events[0].title, 'Réunion hebdomadaire');
     });
   });
 
-  group('parseBody — RRULE expansion', () {
-    test('weekly RRULE with BYDAY expands to correct weekday', () {
-      // Find next Monday.
-      final nextMonday = _nextWeekday(now, DateTime.monday);
+  // ── 4. UID with parameters ────────────────────────────────────────────────
+
+  group('UID with parameters', () {
+    test('UID;VALUE=TEXT:abc123 is used as event ID', () {
       final ics = icsWrap([
         'BEGIN:VEVENT',
-        'UID:weekly@example.com',
-        'SUMMARY:Weekly Standup',
-        'DTSTART:${fmtDateTime(nextMonday)}',
-        'DTEND:${fmtDateTime(nextMonday.add(const Duration(hours: 1)))}',
-        'RRULE:FREQ=WEEKLY;BYDAY=MO',
+        'UID;VALUE=TEXT:abc123',
+        'SUMMARY:Text UID Event',
+        'DTSTART:${fmtDateTime(tomorrow)}',
         'END:VEVENT',
       ].join('\r\n'));
 
       final events = service.parseBody(ics, fakeSub());
-      // ~52 Mondays in 365 days; expect at least several.
-      expect(events.length, greaterThan(5));
-      for (final e in events) {
-        expect(e.start.weekday, DateTime.monday,
-            reason: 'All occurrences should be Mondays');
-        expect(e.title, 'Weekly Standup');
+      expect(events.length, 1);
+      expect(events[0].id, 'abc123');
+    });
+  });
+
+  // ── 5. Stable fallback ID when UID is missing ─────────────────────────────
+
+  group('stable fallback ID', () {
+    test('same event parsed twice produces the same ID', () {
+      final ics = icsWrap([
+        'BEGIN:VEVENT',
+        'SUMMARY:No UID Event',
+        'DTSTART:${fmtDateTime(tomorrow)}',
+        'END:VEVENT',
+      ].join('\r\n'));
+
+      final events1 = service.parseBody(ics, fakeSub());
+      final events2 = service.parseBody(ics, fakeSub());
+      expect(events1.length, 1);
+      expect(events1[0].id, events2[0].id);
+    });
+
+    test('different start times produce different fallback IDs', () {
+      final start1 = tomorrow;
+      final start2 = tomorrow.add(const Duration(hours: 2));
+
+      final ics = icsWrap([
+        'BEGIN:VEVENT',
+        'SUMMARY:Event A',
+        'DTSTART:${fmtDateTime(start1)}',
+        'END:VEVENT',
+        'BEGIN:VEVENT',
+        'SUMMARY:Event A',
+        'DTSTART:${fmtDateTime(start2)}',
+        'END:VEVENT',
+      ].join('\r\n'));
+
+      final events = service.parseBody(ics, fakeSub());
+      expect(events.length, 2);
+      expect(events[0].id, isNot(events[1].id));
+    });
+  });
+
+  // ── 6. Weekly RRULE with COUNT ────────────────────────────────────────────
+
+  group('weekly RRULE with COUNT', () {
+    test('FREQ=WEEKLY;COUNT=4 produces exactly 4 occurrences', () {
+      final nextMonday = _nextWeekday(now, DateTime.monday);
+      final ics = icsWrap([
+        'BEGIN:VEVENT',
+        'UID:wkcount@example.com',
+        'SUMMARY:Weekly 4x',
+        'DTSTART:${fmtDateTime(nextMonday)}',
+        'RRULE:FREQ=WEEKLY;COUNT=4',
+        'END:VEVENT',
+      ].join('\r\n'));
+
+      final events = service.parseBody(ics, fakeSub());
+      expect(events.length, 4);
+      // Each occurrence should be exactly 7 days apart.
+      for (var i = 1; i < events.length; i++) {
+        final diff = events[i].start.difference(events[i - 1].start).inDays;
+        expect(diff, 7);
       }
     });
 
-    test('RRULE FREQ=DAILY with UNTIL stops inclusively at UNTIL', () {
-      final start = tomorrow;
-      final until = start.add(const Duration(days: 20));
+    test('FREQ=WEEKLY;BYDAY=MO;COUNT=3 produces 3 Mondays', () {
+      final nextMonday = _nextWeekday(now, DateTime.monday);
       final ics = icsWrap([
         'BEGIN:VEVENT',
-        'UID:until@example.com',
+        'UID:wkbdcount@example.com',
+        'SUMMARY:MO 3x',
+        'DTSTART:${fmtDateTime(nextMonday)}',
+        'RRULE:FREQ=WEEKLY;BYDAY=MO;COUNT=3',
+        'END:VEVENT',
+      ].join('\r\n'));
+
+      final events = service.parseBody(ics, fakeSub());
+      expect(events.length, 3);
+      for (final e in events) {
+        expect(e.start.weekday, DateTime.monday);
+      }
+    });
+  });
+
+  // ── 7. Weekly RRULE with UNTIL ────────────────────────────────────────────
+
+  group('weekly RRULE with UNTIL', () {
+    test('FREQ=WEEKLY stops on UNTIL date (inclusive)', () {
+      final start = _nextWeekday(now, DateTime.monday);
+      // 3 weeks of Mondays: week0, week1, week2
+      final until = start.add(const Duration(days: 14));
+      final ics = icsWrap([
+        'BEGIN:VEVENT',
+        'UID:wkuntil@example.com',
+        'SUMMARY:Weekly Until',
+        'DTSTART:${fmtDateTime(start)}',
+        'RRULE:FREQ=WEEKLY;UNTIL=${fmtDateTime(until)}',
+        'END:VEVENT',
+      ].join('\r\n'));
+
+      final events = service.parseBody(ics, fakeSub());
+      expect(events.length, 3); // start, start+7, start+14
+      expect(
+        events.last.start.isAfter(until.add(const Duration(seconds: 1))),
+        isFalse,
+        reason: 'No occurrence after UNTIL',
+      );
+    });
+  });
+
+  // ── 8. Daily RRULE ────────────────────────────────────────────────────────
+
+  group('daily RRULE', () {
+    test('FREQ=DAILY;COUNT=5 produces 5 consecutive days', () {
+      final ics = icsWrap([
+        'BEGIN:VEVENT',
+        'UID:daily5@example.com',
+        'SUMMARY:Daily 5x',
+        'DTSTART:${fmtDateTime(tomorrow)}',
+        'RRULE:FREQ=DAILY;COUNT=5',
+        'END:VEVENT',
+      ].join('\r\n'));
+
+      final events = service.parseBody(ics, fakeSub());
+      expect(events.length, 5);
+      for (var i = 1; i < events.length; i++) {
+        final diff = events[i].start.difference(events[i - 1].start).inDays;
+        expect(diff, 1);
+      }
+    });
+
+    test('FREQ=DAILY;UNTIL stops inclusively', () {
+      final start = tomorrow;
+      final until = start.add(const Duration(days: 4));
+      final ics = icsWrap([
+        'BEGIN:VEVENT',
+        'UID:dailyuntil@example.com',
         'SUMMARY:Daily Until',
         'DTSTART:${fmtDateTime(start)}',
         'RRULE:FREQ=DAILY;UNTIL=${fmtDateTime(until)}',
@@ -132,30 +287,79 @@ void main() {
       ].join('\r\n'));
 
       final events = service.parseBody(ics, fakeSub());
-      // start, start+1, …, start+20 = 21 occurrences, all within window.
-      expect(events.length, 21);
-      expect(
-        events.last.start.isBefore(until.add(const Duration(seconds: 1))),
-        isTrue,
-      );
+      expect(events.length, 5); // day 0 through day 4
     });
 
-    test('RRULE FREQ=DAILY with COUNT limits to exact count', () {
-      final start = tomorrow;
+    test('FREQ=DAILY with INTERVAL=2 steps every other day', () {
       final ics = icsWrap([
         'BEGIN:VEVENT',
-        'UID:count@example.com',
-        'SUMMARY:Three Times',
-        'DTSTART:${fmtDateTime(start)}',
-        'RRULE:FREQ=DAILY;COUNT=3',
+        'UID:daily2@example.com',
+        'SUMMARY:Every Other Day',
+        'DTSTART:${fmtDateTime(tomorrow)}',
+        'RRULE:FREQ=DAILY;INTERVAL=2;COUNT=3',
         'END:VEVENT',
       ].join('\r\n'));
 
       final events = service.parseBody(ics, fakeSub());
       expect(events.length, 3);
+      final diff = events[1].start.difference(events[0].start).inDays;
+      expect(diff, 2);
+    });
+  });
+
+  // ── 9. Monthly RRULE ──────────────────────────────────────────────────────
+
+  group('monthly RRULE', () {
+    test('FREQ=MONTHLY;COUNT=3 produces 3 monthly occurrences', () {
+      final ics = icsWrap([
+        'BEGIN:VEVENT',
+        'UID:monthly3@example.com',
+        'SUMMARY:Monthly 3x',
+        'DTSTART:${fmtDateTime(tomorrow)}',
+        'RRULE:FREQ=MONTHLY;COUNT=3',
+        'END:VEVENT',
+      ].join('\r\n'));
+
+      final events = service.parseBody(ics, fakeSub());
+      expect(events.length, 3);
+      // Each occurrence should be a different month (roughly 28–31 days apart).
+      for (var i = 1; i < events.length; i++) {
+        final diff = events[i].start.difference(events[i - 1].start).inDays;
+        expect(diff, greaterThanOrEqualTo(28));
+        expect(diff, lessThanOrEqualTo(31));
+      }
     });
 
-    test('RRULE occurrences in EXDATE are excluded', () {
+    test('monthly occurrences preserve day-of-month from DTSTART', () {
+      // Pick a day that exists in all months (the 5th).
+      final baseDate = DateTime(now.year, now.month, 5, 10, 0, 0);
+      // Start in the past window (within 30 days) so it shows.
+      final start = baseDate.isBefore(now.subtract(const Duration(days: 30)))
+          ? DateTime(now.year, now.month, 5, 10, 0, 0)
+              .add(const Duration(days: 1)) // fallback to tomorrow-ish
+          : baseDate;
+
+      final ics = icsWrap([
+        'BEGIN:VEVENT',
+        'UID:monthlyday@example.com',
+        'SUMMARY:Monthly Same Day',
+        'DTSTART:${fmtDateTime(start)}',
+        'RRULE:FREQ=MONTHLY;COUNT=3',
+        'END:VEVENT',
+      ].join('\r\n'));
+
+      final events = service.parseBody(ics, fakeSub());
+      // Day 5 exists in every month, so each occurrence must be on day 5.
+      for (final e in events) {
+        expect(e.start.day, start.day);
+      }
+    });
+  });
+
+  // ── 10. EXDATE exclusion ──────────────────────────────────────────────────
+
+  group('EXDATE', () {
+    test('EXDATE removes the matching occurrence', () {
       final start = tomorrow;
       final excluded = start.add(const Duration(days: 1));
       final ics = icsWrap([
@@ -169,35 +373,120 @@ void main() {
       ].join('\r\n'));
 
       final events = service.parseBody(ics, fakeSub());
-      // 4 total - 1 excluded = 3
       expect(events.length, 3);
       for (final e in events) {
-        expect(e.start.day, isNot(excluded.day));
+        expect(
+          e.start.day == excluded.day &&
+              e.start.month == excluded.month &&
+              e.start.year == excluded.year,
+          isFalse,
+          reason: 'Excluded date must not appear',
+        );
       }
     });
 
-    test('unsupported FREQ is ignored without crash', () {
+    test('multiple EXDATE values on one line are all excluded', () {
+      final start = tomorrow;
+      final ex1 = start.add(const Duration(days: 1));
+      final ex2 = start.add(const Duration(days: 2));
       final ics = icsWrap([
         'BEGIN:VEVENT',
-        'UID:yearly@example.com',
-        'SUMMARY:Annual',
-        'DTSTART:${fmtDateTime(tomorrow)}',
-        'RRULE:FREQ=YEARLY',
+        'UID:exdate2@example.com',
+        'SUMMARY:Daily Skip 2',
+        'DTSTART:${fmtDateTime(start)}',
+        'RRULE:FREQ=DAILY;COUNT=5',
+        'EXDATE:${fmtDateTime(ex1)},${fmtDateTime(ex2)}',
         'END:VEVENT',
       ].join('\r\n'));
 
-      // Should not throw; unsupported FREQ yields no expanded occurrences.
-      expect(() => service.parseBody(ics, fakeSub()), returnsNormally);
       final events = service.parseBody(ics, fakeSub());
-      expect(events, isEmpty);
+      // 5 - 2 excluded = 3
+      expect(events.length, 3);
     });
   });
 
-  group('parseBody — robustness', () {
+  // ── 11. Does not expand outside the local window ──────────────────────────
+
+  group('window enforcement', () {
+    test('event 400 days in the future is excluded', () {
+      final farFuture = DateTime(now.year, now.month, now.day, 10, 0, 0)
+          .add(const Duration(days: 400));
+      final ics = icsWrap([
+        'BEGIN:VEVENT',
+        'UID:farfuture@example.com',
+        'SUMMARY:Far Future',
+        'DTSTART:${fmtDateTime(farFuture)}',
+        'END:VEVENT',
+      ].join('\r\n'));
+
+      expect(service.parseBody(ics, fakeSub()), isEmpty);
+    });
+
+    test('RRULE occurrences past windowEnd are not included', () {
+      // Daily starting tomorrow; only within the 365-day window should appear.
+      final ics = icsWrap([
+        'BEGIN:VEVENT',
+        'UID:windowrrule@example.com',
+        'SUMMARY:Infinite Daily',
+        'DTSTART:${fmtDateTime(tomorrow)}',
+        'RRULE:FREQ=DAILY',
+        'END:VEVENT',
+      ].join('\r\n'));
+
+      final events = service.parseBody(ics, fakeSub());
+      expect(events, isNotEmpty);
+      final windowEnd = now.add(const Duration(days: 365));
+      for (final e in events) {
+        expect(e.start.isBefore(windowEnd.add(const Duration(days: 1))), isTrue,
+            reason: 'No event should be past windowEnd');
+      }
+    });
+  });
+
+  // ── 12. Oversized ICS body throws friendly error ──────────────────────────
+
+  group('readBody size limit', () {
+    test('reads body within the 5 MB limit', () async {
+      final data = 'BEGIN:VCALENDAR'.codeUnits;
+      final stream = Stream<List<int>>.value(data);
+      final result = await service.readBody(stream);
+      expect(result, 'BEGIN:VCALENDAR');
+    });
+
+    test('throws LocalCalendarIcsException when body exceeds 5 MB', () async {
+      final chunk = List<int>.filled(1024 * 1024, 65); // 1 MB of 'A'
+      final stream = Stream<List<int>>.fromIterable(
+        List.generate(6, (_) => chunk), // 6 MB total
+      );
+
+      await expectLater(
+        service.readBody(stream),
+        throwsA(
+          isA<LocalCalendarIcsException>().having(
+            (e) => e.message,
+            'message',
+            contains('too large'),
+          ),
+        ),
+      );
+    });
+
+    test('body at exactly 5 MB is accepted', () async {
+      final chunk = List<int>.filled(1024 * 1024, 65);
+      final stream = Stream<List<int>>.fromIterable(
+        List.generate(5, (_) => chunk), // exactly 5 MB
+      );
+      await expectLater(service.readBody(stream), completes);
+    });
+  });
+
+  // ── 13. Invalid ICS does not crash ────────────────────────────────────────
+
+  group('robustness', () {
     test('invalid ICS body does not throw', () {
       expect(
         () => service.parseBody(
-          'this is not valid ics at all\x00\xFF',
+          'this is not valid ics\x00\xFF',
           fakeSub(),
         ),
         returnsNormally,
@@ -221,6 +510,36 @@ void main() {
       expect(service.parseBody(ics, fakeSub()), isEmpty);
     });
 
+    test('unsupported FREQ does not crash and returns empty', () {
+      final ics = icsWrap([
+        'BEGIN:VEVENT',
+        'UID:yearly@example.com',
+        'SUMMARY:Annual',
+        'DTSTART:${fmtDateTime(tomorrow)}',
+        'RRULE:FREQ=YEARLY',
+        'END:VEVENT',
+      ].join('\r\n'));
+
+      expect(() => service.parseBody(ics, fakeSub()), returnsNormally);
+      // YEARLY is unsupported — no occurrences emitted.
+      expect(service.parseBody(ics, fakeSub()), isEmpty);
+    });
+
+    test('DTSTART with TZID parameter is parsed without crash', () {
+      final ics = icsWrap([
+        'BEGIN:VEVENT',
+        'UID:tzid@example.com',
+        'SUMMARY:Timezone Event',
+        'DTSTART;TZID=Australia/Sydney:${fmtDateTime(tomorrow)}',
+        'END:VEVENT',
+      ].join('\r\n'));
+
+      expect(() => service.parseBody(ics, fakeSub()), returnsNormally);
+      // Should parse the datetime (treated as floating/local).
+      final events = service.parseBody(ics, fakeSub());
+      expect(events.length, 1);
+    });
+
     test('events are returned sorted by start time', () {
       final d1 = tomorrow;
       final d2 = tomorrow.add(const Duration(days: 2));
@@ -228,18 +547,18 @@ void main() {
 
       final ics = icsWrap([
         'BEGIN:VEVENT',
-        'UID:ev1@example.com',
-        'SUMMARY:Event 1',
+        'UID:s1@example.com',
+        'SUMMARY:First',
         'DTSTART:${fmtDateTime(d1)}',
         'END:VEVENT',
         'BEGIN:VEVENT',
-        'UID:ev2@example.com',
-        'SUMMARY:Event 3',
+        'UID:s2@example.com',
+        'SUMMARY:Third',
         'DTSTART:${fmtDateTime(d2)}',
         'END:VEVENT',
         'BEGIN:VEVENT',
-        'UID:ev3@example.com',
-        'SUMMARY:Event 2',
+        'UID:s3@example.com',
+        'SUMMARY:Second',
         'DTSTART:${fmtDateTime(d3)}',
         'END:VEVENT',
       ].join('\r\n'));
@@ -249,49 +568,66 @@ void main() {
       expect(events[0].start.isBefore(events[1].start), isTrue);
       expect(events[1].start.isBefore(events[2].start), isTrue);
     });
-  });
 
-  // ── readBody tests ────────────────────────────────────────────────────────
+    test('DESCRIPTION and LOCATION lines are silently ignored', () {
+      final ics = icsWrap([
+        'BEGIN:VEVENT',
+        'UID:descr@example.com',
+        'SUMMARY:Has Description',
+        'DTSTART:${fmtDateTime(tomorrow)}',
+        'DESCRIPTION:A long description that should be ignored.',
+        'LOCATION:Conference Room 1',
+        'END:VEVENT',
+      ].join('\r\n'));
 
-  group('readBody', () {
-    test('reads body within the size limit', () async {
-      final data = 'BEGIN:VCALENDAR'.codeUnits;
-      final stream = Stream<List<int>>.value(data);
-      final result = await service.readBody(stream);
-      expect(result, 'BEGIN:VCALENDAR');
-    });
-
-    test('throws LocalCalendarIcsException when body exceeds 5 MB', () async {
-      // 6 chunks of 1 MB each.
-      final chunk = List<int>.filled(1024 * 1024, 65); // 'A'
-      final stream = Stream<List<int>>.fromIterable(
-        List.generate(6, (_) => chunk),
-      );
-
-      await expectLater(
-        service.readBody(stream),
-        throwsA(
-          isA<LocalCalendarIcsException>().having(
-            (e) => e.message,
-            'message',
-            contains('too large'),
-          ),
-        ),
-      );
-    });
-
-    test('body at exactly the limit is accepted', () async {
-      // 5 MB exactly — should succeed.
-      final chunk = List<int>.filled(1024 * 1024, 65);
-      final stream = Stream<List<int>>.fromIterable(
-        List.generate(5, (_) => chunk),
-      );
-      // Must not throw.
-      await expectLater(service.readBody(stream), completes);
+      expect(() => service.parseBody(ics, fakeSub()), returnsNormally);
+      final events = service.parseBody(ics, fakeSub());
+      expect(events.length, 1);
+      expect(events[0].title, 'Has Description');
     });
   });
 
-  // ── Repository duplicate URL tests ───────────────────────────────────────
+  // ── Weekly BYDAY multi-day expansion ─────────────────────────────────────
+
+  group('weekly BYDAY expansion', () {
+    test('FREQ=WEEKLY;BYDAY=MO only produces Mondays', () {
+      final nextMonday = _nextWeekday(now, DateTime.monday);
+      final ics = icsWrap([
+        'BEGIN:VEVENT',
+        'UID:mondays@example.com',
+        'SUMMARY:Every Monday',
+        'DTSTART:${fmtDateTime(nextMonday)}',
+        'RRULE:FREQ=WEEKLY;BYDAY=MO',
+        'END:VEVENT',
+      ].join('\r\n'));
+
+      final events = service.parseBody(ics, fakeSub());
+      expect(events.length, greaterThan(5));
+      for (final e in events) {
+        expect(e.start.weekday, DateTime.monday);
+      }
+    });
+
+    test('FREQ=WEEKLY;BYDAY=MO,WE,FR produces three weekdays each week', () {
+      final nextMonday = _nextWeekday(now, DateTime.monday);
+      final until = nextMonday.add(const Duration(days: 6)); // one full week
+      final ics = icsWrap([
+        'BEGIN:VEVENT',
+        'UID:mwf@example.com',
+        'SUMMARY:MWF',
+        'DTSTART:${fmtDateTime(nextMonday)}',
+        'RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR;UNTIL=${fmtDateTime(until)}',
+        'END:VEVENT',
+      ].join('\r\n'));
+
+      final events = service.parseBody(ics, fakeSub());
+      expect(events.length, 3);
+      final weekdays = events.map((e) => e.start.weekday).toList()..sort();
+      expect(weekdays, [DateTime.monday, DateTime.wednesday, DateTime.friday]);
+    });
+  });
+
+  // ── Repository duplicate URL tests ────────────────────────────────────────
 
   group('LocalCalendarSubscriptionRepository — duplicate handling', () {
     setUp(() {
