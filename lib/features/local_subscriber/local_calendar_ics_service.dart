@@ -3,7 +3,9 @@ import 'dart:io';
 import 'local_calendar_event.dart';
 import 'local_calendar_subscription.dart';
 
-// Recurring events are not fully supported in local subscriber mode yet.
+// Recurring events (RRULE) are intentionally skipped in local subscriber mode v1.
+// Full recurrence expansion is non-trivial and out of scope for this release.
+// Events with RRULE are silently ignored — they will not appear in the event list.
 
 class LocalCalendarIcsService {
   const LocalCalendarIcsService();
@@ -26,7 +28,7 @@ class LocalCalendarIcsService {
       final response = await request.close().timeout(_timeout);
 
       if (response.statusCode != 200) {
-        throw LocalCalendarIcsException(
+        throw const LocalCalendarIcsException(
           'Unable to refresh this calendar. Please try again.',
         );
       }
@@ -36,7 +38,7 @@ class LocalCalendarIcsService {
     } on LocalCalendarIcsException {
       rethrow;
     } catch (_) {
-      throw LocalCalendarIcsException(
+      throw const LocalCalendarIcsException(
         'Unable to refresh this calendar. Please try again.',
       );
     } finally {
@@ -77,12 +79,14 @@ class LocalCalendarIcsService {
 
       if (line == 'END:VEVENT') {
         inVevent = false;
-        // Skip recurring events we can't fully expand.
-        if (!hasRrule && uid != null && dtStart != null) {
+        // Skip recurring events — full RRULE expansion is not supported in v1.
+        if (!hasRrule && dtStart != null) {
+          final eventId =
+              uid ?? _stableEventId(subscription, dtStart, summary);
           if (_inWindow(dtStart, dtEnd, windowStart, windowEnd)) {
             events.add(
               LocalCalendarEvent(
-                id: uid,
+                id: eventId,
                 subscriptionId: subscription.id,
                 subscriptionTitle: subscription.title,
                 title: summary ?? 'Untitled',
@@ -99,33 +103,39 @@ class LocalCalendarIcsService {
 
       if (!inVevent) continue;
 
-      if (line.startsWith('RRULE:') || line.startsWith('RRULE;')) {
+      // RRULE — mark and skip; recurrence is not supported in v1.
+      if (_extractPropertyValue(line, 'RRULE') != null) {
         hasRrule = true;
         continue;
       }
 
-      if (line.startsWith('UID:')) {
-        uid = line.substring(4).trim();
+      final uidVal = _extractPropertyValue(line, 'UID');
+      if (uidVal != null) {
+        uid = uidVal.trim();
         continue;
       }
 
-      if (line.startsWith('SUMMARY:')) {
-        summary = _unescapeText(line.substring(8));
+      final summaryVal = _extractPropertyValue(line, 'SUMMARY');
+      if (summaryVal != null) {
+        summary = _unescapeText(summaryVal);
         continue;
       }
 
-      if (line.startsWith('DTSTART')) {
+      // DTSTART / DTEND — handled by _parseDtLine which locates the first colon.
+      if (_propertyMatches(line, 'DTSTART')) {
         final (dt, allDay) = _parseDtLine(line);
         dtStart = dt;
         isAllDay = allDay;
         continue;
       }
 
-      if (line.startsWith('DTEND')) {
+      if (_propertyMatches(line, 'DTEND')) {
         final (dt, _) = _parseDtLine(line);
         dtEnd = dt;
         continue;
       }
+
+      // DESCRIPTION and LOCATION are intentionally ignored but must not crash.
     }
 
     events.sort((a, b) => a.start.compareTo(b.start));
@@ -134,8 +144,52 @@ class LocalCalendarIcsService {
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
+  /// Extracts the value from an ICS property line, handling parameters.
+  ///
+  /// Handles both `PROP:value` and `PROP;param=v:value` forms, matching the
+  /// property name case-insensitively. Returns null if the line does not match.
+  String? _extractPropertyValue(String line, String propertyName) {
+    final len = propertyName.length;
+    if (line.length <= len) return null;
+    if (!line.substring(0, len).toUpperCase().startsWith(
+          propertyName.toUpperCase(),
+        )) {
+      return null;
+    }
+    final ch = line[len];
+    if (ch == ':') return line.substring(len + 1);
+    if (ch == ';') {
+      final colonIdx = line.indexOf(':', len);
+      if (colonIdx == -1) return null;
+      return line.substring(colonIdx + 1);
+    }
+    return null;
+  }
+
+  /// Returns true when [line] starts with [propertyName] followed by `:` or `;`.
+  bool _propertyMatches(String line, String propertyName) {
+    final len = propertyName.length;
+    if (line.length <= len) return false;
+    if (!line.substring(0, len).toUpperCase().startsWith(
+          propertyName.toUpperCase(),
+        )) {
+      return false;
+    }
+    final ch = line[len];
+    return ch == ':' || ch == ';';
+  }
+
+  /// Generates a stable in-memory event ID when UID is absent.
+  String _stableEventId(
+    LocalCalendarSubscription subscription,
+    DateTime start,
+    String? title,
+  ) {
+    return '${subscription.id}:${start.millisecondsSinceEpoch}:${title ?? ''}';
+  }
+
   List<String> _unfoldLines(String body) {
-    // RFC 5545: lines folded with CRLF (or LF) + whitespace
+    // RFC 5545: lines folded with CRLF (or LF) followed by a whitespace char.
     final unfolded = body
         .replaceAll('\r\n ', '')
         .replaceAll('\r\n\t', '')
@@ -151,7 +205,7 @@ class LocalCalendarIcsService {
     // Formats (ICS uses compact 8-digit/15-digit, not ISO 8601 dashes):
     //   DTSTART;VALUE=DATE:20240101        → all-day
     //   DTSTART:20240101T120000Z           → UTC
-    //   DTSTART;TZID=Australia/Sydney:...  → local (treat as floating)
+    //   DTSTART;TZID=Australia/Sydney:...  → local (treated as floating/local)
     //   DTSTART:20240101T120000            → floating
 
     final colonIdx = line.indexOf(':');

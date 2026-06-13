@@ -70,17 +70,18 @@ class _LocalSubscriberCalendarPageState
         _eventsBySubscription[sub.id] = events;
         _loadingIds.remove(sub.id);
       });
-    } on LocalCalendarIcsException catch (e) {
+    } on LocalCalendarIcsException catch (_) {
       if (!mounted) return;
       setState(() {
-        _errorsBySubscription[sub.id] = e.message;
+        _errorsBySubscription[sub.id] =
+            '"${sub.title}" could not be refreshed. Please try again.';
         _loadingIds.remove(sub.id);
       });
     } catch (_) {
       if (!mounted) return;
       setState(() {
         _errorsBySubscription[sub.id] =
-            'Unable to refresh this calendar. Please try again.';
+            '"${sub.title}" could not be refreshed. Please try again.';
         _loadingIds.remove(sub.id);
       });
     }
