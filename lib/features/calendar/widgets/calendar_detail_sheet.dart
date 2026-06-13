@@ -116,15 +116,15 @@ class _CalendarDetailSheetState extends State<CalendarDetailSheet> {
     final isSubscription = cal.isSubscription;
 
     final title = isSubscription
-        ? 'Unsubscribe from Calendar?'
+        ? 'Remove linked calendar?'
         : 'Delete Calendar?';
     final body = isSubscription
         ? 'This removes "${cal.name}" from Calee. '
-              'The original external calendar and feed are not changed. '
+              'The original external calendar is not changed. '
               'This cannot be undone from Calee.'
         : 'Delete "${cal.name}" and its events from Calee? '
               'This cannot be undone.';
-    final confirmLabel = isSubscription ? 'Unsubscribe' : 'Delete Calendar';
+    final confirmLabel = isSubscription ? 'Remove linked calendar' : 'Delete Calendar';
 
     final confirmed = await CaleeDestructiveDialog.show(
       context: context,
@@ -143,7 +143,7 @@ class _CalendarDetailSheetState extends State<CalendarDetailSheet> {
       );
       if (mounted) {
         widget.onMutated(
-          isSubscription ? 'Calendar unsubscribed.' : 'Calendar deleted.',
+          isSubscription ? 'Calendar link removed.' : 'Calendar deleted.',
         );
       }
     } catch (error) {
@@ -249,7 +249,7 @@ class _CalendarDetailSheetState extends State<CalendarDetailSheet> {
                 value: widget.initiallyVisible ? 'Shown' : 'Hidden',
               ),
               if (cal.isSubscription)
-                const _DetailInfoRow(label: 'Type', value: 'Subscribed'),
+                const _DetailInfoRow(label: 'Type', value: 'Linked calendar'),
               if (cal.readOnly)
                 const _DetailInfoRow(label: 'Access', value: 'Read-only'),
               // Show source host only — never the full URL (may contain tokens)
@@ -283,7 +283,7 @@ class _CalendarDetailSheetState extends State<CalendarDetailSheet> {
                   icon: cal.isSubscription
                       ? Icons.link_off
                       : Icons.delete_outline,
-                  title: cal.isSubscription ? 'Unsubscribe' : 'Delete Calendar',
+                  title: cal.isSubscription ? 'Remove linked calendar' : 'Delete Calendar',
                   isDestructive: true,
                   trailing: _isSubmitting
                       ? const SizedBox(
