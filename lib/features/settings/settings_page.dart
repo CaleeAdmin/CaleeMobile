@@ -97,7 +97,7 @@ class _SettingsPageState extends State<SettingsPage> {
       );
     } catch (e, st) {
       if (!mounted) return;
-      debugPrint('[SettingsPage] Family setup failed: $e\n$st');
+      if (kDebugMode) debugPrint('[SettingsPage] Family setup failed: $e\n$st');
       if (kDebugMode) {
         ScaffoldMessenger.of(
           context,
