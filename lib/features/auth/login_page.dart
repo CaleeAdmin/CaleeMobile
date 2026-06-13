@@ -56,7 +56,7 @@ class _LoginPageState extends State<LoginPage> {
 
     if (!mounted || result == null) return;
 
-    widget.onSignedIn(result);
+    await widget.onSignedIn(result);
   }
 
   Future<void> _openUrl(String url) async {

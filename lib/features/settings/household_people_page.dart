@@ -82,7 +82,7 @@ class _HouseholdPeoplePageState extends State<HouseholdPeoplePage> {
 
     final saved = await CaleeBottomSheet.show<bool>(
       context: context,
-      title: 'Add Person',
+      title: 'Add person',
       child: AddPersonSheet(
         onAdd: (name) => widget.hubClient.createPerson(
           accessToken: widget.accessToken,
@@ -103,10 +103,10 @@ class _HouseholdPeoplePageState extends State<HouseholdPeoplePage> {
 
     final saved = await CaleeBottomSheet.show<bool>(
       context: context,
-      title: 'Edit Person',
+      title: 'Edit person',
       child: _PersonFormContent(
         initialPerson: person,
-        submitLabel: 'Save Changes',
+        submitLabel: 'Save changes',
         onSubmit:
             ({
               required String displayName,
@@ -138,7 +138,7 @@ class _HouseholdPeoplePageState extends State<HouseholdPeoplePage> {
 
     final confirmed = await CaleeDestructiveDialog.show(
       context: context,
-      title: 'Archive Person?',
+      title: 'Archive person?',
       body:
           'Archive "${person.displayName}"? They will be hidden from the active people list.',
       confirmLabel: 'Archive',
@@ -167,12 +167,12 @@ class _HouseholdPeoplePageState extends State<HouseholdPeoplePage> {
       title: person.displayName,
       actions: [
         CaleeAction(
-          label: 'Edit Person',
+          label: 'Edit person',
           icon: Icons.edit_outlined,
           onTap: () => _openEditSheet(person),
         ),
         CaleeAction(
-          label: 'Archive Person',
+          label: 'Archive person',
           icon: Icons.archive_outlined,
           isDestructive: true,
           onTap: () => _confirmArchive(person),
@@ -182,7 +182,7 @@ class _HouseholdPeoplePageState extends State<HouseholdPeoplePage> {
   }
 
   void _showError(Object error) {
-    const friendly = 'Could not set up Family Members. Please try again.';
+    const friendly = 'Could not load people. Please try again.';
     final message = kDebugMode && error is CaleeHubException
         ? '$friendly\nDebug: ${error.debugSummary}'
         : friendly;
@@ -197,7 +197,7 @@ class _HouseholdPeoplePageState extends State<HouseholdPeoplePage> {
     final household = _selectedHousehold;
 
     return CaleeScaffold(
-      appBar: AppBar(title: const Text('Family Members')),
+      appBar: AppBar(title: const Text('People')),
       floatingActionButton: household == null
           ? null
           : FloatingActionButton(
@@ -207,8 +207,9 @@ class _HouseholdPeoplePageState extends State<HouseholdPeoplePage> {
             ),
       body: household == null
           ? const _EmptyPeopleState(
-              title: 'No family yet',
-              message: 'People can be managed after a family is set up.',
+              title: 'No people group yet',
+              message:
+                  'People can be managed after your Calee account is ready.',
             )
           : ListView(
               padding: const EdgeInsets.symmetric(
@@ -218,10 +219,10 @@ class _HouseholdPeoplePageState extends State<HouseholdPeoplePage> {
               children: [
                 if (widget.households.length > 1) ...[
                   CaleeSection(
-                    title: 'Family',
+                    title: 'Group',
                     children: [
                       CaleeSectionDropdownRow<String>(
-                        label: 'Family',
+                        label: 'Group',
                         value: household.id,
                         items: [
                           for (final item in widget.households)
@@ -230,7 +231,7 @@ class _HouseholdPeoplePageState extends State<HouseholdPeoplePage> {
                               child: Text(
                                 item.name.isNotEmpty
                                     ? item.name
-                                    : 'Unnamed family',
+                                    : 'Unnamed group',
                               ),
                             ),
                         ],
@@ -282,8 +283,8 @@ class _HouseholdPeoplePageState extends State<HouseholdPeoplePage> {
                       title: 'People',
                       children: [
                         CaleeListRow(
-                          title: 'Add Person',
-                          subtitle: 'Create a child, parent, or family member',
+                          title: 'Add person',
+                          subtitle: 'Add a person used for tasks and chores',
                           leading: const Icon(
                             Icons.person_add_alt_1_outlined,
                             size: 20,
@@ -444,8 +445,8 @@ class _PersonFormContentState extends State<_PersonFormContent> {
                 value: _role,
                 items: const [
                   DropdownMenuItem(value: 'member', child: Text('Member')),
-                  DropdownMenuItem(value: 'child', child: Text('Child')),
-                  DropdownMenuItem(value: 'parent', child: Text('Parent')),
+                  DropdownMenuItem(value: 'child', child: Text('Member')),
+                  DropdownMenuItem(value: 'parent', child: Text('Manager')),
                 ],
                 onChanged: (value) {
                   if (value == null) return;
