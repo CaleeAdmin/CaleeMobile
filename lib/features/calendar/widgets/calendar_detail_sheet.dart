@@ -124,7 +124,8 @@ class _CalendarDetailSheetState extends State<CalendarDetailSheet> {
               'This cannot be undone from Calee.'
         : 'Delete "${cal.name}" and its events from Calee? '
               'This cannot be undone.';
-    final confirmLabel = isSubscription ? 'Remove linked calendar' : 'Delete Calendar';
+    final confirmLabel =
+        isSubscription ? 'Remove linked calendar' : 'Delete Calendar';
 
     final confirmed = await CaleeDestructiveDialog.show(
       context: context,
@@ -283,7 +284,9 @@ class _CalendarDetailSheetState extends State<CalendarDetailSheet> {
                   icon: cal.isSubscription
                       ? Icons.link_off
                       : Icons.delete_outline,
-                  title: cal.isSubscription ? 'Remove linked calendar' : 'Delete Calendar',
+                  title: cal.isSubscription
+                      ? 'Remove linked calendar'
+                      : 'Delete Calendar',
                   isDestructive: true,
                   trailing: _isSubmitting
                       ? const SizedBox(
