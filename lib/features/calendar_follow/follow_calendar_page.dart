@@ -6,13 +6,19 @@ class FollowCalendarPage extends StatelessWidget {
   const FollowCalendarPage({
     required this.intent,
     required this.onSignIn,
+    required this.onFollowLocally,
     required this.onCancel,
+    this.alreadyFollowed = false,
     super.key,
   });
 
   final ResolvedCalendarFollowIntent intent;
   final VoidCallback onSignIn;
+  final VoidCallback onFollowLocally;
   final VoidCallback onCancel;
+
+  /// True when the URL is already saved locally.
+  final bool alreadyFollowed;
 
   @override
   Widget build(BuildContext context) {
@@ -44,20 +50,30 @@ class FollowCalendarPage extends StatelessWidget {
                   style: theme.textTheme.titleMedium,
                 ),
                 const SizedBox(height: 24),
-                Text(
-                  'Sign in to add this calendar to your Calee account. '
-                  'Read-only local following is coming soon.',
-                  textAlign: TextAlign.center,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
+                if (alreadyFollowed)
+                  _AlreadyFollowedMessage(theme: theme)
+                else
+                  Text(
+                    'This calendar is read-only. Sign in to add it to your '
+                    'Calee account and sync with your Calee Tablet, or follow '
+                    'it on this phone only.',
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
                   ),
-                ),
                 const SizedBox(height: 32),
                 FilledButton(
                   onPressed: onSignIn,
-                  child: const Text('Sign in'),
+                  child: const Text('Continue with Calee account'),
                 ),
                 const SizedBox(height: 12),
+                if (!alreadyFollowed)
+                  FilledButton.tonal(
+                    onPressed: onFollowLocally,
+                    child: const Text('Follow on this phone only'),
+                  ),
+                if (!alreadyFollowed) const SizedBox(height: 12),
                 OutlinedButton(
                   onPressed: onCancel,
                   child: const Text('Cancel'),
@@ -65,6 +81,29 @@ class FollowCalendarPage extends StatelessWidget {
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AlreadyFollowedMessage extends StatelessWidget {
+  const _AlreadyFollowedMessage({required this.theme});
+  final ThemeData theme;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.secondaryContainer,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        'This calendar is already followed on this phone.',
+        textAlign: TextAlign.center,
+        style: theme.textTheme.bodyMedium?.copyWith(
+          color: theme.colorScheme.onSecondaryContainer,
         ),
       ),
     );
