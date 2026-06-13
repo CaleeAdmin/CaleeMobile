@@ -124,8 +124,9 @@ class _CalendarDetailSheetState extends State<CalendarDetailSheet> {
               'This cannot be undone from Calee.'
         : 'Delete "${cal.name}" and its events from Calee? '
               'This cannot be undone.';
-    final confirmLabel =
-        isSubscription ? 'Remove linked calendar' : 'Delete Calendar';
+    final confirmLabel = isSubscription
+        ? 'Remove linked calendar'
+        : 'Delete Calendar';
 
     final confirmed = await CaleeDestructiveDialog.show(
       context: context,

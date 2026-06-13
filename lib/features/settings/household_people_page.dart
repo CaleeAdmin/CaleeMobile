@@ -208,7 +208,8 @@ class _HouseholdPeoplePageState extends State<HouseholdPeoplePage> {
       body: household == null
           ? const _EmptyPeopleState(
               title: 'No people group yet',
-              message: 'People can be managed after your Calee account is ready.',
+              message:
+                  'People can be managed after your Calee account is ready.',
             )
           : ListView(
               padding: const EdgeInsets.symmetric(
@@ -329,7 +330,8 @@ class _PersonFormContent extends StatefulWidget {
     required String? avatarColor,
     required String role,
     required int sortOrder,
-  }) onSubmit;
+  })
+  onSubmit;
 
   @override
   State<_PersonFormContent> createState() => _PersonFormContentState();

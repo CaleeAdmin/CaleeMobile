@@ -22,8 +22,7 @@ class _CapturingClient extends CaleeHubClient {
     required String accessToken,
     required String from,
     required String to,
-  }) =>
-      Future.value(ClientEventList(from: from, to: to, events: const []));
+  }) => Future.value(ClientEventList(from: from, to: to, events: const []));
 
   @override
   Future<ClientTaskList> tasks({
@@ -53,33 +52,30 @@ class _CapturingClient extends CaleeHubClient {
 }
 
 ClientService _choreService() => const ClientService(
-      id: 'portal',
-      displayName: 'Portal',
-      baseUrl: '',
-      launchUrl: '',
-      serviceType: 'nextcloud_portal',
-      accessStatus: 'active',
-      calendarCredentialStatus: 'connected',
-      source: '',
-      capabilities: {'chores': true},
-    );
+  id: 'portal',
+  displayName: 'Portal',
+  baseUrl: '',
+  launchUrl: '',
+  serviceType: 'nextcloud_portal',
+  accessStatus: 'active',
+  calendarCredentialStatus: 'connected',
+  source: '',
+  capabilities: {'chores': true},
+);
 
 ClientService _calendarService() => const ClientService(
-      id: 'caldav',
-      displayName: 'CalDAV',
-      baseUrl: '',
-      launchUrl: '',
-      serviceType: 'caldav',
-      accessStatus: 'active',
-      calendarCredentialStatus: 'connected',
-      source: '',
-      capabilities: {'calendar': true, 'tasks': true},
-    );
+  id: 'caldav',
+  displayName: 'CalDAV',
+  baseUrl: '',
+  launchUrl: '',
+  serviceType: 'caldav',
+  accessStatus: 'active',
+  calendarCredentialStatus: 'connected',
+  source: '',
+  capabilities: {'calendar': true, 'tasks': true},
+);
 
-TodayRepository _repo(
-  CaleeHubClient client, {
-  List<ClientService>? services,
-}) =>
+TodayRepository _repo(CaleeHubClient client, {List<ClientService>? services}) =>
     TodayRepository(
       hubClient: client,
       accessToken: 'token',
@@ -88,19 +84,20 @@ TodayRepository _repo(
     );
 
 ClientTask _task({required String id, required String dueAt}) => ClientTask(
-      id: id,
-      calendarId: 'cal',
-      serviceId: 'svc',
-      serviceName: 'Svc',
-      title: 'Task $id',
-      status: 'needsaction',
-      dueAt: dueAt,
-      completedAt: null,
-      description: null,
-      source: '',
-    );
+  id: id,
+  calendarId: 'cal',
+  serviceId: 'svc',
+  serviceName: 'Svc',
+  title: 'Task $id',
+  status: 'needsaction',
+  dueAt: dueAt,
+  completedAt: null,
+  description: null,
+  source: '',
+);
 
-ClientChore _chore({required String id, required String section}) => ClientChore(
+ClientChore _chore({required String id, required String section}) =>
+    ClientChore(
       id: id,
       calendarId: 'cal',
       serviceId: 'svc',
@@ -142,7 +139,8 @@ void main() {
     test('overdue task older than yesterday appears in overdueTasks', () async {
       final year = DateTime.now().year;
       final oldDue = '${year - 1}-06-15';
-      final client = _CapturingClient()..tasksToReturn = [_task(id: 'old', dueAt: oldDue)];
+      final client = _CapturingClient()
+        ..tasksToReturn = [_task(id: 'old', dueAt: oldDue)];
       final repo = _repo(client);
       final overview = await repo.loadToday();
 
@@ -211,22 +209,19 @@ class _FailTasksClient extends CaleeHubClient {
     required String accessToken,
     required String from,
     required String to,
-  }) =>
-      _inner.events(accessToken: accessToken, from: from, to: to);
+  }) => _inner.events(accessToken: accessToken, from: from, to: to);
 
   @override
   Future<ClientTaskList> tasks({
     required String accessToken,
     required String from,
     required String to,
-  }) =>
-      Future.error(Exception('tasks failed'));
+  }) => Future.error(Exception('tasks failed'));
 
   @override
   Future<ClientChoreList> chores({
     required String accessToken,
     required String from,
     required String to,
-  }) =>
-      _inner.chores(accessToken: accessToken, from: from, to: to);
+  }) => _inner.chores(accessToken: accessToken, from: from, to: to);
 }

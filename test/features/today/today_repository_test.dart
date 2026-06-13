@@ -86,10 +86,7 @@ ClientService _calendarService() => const ClientService(
   capabilities: {'calendar': true, 'tasks': true},
 );
 
-TodayRepository _repo(
-  CaleeHubClient client, {
-  List<ClientService>? services,
-}) =>
+TodayRepository _repo(CaleeHubClient client, {List<ClientService>? services}) =>
     TodayRepository(
       hubClient: client,
       accessToken: 'token',
@@ -101,19 +98,18 @@ ClientTask _task({
   required String id,
   required String dueAt,
   String status = 'needsaction',
-}) =>
-    ClientTask(
-      id: id,
-      calendarId: 'cal',
-      serviceId: 'svc',
-      serviceName: 'Svc',
-      title: 'Task $id',
-      status: status,
-      dueAt: dueAt,
-      completedAt: null,
-      description: null,
-      source: '',
-    );
+}) => ClientTask(
+  id: id,
+  calendarId: 'cal',
+  serviceId: 'svc',
+  serviceName: 'Svc',
+  title: 'Task $id',
+  status: status,
+  dueAt: dueAt,
+  completedAt: null,
+  description: null,
+  source: '',
+);
 
 ClientChore _chore({required String id, required String section}) =>
     ClientChore(
@@ -176,9 +172,7 @@ void main() {
     });
 
     test('partial failure does not block other sections', () async {
-      final repo = _repo(
-        _StubHubClient(failEvents: true, failTasks: true),
-      );
+      final repo = _repo(_StubHubClient(failEvents: true, failTasks: true));
       final overview = await repo.loadToday();
 
       // Both failed but no exception thrown
@@ -259,9 +253,7 @@ void main() {
         tasks: ClientTaskList(
           from: '',
           to: '',
-          tasks: [
-            _task(id: '1', dueAt: todayStr, status: 'completed'),
-          ],
+          tasks: [_task(id: '1', dueAt: todayStr, status: 'completed')],
         ),
       );
       final repo = _repo(client);
