@@ -37,7 +37,7 @@ class FollowCalendarPage extends StatelessWidget {
                 const Icon(Icons.calendar_today_outlined, size: 48),
                 const SizedBox(height: 16),
                 Text(
-                  'Follow this calendar',
+                  'Add this calendar to Calee',
                   textAlign: TextAlign.center,
                   style: theme.textTheme.headlineSmall?.copyWith(
                     fontWeight: FontWeight.bold,
@@ -54,9 +54,8 @@ class FollowCalendarPage extends StatelessWidget {
                   _AlreadyFollowedMessage(theme: theme)
                 else
                   Text(
-                    'This calendar is read-only. Sign in to add it to your '
-                    'Calee account and sync with your Calee Tablet, or follow '
-                    'it on this phone only.',
+                    'This read-only calendar will be linked to your Calee '
+                    'account and can appear on your Calee display.',
                     textAlign: TextAlign.center,
                     style: theme.textTheme.bodyMedium?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
@@ -65,7 +64,7 @@ class FollowCalendarPage extends StatelessWidget {
                 const SizedBox(height: 32),
                 FilledButton(
                   onPressed: onSignIn,
-                  child: const Text('Continue with Calee account'),
+                  child: const Text('Add to Calee'),
                 ),
                 const SizedBox(height: 12),
                 FilledButton.tonal(
@@ -73,7 +72,7 @@ class FollowCalendarPage extends StatelessWidget {
                   child: Text(
                     alreadyFollowed
                         ? 'Open local calendar'
-                        : 'Follow on this phone only',
+                        : 'Advanced: add only to this phone',
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -103,7 +102,7 @@ class _AlreadyFollowedMessage extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
       ),
       child: Text(
-        'This calendar is already followed on this phone.',
+        'This calendar is already added on this phone.',
         textAlign: TextAlign.center,
         style: theme.textTheme.bodyMedium?.copyWith(
           color: theme.colorScheme.onSecondaryContainer,
