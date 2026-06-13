@@ -1,0 +1,29 @@
+import '../../data/models/client_calendar.dart';
+import '../../data/models/client_chore.dart';
+import '../../data/models/client_task.dart';
+
+class TodayOverview {
+  const TodayOverview({
+    required this.eventsToday,
+    required this.tasksDueToday,
+    required this.overdueTasks,
+    required this.choresDueToday,
+    required this.overdueChores,
+    this.calendarError,
+    this.tasksError,
+    this.choresError,
+  });
+
+  final List<ClientEvent> eventsToday;
+  final List<ClientTask> tasksDueToday;
+  final List<ClientTask> overdueTasks;
+  final List<ClientChore> choresDueToday;
+  final List<ClientChore> overdueChores;
+  final Object? calendarError;
+  final Object? tasksError;
+  final Object? choresError;
+
+  bool get hasCalendarError => calendarError != null;
+  bool get hasTasksError => tasksError != null;
+  bool get hasChoresError => choresError != null;
+}
