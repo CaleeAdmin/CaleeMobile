@@ -524,14 +524,8 @@ class _CalendarPageState extends State<CalendarPage> {
       ),
       child: SegmentedButton<_CalendarViewMode>(
         segments: const [
-          ButtonSegment(
-            value: _CalendarViewMode.month,
-            label: Text('Month'),
-          ),
-          ButtonSegment(
-            value: _CalendarViewMode.agenda,
-            label: Text('Agenda'),
-          ),
+          ButtonSegment(value: _CalendarViewMode.month, label: Text('Month')),
+          ButtonSegment(value: _CalendarViewMode.agenda, label: Text('Agenda')),
         ],
         selected: {_viewMode},
         onSelectionChanged: (selected) =>

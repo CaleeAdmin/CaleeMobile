@@ -41,8 +41,7 @@ class _TodayPageState extends State<TodayPage> {
   TodayOverview? _overview;
   Object? _fatalError;
 
-  bool get _hasChoreService =>
-      widget.services.any((s) => s.supportsChores);
+  bool get _hasChoreService => widget.services.any((s) => s.supportsChores);
 
   @override
   void initState() {
@@ -90,10 +89,7 @@ class _TodayPageState extends State<TodayPage> {
 
     return Scaffold(
       body: SafeArea(
-        child: RefreshIndicator(
-          onRefresh: _load,
-          child: _buildBody(theme),
-        ),
+        child: RefreshIndicator(onRefresh: _load, child: _buildBody(theme)),
       ),
     );
   }
@@ -155,11 +151,13 @@ class _TodayPageState extends State<TodayPage> {
           : Column(
               children: overview.eventsToday
                   .take(5)
-                  .map((e) => _EventRow(
-                        event: e,
-                        theme: theme,
-                        onTap: widget.onNavigateToCalendar,
-                      ))
+                  .map(
+                    (e) => _EventRow(
+                      event: e,
+                      theme: theme,
+                      onTap: widget.onNavigateToCalendar,
+                    ),
+                  )
                   .toList(),
             ),
     );
@@ -198,20 +196,24 @@ class _TodayPageState extends State<TodayPage> {
               children: [
                 ...overview.overdueTasks
                     .take(5)
-                    .map((t) => _TaskRow(
-                          task: t,
-                          theme: theme,
-                          overdue: true,
-                          onTap: widget.onNavigateToTasks,
-                        )),
+                    .map(
+                      (t) => _TaskRow(
+                        task: t,
+                        theme: theme,
+                        overdue: true,
+                        onTap: widget.onNavigateToTasks,
+                      ),
+                    ),
                 ...overview.tasksDueToday
                     .take(5)
-                    .map((t) => _TaskRow(
-                          task: t,
-                          theme: theme,
-                          overdue: false,
-                          onTap: widget.onNavigateToTasks,
-                        )),
+                    .map(
+                      (t) => _TaskRow(
+                        task: t,
+                        theme: theme,
+                        overdue: false,
+                        onTap: widget.onNavigateToTasks,
+                      ),
+                    ),
               ],
             ),
     );
@@ -250,20 +252,24 @@ class _TodayPageState extends State<TodayPage> {
               children: [
                 ...overview.overdueChores
                     .take(5)
-                    .map((c) => _ChoreRow(
-                          chore: c,
-                          theme: theme,
-                          overdue: true,
-                          onTap: widget.onNavigateToChores,
-                        )),
+                    .map(
+                      (c) => _ChoreRow(
+                        chore: c,
+                        theme: theme,
+                        overdue: true,
+                        onTap: widget.onNavigateToChores,
+                      ),
+                    ),
                 ...overview.choresDueToday
                     .take(5)
-                    .map((c) => _ChoreRow(
-                          chore: c,
-                          theme: theme,
-                          overdue: false,
-                          onTap: widget.onNavigateToChores,
-                        )),
+                    .map(
+                      (c) => _ChoreRow(
+                        chore: c,
+                        theme: theme,
+                        overdue: false,
+                        onTap: widget.onNavigateToChores,
+                      ),
+                    ),
               ],
             ),
     );
@@ -413,8 +419,11 @@ class _ErrorRow extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       child: Row(
         children: [
-          Icon(Icons.warning_amber_rounded,
-              size: 16, color: theme.colorScheme.error),
+          Icon(
+            Icons.warning_amber_rounded,
+            size: 16,
+            color: theme.colorScheme.error,
+          ),
           const SizedBox(width: 8),
           Expanded(
             child: Text(

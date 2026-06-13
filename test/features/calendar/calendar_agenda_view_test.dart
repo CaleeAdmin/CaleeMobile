@@ -17,12 +17,10 @@ class _StubPrefs extends CaleePreferences {
 }
 
 class _StubHubClient extends CaleeHubClient {
-  _StubHubClient({
-    List<ClientCalendar>? calendars,
-    List<ClientEvent>? events,
-  }) : _calendars = calendars ?? [],
-       _events = events ?? [],
-       super();
+  _StubHubClient({List<ClientCalendar>? calendars, List<ClientEvent>? events})
+    : _calendars = calendars ?? [],
+      _events = events ?? [],
+      super();
 
   final List<ClientCalendar> _calendars;
   final List<ClientEvent> _events;
@@ -103,26 +101,28 @@ void main() {
       expect(result, isEmpty);
     });
 
-    test('all-day events appear alongside timed events for the same day',
-        () async {
-      final ctrl = _ctrl(
-        calendars: [_calendar('cal1')],
-        events: [
-          _event(
-            'e-allday',
-            allDay: true,
-            startsAt: '2026-06-15',
-            endsAt: '2026-06-16',
-          ),
-          _event('e-timed', startsAt: '2026-06-15T10:00:00'),
-        ],
-      );
-      await ctrl.loadMonth();
+    test(
+      'all-day events appear alongside timed events for the same day',
+      () async {
+        final ctrl = _ctrl(
+          calendars: [_calendar('cal1')],
+          events: [
+            _event(
+              'e-allday',
+              allDay: true,
+              startsAt: '2026-06-15',
+              endsAt: '2026-06-16',
+            ),
+            _event('e-timed', startsAt: '2026-06-15T10:00:00'),
+          ],
+        );
+        await ctrl.loadMonth();
 
-      final day = ctrl.eventsForDay(DateTime(2026, 6, 15));
-      expect(day.any((e) => e.allDay), isTrue);
-      expect(day.any((e) => !e.allDay), isTrue);
-    });
+        final day = ctrl.eventsForDay(DateTime(2026, 6, 15));
+        expect(day.any((e) => e.allDay), isTrue);
+        expect(day.any((e) => !e.allDay), isTrue);
+      },
+    );
 
     test('hidden calendar events are excluded from agenda', () async {
       final ctrl = _ctrl(
@@ -161,10 +161,7 @@ void main() {
     });
 
     test('no visible events yields empty days throughout the month', () async {
-      final ctrl = _ctrl(
-        calendars: [_calendar('cal1')],
-        events: const [],
-      );
+      final ctrl = _ctrl(calendars: [_calendar('cal1')], events: const []);
       await ctrl.loadMonth();
 
       var totalVisible = 0;
@@ -184,8 +181,11 @@ void main() {
       const settingsTag = 'settings_add_family_member_fab';
 
       final tags = [tasksTag, choresTag, settingsTag];
-      expect(tags.toSet().length, tags.length,
-          reason: 'All FAB hero tags must be unique');
+      expect(
+        tags.toSet().length,
+        tags.length,
+        reason: 'All FAB hero tags must be unique',
+      );
     });
   });
 }

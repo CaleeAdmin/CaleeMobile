@@ -157,7 +157,9 @@ class TodayRepository {
     return (dueToday, overdue);
   }
 
-  (List<ClientChore>, List<ClientChore>) _splitChores(List<ClientChore> chores) {
+  (List<ClientChore>, List<ClientChore>) _splitChores(
+    List<ClientChore> chores,
+  ) {
     final dueToday = <ClientChore>[];
     final overdue = <ClientChore>[];
 
