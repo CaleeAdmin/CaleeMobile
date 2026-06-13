@@ -50,6 +50,10 @@ const _kFullDayNames = [
 
 String _monthYearLabel(DateTime d) => '${_kMonthNames[d.month - 1]} ${d.year}';
 
+// ─── View mode ────────────────────────────────────────────────────────────────
+
+enum _CalendarViewMode { month, agenda }
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 class CalendarPage extends StatefulWidget {
@@ -73,6 +77,7 @@ class _CalendarPageState extends State<CalendarPage> {
 
   late CalendarController _controller;
   final TextEditingController _searchController = TextEditingController();
+  _CalendarViewMode _viewMode = _CalendarViewMode.month;
 
   @override
   void initState() {
@@ -473,30 +478,141 @@ class _CalendarPageState extends State<CalendarPage> {
                   compactHeight: compactHeight,
                   veryCompactHeight: veryCompactHeight,
                 ),
-                _buildWeekdayHeader(compactHeight: compactHeight),
-                Flexible(
-                  fit: FlexFit.loose,
-                  child: _buildMonthGrid(
-                    compactHeight: compactHeight,
-                    veryCompactHeight: veryCompactHeight,
-                  ),
-                ),
-                const Divider(height: 1),
-                Expanded(
-                  child: RefreshIndicator(
-                    onRefresh: _controller.refresh,
-                    child: ListView(
-                      padding: EdgeInsets.zero,
-                      children: _buildAgendaItems(),
+                _buildViewSwitcher(),
+                if (_viewMode == _CalendarViewMode.month) ...[
+                  _buildWeekdayHeader(compactHeight: compactHeight),
+                  Flexible(
+                    fit: FlexFit.loose,
+                    child: _buildMonthGrid(
+                      compactHeight: compactHeight,
+                      veryCompactHeight: veryCompactHeight,
                     ),
                   ),
-                ),
+                  const Divider(height: 1),
+                  Expanded(
+                    child: RefreshIndicator(
+                      onRefresh: _controller.refresh,
+                      child: ListView(
+                        padding: EdgeInsets.zero,
+                        children: _buildAgendaItems(),
+                      ),
+                    ),
+                  ),
+                ] else ...[
+                  Expanded(
+                    child: RefreshIndicator(
+                      onRefresh: _controller.refresh,
+                      child: _buildAgendaMonthView(),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
         );
       },
     );
+  }
+
+  Widget _buildViewSwitcher() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        CaleeSpacing.md,
+        0,
+        CaleeSpacing.md,
+        CaleeSpacing.xs,
+      ),
+      child: SegmentedButton<_CalendarViewMode>(
+        segments: const [
+          ButtonSegment(
+            value: _CalendarViewMode.month,
+            label: Text('Month'),
+          ),
+          ButtonSegment(
+            value: _CalendarViewMode.agenda,
+            label: Text('Agenda'),
+          ),
+        ],
+        selected: {_viewMode},
+        onSelectionChanged: (selected) =>
+            setState(() => _viewMode = selected.first),
+        style: ButtonStyle(
+          visualDensity: VisualDensity.compact,
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAgendaMonthView() {
+    final use24h = _use24h(context);
+    final month = _controller.selectedMonth;
+    final daysInMonth = DateUtils.getDaysInMonth(month.year, month.month);
+
+    final dayWidgets = <Widget>[];
+    var hasAnyEvent = false;
+
+    for (var d = 1; d <= daysInMonth; d++) {
+      final day = DateTime(month.year, month.month, d);
+      final dayEvents = _controller.eventsForDay(day);
+      if (dayEvents.isEmpty) continue;
+
+      hasAnyEvent = true;
+      final allDay = dayEvents.where((e) => e.allDay).toList();
+      final timed = dayEvents.where((e) => !e.allDay).toList();
+
+      dayWidgets.add(
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            CaleeSpacing.md,
+            CaleeSpacing.md,
+            CaleeSpacing.md,
+            2,
+          ),
+          child: Text(
+            _agendaDateLabel(day),
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: isSameCalendarDay(day, _controller.today)
+                  ? CaleeColors.primary
+                  : CaleeColors.textSecondary,
+              letterSpacing: 0.2,
+            ),
+          ),
+        ),
+      );
+
+      for (final event in [...allDay, ...timed]) {
+        dayWidgets.add(
+          CalendarAgendaEventRow(
+            event: event,
+            color: _eventColor(event),
+            calendarName: _controller.calendarForEvent(event)?.name,
+            hideTime: event.allDay,
+            use24h: use24h,
+            onTap: () => _openEventActions(event),
+          ),
+        );
+      }
+    }
+
+    if (!hasAnyEvent) {
+      return ListView(
+        padding: const EdgeInsets.symmetric(vertical: CaleeSpacing.xl),
+        children: [
+          Center(
+            child: Text(
+              'No events this month',
+              style: TextStyle(fontSize: 15, color: CaleeColors.textTertiary),
+            ),
+          ),
+        ],
+      );
+    }
+
+    dayWidgets.add(const SizedBox(height: CaleeSpacing.xl));
+    return ListView(padding: EdgeInsets.zero, children: dayWidgets);
   }
 
   Widget _buildTopBar({
@@ -797,7 +913,7 @@ class _CalendarPageState extends State<CalendarPage> {
       }
 
       if (timedEvents.isNotEmpty) {
-        items.add(_buildAgendaSectionHeading('Timed'));
+        items.add(_buildAgendaSectionHeading('Events'));
         for (final event in timedEvents) {
           items.add(
             CalendarAgendaEventRow(
