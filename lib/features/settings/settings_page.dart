@@ -97,11 +97,11 @@ class _SettingsPageState extends State<SettingsPage> {
       );
     } catch (e, st) {
       if (!mounted) return;
-      if (kDebugMode) debugPrint('[SettingsPage] Family setup failed: $e\n$st');
+      if (kDebugMode) debugPrint('[SettingsPage] People setup failed: $e\n$st');
       if (kDebugMode) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Family setup error: $e')));
+        ).showSnackBar(SnackBar(content: Text('People setup error: $e')));
       }
       _showFamilySetupPage();
     }
@@ -303,10 +303,10 @@ class _SettingsPageState extends State<SettingsPage> {
               },
             ),
             CaleeListRow(
-              title: 'Family Members',
+              title: 'People',
               subtitle: isOpeningFamily
-                  ? 'Setting up family…'
-                  : 'Manage people used for chores',
+                  ? 'Preparing people…'
+                  : 'Manage people for tasks and chores',
               leading: isOpeningFamily
                   ? const SizedBox(
                       width: 20,
