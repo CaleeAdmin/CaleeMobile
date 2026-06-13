@@ -5,6 +5,7 @@ import '../../data/models/client_bootstrap.dart';
 import '../../data/models/client_calendar.dart';
 import '../../data/models/client_chore.dart';
 import '../../data/models/client_task.dart';
+import '../../ui/calee_design.dart';
 import '../calendar/calendar_utils.dart';
 import 'today_models.dart';
 import 'today_repository.dart';
@@ -85,231 +86,348 @@ class _TodayPageState extends State<TodayPage> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Scaffold(
+    return CaleeScaffold(
       body: SafeArea(
-        child: RefreshIndicator(onRefresh: _load, child: _buildBody(theme)),
+        child: RefreshIndicator(onRefresh: _load, child: _buildBody()),
       ),
     );
   }
 
-  Widget _buildBody(ThemeData theme) {
+  Widget _buildBody() {
     if (!_hasLoadedOnce && _isLoading) {
       return const Center(child: CircularProgressIndicator());
     }
 
     if (_fatalError != null && _overview == null) {
-      return _buildFatalError(theme);
+      return _buildFatalError();
     }
 
     return CustomScrollView(
       slivers: [
-        SliverAppBar(
-          title: const Text('Today'),
-          floating: true,
-          snap: true,
-          centerTitle: false,
-        ),
+        SliverToBoxAdapter(child: _buildPageHeader()),
         SliverPadding(
-          padding: const EdgeInsets.only(bottom: 24),
+          padding: const EdgeInsets.symmetric(horizontal: CaleeSpacing.md),
           sliver: SliverList(
-            delegate: SliverChildListDelegate(_buildSections(theme)),
+            delegate: SliverChildListDelegate(_buildSections()),
+          ),
+        ),
+        const SliverToBoxAdapter(child: SizedBox(height: CaleeSpacing.lg)),
+      ],
+    );
+  }
+
+  Widget _buildPageHeader() {
+    final now = DateTime.now();
+    final dateLabel = _formatHeaderDate(now);
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        CaleeSpacing.md,
+        CaleeSpacing.lg,
+        CaleeSpacing.md,
+        CaleeSpacing.md,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Today',
+            style: TextStyle(
+              fontSize: 32,
+              fontWeight: FontWeight.bold,
+              color: CaleeColors.textPrimary,
+              height: 1.1,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            dateLabel,
+            style: const TextStyle(
+              fontSize: 14,
+              color: CaleeColors.textSecondary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatHeaderDate(DateTime date) {
+    const weekdays = [
+      'Monday',
+      'Tuesday',
+      'Wednesday',
+      'Thursday',
+      'Friday',
+      'Saturday',
+      'Sunday',
+    ];
+    const months = [
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December',
+    ];
+    final weekday = weekdays[date.weekday - 1];
+    final month = months[date.month - 1];
+    return '$weekday, ${date.day} $month';
+  }
+
+  List<Widget> _buildSections() {
+    final overview = _overview;
+    if (overview == null) return [];
+
+    return [
+      _buildSummarySection(overview),
+      const SizedBox(height: CaleeSpacing.sectionSpacing),
+      _buildCalendarSection(overview),
+      const SizedBox(height: CaleeSpacing.sectionSpacing),
+      _buildTasksSection(overview),
+      if (_hasChoreService) ...[
+        const SizedBox(height: CaleeSpacing.sectionSpacing),
+        _buildChoresSection(overview),
+      ],
+      const SizedBox(height: CaleeSpacing.sectionSpacing),
+      _buildDisplayPlaceholder(),
+    ];
+  }
+
+  // ── Summary strip ─────────────────────────────────────────────────────────
+
+  Widget _buildSummarySection(TodayOverview overview) {
+    final eventCount = overview.hasCalendarError ? null : overview.eventsToday.length;
+    final taskCount = overview.hasTasksError
+        ? null
+        : overview.tasksDueToday.length + overview.overdueTasks.length;
+    final choreCount = (!_hasChoreService || overview.hasChoresError)
+        ? null
+        : overview.choresDueToday.length + overview.overdueChores.length;
+
+    return CaleeSection(
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: CaleeSpacing.md,
+            vertical: CaleeSpacing.sm + 2,
+          ),
+          child: Row(
+            children: [
+              _SummaryCounter(
+                label: 'Events',
+                count: eventCount,
+              ),
+              _SummaryDivider(),
+              _SummaryCounter(
+                label: 'Tasks',
+                count: taskCount,
+              ),
+              if (_hasChoreService) ...[
+                _SummaryDivider(),
+                _SummaryCounter(
+                  label: 'Chores',
+                  count: choreCount,
+                ),
+              ],
+            ],
           ),
         ),
       ],
     );
   }
 
-  List<Widget> _buildSections(ThemeData theme) {
-    final overview = _overview;
-    if (overview == null) return [];
-
-    return [
-      _buildCalendarSection(theme, overview),
-      _buildTasksSection(theme, overview),
-      if (_hasChoreService) _buildChoresSection(theme, overview),
-      _buildDisplayPlaceholder(theme),
-    ];
-  }
-
   // ── Calendar section ─────────────────────────────────────────────────────
 
-  Widget _buildCalendarSection(ThemeData theme, TodayOverview overview) {
-    final count = overview.eventsToday.length;
-    return _Section(
+  Widget _buildCalendarSection(TodayOverview overview) {
+    final rows = <Widget>[];
+    String? trailing;
+
+    if (overview.hasCalendarError) {
+      rows.add(_errorRow('Could not load calendar events.'));
+    } else if (overview.eventsToday.isEmpty) {
+      rows.add(_emptyRow('No events today'));
+    } else {
+      final count = overview.eventsToday.length;
+      trailing = '$count ${count == 1 ? 'event' : 'events'}';
+      for (final e in overview.eventsToday.take(5)) {
+        rows.add(_buildEventRow(e));
+      }
+    }
+
+    return CaleeSection(
       title: 'Calendar',
-      countLabel: overview.hasCalendarError || count == 0
-          ? null
-          : '$count ${count == 1 ? 'event' : 'events'} today',
-      onViewAll: widget.onNavigateToCalendar,
-      viewAllLabel: 'View Calendar',
-      child: overview.hasCalendarError
-          ? _ErrorRow(message: 'Could not load calendar events.')
-          : overview.eventsToday.isEmpty
-          ? const _EmptyRow(message: 'No events today')
-          : Column(
-              children: overview.eventsToday
-                  .take(5)
-                  .map(
-                    (e) => _EventRow(
-                      event: e,
-                      theme: theme,
-                      onTap: widget.onNavigateToCalendar,
-                    ),
-                  )
-                  .toList(),
-            ),
+      trailing: trailing,
+      children: rows,
+    );
+  }
+
+  Widget _buildEventRow(ClientEvent event) {
+    final timeLabel = eventTimeLabel(event);
+    return CaleeListRow(
+      title: event.title,
+      subtitle: timeLabel.isNotEmpty ? timeLabel : null,
+      leading: Icon(
+        event.allDay ? Icons.event_available : Icons.schedule,
+        size: 18,
+        color: CaleeColors.primary,
+      ),
+      onTap: widget.onNavigateToCalendar,
     );
   }
 
   // ── Tasks section ────────────────────────────────────────────────────────
 
-  Widget _buildTasksSection(ThemeData theme, TodayOverview overview) {
+  Widget _buildTasksSection(TodayOverview overview) {
     final hasItems =
         overview.overdueTasks.isNotEmpty || overview.tasksDueToday.isNotEmpty;
+    final rows = <Widget>[];
+    String? trailing;
 
-    String? countLabel;
-    if (!overview.hasTasksError && hasItems) {
+    if (overview.hasTasksError) {
+      rows.add(_errorRow('Could not load tasks.'));
+    } else if (!hasItems) {
+      rows.add(_emptyRow('No tasks due today'));
+    } else {
       final parts = <String>[];
       if (overview.tasksDueToday.isNotEmpty) {
-        final n = overview.tasksDueToday.length;
-        parts.add('$n due today');
+        parts.add('${overview.tasksDueToday.length} today');
       }
       if (overview.overdueTasks.isNotEmpty) {
-        final n = overview.overdueTasks.length;
-        parts.add('$n overdue');
+        parts.add('${overview.overdueTasks.length} overdue');
       }
-      countLabel = parts.join(', ');
+      trailing = parts.join(', ');
+      for (final t in overview.overdueTasks.take(5)) {
+        rows.add(_buildTaskRow(t, overdue: true));
+      }
+      for (final t in overview.tasksDueToday.take(5)) {
+        rows.add(_buildTaskRow(t, overdue: false));
+      }
     }
 
-    return _Section(
+    return CaleeSection(
       title: 'Tasks',
-      countLabel: countLabel,
-      onViewAll: widget.onNavigateToTasks,
-      viewAllLabel: 'View Tasks',
-      child: overview.hasTasksError
-          ? _ErrorRow(message: 'Could not load tasks.')
-          : !hasItems
-          ? const _EmptyRow(message: 'No tasks due today')
-          : Column(
-              children: [
-                ...overview.overdueTasks
-                    .take(5)
-                    .map(
-                      (t) => _TaskRow(
-                        task: t,
-                        theme: theme,
-                        overdue: true,
-                        onTap: widget.onNavigateToTasks,
-                      ),
-                    ),
-                ...overview.tasksDueToday
-                    .take(5)
-                    .map(
-                      (t) => _TaskRow(
-                        task: t,
-                        theme: theme,
-                        overdue: false,
-                        onTap: widget.onNavigateToTasks,
-                      ),
-                    ),
-              ],
-            ),
+      trailing: trailing,
+      children: rows,
+    );
+  }
+
+  Widget _buildTaskRow(ClientTask task, {required bool overdue}) {
+    return CaleeListRow(
+      title: task.title,
+      subtitle: overdue ? 'Overdue' : 'Due today',
+      subtitleStyle: overdue
+          ? const TextStyle(fontSize: 12, color: CaleeColors.destructive)
+          : null,
+      leading: Icon(
+        Icons.radio_button_unchecked,
+        size: 18,
+        color: overdue ? CaleeColors.destructive : CaleeColors.textTertiary,
+      ),
+      onTap: widget.onNavigateToTasks,
     );
   }
 
   // ── Chores section ───────────────────────────────────────────────────────
 
-  Widget _buildChoresSection(ThemeData theme, TodayOverview overview) {
+  Widget _buildChoresSection(TodayOverview overview) {
     final hasItems =
         overview.overdueChores.isNotEmpty || overview.choresDueToday.isNotEmpty;
+    final rows = <Widget>[];
+    String? trailing;
 
-    String? countLabel;
-    if (!overview.hasChoresError && hasItems) {
+    if (overview.hasChoresError) {
+      rows.add(_errorRow('Could not load chores.'));
+    } else if (!hasItems) {
+      rows.add(_emptyRow('No chores due today'));
+    } else {
       final parts = <String>[];
       if (overview.choresDueToday.isNotEmpty) {
-        final n = overview.choresDueToday.length;
-        parts.add('$n due today');
+        parts.add('${overview.choresDueToday.length} today');
       }
       if (overview.overdueChores.isNotEmpty) {
-        final n = overview.overdueChores.length;
-        parts.add('$n overdue');
+        parts.add('${overview.overdueChores.length} overdue');
       }
-      countLabel = parts.join(', ');
+      trailing = parts.join(', ');
+      for (final c in overview.overdueChores.take(5)) {
+        rows.add(_buildChoreRow(c, overdue: true));
+      }
+      for (final c in overview.choresDueToday.take(5)) {
+        rows.add(_buildChoreRow(c, overdue: false));
+      }
     }
 
-    return _Section(
+    return CaleeSection(
       title: 'Chores',
-      countLabel: countLabel,
-      onViewAll: widget.onNavigateToChores,
-      viewAllLabel: 'View Chores',
-      child: overview.hasChoresError
-          ? _ErrorRow(message: 'Could not load chores.')
-          : !hasItems
-          ? const _EmptyRow(message: 'No chores due today')
-          : Column(
-              children: [
-                ...overview.overdueChores
-                    .take(5)
-                    .map(
-                      (c) => _ChoreRow(
-                        chore: c,
-                        theme: theme,
-                        overdue: true,
-                        onTap: widget.onNavigateToChores,
-                      ),
-                    ),
-                ...overview.choresDueToday
-                    .take(5)
-                    .map(
-                      (c) => _ChoreRow(
-                        chore: c,
-                        theme: theme,
-                        overdue: false,
-                        onTap: widget.onNavigateToChores,
-                      ),
-                    ),
-              ],
-            ),
+      trailing: trailing,
+      children: rows,
+    );
+  }
+
+  Widget _buildChoreRow(ClientChore chore, {required bool overdue}) {
+    return CaleeListRow(
+      title: chore.title,
+      subtitle: overdue ? 'Overdue' : 'Due today',
+      subtitleStyle: overdue
+          ? const TextStyle(fontSize: 12, color: CaleeColors.destructive)
+          : null,
+      leading: Icon(
+        Icons.check_circle_outline,
+        size: 18,
+        color: overdue ? CaleeColors.destructive : CaleeColors.textTertiary,
+      ),
+      onTap: widget.onNavigateToChores,
     );
   }
 
   // ── Display placeholder ──────────────────────────────────────────────────
 
-  Widget _buildDisplayPlaceholder(ThemeData theme) {
-    return _Section(
+  Widget _buildDisplayPlaceholder() {
+    return CaleeSection(
       title: 'Calee Display',
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        child: Text(
-          'Display status and setup are coming soon.',
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-            fontStyle: FontStyle.italic,
+      footer: 'You will be able to link and check your Calee display here.',
+      children: [
+        const CaleeListRow(
+          title: 'Display status and setup are coming soon.',
+          titleStyle: TextStyle(
+            fontSize: 15,
+            color: CaleeColors.textSecondary,
           ),
         ),
-      ),
+      ],
     );
   }
 
   // ── Fatal error ──────────────────────────────────────────────────────────
 
-  Widget _buildFatalError(ThemeData theme) {
+  Widget _buildFatalError() {
     return ListView(
       children: [
         const SizedBox(height: 80),
         Center(
           child: Column(
             children: [
-              Icon(
+              const Icon(
                 Icons.error_outline,
                 size: 48,
-                color: theme.colorScheme.error,
+                color: CaleeColors.destructive,
               ),
-              const SizedBox(height: 16),
-              Text('Could not load Today', style: theme.textTheme.titleMedium),
-              const SizedBox(height: 8),
+              const SizedBox(height: CaleeSpacing.md),
+              const Text(
+                'Could not load Today',
+                style: TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w600,
+                  color: CaleeColors.textPrimary,
+                ),
+              ),
+              const SizedBox(height: CaleeSpacing.sm),
               TextButton(onPressed: _load, child: const Text('Try again')),
             ],
           ),
@@ -317,68 +435,62 @@ class _TodayPageState extends State<TodayPage> {
       ],
     );
   }
+
+  // ── Shared row helpers ────────────────────────────────────────────────────
+
+  Widget _emptyRow(String message) {
+    return CaleeListRow(
+      title: message,
+      titleStyle: const TextStyle(
+        fontSize: 15,
+        color: CaleeColors.textSecondary,
+      ),
+    );
+  }
+
+  Widget _errorRow(String message) {
+    return CaleeListRow(
+      title: message,
+      titleStyle: const TextStyle(
+        fontSize: 15,
+        color: CaleeColors.destructive,
+      ),
+      leading: const Icon(
+        Icons.warning_amber_rounded,
+        size: 16,
+        color: CaleeColors.destructive,
+      ),
+    );
+  }
 }
 
-// ── Section wrapper ──────────────────────────────────────────────────────────
+// ── Summary counter widget ────────────────────────────────────────────────────
 
-class _Section extends StatelessWidget {
-  const _Section({
-    required this.title,
-    required this.child,
-    this.countLabel,
-    this.onViewAll,
-    this.viewAllLabel,
-  });
+class _SummaryCounter extends StatelessWidget {
+  const _SummaryCounter({required this.label, required this.count});
 
-  final String title;
-  final String? countLabel;
-  final Widget child;
-  final VoidCallback? onViewAll;
-  final String? viewAllLabel;
+  final String label;
+  final int? count;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
+    return Expanded(
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Text(
-                title,
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              if (countLabel != null) ...[
-                const SizedBox(width: 8),
-                Text(
-                  countLabel!,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
-              const Spacer(),
-              if (onViewAll != null && viewAllLabel != null)
-                TextButton(
-                  onPressed: onViewAll,
-                  style: TextButton.styleFrom(
-                    padding: EdgeInsets.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  child: Text(viewAllLabel!),
-                ),
-            ],
+          Text(
+            count != null ? '$count' : '—',
+            style: const TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.w600,
+              color: CaleeColors.textPrimary,
+            ),
           ),
-          const SizedBox(height: 4),
-          Card(
-            margin: EdgeInsets.zero,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              child: child,
+          const SizedBox(height: 2),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 12,
+              color: CaleeColors.textSecondary,
             ),
           ),
         ],
@@ -387,152 +499,14 @@ class _Section extends StatelessWidget {
   }
 }
 
-// ── Reusable rows ────────────────────────────────────────────────────────────
-
-class _EmptyRow extends StatelessWidget {
-  const _EmptyRow({required this.message});
-  final String message;
-
+class _SummaryDivider extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: Text(
-        message,
-        style: theme.textTheme.bodyMedium?.copyWith(
-          color: theme.colorScheme.onSurfaceVariant,
-        ),
-      ),
-    );
-  }
-}
-
-class _ErrorRow extends StatelessWidget {
-  const _ErrorRow({required this.message});
-  final String message;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: Row(
-        children: [
-          Icon(
-            Icons.warning_amber_rounded,
-            size: 16,
-            color: theme.colorScheme.error,
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              message,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.error,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _EventRow extends StatelessWidget {
-  const _EventRow({required this.event, required this.theme, this.onTap});
-  final ClientEvent event;
-  final ThemeData theme;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final timeLabel = eventTimeLabel(event);
-    return ListTile(
-      dense: true,
-      onTap: onTap,
-      leading: Icon(
-        event.allDay ? Icons.event_available : Icons.schedule,
-        size: 18,
-        color: theme.colorScheme.primary,
-      ),
-      title: Text(event.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-      trailing: Text(
-        timeLabel,
-        style: theme.textTheme.bodySmall?.copyWith(
-          color: theme.colorScheme.onSurfaceVariant,
-        ),
-      ),
-    );
-  }
-}
-
-class _TaskRow extends StatelessWidget {
-  const _TaskRow({
-    required this.task,
-    required this.theme,
-    required this.overdue,
-    this.onTap,
-  });
-  final ClientTask task;
-  final ThemeData theme;
-  final bool overdue;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return ListTile(
-      dense: true,
-      onTap: onTap,
-      leading: Icon(
-        Icons.radio_button_unchecked,
-        size: 18,
-        color: overdue ? theme.colorScheme.error : theme.colorScheme.primary,
-      ),
-      title: Text(task.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-      trailing: overdue
-          ? Text(
-              'Overdue',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.error,
-              ),
-            )
-          : null,
-    );
-  }
-}
-
-class _ChoreRow extends StatelessWidget {
-  const _ChoreRow({
-    required this.chore,
-    required this.theme,
-    required this.overdue,
-    this.onTap,
-  });
-  final ClientChore chore;
-  final ThemeData theme;
-  final bool overdue;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return ListTile(
-      dense: true,
-      onTap: onTap,
-      leading: Icon(
-        Icons.check_circle_outline,
-        size: 18,
-        color: overdue ? theme.colorScheme.error : theme.colorScheme.primary,
-      ),
-      title: Text(chore.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-      trailing: overdue
-          ? Text(
-              'Overdue',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.error,
-              ),
-            )
-          : null,
+    return Container(
+      width: 1,
+      height: 36,
+      color: CaleeColors.separator,
+      margin: const EdgeInsets.symmetric(horizontal: CaleeSpacing.sm),
     );
   }
 }
