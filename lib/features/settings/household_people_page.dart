@@ -201,6 +201,7 @@ class _HouseholdPeoplePageState extends State<HouseholdPeoplePage> {
       floatingActionButton: household == null
           ? null
           : FloatingActionButton(
+              heroTag: 'settings_add_family_member_fab',
               onPressed: _openCreateSheet,
               child: const Icon(Icons.add),
             ),

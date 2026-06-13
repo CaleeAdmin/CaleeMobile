@@ -431,6 +431,7 @@ class _TasksPageState extends State<TasksPage> {
           floatingActionButton: taskCalendars.isEmpty
               ? null
               : FloatingActionButton.extended(
+                  heroTag: 'tasks_add_task_fab',
                   onPressed: _controller.isCreatingTask
                       ? null
                       : () => _openCreateTaskSheet(taskCalendars),

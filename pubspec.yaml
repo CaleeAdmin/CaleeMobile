@@ -1,5 +1,5 @@
 name: calee_mobile
-description: "Mobile calendar, tasks, chores, and household planning for Calee families."
+description: "Mobile calendars, tasks, people, and display management for Calee."
 publish_to: 'none'
 
 version: 0.0.5+5
@@ -26,3 +26,6 @@ dev_dependencies:
 flutter:
 
   uses-material-design: true
+
+  assets:
+    - assets/calee_logo.png
