@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:app_links/app_links.dart';
 import 'package:flutter/foundation.dart';
 
@@ -15,6 +17,7 @@ class CalendarFollowLinkController extends ChangeNotifier {
   String? pendingError;
 
   bool _disposed = false;
+  StreamSubscription<Uri>? _linkSubscription;
 
   Future<void> init() async {
     try {
@@ -26,7 +29,7 @@ class CalendarFollowLinkController extends ChangeNotifier {
       // ignore initial link errors
     }
 
-    _appLinks.uriLinkStream.listen(
+    _linkSubscription = _appLinks.uriLinkStream.listen(
       (uri) => _handleUri(uri),
       onError: (_) {},
     );
@@ -79,6 +82,7 @@ class CalendarFollowLinkController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _linkSubscription?.cancel();
     _resolver.dispose();
     super.dispose();
   }
