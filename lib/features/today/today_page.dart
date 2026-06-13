@@ -102,16 +102,16 @@ class _TodayPageState extends State<TodayPage> {
       return _buildFatalError();
     }
 
-    return CustomScrollView(
-      slivers: [
-        SliverToBoxAdapter(child: _buildPageHeader()),
-        SliverPadding(
-          padding: const EdgeInsets.symmetric(horizontal: CaleeSpacing.md),
-          sliver: SliverList(
-            delegate: SliverChildListDelegate(_buildSections()),
-          ),
-        ),
-        const SliverToBoxAdapter(child: SizedBox(height: CaleeSpacing.lg)),
+    return ListView(
+      padding: const EdgeInsets.symmetric(
+        horizontal: CaleeSpacing.pagePadding,
+        vertical: CaleeSpacing.md,
+      ),
+      children: [
+        _buildPageHeader(),
+        const SizedBox(height: CaleeSpacing.md),
+        ..._buildSections(),
+        const SizedBox(height: CaleeSpacing.lg),
       ],
     );
   }
@@ -121,12 +121,7 @@ class _TodayPageState extends State<TodayPage> {
     final dateLabel = _formatHeaderDate(now);
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        CaleeSpacing.md,
-        CaleeSpacing.lg,
-        CaleeSpacing.md,
-        CaleeSpacing.md,
-      ),
+      padding: const EdgeInsets.only(bottom: CaleeSpacing.md),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -213,25 +208,21 @@ class _TodayPageState extends State<TodayPage> {
         ? null
         : overview.choresDueToday.length + overview.overdueChores.length;
 
+    Widget countText(int? count) => Text(
+      count != null ? '$count' : '—',
+      style: const TextStyle(
+        fontSize: 15,
+        color: CaleeColors.textSecondary,
+      ),
+    );
+
     return CaleeSection(
+      title: 'Summary',
       children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(
-            horizontal: CaleeSpacing.md,
-            vertical: CaleeSpacing.sm + 2,
-          ),
-          child: Row(
-            children: [
-              _SummaryCounter(label: 'Events', count: eventCount),
-              _SummaryDivider(),
-              _SummaryCounter(label: 'Tasks', count: taskCount),
-              if (_hasChoreService) ...[
-                _SummaryDivider(),
-                _SummaryCounter(label: 'Chores', count: choreCount),
-              ],
-            ],
-          ),
-        ),
+        CaleeListRow(title: 'Events', trailing: countText(eventCount)),
+        CaleeListRow(title: 'Tasks', trailing: countText(taskCount)),
+        if (_hasChoreService)
+          CaleeListRow(title: 'Chores', trailing: countText(choreCount)),
       ],
     );
   }
@@ -439,49 +430,3 @@ class _TodayPageState extends State<TodayPage> {
   }
 }
 
-// ── Summary counter widget ────────────────────────────────────────────────────
-
-class _SummaryCounter extends StatelessWidget {
-  const _SummaryCounter({required this.label, required this.count});
-
-  final String label;
-  final int? count;
-
-  @override
-  Widget build(BuildContext context) {
-    return Expanded(
-      child: Column(
-        children: [
-          Text(
-            count != null ? '$count' : '—',
-            style: const TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.w600,
-              color: CaleeColors.textPrimary,
-            ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            label,
-            style: const TextStyle(
-              fontSize: 12,
-              color: CaleeColors.textSecondary,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SummaryDivider extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 1,
-      height: 36,
-      color: CaleeColors.separator,
-      margin: const EdgeInsets.symmetric(horizontal: CaleeSpacing.sm),
-    );
-  }
-}
