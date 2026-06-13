@@ -210,10 +210,7 @@ class _TodayPageState extends State<TodayPage> {
 
     Widget countText(int? count) => Text(
       count != null ? '$count' : '—',
-      style: const TextStyle(
-        fontSize: 15,
-        color: CaleeColors.textSecondary,
-      ),
+      style: const TextStyle(fontSize: 15, color: CaleeColors.textSecondary),
     );
 
     return CaleeSection(
@@ -429,4 +426,3 @@ class _TodayPageState extends State<TodayPage> {
     );
   }
 }
-
