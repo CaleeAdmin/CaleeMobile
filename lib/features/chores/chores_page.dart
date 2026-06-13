@@ -733,6 +733,7 @@ class _ChoresPageState extends State<ChoresPage> {
         return CaleeScaffold(
           floatingActionButton: hasWritable
               ? FloatingActionButton.extended(
+                  heroTag: 'chores_add_chore_fab',
                   onPressed: () => _openCreateChoreSheet(choreCalendars),
                   icon: const Icon(Icons.add),
                   label: const Text('Chore'),
