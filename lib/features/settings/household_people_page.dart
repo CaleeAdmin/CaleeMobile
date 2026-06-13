@@ -329,8 +329,7 @@ class _PersonFormContent extends StatefulWidget {
     required String? avatarColor,
     required String role,
     required int sortOrder,
-  })
-  onSubmit;
+  }) onSubmit;
 
   @override
   State<_PersonFormContent> createState() => _PersonFormContentState();
