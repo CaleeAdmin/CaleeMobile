@@ -34,3 +34,13 @@ Run:
 
     flutter pub get
     flutter run
+
+## Development checks before commit
+
+Before committing Dart changes, run:
+
+    dart format lib test
+    flutter analyze --fatal-infos
+    flutter test
+
+CI will fail if `dart format --set-exit-if-changed lib test` would modify any files.

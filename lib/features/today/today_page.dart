@@ -203,7 +203,9 @@ class _TodayPageState extends State<TodayPage> {
   // ── Summary strip ─────────────────────────────────────────────────────────
 
   Widget _buildSummarySection(TodayOverview overview) {
-    final eventCount = overview.hasCalendarError ? null : overview.eventsToday.length;
+    final eventCount = overview.hasCalendarError
+        ? null
+        : overview.eventsToday.length;
     final taskCount = overview.hasTasksError
         ? null
         : overview.tasksDueToday.length + overview.overdueTasks.length;
@@ -220,21 +222,12 @@ class _TodayPageState extends State<TodayPage> {
           ),
           child: Row(
             children: [
-              _SummaryCounter(
-                label: 'Events',
-                count: eventCount,
-              ),
+              _SummaryCounter(label: 'Events', count: eventCount),
               _SummaryDivider(),
-              _SummaryCounter(
-                label: 'Tasks',
-                count: taskCount,
-              ),
+              _SummaryCounter(label: 'Tasks', count: taskCount),
               if (_hasChoreService) ...[
                 _SummaryDivider(),
-                _SummaryCounter(
-                  label: 'Chores',
-                  count: choreCount,
-                ),
+                _SummaryCounter(label: 'Chores', count: choreCount),
               ],
             ],
           ),
@@ -261,11 +254,7 @@ class _TodayPageState extends State<TodayPage> {
       }
     }
 
-    return CaleeSection(
-      title: 'Calendar',
-      trailing: trailing,
-      children: rows,
-    );
+    return CaleeSection(title: 'Calendar', trailing: trailing, children: rows);
   }
 
   Widget _buildEventRow(ClientEvent event) {
@@ -311,11 +300,7 @@ class _TodayPageState extends State<TodayPage> {
       }
     }
 
-    return CaleeSection(
-      title: 'Tasks',
-      trailing: trailing,
-      children: rows,
-    );
+    return CaleeSection(title: 'Tasks', trailing: trailing, children: rows);
   }
 
   Widget _buildTaskRow(ClientTask task, {required bool overdue}) {
@@ -363,11 +348,7 @@ class _TodayPageState extends State<TodayPage> {
       }
     }
 
-    return CaleeSection(
-      title: 'Chores',
-      trailing: trailing,
-      children: rows,
-    );
+    return CaleeSection(title: 'Chores', trailing: trailing, children: rows);
   }
 
   Widget _buildChoreRow(ClientChore chore, {required bool overdue}) {
@@ -395,10 +376,7 @@ class _TodayPageState extends State<TodayPage> {
       children: [
         const CaleeListRow(
           title: 'Display status and setup are coming soon.',
-          titleStyle: TextStyle(
-            fontSize: 15,
-            color: CaleeColors.textSecondary,
-          ),
+          titleStyle: TextStyle(fontSize: 15, color: CaleeColors.textSecondary),
         ),
       ],
     );
@@ -451,10 +429,7 @@ class _TodayPageState extends State<TodayPage> {
   Widget _errorRow(String message) {
     return CaleeListRow(
       title: message,
-      titleStyle: const TextStyle(
-        fontSize: 15,
-        color: CaleeColors.destructive,
-      ),
+      titleStyle: const TextStyle(fontSize: 15, color: CaleeColors.destructive),
       leading: const Icon(
         Icons.warning_amber_rounded,
         size: 16,
