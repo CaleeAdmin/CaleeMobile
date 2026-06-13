@@ -196,6 +196,66 @@ class _LoginPageState extends State<LoginPage> {
                             : const Text('Sign in'),
                       ),
                       const SizedBox(height: 32),
+                      // TODO(CaleeMobile onboarding):
+                      // Add the "New to Calee? Set up a Calee display" entry point after the
+                      // Calee Display auth changeover is stable.
+                      //
+                      // End-to-end target flow:
+                      //
+                      // 1. User opens CaleeMobile without an existing session.
+                      // 2. Login screen shows:
+                      //    - "Sign in to Calee"
+                      //    - "Manage calendars, tasks and displays connected to your Calee account."
+                      //    - email/password sign-in
+                      //    - "Forgot password?"
+                      //    - Terms and Conditions
+                      //    - future link: "New to Calee? Set up a Calee display"
+                      //
+                      // 3. When the future setup link is enabled, tapping it should start the
+                      //    official Hub/Core onboarding flow, not a separate CaleeMobile-only
+                      //    onboarding implementation.
+                      //
+                      // 4. Hub/Core onboarding should handle:
+                      //    - Calee account creation or identification
+                      //    - Calee display activation
+                      //    - redeem code / activation validation if required
+                      //    - display native-login completion
+                      //    - provider guidance for iCloud / Google / Outlook / calendar links
+                      //    - creation of any required account/service credentials
+                      //
+                      // 5. After onboarding completes successfully:
+                      //    - the Calee display should auto-login
+                      //    - Hub/Core should generate a short-lived, one-time mobile handoff code
+                      //    - the browser should offer "Open Calee app" / "Get the Calee app"
+                      //    - if CaleeMobile is installed, the handoff link should open the app
+                      //    - CaleeMobile should exchange the one-time code for its own mobile session
+                      //    - CaleeMobile should store the mobile session securely
+                      //    - user should land on the post-setup home screen, likely Today or Calendar
+                      //
+                      // 6. Security requirements:
+                      //    - do not pass passwords in URLs
+                      //    - do not pass temporary passwords in URLs
+                      //    - do not pass Nextcloud app passwords in URLs
+                      //    - do not reuse the Calee display session as the mobile session
+                      //    - use a short-lived, single-use handoff code
+                      //    - bind the handoff to the onboarding flow and expected account
+                      //    - handle expired, already-used, cancelled, and invalid handoff states
+                      //
+                      // 7. Fallback behaviour:
+                      //    - if mobile handoff fails, show the normal CaleeMobile sign-in screen
+                      //    - explain that setup may be complete but mobile sign-in is still required
+                      //    - provide a safe "Try again" or "Sign in manually" option
+                      //
+                      // 8. Related future feature:
+                      //    Add "Link a Calee display" for existing signed-in users.
+                      //    This should let a signed-in CaleeMobile user scan a Calee display QR code,
+                      //    approve the display login through Hub/Core, and allow the Calee display to
+                      //    auto-login. This should use the CaleeMobile account session, not stored
+                      //    Nextcloud/app-password credentials from the legacy CaleeSync flow.
+                      //
+                      // Do not enable the setup link until the Calee Display auth changeover,
+                      // Hub/Core mobile handoff endpoint, app link/universal link routing, and
+                      // CaleeMobile session exchange are implemented and tested end-to-end.
                       Center(
                         child: TextButton(
                           onPressed: () => _openUrl(_kTermsAndConditionsUrl),
