@@ -140,6 +140,17 @@ class _CaleeAppState extends State<CaleeApp> {
     });
   }
 
+  void _showSnackBar(String message) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final context = _navigatorKey.currentContext;
+      if (context == null) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    });
+  }
+
   Future<void> _handleFollowLocally(ResolvedCalendarFollowIntent intent) async {
     try {
       await _localSubscriptionRepo.add(
@@ -149,14 +160,7 @@ class _CaleeAppState extends State<CaleeApp> {
       );
     } catch (_) {
       if (!mounted) return;
-      final ctx = _navigatorKey.currentContext;
-      if (ctx != null) {
-        ScaffoldMessenger.of(ctx).showSnackBar(
-          const SnackBar(
-            content: Text('This calendar could not be followed on this phone.'),
-          ),
-        );
-      }
+      _showSnackBar('This calendar could not be followed on this phone.');
       return;
     }
 
