@@ -100,7 +100,7 @@ class LocalCalendarIcsService {
         inVevent = false;
         if (dtStart != null) {
           final baseId = uid ?? _stableEventId(subscription, dtStart, summary);
-          final duration = dtEnd != null ? dtEnd.difference(dtStart) : null;
+          final duration = dtEnd?.difference(dtStart);
 
           if (rruleValue != null) {
             final occurrences = _expandRrule(
@@ -198,11 +198,15 @@ class LocalCalendarIcsService {
   }) {
     final params = _parseRruleParams(rruleValue);
     final freq = (params['FREQ'] ?? '').toUpperCase();
-    if (!{'DAILY', 'WEEKLY', 'MONTHLY'}.contains(freq)) return [];
+    if (!{'DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY'}.contains(freq)) return [];
 
-    final interval = (int.tryParse(params['INTERVAL'] ?? '') ?? 1).clamp(1, 365);
-    final countLimit =
-        params['COUNT'] != null ? int.tryParse(params['COUNT']!) : null;
+    // Fix 1: clamp returns num; force int explicitly.
+    final parsedInterval = int.tryParse(params['INTERVAL'] ?? '') ?? 1;
+    final interval = parsedInterval.clamp(1, 365).toInt();
+
+    final countLimit = params['COUNT'] != null
+        ? int.tryParse(params['COUNT']!)
+        : null;
 
     DateTime? until;
     if (params['UNTIL'] != null) {
@@ -210,13 +214,14 @@ class LocalCalendarIcsService {
       until = dt;
     }
 
-    // BYDAY only supported for WEEKLY.
+    // BYDAY only supported for WEEKLY; ordinal values (e.g. 2MO, -1FR) are
+    // filtered out by _weekdayOffset returning -1.
     final byDay = freq == 'WEEKLY'
         ? (params['BYDAY'] ?? '')
-            .split(',')
-            .map((s) => s.trim().toUpperCase())
-            .where((s) => s.isNotEmpty)
-            .toList()
+              .split(',')
+              .map((s) => s.trim().toUpperCase())
+              .where((s) => s.isNotEmpty)
+              .toList()
         : <String>[];
 
     final results = <DateTime>[];
@@ -248,34 +253,34 @@ class LocalCalendarIcsService {
         final monday = _isoWeekStart(current);
         for (final dayAbbr in byDay) {
           final offset = _weekdayOffset(dayAbbr);
-          if (offset < 0) continue;
+          if (offset < 0) continue; // ordinal or unknown — ignore safely
           if (countLimit != null && occurrenceCount >= countLimit) break;
 
           final base = monday.add(Duration(days: offset));
-          final occ = isAllDay
-              ? DateTime(base.year, base.month, base.day)
-              : DateTime(
-                  base.year,
-                  base.month,
-                  base.day,
-                  dtStart.hour,
-                  dtStart.minute,
-                  dtStart.second,
-                );
+          final occ = _makeDateWithOriginalTime(
+            base.year,
+            base.month,
+            base.day,
+            dtStart,
+            isAllDay,
+          );
 
           if (occ.isBefore(dtStart)) continue;
           if (until != null && occ.isAfter(until)) continue;
 
+          // Fix 2: COUNT counts generated candidates before EXDATE removes
+          // visible instances.
+          occurrenceCount++;
           if (!_isExcluded(occ, exdates)) {
-            occurrenceCount++;
             if (occ.isAfter(windowStart) && !occ.isAfter(windowEnd)) {
               results.add(occ);
             }
           }
         }
       } else {
+        // Fix 2: count before EXDATE filter.
+        occurrenceCount++;
         if (!_isExcluded(current, exdates)) {
-          occurrenceCount++;
           if (current.isAfter(windowStart) && !current.isAfter(windowEnd)) {
             results.add(current);
           }
@@ -297,39 +302,97 @@ class LocalCalendarIcsService {
   ) {
     switch (freq) {
       case 'DAILY':
+        // DateTime.add preserves isUtc.
         return current.add(Duration(days: interval));
       case 'WEEKLY':
         return current.add(Duration(days: 7 * interval));
       case 'MONTHLY':
-        var month = current.month + interval;
-        var year = current.year;
-        while (month > 12) {
-          month -= 12;
-          year++;
-        }
-        final day = dtStart.day.clamp(1, _daysInMonth(year, month));
-        return isAllDay
-            ? DateTime(year, month, day)
-            : DateTime(
-                year,
-                month,
-                day,
-                dtStart.hour,
-                dtStart.minute,
-                dtStart.second,
-              );
+        return _advanceMonthly(current, interval, dtStart, isAllDay);
+      case 'YEARLY':
+        return _advanceYearly(current, interval, dtStart, isAllDay);
       default:
         return current.add(const Duration(days: 1));
     }
   }
 
-  /// Returns the ISO Monday of the week containing [dt] (time stripped).
-  DateTime _isoWeekStart(DateTime dt) {
-    final monday = dt.subtract(Duration(days: dt.weekday - 1));
-    return DateTime(monday.year, monday.month, monday.day);
+  // Fix 5: helper that constructs a DateTime matching dtStart's time fields
+  // and UTC flag, clamped to a specific year/month/day.
+  DateTime _makeDateWithOriginalTime(
+    int year,
+    int month,
+    int day,
+    DateTime dtStart,
+    bool isAllDay,
+  ) {
+    if (isAllDay) {
+      return dtStart.isUtc
+          ? DateTime.utc(year, month, day)
+          : DateTime(year, month, day);
+    }
+    return dtStart.isUtc
+        ? DateTime.utc(
+            year,
+            month,
+            day,
+            dtStart.hour,
+            dtStart.minute,
+            dtStart.second,
+          )
+        : DateTime(
+            year,
+            month,
+            day,
+            dtStart.hour,
+            dtStart.minute,
+            dtStart.second,
+          );
   }
 
-  /// Maps a BYDAY abbreviation (e.g. MO, 2TU) to a 0-based offset from Monday.
+  DateTime _advanceMonthly(
+    DateTime current,
+    int interval,
+    DateTime dtStart,
+    bool isAllDay,
+  ) {
+    var month = current.month + interval;
+    var year = current.year;
+    while (month > 12) {
+      month -= 12;
+      year++;
+    }
+    final day = dtStart.day.clamp(1, _daysInMonth(year, month));
+    return _makeDateWithOriginalTime(year, month, day, dtStart, isAllDay);
+  }
+
+  // Fix 3: advance by interval years, preserve original month/day/time,
+  // clamp invalid dates (e.g. Feb 29 → Feb 28 in non-leap years).
+  DateTime _advanceYearly(
+    DateTime current,
+    int interval,
+    DateTime dtStart,
+    bool isAllDay,
+  ) {
+    final year = current.year + interval;
+    final month = dtStart.month;
+    final day = dtStart.day.clamp(1, _daysInMonth(year, month));
+    return _makeDateWithOriginalTime(year, month, day, dtStart, isAllDay);
+  }
+
+  /// Returns the ISO Monday of the week containing [dt] (time stripped).
+  /// Fix 5: preserves UTC flag from [dt].
+  DateTime _isoWeekStart(DateTime dt) {
+    final monday = dt.subtract(Duration(days: dt.weekday - 1));
+    return dt.isUtc
+        ? DateTime.utc(monday.year, monday.month, monday.day)
+        : DateTime(monday.year, monday.month, monday.day);
+  }
+
+  /// Maps a plain BYDAY abbreviation (MO, TU, WE, TH, FR, SA, SU) to a
+  /// 0-based offset from Monday.
+  ///
+  /// Fix 4: ordinal BYDAY values (e.g. 2MO, -1FR) contain digits and are
+  /// NOT stripped — they are rejected by returning -1 so callers can skip
+  /// them safely.
   int _weekdayOffset(String abbr) {
     const offsets = {
       'MO': 0,
@@ -340,9 +403,9 @@ class LocalCalendarIcsService {
       'SA': 5,
       'SU': 6,
     };
-    // Strip leading position digits (e.g. "2MO" → "MO").
-    final key = abbr.replaceAll(RegExp(r'[^A-Z]'), '');
-    return offsets[key] ?? -1;
+    // Reject ordinal values such as 2MO or -1FR (contain a digit).
+    if (abbr.contains(RegExp(r'\d'))) return -1;
+    return offsets[abbr] ?? -1;
   }
 
   bool _isExcluded(DateTime dt, List<DateTime> exdates) {
@@ -390,9 +453,10 @@ class LocalCalendarIcsService {
   String? _extractPropertyValue(String line, String propertyName) {
     final len = propertyName.length;
     if (line.length <= len) return null;
-    if (!line.substring(0, len).toUpperCase().startsWith(
-          propertyName.toUpperCase(),
-        )) {
+    if (!line
+        .substring(0, len)
+        .toUpperCase()
+        .startsWith(propertyName.toUpperCase())) {
       return null;
     }
     final ch = line[len];
@@ -409,9 +473,10 @@ class LocalCalendarIcsService {
   bool _propertyMatches(String line, String propertyName) {
     final len = propertyName.length;
     if (line.length <= len) return false;
-    if (!line.substring(0, len).toUpperCase().startsWith(
-          propertyName.toUpperCase(),
-        )) {
+    if (!line
+        .substring(0, len)
+        .toUpperCase()
+        .startsWith(propertyName.toUpperCase())) {
       return false;
     }
     final ch = line[len];
@@ -433,10 +498,7 @@ class LocalCalendarIcsService {
         .replaceAll('\r\n\t', '')
         .replaceAll('\n ', '')
         .replaceAll('\n\t', '');
-    return unfolded
-        .split(RegExp(r'\r?\n'))
-        .where((l) => l.isNotEmpty)
-        .toList();
+    return unfolded.split(RegExp(r'\r?\n')).where((l) => l.isNotEmpty).toList();
   }
 
   (DateTime?, bool) _parseDtLine(String line) {

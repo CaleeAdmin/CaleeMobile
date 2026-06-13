@@ -59,7 +59,10 @@ class LocalCalendarSubscription {
     try {
       final list = jsonDecode(raw) as List<dynamic>;
       return list
-          .map((e) => LocalCalendarSubscription.fromJson(e as Map<String, dynamic>))
+          .map(
+            (e) =>
+                LocalCalendarSubscription.fromJson(e as Map<String, dynamic>),
+          )
           .toList();
     } catch (_) {
       return [];
