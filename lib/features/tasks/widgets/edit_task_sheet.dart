@@ -6,11 +6,7 @@ import '../../../ui/calee_widgets.dart';
 import 'task_widget_helpers.dart';
 
 class EditTaskForm extends StatefulWidget {
-  const EditTaskForm({
-    required this.task,
-    required this.onUpdate,
-    super.key,
-  });
+  const EditTaskForm({required this.task, required this.onUpdate, super.key});
 
   final ClientTask task;
   final Future<void> Function({
@@ -109,9 +105,9 @@ class _EditTaskFormState extends State<EditTaskForm> {
           _isSubmitting = false;
         });
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Unable to update task.')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Unable to update task.')));
       }
     }
   }

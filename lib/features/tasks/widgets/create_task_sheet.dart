@@ -127,9 +127,9 @@ class _CreateTaskFormState extends State<CreateTaskForm> {
           _isSubmitting = false;
         });
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Unable to create task.')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Unable to create task.')));
       }
     }
   }

@@ -18,8 +18,9 @@ class TaskListFilterBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final label =
-        selectedCalendar == null ? 'All Tasks' : selectedCalendar!.name;
+    final label = selectedCalendar == null
+        ? 'All Tasks'
+        : selectedCalendar!.name;
 
     return GestureDetector(
       onTap: onTap,
@@ -34,11 +35,7 @@ class TaskListFilterBar extends StatelessWidget {
         ),
         child: Row(
           children: [
-            Icon(
-              Icons.list_alt_outlined,
-              size: 18,
-              color: CaleeColors.primary,
-            ),
+            Icon(Icons.list_alt_outlined, size: 18, color: CaleeColors.primary),
             const SizedBox(width: CaleeSpacing.sm),
             Expanded(
               child: Text(
@@ -111,7 +108,11 @@ class TaskListChooser extends StatelessWidget {
             CaleeListRow(
               title: 'All Tasks',
               leading: selectedCalendar == null
-                  ? const Icon(Icons.check, size: 20, color: CaleeColors.primary)
+                  ? const Icon(
+                      Icons.check,
+                      size: 20,
+                      color: CaleeColors.primary,
+                    )
                   : const SizedBox(width: 20),
               trailing: Text('${allTasks.length}', style: countStyle),
               onTap: () => onSelect(null),
