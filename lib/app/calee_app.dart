@@ -10,6 +10,9 @@ import '../features/auth/session_controller.dart';
 import '../features/calendar_follow/calendar_follow_intent.dart';
 import '../features/calendar_follow/calendar_follow_link_controller.dart';
 import '../features/calendar_follow/follow_calendar_page.dart';
+import '../features/local_subscriber/local_calendar_subscription.dart';
+import '../features/local_subscriber/local_calendar_subscription_repository.dart';
+import '../features/local_subscriber/local_subscriber_calendar_page.dart';
 import '../features/settings/calendar_collections_page.dart';
 import '../ui/calee_design.dart';
 import 'calee_home_page.dart';
@@ -25,11 +28,15 @@ class _CaleeAppState extends State<CaleeApp> {
   late final CaleeHubClient _hubClient;
   late final SessionController _sessionController;
   late final CalendarFollowLinkController _followLinkController;
+  late final LocalCalendarSubscriptionRepository _localSubscriptionRepo;
   final _navigatorKey = GlobalKey<NavigatorState>();
 
-  // true while the user has tapped "Sign in" from the FollowCalendarPage
+  // true while the user has tapped "Continue with Calee account"
   bool _showingFollowSignIn = false;
   bool _processingFollowLink = false;
+
+  List<LocalCalendarSubscription> _localSubscriptions = [];
+  bool _localSubscriptionsLoaded = false;
 
   @override
   void initState() {
@@ -46,8 +53,11 @@ class _CaleeAppState extends State<CaleeApp> {
     _followLinkController.addListener(_onFollowLinkChanged);
     _sessionController.addListener(_onSessionChanged);
 
+    _localSubscriptionRepo = LocalCalendarSubscriptionRepository();
+
     _sessionController.restoreSession();
     unawaited(_followLinkController.init());
+    unawaited(_loadLocalSubscriptions());
   }
 
   @override
@@ -57,6 +67,15 @@ class _CaleeAppState extends State<CaleeApp> {
     _followLinkController.dispose();
     _sessionController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadLocalSubscriptions() async {
+    final subs = await _localSubscriptionRepo.list();
+    if (!mounted) return;
+    setState(() {
+      _localSubscriptions = subs;
+      _localSubscriptionsLoaded = true;
+    });
   }
 
   void _onSessionChanged() {
@@ -121,6 +140,39 @@ class _CaleeAppState extends State<CaleeApp> {
     });
   }
 
+  void _showSnackBar(String message) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final context = _navigatorKey.currentContext;
+      if (context == null) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    });
+  }
+
+  Future<void> _handleFollowLocally(ResolvedCalendarFollowIntent intent) async {
+    try {
+      await _localSubscriptionRepo.add(
+        title: intent.title,
+        url: intent.url,
+        source: intent.source,
+      );
+    } catch (_) {
+      if (!mounted) return;
+      _showSnackBar('This calendar could not be followed on this phone.');
+      return;
+    }
+
+    _followLinkController.clearPending();
+    final updated = await _localSubscriptionRepo.list();
+    if (!mounted) return;
+    setState(() {
+      _localSubscriptions = updated;
+      _showingFollowSignIn = false;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -136,23 +188,74 @@ class _CaleeAppState extends State<CaleeApp> {
   }
 
   Widget _buildHome() {
-    if (_sessionController.isRestoringSession) {
+    if (_sessionController.isRestoringSession || !_localSubscriptionsLoaded) {
       return const _SessionRestorePage();
     }
 
     if (!_sessionController.isSignedIn) {
       final pendingIntent = _followLinkController.pendingIntent;
-      if (pendingIntent != null && !_showingFollowSignIn) {
-        return FollowCalendarPage(
-          intent: pendingIntent,
-          onSignIn: () => setState(() => _showingFollowSignIn = true),
-          onCancel: () {
-            _followLinkController.clearPending();
+
+      // User chose "Continue with Calee account" → show login
+      if (_showingFollowSignIn) {
+        return LoginPage(
+          authRepository: _sessionController.repository,
+          onSignedIn: (result) async {
             setState(() => _showingFollowSignIn = false);
+            await _sessionController.completeSignIn(result);
           },
         );
       }
 
+      // Pending follow intent → show follow page
+      if (pendingIntent != null) {
+        final normalizedIntentUrl = pendingIntent.url.startsWith('webcal://')
+            ? 'https://${pendingIntent.url.substring('webcal://'.length)}'
+            : pendingIntent.url;
+        final alreadyFollowed = _localSubscriptions.any(
+          (s) => s.url == normalizedIntentUrl,
+        );
+
+        return FollowCalendarPage(
+          intent: pendingIntent,
+          alreadyFollowed: alreadyFollowed,
+          onSignIn: () => setState(() => _showingFollowSignIn = true),
+          onFollowLocally: alreadyFollowed
+              ? () {
+                  _followLinkController.clearPending();
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (!mounted) return;
+                    final ctx = _navigatorKey.currentContext;
+                    if (ctx != null) {
+                      ScaffoldMessenger.of(ctx).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            "You're already following this calendar on this phone.",
+                          ),
+                        ),
+                      );
+                    }
+                  });
+                }
+              : () => _handleFollowLocally(pendingIntent),
+          onCancel: () {
+            _followLinkController.clearPending();
+          },
+        );
+      }
+
+      // Has local subscriptions → show local subscriber screen
+      if (_localSubscriptions.isNotEmpty) {
+        return LocalSubscriberCalendarPage(
+          subscriptions: _localSubscriptions,
+          repository: _localSubscriptionRepo,
+          onSignIn: () => setState(() => _showingFollowSignIn = true),
+          onSubscriptionsChanged: (updated) {
+            setState(() => _localSubscriptions = updated);
+          },
+        );
+      }
+
+      // Default → login
       return LoginPage(
         authRepository: _sessionController.repository,
         onSignedIn: (result) async {
