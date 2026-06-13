@@ -25,9 +25,9 @@ class CalendarFollowIntentResolver {
   Future<ResolvedCalendarFollowIntent> resolve(
     CalendarFollowIntent intent,
   ) async {
-    final uri = Uri.parse(_kBaseUri).resolve(
-      '/calendar-intent?t=${Uri.encodeQueryComponent(intent.token)}',
-    );
+    final uri = Uri.parse(
+      _kBaseUri,
+    ).resolve('/calendar-intent?t=${Uri.encodeQueryComponent(intent.token)}');
 
     try {
       final request = await _httpClient.getUrl(uri);

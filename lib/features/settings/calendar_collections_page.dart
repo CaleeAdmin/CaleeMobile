@@ -371,21 +371,20 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
             children: [
               Text('This will permanently delete "${calendar.name}".'),
               const SizedBox(height: 12),
-              if (preview.itemCountsAvailable && preview.hasItems) ...
-                [
-                  Text('Known items found in ${preview.rangeDescription}:'),
-                  const SizedBox(height: 4),
-                  ...preview.lines.map(
-                    (line) => Padding(
-                      padding: const EdgeInsets.only(top: 4),
-                      child: Text('• $line'),
-                    ),
+              if (preview.itemCountsAvailable && preview.hasItems) ...[
+                Text('Known items found in ${preview.rangeDescription}:'),
+                const SizedBox(height: 4),
+                ...preview.lines.map(
+                  (line) => Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text('• $line'),
                   ),
-                ]
-              else if (preview.itemCountsAvailable) ...
-                [Text('No items were found in ${preview.rangeDescription}.')]
-              else ...
-                [const Text('Item counts could not be loaded right now.')],
+                ),
+              ] else if (preview.itemCountsAvailable) ...[
+                Text('No items were found in ${preview.rangeDescription}.'),
+              ] else ...[
+                const Text('Item counts could not be loaded right now.'),
+              ],
               const SizedBox(height: 12),
               const Text(
                 'Older or future items may not be shown in this preview.',
@@ -775,27 +774,25 @@ class _CollectionFormContentState extends State<_CollectionFormContent> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (widget.services.isNotEmpty) ...
-              [
-                DropdownButtonFormField<ClientService>(
-                  initialValue: _selectedService,
-                  decoration: const InputDecoration(labelText: 'Service'),
-                  items: [
-                    for (final service in widget.services)
-                      DropdownMenuItem(
-                        value: service,
-                        child: Text(service.displayName),
-                      ),
-                  ],
-                  onChanged: _isSubmitting
-                      ? null
-                      : (service) =>
-                          setState(() => _selectedService = service),
-                  validator: (service) =>
-                      service == null ? 'Choose a service' : null,
-                ),
-                const SizedBox(height: CaleeSpacing.sm + 4),
-              ],
+            if (widget.services.isNotEmpty) ...[
+              DropdownButtonFormField<ClientService>(
+                initialValue: _selectedService,
+                decoration: const InputDecoration(labelText: 'Service'),
+                items: [
+                  for (final service in widget.services)
+                    DropdownMenuItem(
+                      value: service,
+                      child: Text(service.displayName),
+                    ),
+                ],
+                onChanged: _isSubmitting
+                    ? null
+                    : (service) => setState(() => _selectedService = service),
+                validator: (service) =>
+                    service == null ? 'Choose a service' : null,
+              ),
+              const SizedBox(height: CaleeSpacing.sm + 4),
+            ],
             TextFormField(
               controller: _nameController,
               enabled: !_isSubmitting,
@@ -819,17 +816,16 @@ class _CollectionFormContentState extends State<_CollectionFormContent> {
                       if (kind != null) setState(() => _selectedKind = kind);
                     },
             ),
-            if (!widget.allowKindChange) ...
-              [
-                const SizedBox(height: CaleeSpacing.xs),
-                Text(
-                  'Type cannot be changed after creation. '
-                  'Current type: ${_kindLabel(_selectedKind)}.',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: CaleeColors.textSecondary,
-                  ),
+            if (!widget.allowKindChange) ...[
+              const SizedBox(height: CaleeSpacing.xs),
+              Text(
+                'Type cannot be changed after creation. '
+                'Current type: ${_kindLabel(_selectedKind)}.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: CaleeColors.textSecondary,
                 ),
-              ],
+              ),
+            ],
             const SizedBox(height: CaleeSpacing.md),
             Text(
               'Color',
