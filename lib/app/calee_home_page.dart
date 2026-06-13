@@ -6,6 +6,7 @@ import '../features/calendar/calendar_page.dart';
 import '../features/chores/chores_page.dart';
 import '../features/settings/settings_page.dart';
 import '../features/tasks/tasks_page.dart';
+import '../features/today/today_page.dart';
 
 class CaleeHomePage extends StatefulWidget {
   const CaleeHomePage({
@@ -34,11 +35,34 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
   bool get _hasChoreService =>
       widget.bootstrap.services.any((service) => service.supportsChores);
 
+  // Tab index helpers (computed after _tabs is built)
+  int get _calendarTabIndex => _tabs.indexWhere((t) => t.title == 'Calendar');
+  int get _tasksTabIndex => _tabs.indexWhere((t) => t.title == 'Tasks');
+  int get _choresTabIndex => _tabs.indexWhere((t) => t.title == 'Chores');
+
   @override
   void initState() {
     super.initState();
 
     _tabs = [
+      _CaleeTab(
+        title: 'Today',
+        icon: Icons.today_outlined,
+        selectedIcon: Icons.today,
+        page: TodayPage(
+          hubClient: widget.hubClient,
+          accessToken: widget.accessToken,
+          services: widget.bootstrap.services,
+          households: widget.bootstrap.contexts.households,
+          onNavigateToCalendar: () =>
+              setState(() => _selectedIndex = _calendarTabIndex),
+          onNavigateToTasks: () =>
+              setState(() => _selectedIndex = _tasksTabIndex),
+          onNavigateToChores: _hasChoreService
+              ? () => setState(() => _selectedIndex = _choresTabIndex)
+              : null,
+        ),
+      ),
       _CaleeTab(
         title: 'Calendar',
         icon: Icons.calendar_month_outlined,
@@ -89,7 +113,7 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: _selectedIndex == 0
+      appBar: (_selectedIndex == 0 || _selectedIndex == _calendarTabIndex)
           ? null
           : AppBar(title: Text(_tabs[_selectedIndex].title)),
       body: IndexedStack(
