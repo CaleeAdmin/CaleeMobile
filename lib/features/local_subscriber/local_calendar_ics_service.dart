@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'local_calendar_event.dart';
@@ -33,7 +34,7 @@ class LocalCalendarIcsService {
         );
       }
 
-      final body = await response.transform(const SystemEncoding()).join();
+      final body = await response.transform(utf8.decoder).join();
       return _parse(body, subscription);
     } on LocalCalendarIcsException {
       rethrow;
