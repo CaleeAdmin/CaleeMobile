@@ -31,7 +31,7 @@ class _CaleeAppState extends State<CaleeApp> {
   late final LocalCalendarSubscriptionRepository _localSubscriptionRepo;
   final _navigatorKey = GlobalKey<NavigatorState>();
 
-  // true while the user has tapped "Continue with Calee account"
+  // true while the user has tapped "Add to Calee"
   bool _showingFollowSignIn = false;
   bool _processingFollowLink = false;
 
@@ -160,7 +160,7 @@ class _CaleeAppState extends State<CaleeApp> {
       );
     } catch (_) {
       if (!mounted) return;
-      _showSnackBar('This calendar could not be followed on this phone.');
+      _showSnackBar('This calendar could not be added on this phone.');
       return;
     }
 
@@ -198,7 +198,7 @@ class _CaleeAppState extends State<CaleeApp> {
     if (!_sessionController.isSignedIn) {
       final pendingIntent = _followLinkController.pendingIntent;
 
-      // User chose "Continue with Calee account" → show login
+      // User chose "Add to Calee" → show login
       if (_showingFollowSignIn) {
         return LoginPage(
           authRepository: _sessionController.repository,
@@ -232,7 +232,7 @@ class _CaleeAppState extends State<CaleeApp> {
                       ScaffoldMessenger.of(ctx).showSnackBar(
                         const SnackBar(
                           content: Text(
-                            "You're already following this calendar on this phone.",
+                            "This calendar is already added on this phone.",
                           ),
                         ),
                       );
