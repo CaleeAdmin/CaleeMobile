@@ -7,6 +7,7 @@ import '../models/client_caldav_account.dart';
 import '../models/client_calendar.dart';
 import '../models/client_chore.dart';
 import '../models/client_chore_metadata.dart';
+import '../models/client_deleted_items.dart';
 import '../models/client_person.dart';
 import '../models/client_task.dart';
 
@@ -736,6 +737,82 @@ class CaleeHubClient {
     return ClientEventList.fromJson(_data(json));
   }
 
+  Future<DeletedItemsResponse> listDeletedItems({
+    required String accessToken,
+    String? serviceId,
+    String? type,
+    int? limit,
+    String? cursor,
+  }) async {
+    final queryParameters = <String, String>{};
+    if (serviceId != null) queryParameters['serviceId'] = serviceId;
+    if (type != null) queryParameters['type'] = type;
+    if (limit != null) queryParameters['limit'] = limit.toString();
+    if (cursor != null) queryParameters['cursor'] = cursor;
+
+    final uri = queryParameters.isEmpty
+        ? Uri(path: '/client/v1/deleted-items')
+        : Uri(
+            path: '/client/v1/deleted-items',
+            queryParameters: queryParameters,
+          );
+
+    final json = await _getJson(uri.toString(), accessToken: accessToken);
+    return DeletedItemsResponse.fromJson(_data(json));
+  }
+
+  Future<DeletedItemsResponse> listDeletedItemsForService(
+    String serviceId, {
+    required String accessToken,
+    String? type,
+    int? limit,
+    String? cursor,
+  }) async {
+    final encodedServiceId = Uri.encodeComponent(serviceId);
+    final queryParameters = <String, String>{};
+    if (type != null) queryParameters['type'] = type;
+    if (limit != null) queryParameters['limit'] = limit.toString();
+    if (cursor != null) queryParameters['cursor'] = cursor;
+
+    final path = '/client/v1/services/$encodedServiceId/deleted-items';
+    final uri = queryParameters.isEmpty
+        ? Uri(path: path)
+        : Uri(path: path, queryParameters: queryParameters);
+
+    final json = await _getJson(uri.toString(), accessToken: accessToken);
+    return DeletedItemsResponse.fromJson(_data(json));
+  }
+
+  Future<void> restoreDeletedItem({
+    required String accessToken,
+    required String serviceId,
+    required String deletedItemId,
+  }) async {
+    final encodedServiceId = Uri.encodeComponent(serviceId);
+    final encodedItemId = Uri.encodeComponent(deletedItemId);
+
+    await _postJson(
+      '/client/v1/services/$encodedServiceId/deleted-items/$encodedItemId/restore',
+      accessToken: accessToken,
+      body: {},
+    );
+  }
+
+  Future<void> deleteDeletedItemPermanently({
+    required String accessToken,
+    required String serviceId,
+    required String deletedItemId,
+  }) async {
+    final encodedServiceId = Uri.encodeComponent(serviceId);
+    final encodedItemId = Uri.encodeComponent(deletedItemId);
+
+    await _postJson(
+      '/client/v1/services/$encodedServiceId/deleted-items/$encodedItemId/delete-permanently',
+      accessToken: accessToken,
+      body: {},
+    );
+  }
+
   Future<ClientRefreshResult> refresh({required String refreshToken}) async {
     final json = await _postJson(
       '/client/v1/auth/refresh',
@@ -745,7 +822,7 @@ class CaleeHubClient {
     return ClientRefreshResult.fromJson(_data(json));
   }
 
-  // ── Auth retry helper ────────────────────────────────────────────────────────
+  // ── Auth retry helper ────────────────────────────────────────────────────────────────────────────
   //
   // On 401, calls onUnauthorized() once to get a fresh token and retries.
   // Also uses any previously refreshed token so feature pages don't need to
@@ -768,7 +845,7 @@ class CaleeHubClient {
     }
   }
 
-  // ── Low-level HTTP helpers ────────────────────────────────────────────────────
+  // ── Low-level HTTP helpers ───────────────────────────────────────────────────────────────────────────
 
   Future<Map<String, dynamic>> _deleteJson(
     String path, {
