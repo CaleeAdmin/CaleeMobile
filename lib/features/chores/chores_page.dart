@@ -676,6 +676,75 @@ class _ChoresPageState extends State<ChoresPage> {
     );
   }
 
+  PreferredSizeWidget _buildTopBar({
+    required String label,
+    required VoidCallback onSearchTap,
+    required VoidCallback onFilterTap,
+    required VoidCallback onAddTap,
+  }) {
+    return PreferredSize(
+      preferredSize: const Size.fromHeight(64),
+      child: SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(
+            CaleeSpacing.md,
+            CaleeSpacing.xs,
+            CaleeSpacing.xs,
+            CaleeSpacing.xs,
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w600,
+                    color: CaleeColors.textPrimary,
+                  ),
+                ),
+              ),
+              IconButton(
+                onPressed: onSearchTap,
+                icon: const Icon(Icons.search),
+                iconSize: 22,
+                padding: EdgeInsets.zero,
+                constraints:
+                    const BoxConstraints(minWidth: 44, minHeight: 44),
+                color: CaleeColors.primary,
+                tooltip: 'Search chores',
+              ),
+              IconButton(
+                onPressed: onFilterTap,
+                icon: const Icon(Icons.tune),
+                iconSize: 22,
+                padding: EdgeInsets.zero,
+                constraints:
+                    const BoxConstraints(minWidth: 44, minHeight: 44),
+                color: CaleeColors.primary,
+                tooltip: 'Filter chores',
+              ),
+              IconButton(
+                onPressed: onAddTap,
+                icon: const Icon(Icons.add),
+                iconSize: 22,
+                padding: EdgeInsets.zero,
+                constraints:
+                    const BoxConstraints(minWidth: 44, minHeight: 44),
+                color: CaleeColors.primary,
+                tooltip: 'Add chore',
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
@@ -771,6 +840,26 @@ class _ChoresPageState extends State<ChoresPage> {
         };
 
         return CaleeScaffold(
+          appBar: _buildTopBar(
+            label: filterLabel,
+            onSearchTap: () => _openSearchSheet(
+              allChores: allChores,
+              choreCalendars: choreCalendars,
+              personNameMap: personNameMap,
+            ),
+            onFilterTap: () => _openAssigneeFilterChooser(
+              people: overview.people,
+              hasUnassigned: hasUnassignedChores,
+              allChores: allChores,
+            ),
+            onAddTap: () {
+              if (hasWritable) {
+                _openCreateChoreSheet(choreCalendars);
+              } else {
+                _openCollectionCreateShortcut();
+              }
+            },
+          ),
           body: RefreshIndicator(
             onRefresh: _controller.refresh,
             child: ListView(
@@ -779,28 +868,6 @@ class _ChoresPageState extends State<ChoresPage> {
                 vertical: CaleeSpacing.md,
               ),
               children: [
-                // Top action bar: label | search | filter | add
-                _ChoresTopBar(
-                  label: filterLabel,
-                  onSearchTap: () => _openSearchSheet(
-                    allChores: allChores,
-                    choreCalendars: choreCalendars,
-                    personNameMap: personNameMap,
-                  ),
-                  onFilterTap: () => _openAssigneeFilterChooser(
-                    people: overview.people,
-                    hasUnassigned: hasUnassignedChores,
-                    allChores: allChores,
-                  ),
-                  onAddTap: () {
-                    if (hasWritable) {
-                      _openCreateChoreSheet(choreCalendars);
-                    } else {
-                      _openCollectionCreateShortcut();
-                    }
-                  },
-                ),
-                const SizedBox(height: CaleeSpacing.sectionSpacing),
 
                 if (activeSections.isEmpty && choreCalendars.isNotEmpty)
                   CaleeSection(
@@ -856,81 +923,6 @@ class _ChoresPageState extends State<ChoresPage> {
           ),
         );
       },
-    );
-  }
-}
-
-// ─────────────────────────────────────────────
-// _ChoresTopBar
-// ─────────────────────────────────────────────
-
-class _ChoresTopBar extends StatelessWidget {
-  const _ChoresTopBar({
-    required this.label,
-    required this.onSearchTap,
-    required this.onFilterTap,
-    required this.onAddTap,
-  });
-
-  final String label;
-  final VoidCallback onSearchTap;
-  final VoidCallback onFilterTap;
-  final VoidCallback onAddTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Row(
-      children: [
-        Expanded(
-          child: Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.titleMedium?.copyWith(
-              color: CaleeColors.textPrimary,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ),
-        Tooltip(
-          message: 'Search chores',
-          child: SizedBox(
-            width: CaleeSpacing.rowHeight,
-            height: CaleeSpacing.rowHeight,
-            child: IconButton(
-              icon: const Icon(Icons.search_outlined),
-              color: CaleeColors.primary,
-              onPressed: onSearchTap,
-            ),
-          ),
-        ),
-        Tooltip(
-          message: 'Filter chores',
-          child: SizedBox(
-            width: CaleeSpacing.rowHeight,
-            height: CaleeSpacing.rowHeight,
-            child: IconButton(
-              icon: const Icon(Icons.tune),
-              color: CaleeColors.primary,
-              onPressed: onFilterTap,
-            ),
-          ),
-        ),
-        Tooltip(
-          message: 'Add chore',
-          child: SizedBox(
-            width: CaleeSpacing.rowHeight,
-            height: CaleeSpacing.rowHeight,
-            child: IconButton(
-              icon: const Icon(Icons.add),
-              color: CaleeColors.primary,
-              onPressed: onAddTap,
-            ),
-          ),
-        ),
-      ],
     );
   }
 }
