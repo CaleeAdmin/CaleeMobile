@@ -94,8 +94,8 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
       if (_hasChoreService)
         _CaleeTab(
           title: 'Chores',
-          icon: Icons.family_restroom_outlined,
-          selectedIcon: Icons.family_restroom,
+          icon: Icons.cleaning_services_outlined,
+          selectedIcon: Icons.cleaning_services,
           page: ChoresPage(
             hubClient: widget.hubClient,
             accessToken: widget.accessToken,

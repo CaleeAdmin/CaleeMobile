@@ -10,6 +10,7 @@ import '../../ui/calee_widgets.dart';
 import 'calendar_collections_page.dart';
 import 'family_setup_page.dart';
 import 'household_people_page.dart';
+import 'recently_deleted_page.dart';
 import 'service_details_page.dart';
 import 'settings_controller.dart';
 import 'settings_repository.dart';
@@ -325,6 +326,25 @@ class _SettingsPageState extends State<SettingsPage> {
               },
             ),
             CaleeListRow(
+              title: 'Recently deleted',
+              subtitle: 'Restore deleted calendars, tasks, and chores',
+              leading: const Icon(
+                Icons.restore_from_trash_outlined,
+                size: 20,
+                color: CaleeColors.primary,
+              ),
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => RecentlyDeletedPage(
+                      hubClient: widget.hubClient,
+                      accessToken: widget.accessToken,
+                    ),
+                  ),
+                );
+              },
+            ),
+            CaleeListRow(
               title: 'People',
               subtitle: isOpeningFamily
                   ? 'Preparing people…'
@@ -395,7 +415,8 @@ class _ServiceRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasMissing = service.hasMissingCalendarCredential;
-    final needsAttention = hasMissing ||
+    final needsAttention =
+        hasMissing ||
         !{'connected', 'active', 'healthy'}.contains(service.accessStatus);
     final subtitle = needsAttention ? 'Needs attention' : 'Connected';
 
@@ -405,7 +426,9 @@ class _ServiceRow extends StatelessWidget {
       leading: Icon(
         Icons.cloud_outlined,
         size: 20,
-        color: needsAttention ? CaleeColors.dotOrange : CaleeColors.textTertiary,
+        color: needsAttention
+            ? CaleeColors.dotOrange
+            : CaleeColors.textTertiary,
       ),
       trailing: needsAttention
           ? const Icon(

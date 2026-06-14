@@ -64,9 +64,7 @@ void main() {
     // Defensive: stub the secure-storage channel in case it is still hit.
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(
-          const MethodChannel(
-            'plugins.it_nomads.com/flutter_secure_storage',
-          ),
+          const MethodChannel('plugins.it_nomads.com/flutter_secure_storage'),
           (call) async => <String, String>{},
         );
   });
@@ -74,9 +72,7 @@ void main() {
   tearDown(() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(
-          const MethodChannel(
-            'plugins.it_nomads.com/flutter_secure_storage',
-          ),
+          const MethodChannel('plugins.it_nomads.com/flutter_secure_storage'),
           null,
         );
   });

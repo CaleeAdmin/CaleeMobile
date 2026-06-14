@@ -106,28 +106,28 @@ void main() {
       expect(find.text('Today'), findsWidgets);
     });
 
-    testWidgets(
-      'bottom nav contains Today as the first destination',
-      (tester) async {
-        await tester.pumpWidget(_buildHome(bootstrap: _noChoresBootstrap()));
-        await tester.pump();
+    testWidgets('bottom nav contains Today as the first destination', (
+      tester,
+    ) async {
+      await tester.pumpWidget(_buildHome(bootstrap: _noChoresBootstrap()));
+      await tester.pump();
 
-        final bar = find.byType(NavigationBar);
-        expect(bar, findsOneWidget);
+      final bar = find.byType(NavigationBar);
+      expect(bar, findsOneWidget);
 
-        final destinations = find.descendant(
-          of: bar,
-          matching: find.byType(NavigationDestination),
-        );
-        // Without chores: Today, Calendar, Tasks, Settings = 4
-        expect(destinations, findsNWidgets(4));
+      final destinations = find.descendant(
+        of: bar,
+        matching: find.byType(NavigationDestination),
+      );
+      // Without chores: Today, Calendar, Tasks, Settings = 4
+      expect(destinations, findsNWidgets(4));
 
-        // First destination label is 'Today'
-        final firstDest =
-            tester.widgetList<NavigationDestination>(destinations).first;
-        expect(firstDest.label, 'Today');
-      },
-    );
+      // First destination label is 'Today'
+      final firstDest = tester
+          .widgetList<NavigationDestination>(destinations)
+          .first;
+      expect(firstDest.label, 'Today');
+    });
 
     testWidgets('tapping Calendar tab selects Calendar', (tester) async {
       await tester.pumpWidget(_buildHome(bootstrap: _noChoresBootstrap()));
@@ -151,45 +151,43 @@ void main() {
       expect(bar.selectedIndex, 2);
     });
 
-    testWidgets(
-      'Chores tab hidden when service does not support chores',
-      (tester) async {
-        await tester.pumpWidget(_buildHome(bootstrap: _noChoresBootstrap()));
-        await tester.pump();
+    testWidgets('Chores tab hidden when service does not support chores', (
+      tester,
+    ) async {
+      await tester.pumpWidget(_buildHome(bootstrap: _noChoresBootstrap()));
+      await tester.pump();
 
-        final bar = find.byType(NavigationBar);
-        final destinations = find.descendant(
-          of: bar,
-          matching: find.byType(NavigationDestination),
-        );
-        final labels = tester
-            .widgetList<NavigationDestination>(destinations)
-            .map((d) => d.label)
-            .toList();
-        expect(labels.contains('Chores'), isFalse);
-      },
-    );
+      final bar = find.byType(NavigationBar);
+      final destinations = find.descendant(
+        of: bar,
+        matching: find.byType(NavigationDestination),
+      );
+      final labels = tester
+          .widgetList<NavigationDestination>(destinations)
+          .map((d) => d.label)
+          .toList();
+      expect(labels.contains('Chores'), isFalse);
+    });
 
-    testWidgets(
-      'Chores tab appears when service supports chores',
-      (tester) async {
-        await tester.pumpWidget(_buildHome(bootstrap: _choresBootstrap()));
-        await tester.pump();
+    testWidgets('Chores tab appears when service supports chores', (
+      tester,
+    ) async {
+      await tester.pumpWidget(_buildHome(bootstrap: _choresBootstrap()));
+      await tester.pump();
 
-        final bar = find.byType(NavigationBar);
-        final destinations = find.descendant(
-          of: bar,
-          matching: find.byType(NavigationDestination),
-        );
-        final labels = tester
-            .widgetList<NavigationDestination>(destinations)
-            .map((d) => d.label)
-            .toList();
-        expect(labels.contains('Chores'), isTrue);
-        // With chores: Today, Calendar, Tasks, Chores, Settings = 5
-        expect(labels.length, 5);
-      },
-    );
+      final bar = find.byType(NavigationBar);
+      final destinations = find.descendant(
+        of: bar,
+        matching: find.byType(NavigationDestination),
+      );
+      final labels = tester
+          .widgetList<NavigationDestination>(destinations)
+          .map((d) => d.label)
+          .toList();
+      expect(labels.contains('Chores'), isTrue);
+      // With chores: Today, Calendar, Tasks, Chores, Settings = 5
+      expect(labels.length, 5);
+    });
   });
 
   group('CaleeHomePage — parent AppBar visibility', () {
@@ -227,7 +225,7 @@ void main() {
     testWidgets('Chores tab does not receive a parent AppBar', (tester) async {
       await tester.pumpWidget(_buildHome(bootstrap: _choresBootstrap()));
       await tester.pump();
-      await tester.tap(find.byIcon(Icons.family_restroom_outlined));
+      await tester.tap(find.byIcon(Icons.cleaning_services_outlined));
       await tester.pump();
       expect(homeAppBar(tester), isNull);
     });
