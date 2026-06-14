@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../ui/calee_design.dart';
 import '../calendar/shared/calendar_display_event.dart';
+import '../calendar/shared/calendar_display_event_adapters.dart';
 import '../calendar/shared/read_only_calendar_view.dart';
 import 'local_calendar_event.dart';
 import 'local_calendar_ics_service.dart';
@@ -160,7 +161,7 @@ class _LocalSubscriberCalendarPageState
       final subEvents = _eventsBySubscription[sub.id] ?? [];
       for (final e in subEvents) {
         all.add(
-          CalendarDisplayEvent.fromLocalCalendarEvent(
+          calendarDisplayEventFromLocalEvent(
             e,
             subscription: sub,
             color: color,

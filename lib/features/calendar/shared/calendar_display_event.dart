@@ -1,9 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../../../ui/calee_design.dart';
-import '../../local_subscriber/local_calendar_event.dart';
-import '../../local_subscriber/local_calendar_subscription.dart';
-
 class CalendarDisplayEvent {
   const CalendarDisplayEvent({
     required this.id,
@@ -30,22 +26,4 @@ class CalendarDisplayEvent {
   final String? location;
   final String? description;
   final bool readOnly;
-
-  static CalendarDisplayEvent fromLocalCalendarEvent(
-    LocalCalendarEvent event, {
-    required LocalCalendarSubscription subscription,
-    Color color = CaleeColors.dotBlue,
-  }) {
-    return CalendarDisplayEvent(
-      id: event.id,
-      title: event.title,
-      start: event.start,
-      end: event.end,
-      allDay: event.isAllDay,
-      calendarId: subscription.id,
-      calendarName: subscription.title,
-      color: color,
-      readOnly: true,
-    );
-  }
 }

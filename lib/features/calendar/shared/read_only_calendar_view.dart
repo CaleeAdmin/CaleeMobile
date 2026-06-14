@@ -86,7 +86,19 @@ class ReadOnlyCalendarView extends StatelessWidget {
   }
 
   List<CalendarDisplayEvent> _eventsForDay(DateTime day) {
-    final result = events.where((e) => isSameCalendarDay(e.start, day)).toList()
+    final dayDate = DateTime(day.year, day.month, day.day);
+    final result = events.where((e) {
+      if (e.allDay) {
+        final startDate = DateTime(e.start.year, e.start.month, e.start.day);
+        // All-day end is exclusive (API/iCal convention); fall back to startDate if no end.
+        final endDate = e.end != null
+            ? DateTime(e.end!.year, e.end!.month, e.end!.day)
+                .subtract(const Duration(days: 1))
+            : startDate;
+        return !dayDate.isBefore(startDate) && !dayDate.isAfter(endDate);
+      }
+      return isSameCalendarDay(e.start, day);
+    }).toList()
       ..sort((a, b) {
         if (a.allDay != b.allDay) return a.allDay ? -1 : 1;
         return a.start.compareTo(b.start);

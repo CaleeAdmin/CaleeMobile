@@ -272,4 +272,149 @@ void main() {
       expect(find.byType(ReadOnlyCalendarEventRow), findsNWidgets(2));
     });
   });
+
+  group('ReadOnlyCalendarView — multi-day all-day event handling', () {
+    testWidgets('single-day all-day event appears on its day', (tester) async {
+      final events = [
+        CalendarDisplayEvent(
+          id: 'e1',
+          title: 'Single Day',
+          start: DateTime(2026, 6, 15),
+          end: DateTime(2026, 6, 16), // exclusive end
+          allDay: true,
+          calendarId: 'cal1',
+          calendarName: 'My Calendar',
+          color: CaleeColors.dotBlue,
+        ),
+      ];
+      await tester.pumpWidget(
+        _buildView(events: events, selectedDay: DateTime(2026, 6, 15)),
+      );
+      // June 15 cell should have a dot
+      final cells = tester.widgetList<CalendarDayCell>(
+        find.byType(CalendarDayCell),
+      );
+      final june15 = cells.firstWhere(
+        (c) => c.date.month == 6 && c.date.day == 15,
+      );
+      expect(june15.dotColors, isNotEmpty);
+    });
+
+    testWidgets('single-day all-day event does NOT appear on adjacent day', (
+      tester,
+    ) async {
+      final events = [
+        CalendarDisplayEvent(
+          id: 'e1',
+          title: 'Single Day',
+          start: DateTime(2026, 6, 15),
+          end: DateTime(2026, 6, 16), // exclusive end → only June 15
+          allDay: true,
+          calendarId: 'cal1',
+          calendarName: 'My Calendar',
+          color: CaleeColors.dotBlue,
+        ),
+      ];
+      await tester.pumpWidget(
+        _buildView(events: events, selectedDay: DateTime(2026, 6, 16)),
+      );
+      final cells = tester.widgetList<CalendarDayCell>(
+        find.byType(CalendarDayCell),
+      );
+      final june16 = cells.firstWhere(
+        (c) => c.date.month == 6 && c.date.day == 16,
+      );
+      expect(june16.dotColors, isEmpty);
+    });
+
+    testWidgets('multi-day all-day event appears on each day of its range', (
+      tester,
+    ) async {
+      // June 10 to June 13 (exclusive end = June 13), so shows June 10, 11, 12
+      final events = [
+        CalendarDisplayEvent(
+          id: 'e1',
+          title: 'Multi Day',
+          start: DateTime(2026, 6, 10),
+          end: DateTime(2026, 6, 13), // exclusive
+          allDay: true,
+          calendarId: 'cal1',
+          calendarName: 'My Calendar',
+          color: CaleeColors.dotBlue,
+        ),
+      ];
+      await tester.pumpWidget(_buildView(events: events));
+
+      final cells = tester.widgetList<CalendarDayCell>(
+        find.byType(CalendarDayCell),
+      );
+
+      for (final day in [10, 11, 12]) {
+        final cell = cells.firstWhere(
+          (c) => c.date.month == 6 && c.date.day == day,
+        );
+        expect(cell.dotColors, isNotEmpty, reason: 'June $day should have dot');
+      }
+
+      // June 13 should NOT have a dot (exclusive end)
+      final june13 = cells.firstWhere(
+        (c) => c.date.month == 6 && c.date.day == 13,
+      );
+      expect(june13.dotColors, isEmpty, reason: 'June 13 is exclusive end');
+    });
+
+    testWidgets('timed event only appears on its start day', (tester) async {
+      final events = [
+        CalendarDisplayEvent(
+          id: 'e1',
+          title: 'Meeting',
+          start: DateTime(2026, 6, 15, 10),
+          end: DateTime(2026, 6, 15, 11),
+          allDay: false,
+          calendarId: 'cal1',
+          calendarName: 'My Calendar',
+          color: CaleeColors.dotBlue,
+        ),
+      ];
+      await tester.pumpWidget(_buildView(events: events));
+
+      final cells = tester.widgetList<CalendarDayCell>(
+        find.byType(CalendarDayCell),
+      );
+
+      // Only June 15 should have a dot
+      final june15 = cells.firstWhere(
+        (c) => c.date.month == 6 && c.date.day == 15,
+      );
+      expect(june15.dotColors, isNotEmpty);
+
+      // June 16 should NOT
+      final june16 = cells.firstWhere(
+        (c) => c.date.month == 6 && c.date.day == 16,
+      );
+      expect(june16.dotColors, isEmpty);
+    });
+
+    testWidgets('multi-day all-day event shows in day agenda on each covered day',
+        (tester) async {
+      final events = [
+        CalendarDisplayEvent(
+          id: 'e1',
+          title: 'Conference',
+          start: DateTime(2026, 6, 14),
+          end: DateTime(2026, 6, 17), // exclusive → 14, 15, 16
+          allDay: true,
+          calendarId: 'cal1',
+          calendarName: 'My Calendar',
+          color: CaleeColors.dotBlue,
+        ),
+      ];
+
+      // Select June 15 — event should appear in the day agenda
+      await tester.pumpWidget(
+        _buildView(events: events, selectedDay: DateTime(2026, 6, 15)),
+      );
+      expect(find.text('Conference'), findsOneWidget);
+    });
+  });
 }

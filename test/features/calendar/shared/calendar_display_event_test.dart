@@ -1,4 +1,5 @@
 import 'package:calee_mobile/features/calendar/shared/calendar_display_event.dart';
+import 'package:calee_mobile/features/calendar/shared/calendar_display_event_adapters.dart';
 import 'package:calee_mobile/features/local_subscriber/local_calendar_event.dart';
 import 'package:calee_mobile/features/local_subscriber/local_calendar_subscription.dart';
 import 'package:calee_mobile/ui/calee_design.dart';
@@ -36,7 +37,40 @@ LocalCalendarEvent _event({
 );
 
 void main() {
-  group('CalendarDisplayEvent.fromLocalCalendarEvent', () {
+  group('CalendarDisplayEvent — pure model', () {
+    test('direct constructor sets all fields', () {
+      const display = CalendarDisplayEvent(
+        id: 'x',
+        title: 'Test',
+        start: DateTime.fromMillisecondsSinceEpoch(0),
+        allDay: false,
+        calendarId: 'cal',
+        calendarName: 'Cal',
+        color: Colors.blue,
+        readOnly: false,
+      );
+      expect(display.id, 'x');
+      expect(display.title, 'Test');
+      expect(display.readOnly, isFalse);
+      expect(display.location, isNull);
+      expect(display.description, isNull);
+    });
+
+    test('readOnly defaults to true', () {
+      const display = CalendarDisplayEvent(
+        id: 'x',
+        title: 'Test',
+        start: DateTime.fromMillisecondsSinceEpoch(0),
+        allDay: false,
+        calendarId: 'cal',
+        calendarName: 'Cal',
+        color: Colors.blue,
+      );
+      expect(display.readOnly, isTrue);
+    });
+  });
+
+  group('calendarDisplayEventFromLocalEvent', () {
     test('maps all fields from event and subscription', () {
       final sub = _sub(id: 'sub1', title: 'Work');
       final event = _event(
@@ -46,10 +80,7 @@ void main() {
         end: DateTime(2026, 6, 15, 9, 30),
       );
 
-      final display = CalendarDisplayEvent.fromLocalCalendarEvent(
-        event,
-        subscription: sub,
-      );
+      final display = calendarDisplayEventFromLocalEvent(event, subscription: sub);
 
       expect(display.id, 'e1');
       expect(display.title, 'Standup');
@@ -62,7 +93,7 @@ void main() {
     });
 
     test('defaults color to dotBlue when not provided', () {
-      final display = CalendarDisplayEvent.fromLocalCalendarEvent(
+      final display = calendarDisplayEventFromLocalEvent(
         _event(),
         subscription: _sub(),
       );
@@ -70,7 +101,7 @@ void main() {
     });
 
     test('uses provided color when given', () {
-      final display = CalendarDisplayEvent.fromLocalCalendarEvent(
+      final display = calendarDisplayEventFromLocalEvent(
         _event(),
         subscription: _sub(),
         color: CaleeColors.dotGreen,
@@ -84,7 +115,7 @@ void main() {
         start: DateTime(2026, 6, 20),
         end: null,
       );
-      final display = CalendarDisplayEvent.fromLocalCalendarEvent(
+      final display = calendarDisplayEventFromLocalEvent(
         event,
         subscription: _sub(),
       );
@@ -92,8 +123,8 @@ void main() {
       expect(display.end, isNull);
     });
 
-    test('location and description are null (not in LocalCalendarEvent)', () {
-      final display = CalendarDisplayEvent.fromLocalCalendarEvent(
+    test('location and description are null', () {
+      final display = calendarDisplayEventFromLocalEvent(
         _event(),
         subscription: _sub(),
       );
@@ -102,25 +133,11 @@ void main() {
     });
 
     test('is always readOnly', () {
-      final display = CalendarDisplayEvent.fromLocalCalendarEvent(
+      final display = calendarDisplayEventFromLocalEvent(
         _event(),
         subscription: _sub(),
       );
       expect(display.readOnly, isTrue);
-    });
-
-    test('direct constructor allows readOnly = false', () {
-      const display = CalendarDisplayEvent(
-        id: 'x',
-        title: 'Test',
-        start: DateTime.fromMillisecondsSinceEpoch(0),
-        allDay: false,
-        calendarId: 'cal',
-        calendarName: 'Cal',
-        color: Colors.blue,
-        readOnly: false,
-      );
-      expect(display.readOnly, isFalse);
     });
   });
 }
