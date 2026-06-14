@@ -152,6 +152,10 @@ class ClientService {
     }
     return false;
   }
+
+  bool get supportsRecentlyDeleted {
+    return capabilities['recentlyDeleted'] == true;
+  }
 }
 
 class ClientContexts {
