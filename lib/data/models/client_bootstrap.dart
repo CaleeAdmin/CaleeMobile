@@ -152,6 +152,21 @@ class ClientService {
     }
     return false;
   }
+
+  bool get supportsRecentlyDeleted {
+    return capabilities['deletedItems'] == true ||
+        capabilities['recentlyDeleted'] == true;
+  }
+
+  bool get supportsDeletedItemsRestore {
+    return capabilities['deletedItemsRestore'] == true ||
+        supportsRecentlyDeleted;
+  }
+
+  bool get supportsDeletedItemsPermanentDelete {
+    return capabilities['deletedItemsPermanentDelete'] == true ||
+        supportsRecentlyDeleted;
+  }
 }
 
 class ClientContexts {
