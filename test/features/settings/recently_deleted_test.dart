@@ -22,10 +22,7 @@ class _EmptyHubClient extends CaleeHubClient {
     int? limit,
     String? cursor,
   }) async {
-    return const DeletedItemsResponse(
-      items: [],
-      unsupportedServices: [],
-    );
+    return const DeletedItemsResponse(items: [], unsupportedServices: []);
   }
 }
 
@@ -187,8 +184,9 @@ void main() {
     expect(find.textContaining('Calendar'), findsWidgets);
   });
 
-  testWidgets('list-type item appears under Calendars and lists section',
-      (tester) async {
+  testWidgets('list-type item appears under Calendars and lists section', (
+    tester,
+  ) async {
     final client = _ItemsHubClient(
       DeletedItemsResponse(
         items: [_calendarItem()],
@@ -397,8 +395,9 @@ void main() {
     expect(subtitle.toLowerCase(), isNot(contains('caldav')));
   });
 
-  testWidgets('unsupported service shows backend message when provided',
-      (tester) async {
+  testWidgets('unsupported service shows backend message when provided', (
+    tester,
+  ) async {
     final client = _ItemsHubClient(
       const DeletedItemsResponse(
         items: [],
@@ -413,10 +412,7 @@ void main() {
     );
     await tester.pumpWidget(_wrap(client));
     await tester.pumpAndSettle();
-    expect(
-      find.text('Restore coming soon for this service.'),
-      findsOneWidget,
-    );
+    expect(find.text('Restore coming soon for this service.'), findsOneWidget);
   });
 
   testWidgets('item row shows deleted date', (tester) async {
@@ -455,9 +451,9 @@ void main() {
     expect(find.byIcon(Icons.more_horiz), findsOneWidget);
   });
 
-  testWidgets(
-      'non-actionable task_list row does not show three-dot button',
-      (tester) async {
+  testWidgets('non-actionable task_list row does not show three-dot button', (
+    tester,
+  ) async {
     final client = _ItemsHubClient(
       const DeletedItemsResponse(
         items: [
@@ -481,9 +477,9 @@ void main() {
     expect(find.byIcon(Icons.more_horiz), findsNothing);
   });
 
-  testWidgets(
-      'tapping three-dot button opens action sheet with item title',
-      (tester) async {
+  testWidgets('tapping three-dot button opens action sheet with item title', (
+    tester,
+  ) async {
     final client = _ItemsHubClient(
       DeletedItemsResponse(
         items: [_eventItem()],
@@ -545,7 +541,6 @@ void main() {
 
     expect(find.byIcon(Icons.event_outlined), findsOneWidget);
     expect(find.byIcon(Icons.check_circle_outline), findsOneWidget);
-    expect(find.byIcon(Icons.home_work_outlined), findsOneWidget);
+    expect(find.byIcon(Icons.cleaning_services_outlined), findsOneWidget);
   });
 }
-

@@ -54,9 +54,7 @@ void main() {
 
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(
-          const MethodChannel(
-            'plugins.it_nomads.com/flutter_secure_storage',
-          ),
+          const MethodChannel('plugins.it_nomads.com/flutter_secure_storage'),
           (call) async => <String, String>{},
         );
   });
@@ -64,9 +62,7 @@ void main() {
   tearDown(() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(
-          const MethodChannel(
-            'plugins.it_nomads.com/flutter_secure_storage',
-          ),
+          const MethodChannel('plugins.it_nomads.com/flutter_secure_storage'),
           null,
         );
   });
@@ -88,25 +84,24 @@ void main() {
       expect(find.byType(CalendarPage), findsOneWidget);
     });
 
-    testWidgets(
-      'Month / Agenda switcher (SegmentedButton) is visible',
-      (tester) async {
-        await tester.pumpWidget(
-          MaterialApp(
-            theme: CaleeTheme.buildThemeData(),
-            home: CalendarPage(
-              hubClient: _StubHub(),
-              accessToken: 'tok',
-              services: const [_service],
-            ),
+    testWidgets('Month / Agenda switcher (SegmentedButton) is visible', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: CaleeTheme.buildThemeData(),
+          home: CalendarPage(
+            hubClient: _StubHub(),
+            accessToken: 'tok',
+            services: const [_service],
           ),
-        );
-        await tester.pumpAndSettle();
+        ),
+      );
+      await tester.pumpAndSettle();
 
-        expect(find.text('Month'), findsOneWidget);
-        expect(find.text('Agenda'), findsOneWidget);
-      },
-    );
+      expect(find.text('Month'), findsOneWidget);
+      expect(find.text('Agenda'), findsOneWidget);
+    });
 
     testWidgets('switching to Agenda mode does not crash', (tester) async {
       await tester.pumpWidget(

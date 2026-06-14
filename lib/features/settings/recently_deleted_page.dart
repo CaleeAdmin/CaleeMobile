@@ -100,8 +100,7 @@ class _RecentlyDeletedPageState extends State<RecentlyDeletedPage> {
       setState(() {
         _isLoading = false;
         _listItems = response.items.where((i) => i.isListType).toList();
-        _individualItems =
-            response.items.where((i) => !i.isListType).toList();
+        _individualItems = response.items.where((i) => !i.isListType).toList();
         _unsupportedServices = response.unsupportedServices;
       });
     } catch (e) {
@@ -143,16 +142,14 @@ class _RecentlyDeletedPageState extends State<RecentlyDeletedPage> {
         deletedItemId: item.deletedItemId,
       );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Restored')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Restored')));
       await _load();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(_errorMessage(e, 'Unable to restore item.')),
-        ),
+        SnackBar(content: Text(_errorMessage(e, 'Unable to restore item.'))),
       );
     }
   }
@@ -173,16 +170,14 @@ class _RecentlyDeletedPageState extends State<RecentlyDeletedPage> {
         deletedItemId: item.deletedItemId,
       );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Deleted permanently')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Deleted permanently')));
       await _load();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(_errorMessage(e, 'Unable to delete item.')),
-        ),
+        SnackBar(content: Text(_errorMessage(e, 'Unable to delete item.'))),
       );
     }
   }
@@ -232,8 +227,9 @@ class _RecentlyDeletedPageState extends State<RecentlyDeletedPage> {
     final deletedDateLabel = item.deletedAt.isNotEmpty
         ? _formatDeletedDate(item.deletedAt)
         : '';
-    final daysLeftLabel =
-        item.expiresAt != null ? _formatDaysLeft(item.expiresAt!) : null;
+    final daysLeftLabel = item.expiresAt != null
+        ? _formatDaysLeft(item.expiresAt!)
+        : null;
     final subtitleParts = [
       _typeLabel(item.type),
       if (item.subtitle != null && item.subtitle!.isNotEmpty) item.subtitle!,
@@ -280,14 +276,12 @@ class _RecentlyDeletedPageState extends State<RecentlyDeletedPage> {
         icon: Icons.error_outline,
         title: 'Unable to load',
         body: _error!,
-        action: TextButton(
-          onPressed: _load,
-          child: const Text('Try again'),
-        ),
+        action: TextButton(onPressed: _load, child: const Text('Try again')),
       );
     }
 
-    final hasContent = _listItems.isNotEmpty ||
+    final hasContent =
+        _listItems.isNotEmpty ||
         _individualItems.isNotEmpty ||
         _unsupportedServices.isNotEmpty;
 
@@ -312,9 +306,7 @@ class _RecentlyDeletedPageState extends State<RecentlyDeletedPage> {
           if (_listItems.isNotEmpty) ...[
             CaleeSection(
               title: 'Calendars and lists',
-              children: [
-                for (final item in _listItems) _buildItemRow(item),
-              ],
+              children: [for (final item in _listItems) _buildItemRow(item)],
             ),
             const SizedBox(height: CaleeSpacing.sectionSpacing),
           ],
@@ -334,7 +326,8 @@ class _RecentlyDeletedPageState extends State<RecentlyDeletedPage> {
                 for (final service in _unsupportedServices)
                   CaleeListRow(
                     title: service.displayName,
-                    subtitle: service.message ??
+                    subtitle:
+                        service.message ??
                         'Recently deleted is not available for this'
                             ' connected service yet.',
                     trailing: const SizedBox.shrink(),
