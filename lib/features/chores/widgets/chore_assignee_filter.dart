@@ -4,63 +4,6 @@ import '../../../data/models/client_person.dart';
 import '../../../ui/calee_theme.dart';
 import '../../../ui/calee_widgets.dart';
 
-class ChoreAssigneeFilterRow extends StatelessWidget {
-  const ChoreAssigneeFilterRow({
-    required this.label,
-    required this.onTap,
-    super.key,
-  });
-
-  final String label;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        decoration: BoxDecoration(
-          color: CaleeColors.surface,
-          borderRadius: BorderRadius.circular(CaleeRadius.card),
-        ),
-        padding: const EdgeInsets.symmetric(
-          horizontal: CaleeSpacing.md,
-          vertical: CaleeSpacing.sm,
-        ),
-        child: Row(
-          children: [
-            const Icon(
-              Icons.people_outline,
-              size: 18,
-              color: CaleeColors.primary,
-            ),
-            const SizedBox(width: CaleeSpacing.sm),
-            Expanded(
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: CaleeColors.primary,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ),
-            const SizedBox(width: CaleeSpacing.xs),
-            const Icon(
-              Icons.keyboard_arrow_down,
-              size: 16,
-              color: CaleeColors.primary,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class ChoreAssigneeFilterChooser extends StatelessWidget {
   const ChoreAssigneeFilterChooser({
     required this.people,

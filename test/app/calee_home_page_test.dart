@@ -192,6 +192,61 @@ void main() {
     );
   });
 
+  group('CaleeHomePage — parent AppBar visibility', () {
+    // The home Scaffold is the outermost Scaffold; its AppBar is the "parent"
+    // AppBar that the tabs either own (and therefore suppress) or rely on.
+    AppBar? homeAppBar(WidgetTester tester) {
+      final scaffold = tester.widget<Scaffold>(find.byType(Scaffold).first);
+      return scaffold.appBar as AppBar?;
+    }
+
+    testWidgets('Today tab does not receive a parent AppBar', (tester) async {
+      await tester.pumpWidget(_buildHome(bootstrap: _choresBootstrap()));
+      await tester.pump();
+      expect(homeAppBar(tester), isNull);
+    });
+
+    testWidgets('Calendar tab does not receive a parent AppBar', (
+      tester,
+    ) async {
+      await tester.pumpWidget(_buildHome(bootstrap: _choresBootstrap()));
+      await tester.pump();
+      await tester.tap(find.byIcon(Icons.calendar_month_outlined));
+      await tester.pump();
+      expect(homeAppBar(tester), isNull);
+    });
+
+    testWidgets('Tasks tab does not receive a parent AppBar', (tester) async {
+      await tester.pumpWidget(_buildHome(bootstrap: _choresBootstrap()));
+      await tester.pump();
+      await tester.tap(find.byIcon(Icons.checklist_outlined));
+      await tester.pump();
+      expect(homeAppBar(tester), isNull);
+    });
+
+    testWidgets('Chores tab does not receive a parent AppBar', (tester) async {
+      await tester.pumpWidget(_buildHome(bootstrap: _choresBootstrap()));
+      await tester.pump();
+      await tester.tap(find.byIcon(Icons.family_restroom_outlined));
+      await tester.pump();
+      expect(homeAppBar(tester), isNull);
+    });
+
+    testWidgets('Settings tab receives a parent AppBar titled Settings', (
+      tester,
+    ) async {
+      await tester.pumpWidget(_buildHome(bootstrap: _choresBootstrap()));
+      await tester.pump();
+      await tester.tap(find.byIcon(Icons.settings_outlined));
+      await tester.pump();
+
+      final appBar = homeAppBar(tester);
+      expect(appBar, isNotNull);
+      expect(appBar!.title, isA<Text>());
+      expect((appBar.title as Text).data, 'Settings');
+    });
+  });
+
   group('CaleeHomePage — FAB hero tag uniqueness (static check)', () {
     test('all three FAB hero tags are unique strings', () {
       const tags = [

@@ -5,62 +5,6 @@ import '../../../data/models/client_task.dart';
 import '../../../ui/calee_theme.dart';
 import '../../../ui/calee_widgets.dart';
 
-class TaskListFilterBar extends StatelessWidget {
-  const TaskListFilterBar({
-    required this.selectedCalendar,
-    required this.onTap,
-    super.key,
-  });
-
-  final ClientCalendar? selectedCalendar;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final label = selectedCalendar == null
-        ? 'All Tasks'
-        : selectedCalendar!.name;
-
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        decoration: BoxDecoration(
-          color: CaleeColors.surface,
-          borderRadius: BorderRadius.circular(CaleeRadius.card),
-        ),
-        padding: const EdgeInsets.symmetric(
-          horizontal: CaleeSpacing.md,
-          vertical: CaleeSpacing.sm,
-        ),
-        child: Row(
-          children: [
-            Icon(Icons.list_alt_outlined, size: 18, color: CaleeColors.primary),
-            const SizedBox(width: CaleeSpacing.sm),
-            Expanded(
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: CaleeColors.primary,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ),
-            const SizedBox(width: CaleeSpacing.xs),
-            Icon(
-              Icons.keyboard_arrow_down,
-              size: 16,
-              color: CaleeColors.primary,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class TaskListChooser extends StatelessWidget {
   const TaskListChooser({
     required this.taskCalendars,
