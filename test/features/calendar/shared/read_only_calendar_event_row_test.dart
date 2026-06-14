@@ -29,8 +29,10 @@ CalendarDisplayEvent _allDayEvent() => CalendarDisplayEvent(
   color: CaleeColors.dotBlue,
 );
 
-Widget _wrap(Widget child) =>
-    MaterialApp(theme: CaleeTheme.buildThemeData(), home: Scaffold(body: child));
+Widget _wrap(Widget child) => MaterialApp(
+  theme: CaleeTheme.buildThemeData(),
+  home: Scaffold(body: child),
+);
 
 void main() {
   group('ReadOnlyCalendarEventRow — time display', () {

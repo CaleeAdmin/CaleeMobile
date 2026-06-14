@@ -448,10 +448,11 @@ class _CalendarPageState extends State<CalendarPage> {
         final use24h = _use24h(context);
         final firstDayOfWeek =
             _controller.preferences.firstDayOfWeek == FirstDayOfWeek.monday
-                ? 1
-                : 0;
-        final actionIconMinH =
-            MediaQuery.sizeOf(context).height < 520 ? 32.0 : 36.0;
+            ? 1
+            : 0;
+        final actionIconMinH = MediaQuery.sizeOf(context).height < 520
+            ? 32.0
+            : 36.0;
 
         return CaleeScaffold(
           body: SafeArea(
