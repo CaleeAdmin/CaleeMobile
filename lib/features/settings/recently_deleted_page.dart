@@ -187,9 +187,29 @@ class _RecentlyDeletedPageState extends State<RecentlyDeletedPage> {
     }
   }
 
+  IconData _leadingIcon(String type) {
+    switch (type) {
+      case 'event':
+        return Icons.event_outlined;
+      case 'task':
+        return Icons.check_circle_outline;
+      case 'chore':
+        return Icons.home_work_outlined;
+      case 'calendar':
+        return Icons.calendar_month_outlined;
+      case 'task_list':
+        return Icons.checklist_outlined;
+      case 'chore_list':
+        return Icons.list_alt_outlined;
+      default:
+        return Icons.article_outlined;
+    }
+  }
+
   void _openItemActions(DeletedItem item) {
     CaleeActionSheet.show(
       context: context,
+      title: item.title,
       actions: [
         if (item.canRestore)
           CaleeAction(
@@ -225,13 +245,25 @@ class _RecentlyDeletedPageState extends State<RecentlyDeletedPage> {
     return CaleeListRow(
       title: item.title,
       subtitle: subtitleParts.join(' · '),
+      leading: Icon(
+        _leadingIcon(item.type),
+        color: CaleeColors.textTertiary,
+        size: 20,
+      ),
       trailing: hasActions
-          ? GestureDetector(
-              onTap: () => _openItemActions(item),
-              child: const Icon(
-                Icons.more_horiz_rounded,
-                color: CaleeColors.textTertiary,
-                size: 22,
+          ? Builder(
+              builder: (context) => SizedBox(
+                width: 28,
+                height: 28,
+                child: IconButton(
+                  padding: EdgeInsets.zero,
+                  icon: const Icon(
+                    Icons.more_horiz,
+                    color: CaleeColors.textTertiary,
+                    size: 20,
+                  ),
+                  onPressed: () => _openItemActions(item),
+                ),
               ),
             )
           : const SizedBox.shrink(),

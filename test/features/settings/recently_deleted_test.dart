@@ -246,7 +246,7 @@ void main() {
     await tester.pumpWidget(_wrap(client));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byIcon(Icons.more_horiz_rounded).first);
+    await tester.tap(find.byIcon(Icons.more_horiz).first);
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Restore'));
@@ -265,7 +265,7 @@ void main() {
     await tester.pumpWidget(_wrap(client));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byIcon(Icons.more_horiz_rounded).first);
+    await tester.tap(find.byIcon(Icons.more_horiz).first);
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Delete permanently'));
@@ -285,7 +285,7 @@ void main() {
     await tester.pumpWidget(_wrap(client));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byIcon(Icons.more_horiz_rounded).first);
+    await tester.tap(find.byIcon(Icons.more_horiz).first);
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Delete permanently'));
@@ -304,7 +304,7 @@ void main() {
     await tester.pumpWidget(_wrap(client));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byIcon(Icons.more_horiz_rounded).first);
+    await tester.tap(find.byIcon(Icons.more_horiz).first);
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Restore'));
@@ -441,6 +441,111 @@ void main() {
     await tester.pumpWidget(_wrap(client));
     await tester.pumpAndSettle();
     expect(find.textContaining('Deleted'), findsWidgets);
+  });
+
+  testWidgets('actionable event row shows three-dot button', (tester) async {
+    final client = _ItemsHubClient(
+      DeletedItemsResponse(
+        items: [_eventItem()],
+        unsupportedServices: const [],
+      ),
+    );
+    await tester.pumpWidget(_wrap(client));
+    await tester.pumpAndSettle();
+    expect(find.byIcon(Icons.more_horiz), findsOneWidget);
+  });
+
+  testWidgets(
+      'non-actionable task_list row does not show three-dot button',
+      (tester) async {
+    final client = _ItemsHubClient(
+      const DeletedItemsResponse(
+        items: [
+          DeletedItem(
+            deletedItemId: 'tl-2',
+            serviceId: 'svc-1',
+            provider: 'nextcloud',
+            type: 'task_list',
+            title: 'My tasks',
+            deletedAt: '2026-06-01T10:00:00Z',
+            canRestore: false,
+            canDeletePermanently: false,
+            restoreConflictPossible: false,
+          ),
+        ],
+        unsupportedServices: [],
+      ),
+    );
+    await tester.pumpWidget(_wrap(client));
+    await tester.pumpAndSettle();
+    expect(find.byIcon(Icons.more_horiz), findsNothing);
+  });
+
+  testWidgets(
+      'tapping three-dot button opens action sheet with item title',
+      (tester) async {
+    final client = _ItemsHubClient(
+      DeletedItemsResponse(
+        items: [_eventItem()],
+        unsupportedServices: const [],
+      ),
+    );
+    await tester.pumpWidget(_wrap(client));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byIcon(Icons.more_horiz));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Team meeting'), findsWidgets);
+  });
+
+  testWidgets('leading icons render for each item type', (tester) async {
+    final client = _ItemsHubClient(
+      const DeletedItemsResponse(
+        items: [
+          DeletedItem(
+            deletedItemId: 'ev-3',
+            serviceId: 'svc-1',
+            provider: 'nextcloud',
+            type: 'event',
+            title: 'Event',
+            deletedAt: '2026-06-01T10:00:00Z',
+            canRestore: true,
+            canDeletePermanently: false,
+            restoreConflictPossible: false,
+          ),
+          DeletedItem(
+            deletedItemId: 'task-1',
+            serviceId: 'svc-1',
+            provider: 'nextcloud',
+            type: 'task',
+            title: 'A task',
+            deletedAt: '2026-06-01T10:00:00Z',
+            canRestore: true,
+            canDeletePermanently: false,
+            restoreConflictPossible: false,
+          ),
+          DeletedItem(
+            deletedItemId: 'chore-1',
+            serviceId: 'svc-1',
+            provider: 'nextcloud',
+            type: 'chore',
+            title: 'A chore',
+            deletedAt: '2026-06-01T10:00:00Z',
+            canRestore: true,
+            canDeletePermanently: false,
+            restoreConflictPossible: false,
+          ),
+        ],
+        unsupportedServices: [],
+      ),
+    );
+    await tester.pumpWidget(_wrap(client));
+    await tester.pumpAndSettle();
+
+    expect(find.byIcon(Icons.event_outlined), findsOneWidget);
+    expect(find.byIcon(Icons.check_circle_outline), findsOneWidget);
+    expect(find.byIcon(Icons.home_work_outlined), findsOneWidget);
   });
 }
 
