@@ -330,9 +330,7 @@ class _TodayPageState extends State<TodayPage> {
   Widget _buildCaleeDisplaySection() {
     return CaleeSection(
       title: 'Calee Display',
-      children: [
-        _emptyRow('Display status and setup are coming soon.'),
-      ],
+      children: [_emptyRow('Display status and setup are coming soon.')],
     );
   }
 

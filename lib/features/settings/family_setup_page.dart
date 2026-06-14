@@ -12,7 +12,7 @@ class FamilySetupPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return CaleeScaffold(
-      appBar: AppBar(title: const Text('Family Members')),
+      appBar: AppBar(title: const Text('People')),
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(CaleeSpacing.pagePadding),
@@ -26,12 +26,12 @@ class FamilySetupPage extends StatelessWidget {
               ),
               const SizedBox(height: CaleeSpacing.md),
               Text(
-                'Family setup needed',
+                'People setup needed',
                 style: Theme.of(context).textTheme.titleMedium,
               ),
               const SizedBox(height: CaleeSpacing.xs),
               Text(
-                'Family members are used to assign chores. Please complete family setup in Calee Portal first.',
+                'People are used to assign chores. Please complete setup in Calee Portal first.',
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: CaleeColors.textSecondary,
                 ),
