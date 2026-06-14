@@ -61,25 +61,6 @@ class _ItemsHubClient extends CaleeHubClient {
   }) async {}
 }
 
-class _ErrorHubClient extends CaleeHubClient {
-  _ErrorHubClient() : super(baseUri: Uri.parse('http://localhost'));
-
-  @override
-  Future<DeletedItemsResponse> listDeletedItems({
-    required String accessToken,
-    String? serviceId,
-    String? type,
-    int? limit,
-    String? cursor,
-  }) async {
-    throw const CaleeHubException(
-      statusCode: 503,
-      message: 'Service unavailable',
-      code: 'UPSTREAM_ERROR',
-    );
-  }
-}
-
 class _RestoreConflictClient extends CaleeHubClient {
   _RestoreConflictClient(this._items)
     : super(baseUri: Uri.parse('http://localhost'));
