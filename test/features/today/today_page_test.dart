@@ -112,15 +112,17 @@ Widget _buildPage({
 
 void main() {
   group('TodayPage — empty states', () {
-    testWidgets('shows "No events today" when calendar has no events',
-        (tester) async {
-      final hub = _StubHub();
-      await tester.pumpWidget(_buildPage(hub: hub));
-      await tester.pump(); // allow initState _load() future to settle
-      await tester.pump();
+    testWidgets(
+      'shows "No events today" when calendar has no events',
+      (tester) async {
+        final hub = _StubHub();
+        await tester.pumpWidget(_buildPage(hub: hub));
+        await tester.pump();
+        await tester.pump();
 
-      expect(find.text('No events today'), findsOneWidget);
-    });
+        expect(find.text('No events today'), findsOneWidget);
+      },
+    );
 
     testWidgets('shows "No tasks due today" when no tasks exist',
         (tester) async {
@@ -132,20 +134,21 @@ void main() {
       expect(find.text('No tasks due today'), findsOneWidget);
     });
 
-    testWidgets('shows "No chores due today" when chores service present',
-        (tester) async {
-      final hub = _StubHub();
-      await tester.pumpWidget(
-        _buildPage(hub: hub, services: const [_choresService]),
-      );
-      await tester.pump();
-      await tester.pump();
+    testWidgets(
+      'shows "No chores due today" when chores service present',
+      (tester) async {
+        final hub = _StubHub();
+        await tester.pumpWidget(
+          _buildPage(hub: hub, services: const [_choresService]),
+        );
+        await tester.pump();
+        await tester.pump();
 
-      expect(find.text('No chores due today'), findsOneWidget);
-    });
+        expect(find.text('No chores due today'), findsOneWidget);
+      },
+    );
 
-    testWidgets('Chores section is absent when no chores service',
-        (tester) async {
+    testWidgets('Chores section absent when no chores service', (tester) async {
       final hub = _StubHub();
       await tester.pumpWidget(
         _buildPage(hub: hub, services: const [_calendarService]),
@@ -158,41 +161,46 @@ void main() {
   });
 
   group('TodayPage — section error rows', () {
-    testWidgets('calendar error row renders without crashing the page',
-        (tester) async {
-      final hub = _StubHub(failEvents: true);
-      await tester.pumpWidget(_buildPage(hub: hub));
-      await tester.pump();
-      await tester.pump();
+    testWidgets(
+      'calendar error row renders without crashing the page',
+      (tester) async {
+        final hub = _StubHub(failEvents: true);
+        await tester.pumpWidget(_buildPage(hub: hub));
+        await tester.pump();
+        await tester.pump();
 
-      // Page should still be visible (not a blank screen)
-      expect(find.byType(TodayPage), findsOneWidget);
-      expect(find.text('Could not load calendar events.'), findsOneWidget);
-    });
+        expect(find.byType(TodayPage), findsOneWidget);
+        expect(find.text('Could not load calendar events.'), findsOneWidget);
+      },
+    );
 
-    testWidgets('tasks error row renders without crashing the page',
-        (tester) async {
-      final hub = _StubHub(failTasks: true);
-      await tester.pumpWidget(_buildPage(hub: hub));
-      await tester.pump();
-      await tester.pump();
+    testWidgets(
+      'tasks error row renders without crashing the page',
+      (tester) async {
+        final hub = _StubHub(failTasks: true);
+        await tester.pumpWidget(_buildPage(hub: hub));
+        await tester.pump();
+        await tester.pump();
 
-      expect(find.byType(TodayPage), findsOneWidget);
-      expect(find.text('Could not load tasks.'), findsOneWidget);
-    });
+        expect(find.byType(TodayPage), findsOneWidget);
+        expect(find.text('Could not load tasks.'), findsOneWidget);
+      },
+    );
 
-    testWidgets('chores error row renders without crashing the page',
-        (tester) async {
-      final hub = _StubHub(failChores: true);
-      await tester.pumpWidget(
-        _buildPage(hub: hub, services: const [_choresService]),
-      );
-      await tester.pump();
-      await tester.pump();
+    testWidgets(
+      'chores error row renders without crashing the page',
+      (tester) async {
+        final hub = _StubHub(failChores: true);
+        await tester.pumpWidget(
+          _buildPage(hub: hub, services: const [_choresService]),
+        );
+        await tester.pump();
+        await tester.pump();
 
-      expect(find.byType(TodayPage), findsOneWidget);
-      expect(find.text('Could not load chores.'), findsOneWidget);
-    });
+        expect(find.byType(TodayPage), findsOneWidget);
+        expect(find.text('Could not load chores.'), findsOneWidget);
+      },
+    );
 
     testWidgets('all sections error without crashing the page', (tester) async {
       final hub = _StubHub(
@@ -218,7 +226,6 @@ void main() {
       await tester.pump();
       await tester.pump();
 
-      // CaleeSection should be present for Calendar, Tasks, and Calee Display
       expect(find.byType(CaleeSection), findsWidgets);
     });
 
@@ -239,10 +246,8 @@ void main() {
       await tester.pump();
       await tester.pump();
 
-      // Drag from top to trigger RefreshIndicator
       await tester.drag(find.byType(ListView).first, const Offset(0, 300));
       await tester.pump();
-      // Allow the refresh future to complete
       await tester.pump(const Duration(milliseconds: 100));
       await tester.pump();
 
@@ -251,7 +256,7 @@ void main() {
   });
 
   group('TodayPage — Calee Display section', () {
-    testWidgets('displays "coming soon" placeholder section', (tester) async {
+    testWidgets('displays coming-soon placeholder section', (tester) async {
       final hub = _StubHub();
       await tester.pumpWidget(_buildPage(hub: hub));
       await tester.pump();

@@ -34,18 +34,20 @@ void main() {
       expect(find.text('Coming soon'), findsOneWidget);
     });
 
-    testWidgets('tapping "Link a Calee display" shows a coming-soon snackbar',
-        (tester) async {
-      await tester.pumpWidget(
-        _wrap(const Scaffold(body: CaleeDisplaysPage())),
-      );
-      await tester.pump();
+    testWidgets(
+      'tapping "Link a Calee display" shows a coming-soon snackbar',
+      (tester) async {
+        await tester.pumpWidget(
+          _wrap(const Scaffold(body: CaleeDisplaysPage())),
+        );
+        await tester.pump();
 
-      await tester.tap(find.text('Link a Calee display'));
-      await tester.pump();
+        await tester.tap(find.text('Link a Calee display'));
+        await tester.pump();
 
-      expect(find.text('Display linking is coming soon.'), findsOneWidget);
-    });
+        expect(find.text('Display linking is coming soon.'), findsOneWidget);
+      },
+    );
 
     testWidgets('page header reads "Calee displays"', (tester) async {
       await tester.pumpWidget(_wrap(const CaleeDisplaysPage()));
@@ -56,35 +58,38 @@ void main() {
   });
 
   group('Settings → Calee displays navigation', () {
-    testWidgets('tapping Calee displays row opens CaleeDisplaysPage',
-        (tester) async {
-      // Build a minimal widget that mimics the settings row tap: a
-      // ListTile that pushes CaleeDisplaysPage, matching the real
-      // settings_page.dart pattern.
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: CaleeTheme.buildThemeData(),
-          home: Scaffold(
-            body: Builder(
-              builder: (ctx) => ListTile(
-                title: const Text('Calee displays'),
-                onTap: () => Navigator.push(
-                  ctx,
-                  MaterialPageRoute<void>(
-                    builder: (_) => const CaleeDisplaysPage(),
-                  ),
-                ),
+    testWidgets(
+      'tapping Calee displays row opens CaleeDisplaysPage',
+      (tester) async {
+        // Build a minimal widget that mimics the settings row tap: a
+        // ListTile that pushes CaleeDisplaysPage, matching the real
+        // settings_page.dart pattern.
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: CaleeTheme.buildThemeData(),
+            home: Scaffold(
+              body: Builder(
+                builder:
+                    (ctx) => ListTile(
+                      title: const Text('Calee displays'),
+                      onTap: () => Navigator.push(
+                        ctx,
+                        MaterialPageRoute<void>(
+                          builder: (_) => const CaleeDisplaysPage(),
+                        ),
+                      ),
+                    ),
               ),
             ),
           ),
-        ),
-      );
+        );
 
-      await tester.tap(find.text('Calee displays'));
-      await tester.pumpAndSettle();
+        await tester.tap(find.text('Calee displays'));
+        await tester.pumpAndSettle();
 
-      expect(find.byType(CaleeDisplaysPage), findsOneWidget);
-      expect(find.text('No Calee displays linked yet.'), findsOneWidget);
-    });
+        expect(find.byType(CaleeDisplaysPage), findsOneWidget);
+        expect(find.text('No Calee displays linked yet.'), findsOneWidget);
+      },
+    );
   });
 }

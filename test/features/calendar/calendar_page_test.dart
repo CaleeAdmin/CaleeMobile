@@ -1,8 +1,9 @@
 // Widget tests for CalendarPage structure.
 //
 // Verifies that the Month/Agenda switcher renders and that switching between
-// modes does not crash the page. Uses a stub CaleeHubClient and CaleePreferences
-// so no platform channels or network are needed.
+// modes does not crash the page. Uses a stub CaleeHubClient so no platform
+// channels or network access are needed. SharedPreferences is mocked because
+// CalendarPage creates CaleePreferences internally.
 
 import 'package:calee_mobile/data/api/calee_hub_client.dart';
 import 'package:calee_mobile/data/models/client_bootstrap.dart';
@@ -67,24 +68,26 @@ void main() {
       expect(find.byType(CalendarPage), findsOneWidget);
     });
 
-    testWidgets('Month / Agenda switcher (SegmentedButton) is visible',
-        (tester) async {
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: CaleeTheme.buildThemeData(),
-          home: CalendarPage(
-            hubClient: _StubHub(),
-            accessToken: 'tok',
-            services: const [_service],
+    testWidgets(
+      'Month / Agenda switcher (SegmentedButton) is visible',
+      (tester) async {
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: CaleeTheme.buildThemeData(),
+            home: CalendarPage(
+              hubClient: _StubHub(),
+              accessToken: 'tok',
+              services: const [_service],
+            ),
           ),
-        ),
-      );
-      await tester.pump();
-      await tester.pump();
+        );
+        await tester.pump();
+        await tester.pump();
 
-      expect(find.text('Month'), findsOneWidget);
-      expect(find.text('Agenda'), findsOneWidget);
-    });
+        expect(find.text('Month'), findsOneWidget);
+        expect(find.text('Agenda'), findsOneWidget);
+      },
+    );
 
     testWidgets('switching to Agenda mode does not crash', (tester) async {
       await tester.pumpWidget(

@@ -102,46 +102,45 @@ void main() {
       await tester.pumpWidget(_buildHome(bootstrap: _noChoresBootstrap()));
       await tester.pump();
 
-      // NavigationBar should show 'Today' as the first destination and it
-      // should be selected by default — the Today header text is visible.
+      // Today header text is visible — Today tab is selected by default.
       expect(find.text('Today'), findsWidgets);
     });
 
-    testWidgets('bottom navigation contains Today as the first destination',
-        (tester) async {
-      await tester.pumpWidget(_buildHome(bootstrap: _noChoresBootstrap()));
-      await tester.pump();
+    testWidgets(
+      'bottom nav contains Today as the first destination',
+      (tester) async {
+        await tester.pumpWidget(_buildHome(bootstrap: _noChoresBootstrap()));
+        await tester.pump();
 
-      final bar = find.byType(NavigationBar);
-      expect(bar, findsOneWidget);
+        final bar = find.byType(NavigationBar);
+        expect(bar, findsOneWidget);
 
-      final destinations = find.descendant(
-        of: bar,
-        matching: find.byType(NavigationDestination),
-      );
-      // Without chores: Today, Calendar, Tasks, Settings = 4
-      expect(destinations, findsNWidgets(4));
+        final destinations = find.descendant(
+          of: bar,
+          matching: find.byType(NavigationDestination),
+        );
+        // Without chores: Today, Calendar, Tasks, Settings = 4
+        expect(destinations, findsNWidgets(4));
 
-      // First destination label is 'Today'
-      final firstDest = tester.widgetList<NavigationDestination>(
-        destinations,
-      ).first;
-      expect(firstDest.label, 'Today');
-    });
+        // First destination label is 'Today'
+        final firstDest =
+            tester.widgetList<NavigationDestination>(destinations).first;
+        expect(firstDest.label, 'Today');
+      },
+    );
 
-    testWidgets('tapping Calendar tab opens Calendar tab', (tester) async {
+    testWidgets('tapping Calendar tab selects Calendar', (tester) async {
       await tester.pumpWidget(_buildHome(bootstrap: _noChoresBootstrap()));
       await tester.pump();
 
       await tester.tap(find.text('Calendar'));
       await tester.pump();
 
-      // The selected tab index has changed; Calendar is now selected.
       final bar = tester.widget<NavigationBar>(find.byType(NavigationBar));
       expect(bar.selectedIndex, 1);
     });
 
-    testWidgets('tapping Tasks tab opens Tasks tab', (tester) async {
+    testWidgets('tapping Tasks tab selects Tasks', (tester) async {
       await tester.pumpWidget(_buildHome(bootstrap: _noChoresBootstrap()));
       await tester.pump();
 
@@ -152,41 +151,45 @@ void main() {
       expect(bar.selectedIndex, 2);
     });
 
-    testWidgets('Chores tab is hidden when service does not support chores',
-        (tester) async {
-      await tester.pumpWidget(_buildHome(bootstrap: _noChoresBootstrap()));
-      await tester.pump();
+    testWidgets(
+      'Chores tab hidden when service does not support chores',
+      (tester) async {
+        await tester.pumpWidget(_buildHome(bootstrap: _noChoresBootstrap()));
+        await tester.pump();
 
-      final bar = find.byType(NavigationBar);
-      final destinations = find.descendant(
-        of: bar,
-        matching: find.byType(NavigationDestination),
-      );
-      final labels = tester
-          .widgetList<NavigationDestination>(destinations)
-          .map((d) => d.label)
-          .toList();
-      expect(labels.contains('Chores'), isFalse);
-    });
+        final bar = find.byType(NavigationBar);
+        final destinations = find.descendant(
+          of: bar,
+          matching: find.byType(NavigationDestination),
+        );
+        final labels = tester
+            .widgetList<NavigationDestination>(destinations)
+            .map((d) => d.label)
+            .toList();
+        expect(labels.contains('Chores'), isFalse);
+      },
+    );
 
-    testWidgets('Chores tab appears when service supports chores',
-        (tester) async {
-      await tester.pumpWidget(_buildHome(bootstrap: _choresBootstrap()));
-      await tester.pump();
+    testWidgets(
+      'Chores tab appears when service supports chores',
+      (tester) async {
+        await tester.pumpWidget(_buildHome(bootstrap: _choresBootstrap()));
+        await tester.pump();
 
-      final bar = find.byType(NavigationBar);
-      final destinations = find.descendant(
-        of: bar,
-        matching: find.byType(NavigationDestination),
-      );
-      final labels = tester
-          .widgetList<NavigationDestination>(destinations)
-          .map((d) => d.label)
-          .toList();
-      expect(labels.contains('Chores'), isTrue);
-      // With chores: Today, Calendar, Tasks, Chores, Settings = 5
-      expect(labels.length, 5);
-    });
+        final bar = find.byType(NavigationBar);
+        final destinations = find.descendant(
+          of: bar,
+          matching: find.byType(NavigationDestination),
+        );
+        final labels = tester
+            .widgetList<NavigationDestination>(destinations)
+            .map((d) => d.label)
+            .toList();
+        expect(labels.contains('Chores'), isTrue);
+        // With chores: Today, Calendar, Tasks, Chores, Settings = 5
+        expect(labels.length, 5);
+      },
+    );
   });
 
   group('CaleeHomePage — FAB hero tag uniqueness (static check)', () {
@@ -196,8 +199,11 @@ void main() {
         'chores_add_chore_fab',
         'settings_add_family_member_fab',
       ];
-      expect(tags.toSet().length, tags.length,
-          reason: 'Every FAB must have a unique heroTag');
+      expect(
+        tags.toSet().length,
+        tags.length,
+        reason: 'Every FAB must have a unique heroTag',
+      );
     });
   });
 }
