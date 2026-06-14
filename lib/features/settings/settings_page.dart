@@ -97,11 +97,11 @@ class _SettingsPageState extends State<SettingsPage> {
       );
     } catch (e, st) {
       if (!mounted) return;
-      if (kDebugMode) debugPrint('[SettingsPage] Family setup failed: $e\n$st');
+      if (kDebugMode) debugPrint('[SettingsPage] People setup failed: $e\n$st');
       if (kDebugMode) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Family setup error: $e')));
+        ).showSnackBar(SnackBar(content: Text('People setup error: $e')));
       }
       _showFamilySetupPage();
     }
@@ -118,6 +118,19 @@ class _SettingsPageState extends State<SettingsPage> {
         builder: (_) => FamilySetupPage(portalUrl: portalUrl),
       ),
     );
+  }
+
+  bool _serviceNeedsAttention(ClientService s) =>
+      s.hasMissingCalendarCredential ||
+      !{'connected', 'active', 'healthy'}.contains(s.accessStatus);
+
+  bool _shouldShowServices(List<ClientService> services) {
+    if (services.isEmpty) return false;
+    if (kDebugMode) return true;
+    if (services.length == 1 && !_serviceNeedsAttention(services[0])) {
+      return false;
+    }
+    return true;
   }
 
   void _openServiceDetails(ClientService service) {
@@ -244,7 +257,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   if (v != null) _controller.setTimeFormat(v);
                 },
               ),
-              if (writableCalendars.isNotEmpty)
+              if (writableCalendars.length >= 2)
                 CaleeSectionDropdownRow<ClientCalendar?>(
                   label: 'Default calendar',
                   value: defaultCal,
@@ -256,7 +269,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   ],
                   onChanged: _controller.setDefaultCalendar,
                 ),
-              if (taskCalendars.isNotEmpty)
+              if (taskCalendars.length >= 2)
                 CaleeSectionDropdownRow<ClientCalendar?>(
                   label: 'Default task list',
                   value: defaultTask,
@@ -275,11 +288,20 @@ class _SettingsPageState extends State<SettingsPage> {
         const SizedBox(height: CaleeSpacing.sectionSpacing),
 
         // ── Manage ───────────────────────────────────
+        // TODO(displays): Re-enable Calee displays in Settings when the secure
+        // display-linking flow is ready.
+        // Future flow:
+        //   - signed-in CaleeMobile user scans a Calee display QR code
+        //   - app sends a short-lived, single-use display linking token to Hub/Core
+        //   - Hub/Core approves the display login using the signed-in Calee account
+        //   - Calee display signs in automatically
+        // Security: do not pass passwords, app passwords, or long-lived tokens
+        // through URLs; token must be short-lived and single-use.
         CaleeSection(
           title: 'Manage',
           children: [
             CaleeListRow(
-              title: 'Calendars & Lists',
+              title: 'Calendars and lists',
               subtitle: 'Manage calendars, task lists, and chore lists',
               leading: const Icon(
                 Icons.calendar_month_outlined,
@@ -303,10 +325,10 @@ class _SettingsPageState extends State<SettingsPage> {
               },
             ),
             CaleeListRow(
-              title: 'Family Members',
+              title: 'People',
               subtitle: isOpeningFamily
-                  ? 'Setting up family…'
-                  : 'Manage people used for chores',
+                  ? 'Preparing people…'
+                  : 'Manage people for tasks and chores',
               leading: isOpeningFamily
                   ? const SizedBox(
                       width: 20,
@@ -326,21 +348,19 @@ class _SettingsPageState extends State<SettingsPage> {
         const SizedBox(height: CaleeSpacing.sectionSpacing),
 
         // ── Services ─────────────────────────────────
-        CaleeSection(
-          title: 'Services',
-          children: [
-            if (_controller.bootstrap.services.isEmpty)
-              _EmptyRowText('No services connected.')
-            else
+        if (_shouldShowServices(_controller.bootstrap.services)) ...[
+          CaleeSection(
+            title: 'Connected services',
+            children: [
               for (final service in _controller.bootstrap.services)
                 _ServiceRow(
                   service: service,
                   onTap: () => _openServiceDetails(service),
                 ),
-          ],
-        ),
-
-        const SizedBox(height: CaleeSpacing.sectionSpacing),
+            ],
+          ),
+          const SizedBox(height: CaleeSpacing.sectionSpacing),
+        ],
 
         // ── Sign out ─────────────────────────────────
         CaleeSection(
@@ -375,7 +395,9 @@ class _ServiceRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasMissing = service.hasMissingCalendarCredential;
-    final subtitle = '${service.baseUrl} · ${service.accessStatus}';
+    final needsAttention = hasMissing ||
+        !{'connected', 'active', 'healthy'}.contains(service.accessStatus);
+    final subtitle = needsAttention ? 'Needs attention' : 'Connected';
 
     return CaleeListRow(
       title: service.displayName,
@@ -383,9 +405,9 @@ class _ServiceRow extends StatelessWidget {
       leading: Icon(
         Icons.cloud_outlined,
         size: 20,
-        color: hasMissing ? CaleeColors.dotOrange : CaleeColors.textTertiary,
+        color: needsAttention ? CaleeColors.dotOrange : CaleeColors.textTertiary,
       ),
-      trailing: hasMissing
+      trailing: needsAttention
           ? const Icon(
               Icons.warning_amber_rounded,
               size: 16,
@@ -393,32 +415,6 @@ class _ServiceRow extends StatelessWidget {
             )
           : null,
       onTap: onTap,
-    );
-  }
-}
-
-// ─────────────────────────────────────────────
-// _EmptyRowText
-// ─────────────────────────────────────────────
-
-class _EmptyRowText extends StatelessWidget {
-  const _EmptyRowText(this.text);
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(
-        horizontal: CaleeSpacing.md,
-        vertical: CaleeSpacing.sm + 4,
-      ),
-      child: Text(
-        text,
-        style: Theme.of(
-          context,
-        ).textTheme.bodyMedium?.copyWith(color: CaleeColors.textSecondary),
-      ),
     );
   }
 }

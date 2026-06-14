@@ -72,7 +72,7 @@ class _CalendarChooserSheetState extends State<CalendarChooserSheet> {
   String _subtitleFor(ClientCalendar cal) {
     final parts = <String>[];
     if (cal.serviceName.trim().isNotEmpty) parts.add(cal.serviceName.trim());
-    if (cal.isSubscription) parts.add('Subscribed');
+    if (cal.isSubscription) parts.add('Linked calendar');
     if (cal.readOnly) parts.add('Read-only');
     return parts.join(' · ');
   }
@@ -216,18 +216,18 @@ class _CalendarChooserSheetState extends State<CalendarChooserSheet> {
     Navigator.of(context).pop();
     CaleeBottomSheet.show<void>(
       context: context,
-      title: 'Add Calee Calendar',
+      title: 'Add Calee calendar',
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           const Text(
-            'Calee calendars will help you create ready-made public calendars.',
+            'Calee calendars help you add ready-made public calendars.',
             style: TextStyle(fontSize: 15, color: CaleeColors.textSecondary),
           ),
           const SizedBox(height: CaleeSpacing.xs),
           const Text(
-            'Examples: School, Sport Events, Holidays',
+            'Examples: school, sport events, holidays',
             style: TextStyle(fontSize: 13, color: CaleeColors.textTertiary),
           ),
           const SizedBox(height: CaleeSpacing.lg),
@@ -245,7 +245,7 @@ class _CalendarChooserSheetState extends State<CalendarChooserSheet> {
       title: 'Add',
       children: [
         CaleeListRow(
-          title: 'New Calendar',
+          title: 'New calendar',
           leading: const Icon(
             Icons.add_circle_outline,
             color: CaleeColors.primary,
@@ -257,7 +257,7 @@ class _CalendarChooserSheetState extends State<CalendarChooserSheet> {
           },
         ),
         CaleeListRow(
-          title: 'Subscribe from Link',
+          title: 'Add calendar link',
           leading: const Icon(
             Icons.link_outlined,
             color: CaleeColors.primary,
@@ -269,7 +269,7 @@ class _CalendarChooserSheetState extends State<CalendarChooserSheet> {
           },
         ),
         CaleeListRow(
-          title: 'Add Calee Calendar',
+          title: 'Add Calee calendar',
           leading: const Icon(
             Icons.public_outlined,
             color: CaleeColors.primary,

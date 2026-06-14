@@ -144,7 +144,7 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
           onTap: _openCreateSheet,
         ),
         CaleeAction(
-          label: 'Subscribe from link',
+          label: 'Add calendar link',
           icon: Icons.link_rounded,
           onTap: _openSubscribeSheet,
         ),
@@ -212,7 +212,7 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
 
     final created = await CaleeBottomSheet.show<bool>(
       context: context,
-      title: 'Subscribe from link',
+      title: 'Add calendar link',
       child: _SubscriptionFormContent(
         services: services,
         initialName: widget.initialSubscriptionName,
@@ -472,7 +472,7 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
 
     final subtitleParts = <String>[
       if (calendar.serviceName.trim().isNotEmpty) calendar.serviceName,
-      if (calendar.isSubscription) 'Subscription',
+      if (calendar.isSubscription) 'Linked calendar',
       if (calendar.readOnly) 'Read-only',
     ];
 
@@ -774,7 +774,7 @@ class _CollectionFormContentState extends State<_CollectionFormContent> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (widget.services.isNotEmpty) ...[
+            if (widget.services.length >= 2) ...[
               DropdownButtonFormField<ClientService>(
                 initialValue: _selectedService,
                 decoration: const InputDecoration(labelText: 'Service'),
@@ -986,7 +986,7 @@ class _SubscriptionFormContentState extends State<_SubscriptionFormContent> {
             content: Text(
               error is CaleeHubException
                   ? error.message
-                  : 'Unable to subscribe from this link.',
+                  : 'Unable to add this calendar link.',
             ),
           ),
         );
@@ -1005,23 +1005,25 @@ class _SubscriptionFormContentState extends State<_SubscriptionFormContent> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            DropdownButtonFormField<ClientService>(
-              initialValue: _selectedService,
-              decoration: const InputDecoration(labelText: 'Service'),
-              items: [
-                for (final service in widget.services)
-                  DropdownMenuItem(
-                    value: service,
-                    child: Text(service.displayName),
-                  ),
-              ],
-              onChanged: _isSubmitting
-                  ? null
-                  : (service) => setState(() => _selectedService = service),
-              validator: (service) =>
-                  service == null ? 'Choose a service' : null,
-            ),
-            const SizedBox(height: CaleeSpacing.sm + 4),
+            if (widget.services.length >= 2) ...[
+              DropdownButtonFormField<ClientService>(
+                initialValue: _selectedService,
+                decoration: const InputDecoration(labelText: 'Service'),
+                items: [
+                  for (final service in widget.services)
+                    DropdownMenuItem(
+                      value: service,
+                      child: Text(service.displayName),
+                    ),
+                ],
+                onChanged: _isSubmitting
+                    ? null
+                    : (service) => setState(() => _selectedService = service),
+                validator: (service) =>
+                    service == null ? 'Choose a service' : null,
+              ),
+              const SizedBox(height: CaleeSpacing.sm + 4),
+            ],
             TextFormField(
               controller: _nameController,
               enabled: !_isSubmitting,
@@ -1059,7 +1061,7 @@ class _SubscriptionFormContentState extends State<_SubscriptionFormContent> {
             ),
             const SizedBox(height: CaleeSpacing.xs),
             Text(
-              'Subscribed calendars are read-only and stay linked to the source.',
+              'Linked calendars are read-only and stay connected to the source.',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: CaleeColors.textSecondary,
               ),
@@ -1112,7 +1114,7 @@ class _SubscriptionFormContentState extends State<_SubscriptionFormContent> {
                       height: 18,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : const Text('Subscribe'),
+                  : const Text('Add to Calee'),
             ),
           ],
         ),

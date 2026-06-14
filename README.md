@@ -1,6 +1,6 @@
 # CaleeMobile
 
-CaleeMobile is the phone version of Calee.
+CaleeMobile is the mobile companion for Calee.
 
 This app is based on the former CaleeSync Flutter project, but CaleeMobile is not a phone-local calendar sync utility.
 
@@ -10,9 +10,10 @@ CaleeMobile should connect to the existing Calee server / Nextcloud backend and 
 
 - Calendar
 - Tasks
-- Chores
+- Chores where supported
 - Settings
-- Family/profile information
+- People/profile information
+- Calee display setup and status where supported
 - Weather and system messages where supported
 
 ## Removed from the active app path
@@ -33,3 +34,13 @@ Run:
 
     flutter pub get
     flutter run
+
+## Development checks before commit
+
+Before committing Dart changes, run:
+
+    dart format lib test
+    flutter analyze --fatal-infos
+    flutter test
+
+CI will fail if `dart format --set-exit-if-changed lib test` would modify any files.

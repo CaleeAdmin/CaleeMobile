@@ -14,6 +14,7 @@ import 'widgets/create_task_sheet.dart';
 import 'widgets/edit_task_sheet.dart';
 import 'widgets/task_filter_bar.dart';
 import 'widgets/task_row.dart';
+import 'widgets/task_search_sheet.dart';
 
 class TasksPage extends StatefulWidget {
   const TasksPage({
@@ -189,6 +190,33 @@ class _TasksPageState extends State<TasksPage> {
     }
   }
 
+  void _openSearchSheet(
+    List<ClientCalendar> taskCalendars,
+    List<ClientTask> allTasks,
+  ) {
+    _searchController.clear();
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: CaleeColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(CaleeRadius.sheet),
+        ),
+      ),
+      builder: (_) => TaskSearchSheet(
+        searchController: _searchController,
+        searchTasks: (query) => _searchTaskList(query, allTasks, taskCalendars),
+        calendarNameForTask: _calendarNameForTask,
+        formatDueLabel: _formatDueLabel,
+        onResultTap: (task) {
+          Navigator.of(context).pop();
+          _openEditTaskSheet(task);
+        },
+      ),
+    );
+  }
+
   bool _matchesSearch(
     ClientTask task,
     String query,
@@ -202,6 +230,17 @@ class _TasksPageState extends State<TasksPage> {
     }
     if (_formatDueLabel(task.dueAt).toLowerCase().contains(q)) return true;
     return false;
+  }
+
+  List<ClientTask> _searchTaskList(
+    String query,
+    List<ClientTask> allTasks,
+    List<ClientCalendar> taskCalendars,
+  ) {
+    if (query.trim().isEmpty) return [];
+    return allTasks
+        .where((t) => _matchesSearch(t, query, taskCalendars))
+        .toList();
   }
 
   String _rawCalendarId(ClientCalendar calendar) {
@@ -312,6 +351,85 @@ class _TasksPageState extends State<TasksPage> {
     );
   }
 
+  PreferredSizeWidget _buildTopBar({
+    required List<ClientCalendar> taskCalendars,
+    required List<ClientTask> allTasks,
+  }) {
+    final selectedCalendar = _controller.selectedCalendar;
+    final subtitle = selectedCalendar == null
+        ? 'All task lists'
+        : selectedCalendar.name;
+
+    return PreferredSize(
+      preferredSize: const Size.fromHeight(64),
+      child: SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(
+            CaleeSpacing.md,
+            CaleeSpacing.xs,
+            CaleeSpacing.xs,
+            CaleeSpacing.xs,
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              // Context label
+              Expanded(
+                child: Text(
+                  subtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w600,
+                    color: CaleeColors.textPrimary,
+                  ),
+                ),
+              ),
+              // Search icon
+              if (taskCalendars.isNotEmpty)
+                IconButton(
+                  onPressed: () => _openSearchSheet(taskCalendars, allTasks),
+                  icon: const Icon(Icons.search),
+                  iconSize: 22,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                  color: CaleeColors.primary,
+                  tooltip: 'Search tasks',
+                ),
+              // Filter icon
+              if (taskCalendars.isNotEmpty)
+                IconButton(
+                  onPressed: () => _openTaskListChooser(taskCalendars, allTasks),
+                  icon: const Icon(Icons.tune),
+                  iconSize: 22,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                  color: CaleeColors.primary,
+                  tooltip: 'Task lists',
+                ),
+              // Add icon
+              IconButton(
+                onPressed: taskCalendars.isEmpty
+                    ? _openCollectionCreateShortcut
+                    : (_controller.isCreatingTask
+                          ? null
+                          : () => _openCreateTaskSheet(taskCalendars)),
+                icon: const Icon(Icons.add),
+                iconSize: 22,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                color: CaleeColors.primary,
+                tooltip: 'Add task',
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
@@ -369,6 +487,10 @@ class _TasksPageState extends State<TasksPage> {
 
         if (taskCalendars.isEmpty && allTasks.isEmpty) {
           return CaleeScaffold(
+            appBar: _buildTopBar(
+              taskCalendars: taskCalendars,
+              allTasks: allTasks,
+            ),
             body: CaleeEmptyState(
               icon: Icons.checklist_outlined,
               title: 'No task lists yet',
@@ -382,8 +504,8 @@ class _TasksPageState extends State<TasksPage> {
           );
         }
 
-        // Apply task list filter then search query
-        var filteredTasks = selectedCalendar == null
+        // Apply task list filter
+        final filteredTasks = selectedCalendar == null
             ? allTasks
             : allTasks.where((t) {
                 final sel = selectedCalendar;
@@ -391,13 +513,6 @@ class _TasksPageState extends State<TasksPage> {
                     t.calendarId == _rawCalendarId(sel) ||
                     '${t.serviceId}:${t.calendarId}' == sel.id;
               }).toList();
-
-        final searchQuery = _controller.searchQuery;
-        if (searchQuery.trim().isNotEmpty) {
-          filteredTasks = filteredTasks
-              .where((t) => _matchesSearch(t, searchQuery, taskCalendars))
-              .toList();
-        }
 
         final openTasks = filteredTasks.where((t) => !t.isCompleted).toList();
         final completedTasks = filteredTasks
@@ -428,15 +543,10 @@ class _TasksPageState extends State<TasksPage> {
               ..sort((a, b) => a.title.compareTo(b.title));
 
         return CaleeScaffold(
-          floatingActionButton: taskCalendars.isEmpty
-              ? null
-              : FloatingActionButton.extended(
-                  onPressed: _controller.isCreatingTask
-                      ? null
-                      : () => _openCreateTaskSheet(taskCalendars),
-                  icon: const Icon(Icons.add),
-                  label: const Text('New Task'),
-                ),
+          appBar: _buildTopBar(
+            taskCalendars: taskCalendars,
+            allTasks: allTasks,
+          ),
           body: RefreshIndicator(
             onRefresh: () => _controller.refresh(),
             child: ListView(
@@ -445,57 +555,15 @@ class _TasksPageState extends State<TasksPage> {
                 vertical: CaleeSpacing.md,
               ),
               children: [
-                // ── Task list filter pill ─────────────────────────────
-                if (taskCalendars.isNotEmpty)
-                  TaskListFilterBar(
-                    selectedCalendar: _controller.selectedCalendar,
-                    onTap: () => _openTaskListChooser(taskCalendars, allTasks),
-                  ),
-                if (taskCalendars.isNotEmpty)
-                  const SizedBox(height: CaleeSpacing.sm),
-
-                // ── Search field ─────────────────────────────────────
-                if (taskCalendars.isNotEmpty)
-                  TextField(
-                    controller: _searchController,
-                    onChanged: (v) => _controller.setSearchQuery(v),
-                    textInputAction: TextInputAction.search,
-                    decoration: InputDecoration(
-                      hintText: 'Search tasks…',
-                      prefixIcon: const Icon(Icons.search, size: 20),
-                      suffixIcon: searchQuery.isNotEmpty
-                          ? IconButton(
-                              icon: const Icon(Icons.close, size: 18),
-                              onPressed: () {
-                                _searchController.clear();
-                                _controller.setSearchQuery('');
-                              },
-                            )
-                          : null,
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: CaleeSpacing.md,
-                        vertical: CaleeSpacing.sm,
-                      ),
-                    ),
-                  ),
-                if (taskCalendars.isNotEmpty)
-                  const SizedBox(height: CaleeSpacing.md),
-
                 // ── Empty state when no open tasks ───────────────────
                 if (openTasks.isEmpty && taskCalendars.isNotEmpty)
                   CaleeSection(
                     children: [
                       CaleeListRow(
-                        title: searchQuery.trim().isNotEmpty
-                            ? 'No tasks match your search.'
-                            : 'No open tasks',
-                        subtitle: searchQuery.trim().isNotEmpty
-                            ? null
-                            : 'You\'re all caught up.',
-                        leading: Icon(
-                          searchQuery.trim().isNotEmpty
-                              ? Icons.search_off
-                              : Icons.check_circle_outline,
+                        title: 'No open tasks',
+                        subtitle: 'You\'re all caught up.',
+                        leading: const Icon(
+                          Icons.check_circle_outline,
                           color: CaleeColors.textTertiary,
                           size: 22,
                         ),

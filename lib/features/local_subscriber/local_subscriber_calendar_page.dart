@@ -199,7 +199,7 @@ class _LocalSubscriberCalendarPageState
           child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
             child: Text(
-              'Followed calendars',
+              'Calendars on this phone',
               style: theme.textTheme.titleSmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
@@ -265,13 +265,13 @@ class _LocalSubscriberBanner extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Saved on this phone only',
+                    'Added on this phone only',
                     style: theme.textTheme.labelMedium?.copyWith(
                       fontWeight: FontWeight.bold,
                     ),
                   ),
                   Text(
-                    'Read-only public calendar · Sign in to sync with your Calee account and Calee Tablet.',
+                    'Read-only public calendar · Sign in to link it to your Calee account and Calee display.',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
@@ -452,7 +452,7 @@ class _EmptyState extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.all(32),
         child: Text(
-          'No followed calendars yet.',
+          'No calendars added on this phone yet.',
           textAlign: TextAlign.center,
           style: theme.textTheme.bodyMedium?.copyWith(
             color: theme.colorScheme.onSurfaceVariant,

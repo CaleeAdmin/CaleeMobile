@@ -14,7 +14,6 @@ import 'chores_controller.dart';
 import 'chores_repository.dart';
 import 'widgets/chore_assignee_filter.dart';
 import 'widgets/chore_row.dart';
-import 'widgets/chore_summary_strip.dart';
 import 'widgets/chore_widget_helpers.dart';
 import 'widgets/create_chore_sheet.dart';
 import 'widgets/edit_chore_sheet.dart';
@@ -235,14 +234,14 @@ class _ChoresPageState extends State<ChoresPage> {
     final actions = <CaleeAction>[
       if (chore.canToggleCompletion)
         CaleeAction(
-          label: isDone ? 'Undo Done' : 'Mark Done',
+          label: isDone ? 'Undo done' : 'Mark done',
           icon: isDone
               ? Icons.unpublished_outlined
               : Icons.check_circle_outline,
           onTap: () => _toggleChoreCompletion(chore),
         ),
       CaleeAction(
-        label: 'Edit Chore',
+        label: 'Edit chore',
         icon: Icons.edit_outlined,
         onTap: () => _openEditChoreSheet(chore),
       ),
@@ -251,18 +250,18 @@ class _ChoresPageState extends State<ChoresPage> {
     if (chore.isRecurring) {
       actions.addAll([
         CaleeAction(
-          label: 'Skip This Time',
+          label: 'Skip this time',
           icon: Icons.event_busy_outlined,
           onTap: () => _skipChore(chore),
         ),
         CaleeAction(
-          label: 'Stop Repeating',
+          label: 'Stop repeating',
           icon: Icons.repeat_one_outlined,
           isDestructive: true,
           onTap: () => _stopRepeatingChore(chore),
         ),
         CaleeAction(
-          label: 'Delete Permanently',
+          label: 'Delete permanently',
           icon: Icons.delete_outline,
           isDestructive: true,
           onTap: () => _confirmAndDeletePermanentChore(chore),
@@ -271,7 +270,7 @@ class _ChoresPageState extends State<ChoresPage> {
     } else {
       actions.add(
         CaleeAction(
-          label: 'Delete Chore',
+          label: 'Delete chore',
           icon: Icons.delete_outline,
           isDestructive: true,
           onTap: () => _confirmAndDeletePermanentChore(chore),
@@ -336,7 +335,7 @@ class _ChoresPageState extends State<ChoresPage> {
       title: 'Stop repeating?',
       body:
           'This chore will stop repeating after the current schedule. Existing completion history will remain.',
-      confirmLabel: 'Stop Repeating',
+      confirmLabel: 'Stop repeating',
     );
 
     if (confirmed && mounted) {
@@ -367,7 +366,7 @@ class _ChoresPageState extends State<ChoresPage> {
       title: 'Delete chore permanently?',
       body:
           'This will permanently delete "${chore.title}" and its completion records. This cannot be undone.',
-      confirmLabel: 'Delete Permanently',
+      confirmLabel: 'Delete permanently',
     );
 
     if (confirmed && mounted) {
@@ -423,21 +422,19 @@ class _ChoresPageState extends State<ChoresPage> {
     List<ClientChore> allChores,
   ) {
     if (filter == 'all') {
-      return 'All Chores · ${_countAllChores(allChores)}';
+      return 'All chores';
     }
     if (filter == 'unassigned') {
-      return 'Unassigned · ${_countUnassignedChores(allChores)}';
+      return 'Unassigned';
     }
     if (filter.startsWith('person:')) {
       final personId = filter.substring('person:'.length);
       final matches = people.where((p) => p.id == personId);
-      final name =
-          matches.isNotEmpty && matches.first.displayName.trim().isNotEmpty
+      return matches.isNotEmpty && matches.first.displayName.trim().isNotEmpty
           ? matches.first.displayName.trim()
           : 'Unnamed';
-      return '$name · ${_countChoresForPerson(allChores, personId)}';
     }
-    return 'All Chores · ${_countAllChores(allChores)}';
+    return 'All chores';
   }
 
   Future<void> _openAssigneeFilterChooser({
@@ -502,6 +499,55 @@ class _ChoresPageState extends State<ChoresPage> {
     }
   }
 
+  void _openSearchSheet({
+    required List<ClientChore> allChores,
+    required List<ClientCalendar> choreCalendars,
+    required Map<String, String> personNameMap,
+  }) {
+    final grouped = _groupChoresBySection(allChores);
+    final choreSection = <String, String>{};
+    for (final entry in grouped.entries) {
+      for (final chore in entry.value) {
+        final key = chore.completionActionId.isNotEmpty
+            ? chore.completionActionId
+            : chore.id;
+        choreSection[key] = entry.key;
+      }
+    }
+
+    final searchable = allChores.map((chore) {
+      final key = chore.completionActionId.isNotEmpty
+          ? chore.completionActionId
+          : chore.id;
+      final section = choreSection[key] ?? chore.normalizedSection;
+      return _SearchableChore(
+        chore: chore,
+        assigneeName: personNameMap[chore.assigneePersonId ?? ''] ?? '',
+        calendarName: _calendarNameForChore(chore, choreCalendars),
+        scheduledLabel: _formatScheduledAt(chore),
+        sectionLabel: _sectionTitle(section),
+      );
+    }).toList();
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: CaleeColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(CaleeRadius.sheet),
+        ),
+      ),
+      builder: (sheetContext) => _ChoreSearchSheet(
+        searchable: searchable,
+        onTapChore: (chore) {
+          Navigator.of(sheetContext).pop();
+          _showChoreActions(chore);
+        },
+      ),
+    );
+  }
+
   int _countAllChores(List<ClientChore> chores) => chores.length;
 
   int _countUnassignedChores(List<ClientChore> chores) =>
@@ -514,15 +560,6 @@ class _ChoresPageState extends State<ChoresPage> {
     List<ClientChore> chores,
   ) {
     return groupChoresBySection(chores, DateTime.now());
-  }
-
-  int _todayCompletionPoints(List<ClientChore> chores) {
-    return chores
-        .where(
-          (chore) =>
-              chore.normalizedSection == 'doneToday' || chore.completedToday,
-        )
-        .fold<int>(0, (total, chore) => total + chore.points);
   }
 
   String _formatScheduledAt(ClientChore chore) {
@@ -639,6 +676,75 @@ class _ChoresPageState extends State<ChoresPage> {
     );
   }
 
+  PreferredSizeWidget _buildTopBar({
+    required String label,
+    required VoidCallback onSearchTap,
+    required VoidCallback onFilterTap,
+    required VoidCallback onAddTap,
+  }) {
+    return PreferredSize(
+      preferredSize: const Size.fromHeight(64),
+      child: SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(
+            CaleeSpacing.md,
+            CaleeSpacing.xs,
+            CaleeSpacing.xs,
+            CaleeSpacing.xs,
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w600,
+                    color: CaleeColors.textPrimary,
+                  ),
+                ),
+              ),
+              IconButton(
+                onPressed: onSearchTap,
+                icon: const Icon(Icons.search),
+                iconSize: 22,
+                padding: EdgeInsets.zero,
+                constraints:
+                    const BoxConstraints(minWidth: 44, minHeight: 44),
+                color: CaleeColors.primary,
+                tooltip: 'Search chores',
+              ),
+              IconButton(
+                onPressed: onFilterTap,
+                icon: const Icon(Icons.tune),
+                iconSize: 22,
+                padding: EdgeInsets.zero,
+                constraints:
+                    const BoxConstraints(minWidth: 44, minHeight: 44),
+                color: CaleeColors.primary,
+                tooltip: 'Filter chores',
+              ),
+              IconButton(
+                onPressed: onAddTap,
+                icon: const Icon(Icons.add),
+                iconSize: 22,
+                padding: EdgeInsets.zero,
+                constraints:
+                    const BoxConstraints(minWidth: 44, minHeight: 44),
+                color: CaleeColors.primary,
+                tooltip: 'Add chore',
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
@@ -668,9 +774,9 @@ class _ChoresPageState extends State<ChoresPage> {
         if (overview == null) {
           return CaleeScaffold(
             body: CaleeEmptyState(
-              icon: Icons.family_restroom_outlined,
+              icon: Icons.checklist_outlined,
               title: 'No chore lists yet',
-              body: 'Create a chore list to start tracking family chores.',
+              body: 'Create a chore list to start tracking chores.',
               action: FilledButton.icon(
                 onPressed: _openCollectionCreateShortcut,
                 icon: const Icon(Icons.add),
@@ -687,16 +793,13 @@ class _ChoresPageState extends State<ChoresPage> {
         final chores = _filterChoresByAssignee(allChores);
         final choresBySection = _groupChoresBySection(chores);
         final hasUnassignedChores = _hasUnassignedChores(allChores);
-        final showAssigneeFilters =
-            allChores.isNotEmpty &&
-            (overview.people.isNotEmpty || hasUnassignedChores);
 
         if (choreCalendars.isEmpty && allChores.isEmpty) {
           return CaleeScaffold(
             body: CaleeEmptyState(
-              icon: Icons.family_restroom_outlined,
+              icon: Icons.checklist_outlined,
               title: 'No chore lists yet',
-              body: 'Create a chore list to start tracking family chores.',
+              body: 'Create a chore list to start tracking chores.',
               action: FilledButton.icon(
                 onPressed: _openCollectionCreateShortcut,
                 icon: const Icon(Icons.add),
@@ -725,19 +828,38 @@ class _ChoresPageState extends State<ChoresPage> {
             .where((s) => (choresBySection[s]?.isNotEmpty ?? false))
             .toList();
 
-        final overdueCount = choresBySection['overdue']?.length ?? 0;
-        final todoTodayCount = choresBySection['todoToday']?.length ?? 0;
-        final doneTodayCount = choresBySection['doneToday']?.length ?? 0;
-        final pointsToday = _todayCompletionPoints(chores);
+        final filterLabel = _filterLabel(
+          _controller.selectedAssigneeFilter,
+          overview.people,
+          allChores,
+        );
+
+        final personNameMap = {
+          for (final p in overview.people)
+            p.id: p.displayName.trim().isEmpty ? 'Unnamed' : p.displayName.trim(),
+        };
 
         return CaleeScaffold(
-          floatingActionButton: hasWritable
-              ? FloatingActionButton.extended(
-                  onPressed: () => _openCreateChoreSheet(choreCalendars),
-                  icon: const Icon(Icons.add),
-                  label: const Text('Chore'),
-                )
-              : null,
+          appBar: _buildTopBar(
+            label: filterLabel,
+            onSearchTap: () => _openSearchSheet(
+              allChores: allChores,
+              choreCalendars: choreCalendars,
+              personNameMap: personNameMap,
+            ),
+            onFilterTap: () => _openAssigneeFilterChooser(
+              people: overview.people,
+              hasUnassigned: hasUnassignedChores,
+              allChores: allChores,
+            ),
+            onAddTap: () {
+              if (hasWritable) {
+                _openCreateChoreSheet(choreCalendars);
+              } else {
+                _openCollectionCreateShortcut();
+              }
+            },
+          ),
           body: RefreshIndicator(
             onRefresh: _controller.refresh,
             child: ListView(
@@ -746,33 +868,6 @@ class _ChoresPageState extends State<ChoresPage> {
                 vertical: CaleeSpacing.md,
               ),
               children: [
-                if (overdueCount > 0 ||
-                    todoTodayCount > 0 ||
-                    doneTodayCount > 0) ...[
-                  ChoreSummaryStrip(
-                    overdueCount: overdueCount,
-                    todoTodayCount: todoTodayCount,
-                    doneTodayCount: doneTodayCount,
-                    pointsToday: pointsToday,
-                  ),
-                  const SizedBox(height: CaleeSpacing.sectionSpacing),
-                ],
-
-                if (showAssigneeFilters) ...[
-                  ChoreAssigneeFilterRow(
-                    label: _filterLabel(
-                      _controller.selectedAssigneeFilter,
-                      overview.people,
-                      allChores,
-                    ),
-                    onTap: () => _openAssigneeFilterChooser(
-                      people: overview.people,
-                      hasUnassigned: hasUnassignedChores,
-                      allChores: allChores,
-                    ),
-                  ),
-                  const SizedBox(height: CaleeSpacing.sectionSpacing),
-                ],
 
                 if (activeSections.isEmpty && choreCalendars.isNotEmpty)
                   CaleeSection(
@@ -783,7 +878,7 @@ class _ChoresPageState extends State<ChoresPage> {
                             ? 'No chores yet'
                             : 'No chores for this filter',
                         subtitle: allChores.isEmpty
-                            ? 'Tap + Chore to add your first chore.'
+                            ? 'Tap + to add your first chore.'
                             : 'Choose another assignee filter.',
                         leading: const Icon(
                           Icons.check_circle_outline,
@@ -828,6 +923,204 @@ class _ChoresPageState extends State<ChoresPage> {
           ),
         );
       },
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
+// Search support
+// ─────────────────────────────────────────────
+
+class _SearchableChore {
+  const _SearchableChore({
+    required this.chore,
+    required this.assigneeName,
+    required this.calendarName,
+    required this.scheduledLabel,
+    required this.sectionLabel,
+  });
+
+  final ClientChore chore;
+  final String assigneeName;
+  final String calendarName;
+  final String scheduledLabel;
+  final String sectionLabel;
+
+  bool matches(String query) {
+    if (query.isEmpty) return false;
+    final q = query.toLowerCase();
+    return chore.title.toLowerCase().contains(q) ||
+        (chore.description ?? '').toLowerCase().contains(q) ||
+        assigneeName.toLowerCase().contains(q) ||
+        calendarName.toLowerCase().contains(q) ||
+        scheduledLabel.toLowerCase().contains(q) ||
+        sectionLabel.toLowerCase().contains(q);
+  }
+}
+
+class _ChoreSearchSheet extends StatefulWidget {
+  const _ChoreSearchSheet({
+    required this.searchable,
+    required this.onTapChore,
+  });
+
+  final List<_SearchableChore> searchable;
+  final ValueChanged<ClientChore> onTapChore;
+
+  @override
+  State<_ChoreSearchSheet> createState() => _ChoreSearchSheetState();
+}
+
+class _ChoreSearchSheetState extends State<_ChoreSearchSheet> {
+  final _controller = TextEditingController();
+  List<_SearchableChore> _results = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.addListener(_onQueryChanged);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _onQueryChanged() {
+    final q = _controller.text.trim();
+    setState(() {
+      _results = q.isEmpty
+          ? []
+          : widget.searchable.where((s) => s.matches(q)).toList();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+
+    return DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: 0.6,
+      minChildSize: 0.4,
+      maxChildSize: 0.92,
+      builder: (context, scrollController) => Padding(
+        padding: EdgeInsets.only(bottom: bottomInset),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                CaleeSpacing.pagePadding,
+                CaleeSpacing.md,
+                CaleeSpacing.pagePadding,
+                CaleeSpacing.sm,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 36,
+                      height: 4,
+                      margin: const EdgeInsets.only(bottom: CaleeSpacing.md),
+                      decoration: BoxDecoration(
+                        color: CaleeColors.textTertiary.withValues(alpha: 0.4),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  Text(
+                    'Search chores',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: CaleeColors.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: CaleeSpacing.sm),
+                  TextField(
+                    controller: _controller,
+                    autofocus: true,
+                    textInputAction: TextInputAction.search,
+                    decoration: InputDecoration(
+                      hintText: 'Search by title, assignee, list…',
+                      prefixIcon: const Icon(Icons.search_outlined),
+                      suffixIcon: _controller.text.isNotEmpty
+                          ? IconButton(
+                              icon: const Icon(Icons.clear),
+                              onPressed: _controller.clear,
+                            )
+                          : null,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(CaleeRadius.card),
+                        borderSide: BorderSide.none,
+                      ),
+                      filled: true,
+                      fillColor: CaleeColors.groupedBackground,
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: CaleeSpacing.md,
+                        vertical: CaleeSpacing.sm,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: _controller.text.trim().isEmpty
+                  ? Center(
+                      child: Text(
+                        'Type to search',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: CaleeColors.textTertiary,
+                        ),
+                      ),
+                    )
+                  : _results.isEmpty
+                      ? Center(
+                          child: Text(
+                            'No chores found',
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: CaleeColors.textTertiary,
+                            ),
+                          ),
+                        )
+                      : ListView.builder(
+                          controller: scrollController,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: CaleeSpacing.pagePadding,
+                            vertical: CaleeSpacing.sm,
+                          ),
+                          itemCount: _results.length,
+                          itemBuilder: (context, index) {
+                            final item = _results[index];
+                            final subtitle = [
+                              if (item.sectionLabel.isNotEmpty)
+                                item.sectionLabel,
+                              if (item.assigneeName.isNotEmpty)
+                                item.assigneeName,
+                              if (item.calendarName.isNotEmpty)
+                                item.calendarName,
+                            ].join(' · ');
+                            return CaleeListRow(
+                              title: item.chore.title,
+                              subtitle: subtitle.isNotEmpty ? subtitle : null,
+                              leading: const Icon(
+                                Icons.check_circle_outline,
+                                size: 22,
+                                color: CaleeColors.textTertiary,
+                              ),
+                              onTap: () => widget.onTapChore(item.chore),
+                            );
+                          },
+                        ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
