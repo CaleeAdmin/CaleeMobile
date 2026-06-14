@@ -14,7 +14,6 @@ import 'chores_controller.dart';
 import 'chores_repository.dart';
 import 'widgets/chore_assignee_filter.dart';
 import 'widgets/chore_row.dart';
-import 'widgets/chore_summary_strip.dart';
 import 'widgets/chore_widget_helpers.dart';
 import 'widgets/create_chore_sheet.dart';
 import 'widgets/edit_chore_sheet.dart';
@@ -423,21 +422,19 @@ class _ChoresPageState extends State<ChoresPage> {
     List<ClientChore> allChores,
   ) {
     if (filter == 'all') {
-      return 'All chores · ${_countAllChores(allChores)}';
+      return 'All chores';
     }
     if (filter == 'unassigned') {
-      return 'Unassigned · ${_countUnassignedChores(allChores)}';
+      return 'Unassigned';
     }
     if (filter.startsWith('person:')) {
       final personId = filter.substring('person:'.length);
       final matches = people.where((p) => p.id == personId);
-      final name =
-          matches.isNotEmpty && matches.first.displayName.trim().isNotEmpty
+      return matches.isNotEmpty && matches.first.displayName.trim().isNotEmpty
           ? matches.first.displayName.trim()
           : 'Unnamed';
-      return '$name · ${_countChoresForPerson(allChores, personId)}';
     }
-    return 'All chores · ${_countAllChores(allChores)}';
+    return 'All chores';
   }
 
   Future<void> _openAssigneeFilterChooser({
@@ -563,15 +560,6 @@ class _ChoresPageState extends State<ChoresPage> {
     List<ClientChore> chores,
   ) {
     return groupChoresBySection(chores, DateTime.now());
-  }
-
-  int _todayCompletionPoints(List<ClientChore> chores) {
-    return chores
-        .where(
-          (chore) =>
-              chore.normalizedSection == 'doneToday' || chore.completedToday,
-        )
-        .fold<int>(0, (total, chore) => total + chore.points);
   }
 
   String _formatScheduledAt(ClientChore chore) {
@@ -736,9 +724,6 @@ class _ChoresPageState extends State<ChoresPage> {
         final chores = _filterChoresByAssignee(allChores);
         final choresBySection = _groupChoresBySection(chores);
         final hasUnassignedChores = _hasUnassignedChores(allChores);
-        final showAssigneeFilters =
-            allChores.isNotEmpty &&
-            (overview.people.isNotEmpty || hasUnassignedChores);
 
         if (choreCalendars.isEmpty && allChores.isEmpty) {
           return CaleeScaffold(
@@ -774,11 +759,6 @@ class _ChoresPageState extends State<ChoresPage> {
             .where((s) => (choresBySection[s]?.isNotEmpty ?? false))
             .toList();
 
-        final overdueCount = choresBySection['overdue']?.length ?? 0;
-        final todoTodayCount = choresBySection['todoToday']?.length ?? 0;
-        final doneTodayCount = choresBySection['doneToday']?.length ?? 0;
-        final pointsToday = _todayCompletionPoints(chores);
-
         final filterLabel = _filterLabel(
           _controller.selectedAssigneeFilter,
           overview.people,
@@ -802,19 +782,16 @@ class _ChoresPageState extends State<ChoresPage> {
                 // Top action bar: label | search | filter | add
                 _ChoresTopBar(
                   label: filterLabel,
-                  showFilter: showAssigneeFilters,
                   onSearchTap: () => _openSearchSheet(
                     allChores: allChores,
                     choreCalendars: choreCalendars,
                     personNameMap: personNameMap,
                   ),
-                  onFilterTap: showAssigneeFilters
-                      ? () => _openAssigneeFilterChooser(
-                            people: overview.people,
-                            hasUnassigned: hasUnassignedChores,
-                            allChores: allChores,
-                          )
-                      : null,
+                  onFilterTap: () => _openAssigneeFilterChooser(
+                    people: overview.people,
+                    hasUnassigned: hasUnassignedChores,
+                    allChores: allChores,
+                  ),
                   onAddTap: () {
                     if (hasWritable) {
                       _openCreateChoreSheet(choreCalendars);
@@ -824,18 +801,6 @@ class _ChoresPageState extends State<ChoresPage> {
                   },
                 ),
                 const SizedBox(height: CaleeSpacing.sectionSpacing),
-
-                if (overdueCount > 0 ||
-                    todoTodayCount > 0 ||
-                    doneTodayCount > 0) ...[
-                  ChoreSummaryStrip(
-                    overdueCount: overdueCount,
-                    todoTodayCount: todoTodayCount,
-                    doneTodayCount: doneTodayCount,
-                    pointsToday: pointsToday,
-                  ),
-                  const SizedBox(height: CaleeSpacing.sectionSpacing),
-                ],
 
                 if (activeSections.isEmpty && choreCalendars.isNotEmpty)
                   CaleeSection(
@@ -902,16 +867,14 @@ class _ChoresPageState extends State<ChoresPage> {
 class _ChoresTopBar extends StatelessWidget {
   const _ChoresTopBar({
     required this.label,
-    required this.showFilter,
     required this.onSearchTap,
     required this.onFilterTap,
     required this.onAddTap,
   });
 
   final String label;
-  final bool showFilter;
   final VoidCallback onSearchTap;
-  final VoidCallback? onFilterTap;
+  final VoidCallback onFilterTap;
   final VoidCallback onAddTap;
 
   @override
@@ -943,19 +906,18 @@ class _ChoresTopBar extends StatelessWidget {
             ),
           ),
         ),
-        if (showFilter)
-          Tooltip(
-            message: 'Filter chores',
-            child: SizedBox(
-              width: CaleeSpacing.rowHeight,
-              height: CaleeSpacing.rowHeight,
-              child: IconButton(
-                icon: const Icon(Icons.filter_list_outlined),
-                color: CaleeColors.primary,
-                onPressed: onFilterTap,
-              ),
+        Tooltip(
+          message: 'Filter chores',
+          child: SizedBox(
+            width: CaleeSpacing.rowHeight,
+            height: CaleeSpacing.rowHeight,
+            child: IconButton(
+              icon: const Icon(Icons.tune),
+              color: CaleeColors.primary,
+              onPressed: onFilterTap,
             ),
           ),
+        ),
         Tooltip(
           message: 'Add chore',
           child: SizedBox(
