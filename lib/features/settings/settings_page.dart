@@ -227,7 +227,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
                 child: Center(child: CircularProgressIndicator()),
               )
-            else ...[  
+            else ...[
               CaleeSectionDropdownRow<FirstDayOfWeek>(
                 label: 'First day of week',
                 value: preferences.firstDayOfWeek,
@@ -368,7 +368,7 @@ class _SettingsPageState extends State<SettingsPage> {
         const SizedBox(height: CaleeSpacing.sectionSpacing),
 
         // ── Services ─────────────────────────────────
-        if (_shouldShowServices(_controller.bootstrap.services)) ...[  
+        if (_shouldShowServices(_controller.bootstrap.services)) ...[
           CaleeSection(
             title: 'Connected services',
             children: [
@@ -415,7 +415,8 @@ class _ServiceRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasMissing = service.hasMissingCalendarCredential;
-    final needsAttention = hasMissing ||
+    final needsAttention =
+        hasMissing ||
         !{'connected', 'active', 'healthy'}.contains(service.accessStatus);
     final subtitle = needsAttention ? 'Needs attention' : 'Connected';
 

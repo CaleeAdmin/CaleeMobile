@@ -133,10 +133,7 @@ void _capabilityTests() {
     });
 
     test('returns false when deletedItems is false', () {
-      expect(
-        _svc({'deletedItems': false}).supportsRecentlyDeleted,
-        isFalse,
-      );
+      expect(_svc({'deletedItems': false}).supportsRecentlyDeleted, isFalse);
     });
   });
 
@@ -149,10 +146,7 @@ void _capabilityTests() {
     });
 
     test('falls back to supportsRecentlyDeleted', () {
-      expect(
-        _svc({'deletedItems': true}).supportsDeletedItemsRestore,
-        isTrue,
-      );
+      expect(_svc({'deletedItems': true}).supportsDeletedItemsRestore, isTrue);
     });
   });
 

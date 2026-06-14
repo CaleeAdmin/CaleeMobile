@@ -394,18 +394,25 @@ class _TasksPageState extends State<TasksPage> {
                   icon: const Icon(Icons.search),
                   iconSize: 22,
                   padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                  constraints: const BoxConstraints(
+                    minWidth: 44,
+                    minHeight: 44,
+                  ),
                   color: CaleeColors.primary,
                   tooltip: 'Search tasks',
                 ),
               // Filter icon
               if (taskCalendars.isNotEmpty)
                 IconButton(
-                  onPressed: () => _openTaskListChooser(taskCalendars, allTasks),
+                  onPressed: () =>
+                      _openTaskListChooser(taskCalendars, allTasks),
                   icon: const Icon(Icons.tune),
                   iconSize: 22,
                   padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                  constraints: const BoxConstraints(
+                    minWidth: 44,
+                    minHeight: 44,
+                  ),
                   color: CaleeColors.primary,
                   tooltip: 'Task lists',
                 ),

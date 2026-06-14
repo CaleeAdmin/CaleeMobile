@@ -713,8 +713,7 @@ class _ChoresPageState extends State<ChoresPage> {
                 icon: const Icon(Icons.search),
                 iconSize: 22,
                 padding: EdgeInsets.zero,
-                constraints:
-                    const BoxConstraints(minWidth: 44, minHeight: 44),
+                constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
                 color: CaleeColors.primary,
                 tooltip: 'Search chores',
               ),
@@ -723,8 +722,7 @@ class _ChoresPageState extends State<ChoresPage> {
                 icon: const Icon(Icons.tune),
                 iconSize: 22,
                 padding: EdgeInsets.zero,
-                constraints:
-                    const BoxConstraints(minWidth: 44, minHeight: 44),
+                constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
                 color: CaleeColors.primary,
                 tooltip: 'Filter chores',
               ),
@@ -733,8 +731,7 @@ class _ChoresPageState extends State<ChoresPage> {
                 icon: const Icon(Icons.add),
                 iconSize: 22,
                 padding: EdgeInsets.zero,
-                constraints:
-                    const BoxConstraints(minWidth: 44, minHeight: 44),
+                constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
                 color: CaleeColors.primary,
                 tooltip: 'Add chore',
               ),
@@ -836,7 +833,9 @@ class _ChoresPageState extends State<ChoresPage> {
 
         final personNameMap = {
           for (final p in overview.people)
-            p.id: p.displayName.trim().isEmpty ? 'Unnamed' : p.displayName.trim(),
+            p.id: p.displayName.trim().isEmpty
+                ? 'Unnamed'
+                : p.displayName.trim(),
         };
 
         return CaleeScaffold(
@@ -868,7 +867,6 @@ class _ChoresPageState extends State<ChoresPage> {
                 vertical: CaleeSpacing.md,
               ),
               children: [
-
                 if (activeSections.isEmpty && choreCalendars.isNotEmpty)
                   CaleeSection(
                     title: 'Chores',
@@ -959,10 +957,7 @@ class _SearchableChore {
 }
 
 class _ChoreSearchSheet extends StatefulWidget {
-  const _ChoreSearchSheet({
-    required this.searchable,
-    required this.onTapChore,
-  });
+  const _ChoreSearchSheet({required this.searchable, required this.onTapChore});
 
   final List<_SearchableChore> searchable;
   final ValueChanged<ClientChore> onTapChore;
@@ -1080,43 +1075,40 @@ class _ChoreSearchSheetState extends State<_ChoreSearchSheet> {
                       ),
                     )
                   : _results.isEmpty
-                      ? Center(
-                          child: Text(
-                            'No chores found',
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              color: CaleeColors.textTertiary,
-                            ),
-                          ),
-                        )
-                      : ListView.builder(
-                          controller: scrollController,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: CaleeSpacing.pagePadding,
-                            vertical: CaleeSpacing.sm,
-                          ),
-                          itemCount: _results.length,
-                          itemBuilder: (context, index) {
-                            final item = _results[index];
-                            final subtitle = [
-                              if (item.sectionLabel.isNotEmpty)
-                                item.sectionLabel,
-                              if (item.assigneeName.isNotEmpty)
-                                item.assigneeName,
-                              if (item.calendarName.isNotEmpty)
-                                item.calendarName,
-                            ].join(' · ');
-                            return CaleeListRow(
-                              title: item.chore.title,
-                              subtitle: subtitle.isNotEmpty ? subtitle : null,
-                              leading: const Icon(
-                                Icons.check_circle_outline,
-                                size: 22,
-                                color: CaleeColors.textTertiary,
-                              ),
-                              onTap: () => widget.onTapChore(item.chore),
-                            );
-                          },
+                  ? Center(
+                      child: Text(
+                        'No chores found',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: CaleeColors.textTertiary,
                         ),
+                      ),
+                    )
+                  : ListView.builder(
+                      controller: scrollController,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: CaleeSpacing.pagePadding,
+                        vertical: CaleeSpacing.sm,
+                      ),
+                      itemCount: _results.length,
+                      itemBuilder: (context, index) {
+                        final item = _results[index];
+                        final subtitle = [
+                          if (item.sectionLabel.isNotEmpty) item.sectionLabel,
+                          if (item.assigneeName.isNotEmpty) item.assigneeName,
+                          if (item.calendarName.isNotEmpty) item.calendarName,
+                        ].join(' · ');
+                        return CaleeListRow(
+                          title: item.chore.title,
+                          subtitle: subtitle.isNotEmpty ? subtitle : null,
+                          leading: const Icon(
+                            Icons.check_circle_outline,
+                            size: 22,
+                            color: CaleeColors.textTertiary,
+                          ),
+                          onTap: () => widget.onTapChore(item.chore),
+                        );
+                      },
+                    ),
             ),
           ],
         ),

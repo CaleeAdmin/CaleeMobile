@@ -64,8 +64,7 @@ class DeletedItemsResponse {
               .whereType<Map<String, dynamic>>()
               .map(UnsupportedDeletedItemsService.fromJson)
               .toList(),
-      nextCursor:
-          json['nextCursor'] as String? ?? json['cursor'] as String?,
+      nextCursor: json['nextCursor'] as String? ?? json['cursor'] as String?,
     );
   }
 
@@ -83,12 +82,11 @@ class UnsupportedDeletedItemsService {
     this.message,
   });
 
-  factory UnsupportedDeletedItemsService.fromJson(
-    Map<String, dynamic> json,
-  ) {
+  factory UnsupportedDeletedItemsService.fromJson(Map<String, dynamic> json) {
     return UnsupportedDeletedItemsService(
       serviceId: json['serviceId'] as String? ?? '',
-      displayName: json['displayName'] as String? ??
+      displayName:
+          json['displayName'] as String? ??
           json['serviceId'] as String? ??
           'Connected service',
       provider: json['provider'] as String?,
