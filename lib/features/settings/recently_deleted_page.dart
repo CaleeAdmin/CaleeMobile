@@ -5,6 +5,42 @@ import '../../data/models/client_deleted_items.dart';
 import '../../ui/calee_theme.dart';
 import '../../ui/calee_widgets.dart';
 
+String _formatDeletedDate(String iso) {
+  try {
+    final dt = DateTime.parse(iso).toLocal();
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    return 'Deleted ${dt.day} ${months[dt.month - 1]}';
+  } catch (_) {
+    return '';
+  }
+}
+
+String? _formatDaysLeft(String iso) {
+  try {
+    final expires = DateTime.parse(iso).toLocal();
+    final now = DateTime.now();
+    final days = expires.difference(now).inDays;
+    if (days < 0) return null;
+    if (days == 0) return 'Expires today';
+    return '$days ${days == 1 ? 'day' : 'days'} left';
+  } catch (_) {
+    return null;
+  }
+}
+
 String _typeLabel(String type) {
   switch (type) {
     case 'calendar':
@@ -81,14 +117,15 @@ class _RecentlyDeletedPageState extends State<RecentlyDeletedPage> {
     if (error is CaleeHubException) {
       switch (error.code) {
         case 'SERVICE_NOT_SUPPORTED':
-          return 'This service does not support restore from Calee yet.';
+          return 'Recently deleted is not available for this connected'
+              ' service yet.';
         case 'DELETED_ITEM_NOT_FOUND':
-          return 'This item no longer exists.';
+          return 'This item is no longer available.';
         case 'RESTORE_CONFLICT':
-          return 'This item could not be restored because a conflict was'
-              ' detected.';
+          return 'Could not restore because another item with the same name'
+              ' already exists.';
         case 'UPSTREAM_ERROR':
-          return 'The connected service returned an error. Please try again.';
+          return 'Calendar service unavailable. Please try again later.';
         case 'UNAUTHORIZED':
         case 'FORBIDDEN':
           return 'You do not have permission to perform this action.';
@@ -172,9 +209,16 @@ class _RecentlyDeletedPageState extends State<RecentlyDeletedPage> {
   }
 
   Widget _buildItemRow(DeletedItem item) {
+    final deletedDateLabel = item.deletedAt.isNotEmpty
+        ? _formatDeletedDate(item.deletedAt)
+        : '';
+    final daysLeftLabel =
+        item.expiresAt != null ? _formatDaysLeft(item.expiresAt!) : null;
     final subtitleParts = [
       _typeLabel(item.type),
       if (item.subtitle != null && item.subtitle!.isNotEmpty) item.subtitle!,
+      if (deletedDateLabel.isNotEmpty) deletedDateLabel,
+      if (daysLeftLabel != null) daysLeftLabel,
     ];
     final hasActions = item.canRestore || item.canDeletePermanently;
 
@@ -258,8 +302,9 @@ class _RecentlyDeletedPageState extends State<RecentlyDeletedPage> {
                 for (final service in _unsupportedServices)
                   CaleeListRow(
                     title: service.displayName,
-                    subtitle:
-                        'Restore is not available for this service yet.',
+                    subtitle: service.message ??
+                        'Recently deleted is not available for this'
+                            ' connected service yet.',
                     trailing: const SizedBox.shrink(),
                   ),
               ],
