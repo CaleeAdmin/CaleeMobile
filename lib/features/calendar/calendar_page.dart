@@ -11,50 +11,14 @@ import '../../ui/calee_design.dart';
 import '../settings/calendar_collections_page.dart';
 import 'calendar_controller.dart';
 import 'calendar_repository.dart';
+import 'shared/calendar_display_event.dart';
+import 'shared/calendar_display_event_adapters.dart';
+import 'shared/read_only_calendar_view.dart';
 import 'widgets/calendar_chooser_sheet.dart';
-import 'widgets/calendar_day_cell.dart';
 import 'widgets/calendar_error_state.dart';
-import 'widgets/calendar_event_row.dart';
 import 'widgets/calendar_search_sheet.dart';
 import 'widgets/calendar_widget_helpers.dart';
 import 'widgets/create_event_sheet.dart';
-
-// ─── Label helpers ────────────────────────────────────────────────────────────
-
-const _kMonthNames = [
-  'January',
-  'February',
-  'March',
-  'April',
-  'May',
-  'June',
-  'July',
-  'August',
-  'September',
-  'October',
-  'November',
-  'December',
-];
-
-const _kDayAbbr = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
-
-const _kFullDayNames = [
-  'Sunday',
-  'Monday',
-  'Tuesday',
-  'Wednesday',
-  'Thursday',
-  'Friday',
-  'Saturday',
-];
-
-String _monthYearLabel(DateTime d) => '${_kMonthNames[d.month - 1]} ${d.year}';
-
-// ─── View mode ────────────────────────────────────────────────────────────────
-
-enum _CalendarViewMode { month, agenda }
-
-// ─── Page ─────────────────────────────────────────────────────────────────────
 
 class CalendarPage extends StatefulWidget {
   const CalendarPage({
@@ -73,11 +37,9 @@ class CalendarPage extends StatefulWidget {
 }
 
 class _CalendarPageState extends State<CalendarPage> {
-  // ── Controller / search ───────────────────────────────────────────────────
-
   late CalendarController _controller;
   final TextEditingController _searchController = TextEditingController();
-  _CalendarViewMode _viewMode = _CalendarViewMode.month;
+  CalendarDisplayViewMode _viewMode = CalendarDisplayViewMode.month;
 
   @override
   void initState() {
@@ -98,7 +60,7 @@ class _CalendarPageState extends State<CalendarPage> {
     super.dispose();
   }
 
-  // ── CRUD shortcuts ────────────────────────────────────────────────────────
+  // ── Collection shortcuts ──────────────────────────────────────────────────
 
   void _openCollectionCreateShortcut() {
     _openCalendarCollectionsShortcut(autoOpenCreate: true);
@@ -388,22 +350,7 @@ class _CalendarPageState extends State<CalendarPage> {
     }
   }
 
-  // ── Helpers ────────────────────────────────────────────────────────────────
-
-  Color _eventColor(ClientEvent event) {
-    final cal = _controller.calendarForEvent(event);
-    if (cal?.color != null) {
-      final parsed = parseCalendarHexColor(cal!.color!);
-      if (parsed != null) return parsed;
-    }
-    return CaleeColors.dotBlue;
-  }
-
-  String _agendaDateLabel(DateTime day) {
-    if (isSameCalendarDay(day, _controller.today)) return 'Today';
-    final weekday = _kFullDayNames[day.weekday % 7]; // Sun=0
-    return '$weekday ${day.day} ${_kMonthNames[day.month - 1]}';
-  }
+  // ── Search ─────────────────────────────────────────────────────────────────
 
   bool _use24h(BuildContext context) =>
       switch (_controller.preferences.timeFormat) {
@@ -412,10 +359,17 @@ class _CalendarPageState extends State<CalendarPage> {
         TimeFormatPref.system => MediaQuery.alwaysUse24HourFormatOf(context),
       };
 
-  // ── Search ─────────────────────────────────────────────────────────────────
-
   String _calendarNameForEvent(ClientEvent event) {
     return _controller.calendarForEvent(event)?.name ?? '';
+  }
+
+  Color _eventColor(ClientEvent event) {
+    final cal = _controller.calendarForEvent(event);
+    if (cal?.color != null) {
+      final parsed = parseCalendarHexColor(cal!.color!);
+      if (parsed != null) return parsed;
+    }
+    return CaleeColors.dotBlue;
   }
 
   void _openSearchSheet() {
@@ -443,6 +397,31 @@ class _CalendarPageState extends State<CalendarPage> {
     );
   }
 
+  // ── Display event conversion ──────────────────────────────────────────────
+
+  List<CalendarDisplayEvent> get _visibleDisplayEvents {
+    return _controller.events
+        .where((e) {
+          final cal = _controller.calendarForEvent(e);
+          return cal == null || _controller.isCalendarVisible(cal.id);
+        })
+        .map(
+          (e) => calendarDisplayEventFromClientEvent(
+            e,
+            calendar: _controller.calendarForEvent(e),
+          ),
+        )
+        .toList();
+  }
+
+  void _onDisplayEventTap(CalendarDisplayEvent displayEvent) {
+    final matches = _controller.events
+        .where((e) => e.id == displayEvent.id)
+        .toList();
+    if (matches.isEmpty) return;
+    _openEventActions(matches.first);
+  }
+
   // ── Build ──────────────────────────────────────────────────────────────────
 
   @override
@@ -466,465 +445,72 @@ class _CalendarPageState extends State<CalendarPage> {
           );
         }
 
-        final screenHeight = MediaQuery.sizeOf(context).height;
-        final compactHeight = screenHeight < 520;
-        final veryCompactHeight = screenHeight < 430;
+        final use24h = _use24h(context);
+        final firstDayOfWeek =
+            _controller.preferences.firstDayOfWeek == FirstDayOfWeek.monday
+                ? 1
+                : 0;
+        final actionIconMinH =
+            MediaQuery.sizeOf(context).height < 520 ? 32.0 : 36.0;
 
         return CaleeScaffold(
           body: SafeArea(
-            child: Column(
-              children: [
-                _buildTopBar(
-                  compactHeight: compactHeight,
-                  veryCompactHeight: veryCompactHeight,
+            child: ReadOnlyCalendarView(
+              selectedMonth: _controller.selectedMonth,
+              selectedDay: _controller.selectedDay,
+              today: _controller.today,
+              firstDayOfWeek: firstDayOfWeek,
+              events: _visibleDisplayEvents,
+              viewMode: _viewMode,
+              onViewModeChanged: (m) => setState(() => _viewMode = m),
+              onPreviousMonth: _controller.previousMonth,
+              onNextMonth: _controller.nextMonth,
+              onGoToToday: _controller.goToToday,
+              onSelectDay: _controller.selectDay,
+              onEventTap: _onDisplayEventTap,
+              use24h: use24h,
+              actionWidgets: [
+                IconButton(
+                  onPressed: _openSearchSheet,
+                  icon: const Icon(Icons.search),
+                  iconSize: 22,
+                  padding: EdgeInsets.zero,
+                  constraints: BoxConstraints(
+                    minWidth: 44,
+                    minHeight: actionIconMinH,
+                  ),
+                  color: CaleeColors.primary,
+                  tooltip: 'Search events',
                 ),
-                _buildViewSwitcher(),
-                if (_viewMode == _CalendarViewMode.month) ...[
-                  _buildWeekdayHeader(compactHeight: compactHeight),
-                  Flexible(
-                    fit: FlexFit.loose,
-                    child: _buildMonthGrid(
-                      compactHeight: compactHeight,
-                      veryCompactHeight: veryCompactHeight,
-                    ),
+                IconButton(
+                  onPressed: _openCalendarChooser,
+                  icon: const Icon(Icons.tune),
+                  iconSize: 22,
+                  padding: EdgeInsets.zero,
+                  constraints: BoxConstraints(
+                    minWidth: 44,
+                    minHeight: actionIconMinH,
                   ),
-                  const Divider(height: 1),
-                  Expanded(
-                    child: RefreshIndicator(
-                      onRefresh: _controller.refresh,
-                      child: ListView(
-                        padding: EdgeInsets.zero,
-                        children: _buildAgendaItems(),
-                      ),
-                    ),
+                  color: CaleeColors.primary,
+                  tooltip: 'Calendars',
+                ),
+                IconButton(
+                  onPressed: _openCreateEventSheet,
+                  icon: const Icon(Icons.add),
+                  iconSize: 22,
+                  padding: EdgeInsets.zero,
+                  constraints: BoxConstraints(
+                    minWidth: 44,
+                    minHeight: actionIconMinH,
                   ),
-                ] else ...[
-                  Expanded(
-                    child: RefreshIndicator(
-                      onRefresh: _controller.refresh,
-                      child: _buildAgendaMonthView(),
-                    ),
-                  ),
-                ],
+                  color: CaleeColors.primary,
+                  tooltip: 'Add event',
+                ),
               ],
             ),
           ),
         );
       },
     );
-  }
-
-  Widget _buildViewSwitcher() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        CaleeSpacing.md,
-        0,
-        CaleeSpacing.md,
-        CaleeSpacing.xs,
-      ),
-      child: SegmentedButton<_CalendarViewMode>(
-        segments: const [
-          ButtonSegment(value: _CalendarViewMode.month, label: Text('Month')),
-          ButtonSegment(value: _CalendarViewMode.agenda, label: Text('Agenda')),
-        ],
-        selected: {_viewMode},
-        onSelectionChanged: (selected) =>
-            setState(() => _viewMode = selected.first),
-        style: ButtonStyle(
-          visualDensity: VisualDensity.compact,
-          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildAgendaMonthView() {
-    final use24h = _use24h(context);
-    final month = _controller.selectedMonth;
-    final daysInMonth = DateUtils.getDaysInMonth(month.year, month.month);
-
-    final dayWidgets = <Widget>[];
-    var hasAnyEvent = false;
-
-    for (var d = 1; d <= daysInMonth; d++) {
-      final day = DateTime(month.year, month.month, d);
-      final dayEvents = _controller.eventsForDay(day);
-      if (dayEvents.isEmpty) continue;
-
-      hasAnyEvent = true;
-      final allDay = dayEvents.where((e) => e.allDay).toList();
-      final timed = dayEvents.where((e) => !e.allDay).toList();
-
-      dayWidgets.add(
-        Padding(
-          padding: const EdgeInsets.fromLTRB(
-            CaleeSpacing.md,
-            CaleeSpacing.md,
-            CaleeSpacing.md,
-            2,
-          ),
-          child: Text(
-            _agendaDateLabel(day),
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: isSameCalendarDay(day, _controller.today)
-                  ? CaleeColors.primary
-                  : CaleeColors.textSecondary,
-              letterSpacing: 0.2,
-            ),
-          ),
-        ),
-      );
-
-      for (final event in [...allDay, ...timed]) {
-        dayWidgets.add(
-          CalendarAgendaEventRow(
-            event: event,
-            color: _eventColor(event),
-            calendarName: _controller.calendarForEvent(event)?.name,
-            hideTime: event.allDay,
-            use24h: use24h,
-            onTap: () => _openEventActions(event),
-          ),
-        );
-      }
-    }
-
-    if (!hasAnyEvent) {
-      return ListView(
-        padding: const EdgeInsets.symmetric(vertical: CaleeSpacing.xl),
-        children: [
-          Center(
-            child: Text(
-              'No events this month',
-              style: TextStyle(fontSize: 15, color: CaleeColors.textTertiary),
-            ),
-          ),
-        ],
-      );
-    }
-
-    dayWidgets.add(const SizedBox(height: CaleeSpacing.xl));
-    return ListView(padding: EdgeInsets.zero, children: dayWidgets);
-  }
-
-  Widget _buildTopBar({
-    bool compactHeight = false,
-    bool veryCompactHeight = false,
-  }) {
-    final outerPad = veryCompactHeight
-        ? 2.0
-        : compactHeight
-        ? 4.0
-        : CaleeSpacing.xs;
-    final navIconMinH = compactHeight ? 36.0 : 44.0;
-    final actionIconMinH = compactHeight ? 32.0 : 36.0;
-
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        // Row 1: month navigation
-        Padding(
-          padding: EdgeInsets.fromLTRB(
-            CaleeSpacing.xs,
-            outerPad,
-            CaleeSpacing.xs,
-            0,
-          ),
-          child: Row(
-            children: [
-              IconButton(
-                onPressed: _controller.previousMonth,
-                icon: const Icon(Icons.chevron_left),
-                iconSize: 24,
-                padding: EdgeInsets.zero,
-                constraints: BoxConstraints(
-                  minWidth: 44,
-                  minHeight: navIconMinH,
-                ),
-                color: CaleeColors.primary,
-                tooltip: 'Previous month',
-              ),
-              Expanded(
-                child: Text(
-                  _monthYearLabel(_controller.selectedMonth),
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w600,
-                    color: CaleeColors.textPrimary,
-                  ),
-                ),
-              ),
-              IconButton(
-                onPressed: _controller.nextMonth,
-                icon: const Icon(Icons.chevron_right),
-                iconSize: 24,
-                padding: EdgeInsets.zero,
-                constraints: BoxConstraints(
-                  minWidth: 44,
-                  minHeight: navIconMinH,
-                ),
-                color: CaleeColors.primary,
-                tooltip: 'Next month',
-              ),
-            ],
-          ),
-        ),
-        // Row 2: Today + action icons
-        Padding(
-          padding: EdgeInsets.fromLTRB(
-            CaleeSpacing.sm,
-            0,
-            CaleeSpacing.xs,
-            outerPad,
-          ),
-          child: Row(
-            children: [
-              Tooltip(
-                message: 'Go to today',
-                child: TextButton(
-                  onPressed: _controller.goToToday,
-                  style: TextButton.styleFrom(
-                    foregroundColor: CaleeColors.primary,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: CaleeSpacing.sm,
-                      vertical: CaleeSpacing.xs,
-                    ),
-                    minimumSize: Size(44, actionIconMinH),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  child: const Text(
-                    'Today',
-                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
-                  ),
-                ),
-              ),
-              const Spacer(),
-              IconButton(
-                onPressed: _openSearchSheet,
-                icon: const Icon(Icons.search),
-                iconSize: 22,
-                padding: EdgeInsets.zero,
-                constraints: BoxConstraints(
-                  minWidth: 44,
-                  minHeight: actionIconMinH,
-                ),
-                color: CaleeColors.primary,
-                tooltip: 'Search events',
-              ),
-              IconButton(
-                onPressed: _openCalendarChooser,
-                icon: const Icon(Icons.tune),
-                iconSize: 22,
-                padding: EdgeInsets.zero,
-                constraints: BoxConstraints(
-                  minWidth: 44,
-                  minHeight: actionIconMinH,
-                ),
-                color: CaleeColors.primary,
-                tooltip: 'Calendars',
-              ),
-              IconButton(
-                onPressed: _openCreateEventSheet,
-                icon: const Icon(Icons.add),
-                iconSize: 22,
-                padding: EdgeInsets.zero,
-                constraints: BoxConstraints(
-                  minWidth: 44,
-                  minHeight: actionIconMinH,
-                ),
-                color: CaleeColors.primary,
-                tooltip: 'Add event',
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  List<String> get _weekdayAbbr {
-    if (_controller.preferences.firstDayOfWeek == FirstDayOfWeek.monday) {
-      return const ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
-    }
-    return _kDayAbbr;
-  }
-
-  Widget _buildWeekdayHeader({bool compactHeight = false}) {
-    final vertPad = compactHeight ? 1.0 : 2.0;
-    final fontSize = compactHeight ? 11.0 : 12.0;
-
-    return Padding(
-      padding: EdgeInsets.symmetric(
-        horizontal: CaleeSpacing.xs,
-        vertical: vertPad,
-      ),
-      child: Row(
-        children: _weekdayAbbr
-            .map(
-              (d) => Expanded(
-                child: Center(
-                  child: Text(
-                    d,
-                    style: TextStyle(
-                      fontSize: fontSize,
-                      fontWeight: FontWeight.w500,
-                      color: CaleeColors.textSecondary,
-                    ),
-                  ),
-                ),
-              ),
-            )
-            .toList(),
-      ),
-    );
-  }
-
-  Widget _buildMonthGrid({
-    bool compactHeight = false,
-    bool veryCompactHeight = false,
-  }) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final cellSize = constraints.maxWidth / 7;
-        final desiredHeight = cellSize * 6;
-        final height = constraints.hasBoundedHeight
-            ? desiredHeight.clamp(0.0, constraints.maxHeight)
-            : desiredHeight;
-        return SizedBox(
-          height: height,
-          child: GridView.builder(
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 7,
-            ),
-            itemCount: 42,
-            itemBuilder: (context, index) {
-              final date = _controller.gridStart.add(Duration(days: index));
-              final dayEvents = _controller.eventsForDay(date);
-              final dotColors = dayEvents.take(3).map(_eventColor).toList();
-              return CalendarDayCell(
-                date: date,
-                isCurrentMonth: date.month == _controller.selectedMonth.month,
-                isToday: isSameCalendarDay(date, _controller.today),
-                isSelected: isSameCalendarDay(date, _controller.selectedDay),
-                dotColors: dotColors,
-                eventCount: dayEvents.length,
-                compactHeight: compactHeight,
-                veryCompactHeight: veryCompactHeight,
-                onTap: () => _controller.selectDay(date),
-              );
-            },
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildAgendaSectionHeading(String label) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        CaleeSpacing.md,
-        CaleeSpacing.sm,
-        CaleeSpacing.md,
-        2,
-      ),
-      child: Text(
-        label,
-        style: const TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w600,
-          color: CaleeColors.textSecondary,
-          letterSpacing: 0.4,
-        ),
-      ),
-    );
-  }
-
-  List<Widget> _buildAgendaItems() {
-    final items = <Widget>[];
-    final use24h = _use24h(context);
-
-    // Date header
-    items.add(
-      Padding(
-        padding: const EdgeInsets.fromLTRB(
-          CaleeSpacing.md,
-          CaleeSpacing.md,
-          CaleeSpacing.md,
-          CaleeSpacing.xs,
-        ),
-        child: Text(
-          _agendaDateLabel(_controller.selectedDay),
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-            color: isSameCalendarDay(_controller.selectedDay, _controller.today)
-                ? CaleeColors.primary
-                : CaleeColors.textSecondary,
-            letterSpacing: 0.2,
-          ),
-        ),
-      ),
-    );
-
-    final dayEvents = _controller.eventsForDay(_controller.selectedDay);
-    final allDayEvents = dayEvents.where((e) => e.allDay).toList();
-    final timedEvents = dayEvents.where((e) => !e.allDay).toList();
-
-    if (dayEvents.isEmpty) {
-      items.add(
-        Padding(
-          padding: const EdgeInsets.symmetric(
-            horizontal: CaleeSpacing.md,
-            vertical: CaleeSpacing.lg,
-          ),
-          child: Center(
-            child: Text(
-              'No events this day',
-              style: TextStyle(fontSize: 15, color: CaleeColors.textTertiary),
-            ),
-          ),
-        ),
-      );
-    } else {
-      if (allDayEvents.isNotEmpty) {
-        items.add(_buildAgendaSectionHeading('All-day'));
-        for (final event in allDayEvents) {
-          items.add(
-            CalendarAgendaEventRow(
-              event: event,
-              color: _eventColor(event),
-              calendarName: _controller.calendarForEvent(event)?.name,
-              hideTime: true,
-              use24h: use24h,
-              onTap: () => _openEventActions(event),
-            ),
-          );
-        }
-      }
-
-      if (timedEvents.isNotEmpty) {
-        items.add(_buildAgendaSectionHeading('Events'));
-        for (final event in timedEvents) {
-          items.add(
-            CalendarAgendaEventRow(
-              event: event,
-              color: _eventColor(event),
-              calendarName: _controller.calendarForEvent(event)?.name,
-              use24h: use24h,
-              onTap: () => _openEventActions(event),
-            ),
-          );
-        }
-      }
-    }
-
-    // Bottom padding so content isn't cut off
-    items.add(const SizedBox(height: CaleeSpacing.xl));
-
-    return items;
   }
 }
