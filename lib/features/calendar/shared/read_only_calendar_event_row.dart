@@ -33,7 +33,7 @@ class ReadOnlyCalendarEventRow extends StatelessWidget {
 
     final end = event.end;
     if (end == null) return fmt(event.start);
-    return '${fmt(event.start)} – ${fmt(end)}';
+    return '${fmt(event.start)}–${fmt(end)}';
   }
 
   @override
@@ -62,12 +62,12 @@ class ReadOnlyCalendarEventRow extends StatelessWidget {
           const SizedBox(width: CaleeSpacing.sm + 2),
           if (!hideTime) ...[
             SizedBox(
-              width: 62,
+              width: use24h ? 92 : 78,
               child: Text(
                 _timeLabel(),
                 maxLines: 1,
                 softWrap: false,
-                overflow: TextOverflow.clip,
+                overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
                   fontSize: 13,
                   color: CaleeColors.textSecondary,
