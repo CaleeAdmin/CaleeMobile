@@ -285,6 +285,13 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
 
   // ── Delete ────────────────────────────────────────────────────────────────
 
+  ClientService? _serviceFor(String serviceId) {
+    for (final s in widget.services) {
+      if (s.id == serviceId) return s;
+    }
+    return null;
+  }
+
   Future<_CollectionDeletePreview> _loadDeletePreview(
     ClientCalendar calendar,
   ) async {
@@ -360,18 +367,26 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
     final preview = await _loadDeletePreview(calendar);
     if (!mounted) return;
 
+    final service = _serviceFor(calendar.serviceId);
+    final supportsRecentlyDeleted = service?.supportsRecentlyDeleted ?? false;
+
+    final restoreNote = supportsRecentlyDeleted
+        ? 'This will move the item to Recently deleted.'
+            ' You can restore it for a limited time.'
+        : 'This connected service does not support restore from Calee yet.';
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Delete collection permanently?'),
+        title: const Text('Delete?'),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('This will permanently delete "${calendar.name}".'),
+              Text('This will delete "${calendar.name}".'),
               const SizedBox(height: 12),
-              if (preview.itemCountsAvailable && preview.hasItems) ...[
+              if (preview.itemCountsAvailable && preview.hasItems) ...[  
                 Text('Known items found in ${preview.rangeDescription}:'),
                 const SizedBox(height: 4),
                 ...preview.lines.map(
@@ -380,9 +395,9 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
                     child: Text('• $line'),
                   ),
                 ),
-              ] else if (preview.itemCountsAvailable) ...[
+              ] else if (preview.itemCountsAvailable) ...[  
                 Text('No items were found in ${preview.rangeDescription}.'),
-              ] else ...[
+              ] else ...[  
                 const Text('Item counts could not be loaded right now.'),
               ],
               const SizedBox(height: 12),
@@ -390,9 +405,7 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
                 'Older or future items may not be shown in this preview.',
               ),
               const SizedBox(height: 12),
-              const Text(
-                'Deleting this collection also deletes the data stored inside it. This cannot be undone.',
-              ),
+              Text(restoreNote),
             ],
           ),
         ),
@@ -407,7 +420,7 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
             ),
             onPressed: () => Navigator.of(context).pop(true),
             child: const Text(
-              'Delete everything',
+              'Delete',
               style: TextStyle(fontWeight: FontWeight.w600),
             ),
           ),
@@ -432,7 +445,9 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(_errorMessage(error, 'Unable to delete collection.')),
+            content: Text(
+              _errorMessage(error, 'Unable to delete collection.'),
+            ),
           ),
         );
       }
@@ -774,7 +789,7 @@ class _CollectionFormContentState extends State<_CollectionFormContent> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (widget.services.length >= 2) ...[
+            if (widget.services.length >= 2) ...[  
               DropdownButtonFormField<ClientService>(
                 initialValue: _selectedService,
                 decoration: const InputDecoration(labelText: 'Service'),
@@ -787,7 +802,8 @@ class _CollectionFormContentState extends State<_CollectionFormContent> {
                 ],
                 onChanged: _isSubmitting
                     ? null
-                    : (service) => setState(() => _selectedService = service),
+                    : (service) =>
+                        setState(() => _selectedService = service),
                 validator: (service) =>
                     service == null ? 'Choose a service' : null,
               ),
@@ -816,7 +832,7 @@ class _CollectionFormContentState extends State<_CollectionFormContent> {
                       if (kind != null) setState(() => _selectedKind = kind);
                     },
             ),
-            if (!widget.allowKindChange) ...[
+            if (!widget.allowKindChange) ...[  
               const SizedBox(height: CaleeSpacing.xs),
               Text(
                 'Type cannot be changed after creation. '
@@ -843,7 +859,8 @@ class _CollectionFormContentState extends State<_CollectionFormContent> {
                     hex: hex,
                     color: color,
                     isSelected: _isPaletteColorSelected(hex),
-                    onTap: () => setState(() => _colorController.text = hex),
+                    onTap: () =>
+                        setState(() => _colorController.text = hex),
                   ),
               ],
             ),
@@ -858,7 +875,8 @@ class _CollectionFormContentState extends State<_CollectionFormContent> {
               validator: (value) {
                 final color = (value ?? '').trim();
                 if (color.isEmpty) return null;
-                final normalized = color.startsWith('#') ? color : '#$color';
+                final normalized =
+                    color.startsWith('#') ? color : '#$color';
                 if (!RegExp(r'^#[0-9A-Fa-f]{6}$').hasMatch(normalized)) {
                   return 'Use a color like #8BC34A';
                 }
@@ -1005,7 +1023,7 @@ class _SubscriptionFormContentState extends State<_SubscriptionFormContent> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (widget.services.length >= 2) ...[
+            if (widget.services.length >= 2) ...[  
               DropdownButtonFormField<ClientService>(
                 initialValue: _selectedService,
                 decoration: const InputDecoration(labelText: 'Service'),
@@ -1018,7 +1036,8 @@ class _SubscriptionFormContentState extends State<_SubscriptionFormContent> {
                 ],
                 onChanged: _isSubmitting
                     ? null
-                    : (service) => setState(() => _selectedService = service),
+                    : (service) =>
+                        setState(() => _selectedService = service),
                 validator: (service) =>
                     service == null ? 'Choose a service' : null,
               ),
@@ -1083,7 +1102,8 @@ class _SubscriptionFormContentState extends State<_SubscriptionFormContent> {
                     hex: hex,
                     color: color,
                     isSelected: _isPaletteColorSelected(hex),
-                    onTap: () => setState(() => _colorController.text = hex),
+                    onTap: () =>
+                        setState(() => _colorController.text = hex),
                   ),
               ],
             ),
@@ -1098,7 +1118,8 @@ class _SubscriptionFormContentState extends State<_SubscriptionFormContent> {
               validator: (value) {
                 final color = (value ?? '').trim();
                 if (color.isEmpty) return null;
-                final normalized = color.startsWith('#') ? color : '#$color';
+                final normalized =
+                    color.startsWith('#') ? color : '#$color';
                 if (!RegExp(r'^#[0-9A-Fa-f]{6}$').hasMatch(normalized)) {
                   return 'Use a color like #007AFF';
                 }
