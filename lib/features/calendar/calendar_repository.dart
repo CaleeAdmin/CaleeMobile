@@ -57,6 +57,11 @@ class CalendarRepository {
 
   // ── Load ──────────────────────────────────────────────────────────────────
 
+  // TODO(calendar-notifications): Implement reliable calendar event
+  // notifications after hub-core has a background calendar cache/sync worker.
+  // Mobile-only local scheduling is not reliable enough because reminders can
+  // become stale when events are changed elsewhere. Notification scheduling
+  // should use server-side cached event occurrences and push delivery.
   Future<CalendarOverview> loadMonth({
     required DateTime selectedMonth,
     required FirstDayOfWeek firstDayOfWeek,
