@@ -235,14 +235,14 @@ class _ChoresPageState extends State<ChoresPage> {
     final actions = <CaleeAction>[
       if (chore.canToggleCompletion)
         CaleeAction(
-          label: isDone ? 'Undo Done' : 'Mark Done',
+          label: isDone ? 'Undo done' : 'Mark done',
           icon: isDone
               ? Icons.unpublished_outlined
               : Icons.check_circle_outline,
           onTap: () => _toggleChoreCompletion(chore),
         ),
       CaleeAction(
-        label: 'Edit Chore',
+        label: 'Edit chore',
         icon: Icons.edit_outlined,
         onTap: () => _openEditChoreSheet(chore),
       ),
@@ -251,18 +251,18 @@ class _ChoresPageState extends State<ChoresPage> {
     if (chore.isRecurring) {
       actions.addAll([
         CaleeAction(
-          label: 'Skip This Time',
+          label: 'Skip this time',
           icon: Icons.event_busy_outlined,
           onTap: () => _skipChore(chore),
         ),
         CaleeAction(
-          label: 'Stop Repeating',
+          label: 'Stop repeating',
           icon: Icons.repeat_one_outlined,
           isDestructive: true,
           onTap: () => _stopRepeatingChore(chore),
         ),
         CaleeAction(
-          label: 'Delete Permanently',
+          label: 'Delete permanently',
           icon: Icons.delete_outline,
           isDestructive: true,
           onTap: () => _confirmAndDeletePermanentChore(chore),
@@ -271,7 +271,7 @@ class _ChoresPageState extends State<ChoresPage> {
     } else {
       actions.add(
         CaleeAction(
-          label: 'Delete Chore',
+          label: 'Delete chore',
           icon: Icons.delete_outline,
           isDestructive: true,
           onTap: () => _confirmAndDeletePermanentChore(chore),
@@ -336,7 +336,7 @@ class _ChoresPageState extends State<ChoresPage> {
       title: 'Stop repeating?',
       body:
           'This chore will stop repeating after the current schedule. Existing completion history will remain.',
-      confirmLabel: 'Stop Repeating',
+      confirmLabel: 'Stop repeating',
     );
 
     if (confirmed && mounted) {
@@ -367,7 +367,7 @@ class _ChoresPageState extends State<ChoresPage> {
       title: 'Delete chore permanently?',
       body:
           'This will permanently delete "${chore.title}" and its completion records. This cannot be undone.',
-      confirmLabel: 'Delete Permanently',
+      confirmLabel: 'Delete permanently',
     );
 
     if (confirmed && mounted) {
@@ -423,7 +423,7 @@ class _ChoresPageState extends State<ChoresPage> {
     List<ClientChore> allChores,
   ) {
     if (filter == 'all') {
-      return 'All Chores · ${_countAllChores(allChores)}';
+      return 'All chores · ${_countAllChores(allChores)}';
     }
     if (filter == 'unassigned') {
       return 'Unassigned · ${_countUnassignedChores(allChores)}';
@@ -437,7 +437,7 @@ class _ChoresPageState extends State<ChoresPage> {
           : 'Unnamed';
       return '$name · ${_countChoresForPerson(allChores, personId)}';
     }
-    return 'All Chores · ${_countAllChores(allChores)}';
+    return 'All chores · ${_countAllChores(allChores)}';
   }
 
   Future<void> _openAssigneeFilterChooser({
@@ -668,9 +668,9 @@ class _ChoresPageState extends State<ChoresPage> {
         if (overview == null) {
           return CaleeScaffold(
             body: CaleeEmptyState(
-              icon: Icons.family_restroom_outlined,
+              icon: Icons.checklist_outlined,
               title: 'No chore lists yet',
-              body: 'Create a chore list to start tracking family chores.',
+              body: 'Create a chore list to start tracking chores.',
               action: FilledButton.icon(
                 onPressed: _openCollectionCreateShortcut,
                 icon: const Icon(Icons.add),
@@ -694,9 +694,9 @@ class _ChoresPageState extends State<ChoresPage> {
         if (choreCalendars.isEmpty && allChores.isEmpty) {
           return CaleeScaffold(
             body: CaleeEmptyState(
-              icon: Icons.family_restroom_outlined,
+              icon: Icons.checklist_outlined,
               title: 'No chore lists yet',
-              body: 'Create a chore list to start tracking family chores.',
+              body: 'Create a chore list to start tracking chores.',
               action: FilledButton.icon(
                 onPressed: _openCollectionCreateShortcut,
                 icon: const Icon(Icons.add),
@@ -730,15 +730,13 @@ class _ChoresPageState extends State<ChoresPage> {
         final doneTodayCount = choresBySection['doneToday']?.length ?? 0;
         final pointsToday = _todayCompletionPoints(chores);
 
+        final filterLabel = _filterLabel(
+          _controller.selectedAssigneeFilter,
+          overview.people,
+          allChores,
+        );
+
         return CaleeScaffold(
-          floatingActionButton: hasWritable
-              ? FloatingActionButton.extended(
-                  heroTag: 'chores_add_chore_fab',
-                  onPressed: () => _openCreateChoreSheet(choreCalendars),
-                  icon: const Icon(Icons.add),
-                  label: const Text('Chore'),
-                )
-              : null,
           body: RefreshIndicator(
             onRefresh: _controller.refresh,
             child: ListView(
@@ -747,6 +745,27 @@ class _ChoresPageState extends State<ChoresPage> {
                 vertical: CaleeSpacing.md,
               ),
               children: [
+                // Top action bar: label | filter | add
+                _ChoresTopBar(
+                  label: filterLabel,
+                  showFilter: showAssigneeFilters,
+                  onFilterTap: showAssigneeFilters
+                      ? () => _openAssigneeFilterChooser(
+                            people: overview.people,
+                            hasUnassigned: hasUnassignedChores,
+                            allChores: allChores,
+                          )
+                      : null,
+                  onAddTap: () {
+                    if (hasWritable) {
+                      _openCreateChoreSheet(choreCalendars);
+                    } else {
+                      _openCollectionCreateShortcut();
+                    }
+                  },
+                ),
+                const SizedBox(height: CaleeSpacing.sectionSpacing),
+
                 if (overdueCount > 0 ||
                     todoTodayCount > 0 ||
                     doneTodayCount > 0) ...[
@@ -755,22 +774,6 @@ class _ChoresPageState extends State<ChoresPage> {
                     todoTodayCount: todoTodayCount,
                     doneTodayCount: doneTodayCount,
                     pointsToday: pointsToday,
-                  ),
-                  const SizedBox(height: CaleeSpacing.sectionSpacing),
-                ],
-
-                if (showAssigneeFilters) ...[
-                  ChoreAssigneeFilterRow(
-                    label: _filterLabel(
-                      _controller.selectedAssigneeFilter,
-                      overview.people,
-                      allChores,
-                    ),
-                    onTap: () => _openAssigneeFilterChooser(
-                      people: overview.people,
-                      hasUnassigned: hasUnassignedChores,
-                      allChores: allChores,
-                    ),
                   ),
                   const SizedBox(height: CaleeSpacing.sectionSpacing),
                 ],
@@ -784,7 +787,7 @@ class _ChoresPageState extends State<ChoresPage> {
                             ? 'No chores yet'
                             : 'No chores for this filter',
                         subtitle: allChores.isEmpty
-                            ? 'Tap + Chore to add your first chore.'
+                            ? 'Tap + to add your first chore.'
                             : 'Choose another assignee filter.',
                         leading: const Icon(
                           Icons.check_circle_outline,
@@ -829,6 +832,70 @@ class _ChoresPageState extends State<ChoresPage> {
           ),
         );
       },
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
+// _ChoresTopBar
+// ─────────────────────────────────────────────
+
+class _ChoresTopBar extends StatelessWidget {
+  const _ChoresTopBar({
+    required this.label,
+    required this.showFilter,
+    required this.onFilterTap,
+    required this.onAddTap,
+  });
+
+  final String label;
+  final bool showFilter;
+  final VoidCallback? onFilterTap;
+  final VoidCallback onAddTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.titleMedium?.copyWith(
+              color: CaleeColors.textPrimary,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        if (showFilter)
+          Tooltip(
+            message: 'Filter chores',
+            child: SizedBox(
+              width: CaleeSpacing.rowHeight,
+              height: CaleeSpacing.rowHeight,
+              child: IconButton(
+                icon: const Icon(Icons.filter_list_outlined),
+                color: CaleeColors.primary,
+                onPressed: onFilterTap,
+              ),
+            ),
+          ),
+        Tooltip(
+          message: 'Add chore',
+          child: SizedBox(
+            width: CaleeSpacing.rowHeight,
+            height: CaleeSpacing.rowHeight,
+            child: IconButton(
+              icon: const Icon(Icons.add),
+              color: CaleeColors.primary,
+              onPressed: onAddTap,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

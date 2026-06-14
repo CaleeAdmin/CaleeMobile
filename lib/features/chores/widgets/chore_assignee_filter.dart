@@ -99,7 +99,7 @@ class ChoreAssigneeFilterChooser extends StatelessWidget {
         CaleeSection(
           children: [
             CaleeListRow(
-              title: 'All Chores',
+              title: 'All chores',
               leading: selectedFilter == 'all'
                   ? const Icon(
                       Icons.check,
@@ -148,7 +148,7 @@ class ChoreAssigneeFilterChooser extends StatelessWidget {
           title: 'Add',
           children: [
             CaleeListRow(
-              title: 'Add Person',
+              title: 'Add person',
               leading: const Icon(
                 Icons.person_add_outlined,
                 color: CaleeColors.primary,
@@ -157,7 +157,7 @@ class ChoreAssigneeFilterChooser extends StatelessWidget {
               onTap: onAddPerson,
             ),
             CaleeListRow(
-              title: 'New Chore List',
+              title: 'New chore list',
               leading: const Icon(
                 Icons.playlist_add_outlined,
                 color: CaleeColors.primary,
