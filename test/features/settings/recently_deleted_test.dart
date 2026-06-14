@@ -248,7 +248,9 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Legacy Server'), findsOneWidget);
     expect(
-      find.text('Restore is not available for this service yet.'),
+      find.text(
+        'Recently deleted is not available for this connected service yet.',
+      ),
       findsOneWidget,
     );
   });
@@ -328,7 +330,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(
-      find.textContaining('could not be restored'),
+      find.textContaining('Could not restore because another item'),
       findsOneWidget,
     );
   });
@@ -413,4 +415,51 @@ void main() {
     expect(subtitle.toLowerCase(), isNot(contains('trashbin')));
     expect(subtitle.toLowerCase(), isNot(contains('caldav')));
   });
+
+  testWidgets('unsupported service shows backend message when provided',
+      (tester) async {
+    final client = _ItemsHubClient(
+      const DeletedItemsResponse(
+        items: [],
+        unsupportedServices: [
+          UnsupportedDeletedItemsService(
+            serviceId: 'svc-3',
+            displayName: 'Old Server',
+            message: 'Restore coming soon for this service.',
+          ),
+        ],
+      ),
+    );
+    await tester.pumpWidget(_wrap(client));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Restore coming soon for this service.'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('item row shows deleted date', (tester) async {
+    final client = _ItemsHubClient(
+      const DeletedItemsResponse(
+        items: [
+          DeletedItem(
+            deletedItemId: 'ev-2',
+            serviceId: 'svc-1',
+            provider: 'nextcloud',
+            type: 'event',
+            title: 'Gym session',
+            deletedAt: '2026-06-14T08:00:00Z',
+            canRestore: false,
+            canDeletePermanently: false,
+            restoreConflictPossible: false,
+          ),
+        ],
+        unsupportedServices: [],
+      ),
+    );
+    await tester.pumpWidget(_wrap(client));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Deleted'), findsWidgets);
+  });
 }
+

@@ -50,7 +50,7 @@ class DeletedItemsResponse {
   const DeletedItemsResponse({
     required this.items,
     required this.unsupportedServices,
-    this.cursor,
+    this.nextCursor,
   });
 
   factory DeletedItemsResponse.fromJson(Map<String, dynamic> json) {
@@ -64,19 +64,23 @@ class DeletedItemsResponse {
               .whereType<Map<String, dynamic>>()
               .map(UnsupportedDeletedItemsService.fromJson)
               .toList(),
-      cursor: json['cursor'] as String?,
+      nextCursor:
+          json['nextCursor'] as String? ?? json['cursor'] as String?,
     );
   }
 
   final List<DeletedItem> items;
   final List<UnsupportedDeletedItemsService> unsupportedServices;
-  final String? cursor;
+  final String? nextCursor;
 }
 
 class UnsupportedDeletedItemsService {
   const UnsupportedDeletedItemsService({
     required this.serviceId,
     required this.displayName,
+    this.provider,
+    this.supportsDeletedItems,
+    this.message,
   });
 
   factory UnsupportedDeletedItemsService.fromJson(
@@ -84,10 +88,18 @@ class UnsupportedDeletedItemsService {
   ) {
     return UnsupportedDeletedItemsService(
       serviceId: json['serviceId'] as String? ?? '',
-      displayName: json['displayName'] as String? ?? '',
+      displayName: json['displayName'] as String? ??
+          json['serviceId'] as String? ??
+          'Connected service',
+      provider: json['provider'] as String?,
+      supportsDeletedItems: json['supportsDeletedItems'] as bool?,
+      message: json['message'] as String?,
     );
   }
 
   final String serviceId;
   final String displayName;
+  final String? provider;
+  final bool? supportsDeletedItems;
+  final String? message;
 }
