@@ -43,11 +43,13 @@ ClientBootstrap _bootstrap() => ClientBootstrap(
 
 Widget _wrap() => MaterialApp(
   theme: CaleeTheme.buildThemeData(),
-  home: SettingsPage(
-    hubClient: _StubHubClient(),
-    accessToken: 'tok',
-    bootstrap: _bootstrap(),
-    onSignOut: () {},
+  home: Scaffold(
+    body: SettingsPage(
+      hubClient: _StubHubClient(),
+      accessToken: 'tok',
+      bootstrap: _bootstrap(),
+      onSignOut: () {},
+    ),
   ),
 );
 
