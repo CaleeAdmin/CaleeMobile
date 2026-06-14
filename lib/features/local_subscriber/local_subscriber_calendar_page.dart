@@ -2,10 +2,25 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../ui/calee_design.dart';
+import '../calendar/shared/calendar_display_event.dart';
+import '../calendar/shared/calendar_display_event_adapters.dart';
+import '../calendar/shared/read_only_calendar_view.dart';
 import 'local_calendar_event.dart';
 import 'local_calendar_ics_service.dart';
 import 'local_calendar_subscription.dart';
 import 'local_calendar_subscription_repository.dart';
+
+// Palette cycled per subscription (index % length).
+const _kSubscriptionColors = [
+  CaleeColors.dotBlue,
+  CaleeColors.dotGreen,
+  CaleeColors.dotOrange,
+  CaleeColors.dotPurple,
+  CaleeColors.dotPink,
+  CaleeColors.dotTeal,
+  CaleeColors.dotRed,
+];
 
 class LocalSubscriberCalendarPage extends StatefulWidget {
   const LocalSubscriberCalendarPage({
@@ -13,6 +28,7 @@ class LocalSubscriberCalendarPage extends StatefulWidget {
     required this.repository,
     required this.onSignIn,
     required this.onSubscriptionsChanged,
+    this.icsService,
     super.key,
   });
 
@@ -21,6 +37,9 @@ class LocalSubscriberCalendarPage extends StatefulWidget {
   final VoidCallback onSignIn;
   final void Function(List<LocalCalendarSubscription>) onSubscriptionsChanged;
 
+  /// Overrideable for tests; defaults to [LocalCalendarIcsService].
+  final LocalCalendarIcsService? icsService;
+
   @override
   State<LocalSubscriberCalendarPage> createState() =>
       _LocalSubscriberCalendarPageState();
@@ -28,16 +47,25 @@ class LocalSubscriberCalendarPage extends StatefulWidget {
 
 class _LocalSubscriberCalendarPageState
     extends State<LocalSubscriberCalendarPage> {
-  final _icsService = const LocalCalendarIcsService();
+  LocalCalendarIcsService get _icsService =>
+      widget.icsService ?? const LocalCalendarIcsService();
 
   List<LocalCalendarSubscription> _subscriptions = [];
   final Map<String, List<LocalCalendarEvent>> _eventsBySubscription = {};
   final Map<String, String?> _errorsBySubscription = {};
   final Set<String> _loadingIds = {};
 
+  late DateTime _today;
+  late DateTime _selectedMonth;
+  late DateTime _selectedDay;
+  CalendarDisplayViewMode _viewMode = CalendarDisplayViewMode.month;
+
   @override
   void initState() {
     super.initState();
+    _today = DateTime.now();
+    _selectedMonth = DateTime(_today.year, _today.month);
+    _selectedDay = _today;
     _subscriptions = List.of(widget.subscriptions);
     _refreshAll();
   }
@@ -120,20 +148,53 @@ class _LocalSubscriberCalendarPageState
     widget.onSubscriptionsChanged(updated);
   }
 
-  List<LocalCalendarEvent> get _allEvents {
-    final all = <LocalCalendarEvent>[];
-    for (final sub in _subscriptions) {
-      all.addAll(_eventsBySubscription[sub.id] ?? []);
+  bool get _isAnyLoading => _loadingIds.isNotEmpty;
+
+  Color _colorForSubscription(int index) =>
+      _kSubscriptionColors[index % _kSubscriptionColors.length];
+
+  List<CalendarDisplayEvent> get _displayEvents {
+    final all = <CalendarDisplayEvent>[];
+    for (var i = 0; i < _subscriptions.length; i++) {
+      final sub = _subscriptions[i];
+      final color = _colorForSubscription(i);
+      final subEvents = _eventsBySubscription[sub.id] ?? [];
+      for (final e in subEvents) {
+        all.add(
+          calendarDisplayEventFromLocalEvent(
+            e,
+            subscription: sub,
+            color: color,
+          ),
+        );
+      }
     }
-    all.sort((a, b) => a.start.compareTo(b.start));
     return all;
   }
 
-  bool get _isAnyLoading => _loadingIds.isNotEmpty;
+  void _openCalendarsSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: CaleeColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(CaleeRadius.sheet),
+        ),
+      ),
+      builder: (_) => _CalendarsSheet(
+        subscriptions: _subscriptions,
+        loadingIds: Set.of(_loadingIds),
+        errorsBySubscription: Map.of(_errorsBySubscription),
+        onRefresh: _refreshOne,
+        onRemove: _removeSubscription,
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final use24h = MediaQuery.alwaysUse24HourFormatOf(context);
 
     return Scaffold(
       appBar: AppBar(
@@ -163,83 +224,46 @@ class _LocalSubscriberCalendarPageState
           Expanded(
             child: _subscriptions.isEmpty
                 ? _EmptyState()
-                : _buildContent(theme),
+                : ReadOnlyCalendarView(
+                    selectedMonth: _selectedMonth,
+                    selectedDay: _selectedDay,
+                    today: _today,
+                    firstDayOfWeek: 0,
+                    events: _displayEvents,
+                    viewMode: _viewMode,
+                    use24h: use24h,
+                    onViewModeChanged: (mode) =>
+                        setState(() => _viewMode = mode),
+                    onPreviousMonth: () => setState(() {
+                      _selectedMonth = DateTime(
+                        _selectedMonth.year,
+                        _selectedMonth.month - 1,
+                      );
+                    }),
+                    onNextMonth: () => setState(() {
+                      _selectedMonth = DateTime(
+                        _selectedMonth.year,
+                        _selectedMonth.month + 1,
+                      );
+                    }),
+                    onGoToToday: () => setState(() {
+                      _today = DateTime.now();
+                      _selectedMonth = DateTime(_today.year, _today.month);
+                      _selectedDay = _today;
+                    }),
+                    onSelectDay: (day) => setState(() => _selectedDay = day),
+                    actionWidgets: [
+                      IconButton(
+                        icon: const Icon(Icons.calendar_month_outlined),
+                        color: CaleeColors.primary,
+                        tooltip: 'Calendars on this phone',
+                        onPressed: _openCalendarsSheet,
+                      ),
+                    ],
+                  ),
           ),
         ],
       ),
-    );
-  }
-
-  Widget _buildContent(ThemeData theme) {
-    final events = _allEvents;
-    final errors = _errorsBySubscription.values
-        .where((e) => e != null)
-        .cast<String>()
-        .toList();
-
-    return CustomScrollView(
-      slivers: [
-        if (errors.isNotEmpty)
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-              child: Column(
-                children: errors
-                    .map(
-                      (e) => Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: _ErrorBanner(message: e),
-                      ),
-                    )
-                    .toList(),
-              ),
-            ),
-          ),
-        SliverToBoxAdapter(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-            child: Text(
-              'Calendars on this phone',
-              style: theme.textTheme.titleSmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ),
-        ),
-        SliverList.builder(
-          itemCount: _subscriptions.length,
-          itemBuilder: (_, i) => _SubscriptionTile(
-            subscription: _subscriptions[i],
-            isLoading: _loadingIds.contains(_subscriptions[i].id),
-            onRefresh: () => _refreshOne(_subscriptions[i]),
-            onRemove: () => _removeSubscription(_subscriptions[i]),
-          ),
-        ),
-        SliverToBoxAdapter(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
-            child: Text(
-              'Upcoming events',
-              style: theme.textTheme.titleSmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ),
-        ),
-        if (events.isEmpty && !_isAnyLoading)
-          const SliverToBoxAdapter(
-            child: Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: Text('No upcoming events found.'),
-            ),
-          )
-        else
-          SliverList.builder(
-            itemCount: events.length,
-            itemBuilder: (_, i) => _EventTile(event: events[i]),
-          ),
-        const SliverToBoxAdapter(child: SizedBox(height: 24)),
-      ],
     );
   }
 }
@@ -295,6 +319,83 @@ class _LocalSubscriberBanner extends StatelessWidget {
   }
 }
 
+// ── Calendars sheet ───────────────────────────────────────────────────────────
+
+class _CalendarsSheet extends StatelessWidget {
+  const _CalendarsSheet({
+    required this.subscriptions,
+    required this.loadingIds,
+    required this.errorsBySubscription,
+    required this.onRefresh,
+    required this.onRemove,
+  });
+
+  final List<LocalCalendarSubscription> subscriptions;
+  final Set<String> loadingIds;
+  final Map<String, String?> errorsBySubscription;
+  final void Function(LocalCalendarSubscription) onRefresh;
+  final void Function(LocalCalendarSubscription) onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final errors = errorsBySubscription.values
+        .where((e) => e != null)
+        .cast<String>()
+        .toList();
+
+    return SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(height: 8),
+          Container(
+            width: 36,
+            height: 4,
+            decoration: BoxDecoration(
+              color: theme.colorScheme.onSurfaceVariant.withAlpha(60),
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Text(
+              'Calendars on this phone',
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          if (errors.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Column(
+                children: errors
+                    .map(
+                      (e) => Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: _ErrorBanner(message: e),
+                      ),
+                    )
+                    .toList(),
+              ),
+            ),
+          ...subscriptions.map(
+            (sub) => _SubscriptionTile(
+              subscription: sub,
+              isLoading: loadingIds.contains(sub.id),
+              onRefresh: () => onRefresh(sub),
+              onRemove: () => onRemove(sub),
+            ),
+          ),
+          const SizedBox(height: 8),
+        ],
+      ),
+    );
+  }
+}
+
 // ── Subscription tile ─────────────────────────────────────────────────────────
 
 class _SubscriptionTile extends StatelessWidget {
@@ -342,71 +443,6 @@ class _SubscriptionTile extends StatelessWidget {
               ],
             ),
     );
-  }
-}
-
-// ── Event tile ────────────────────────────────────────────────────────────────
-
-class _EventTile extends StatelessWidget {
-  const _EventTile({required this.event});
-
-  final LocalCalendarEvent event;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return ListTile(
-      leading: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(
-            _monthDay(event.start),
-            style: theme.textTheme.labelLarge?.copyWith(
-              color: theme.colorScheme.primary,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-        ],
-      ),
-      title: Text(event.title),
-      subtitle: Text(
-        event.isAllDay
-            ? '${event.subscriptionTitle} · All day'
-            : '${event.subscriptionTitle} · ${_timeRange(event.start, event.end)}',
-        style: theme.textTheme.bodySmall,
-      ),
-    );
-  }
-
-  String _monthDay(DateTime dt) {
-    const months = [
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'May',
-      'Jun',
-      'Jul',
-      'Aug',
-      'Sep',
-      'Oct',
-      'Nov',
-      'Dec',
-    ];
-    return '${months[dt.month - 1]} ${dt.day}';
-  }
-
-  String _timeRange(DateTime start, DateTime? end) {
-    String fmt(DateTime dt) {
-      final h = dt.hour;
-      final m = dt.minute;
-      final ampm = h < 12 ? 'am' : 'pm';
-      final h12 = h % 12 == 0 ? 12 : h % 12;
-      return m == 0 ? '$h12$ampm' : '$h12:${m.toString().padLeft(2, '0')}$ampm';
-    }
-
-    if (end == null) return fmt(start);
-    return '${fmt(start)} – ${fmt(end)}';
   }
 }
 
