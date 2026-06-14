@@ -68,7 +68,7 @@ void main() {
 
     testWidgets('renders Today button', (tester) async {
       await tester.pumpWidget(_buildView());
-      expect(find.text('Today'), findsOneWidget);
+      expect(find.widgetWithText(TextButton, 'Today'), findsOneWidget);
     });
 
     testWidgets('renders previous and next month navigation', (tester) async {
@@ -172,10 +172,26 @@ void main() {
 
     testWidgets('shows up to 3 dot colors per day', (tester) async {
       final events = [
-        _event(id: 'e1', start: DateTime(2026, 6, 15, 9), color: CaleeColors.dotBlue),
-        _event(id: 'e2', start: DateTime(2026, 6, 15, 10), color: CaleeColors.dotGreen),
-        _event(id: 'e3', start: DateTime(2026, 6, 15, 11), color: CaleeColors.dotOrange),
-        _event(id: 'e4', start: DateTime(2026, 6, 15, 12), color: CaleeColors.dotPurple),
+        _event(
+          id: 'e1',
+          start: DateTime(2026, 6, 15, 9),
+          color: CaleeColors.dotBlue,
+        ),
+        _event(
+          id: 'e2',
+          start: DateTime(2026, 6, 15, 10),
+          color: CaleeColors.dotGreen,
+        ),
+        _event(
+          id: 'e3',
+          start: DateTime(2026, 6, 15, 11),
+          color: CaleeColors.dotOrange,
+        ),
+        _event(
+          id: 'e4',
+          start: DateTime(2026, 6, 15, 12),
+          color: CaleeColors.dotPurple,
+        ),
       ];
       await tester.pumpWidget(_buildView(events: events));
       final cells = tester.widgetList<CalendarDayCell>(
@@ -190,7 +206,9 @@ void main() {
 
   group('ReadOnlyCalendarView — selected-day agenda', () {
     testWidgets('shows event title in day agenda', (tester) async {
-      final events = [_event(title: 'Dentist', start: DateTime(2026, 6, 15, 10))];
+      final events = [
+        _event(title: 'Dentist', start: DateTime(2026, 6, 15, 10)),
+      ];
       await tester.pumpWidget(_buildView(events: events, selectedDay: _today));
       expect(find.text('Dentist'), findsOneWidget);
     });
@@ -242,7 +260,11 @@ void main() {
     testWidgets('shows events across multiple days', (tester) async {
       final events = [
         _event(id: 'e1', title: 'Day 5 Event', start: DateTime(2026, 6, 5, 10)),
-        _event(id: 'e2', title: 'Day 20 Event', start: DateTime(2026, 6, 20, 14)),
+        _event(
+          id: 'e2',
+          title: 'Day 20 Event',
+          start: DateTime(2026, 6, 20, 14),
+        ),
       ];
       await tester.pumpWidget(
         _buildView(events: events, viewMode: CalendarDisplayViewMode.agenda),
@@ -260,17 +282,19 @@ void main() {
       expect(find.text('No events this month'), findsOneWidget);
     });
 
-    testWidgets('shows ReadOnlyCalendarEventRow per event in agenda month view',
-        (tester) async {
-      final events = [
-        _event(id: 'e1', start: DateTime(2026, 6, 10, 9)),
-        _event(id: 'e2', start: DateTime(2026, 6, 22, 14)),
-      ];
-      await tester.pumpWidget(
-        _buildView(events: events, viewMode: CalendarDisplayViewMode.agenda),
-      );
-      expect(find.byType(ReadOnlyCalendarEventRow), findsNWidgets(2));
-    });
+    testWidgets(
+      'shows ReadOnlyCalendarEventRow per event in agenda month view',
+      (tester) async {
+        final events = [
+          _event(id: 'e1', start: DateTime(2026, 6, 10, 9)),
+          _event(id: 'e2', start: DateTime(2026, 6, 22, 14)),
+        ];
+        await tester.pumpWidget(
+          _buildView(events: events, viewMode: CalendarDisplayViewMode.agenda),
+        );
+        expect(find.byType(ReadOnlyCalendarEventRow), findsNWidgets(2));
+      },
+    );
   });
 
   group('ReadOnlyCalendarView — multi-day all-day event handling', () {
@@ -395,26 +419,28 @@ void main() {
       expect(june16.dotColors, isEmpty);
     });
 
-    testWidgets('multi-day all-day event shows in day agenda on each covered day',
-        (tester) async {
-      final events = [
-        CalendarDisplayEvent(
-          id: 'e1',
-          title: 'Conference',
-          start: DateTime(2026, 6, 14),
-          end: DateTime(2026, 6, 17), // exclusive → 14, 15, 16
-          allDay: true,
-          calendarId: 'cal1',
-          calendarName: 'My Calendar',
-          color: CaleeColors.dotBlue,
-        ),
-      ];
+    testWidgets(
+      'multi-day all-day event shows in day agenda on each covered day',
+      (tester) async {
+        final events = [
+          CalendarDisplayEvent(
+            id: 'e1',
+            title: 'Conference',
+            start: DateTime(2026, 6, 14),
+            end: DateTime(2026, 6, 17), // exclusive → 14, 15, 16
+            allDay: true,
+            calendarId: 'cal1',
+            calendarName: 'My Calendar',
+            color: CaleeColors.dotBlue,
+          ),
+        ];
 
-      // Select June 15 — event should appear in the day agenda
-      await tester.pumpWidget(
-        _buildView(events: events, selectedDay: DateTime(2026, 6, 15)),
-      );
-      expect(find.text('Conference'), findsOneWidget);
-    });
+        // Select June 15 — event should appear in the day agenda
+        await tester.pumpWidget(
+          _buildView(events: events, selectedDay: DateTime(2026, 6, 15)),
+        );
+        expect(find.text('Conference'), findsOneWidget);
+      },
+    );
   });
 }

@@ -39,7 +39,7 @@ LocalCalendarEvent _event({
 void main() {
   group('CalendarDisplayEvent — pure model', () {
     test('direct constructor sets all fields', () {
-      const display = CalendarDisplayEvent(
+      final display = CalendarDisplayEvent(
         id: 'x',
         title: 'Test',
         start: DateTime.fromMillisecondsSinceEpoch(0),
@@ -57,7 +57,7 @@ void main() {
     });
 
     test('readOnly defaults to true', () {
-      const display = CalendarDisplayEvent(
+      final display = CalendarDisplayEvent(
         id: 'x',
         title: 'Test',
         start: DateTime.fromMillisecondsSinceEpoch(0),
@@ -80,7 +80,10 @@ void main() {
         end: DateTime(2026, 6, 15, 9, 30),
       );
 
-      final display = calendarDisplayEventFromLocalEvent(event, subscription: sub);
+      final display = calendarDisplayEventFromLocalEvent(
+        event,
+        subscription: sub,
+      );
 
       expect(display.id, 'e1');
       expect(display.title, 'Standup');
@@ -120,7 +123,7 @@ void main() {
         subscription: _sub(),
       );
       expect(display.allDay, isTrue);
-      expect(display.end, isNull);
+      expect(display.end, event.end);
     });
 
     test('location and description are null', () {

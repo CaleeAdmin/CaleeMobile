@@ -131,11 +131,7 @@ void main() {
 
     test('maps allDay flag', () {
       final display = calendarDisplayEventFromClientEvent(
-        _event(
-          allDay: true,
-          startsAt: '2026-06-15',
-          endsAt: '2026-06-16',
-        ),
+        _event(allDay: true, startsAt: '2026-06-15', endsAt: '2026-06-16'),
         calendar: _calendar(),
       );
       expect(display.allDay, isTrue);

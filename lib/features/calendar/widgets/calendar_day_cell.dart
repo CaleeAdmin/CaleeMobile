@@ -94,34 +94,38 @@ class CalendarDayCell extends StatelessWidget {
         onTap: onTap,
         behavior: HitTestBehavior.opaque,
         child: ClipRect(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: circleSize,
-                height: circleSize,
-                decoration: bgColor != null
-                    ? BoxDecoration(color: bgColor, shape: BoxShape.circle)
-                    : null,
-                alignment: Alignment.center,
-                child: Text(
-                  '${date.day}',
-                  style: TextStyle(
-                    fontSize: fontSize,
-                    fontWeight: isToday ? FontWeight.w700 : FontWeight.w400,
-                    color: numberColor,
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.center,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: circleSize,
+                  height: circleSize,
+                  decoration: bgColor != null
+                      ? BoxDecoration(color: bgColor, shape: BoxShape.circle)
+                      : null,
+                  alignment: Alignment.center,
+                  child: Text(
+                    '${date.day}',
+                    style: TextStyle(
+                      fontSize: fontSize,
+                      fontWeight: isToday ? FontWeight.w700 : FontWeight.w400,
+                      color: numberColor,
+                    ),
                   ),
                 ),
-              ),
-              if (verticalGap > 0) SizedBox(height: verticalGap),
-              _EventDots(
-                colors: showDots ? dotColors : const [],
-                dotSize: dotSize,
-                gap: dotGap,
-                hidden: !showDots,
-              ),
-            ],
+                if (verticalGap > 0) SizedBox(height: verticalGap),
+                _EventDots(
+                  colors: showDots ? dotColors : const [],
+                  dotSize: dotSize,
+                  gap: dotGap,
+                  hidden: !showDots,
+                ),
+              ],
+            ),
           ),
         ),
       ),

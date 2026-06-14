@@ -87,22 +87,29 @@ class ReadOnlyCalendarView extends StatelessWidget {
 
   List<CalendarDisplayEvent> _eventsForDay(DateTime day) {
     final dayDate = DateTime(day.year, day.month, day.day);
-    final result = events.where((e) {
-      if (e.allDay) {
-        final startDate = DateTime(e.start.year, e.start.month, e.start.day);
-        // All-day end is exclusive (API/iCal convention); fall back to startDate if no end.
-        final endDate = e.end != null
-            ? DateTime(e.end!.year, e.end!.month, e.end!.day)
-                .subtract(const Duration(days: 1))
-            : startDate;
-        return !dayDate.isBefore(startDate) && !dayDate.isAfter(endDate);
-      }
-      return isSameCalendarDay(e.start, day);
-    }).toList()
-      ..sort((a, b) {
-        if (a.allDay != b.allDay) return a.allDay ? -1 : 1;
-        return a.start.compareTo(b.start);
-      });
+    final result =
+        events.where((e) {
+          if (e.allDay) {
+            final startDate = DateTime(
+              e.start.year,
+              e.start.month,
+              e.start.day,
+            );
+            // All-day end is exclusive (API/iCal convention); fall back to startDate if no end.
+            final endDate = e.end != null
+                ? DateTime(
+                    e.end!.year,
+                    e.end!.month,
+                    e.end!.day,
+                  ).subtract(const Duration(days: 1))
+                : startDate;
+            return !dayDate.isBefore(startDate) && !dayDate.isAfter(endDate);
+          }
+          return isSameCalendarDay(e.start, day);
+        }).toList()..sort((a, b) {
+          if (a.allDay != b.allDay) return a.allDay ? -1 : 1;
+          return a.start.compareTo(b.start);
+        });
     return result;
   }
 
@@ -161,8 +168,11 @@ class ReadOnlyCalendarView extends StatelessWidget {
     bool compactHeight = false,
     bool veryCompactHeight = false,
   }) {
-    final outerPad =
-        veryCompactHeight ? 2.0 : compactHeight ? 4.0 : CaleeSpacing.xs;
+    final outerPad = veryCompactHeight
+        ? 2.0
+        : compactHeight
+        ? 4.0
+        : CaleeSpacing.xs;
     final navIconMinH = compactHeight ? 36.0 : 44.0;
     final actionIconMinH = compactHeight ? 32.0 : 36.0;
 
@@ -318,17 +328,19 @@ class ReadOnlyCalendarView extends StatelessWidget {
     final gridStart = _gridStart;
     return LayoutBuilder(
       builder: (context, constraints) {
-        final cellSize = constraints.maxWidth / 7;
-        final desiredHeight = cellSize * 6;
+        final cellWidth = constraints.maxWidth / 7;
+        final desiredHeight = cellWidth * 6;
         final height = constraints.hasBoundedHeight
             ? desiredHeight.clamp(0.0, constraints.maxHeight)
             : desiredHeight;
+        final cellHeight = height / 6;
         return SizedBox(
           height: height,
           child: GridView.builder(
             physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: 7,
+              childAspectRatio: cellHeight > 0 ? cellWidth / cellHeight : 1,
             ),
             itemCount: 42,
             itemBuilder: (context, index) {

@@ -188,10 +188,7 @@ void main() {
     ) async {
       await tester.pumpWidget(_buildPage(subscriptions: [_sub()]));
       await tester.pumpAndSettle();
-      expect(
-        find.byTooltip('Calendars on this phone'),
-        findsOneWidget,
-      );
+      expect(find.byTooltip('Calendars on this phone'), findsOneWidget);
     });
 
     testWidgets('opening calendars sheet shows subscription name', (
