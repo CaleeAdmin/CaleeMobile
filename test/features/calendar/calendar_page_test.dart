@@ -11,6 +11,7 @@ import 'package:calee_mobile/data/models/client_calendar.dart';
 import 'package:calee_mobile/features/calendar/calendar_page.dart';
 import 'package:calee_mobile/ui/calee_design.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -47,7 +48,27 @@ const _service = ClientService(
 
 void main() {
   setUp(() {
-    SharedPreferences.setMockInitialValues({});
+    SharedPreferences.setMockInitialValues({
+      'calee_pref_migrated_to_shared_prefs': true,
+    });
+
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          const MethodChannel(
+            'plugins.it_nomads.com/flutter_secure_storage',
+          ),
+          (call) async => <String, String>{},
+        );
+  });
+
+  tearDown(() {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          const MethodChannel(
+            'plugins.it_nomads.com/flutter_secure_storage',
+          ),
+          null,
+        );
   });
 
   group('CalendarPage', () {
@@ -62,8 +83,7 @@ void main() {
           ),
         ),
       );
-      await tester.pump();
-      await tester.pump();
+      await tester.pumpAndSettle();
 
       expect(find.byType(CalendarPage), findsOneWidget);
     });
@@ -81,8 +101,7 @@ void main() {
             ),
           ),
         );
-        await tester.pump();
-        await tester.pump();
+        await tester.pumpAndSettle();
 
         expect(find.text('Month'), findsOneWidget);
         expect(find.text('Agenda'), findsOneWidget);
@@ -100,12 +119,10 @@ void main() {
           ),
         ),
       );
-      await tester.pump();
-      await tester.pump();
+      await tester.pumpAndSettle();
 
       await tester.tap(find.text('Agenda'));
-      await tester.pump();
-      await tester.pump();
+      await tester.pumpAndSettle();
 
       expect(find.byType(CalendarPage), findsOneWidget);
     });
