@@ -227,7 +227,7 @@ void main() {
     testWidgets('Chores tab does not receive a parent AppBar', (tester) async {
       await tester.pumpWidget(_buildHome(bootstrap: _choresBootstrap()));
       await tester.pump();
-      await tester.tap(find.byIcon(Icons.family_restroom_outlined));
+      await tester.tap(find.byIcon(Icons.cleaning_services_outlined));
       await tester.pump();
       expect(homeAppBar(tester), isNull);
     });
