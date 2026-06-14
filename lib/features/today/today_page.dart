@@ -188,6 +188,8 @@ class _TodayPageState extends State<TodayPage> {
         const SizedBox(height: CaleeSpacing.sectionSpacing),
         _buildChoresSection(overview),
       ],
+      const SizedBox(height: CaleeSpacing.sectionSpacing),
+      _buildCaleeDisplaySection(),
     ];
   }
 
@@ -319,6 +321,18 @@ class _TodayPageState extends State<TodayPage> {
         color: overdue ? CaleeColors.destructive : CaleeColors.textTertiary,
       ),
       onTap: widget.onNavigateToChores,
+    );
+  }
+
+  // ── Calee Display section ────────────────────────────────────────────────
+
+  // TODO(displays): Replace this placeholder once display linking is implemented.
+  Widget _buildCaleeDisplaySection() {
+    return CaleeSection(
+      title: 'Calee Display',
+      children: [
+        _emptyRow('Display status and setup are coming soon.'),
+      ],
     );
   }
 

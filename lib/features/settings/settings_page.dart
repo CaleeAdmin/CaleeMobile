@@ -11,6 +11,7 @@ import 'calendar_collections_page.dart';
 import 'family_setup_page.dart';
 import 'household_people_page.dart';
 import 'service_details_page.dart';
+import 'calee_displays_page.dart';
 import 'settings_controller.dart';
 import 'settings_repository.dart';
 
@@ -300,6 +301,22 @@ class _SettingsPageState extends State<SettingsPage> {
                     .then((_) {
                       if (mounted) _controller.refresh();
                     });
+              },
+            ),
+            CaleeListRow(
+              title: 'Calee displays',
+              subtitle: 'Link and manage your Calee displays',
+              leading: const Icon(
+                Icons.tablet_mac_outlined,
+                size: 20,
+                color: CaleeColors.primary,
+              ),
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const CaleeDisplaysPage(),
+                  ),
+                );
               },
             ),
             CaleeListRow(
