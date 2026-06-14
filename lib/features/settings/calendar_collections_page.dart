@@ -774,7 +774,7 @@ class _CollectionFormContentState extends State<_CollectionFormContent> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (widget.services.isNotEmpty) ...[
+            if (widget.services.length >= 2) ...[
               DropdownButtonFormField<ClientService>(
                 initialValue: _selectedService,
                 decoration: const InputDecoration(labelText: 'Service'),
@@ -1005,23 +1005,25 @@ class _SubscriptionFormContentState extends State<_SubscriptionFormContent> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            DropdownButtonFormField<ClientService>(
-              initialValue: _selectedService,
-              decoration: const InputDecoration(labelText: 'Service'),
-              items: [
-                for (final service in widget.services)
-                  DropdownMenuItem(
-                    value: service,
-                    child: Text(service.displayName),
-                  ),
-              ],
-              onChanged: _isSubmitting
-                  ? null
-                  : (service) => setState(() => _selectedService = service),
-              validator: (service) =>
-                  service == null ? 'Choose a service' : null,
-            ),
-            const SizedBox(height: CaleeSpacing.sm + 4),
+            if (widget.services.length >= 2) ...[
+              DropdownButtonFormField<ClientService>(
+                initialValue: _selectedService,
+                decoration: const InputDecoration(labelText: 'Service'),
+                items: [
+                  for (final service in widget.services)
+                    DropdownMenuItem(
+                      value: service,
+                      child: Text(service.displayName),
+                    ),
+                ],
+                onChanged: _isSubmitting
+                    ? null
+                    : (service) => setState(() => _selectedService = service),
+                validator: (service) =>
+                    service == null ? 'Choose a service' : null,
+              ),
+              const SizedBox(height: CaleeSpacing.sm + 4),
+            ],
             TextFormField(
               controller: _nameController,
               enabled: !_isSubmitting,

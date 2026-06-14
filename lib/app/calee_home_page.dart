@@ -35,6 +35,14 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
   bool get _hasChoreService =>
       widget.bootstrap.services.any((service) => service.supportsChores);
 
+  bool get _selectedTabOwnsTopBar {
+    final title = _tabs[_selectedIndex].title;
+    return title == 'Today' ||
+        title == 'Calendar' ||
+        title == 'Tasks' ||
+        title == 'Chores';
+  }
+
   // Tab index helpers (computed after _tabs is built)
   int get _calendarTabIndex => _tabs.indexWhere((t) => t.title == 'Calendar');
   int get _tasksTabIndex => _tabs.indexWhere((t) => t.title == 'Tasks');
@@ -113,7 +121,7 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: (_selectedIndex == 0 || _selectedIndex == _calendarTabIndex)
+      appBar: _selectedTabOwnsTopBar
           ? null
           : AppBar(title: Text(_tabs[_selectedIndex].title)),
       body: IndexedStack(
