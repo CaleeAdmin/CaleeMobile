@@ -194,13 +194,13 @@ class _RecentlyDeletedPageState extends State<RecentlyDeletedPage> {
       case 'task':
         return Icons.check_circle_outline;
       case 'chore':
-        return Icons.home_work_outlined;
+        return Icons.cleaning_services_outlined;
       case 'calendar':
         return Icons.calendar_month_outlined;
       case 'task_list':
         return Icons.checklist_outlined;
       case 'chore_list':
-        return Icons.list_alt_outlined;
+        return Icons.cleaning_services_outlined;
       default:
         return Icons.article_outlined;
     }
@@ -309,7 +309,7 @@ class _RecentlyDeletedPageState extends State<RecentlyDeletedPage> {
           96,
         ),
         children: [
-          if (_listItems.isNotEmpty) ...[  
+          if (_listItems.isNotEmpty) ...[
             CaleeSection(
               title: 'Calendars and lists',
               children: [
@@ -318,7 +318,7 @@ class _RecentlyDeletedPageState extends State<RecentlyDeletedPage> {
             ),
             const SizedBox(height: CaleeSpacing.sectionSpacing),
           ],
-          if (_individualItems.isNotEmpty) ...[  
+          if (_individualItems.isNotEmpty) ...[
             CaleeSection(
               title: 'Items',
               children: [
