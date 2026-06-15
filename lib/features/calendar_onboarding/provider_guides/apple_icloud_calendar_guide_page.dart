@@ -76,7 +76,9 @@ class _AppleIcloudCalendarGuidePageState
     final service = _selectedService;
     if (service == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No connected calendar service available.')),
+        const SnackBar(
+          content: Text('No connected calendar service available.'),
+        ),
       );
       return;
     }
@@ -100,9 +102,8 @@ class _AppleIcloudCalendarGuidePageState
 
       Navigator.of(context).push(
         MaterialPageRoute<void>(
-          builder: (_) => CalendarAddedSuccessPage(
-            onViewCalendar: widget.onViewCalendar,
-          ),
+          builder: (_) =>
+              CalendarAddedSuccessPage(onViewCalendar: widget.onViewCalendar),
         ),
       );
     } catch (error) {
@@ -176,7 +177,7 @@ class _AppleIcloudCalendarGuidePageState
               const SizedBox(height: CaleeSpacing.sectionSpacing),
               if (services.length >= 2) ...[
                 DropdownButtonFormField<ClientService>(
-                  value: _selectedService,
+                  initialValue: _selectedService,
                   decoration: const InputDecoration(labelText: 'Service'),
                   items: [
                     for (final s in services)

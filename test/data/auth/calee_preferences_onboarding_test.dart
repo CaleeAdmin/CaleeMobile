@@ -8,6 +8,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  setUpAll(() => TestWidgetsFlutterBinding.ensureInitialized());
+
   setUp(() {
     SharedPreferences.setMockInitialValues({
       'calee_pref_migrated_to_shared_prefs': true,
@@ -58,16 +60,19 @@ void main() {
       expect(status, CalendarOnboardingStatus.dismissedForever);
     });
 
-    test('status is account-scoped (different accounts are independent)', () async {
-      SharedPreferences.setMockInitialValues({
-        'calee_pref_migrated_to_shared_prefs': true,
-        'calee_calendar_onboarding_status_account1':
-            CalendarOnboardingStatus.dismissedForever,
-      });
-      final prefs = CaleePreferences();
-      final status = await prefs.loadCalendarOnboardingStatus('account2');
-      expect(status, CalendarOnboardingStatus.notStarted);
-    });
+    test(
+      'status is account-scoped (different accounts are independent)',
+      () async {
+        SharedPreferences.setMockInitialValues({
+          'calee_pref_migrated_to_shared_prefs': true,
+          'calee_calendar_onboarding_status_account1':
+              CalendarOnboardingStatus.dismissedForever,
+        });
+        final prefs = CaleePreferences();
+        final status = await prefs.loadCalendarOnboardingStatus('account2');
+        expect(status, CalendarOnboardingStatus.notStarted);
+      },
+    );
   });
 
   group('saveCalendarOnboardingStatus', () {

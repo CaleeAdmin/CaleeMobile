@@ -62,30 +62,29 @@ class _GoogleCalendarGuidePageState extends State<GoogleCalendarGuidePage> {
         leading: _view == _GoogleGuideView.main
             ? null
             : BackButton(
-                onPressed: () =>
-                    setState(() => _view = _GoogleGuideView.main),
+                onPressed: () => setState(() => _view = _GoogleGuideView.main),
               ),
       ),
       body: AnimatedSwitcher(
         duration: const Duration(milliseconds: 200),
         child: switch (_view) {
           _GoogleGuideView.main => _MainView(
-              key: const ValueKey('main'),
-              onContinueOnComputer: () =>
-                  setState(() => _view = _GoogleGuideView.continueOnComputer),
-              onAlreadyHaveLink: () => _openLink(context),
-              onNoComputer: () =>
-                  setState(() => _view = _GoogleGuideView.phoneFallback),
-            ),
+            key: const ValueKey('main'),
+            onContinueOnComputer: () =>
+                setState(() => _view = _GoogleGuideView.continueOnComputer),
+            onAlreadyHaveLink: () => _openLink(context),
+            onNoComputer: () =>
+                setState(() => _view = _GoogleGuideView.phoneFallback),
+          ),
           _GoogleGuideView.continueOnComputer => _ComputerView(
-              key: const ValueKey('computer'),
-              portalUrl: _portalUrl,
-              onAlreadyHaveLink: () => _openLink(context),
-            ),
+            key: const ValueKey('computer'),
+            portalUrl: _portalUrl,
+            onAlreadyHaveLink: () => _openLink(context),
+          ),
           _GoogleGuideView.phoneFallback => _PhoneFallbackView(
-              key: const ValueKey('phone'),
-              onAlreadyHaveLink: () => _openLink(context),
-            ),
+            key: const ValueKey('phone'),
+            onAlreadyHaveLink: () => _openLink(context),
+          ),
         },
       ),
     );
@@ -129,7 +128,10 @@ class _MainView extends StatelessWidget {
           CaleeSection(
             title: 'On your computer',
             children: [
-              _StepRow(number: 1, text: 'Open Google Calendar in a web browser.'),
+              _StepRow(
+                number: 1,
+                text: 'Open Google Calendar in a web browser.',
+              ),
               _StepRow(number: 2, text: 'Open the calendar\'s settings.'),
               _StepRow(
                 number: 3,
@@ -202,9 +204,16 @@ class _ComputerView extends StatelessWidget {
           const SizedBox(height: CaleeSpacing.md),
           CaleeSection(
             children: [
-              _StepRow(number: 1, text: 'Copy the secret iCal address from Google Calendar settings.'),
+              _StepRow(
+                number: 1,
+                text:
+                    'Copy the secret iCal address from Google Calendar settings.',
+              ),
               _StepRow(number: 2, text: 'Open Calee Portal in your browser.'),
-              _StepRow(number: 3, text: 'Go to Calendar settings and add the link.'),
+              _StepRow(
+                number: 3,
+                text: 'Go to Calendar settings and add the link.',
+              ),
             ],
           ),
           if (portalUrl != null) ...[
@@ -216,7 +225,10 @@ class _ComputerView extends StatelessWidget {
                   onTap: () async {
                     final uri = Uri.tryParse(portalUrl!);
                     if (uri != null && await canLaunchUrl(uri)) {
-                      await launchUrl(uri, mode: LaunchMode.externalApplication);
+                      await launchUrl(
+                        uri,
+                        mode: LaunchMode.externalApplication,
+                      );
                     }
                   },
                   child: Padding(

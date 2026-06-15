@@ -16,7 +16,7 @@ typedef _CalendarsCallback = Future<ClientCalendarList> Function();
 
 class _StubHubClient extends CaleeHubClient {
   _StubHubClient({_CalendarsCallback? onCalendars})
-    : _onCalendars = onCalendars,
+    : _onCalendars = onCalendars, // ignore: prefer_initializing_formals
       super(baseUri: Uri.parse('http://localhost'));
 
   final _CalendarsCallback? _onCalendars;
@@ -27,30 +27,6 @@ class _StubHubClient extends CaleeHubClient {
     if (cb != null) return cb();
     return Future.value(const ClientCalendarList(calendars: []));
   }
-}
-
-ClientCalendarList _calendarList(List<String> ids) {
-  return ClientCalendarList(
-    calendars: ids
-        .map(
-          (id) => ClientCalendar(
-            id: id,
-            name: 'Cal $id',
-            serviceId: 's1',
-            serviceName: 'Service',
-            components: const [],
-            primaryKind: 'calendar',
-            supportsEvents: true,
-            supportsTasks: false,
-            supportsChores: false,
-            readOnly: true,
-            isSubscription: true,
-            source: 'subscription',
-            color: null,
-          ),
-        )
-        .toList(),
-  );
 }
 
 ClientService _sharingService() => const ClientService(
@@ -68,18 +44,17 @@ ClientService _sharingService() => const ClientService(
 Widget _wrap({
   required CaleeHubClient hubClient,
   List<ClientService>? services,
-}) =>
-    MaterialApp(
-      theme: CaleeTheme.buildThemeData(),
-      home: OutlookCalendarGuidePage(
-        hubClient: hubClient,
-        accessToken: 'token',
-        services: services ?? [_sharingService()],
-        accountId: 'acct1',
-        onDone: () {},
-        onViewCalendar: () {},
-      ),
-    );
+}) => MaterialApp(
+  theme: CaleeTheme.buildThemeData(),
+  home: OutlookCalendarGuidePage(
+    hubClient: hubClient,
+    accessToken: 'token',
+    services: services ?? [_sharingService()],
+    accountId: 'acct1',
+    onDone: () {},
+    onViewCalendar: () {},
+  ),
+);
 
 // ── Setup ──────────────────────────────────────────────────────────────────────
 
@@ -114,8 +89,9 @@ void main() {
       expect(find.text('Add Outlook Calendar'), findsOneWidget);
     });
 
-    testWidgets('shows error state when no service supports sharing',
-        (tester) async {
+    testWidgets('shows error state when no service supports sharing', (
+      tester,
+    ) async {
       // Service without sharing capability → error on load.
       final noSharingService = const ClientService(
         id: 'svc2',
@@ -157,25 +133,18 @@ void main() {
   });
 
   group('OutlookCalendarGuidePage — baseline tracking', () {
-    test(
-      'baseline is NOT loaded by default (flag starts false)',
-      () {
-        // Verified by code: _baselineLoaded = false is the initial value.
-        // _iveSharedIt returns early without showing success when !_baselineLoaded.
-        // This prevents the false-positive where all calendars appear new.
-        expect(true, isTrue);
-      },
-    );
+    test('baseline is NOT loaded by default (flag starts false)', () {
+      // Verified by code: _baselineLoaded = false is the initial value.
+      // _iveSharedIt returns early without showing success when !_baselineLoaded.
+      // This prevents the false-positive where all calendars appear new.
+      expect(true, isTrue);
+    });
 
     testWidgets(
       'page does not crash when calendars() throws during baseline load',
       (tester) async {
-        var callCount = 0;
         final client = _StubHubClient(
-          onCalendars: () {
-            callCount++;
-            return Future.error(Exception('network error'));
-          },
+          onCalendars: () => Future.error(Exception('network error')),
         );
 
         await tester.pumpWidget(_wrap(hubClient: client));

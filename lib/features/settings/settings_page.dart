@@ -23,6 +23,7 @@ class SettingsPage extends StatefulWidget {
     required this.bootstrap,
     required this.onSignOut,
     this.onBootstrapRefreshed,
+    this.onNavigateToCalendar,
     super.key,
   });
 
@@ -31,6 +32,8 @@ class SettingsPage extends StatefulWidget {
   final ClientBootstrap bootstrap;
   final VoidCallback onSignOut;
   final void Function(ClientBootstrap)? onBootstrapRefreshed;
+  // Called after manual onboarding "View calendar" to switch the home tab.
+  final VoidCallback? onNavigateToCalendar;
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
@@ -321,10 +324,12 @@ class _SettingsPageState extends State<SettingsPage> {
                       accountId: _controller.bootstrap.account.id,
                       isManual: true,
                       onDismissed: () => Navigator.of(context).pop(),
-                      onViewCalendar: () =>
-                          Navigator.of(context).popUntil(
-                            (route) => route.isFirst,
-                          ),
+                      onViewCalendar: () {
+                        Navigator.of(
+                          context,
+                        ).popUntil((route) => route.isFirst);
+                        widget.onNavigateToCalendar?.call();
+                      },
                     ),
                   ),
                 );

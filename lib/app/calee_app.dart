@@ -153,8 +153,9 @@ class _CaleeAppState extends State<CaleeApp> {
       _checkingOnboarding = true;
       _showingOnboarding = false;
     });
-    final status =
-        await CaleePreferences().loadCalendarOnboardingStatus(accountId);
+    final status = await CaleePreferences().loadCalendarOnboardingStatus(
+      accountId,
+    );
     if (!mounted) return;
     setState(() {
       _checkingOnboarding = false;
@@ -309,15 +310,12 @@ class _CaleeAppState extends State<CaleeApp> {
         authRepository: _sessionController.repository,
         onSignedIn: (result) async {
           // Capture pending intent state before completeSignIn clears it
-          final hasPendingIntent =
-              _followLinkController.pendingIntent != null;
+          final hasPendingIntent = _followLinkController.pendingIntent != null;
           setState(() => _showingFollowSignIn = false);
           await _sessionController.completeSignIn(result);
           // Only check onboarding when there is no pending calendar-follow link
           if (!hasPendingIntent) {
-            unawaited(
-              _checkAndShowOnboarding(result.bootstrap.account.id),
-            );
+            unawaited(_checkAndShowOnboarding(result.bootstrap.account.id));
           }
         },
       );
@@ -344,6 +342,9 @@ class _CaleeAppState extends State<CaleeApp> {
       onSignOut: () => _sessionController.signOut(),
       onBootstrapRefreshed: _sessionController.updateBootstrap,
       initialSelectedIndex: _initialHomeTab ?? 0,
+      onInitialTabConsumed: _initialHomeTab != null
+          ? () => setState(() => _initialHomeTab = null)
+          : null,
     );
   }
 }
