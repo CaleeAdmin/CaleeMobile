@@ -90,4 +90,50 @@ void main() {
 
     expect(find.text('Calee displays'), findsNothing);
   });
+
+  testWidgets('Settings shows "Add existing calendars" row', (tester) async {
+    await tester.pumpWidget(_wrap());
+    await tester.pumpAndSettle();
+
+    expect(find.text('Add existing calendars'), findsOneWidget);
+  });
+
+  testWidgets(
+    '"Add existing calendars" opens manual onboarding page when tapped',
+    (tester) async {
+      await tester.pumpWidget(_wrap());
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Add existing calendars'));
+      await tester.pumpAndSettle();
+
+      // Manual onboarding page is shown with title and correct buttons.
+      expect(find.text('Your Calee calendar is ready'), findsOneWidget);
+      expect(find.text('Not now'), findsOneWidget);
+      // Automatic-only buttons must not be shown in manual mode.
+      expect(find.text('Remind me later'), findsNothing);
+      expect(find.text("Don't show this again"), findsNothing);
+    },
+  );
+
+  testWidgets('Settings manual onboarding can navigate to source picker', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_wrap());
+    await tester.pumpAndSettle();
+
+    // Open manual onboarding.
+    await tester.tap(find.text('Add existing calendars'));
+    await tester.pumpAndSettle();
+
+    // Tap the FilledButton (primary button) on CalendarOnboardingPage.
+    // The Settings list row uses CaleeListRow (not a FilledButton), so
+    // widgetWithText(FilledButton, ...) uniquely finds the onboarding button.
+    await tester.tap(
+      find.widgetWithText(FilledButton, 'Add existing calendars'),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Where is your calendar?'), findsOneWidget);
+  });
 }

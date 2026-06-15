@@ -7,6 +7,7 @@ import '../../data/models/client_bootstrap.dart';
 import '../../data/models/client_calendar.dart';
 import '../../ui/calee_theme.dart';
 import '../../ui/calee_widgets.dart';
+import '../calendar_onboarding/calendar_onboarding_page.dart';
 import 'calendar_collections_page.dart';
 import 'family_setup_page.dart';
 import 'household_people_page.dart';
@@ -22,6 +23,7 @@ class SettingsPage extends StatefulWidget {
     required this.bootstrap,
     required this.onSignOut,
     this.onBootstrapRefreshed,
+    this.onNavigateToCalendar,
     super.key,
   });
 
@@ -30,6 +32,8 @@ class SettingsPage extends StatefulWidget {
   final ClientBootstrap bootstrap;
   final VoidCallback onSignOut;
   final void Function(ClientBootstrap)? onBootstrapRefreshed;
+  // Called after manual onboarding "View calendar" to switch the home tab.
+  final VoidCallback? onNavigateToCalendar;
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
@@ -301,6 +305,36 @@ class _SettingsPageState extends State<SettingsPage> {
         CaleeSection(
           title: 'Manage',
           children: [
+            CaleeListRow(
+              title: 'Add existing calendars',
+              subtitle:
+                  'Connect Google, Apple, Outlook, or other calendar links to Calee.',
+              leading: const Icon(
+                Icons.add_circle_outline,
+                size: 20,
+                color: CaleeColors.primary,
+              ),
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => CalendarOnboardingPage(
+                      hubClient: widget.hubClient,
+                      accessToken: widget.accessToken,
+                      services: _controller.bootstrap.services,
+                      accountId: _controller.bootstrap.account.id,
+                      isManual: true,
+                      onDismissed: () => Navigator.of(context).pop(),
+                      onViewCalendar: () {
+                        Navigator.of(
+                          context,
+                        ).popUntil((route) => route.isFirst);
+                        widget.onNavigateToCalendar?.call();
+                      },
+                    ),
+                  ),
+                );
+              },
+            ),
             CaleeListRow(
               title: 'Calendars and lists',
               subtitle: 'Manage calendars, task lists, and chore lists',
