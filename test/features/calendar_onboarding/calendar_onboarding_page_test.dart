@@ -27,19 +27,18 @@ Widget _wrap({
   required VoidCallback onDismissed,
   VoidCallback? onViewCalendar,
   bool isManual = false,
-}) =>
-    MaterialApp(
-      theme: CaleeTheme.buildThemeData(),
-      home: CalendarOnboardingPage(
-        hubClient: _StubHubClient(),
-        accessToken: 'token',
-        services: _emptyServices,
-        accountId: _kAccountId,
-        onDismissed: onDismissed,
-        onViewCalendar: onViewCalendar ?? () {},
-        isManual: isManual,
-      ),
-    );
+}) => MaterialApp(
+  theme: CaleeTheme.buildThemeData(),
+  home: CalendarOnboardingPage(
+    hubClient: _StubHubClient(),
+    accessToken: 'token',
+    services: _emptyServices,
+    accountId: _kAccountId,
+    onDismissed: onDismissed,
+    onViewCalendar: onViewCalendar ?? () {},
+    isManual: isManual,
+  ),
+);
 
 // ── Setup ──────────────────────────────────────────────────────────────────────
 
@@ -93,26 +92,25 @@ void main() {
       expect(find.text('Not now'), findsNothing);
     });
 
-    testWidgets(
-      '"Remind me later" saves remind_later and calls onDismissed',
-      (tester) async {
-        var dismissed = false;
-        _setUpSharedPrefs({'calee_pref_migrated_to_shared_prefs': true});
+    testWidgets('"Remind me later" saves remind_later and calls onDismissed', (
+      tester,
+    ) async {
+      var dismissed = false;
+      _setUpSharedPrefs({'calee_pref_migrated_to_shared_prefs': true});
 
-        await tester.pumpWidget(_wrap(onDismissed: () => dismissed = true));
+      await tester.pumpWidget(_wrap(onDismissed: () => dismissed = true));
 
-        await tester.tap(find.text('Remind me later'));
-        await tester.pumpAndSettle();
+      await tester.tap(find.text('Remind me later'));
+      await tester.pumpAndSettle();
 
-        expect(dismissed, isTrue);
+      expect(dismissed, isTrue);
 
-        final prefs = await SharedPreferences.getInstance();
-        expect(
-          prefs.getString('calee_calendar_onboarding_status_$_kAccountId'),
-          CalendarOnboardingStatus.remindLater,
-        );
-      },
-    );
+      final prefs = await SharedPreferences.getInstance();
+      expect(
+        prefs.getString('calee_calendar_onboarding_status_$_kAccountId'),
+        CalendarOnboardingStatus.remindLater,
+      );
+    });
 
     testWidgets(
       '"Don\'t show this again" saves dismissed_forever and calls onDismissed',
@@ -170,24 +168,27 @@ void main() {
   });
 
   group('CalendarOnboardingPage — manual (Settings) mode', () {
-    testWidgets('shows Add existing calendars and Not now buttons',
-        (tester) async {
+    testWidgets('shows Add existing calendars and Not now buttons', (
+      tester,
+    ) async {
       await tester.pumpWidget(_wrap(onDismissed: () {}, isManual: true));
 
       expect(find.text('Add existing calendars'), findsOneWidget);
       expect(find.text('Not now'), findsOneWidget);
     });
 
-    testWidgets('does not show Remind me later or Don\'t show this again',
-        (tester) async {
+    testWidgets('does not show Remind me later or Don\'t show this again', (
+      tester,
+    ) async {
       await tester.pumpWidget(_wrap(onDismissed: () {}, isManual: true));
 
       expect(find.text('Remind me later'), findsNothing);
       expect(find.text("Don't show this again"), findsNothing);
     });
 
-    testWidgets('"Not now" calls onDismissed without changing status',
-        (tester) async {
+    testWidgets('"Not now" calls onDismissed without changing status', (
+      tester,
+    ) async {
       var dismissed = false;
       _setUpSharedPrefs({'calee_pref_migrated_to_shared_prefs': true});
 

@@ -10,12 +10,7 @@ import '../../../ui/calee_design.dart';
 import '../calendar_added_success_page.dart';
 import '../calendar_onboarding_status.dart';
 
-enum _OutlookState {
-  loading,
-  aliasLoaded,
-  sharedWaiting,
-  error,
-}
+enum _OutlookState { loading, aliasLoaded, sharedWaiting, error }
 
 class OutlookCalendarGuidePage extends StatefulWidget {
   const OutlookCalendarGuidePage({
@@ -49,9 +44,8 @@ class _OutlookCalendarGuidePageState extends State<OutlookCalendarGuidePage> {
   bool _baselineLoaded = false;
   Set<String> _baselineCalendarIds = {};
 
-  ClientService? get _sharingService => widget.services.firstWhereOrNull(
-    (s) => s.supportsCalendarSharingAddress,
-  );
+  ClientService? get _sharingService =>
+      widget.services.firstWhereOrNull((s) => s.supportsCalendarSharingAddress);
 
   @override
   void initState() {
@@ -112,12 +106,13 @@ class _OutlookCalendarGuidePageState extends State<OutlookCalendarGuidePage> {
   void _copyAlias(BuildContext context) {
     final value = _address?.copyValue ?? _address?.address ?? '';
     Clipboard.setData(ClipboardData(text: value));
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('Calendar Share Alias copied')));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Calendar Share Alias copied')),
+    );
   }
 
   Future<void> _iveSharedIt(BuildContext context) async {
+    final nav = Navigator.of(context);
     setState(() {
       _checkingForCalendar = true;
       _state = _OutlookState.sharedWaiting;
@@ -145,11 +140,10 @@ class _OutlookCalendarGuidePageState extends State<OutlookCalendarGuidePage> {
           CalendarOnboardingStatus.dismissedForever,
         );
         if (!mounted) return;
-        Navigator.of(context).push(
+        nav.push(
           MaterialPageRoute<void>(
-            builder: (_) => CalendarAddedSuccessPage(
-              onViewCalendar: widget.onViewCalendar,
-            ),
+            builder: (_) =>
+                CalendarAddedSuccessPage(onViewCalendar: widget.onViewCalendar),
           ),
         );
       } else {
@@ -172,7 +166,8 @@ class _OutlookCalendarGuidePageState extends State<OutlookCalendarGuidePage> {
         _OutlookState.error => CaleeEmptyState(
           icon: Icons.error_outline,
           title: 'Not available',
-          body: _error ??
+          body:
+              _error ??
               'Calendar sharing could not be loaded. Please try again.',
           action: _sharingService != null
               ? TextButton(
@@ -338,10 +333,7 @@ class _AliasView extends StatelessWidget {
             child: const Text("I've shared it"),
           ),
           const SizedBox(height: CaleeSpacing.sm),
-          TextButton(
-            onPressed: onBack,
-            child: const Text('Back'),
-          ),
+          TextButton(onPressed: onBack, child: const Text('Back')),
         ],
       ),
     );

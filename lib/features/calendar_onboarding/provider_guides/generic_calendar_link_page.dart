@@ -94,7 +94,9 @@ class _GenericCalendarLinkPageState extends State<GenericCalendarLinkPage> {
     final service = _selectedService;
     if (service == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No connected calendar service available.')),
+        const SnackBar(
+          content: Text('No connected calendar service available.'),
+        ),
       );
       return;
     }
@@ -120,9 +122,8 @@ class _GenericCalendarLinkPageState extends State<GenericCalendarLinkPage> {
       if (!mounted) return;
       Navigator.of(context).push(
         MaterialPageRoute<void>(
-          builder: (_) => CalendarAddedSuccessPage(
-            onViewCalendar: widget.onViewCalendar,
-          ),
+          builder: (_) =>
+              CalendarAddedSuccessPage(onViewCalendar: widget.onViewCalendar),
         ),
       );
     } catch (error) {
@@ -182,7 +183,7 @@ class _GenericCalendarLinkPageState extends State<GenericCalendarLinkPage> {
               const SizedBox(height: CaleeSpacing.sectionSpacing),
               if (services.length >= 2) ...[
                 DropdownButtonFormField<ClientService>(
-                  value: _selectedService,
+                  initialValue: _selectedService,
                   decoration: const InputDecoration(labelText: 'Service'),
                   items: [
                     for (final s in services)
@@ -240,9 +241,7 @@ class _GenericCalendarLinkPageState extends State<GenericCalendarLinkPage> {
                     Text(_showMoreOptions ? 'Hide options' : 'More options'),
                     const SizedBox(width: CaleeSpacing.xs),
                     Icon(
-                      _showMoreOptions
-                          ? Icons.expand_less
-                          : Icons.expand_more,
+                      _showMoreOptions ? Icons.expand_less : Icons.expand_more,
                       size: 18,
                     ),
                   ],

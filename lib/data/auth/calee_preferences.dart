@@ -70,7 +70,8 @@ class CaleePreferences {
   Future<String> loadCalendarOnboardingStatus(String accountId) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      return prefs.getString(_calendarOnboardingKey(accountId)) ?? 'not_started';
+      return prefs.getString(_calendarOnboardingKey(accountId)) ??
+          'not_started';
     } catch (_) {
       return 'not_started';
     }

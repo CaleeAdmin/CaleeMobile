@@ -78,6 +78,8 @@ ClientBootstrap _choresBootstrap() => ClientBootstrap(
 Widget _buildHome({
   required ClientBootstrap bootstrap,
   VoidCallback? onSignOut,
+  int initialSelectedIndex = 0,
+  VoidCallback? onInitialTabConsumed,
 }) {
   return MaterialApp(
     theme: CaleeTheme.buildThemeData(),
@@ -86,6 +88,8 @@ Widget _buildHome({
       accessToken: 'tok',
       bootstrap: bootstrap,
       onSignOut: onSignOut ?? () {},
+      initialSelectedIndex: initialSelectedIndex,
+      onInitialTabConsumed: onInitialTabConsumed,
     ),
   );
 }
@@ -258,5 +262,68 @@ void main() {
         reason: 'Every FAB must have a unique heroTag',
       );
     });
+  });
+
+  group('CaleeHomePage — initialSelectedIndex one-time behaviour', () {
+    testWidgets('initialSelectedIndex: 1 opens Calendar tab', (tester) async {
+      await tester.pumpWidget(
+        _buildHome(bootstrap: _noChoresBootstrap(), initialSelectedIndex: 1),
+      );
+      await tester.pump();
+
+      final bar = tester.widget<NavigationBar>(find.byType(NavigationBar));
+      expect(bar.selectedIndex, 1);
+    });
+
+    testWidgets(
+      'onInitialTabConsumed is called after first frame when initialSelectedIndex != 0',
+      (tester) async {
+        var consumed = false;
+        await tester.pumpWidget(
+          _buildHome(
+            bootstrap: _noChoresBootstrap(),
+            initialSelectedIndex: 1,
+            onInitialTabConsumed: () => consumed = true,
+          ),
+        );
+        await tester.pump();
+
+        expect(consumed, isTrue);
+      },
+    );
+
+    testWidgets(
+      'onInitialTabConsumed is NOT called when initialSelectedIndex is 0',
+      (tester) async {
+        var consumed = false;
+        await tester.pumpWidget(
+          _buildHome(
+            bootstrap: _noChoresBootstrap(),
+            initialSelectedIndex: 0,
+            onInitialTabConsumed: () => consumed = true,
+          ),
+        );
+        await tester.pump();
+
+        expect(consumed, isFalse);
+      },
+    );
+
+    testWidgets(
+      'switching tabs after initialSelectedIndex does not reset to initial',
+      (tester) async {
+        await tester.pumpWidget(
+          _buildHome(bootstrap: _noChoresBootstrap(), initialSelectedIndex: 1),
+        );
+        await tester.pump();
+
+        // Switch to Today (index 0)
+        await tester.tap(find.text('Today'));
+        await tester.pump();
+
+        final bar = tester.widget<NavigationBar>(find.byType(NavigationBar));
+        expect(bar.selectedIndex, 0);
+      },
+    );
   });
 }
