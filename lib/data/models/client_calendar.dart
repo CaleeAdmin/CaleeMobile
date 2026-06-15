@@ -13,6 +13,32 @@ class ClientCalendarList {
   final List<ClientCalendar> calendars;
 }
 
+// Calee calendar model
+//
+// Calee displays all calendars together, but only Calee calendars are edited
+// in Calee.
+//
+// Calee calendars:
+// - Are created and managed by Calee.
+// - Are fully two-way editable.
+// - Can be edited in CaleeMobile, Calee Portal, and optionally through CalDAV.
+// - Are best for events users want to manage directly in Calee.
+//
+// Connected / non-Calee calendars:
+// - Come from Google, Apple/iCloud, Outlook, school, sport, roster, booking,
+//   or other calendar systems.
+// - Are added using subscription URLs for now, such as ICS, webcal, private
+//   iCal, published calendar, or shared calendar links.
+// - Are read-only in Calee.
+// - Must be edited in the original app or provider.
+// - Are best for showing existing events on the Calee display.
+//
+// UX implications:
+// - Calee calendar events may show create, edit, and delete controls.
+// - Connected calendar events should show read-only messaging and should not
+//   expose edit/delete controls in CaleeMobile.
+// - User-facing wording should say "Add calendars you already use so their
+//   events appear on your Calee display", not "manage everything in Calee".
 class ClientCalendar {
   const ClientCalendar({
     required this.id,
