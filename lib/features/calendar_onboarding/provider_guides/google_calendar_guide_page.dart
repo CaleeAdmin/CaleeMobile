@@ -15,6 +15,7 @@ class GoogleCalendarGuidePage extends StatefulWidget {
     required this.services,
     required this.accountId,
     required this.onDone,
+    required this.onViewCalendar,
     super.key,
   });
 
@@ -23,6 +24,7 @@ class GoogleCalendarGuidePage extends StatefulWidget {
   final List<ClientService> services;
   final String accountId;
   final VoidCallback onDone;
+  final VoidCallback onViewCalendar;
 
   @override
   State<GoogleCalendarGuidePage> createState() =>
@@ -46,6 +48,7 @@ class _GoogleCalendarGuidePageState extends State<GoogleCalendarGuidePage> {
           services: widget.services,
           accountId: widget.accountId,
           onDone: widget.onDone,
+          onViewCalendar: widget.onViewCalendar,
         ),
       ),
     );

@@ -15,6 +15,7 @@ class CaleeHomePage extends StatefulWidget {
     required this.bootstrap,
     required this.onSignOut,
     this.onBootstrapRefreshed,
+    this.initialSelectedIndex = 0,
     super.key,
   });
 
@@ -23,13 +24,14 @@ class CaleeHomePage extends StatefulWidget {
   final ClientBootstrap bootstrap;
   final VoidCallback onSignOut;
   final void Function(ClientBootstrap)? onBootstrapRefreshed;
+  final int initialSelectedIndex;
 
   @override
   State<CaleeHomePage> createState() => _CaleeHomePageState();
 }
 
 class _CaleeHomePageState extends State<CaleeHomePage> {
-  int _selectedIndex = 0;
+  late int _selectedIndex;
   late final List<_CaleeTab> _tabs;
 
   bool get _hasChoreService =>
@@ -51,6 +53,7 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
   @override
   void initState() {
     super.initState();
+    _selectedIndex = widget.initialSelectedIndex;
 
     _tabs = [
       _CaleeTab(

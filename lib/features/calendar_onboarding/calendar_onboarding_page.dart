@@ -14,6 +14,8 @@ class CalendarOnboardingPage extends StatelessWidget {
     required this.services,
     required this.accountId,
     required this.onDismissed,
+    required this.onViewCalendar,
+    this.isManual = false,
     super.key,
   });
 
@@ -22,6 +24,12 @@ class CalendarOnboardingPage extends StatelessWidget {
   final List<ClientService> services;
   final String accountId;
   final VoidCallback onDismissed;
+  final VoidCallback onViewCalendar;
+
+  /// When true the page was opened manually from Settings. Shows "Not now"
+  /// instead of "Remind me later" / "Don't show this again", and does not
+  /// mutate the saved onboarding status.
+  final bool isManual;
 
   Future<void> _remindLater(BuildContext context) async {
     await CaleePreferences().saveCalendarOnboardingStatus(
@@ -49,6 +57,7 @@ class CalendarOnboardingPage extends StatelessWidget {
           services: services,
           accountId: accountId,
           onDone: onDismissed,
+          onViewCalendar: onViewCalendar,
         ),
       ),
     );
@@ -95,15 +104,22 @@ class CalendarOnboardingPage extends StatelessWidget {
                 child: const Text('Add existing calendars'),
               ),
               const SizedBox(height: CaleeSpacing.sm),
-              OutlinedButton(
-                onPressed: () => _remindLater(context),
-                child: const Text('Remind me later'),
-              ),
-              const SizedBox(height: CaleeSpacing.sm),
-              TextButton(
-                onPressed: () => _dismissForever(context),
-                child: const Text("Don't show this again"),
-              ),
+              if (isManual) ...[
+                OutlinedButton(
+                  onPressed: onDismissed,
+                  child: const Text('Not now'),
+                ),
+              ] else ...[
+                OutlinedButton(
+                  onPressed: () => _remindLater(context),
+                  child: const Text('Remind me later'),
+                ),
+                const SizedBox(height: CaleeSpacing.sm),
+                TextButton(
+                  onPressed: () => _dismissForever(context),
+                  child: const Text("Don't show this again"),
+                ),
+              ],
             ],
           ),
         ),

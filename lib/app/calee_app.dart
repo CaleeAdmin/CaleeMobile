@@ -41,6 +41,7 @@ class _CaleeAppState extends State<CaleeApp> {
   // Onboarding gate state (only active after fresh sign-in, not session restore)
   bool _checkingOnboarding = false;
   bool _showingOnboarding = false;
+  int? _initialHomeTab;
 
   List<LocalCalendarSubscription> _localSubscriptions = [];
   bool _localSubscriptionsLoaded = false;
@@ -169,6 +170,19 @@ class _CaleeAppState extends State<CaleeApp> {
     setState(() {
       _showingOnboarding = false;
       _checkingOnboarding = false;
+      _initialHomeTab = null;
+    });
+  }
+
+  void _onOnboardingViewCalendar() {
+    setState(() {
+      _showingOnboarding = false;
+      _checkingOnboarding = false;
+      _initialHomeTab = 1; // Calendar tab
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _navigatorKey.currentState?.popUntil((route) => route.isFirst);
     });
   }
 
@@ -319,6 +333,7 @@ class _CaleeAppState extends State<CaleeApp> {
         services: _sessionController.bootstrap!.services,
         accountId: _sessionController.bootstrap!.account.id,
         onDismissed: _onOnboardingDone,
+        onViewCalendar: _onOnboardingViewCalendar,
       );
     }
 
@@ -328,6 +343,7 @@ class _CaleeAppState extends State<CaleeApp> {
       bootstrap: _sessionController.bootstrap!,
       onSignOut: () => _sessionController.signOut(),
       onBootstrapRefreshed: _sessionController.updateBootstrap,
+      initialSelectedIndex: _initialHomeTab ?? 0,
     );
   }
 }

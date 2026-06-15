@@ -24,6 +24,7 @@ class OutlookCalendarGuidePage extends StatefulWidget {
     required this.services,
     required this.accountId,
     required this.onDone,
+    required this.onViewCalendar,
     super.key,
   });
 
@@ -32,6 +33,7 @@ class OutlookCalendarGuidePage extends StatefulWidget {
   final List<ClientService> services;
   final String accountId;
   final VoidCallback onDone;
+  final VoidCallback onViewCalendar;
 
   @override
   State<OutlookCalendarGuidePage> createState() =>
@@ -44,7 +46,8 @@ class _OutlookCalendarGuidePageState extends State<OutlookCalendarGuidePage> {
   ClientServiceCalendarAddress? _address;
   String? _error;
   bool _checkingForCalendar = false;
-  List<String>? _baselineCalendarIds;
+  bool _baselineLoaded = false;
+  Set<String> _baselineCalendarIds = {};
 
   ClientService? get _sharingService => widget.services.firstWhereOrNull(
     (s) => s.supportsCalendarSharingAddress,
@@ -96,9 +99,13 @@ class _OutlookCalendarGuidePageState extends State<OutlookCalendarGuidePage> {
         accessToken: widget.accessToken,
       );
       if (!mounted) return;
-      _baselineCalendarIds = list.calendars.map((c) => c.id).toList();
+      setState(() {
+        _baselineCalendarIds = list.calendars.map((c) => c.id).toSet();
+        _baselineLoaded = true;
+      });
     } catch (_) {
-      // Non-critical: if we can't get baseline, we show success anyway
+      // Baseline load failed; _baselineLoaded stays false.
+      // _iveSharedIt will show the waiting state instead of false success.
     }
   }
 
@@ -122,12 +129,14 @@ class _OutlookCalendarGuidePageState extends State<OutlookCalendarGuidePage> {
       );
       if (!mounted) return;
 
+      if (!_baselineLoaded) {
+        // Cannot detect new calendars reliably; stay on waiting state.
+        setState(() => _checkingForCalendar = false);
+        return;
+      }
+
       final newCalendars = list.calendars
-          .where(
-            (c) =>
-                _baselineCalendarIds == null ||
-                !_baselineCalendarIds!.contains(c.id),
-          )
+          .where((c) => !_baselineCalendarIds.contains(c.id))
           .toList();
 
       if (newCalendars.isNotEmpty) {
@@ -139,7 +148,7 @@ class _OutlookCalendarGuidePageState extends State<OutlookCalendarGuidePage> {
         Navigator.of(context).push(
           MaterialPageRoute<void>(
             builder: (_) => CalendarAddedSuccessPage(
-              onViewCalendar: widget.onDone,
+              onViewCalendar: widget.onViewCalendar,
             ),
           ),
         );
@@ -154,8 +163,6 @@ class _OutlookCalendarGuidePageState extends State<OutlookCalendarGuidePage> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
     return CaleeScaffold(
       appBar: AppBar(title: const Text('Add Outlook Calendar')),
       body: switch (_state) {
@@ -280,7 +287,7 @@ class _AliasView extends StatelessWidget {
             children: [
               _StepRow(
                 number: 1,
-                text: 'In the Calee app, copy your Calendar Share Alias above.',
+                text: 'In the Calee app, copy your Calendar Share Alias.',
               ),
               _StepRow(number: 2, text: 'Open the Outlook app on your phone.'),
               _StepRow(number: 3, text: 'Go to Calendar.'),
