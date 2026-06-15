@@ -62,6 +62,32 @@ class CaleePreferences {
     }
   }
 
+  // ── Calendar onboarding ───────────────────────────────────────────────────
+
+  static String _calendarOnboardingKey(String accountId) =>
+      'calee_calendar_onboarding_status_$accountId';
+
+  Future<String> loadCalendarOnboardingStatus(String accountId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getString(_calendarOnboardingKey(accountId)) ?? 'not_started';
+    } catch (_) {
+      return 'not_started';
+    }
+  }
+
+  Future<void> saveCalendarOnboardingStatus(
+    String accountId,
+    String status,
+  ) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_calendarOnboardingKey(accountId), status);
+    } catch (_) {
+      // Best-effort; failures should not block the app.
+    }
+  }
+
   // ── Migration ─────────────────────────────────────────────────────────────
 
   Future<void> _migrateIfNeeded(SharedPreferences prefs) async {

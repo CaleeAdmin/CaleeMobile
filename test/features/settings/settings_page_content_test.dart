@@ -90,4 +90,23 @@ void main() {
 
     expect(find.text('Calee displays'), findsNothing);
   });
+
+  testWidgets('Settings shows "Add existing calendars" row', (tester) async {
+    await tester.pumpWidget(_wrap());
+    await tester.pumpAndSettle();
+
+    expect(find.text('Add existing calendars'), findsOneWidget);
+  });
+
+  testWidgets(
+      '"Add existing calendars" opens source picker when tapped',
+      (tester) async {
+    await tester.pumpWidget(_wrap());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Add existing calendars'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Where is your calendar?'), findsOneWidget);
+  });
 }

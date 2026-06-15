@@ -7,6 +7,7 @@ import '../../data/models/client_bootstrap.dart';
 import '../../data/models/client_calendar.dart';
 import '../../ui/calee_theme.dart';
 import '../../ui/calee_widgets.dart';
+import '../calendar_onboarding/calendar_source_picker_page.dart';
 import 'calendar_collections_page.dart';
 import 'family_setup_page.dart';
 import 'household_people_page.dart';
@@ -301,6 +302,32 @@ class _SettingsPageState extends State<SettingsPage> {
         CaleeSection(
           title: 'Manage',
           children: [
+            CaleeListRow(
+              title: 'Add existing calendars',
+              subtitle:
+                  'Connect Google, Apple, Outlook, or other calendar links to Calee.',
+              leading: const Icon(
+                Icons.add_circle_outline,
+                size: 20,
+                color: CaleeColors.primary,
+              ),
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    settings: const RouteSettings(
+                      name: 'calendar_source_picker',
+                    ),
+                    builder: (_) => CalendarSourcePickerPage(
+                      hubClient: widget.hubClient,
+                      accessToken: widget.accessToken,
+                      services: _controller.bootstrap.services,
+                      accountId: _controller.bootstrap.account.id,
+                      onDone: () => Navigator.of(context).pop(),
+                    ),
+                  ),
+                );
+              },
+            ),
             CaleeListRow(
               title: 'Calendars and lists',
               subtitle: 'Manage calendars, task lists, and chore lists',

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../data/api/calee_hub_client.dart';
+import '../data/auth/calee_preferences.dart';
 import '../data/auth/session_store.dart';
 import '../features/auth/auth_repository.dart';
 import '../features/auth/login_page.dart';
@@ -10,6 +11,8 @@ import '../features/auth/session_controller.dart';
 import '../features/calendar_follow/calendar_follow_intent.dart';
 import '../features/calendar_follow/calendar_follow_link_controller.dart';
 import '../features/calendar_follow/follow_calendar_page.dart';
+import '../features/calendar_onboarding/calendar_onboarding_page.dart';
+import '../features/calendar_onboarding/calendar_onboarding_status.dart';
 import '../features/local_subscriber/local_calendar_subscription.dart';
 import '../features/local_subscriber/local_calendar_subscription_repository.dart';
 import '../features/local_subscriber/local_subscriber_calendar_page.dart';
@@ -34,6 +37,10 @@ class _CaleeAppState extends State<CaleeApp> {
   // true while the user has tapped "Add to Calee"
   bool _showingFollowSignIn = false;
   bool _processingFollowLink = false;
+
+  // Onboarding gate state (only active after fresh sign-in, not session restore)
+  bool _checkingOnboarding = false;
+  bool _showingOnboarding = false;
 
   List<LocalCalendarSubscription> _localSubscriptions = [];
   bool _localSubscriptionsLoaded = false;
@@ -140,6 +147,31 @@ class _CaleeAppState extends State<CaleeApp> {
     });
   }
 
+  Future<void> _checkAndShowOnboarding(String accountId) async {
+    setState(() {
+      _checkingOnboarding = true;
+      _showingOnboarding = false;
+    });
+    final status =
+        await CaleePreferences().loadCalendarOnboardingStatus(accountId);
+    if (!mounted) return;
+    setState(() {
+      _checkingOnboarding = false;
+      _showingOnboarding = shouldShowCalendarOnboarding(
+        status: status,
+        hasPendingCalendarFollowIntent:
+            _followLinkController.pendingIntent != null,
+      );
+    });
+  }
+
+  void _onOnboardingDone() {
+    setState(() {
+      _showingOnboarding = false;
+      _checkingOnboarding = false;
+    });
+  }
+
   void _showSnackBar(String message) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -198,7 +230,7 @@ class _CaleeAppState extends State<CaleeApp> {
     if (!_sessionController.isSignedIn) {
       final pendingIntent = _followLinkController.pendingIntent;
 
-      // User chose "Add to Calee" → show login
+      // User chose "Add to Calee" → show login (pending intent present, skip onboarding)
       if (_showingFollowSignIn) {
         return LoginPage(
           authRepository: _sessionController.repository,
@@ -258,13 +290,35 @@ class _CaleeAppState extends State<CaleeApp> {
         );
       }
 
-      // Default → login
+      // Default → login; on success check if onboarding should be shown
       return LoginPage(
         authRepository: _sessionController.repository,
         onSignedIn: (result) async {
+          // Capture pending intent state before completeSignIn clears it
+          final hasPendingIntent =
+              _followLinkController.pendingIntent != null;
           setState(() => _showingFollowSignIn = false);
           await _sessionController.completeSignIn(result);
+          // Only check onboarding when there is no pending calendar-follow link
+          if (!hasPendingIntent) {
+            unawaited(
+              _checkAndShowOnboarding(result.bootstrap.account.id),
+            );
+          }
         },
+      );
+    }
+
+    // Show loading spinner while checking onboarding status after fresh sign-in
+    if (_checkingOnboarding) return const _SessionRestorePage();
+
+    if (_showingOnboarding) {
+      return CalendarOnboardingPage(
+        hubClient: _hubClient,
+        accessToken: _sessionController.accessToken!,
+        services: _sessionController.bootstrap!.services,
+        accountId: _sessionController.bootstrap!.account.id,
+        onDismissed: _onOnboardingDone,
       );
     }
 
