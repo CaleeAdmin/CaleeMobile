@@ -14,6 +14,7 @@ class GenericCalendarLinkPage extends StatefulWidget {
     required this.services,
     required this.accountId,
     required this.onDone,
+    required this.onViewCalendar,
     super.key,
   });
 
@@ -22,6 +23,7 @@ class GenericCalendarLinkPage extends StatefulWidget {
   final List<ClientService> services;
   final String accountId;
   final VoidCallback onDone;
+  final VoidCallback onViewCalendar;
 
   @override
   State<GenericCalendarLinkPage> createState() =>
@@ -119,7 +121,7 @@ class _GenericCalendarLinkPageState extends State<GenericCalendarLinkPage> {
       Navigator.of(context).push(
         MaterialPageRoute<void>(
           builder: (_) => CalendarAddedSuccessPage(
-            onViewCalendar: widget.onDone,
+            onViewCalendar: widget.onViewCalendar,
           ),
         ),
       );

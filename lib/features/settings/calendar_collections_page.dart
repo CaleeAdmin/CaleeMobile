@@ -144,7 +144,7 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
           onTap: _openCreateSheet,
         ),
         CaleeAction(
-          label: 'Add calendar link',
+          label: 'Add existing calendar',
           icon: Icons.link_rounded,
           onTap: _openSubscribeSheet,
         ),

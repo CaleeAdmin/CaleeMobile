@@ -14,6 +14,7 @@ class AppleIcloudCalendarGuidePage extends StatefulWidget {
     required this.services,
     required this.accountId,
     required this.onDone,
+    required this.onViewCalendar,
     super.key,
   });
 
@@ -22,6 +23,7 @@ class AppleIcloudCalendarGuidePage extends StatefulWidget {
   final List<ClientService> services;
   final String accountId;
   final VoidCallback onDone;
+  final VoidCallback onViewCalendar;
 
   @override
   State<AppleIcloudCalendarGuidePage> createState() =>
@@ -99,7 +101,7 @@ class _AppleIcloudCalendarGuidePageState
       Navigator.of(context).push(
         MaterialPageRoute<void>(
           builder: (_) => CalendarAddedSuccessPage(
-            onViewCalendar: widget.onDone,
+            onViewCalendar: widget.onViewCalendar,
           ),
         ),
       );

@@ -15,6 +15,7 @@ class CalendarSourcePickerPage extends StatelessWidget {
     required this.services,
     required this.accountId,
     required this.onDone,
+    required this.onViewCalendar,
     super.key,
   });
 
@@ -23,6 +24,7 @@ class CalendarSourcePickerPage extends StatelessWidget {
   final List<ClientService> services;
   final String accountId;
   final VoidCallback onDone;
+  final VoidCallback onViewCalendar;
 
   void _push(BuildContext context, Widget page) {
     Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => page));
@@ -65,6 +67,7 @@ class CalendarSourcePickerPage extends StatelessWidget {
                     services: services,
                     accountId: accountId,
                     onDone: onDone,
+                    onViewCalendar: onViewCalendar,
                   ),
                 ),
               ),
@@ -83,6 +86,7 @@ class CalendarSourcePickerPage extends StatelessWidget {
                     services: services,
                     accountId: accountId,
                     onDone: onDone,
+                    onViewCalendar: onViewCalendar,
                   ),
                 ),
               ),
@@ -101,6 +105,7 @@ class CalendarSourcePickerPage extends StatelessWidget {
                     services: services,
                     accountId: accountId,
                     onDone: onDone,
+                    onViewCalendar: onViewCalendar,
                   ),
                 ),
               ),
@@ -119,6 +124,7 @@ class CalendarSourcePickerPage extends StatelessWidget {
                     services: services,
                     accountId: accountId,
                     onDone: onDone,
+                    onViewCalendar: onViewCalendar,
                   ),
                 ),
               ),
