@@ -92,6 +92,7 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
           hubClient: widget.hubClient,
           accessToken: widget.accessToken,
           services: widget.bootstrap.services,
+          accountId: widget.bootstrap.account.id,
         ),
       ),
       _CaleeTab(
@@ -102,6 +103,7 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
           hubClient: widget.hubClient,
           accessToken: widget.accessToken,
           services: widget.bootstrap.services,
+          accountId: widget.bootstrap.account.id,
         ),
       ),
       if (_hasChoreService)
@@ -114,6 +116,7 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
             accessToken: widget.accessToken,
             services: widget.bootstrap.services,
             households: widget.bootstrap.contexts.households,
+            accountId: widget.bootstrap.account.id,
           ),
         ),
       _CaleeTab(

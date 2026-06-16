@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../data/api/calee_hub_client.dart';
 import '../../../data/models/client_bootstrap.dart';
@@ -9,6 +12,7 @@ import 'generic_calendar_link_page.dart';
 enum _GoogleGuideView { main, continueOnComputer, phoneFallback }
 
 const _kWebsiteGuideUrl = 'calee.com.au/start';
+const _kWebsiteGuideFullUrl = 'https://calee.com.au/start';
 
 class GoogleCalendarGuidePage extends StatefulWidget {
   const GoogleCalendarGuidePage({
@@ -49,6 +53,13 @@ class _GoogleCalendarGuidePageState extends State<GoogleCalendarGuidePage> {
       _view = _previousView ?? _GoogleGuideView.main;
       _previousView = null;
     });
+  }
+
+  Future<void> _launchWebsiteGuide() async {
+    await launchUrl(
+      Uri.parse(_kWebsiteGuideFullUrl),
+      mode: LaunchMode.externalApplication,
+    );
   }
 
   void _openLink(BuildContext context) {
@@ -104,7 +115,7 @@ class _GoogleCalendarGuidePageState extends State<GoogleCalendarGuidePage> {
                 const SnackBar(content: Text('Website address copied')),
               );
             },
-            onOpenGuideOnPhone: () => _goTo(_GoogleGuideView.phoneFallback),
+            onOpenGuideOnPhone: () => unawaited(_launchWebsiteGuide()),
             onPasteLink: () => _openLink(context),
           ),
           _GoogleGuideView.phoneFallback => _PhoneFallbackView(

@@ -243,7 +243,7 @@ class _AppleIcloudCalendarGuidePageState
                 autocorrect: false,
                 decoration: const InputDecoration(
                   labelText: 'Calendar link',
-                  hintText: 'https://example.com/calendar.ics',
+                  hintText: 'webcal://p12-caldav.icloud.com/...',
                 ),
                 validator: (v) {
                   final url = (v ?? '').trim();

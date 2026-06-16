@@ -232,6 +232,27 @@ void main() {
         expect(find.text('Add calendar link'), findsNothing);
       },
     );
+
+    testWidgets(
+      'source picker opened from collections receives the correct accountId',
+      (tester) async {
+        // _wrapCollections passes accountId: 'acct1'; opening the source
+        // picker should succeed without throwing a missing-accountId error,
+        // confirming the accountId is forwarded correctly.
+        await tester.pumpWidget(_wrapCollections());
+        await tester.pump(const Duration(milliseconds: 50));
+
+        await tester.tap(find.byIcon(Icons.add));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('Add existing calendar'));
+        await tester.pumpAndSettle();
+
+        // Source picker rendered — accountId was propagated successfully.
+        expect(find.text('Where is your calendar?'), findsOneWidget);
+        expect(find.text('Google Calendar'), findsOneWidget);
+      },
+    );
   });
 
   group('Generic calendar-link form copy', () {
@@ -318,6 +339,61 @@ void main() {
     });
   });
 
+  group('Google guide — "Open guide on this phone" and phone fallback', () {
+    final List<String> launchedUrls = [];
+
+    setUp(() {
+      launchedUrls.clear();
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(
+            const MethodChannel('plugins.flutter.io/url_launcher'),
+            (call) async {
+              final args = call.arguments as Map<Object?, Object?>?;
+              final url = args?['url'] as String?;
+              if (url != null) launchedUrls.add(url);
+              return true;
+            },
+          );
+    });
+
+    tearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(
+            const MethodChannel('plugins.flutter.io/url_launcher'),
+            null,
+          );
+    });
+
+    testWidgets(
+      '"Open guide on this phone" in computer view launches https://calee.com.au/start',
+      (tester) async {
+        await tester.pumpWidget(_wrapGoogleGuide());
+
+        await tester.tap(find.text('Continue on computer'));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('Open guide on this phone'));
+        await tester.pumpAndSettle();
+
+        expect(launchedUrls, contains('https://calee.com.au/start'));
+        expect(find.text('Use your phone instead'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      '"No computer available?" still opens the in-app phone fallback',
+      (tester) async {
+        await tester.pumpWidget(_wrapGoogleGuide());
+
+        await tester.tap(find.text('No computer available?'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Use your phone instead'), findsOneWidget);
+        expect(launchedUrls, isEmpty);
+      },
+    );
+  });
+
   group('Apple / iCloud guide copy', () {
     testWidgets('says "Open the Apple Calendar app."', (tester) async {
       await tester.pumpWidget(_wrapAppleGuide());
@@ -336,6 +412,19 @@ void main() {
 
       expect(find.text('My iCloud Calendar'), findsOneWidget);
     });
+
+    testWidgets(
+      'calendar-link field uses webcal://p12-caldav.icloud.com/... as hint',
+      (tester) async {
+        await tester.pumpWidget(_wrapAppleGuide());
+
+        expect(
+          find.text('webcal://p12-caldav.icloud.com/...'),
+          findsOneWidget,
+        );
+        expect(find.text('https://example.com/calendar.ics'), findsNothing);
+      },
+    );
   });
 
   group('Outlook guide copy', () {

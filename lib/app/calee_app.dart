@@ -139,6 +139,7 @@ class _CaleeAppState extends State<CaleeApp> {
             hubClient: _hubClient,
             accessToken: _sessionController.accessToken!,
             services: _sessionController.bootstrap!.services,
+            accountId: _sessionController.bootstrap!.account.id,
             autoOpenSubscribeForm: true,
             initialSubscriptionUrl: intent.url,
             initialSubscriptionName: intent.title,

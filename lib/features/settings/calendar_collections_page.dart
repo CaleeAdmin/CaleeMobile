@@ -63,7 +63,7 @@ class CalendarCollectionsPage extends StatefulWidget {
     required this.hubClient,
     required this.accessToken,
     required this.services,
-    this.accountId = '',
+    required this.accountId,
     this.initialCreateKind,
     this.autoOpenCreate = false,
     this.autoOpenSubscribe = false,
