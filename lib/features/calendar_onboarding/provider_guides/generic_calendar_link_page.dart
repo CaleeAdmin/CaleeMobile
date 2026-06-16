@@ -19,7 +19,9 @@ class GenericCalendarLinkPage extends StatefulWidget {
     this.introText =
         'Paste any supported calendar link, such as an ICS, iCal, or webcal link.',
     this.exampleText =
-        'Examples include school calendars, sports calendars, work rosters, staff calendars, booking calendars, public holiday calendars, or shared calendar links.',
+        'Examples: school calendar, sports calendar, work roster, staff calendar, '
+        'booking calendar, public holidays, or another shared calendar link.',
+    this.showExamples = true,
     this.linkHintText = 'https://example.com/calendar.ics',
     this.nameHintText = 'Shared calendar',
     this.readOnlyText =
@@ -41,6 +43,7 @@ class GenericCalendarLinkPage extends StatefulWidget {
   final String pageTitle;
   final String introText;
   final String exampleText;
+  final bool showExamples;
   final String linkHintText;
   final String nameHintText;
   final String readOnlyText;
@@ -189,13 +192,15 @@ class _GenericCalendarLinkPageState extends State<GenericCalendarLinkPage> {
                   color: CaleeColors.textSecondary,
                 ),
               ),
-              const SizedBox(height: CaleeSpacing.xs),
-              Text(
-                widget.exampleText,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: CaleeColors.textSecondary,
+              if (widget.showExamples) ...[
+                const SizedBox(height: CaleeSpacing.xs),
+                Text(
+                  widget.exampleText,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: CaleeColors.textSecondary,
+                  ),
                 ),
-              ),
+              ],
               const SizedBox(height: CaleeSpacing.xs),
               Text(
                 'Calendar links often end in .ics or start with webcal://',

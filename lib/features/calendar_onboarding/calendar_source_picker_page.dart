@@ -44,7 +44,10 @@ class CalendarSourcePickerPage extends StatelessWidget {
         ),
         children: [
           Text(
-            'Choose the service where your calendar lives.',
+            'Choose where your existing calendar is.\n\n'
+            'If it comes from a school, sport, roster, booking system, '
+            'public holiday calendar, work roster, staff calendar, or another '
+            'shared link, choose “I already have a calendar link.”',
             style: theme.textTheme.bodyMedium?.copyWith(
               color: CaleeColors.textSecondary,
             ),

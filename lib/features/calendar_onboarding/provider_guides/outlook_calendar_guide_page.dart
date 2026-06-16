@@ -227,14 +227,22 @@ class _AliasView extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            'To show an Outlook calendar on Calee, share it with your Calendar Share Alias.',
+            'Calee will show your Outlook events on your Calee display. '
+            'Your Outlook calendar stays in Outlook, and you still edit events in Outlook.',
             style: theme.textTheme.bodyMedium?.copyWith(
               color: CaleeColors.textSecondary,
             ),
           ),
-          const SizedBox(height: CaleeSpacing.md),
+          const SizedBox(height: CaleeSpacing.sectionSpacing),
+          Text(
+            'Step 1: Copy your Calendar Share Alias',
+            style: theme.textTheme.titleSmall?.copyWith(
+              color: CaleeColors.textPrimary,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: CaleeSpacing.sm),
           CaleeSection(
-            title: 'Your Calendar Share Alias',
             children: [
               Padding(
                 padding: const EdgeInsets.symmetric(
@@ -277,47 +285,57 @@ class _AliasView extends StatelessWidget {
             ),
           ),
           const SizedBox(height: CaleeSpacing.sectionSpacing),
+          Text(
+            'Step 2: Share your Outlook calendar',
+            style: theme.textTheme.titleSmall?.copyWith(
+              color: CaleeColors.textPrimary,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: CaleeSpacing.sm),
           CaleeSection(
-            title: 'In Outlook',
             children: [
+              _StepRow(number: 1, text: 'Open the Outlook app.'),
+              _StepRow(number: 2, text: 'Go to Calendar.'),
+              _StepRow(number: 3, text: 'Open the calendar settings.'),
               _StepRow(
-                number: 1,
-                text: 'In the Calee app, copy your Calendar Share Alias.',
+                number: 4,
+                text: 'Choose the calendar you want to share.',
               ),
-              _StepRow(number: 2, text: 'Open the Outlook app on your phone.'),
-              _StepRow(number: 3, text: 'Go to Calendar.'),
-              _StepRow(number: 4, text: 'Open the calendar menu.'),
-              _StepRow(
-                number: 5,
-                text: 'Tap the calendar settings or gear icon.',
-              ),
+              _StepRow(number: 5, text: 'Tap Add people.'),
               _StepRow(
                 number: 6,
-                text: 'Choose the Outlook calendar you want to share.',
+                text: 'Paste your Calendar Share Alias and confirm the share.',
               ),
-              _StepRow(number: 7, text: 'Tap Add people.'),
-              _StepRow(number: 8, text: 'Paste your Calendar Share Alias.'),
-              _StepRow(number: 9, text: 'Choose the sharing permission.'),
-              _StepRow(number: 10, text: 'Confirm the share.'),
             ],
           ),
-          const SizedBox(height: CaleeSpacing.xs),
+          const SizedBox(height: CaleeSpacing.sectionSpacing),
+          Text(
+            'Step 3: Come back to Calee',
+            style: theme.textTheme.titleSmall?.copyWith(
+              color: CaleeColors.textPrimary,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: CaleeSpacing.sm),
           Text(
             'The shared calendar usually appears in Calee shortly after Outlook sends the sharing email.',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: CaleeColors.textSecondary,
+            ),
+          ),
+          const SizedBox(height: CaleeSpacing.sectionSpacing),
+          Text(
+            'Work or school account?',
             style: theme.textTheme.bodySmall?.copyWith(
               color: CaleeColors.textSecondary,
+              fontWeight: FontWeight.w600,
             ),
           ),
           const SizedBox(height: CaleeSpacing.xs),
           Text(
-            'Connected Outlook calendars are read-only in Calee. To edit events, use Outlook.',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: CaleeColors.textSecondary,
-            ),
-          ),
-          const SizedBox(height: CaleeSpacing.xs),
-          Text(
-            'Calendar sharing may not be available for every Outlook account. Some work or school organisations may only allow sharing inside the organisation.',
+            'Calendar sharing may not be available for every Outlook account. '
+            'Some work or school organisations may only allow sharing inside the organisation.',
             style: theme.textTheme.bodySmall?.copyWith(
               color: CaleeColors.textSecondary,
             ),

@@ -64,8 +64,8 @@ class _CalendarSharingAddressPageState
       setState(() {
         _loading = false;
         _error = kDebugMode
-            ? 'Could not load Calendar Sharing Address. $e'
-            : 'Could not load Calendar Sharing Address. Please try again.';
+            ? 'Could not load Calendar Share Alias. $e'
+            : 'Could not load Calendar Share Alias. Please try again.';
       });
     }
   }
@@ -74,9 +74,9 @@ class _CalendarSharingAddressPageState
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Reset sharing address?'),
+        title: const Text('Reset Calendar Share Alias?'),
         content: const Text(
-          'Only reset this address if it has been shared with the wrong person or you need a new receiving address.',
+          'Only reset this alias if it has been shared with the wrong person or you need a new receiving alias.',
         ),
         actions: [
           TextButton(
@@ -108,9 +108,9 @@ class _CalendarSharingAddressPageState
         _address = address;
         _rotating = false;
       });
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Sharing address reset')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Calendar Share Alias reset')),
+      );
     } catch (e, st) {
       if (kDebugMode) {
         debugPrint('[CalendarSharingAddressPage] rotate failed: $e\n$st');
@@ -119,8 +119,8 @@ class _CalendarSharingAddressPageState
       setState(() {
         _rotating = false;
         _error = kDebugMode
-            ? 'Could not reset Calendar Sharing Address. $e'
-            : 'Could not reset Calendar Sharing Address. Please try again.';
+            ? 'Could not reset Calendar Share Alias. $e'
+            : 'Could not reset Calendar Share Alias. Please try again.';
       });
     }
   }
@@ -135,7 +135,7 @@ class _CalendarSharingAddressPageState
   @override
   Widget build(BuildContext context) {
     return CaleeScaffold(
-      appBar: AppBar(title: const Text('Calendar Sharing Address')),
+      appBar: AppBar(title: const Text('Calendar Share Alias')),
       body: _buildBody(context),
     );
   }
@@ -169,7 +169,7 @@ class _CalendarSharingAddressPageState
             CaleeSpacing.md,
           ),
           child: Text(
-            'Use this email address when another calendar service asks who to share the calendar with.',
+            'Use this Calendar Share Alias when Outlook or another calendar service asks who to share the calendar with.',
             style: Theme.of(
               context,
             ).textTheme.bodyMedium?.copyWith(color: CaleeColors.textSecondary),
@@ -187,7 +187,7 @@ class _CalendarSharingAddressPageState
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: CaleeSpacing.sm),
           child: Text(
-            'This address is only for receiving shared calendar invitations. It is not your login email.',
+            'This alias is only for receiving shared calendar invitations. It is not your login email.',
             style: Theme.of(
               context,
             ).textTheme.bodySmall?.copyWith(color: CaleeColors.textSecondary),
@@ -209,9 +209,9 @@ class _CalendarSharingAddressPageState
         CaleeSection(
           children: [
             CaleeListRow(
-              title: _rotating ? 'Resetting…' : 'Reset sharing address',
+              title: _rotating ? 'Resetting…' : 'Reset Calendar Share Alias',
               subtitle:
-                  'Use only if this address was shared with the wrong person.',
+                  'Use only if this alias was shared with the wrong person.',
               enabled: !_rotating,
               onTap: _rotating ? null : _rotate,
               titleStyle: Theme.of(
@@ -254,7 +254,7 @@ class _AddressRow extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 const Text(
-                  'Sharing email address',
+                  'Calendar Share Alias',
                   style: TextStyle(
                     fontSize: 16,
                     color: CaleeColors.textPrimary,
