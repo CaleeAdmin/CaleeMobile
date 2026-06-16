@@ -146,11 +146,18 @@ class _AppleIcloudCalendarGuidePageState
                   color: CaleeColors.textSecondary,
                 ),
               ),
+              const SizedBox(height: CaleeSpacing.sm),
+              Text(
+                'Apple calls this a Public Calendar link. This lets Calee read the calendar '
+                'from the link so it can show events on your Calee display.',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: CaleeColors.textSecondary,
+                ),
+              ),
               const SizedBox(height: CaleeSpacing.md),
               CaleeSection(
-                title: 'On your iPhone',
                 children: [
-                  _StepRow(number: 1, text: 'Open the Calendar app.'),
+                  _StepRow(number: 1, text: 'Open the Apple Calendar app.'),
                   _StepRow(number: 2, text: 'Tap Calendars.'),
                   _StepRow(
                     number: 3,
@@ -167,12 +174,34 @@ class _AppleIcloudCalendarGuidePageState
                   ),
                 ],
               ),
-              const SizedBox(height: CaleeSpacing.xs),
-              Text(
-                'Connected iCloud calendars are read-only in Calee. To edit events, use Apple Calendar.',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: CaleeColors.textSecondary,
-                ),
+              const SizedBox(height: CaleeSpacing.md),
+              CaleeSection(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: CaleeSpacing.md,
+                      vertical: CaleeSpacing.sm + 4,
+                    ),
+                    child: RichText(
+                      text: TextSpan(
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: CaleeColors.textSecondary,
+                        ),
+                        children: const [
+                          TextSpan(
+                            text: 'Important: ',
+                            style: TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                          TextSpan(
+                            text:
+                                'This calendar will be read-only in Calee. '
+                                'To change events, use Apple Calendar.',
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: CaleeSpacing.sectionSpacing),
               if (services.length >= 2) ...[
@@ -197,7 +226,7 @@ class _AppleIcloudCalendarGuidePageState
                 textCapitalization: TextCapitalization.words,
                 decoration: const InputDecoration(
                   labelText: 'Calendar name',
-                  hintText: 'My iCloud calendar',
+                  hintText: 'My iCloud Calendar',
                 ),
                 validator: (v) {
                   final name = (v ?? '').trim();
@@ -220,10 +249,18 @@ class _AppleIcloudCalendarGuidePageState
                   final url = (v ?? '').trim();
                   if (url.isEmpty) return 'Enter a calendar link';
                   if (!_isAllowedSubscriptionUrl(url)) {
-                    return 'Use a valid http, https, or webcal link';
+                    return 'This does not look like a calendar link. '
+                        'Paste a link that starts with http, https, or webcal.';
                   }
                   return null;
                 },
+              ),
+              const SizedBox(height: CaleeSpacing.xs),
+              Text(
+                'After you add it, events may take a few minutes to appear on your Calee display.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: CaleeColors.textSecondary,
+                ),
               ),
               const SizedBox(height: CaleeSpacing.md),
               FilledButton(
