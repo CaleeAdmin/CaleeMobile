@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter/services.dart';
 
 import '../../../data/api/calee_hub_client.dart';
 import '../../../data/models/client_bootstrap.dart';
@@ -7,6 +7,8 @@ import '../../../ui/calee_design.dart';
 import 'generic_calendar_link_page.dart';
 
 enum _GoogleGuideView { main, continueOnComputer, phoneFallback }
+
+const _kWebsiteGuideUrl = 'calee.com.au/start';
 
 class GoogleCalendarGuidePage extends StatefulWidget {
   const GoogleCalendarGuidePage({
@@ -33,11 +35,21 @@ class GoogleCalendarGuidePage extends StatefulWidget {
 
 class _GoogleCalendarGuidePageState extends State<GoogleCalendarGuidePage> {
   _GoogleGuideView _view = _GoogleGuideView.main;
+  _GoogleGuideView? _previousView;
 
-  String? get _portalUrl => widget.services
-      .where((s) => s.launchUrl.trim().isNotEmpty)
-      .map((s) => s.launchUrl)
-      .firstOrNull;
+  void _goTo(_GoogleGuideView view) {
+    setState(() {
+      _previousView = _view;
+      _view = view;
+    });
+  }
+
+  void _goBack() {
+    setState(() {
+      _view = _previousView ?? _GoogleGuideView.main;
+      _previousView = null;
+    });
+  }
 
   void _openLink(BuildContext context) {
     Navigator.of(context).push(
@@ -49,6 +61,17 @@ class _GoogleCalendarGuidePageState extends State<GoogleCalendarGuidePage> {
           accountId: widget.accountId,
           onDone: widget.onDone,
           onViewCalendar: widget.onViewCalendar,
+          pageTitle: 'Add Google Calendar link',
+          introText:
+              'Paste the Google Calendar link you copied from Google Calendar settings.',
+          showExamples: false,
+          nameHintText: 'My Google Calendar',
+          linkHintText: 'https://calendar.google.com/calendar/ical/...',
+          readOnlyText:
+              'This will show your Google Calendar events on your Calee display. '
+              'Your Google Calendar stays in Google, and you still edit events in Google Calendar.',
+          validationErrorText:
+              'This does not look like a calendar link. Paste a link that starts with http, https, or webcal.',
         ),
       ),
     );
@@ -61,9 +84,7 @@ class _GoogleCalendarGuidePageState extends State<GoogleCalendarGuidePage> {
         title: const Text('Add Google Calendar'),
         leading: _view == _GoogleGuideView.main
             ? null
-            : BackButton(
-                onPressed: () => setState(() => _view = _GoogleGuideView.main),
-              ),
+            : BackButton(onPressed: _goBack),
       ),
       body: AnimatedSwitcher(
         duration: const Duration(milliseconds: 200),
@@ -71,19 +92,24 @@ class _GoogleCalendarGuidePageState extends State<GoogleCalendarGuidePage> {
           _GoogleGuideView.main => _MainView(
             key: const ValueKey('main'),
             onContinueOnComputer: () =>
-                setState(() => _view = _GoogleGuideView.continueOnComputer),
-            onAlreadyHaveLink: () => _openLink(context),
-            onNoComputer: () =>
-                setState(() => _view = _GoogleGuideView.phoneFallback),
+                _goTo(_GoogleGuideView.continueOnComputer),
+            onPasteLink: () => _openLink(context),
+            onNoComputer: () => _goTo(_GoogleGuideView.phoneFallback),
           ),
           _GoogleGuideView.continueOnComputer => _ComputerView(
             key: const ValueKey('computer'),
-            portalUrl: _portalUrl,
-            onAlreadyHaveLink: () => _openLink(context),
+            onCopyWebsiteAddress: () {
+              Clipboard.setData(const ClipboardData(text: _kWebsiteGuideUrl));
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Website address copied')),
+              );
+            },
+            onOpenGuideOnPhone: () => _goTo(_GoogleGuideView.phoneFallback),
+            onPasteLink: () => _openLink(context),
           ),
           _GoogleGuideView.phoneFallback => _PhoneFallbackView(
             key: const ValueKey('phone'),
-            onAlreadyHaveLink: () => _openLink(context),
+            onPasteLink: () => _openLink(context),
           ),
         },
       ),
@@ -96,13 +122,13 @@ class _GoogleCalendarGuidePageState extends State<GoogleCalendarGuidePage> {
 class _MainView extends StatelessWidget {
   const _MainView({
     required this.onContinueOnComputer,
-    required this.onAlreadyHaveLink,
+    required this.onPasteLink,
     required this.onNoComputer,
     super.key,
   });
 
   final VoidCallback onContinueOnComputer;
-  final VoidCallback onAlreadyHaveLink;
+  final VoidCallback onPasteLink;
   final VoidCallback onNoComputer;
 
   @override
@@ -119,33 +145,16 @@ class _MainView extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            'Google Calendar links are easiest to copy from a computer.',
+            'Google Calendar is easiest to connect from a computer.',
             style: theme.textTheme.bodyMedium?.copyWith(
               color: CaleeColors.textSecondary,
             ),
           ),
-          const SizedBox(height: CaleeSpacing.md),
-          CaleeSection(
-            title: 'On your computer',
-            children: [
-              _StepRow(
-                number: 1,
-                text: 'Open Google Calendar in a web browser.',
-              ),
-              _StepRow(number: 2, text: 'Open the calendar\'s settings.'),
-              _StepRow(
-                number: 3,
-                text:
-                    'Under "Integrate calendar", copy the "Secret address in iCal format".',
-              ),
-              _StepRow(number: 4, text: 'Sign in to Calee Portal.'),
-              _StepRow(number: 5, text: 'Add the link to Calee Calendar.'),
-            ],
-          ),
-          const SizedBox(height: CaleeSpacing.xs),
+          const SizedBox(height: CaleeSpacing.sm),
           Text(
-            'Once added, your Google Calendar will appear in the Calee app and on your Calee display.',
-            style: theme.textTheme.bodySmall?.copyWith(
+            'Calee will show your Google Calendar events on your Calee display. '
+            'Your Google Calendar stays in Google, and you still edit events in Google Calendar.',
+            style: theme.textTheme.bodyMedium?.copyWith(
               color: CaleeColors.textSecondary,
             ),
           ),
@@ -156,8 +165,8 @@ class _MainView extends StatelessWidget {
           ),
           const SizedBox(height: CaleeSpacing.sm),
           OutlinedButton(
-            onPressed: onAlreadyHaveLink,
-            child: const Text('I already have the link'),
+            onPressed: onPasteLink,
+            child: const Text('Paste the link in Calee'),
           ),
           const SizedBox(height: CaleeSpacing.sm),
           TextButton(
@@ -174,13 +183,15 @@ class _MainView extends StatelessWidget {
 
 class _ComputerView extends StatelessWidget {
   const _ComputerView({
-    required this.portalUrl,
-    required this.onAlreadyHaveLink,
+    required this.onCopyWebsiteAddress,
+    required this.onOpenGuideOnPhone,
+    required this.onPasteLink,
     super.key,
   });
 
-  final String? portalUrl;
-  final VoidCallback onAlreadyHaveLink;
+  final VoidCallback onCopyWebsiteAddress;
+  final VoidCallback onOpenGuideOnPhone;
+  final VoidCallback onPasteLink;
 
   @override
   Widget build(BuildContext context) {
@@ -196,7 +207,29 @@ class _ComputerView extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            'On your computer, open Calee Portal and add the Google Calendar link.',
+            'Use the website guide on your computer so you can follow the Google Calendar steps more easily.',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: CaleeColors.textSecondary,
+            ),
+          ),
+          const SizedBox(height: CaleeSpacing.md),
+          Text(
+            'On your computer, go to:',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: CaleeColors.textSecondary,
+            ),
+          ),
+          const SizedBox(height: CaleeSpacing.xs),
+          Text(
+            _kWebsiteGuideUrl,
+            style: theme.textTheme.bodyLarge?.copyWith(
+              color: CaleeColors.primary,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: CaleeSpacing.xs),
+          Text(
+            'Then choose "Add Google Calendar to Calee".',
             style: theme.textTheme.bodyMedium?.copyWith(
               color: CaleeColors.textSecondary,
             ),
@@ -206,64 +239,38 @@ class _ComputerView extends StatelessWidget {
             children: [
               _StepRow(
                 number: 1,
-                text:
-                    'Copy the secret iCal address from Google Calendar settings.',
+                text: 'On your computer, open $_kWebsiteGuideUrl.',
               ),
-              _StepRow(number: 2, text: 'Open Calee Portal in your browser.'),
+              _StepRow(
+                number: 2,
+                text: 'Choose "Add Google Calendar to Calee".',
+              ),
               _StepRow(
                 number: 3,
-                text: 'Go to Calendar settings and add the link.',
+                text: 'Follow the guide to open Google Calendar.',
               ),
+              _StepRow(
+                number: 4,
+                text: 'Copy your Secret address in iCal format.',
+              ),
+              _StepRow(number: 5, text: 'Open Calee Portal from the guide.'),
+              _StepRow(number: 6, text: 'Paste the link into Calee.'),
             ],
           ),
-          if (portalUrl != null) ...[
-            const SizedBox(height: CaleeSpacing.md),
-            CaleeSection(
-              title: 'Calee Portal',
-              children: [
-                InkWell(
-                  onTap: () async {
-                    final uri = Uri.tryParse(portalUrl!);
-                    if (uri != null && await canLaunchUrl(uri)) {
-                      await launchUrl(
-                        uri,
-                        mode: LaunchMode.externalApplication,
-                      );
-                    }
-                  },
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: CaleeSpacing.md,
-                      vertical: 12,
-                    ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            portalUrl!,
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              color: CaleeColors.primary,
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        const SizedBox(width: CaleeSpacing.sm),
-                        const Icon(
-                          Icons.open_in_new,
-                          size: 18,
-                          color: CaleeColors.primary,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
           const SizedBox(height: CaleeSpacing.sectionSpacing),
+          FilledButton(
+            onPressed: onCopyWebsiteAddress,
+            child: const Text('Copy website address'),
+          ),
+          const SizedBox(height: CaleeSpacing.sm),
           OutlinedButton(
-            onPressed: onAlreadyHaveLink,
-            child: const Text('I already have the link'),
+            onPressed: onOpenGuideOnPhone,
+            child: const Text('Open guide on this phone'),
+          ),
+          const SizedBox(height: CaleeSpacing.sm),
+          TextButton(
+            onPressed: onPasteLink,
+            child: const Text('Paste the link in Calee'),
           ),
         ],
       ),
@@ -274,9 +281,9 @@ class _ComputerView extends StatelessWidget {
 // ── Phone fallback view ───────────────────────────────────────────────────
 
 class _PhoneFallbackView extends StatelessWidget {
-  const _PhoneFallbackView({required this.onAlreadyHaveLink, super.key});
+  const _PhoneFallbackView({required this.onPasteLink, super.key});
 
-  final VoidCallback onAlreadyHaveLink;
+  final VoidCallback onPasteLink;
 
   @override
   Widget build(BuildContext context) {
@@ -316,7 +323,8 @@ class _PhoneFallbackView extends StatelessWidget {
               _StepRow(number: 3, text: 'Open the calendar\'s settings.'),
               _StepRow(
                 number: 4,
-                text: 'Under "Integrate calendar", copy the private iCal link.',
+                text:
+                    'Under "Integrate calendar", copy the Secret address in iCal format.',
               ),
               _StepRow(
                 number: 5,
@@ -326,8 +334,8 @@ class _PhoneFallbackView extends StatelessWidget {
           ),
           const SizedBox(height: CaleeSpacing.sectionSpacing),
           FilledButton(
-            onPressed: onAlreadyHaveLink,
-            child: const Text('I have the link'),
+            onPressed: onPasteLink,
+            child: const Text('Paste the link in Calee'),
           ),
         ],
       ),

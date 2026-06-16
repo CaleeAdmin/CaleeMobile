@@ -72,7 +72,7 @@ class _CalendarChooserSheetState extends State<CalendarChooserSheet> {
   String _subtitleFor(ClientCalendar cal) {
     final parts = <String>[];
     if (cal.serviceName.trim().isNotEmpty) parts.add(cal.serviceName.trim());
-    if (cal.isSubscription) parts.add('Linked calendar');
+    if (cal.isSubscription) parts.add('Connected calendar');
     if (cal.readOnly) parts.add('Read-only');
     return parts.join(' · ');
   }

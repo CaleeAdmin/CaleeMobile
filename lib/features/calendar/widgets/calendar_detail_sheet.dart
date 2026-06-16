@@ -116,16 +116,15 @@ class _CalendarDetailSheetState extends State<CalendarDetailSheet> {
     final isSubscription = cal.isSubscription;
 
     final title = isSubscription
-        ? 'Remove linked calendar?'
+        ? 'Remove connected calendar?'
         : 'Delete Calendar?';
     final body = isSubscription
-        ? 'This removes "${cal.name}" from Calee. '
-              'The original external calendar is not changed. '
-              'This cannot be undone from Calee.'
+        ? 'This will remove the connected calendar from Calee. '
+              'It will not delete events from the original calendar provider.'
         : 'Delete "${cal.name}" and its events from Calee? '
               'This cannot be undone.';
     final confirmLabel = isSubscription
-        ? 'Remove linked calendar'
+        ? 'Remove connected calendar'
         : 'Delete Calendar';
 
     final confirmed = await CaleeDestructiveDialog.show(
@@ -251,7 +250,10 @@ class _CalendarDetailSheetState extends State<CalendarDetailSheet> {
                 value: widget.initiallyVisible ? 'Shown' : 'Hidden',
               ),
               if (cal.isSubscription)
-                const _DetailInfoRow(label: 'Type', value: 'Linked calendar'),
+                const _DetailInfoRow(
+                  label: 'Type',
+                  value: 'Connected calendar',
+                ),
               if (cal.readOnly)
                 const _DetailInfoRow(label: 'Access', value: 'Read-only'),
               // Show source host only — never the full URL (may contain tokens)
@@ -286,7 +288,7 @@ class _CalendarDetailSheetState extends State<CalendarDetailSheet> {
                       ? Icons.link_off
                       : Icons.delete_outline,
                   title: cal.isSubscription
-                      ? 'Remove linked calendar'
+                      ? 'Remove connected calendar'
                       : 'Delete Calendar',
                   isDestructive: true,
                   trailing: _isSubmitting

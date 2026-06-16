@@ -4,6 +4,7 @@ import '../../data/api/calee_hub_client.dart';
 import '../../data/models/client_bootstrap.dart';
 import '../../data/models/client_calendar.dart';
 import '../../ui/calee_design.dart';
+import '../calendar_onboarding/calendar_source_picker_page.dart';
 
 // ─── File-level helpers ───────────────────────────────────────────────────────
 
@@ -62,6 +63,7 @@ class CalendarCollectionsPage extends StatefulWidget {
     required this.hubClient,
     required this.accessToken,
     required this.services,
+    this.accountId = '',
     this.initialCreateKind,
     this.autoOpenCreate = false,
     this.autoOpenSubscribe = false,
@@ -74,6 +76,7 @@ class CalendarCollectionsPage extends StatefulWidget {
   final CaleeHubClient hubClient;
   final String accessToken;
   final List<ClientService> services;
+  final String accountId;
   final String? initialCreateKind;
   final bool autoOpenCreate;
   final bool autoOpenSubscribe;
@@ -146,10 +149,28 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
         CaleeAction(
           label: 'Add existing calendar',
           icon: Icons.link_rounded,
-          onTap: _openSubscribeSheet,
+          onTap: () => _openSourcePicker(context),
         ),
       ],
     );
+  }
+
+  Future<void> _openSourcePicker(BuildContext context) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        settings: const RouteSettings(name: 'calendar_source_picker'),
+        builder: (_) => CalendarSourcePickerPage(
+          hubClient: widget.hubClient,
+          accessToken: widget.accessToken,
+          services: widget.services,
+          accountId: widget.accountId,
+          onDone: () {},
+          onViewCalendar: () =>
+              Navigator.of(context).popUntil((r) => r.isFirst),
+        ),
+      ),
+    );
+    if (mounted) _reload();
   }
 
   Future<void> _openCreateSheet() async {
@@ -378,34 +399,41 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Delete?'),
+        title: Text(calendar.isSubscription ? 'Remove?' : 'Delete?'),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('This will delete "${calendar.name}".'),
-              const SizedBox(height: 12),
-              if (preview.itemCountsAvailable && preview.hasItems) ...[
-                Text('Known items found in ${preview.rangeDescription}:'),
-                const SizedBox(height: 4),
-                ...preview.lines.map(
-                  (line) => Padding(
-                    padding: const EdgeInsets.only(top: 4),
-                    child: Text('• $line'),
-                  ),
+              if (calendar.isSubscription) ...[
+                const Text(
+                  'This will remove the connected calendar from Calee. '
+                  'It will not delete events from the original calendar provider.',
                 ),
-              ] else if (preview.itemCountsAvailable) ...[
-                Text('No items were found in ${preview.rangeDescription}.'),
               ] else ...[
-                const Text('Item counts could not be loaded right now.'),
+                Text('This will delete "${calendar.name}".'),
+                const SizedBox(height: 12),
+                if (preview.itemCountsAvailable && preview.hasItems) ...[
+                  Text('Known items found in ${preview.rangeDescription}:'),
+                  const SizedBox(height: 4),
+                  ...preview.lines.map(
+                    (line) => Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text('• $line'),
+                    ),
+                  ),
+                ] else if (preview.itemCountsAvailable) ...[
+                  Text('No items were found in ${preview.rangeDescription}.'),
+                ] else ...[
+                  const Text('Item counts could not be loaded right now.'),
+                ],
+                const SizedBox(height: 12),
+                const Text(
+                  'Older or future items may not be shown in this preview.',
+                ),
+                const SizedBox(height: 12),
+                Text(restoreNote),
               ],
-              const SizedBox(height: 12),
-              const Text(
-                'Older or future items may not be shown in this preview.',
-              ),
-              const SizedBox(height: 12),
-              Text(restoreNote),
             ],
           ),
         ),
@@ -485,7 +513,7 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
 
     final subtitleParts = <String>[
       if (calendar.serviceName.trim().isNotEmpty) calendar.serviceName,
-      if (calendar.isSubscription) 'Linked calendar',
+      if (calendar.isSubscription) 'Connected calendar',
       if (calendar.readOnly) 'Read-only',
     ];
 
@@ -1043,8 +1071,8 @@ class _SubscriptionFormContentState extends State<_SubscriptionFormContent> {
               autofocus: true,
               textCapitalization: TextCapitalization.words,
               decoration: const InputDecoration(
-                labelText: 'Name',
-                hintText: 'School calendar',
+                labelText: 'Calendar name',
+                hintText: 'Shared calendar',
               ),
               validator: (value) {
                 final name = (value ?? '').trim();
@@ -1067,14 +1095,14 @@ class _SubscriptionFormContentState extends State<_SubscriptionFormContent> {
                 final url = (value ?? '').trim();
                 if (url.isEmpty) return 'Enter a calendar link';
                 if (!_isAllowedSubscriptionUrl(url)) {
-                  return 'Use a valid http, https, or webcal link';
+                  return 'This does not look like a calendar link. Paste a link that starts with http, https, or webcal.';
                 }
                 return null;
               },
             ),
             const SizedBox(height: CaleeSpacing.xs),
             Text(
-              'Linked calendars are read-only and stay connected to the source.',
+              'Connected calendars are read-only in Calee. To change events, use the original calendar app or provider.',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: CaleeColors.textSecondary,
               ),

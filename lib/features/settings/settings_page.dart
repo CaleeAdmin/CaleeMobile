@@ -351,6 +351,7 @@ class _SettingsPageState extends State<SettingsPage> {
                           hubClient: widget.hubClient,
                           accessToken: widget.accessToken,
                           services: _controller.bootstrap.services,
+                          accountId: _controller.bootstrap.account.id,
                         ),
                       ),
                     )
