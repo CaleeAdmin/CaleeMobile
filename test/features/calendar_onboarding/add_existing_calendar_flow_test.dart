@@ -245,6 +245,8 @@ void main() {
     expect(find.textContaining('calee.com.au/start'), findsWidgets);
     expect(find.text('Copy website address'), findsOneWidget);
 
+    await tester.ensureVisible(find.text('Open guide on this phone'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Open guide on this phone'));
     await tester.pumpAndSettle();
 
