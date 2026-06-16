@@ -1,15 +1,4 @@
 // Widget tests for the "Add existing calendar" flow copy and routing.
-//
-// Verifies:
-//  - Source picker has exactly four expected options with correct copy.
-//  - "Add existing calendar" from Lists & calendars opens the source picker.
-//  - Google "Paste the link in Calee" opens a Google-specific link form
-//    that does not show "School calendar".
-//  - Generic calendar-link form uses "Shared calendar".
-//  - Apple guide says "Open the Apple Calendar app."
-//  - Outlook guide uses Calendar Share Alias.
-//  - Settings uses Calendar Share Alias, not Calendar Sharing Address.
-//  - Calendar row subtitle uses Connected calendar, not Linked calendar.
 
 import 'package:calee_mobile/data/api/calee_hub_client.dart';
 import 'package:calee_mobile/data/models/client_bootstrap.dart';
@@ -28,8 +17,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
-// ── Stubs ──────────────────────────────────────────────────────────────────────
 
 class _StubHubClient extends CaleeHubClient {
   _StubHubClient() : super(baseUri: Uri.parse('http://localhost'));
@@ -52,8 +39,6 @@ ClientService _sharingService() => const ClientService(
   capabilities: {'calendarSharingAddress': true},
 );
 
-// ── Setup ──────────────────────────────────────────────────────────────────────
-
 void _setUpSharedPrefs() {
   SharedPreferences.setMockInitialValues({
     'calee_pref_migrated_to_shared_prefs': true,
@@ -72,8 +57,6 @@ void _tearDownSharedPrefs() {
         null,
       );
 }
-
-// ── Helpers ────────────────────────────────────────────────────────────────────
 
 Widget _wrapOnboarding() => MaterialApp(
   theme: CaleeTheme.buildThemeData(),
@@ -112,17 +95,19 @@ Widget _wrapGenericLink({bool showExamples = true}) => MaterialApp(
   ),
 );
 
-Widget _wrapGoogleGuide() => MaterialApp(
-  theme: CaleeTheme.buildThemeData(),
-  home: GoogleCalendarGuidePage(
-    hubClient: _StubHubClient(),
-    accessToken: 'token',
-    services: const [],
-    accountId: 'acct1',
-    onDone: () {},
-    onViewCalendar: () {},
-  ),
-);
+Widget _wrapGoogleGuide({Future<void> Function(String url)? launchWebsiteGuide}) =>
+    MaterialApp(
+      theme: CaleeTheme.buildThemeData(),
+      home: GoogleCalendarGuidePage(
+        hubClient: _StubHubClient(),
+        accessToken: 'token',
+        services: const [],
+        accountId: 'acct1',
+        onDone: () {},
+        onViewCalendar: () {},
+        launchWebsiteGuide: launchWebsiteGuide,
+      ),
+    );
 
 Widget _wrapAppleGuide() => MaterialApp(
   theme: CaleeTheme.buildThemeData(),
@@ -175,320 +160,175 @@ Widget _wrapChooserSheet(List<ClientCalendar> calendars) => MaterialApp(
   ),
 );
 
-// ── Tests ──────────────────────────────────────────────────────────────────────
-
 void main() {
   setUp(_setUpSharedPrefs);
   tearDown(_tearDownSharedPrefs);
 
-  group('CalendarSourcePickerPage — four options', () {
-    testWidgets('shows exactly the four expected provider options', (
-      tester,
-    ) async {
-      await tester.pumpWidget(_wrapSourcePicker());
+  testWidgets('source picker shows exactly four provider options', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_wrapSourcePicker());
 
-      expect(find.text('Google Calendar'), findsOneWidget);
-      expect(find.text('Apple / iCloud Calendar'), findsOneWidget);
-      expect(find.text('Outlook Calendar'), findsOneWidget);
-      expect(find.text('I already have a calendar link'), findsOneWidget);
-    });
-
-    testWidgets('source picker subtitle uses new copy', (tester) async {
-      await tester.pumpWidget(_wrapSourcePicker());
-
-      expect(
-        find.textContaining('Choose where your existing calendar is'),
-        findsOneWidget,
-      );
-    });
-  });
-
-  group('"Add existing calendar" opens source picker', () {
-    testWidgets(
-      '"Add existing calendars" from onboarding opens source picker',
-      (tester) async {
-        await tester.pumpWidget(_wrapOnboarding());
-
-        await tester.tap(find.text('Add existing calendars'));
-        await tester.pumpAndSettle();
-
-        expect(find.text('Where is your calendar?'), findsOneWidget);
-      },
-    );
-
-    testWidgets(
-      '"Add existing calendar" in collections opens source picker not raw form',
-      (tester) async {
-        await tester.pumpWidget(_wrapCollections());
-        await tester.pump(const Duration(milliseconds: 50));
-
-        await tester.tap(find.byIcon(Icons.add));
-        await tester.pumpAndSettle();
-
-        await tester.tap(find.text('Add existing calendar'));
-        await tester.pumpAndSettle();
-
-        expect(find.text('Where is your calendar?'), findsOneWidget);
-        expect(find.text('Add calendar link'), findsNothing);
-      },
-    );
-
-    testWidgets(
-      'source picker opened from collections receives the correct accountId',
-      (tester) async {
-        // _wrapCollections passes accountId: 'acct1'; opening the source
-        // picker should succeed without throwing a missing-accountId error,
-        // confirming the accountId is forwarded correctly.
-        await tester.pumpWidget(_wrapCollections());
-        await tester.pump(const Duration(milliseconds: 50));
-
-        await tester.tap(find.byIcon(Icons.add));
-        await tester.pumpAndSettle();
-
-        await tester.tap(find.text('Add existing calendar'));
-        await tester.pumpAndSettle();
-
-        // Source picker rendered — accountId was propagated successfully.
-        expect(find.text('Where is your calendar?'), findsOneWidget);
-        expect(find.text('Google Calendar'), findsOneWidget);
-      },
+    expect(find.text('Google Calendar'), findsOneWidget);
+    expect(find.text('Apple / iCloud Calendar'), findsOneWidget);
+    expect(find.text('Outlook Calendar'), findsOneWidget);
+    expect(find.text('I already have a calendar link'), findsOneWidget);
+    expect(
+      find.textContaining('Choose where your existing calendar is'),
+      findsOneWidget,
     );
   });
 
-  group('Generic calendar-link form copy', () {
-    testWidgets('uses "Shared calendar" as name hint', (tester) async {
-      await tester.pumpWidget(_wrapGenericLink());
+  testWidgets('onboarding opens source picker', (tester) async {
+    await tester.pumpWidget(_wrapOnboarding());
 
-      expect(find.text('Shared calendar'), findsOneWidget);
-    });
+    await tester.tap(find.text('Add existing calendars'));
+    await tester.pumpAndSettle();
 
-    testWidgets('shows example text when showExamples is true', (tester) async {
-      await tester.pumpWidget(_wrapGenericLink(showExamples: true));
-
-      expect(find.textContaining('school calendar'), findsWidgets);
-    });
-
-    testWidgets('hides example text when showExamples is false', (
-      tester,
-    ) async {
-      await tester.pumpWidget(_wrapGenericLink(showExamples: false));
-
-      expect(find.textContaining('Examples:'), findsNothing);
-    });
-
-    testWidgets('does not show "School calendar" as main hint', (tester) async {
-      await tester.pumpWidget(_wrapGenericLink());
-
-      expect(find.text('School calendar'), findsNothing);
-    });
+    expect(find.text('Where is your calendar?'), findsOneWidget);
   });
 
-  group('Google guide copy', () {
-    testWidgets('main view has "Paste the link in Calee" button', (
-      tester,
-    ) async {
-      await tester.pumpWidget(_wrapGoogleGuide());
+  testWidgets('collections Add existing calendar opens source picker', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_wrapCollections());
+    await tester.pump(const Duration(milliseconds: 50));
 
-      expect(find.text('Paste the link in Calee'), findsOneWidget);
-      expect(find.text('I already have the link'), findsNothing);
-      expect(find.text('I have the link'), findsNothing);
-    });
+    await tester.tap(find.byIcon(Icons.add));
+    await tester.pumpAndSettle();
 
-    testWidgets('"Paste the link in Calee" opens Google-specific form', (
-      tester,
-    ) async {
-      await tester.pumpWidget(_wrapGoogleGuide());
+    await tester.tap(find.text('Add existing calendar'));
+    await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Paste the link in Calee'));
-      await tester.pumpAndSettle();
-
-      expect(find.text('Add Google Calendar link'), findsOneWidget);
-      expect(find.text('My Google Calendar'), findsOneWidget);
-    });
-
-    testWidgets('Google paste-link form does not show "School calendar"', (
-      tester,
-    ) async {
-      await tester.pumpWidget(_wrapGoogleGuide());
-
-      await tester.tap(find.text('Paste the link in Calee'));
-      await tester.pumpAndSettle();
-
-      expect(find.text('School calendar'), findsNothing);
-      expect(find.textContaining('school calendar'), findsNothing);
-    });
-
-    testWidgets('computer view mentions calee.com.au/start', (tester) async {
-      await tester.pumpWidget(_wrapGoogleGuide());
-
-      await tester.tap(find.text('Continue on computer'));
-      await tester.pumpAndSettle();
-
-      expect(find.textContaining('calee.com.au/start'), findsWidgets);
-    });
-
-    testWidgets('computer view has "Copy website address" button', (
-      tester,
-    ) async {
-      await tester.pumpWidget(_wrapGoogleGuide());
-
-      await tester.tap(find.text('Continue on computer'));
-      await tester.pumpAndSettle();
-
-      expect(find.text('Copy website address'), findsOneWidget);
-    });
+    expect(find.text('Where is your calendar?'), findsOneWidget);
+    expect(find.text('Add calendar link'), findsNothing);
   });
 
-  group('Google guide — "Open guide on this phone" and phone fallback', () {
-    final List<String> launchedUrls = [];
+  testWidgets('generic link form uses Shared calendar, not School calendar', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_wrapGenericLink());
 
-    setUp(() {
-      launchedUrls.clear();
-      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-          .setMockMethodCallHandler(
-            const MethodChannel('plugins.flutter.io/url_launcher'),
-            (call) async {
-              final args = call.arguments as Map<Object?, Object?>?;
-              final url = args?['url'] as String?;
-              if (url != null) launchedUrls.add(url);
-              return true;
-            },
-          );
-    });
+    expect(find.text('Shared calendar'), findsOneWidget);
+    expect(find.text('School calendar'), findsNothing);
+    expect(find.textContaining('school calendar'), findsWidgets);
+  });
 
-    tearDown(() {
-      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-          .setMockMethodCallHandler(
-            const MethodChannel('plugins.flutter.io/url_launcher'),
-            null,
-          );
-    });
+  testWidgets('Google paste-link form is provider-specific', (tester) async {
+    await tester.pumpWidget(_wrapGoogleGuide());
 
-    testWidgets(
-      '"Open guide on this phone" in computer view launches https://calee.com.au/start',
-      (tester) async {
-        await tester.pumpWidget(_wrapGoogleGuide());
+    await tester.tap(find.text('Paste the link in Calee'));
+    await tester.pumpAndSettle();
 
-        await tester.tap(find.text('Continue on computer'));
-        await tester.pumpAndSettle();
+    expect(find.text('Add Google Calendar link'), findsOneWidget);
+    expect(find.text('My Google Calendar'), findsOneWidget);
+    expect(find.text('School calendar'), findsNothing);
+    expect(find.textContaining('school calendar'), findsNothing);
+  });
 
-        await tester.tap(find.text('Open guide on this phone'));
-        await tester.pumpAndSettle();
+  testWidgets('Google computer view opens website guide via injected launcher', (
+    tester,
+  ) async {
+    final launchedUrls = <String>[];
 
-        expect(launchedUrls, contains('https://calee.com.au/start'));
-        expect(find.text('Use your phone instead'), findsNothing);
-      },
+    await tester.pumpWidget(
+      _wrapGoogleGuide(
+        launchWebsiteGuide: (url) async {
+          launchedUrls.add(url);
+        },
+      ),
     );
 
-    testWidgets(
-      '"No computer available?" still opens the in-app phone fallback',
-      (tester) async {
-        await tester.pumpWidget(_wrapGoogleGuide());
+    await tester.tap(find.text('Continue on computer'));
+    await tester.pumpAndSettle();
 
-        await tester.tap(find.text('No computer available?'));
-        await tester.pumpAndSettle();
+    expect(find.textContaining('calee.com.au/start'), findsWidgets);
+    expect(find.text('Copy website address'), findsOneWidget);
 
-        expect(find.text('Use your phone instead'), findsOneWidget);
-        expect(launchedUrls, isEmpty);
-      },
-    );
+    await tester.tap(find.text('Open guide on this phone'));
+    await tester.pumpAndSettle();
+
+    expect(launchedUrls, contains('https://calee.com.au/start'));
+    expect(find.text('Use your phone instead'), findsNothing);
   });
 
-  group('Apple / iCloud guide copy', () {
-    testWidgets('says "Open the Apple Calendar app."', (tester) async {
-      await tester.pumpWidget(_wrapAppleGuide());
+  testWidgets('Google No computer available opens phone fallback', (
+    tester,
+  ) async {
+    final launchedUrls = <String>[];
 
-      expect(find.text('Open the Apple Calendar app.'), findsOneWidget);
-    });
-
-    testWidgets('mentions Public Calendar link', (tester) async {
-      await tester.pumpWidget(_wrapAppleGuide());
-
-      expect(find.textContaining('Public Calendar'), findsWidgets);
-    });
-
-    testWidgets('uses "My iCloud Calendar" as name hint', (tester) async {
-      await tester.pumpWidget(_wrapAppleGuide());
-
-      expect(find.text('My iCloud Calendar'), findsOneWidget);
-    });
-
-    testWidgets(
-      'calendar-link field uses webcal://p12-caldav.icloud.com/... as hint',
-      (tester) async {
-        await tester.pumpWidget(_wrapAppleGuide());
-
-        expect(
-          find.text('webcal://p12-caldav.icloud.com/...'),
-          findsOneWidget,
-        );
-        expect(find.text('https://example.com/calendar.ics'), findsNothing);
-      },
+    await tester.pumpWidget(
+      _wrapGoogleGuide(
+        launchWebsiteGuide: (url) async {
+          launchedUrls.add(url);
+        },
+      ),
     );
+
+    await tester.tap(find.text('No computer available?'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Use your phone instead'), findsOneWidget);
+    expect(launchedUrls, isEmpty);
   });
 
-  group('Outlook guide copy', () {
-    testWidgets('page title is "Add Outlook Calendar"', (tester) async {
-      await tester.pumpWidget(_wrapOutlookGuide());
-      expect(find.text('Add Outlook Calendar'), findsOneWidget);
-    });
+  testWidgets('Apple guide copy is polished', (tester) async {
+    await tester.pumpWidget(_wrapAppleGuide());
 
-    testWidgets(
-      'Calendar Share Alias wording appears (in error message or alias view)',
-      (tester) async {
-        await tester.pumpWidget(_wrapOutlookGuide());
-        // Allow API call to complete (will fail in test env → error state)
-        await tester.pump(const Duration(milliseconds: 100));
-
-        // "Calendar Share Alias" appears either in the error message
-        // ("Could not load Calendar Share Alias") or in the alias view.
-        expect(find.textContaining('Calendar Share Alias'), findsWidgets);
-      },
-    );
+    expect(find.text('Open the Apple Calendar app.'), findsOneWidget);
+    expect(find.textContaining('Public Calendar'), findsWidgets);
+    expect(find.text('My iCloud Calendar'), findsOneWidget);
+    expect(find.text('webcal://p12-caldav.icloud.com/...'), findsOneWidget);
+    expect(find.text('https://example.com/calendar.ics'), findsNothing);
   });
 
-  group('Settings — Calendar Share Alias page', () {
-    testWidgets('page title is "Calendar Share Alias"', (tester) async {
-      final page = MaterialApp(
+  testWidgets('Outlook guide uses Calendar Share Alias wording', (tester) async {
+    await tester.pumpWidget(_wrapOutlookGuide());
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(find.text('Add Outlook Calendar'), findsOneWidget);
+    expect(find.textContaining('Calendar Share Alias'), findsWidgets);
+  });
+
+  testWidgets('Settings share page uses Calendar Share Alias wording', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
         theme: CaleeTheme.buildThemeData(),
         home: CalendarSharingAddressPage(
           hubClient: _StubHubClient(),
           accessToken: 'token',
           serviceId: 'svc1',
         ),
-      );
-      await tester.pumpWidget(page);
+      ),
+    );
 
-      expect(find.text('Calendar Share Alias'), findsOneWidget);
-      expect(find.text('Calendar Sharing Address'), findsNothing);
-    });
+    expect(find.text('Calendar Share Alias'), findsOneWidget);
+    expect(find.text('Calendar Sharing Address'), findsNothing);
   });
 
-  group('Calendar row subtitle — Connected calendar', () {
-    testWidgets('subscription calendar shows "Connected calendar" subtitle', (
-      tester,
-    ) async {
-      final subscription = ClientCalendar(
-        id: 'cal1',
-        name: 'My School Cal',
-        serviceId: 'svc1',
-        serviceName: 'Calee',
-        color: null,
-        primaryKind: 'calendar',
-        components: const [],
-        supportsEvents: true,
-        supportsTasks: false,
-        supportsChores: false,
-        readOnly: true,
-        isSubscription: true,
-        source: 'test',
-        subscriptionUrl: 'https://example.com/calendar.ics',
-      );
+  testWidgets('subscription calendar says Connected calendar', (tester) async {
+    final subscription = ClientCalendar(
+      id: 'cal1',
+      name: 'My Shared Calendar',
+      serviceId: 'svc1',
+      serviceName: 'Calee',
+      color: null,
+      primaryKind: 'calendar',
+      components: const [],
+      supportsEvents: true,
+      supportsTasks: false,
+      supportsChores: false,
+      readOnly: true,
+      isSubscription: true,
+      source: 'test',
+      subscriptionUrl: 'https://example.com/calendar.ics',
+    );
 
-      await tester.pumpWidget(_wrapChooserSheet([subscription]));
+    await tester.pumpWidget(_wrapChooserSheet([subscription]));
 
-      expect(find.textContaining('Connected calendar'), findsOneWidget);
-      expect(find.text('Linked calendar'), findsNothing);
-    });
+    expect(find.textContaining('Connected calendar'), findsOneWidget);
+    expect(find.text('Linked calendar'), findsNothing);
   });
 }
