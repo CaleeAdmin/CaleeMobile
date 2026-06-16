@@ -16,6 +16,10 @@ CaleeMobile should connect to the existing Calee server / Nextcloud backend and 
 - Calee display setup and status where supported
 - Weather and system messages where supported
 
+## Future to-do
+
+- Add a scan-to-create feature for calendar events, so users can scan supported event details and create Calee calendar events from them.
+
 ## Removed from the active app path
 
 The active app startup no longer runs:
