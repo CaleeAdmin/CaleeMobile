@@ -22,6 +22,7 @@ class GoogleCalendarGuidePage extends StatefulWidget {
     required this.accountId,
     required this.onDone,
     required this.onViewCalendar,
+    this.launchWebsiteGuide,
     super.key,
   });
 
@@ -31,6 +32,10 @@ class GoogleCalendarGuidePage extends StatefulWidget {
   final String accountId;
   final VoidCallback onDone;
   final VoidCallback onViewCalendar;
+
+  /// Optional launcher override used by widget tests so the guide-open action
+  /// can be verified without depending on the platform url_launcher channel.
+  final Future<void> Function(String url)? launchWebsiteGuide;
 
   @override
   State<GoogleCalendarGuidePage> createState() =>
@@ -56,6 +61,12 @@ class _GoogleCalendarGuidePageState extends State<GoogleCalendarGuidePage> {
   }
 
   Future<void> _launchWebsiteGuide() async {
+    final testLauncher = widget.launchWebsiteGuide;
+    if (testLauncher != null) {
+      await testLauncher(_kWebsiteGuideFullUrl);
+      return;
+    }
+
     await launchUrl(
       Uri.parse(_kWebsiteGuideFullUrl),
       mode: LaunchMode.externalApplication,
