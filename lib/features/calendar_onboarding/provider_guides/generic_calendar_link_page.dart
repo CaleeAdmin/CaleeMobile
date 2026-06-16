@@ -15,6 +15,20 @@ class GenericCalendarLinkPage extends StatefulWidget {
     required this.accountId,
     required this.onDone,
     required this.onViewCalendar,
+    this.pageTitle = 'Add calendar link',
+    this.introText =
+        'Paste any supported calendar link, such as an ICS, iCal, or webcal link.',
+    this.exampleText =
+        'Examples include school calendars, sports calendars, work rosters, staff calendars, booking calendars, public holiday calendars, or shared calendar links.',
+    this.linkHintText = 'https://example.com/calendar.ics',
+    this.nameHintText = 'Shared calendar',
+    this.readOnlyText =
+        'Connected calendars are read-only in Calee. To change events, use the original calendar app or provider.',
+    this.submitButtonText = 'Add to Calee',
+    this.successDelayText =
+        'After you add it, events may take a few minutes to appear on your Calee display.',
+    this.validationErrorText =
+        'This does not look like a calendar link. Paste a link that starts with http, https, or webcal.',
     super.key,
   });
 
@@ -24,6 +38,15 @@ class GenericCalendarLinkPage extends StatefulWidget {
   final String accountId;
   final VoidCallback onDone;
   final VoidCallback onViewCalendar;
+  final String pageTitle;
+  final String introText;
+  final String exampleText;
+  final String linkHintText;
+  final String nameHintText;
+  final String readOnlyText;
+  final String submitButtonText;
+  final String successDelayText;
+  final String validationErrorText;
 
   @override
   State<GenericCalendarLinkPage> createState() =>
@@ -147,7 +170,7 @@ class _GenericCalendarLinkPageState extends State<GenericCalendarLinkPage> {
     final services = _calendarServices;
 
     return CaleeScaffold(
-      appBar: AppBar(title: const Text('Add calendar link')),
+      appBar: AppBar(title: Text(widget.pageTitle)),
       body: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(
           CaleeSpacing.pagePadding,
@@ -161,21 +184,28 @@ class _GenericCalendarLinkPageState extends State<GenericCalendarLinkPage> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text(
-                'Paste any supported calendar link, such as an ICS, iCal, or webcal link.',
+                widget.introText,
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: CaleeColors.textSecondary,
                 ),
               ),
               const SizedBox(height: CaleeSpacing.xs),
               Text(
-                'Examples include school calendars, sports calendars, roster calendars, booking calendars, public holiday calendars, or shared calendar links.',
+                widget.exampleText,
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: CaleeColors.textSecondary,
                 ),
               ),
               const SizedBox(height: CaleeSpacing.xs),
               Text(
-                'Connected calendars are read-only in Calee. To edit events, use the original calendar app or provider.',
+                'Calendar links often end in .ics or start with webcal://',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: CaleeColors.textSecondary,
+                ),
+              ),
+              const SizedBox(height: CaleeSpacing.xs),
+              Text(
+                widget.readOnlyText,
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: CaleeColors.textSecondary,
                 ),
@@ -201,9 +231,9 @@ class _GenericCalendarLinkPageState extends State<GenericCalendarLinkPage> {
                 enabled: !_isSubmitting,
                 autofocus: true,
                 textCapitalization: TextCapitalization.words,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: 'Calendar name',
-                  hintText: 'School calendar',
+                  hintText: widget.nameHintText,
                 ),
                 validator: (v) {
                   final name = (v ?? '').trim();
@@ -218,18 +248,25 @@ class _GenericCalendarLinkPageState extends State<GenericCalendarLinkPage> {
                 enabled: !_isSubmitting,
                 keyboardType: TextInputType.url,
                 autocorrect: false,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: 'Calendar link',
-                  hintText: 'https://example.com/calendar.ics',
+                  hintText: widget.linkHintText,
                 ),
                 validator: (v) {
                   final url = (v ?? '').trim();
                   if (url.isEmpty) return 'Enter a calendar link';
                   if (!_isAllowedSubscriptionUrl(url)) {
-                    return 'Use a valid http, https, or webcal link';
+                    return widget.validationErrorText;
                   }
                   return null;
                 },
+              ),
+              const SizedBox(height: CaleeSpacing.xs),
+              Text(
+                widget.successDelayText,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: CaleeColors.textSecondary,
+                ),
               ),
               const SizedBox(height: CaleeSpacing.md),
               TextButton(
@@ -297,7 +334,7 @@ class _GenericCalendarLinkPageState extends State<GenericCalendarLinkPage> {
                         height: 18,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : const Text('Add to Calee'),
+                    : Text(widget.submitButtonText),
               ),
             ],
           ),
