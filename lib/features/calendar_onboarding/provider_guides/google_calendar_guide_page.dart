@@ -64,13 +64,17 @@ class _GoogleCalendarGuidePageState extends State<GoogleCalendarGuidePage> {
     final testLauncher = widget.launchWebsiteGuide;
     if (testLauncher != null) {
       await testLauncher(_kWebsiteGuideFullUrl);
-      return;
+    } else {
+      await launchUrl(
+        Uri.parse(_kWebsiteGuideFullUrl),
+        mode: LaunchMode.externalApplication,
+      );
     }
 
-    await launchUrl(
-      Uri.parse(_kWebsiteGuideFullUrl),
-      mode: LaunchMode.externalApplication,
-    );
+    // The button intentionally keeps the user on this screen. Schedule a frame
+    // after the async launch completes so widget tests that tap the button can
+    // settle before asserting that the launch request was made.
+    if (mounted) setState(() {});
   }
 
   void _openLink(BuildContext context) {
