@@ -25,12 +25,14 @@ class CalendarPage extends StatefulWidget {
     required this.hubClient,
     required this.accessToken,
     required this.services,
+    required this.accountId,
     super.key,
   });
 
   final CaleeHubClient hubClient;
   final String accessToken;
   final List<ClientService> services;
+  final String accountId;
 
   @override
   State<CalendarPage> createState() => _CalendarPageState();
@@ -81,6 +83,7 @@ class _CalendarPageState extends State<CalendarPage> {
               hubClient: widget.hubClient,
               accessToken: widget.accessToken,
               services: widget.services,
+              accountId: widget.accountId,
               initialCreateKind: autoOpenCreate ? 'calendar' : null,
               autoOpenCreate: autoOpenCreate,
               autoOpenSubscribe: autoOpenSubscribe,

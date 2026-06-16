@@ -28,6 +28,7 @@ class ChoresPage extends StatefulWidget {
     required this.accessToken,
     required this.services,
     required this.households,
+    required this.accountId,
     super.key,
   });
 
@@ -35,6 +36,7 @@ class ChoresPage extends StatefulWidget {
   final String accessToken;
   final List<ClientService> services;
   final List<ClientContext> households;
+  final String accountId;
 
   @override
   State<ChoresPage> createState() => _ChoresPageState();
@@ -92,6 +94,7 @@ class _ChoresPageState extends State<ChoresPage> {
               hubClient: widget.hubClient,
               accessToken: widget.accessToken,
               services: choreServices,
+              accountId: widget.accountId,
               initialCreateKind: 'chores',
               autoOpenCreate: true,
             ),

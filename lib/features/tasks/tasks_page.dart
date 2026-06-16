@@ -21,12 +21,14 @@ class TasksPage extends StatefulWidget {
     required this.hubClient,
     required this.accessToken,
     required this.services,
+    required this.accountId,
     super.key,
   });
 
   final CaleeHubClient hubClient;
   final String accessToken;
   final List<ClientService> services;
+  final String accountId;
 
   @override
   State<TasksPage> createState() => _TasksPageState();
@@ -63,6 +65,7 @@ class _TasksPageState extends State<TasksPage> {
               hubClient: widget.hubClient,
               accessToken: widget.accessToken,
               services: widget.services,
+              accountId: widget.accountId,
               initialCreateKind: 'tasks',
               autoOpenCreate: true,
             ),
