@@ -39,6 +39,7 @@ Widget _wrap(List<ClientService> services) => MaterialApp(
     hubClient: _StubHubClient(),
     accessToken: 'tok',
     services: services,
+    accountId: 'acct1',
     autoOpenCreate: true,
   ),
 );

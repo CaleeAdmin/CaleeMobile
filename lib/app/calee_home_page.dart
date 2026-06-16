@@ -15,6 +15,8 @@ class CaleeHomePage extends StatefulWidget {
     required this.bootstrap,
     required this.onSignOut,
     this.onBootstrapRefreshed,
+    this.initialSelectedIndex = 0,
+    this.onInitialTabConsumed,
     super.key,
   });
 
@@ -23,13 +25,17 @@ class CaleeHomePage extends StatefulWidget {
   final ClientBootstrap bootstrap;
   final VoidCallback onSignOut;
   final void Function(ClientBootstrap)? onBootstrapRefreshed;
+  final int initialSelectedIndex;
+  // Called once after the first frame when initialSelectedIndex != 0,
+  // so callers can clear any one-shot tab override.
+  final VoidCallback? onInitialTabConsumed;
 
   @override
   State<CaleeHomePage> createState() => _CaleeHomePageState();
 }
 
 class _CaleeHomePageState extends State<CaleeHomePage> {
-  int _selectedIndex = 0;
+  late int _selectedIndex;
   late final List<_CaleeTab> _tabs;
 
   bool get _hasChoreService =>
@@ -51,6 +57,13 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
   @override
   void initState() {
     super.initState();
+    _selectedIndex = widget.initialSelectedIndex;
+
+    if (widget.initialSelectedIndex != 0) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        widget.onInitialTabConsumed?.call();
+      });
+    }
 
     _tabs = [
       _CaleeTab(
@@ -79,6 +92,7 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
           hubClient: widget.hubClient,
           accessToken: widget.accessToken,
           services: widget.bootstrap.services,
+          accountId: widget.bootstrap.account.id,
         ),
       ),
       _CaleeTab(
@@ -89,6 +103,7 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
           hubClient: widget.hubClient,
           accessToken: widget.accessToken,
           services: widget.bootstrap.services,
+          accountId: widget.bootstrap.account.id,
         ),
       ),
       if (_hasChoreService)
@@ -101,6 +116,7 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
             accessToken: widget.accessToken,
             services: widget.bootstrap.services,
             households: widget.bootstrap.contexts.households,
+            accountId: widget.bootstrap.account.id,
           ),
         ),
       _CaleeTab(
@@ -113,6 +129,8 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
           bootstrap: widget.bootstrap,
           onSignOut: widget.onSignOut,
           onBootstrapRefreshed: widget.onBootstrapRefreshed,
+          onNavigateToCalendar: () =>
+              setState(() => _selectedIndex = _calendarTabIndex),
         ),
       ),
     ];

@@ -76,6 +76,7 @@ void main() {
             hubClient: _StubHub(),
             accessToken: 'tok',
             services: const [_service],
+            accountId: 'acct1',
           ),
         ),
       );
@@ -94,6 +95,7 @@ void main() {
             hubClient: _StubHub(),
             accessToken: 'tok',
             services: const [_service],
+            accountId: 'acct1',
           ),
         ),
       );
@@ -111,6 +113,7 @@ void main() {
             hubClient: _StubHub(),
             accessToken: 'tok',
             services: const [_service],
+            accountId: 'acct1',
           ),
         ),
       );
