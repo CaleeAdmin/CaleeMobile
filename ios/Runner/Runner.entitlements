@@ -5,6 +5,7 @@
 	<key>com.apple.developer.associated-domains</key>
 	<array>
 		<string>applinks:calembed.calee.com.au</string>
+		<string>applinks:hub.calee.com.au</string>
 	</array>
 </dict>
 </plist>

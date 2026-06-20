@@ -32,6 +32,16 @@ class AuthRepository {
   Future<void> saveAccessToken(String accessToken) =>
       sessionStore.saveAccessToken(accessToken);
 
+  Future<ClientLoginResult> register({
+    required String email,
+    required String password,
+    required String displayName,
+  }) => hubClient.register(
+    email: email,
+    password: password,
+    displayName: displayName,
+  );
+
   Future<void> clearSession() => sessionStore.clear();
 
   void clearAuthCache() => hubClient.clearAuthCache();

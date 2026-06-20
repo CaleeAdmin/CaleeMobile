@@ -89,6 +89,13 @@ class _FakeRepository implements AuthRepository {
   }
 
   @override
+  Future<ClientLoginResult> register({
+    required String email,
+    required String password,
+    required String displayName,
+  }) => throw UnimplementedError();
+
+  @override
   void clearAuthCache() {
     clearAuthCacheCalled = true;
   }
