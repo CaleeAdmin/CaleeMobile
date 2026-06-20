@@ -59,6 +59,13 @@ class _FakeRepository implements AuthRepository {
       throw UnimplementedError();
 
   @override
+  Future<ClientLoginResult> register({
+    required String email,
+    required String password,
+    required String displayName,
+  }) => throw UnimplementedError();
+
+  @override
   Future<void> clearSession() => throw UnimplementedError();
 
   @override

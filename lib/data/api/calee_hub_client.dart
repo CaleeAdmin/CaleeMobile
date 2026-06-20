@@ -813,6 +813,34 @@ class CaleeHubClient {
     );
   }
 
+  Future<ClientLoginResult> register({
+    required String email,
+    required String password,
+    required String displayName,
+  }) async {
+    final json = await _postJson(
+      '/client/v1/auth/register',
+      body: {
+        'email': email,
+        'password': password,
+        'displayName': displayName,
+      },
+    );
+    return ClientLoginResult.fromJson(_data(json));
+  }
+
+  Future<void> approveDisplayLogin({
+    required String accessToken,
+    required String token,
+  }) async {
+    final encodedToken = Uri.encodeComponent(token);
+    await _postJson(
+      '/client/v1/displays/native-login/$encodedToken/approve',
+      accessToken: accessToken,
+      body: {},
+    );
+  }
+
   Future<ClientRefreshResult> refresh({required String refreshToken}) async {
     final json = await _postJson(
       '/client/v1/auth/refresh',

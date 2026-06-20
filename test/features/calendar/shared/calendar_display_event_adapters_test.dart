@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:calee_mobile/data/models/client_calendar.dart';
 import 'package:calee_mobile/features/calendar/shared/calendar_display_event_adapters.dart';
 import 'package:calee_mobile/ui/calee_design.dart';
@@ -70,6 +72,44 @@ void main() {
       // Should be non-null DateTime objects
       expect(display.start, isNotNull);
       expect(display.end, isNotNull);
+    });
+
+    test(
+      'converts backend UTC instants to the Perth device timezone',
+      () {
+        final display = calendarDisplayEventFromClientEvent(
+          _event(
+            startsAt: '2026-06-15T01:00:00Z',
+            endsAt: '2026-06-15T02:00:00Z',
+          ),
+          calendar: _calendar(),
+        );
+
+        expect(display.start.year, 2026);
+        expect(display.start.month, 6);
+        expect(display.start.day, 15);
+        expect(display.start.hour, 9);
+        expect(display.start.minute, 0);
+        expect(display.start.isUtc, isFalse);
+        expect(display.end, isNotNull);
+        expect(display.end!.hour, 10);
+      },
+      skip: Platform.environment['TZ'] == 'Australia/Perth'
+          ? false
+          : 'Requires the test process to run with TZ=Australia/Perth.',
+    );
+
+    test('keeps all-day date-only values on their local calendar dates', () {
+      final display = calendarDisplayEventFromClientEvent(
+        _event(allDay: true, startsAt: '2026-06-15', endsAt: '2026-06-16'),
+        calendar: _calendar(),
+      );
+
+      expect(display.allDay, isTrue);
+      expect(display.start, DateTime(2026, 6, 15));
+      expect(display.start.isUtc, isFalse);
+      expect(display.end, DateTime(2026, 6, 16));
+      expect(display.end!.isUtc, isFalse);
     });
 
     test('maps calendarId and calendarName from calendar', () {
