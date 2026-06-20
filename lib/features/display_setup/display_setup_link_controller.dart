@@ -5,6 +5,8 @@ import 'package:flutter/foundation.dart';
 
 import 'display_setup_intent.dart';
 
+const _tokenPattern = r'^[A-Za-z0-9_\-]{32,256}$';
+
 class DisplaySetupLinkController extends ChangeNotifier {
   DisplaySetupLinkController();
 
@@ -31,21 +33,34 @@ class DisplaySetupLinkController extends ChangeNotifier {
   }
 
   void _handleUri(Uri uri) {
-    if (!_isDisplaySetupLink(uri)) return;
+    final intent = parseDisplaySetupUri(uri);
+    if (intent == null) return;
     if (_disposed) return;
 
-    final token = uri.pathSegments.last;
-    pendingIntent = DisplaySetupIntent(token: token, sourceUri: uri);
+    pendingIntent = intent;
     pendingError = null;
     notifyListeners();
   }
 
-  bool _isDisplaySetupLink(Uri uri) {
-    return uri.scheme == 'https' &&
-        uri.host == 'hub.calee.com.au' &&
-        uri.pathSegments.length == 2 &&
-        uri.pathSegments.first == 'native-login' &&
-        uri.pathSegments.last.isNotEmpty;
+  static DisplaySetupIntent? parseDisplaySetupUri(Uri uri) {
+    final tokenRe = RegExp(_tokenPattern);
+    String token;
+
+    if (uri.scheme == 'https') {
+      if (uri.host != 'hub.calee.com.au') return null;
+      if (uri.pathSegments.length != 2) return null;
+      if (uri.pathSegments[0] != 'native-login') return null;
+      token = uri.pathSegments[1];
+    } else if (uri.scheme == 'calee') {
+      if (uri.host != 'native-login') return null;
+      if (uri.pathSegments.length != 1) return null;
+      token = uri.pathSegments[0];
+    } else {
+      return null;
+    }
+
+    if (!tokenRe.hasMatch(token)) return null;
+    return DisplaySetupIntent(token: token, sourceUri: uri);
   }
 
   void clearPending() {

@@ -2,54 +2,111 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:calee_mobile/features/display_setup/display_setup_link_controller.dart';
 import 'package:calee_mobile/features/display_setup/display_setup_intent.dart';
 
+const _validToken = 'AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-AB';
+const _shortToken = 'abc123';
+
 void main() {
-  group('DisplaySetupLinkController._isDisplaySetupLink', () {
-    // Access _isDisplaySetupLink via a subclass to keep tests pure.
-    late _TestableController controller;
-
-    setUp(() {
-      controller = _TestableController();
-    });
-
-    tearDown(() {
-      controller.dispose();
-    });
-
-    test('valid native-login URL is detected', () {
-      final uri = Uri.parse('https://hub.calee.com.au/native-login/abc123');
-      expect(controller.testIsDisplaySetupLink(uri), isTrue);
-    });
-
-    test('token is extracted correctly', () {
-      final uri = Uri.parse('https://hub.calee.com.au/native-login/tok-xyz');
-      expect(uri.pathSegments.last, 'tok-xyz');
-    });
-
-    test('wrong host is ignored', () {
-      final uri = Uri.parse('https://other.calee.com.au/native-login/abc');
-      expect(controller.testIsDisplaySetupLink(uri), isFalse);
-    });
-
-    test('wrong scheme is ignored', () {
-      final uri = Uri.parse('http://hub.calee.com.au/native-login/abc');
-      expect(controller.testIsDisplaySetupLink(uri), isFalse);
-    });
-
-    test('wrong path prefix is ignored', () {
-      final uri = Uri.parse('https://hub.calee.com.au/login/abc');
-      expect(controller.testIsDisplaySetupLink(uri), isFalse);
-    });
-
-    test('missing token segment is ignored', () {
-      final uri = Uri.parse('https://hub.calee.com.au/native-login/');
-      expect(controller.testIsDisplaySetupLink(uri), isFalse);
-    });
-
-    test('calembed calendar-follow URL is ignored', () {
+  group('parseDisplaySetupUri — HTTPS', () {
+    test('accepts valid HTTPS link', () {
       final uri = Uri.parse(
-        'https://calembed.calee.com.au/follow?t=tok',
+        'https://hub.calee.com.au/native-login/$_validToken',
       );
-      expect(controller.testIsDisplaySetupLink(uri), isFalse);
+      expect(DisplaySetupLinkController.parseDisplaySetupUri(uri), isNotNull);
+    });
+
+    test('extracts token from HTTPS link', () {
+      final uri = Uri.parse(
+        'https://hub.calee.com.au/native-login/$_validToken',
+      );
+      final intent = DisplaySetupLinkController.parseDisplaySetupUri(uri);
+      expect(intent!.token, _validToken);
+    });
+
+    test('rejects short HTTPS token', () {
+      final uri = Uri.parse(
+        'https://hub.calee.com.au/native-login/$_shortToken',
+      );
+      expect(DisplaySetupLinkController.parseDisplaySetupUri(uri), isNull);
+    });
+
+    test('rejects wrong HTTPS host', () {
+      final uri = Uri.parse(
+        'https://other.calee.com.au/native-login/$_validToken',
+      );
+      expect(DisplaySetupLinkController.parseDisplaySetupUri(uri), isNull);
+    });
+
+    test('rejects wrong HTTPS path prefix', () {
+      final uri = Uri.parse(
+        'https://hub.calee.com.au/login/$_validToken',
+      );
+      expect(DisplaySetupLinkController.parseDisplaySetupUri(uri), isNull);
+    });
+
+    test('rejects /v1/native-login path', () {
+      final uri = Uri.parse(
+        'https://hub.calee.com.au/v1/native-login/$_validToken',
+      );
+      expect(DisplaySetupLinkController.parseDisplaySetupUri(uri), isNull);
+    });
+
+    test('rejects HTTPS link with extra path segment', () {
+      final uri = Uri.parse(
+        'https://hub.calee.com.au/native-login/$_validToken/extra',
+      );
+      expect(DisplaySetupLinkController.parseDisplaySetupUri(uri), isNull);
+    });
+
+    test('rejects HTTPS link with empty token', () {
+      final uri = Uri.parse('https://hub.calee.com.au/native-login/');
+      expect(DisplaySetupLinkController.parseDisplaySetupUri(uri), isNull);
+    });
+
+    test('sourceUri is preserved for HTTPS link', () {
+      final uri = Uri.parse(
+        'https://hub.calee.com.au/native-login/$_validToken',
+      );
+      final intent = DisplaySetupLinkController.parseDisplaySetupUri(uri);
+      expect(intent!.sourceUri, uri);
+    });
+  });
+
+  group('parseDisplaySetupUri — custom scheme', () {
+    test('accepts valid calee:// link', () {
+      final uri = Uri.parse('calee://native-login/$_validToken');
+      expect(DisplaySetupLinkController.parseDisplaySetupUri(uri), isNotNull);
+    });
+
+    test('extracts token from custom scheme', () {
+      final uri = Uri.parse('calee://native-login/$_validToken');
+      final intent = DisplaySetupLinkController.parseDisplaySetupUri(uri);
+      expect(intent!.token, _validToken);
+    });
+
+    test('rejects short calee token', () {
+      final uri = Uri.parse('calee://native-login/$_shortToken');
+      expect(DisplaySetupLinkController.parseDisplaySetupUri(uri), isNull);
+    });
+
+    test('rejects calee://wrong-host', () {
+      final uri = Uri.parse('calee://wrong-host/$_validToken');
+      expect(DisplaySetupLinkController.parseDisplaySetupUri(uri), isNull);
+    });
+
+    test('rejects calee://native-login with extra path segment', () {
+      final uri = Uri.parse('calee://native-login/$_validToken/extra');
+      expect(DisplaySetupLinkController.parseDisplaySetupUri(uri), isNull);
+    });
+
+    test('rejects calee://native-login with empty token', () {
+      final uri = Uri.parse('calee://native-login/');
+      expect(DisplaySetupLinkController.parseDisplaySetupUri(uri), isNull);
+    });
+
+    test('sourceUri is preserved for calee:// link', () {
+      final uri = Uri.parse('calee://native-login/$_validToken');
+      final intent = DisplaySetupLinkController.parseDisplaySetupUri(uri);
+      expect(intent!.sourceUri, uri);
     });
   });
 
@@ -69,17 +126,28 @@ void main() {
       expect(controller.pendingError, isNull);
     });
 
-    test('valid URI sets pendingIntent', () {
+    test('valid HTTPS URI sets pendingIntent', () {
       var notified = false;
       controller.addListener(() => notified = true);
 
       controller.injectUri(
-        Uri.parse('https://hub.calee.com.au/native-login/abc123'),
+        Uri.parse('https://hub.calee.com.au/native-login/$_validToken'),
       );
 
       expect(notified, isTrue);
       expect(controller.pendingIntent, isNotNull);
-      expect(controller.pendingIntent!.token, 'abc123');
+      expect(controller.pendingIntent!.token, _validToken);
+    });
+
+    test('valid calee:// URI sets pendingIntent', () {
+      var notified = false;
+      controller.addListener(() => notified = true);
+
+      controller.injectUri(Uri.parse('calee://native-login/$_validToken'));
+
+      expect(notified, isTrue);
+      expect(controller.pendingIntent, isNotNull);
+      expect(controller.pendingIntent!.token, _validToken);
     });
 
     test('invalid URI leaves pendingIntent null', () {
@@ -94,7 +162,7 @@ void main() {
 
     test('clearPending clears intent and notifies', () {
       controller.injectUri(
-        Uri.parse('https://hub.calee.com.au/native-login/tok'),
+        Uri.parse('https://hub.calee.com.au/native-login/$_validToken'),
       );
 
       var notified = false;
@@ -107,52 +175,27 @@ void main() {
     });
 
     test('second valid URI replaces pending intent', () {
+      final token2 = 'ZzZzZzZzZzZzZzZzZzZzZzZzZzZzZzZz';
       controller.injectUri(
-        Uri.parse('https://hub.calee.com.au/native-login/first'),
+        Uri.parse('https://hub.calee.com.au/native-login/$_validToken'),
       );
       controller.injectUri(
-        Uri.parse('https://hub.calee.com.au/native-login/second'),
+        Uri.parse('https://hub.calee.com.au/native-login/$token2'),
       );
 
-      expect(controller.pendingIntent!.token, 'second');
-    });
-
-    test('sourceUri is preserved in intent', () {
-      final uri = Uri.parse('https://hub.calee.com.au/native-login/abc');
-      controller.injectUri(uri);
-
-      expect(controller.pendingIntent!.sourceUri, uri);
+      expect(controller.pendingIntent!.token, token2);
     });
   });
 }
 
-// ─── Test helpers ─────────────────────────────────────────────────────────────
-
-class _TestableController extends DisplaySetupLinkController {
-  bool testIsDisplaySetupLink(Uri uri) {
-    return uri.scheme == 'https' &&
-        uri.host == 'hub.calee.com.au' &&
-        uri.pathSegments.length == 2 &&
-        uri.pathSegments.first == 'native-login' &&
-        uri.pathSegments.last.isNotEmpty;
-  }
-}
+// ─── Test helper ──────────────────────────────────────────────────────────────
 
 class _ManualController extends DisplaySetupLinkController {
   void injectUri(Uri uri) {
-    // Replicate the internal _handleUri logic without app_links dependency.
-    if (!_check(uri)) return;
-    final token = uri.pathSegments.last;
-    pendingIntent = DisplaySetupIntent(token: token, sourceUri: uri);
+    final intent = DisplaySetupLinkController.parseDisplaySetupUri(uri);
+    if (intent == null) return;
+    pendingIntent = intent;
     pendingError = null;
     notifyListeners();
-  }
-
-  bool _check(Uri uri) {
-    return uri.scheme == 'https' &&
-        uri.host == 'hub.calee.com.au' &&
-        uri.pathSegments.length == 2 &&
-        uri.pathSegments.first == 'native-login' &&
-        uri.pathSegments.last.isNotEmpty;
   }
 }
