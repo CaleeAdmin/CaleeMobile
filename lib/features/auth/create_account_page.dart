@@ -179,7 +179,9 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                         child: isLoading
                             ? const SizedBox.square(
                                 dimension: 20,
-                                child: CircularProgressIndicator(strokeWidth: 2),
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
                               )
                             : const Text('Create account'),
                       ),

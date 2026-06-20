@@ -37,9 +37,7 @@ void main() {
     });
 
     test('rejects wrong HTTPS path prefix', () {
-      final uri = Uri.parse(
-        'https://hub.calee.com.au/login/$_validToken',
-      );
+      final uri = Uri.parse('https://hub.calee.com.au/login/$_validToken');
       expect(DisplaySetupLinkController.parseDisplaySetupUri(uri), isNull);
     });
 

@@ -820,11 +820,7 @@ class CaleeHubClient {
   }) async {
     final json = await _postJson(
       '/client/v1/auth/register',
-      body: {
-        'email': email,
-        'password': password,
-        'displayName': displayName,
-      },
+      body: {'email': email, 'password': password, 'displayName': displayName},
     );
     return ClientLoginResult.fromJson(_data(json));
   }

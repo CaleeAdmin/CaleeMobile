@@ -92,7 +92,9 @@ class _DisplaySetupConfirmationPageState
                     ),
                     const SizedBox(height: 12),
                     OutlinedButton(
-                      onPressed: isLoading ? null : widget.onUseDifferentAccount,
+                      onPressed: isLoading
+                          ? null
+                          : widget.onUseDifferentAccount,
                       child: const Text('Use a different account'),
                     ),
                     const SizedBox(height: 12),
