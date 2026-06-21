@@ -1,6 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:calee_mobile/features/display_setup/display_setup_link_controller.dart';
-import 'package:calee_mobile/features/display_setup/display_setup_intent.dart';
 
 const _validToken = 'AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-AB';
 const _shortToken = 'abc123';
@@ -37,9 +36,7 @@ void main() {
     });
 
     test('rejects wrong HTTPS path prefix', () {
-      final uri = Uri.parse(
-        'https://hub.calee.com.au/login/$_validToken',
-      );
+      final uri = Uri.parse('https://hub.calee.com.au/login/$_validToken');
       expect(DisplaySetupLinkController.parseDisplaySetupUri(uri), isNull);
     });
 

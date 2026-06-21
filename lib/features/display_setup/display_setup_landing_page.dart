@@ -53,7 +53,10 @@ class DisplaySetupLandingPage extends StatelessWidget {
                   child: const Text('I already have an account'),
                 ),
                 const SizedBox(height: 12),
-                OutlinedButton(onPressed: onCancel, child: const Text('Cancel')),
+                OutlinedButton(
+                  onPressed: onCancel,
+                  child: const Text('Cancel'),
+                ),
               ],
             ),
           ),
