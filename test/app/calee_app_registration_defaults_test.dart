@@ -136,17 +136,26 @@ void main() {
       // Fill in the registration form
       await tester.enterText(find.byType(TextFormField).at(0), 'Jane');
       await tester.enterText(find.byType(TextFormField).at(1), 'Smith');
-      await tester.enterText(find.byType(TextFormField).at(2), 'jane@example.com');
-      await tester.enterText(find.byType(TextFormField).at(3), 'jane@example.com');
+      await tester.enterText(
+        find.byType(TextFormField).at(2),
+        'jane@example.com',
+      );
+      await tester.enterText(
+        find.byType(TextFormField).at(3),
+        'jane@example.com',
+      );
       await tester.enterText(find.byType(TextFormField).at(4), 'REDEEM');
       await tester.enterText(find.byType(TextFormField).at(5), 'password123');
       await tester.enterText(find.byType(TextFormField).at(6), 'password123');
 
       // Submit
-      await tester.ensureVisible(
-        find.widgetWithText(FilledButton, 'Create account'),
+      final createButton = find.widgetWithText(FilledButton, 'Create account');
+      await tester.scrollUntilVisible(
+        createButton,
+        300,
+        scrollable: find.byType(Scrollable).first,
       );
-      await tester.tap(find.widgetWithText(FilledButton, 'Create account'));
+      await tester.tap(createButton);
       // Process the tap, the async register() call, and the state rebuild.
       await tester.pump();
       await tester.pump();

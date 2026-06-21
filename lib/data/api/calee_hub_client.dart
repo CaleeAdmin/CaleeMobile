@@ -863,10 +863,7 @@ class CaleeHubClient {
   }
 
   Future<ClientProfile> profile({required String accessToken}) async {
-    final json = await _getJson(
-      '/client/v1/profile',
-      accessToken: accessToken,
-    );
+    final json = await _getJson('/client/v1/profile', accessToken: accessToken);
     final data = _data(json);
     final profileJson = data['profile'];
     if (profileJson is! Map<String, dynamic>) {

@@ -335,9 +335,9 @@ class _SettingsPageState extends State<SettingsPage> {
                       accessToken: widget.accessToken,
                       services: _controller.bootstrap.services,
                       accountId: _controller.bootstrap.account.id,
-                      onDone: () => Navigator.of(context).popUntil(
-                        (route) => route.isFirst,
-                      ),
+                      onDone: () => Navigator.of(
+                        context,
+                      ).popUntil((route) => route.isFirst),
                     ),
                   ),
                 );

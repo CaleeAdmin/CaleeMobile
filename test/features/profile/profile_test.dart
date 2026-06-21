@@ -37,8 +37,8 @@ const _kProfileWithWarnings = ClientProfile(
 
 class _StubClient extends CaleeHubClient {
   _StubClient({ClientProfile? profile, this.updateResult, this.throwOnUpdate})
-      : _profile = profile ?? _kProfile,
-        super(baseUri: Uri.parse('http://localhost'));
+    : _profile = profile ?? _kProfile,
+      super(baseUri: Uri.parse('http://localhost'));
 
   final ClientProfile _profile;
   final ClientProfile? updateResult;
@@ -82,9 +82,9 @@ class _StubClient extends CaleeHubClient {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 Widget _wrapProfile(CaleeHubClient client) => MaterialApp(
-      theme: CaleeTheme.buildThemeData(),
-      home: ProfilePage(hubClient: client, accessToken: 'tok'),
-    );
+  theme: CaleeTheme.buildThemeData(),
+  home: ProfilePage(hubClient: client, accessToken: 'tok'),
+);
 
 ClientBootstrap _minBootstrap({String displayName = 'Alice S'}) {
   return ClientBootstrap.fromJson({
@@ -104,17 +104,17 @@ void _setUpChannels() {
   });
   TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
       .setMockMethodCallHandler(
-    const MethodChannel('plugins.it_nomads.com/flutter_secure_storage'),
-    (call) async => <String, String>{},
-  );
+        const MethodChannel('plugins.it_nomads.com/flutter_secure_storage'),
+        (call) async => <String, String>{},
+      );
 }
 
 void _tearDownChannels() {
   TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
       .setMockMethodCallHandler(
-    const MethodChannel('plugins.it_nomads.com/flutter_secure_storage'),
-    null,
-  );
+        const MethodChannel('plugins.it_nomads.com/flutter_secure_storage'),
+        null,
+      );
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -144,15 +144,10 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Personal profile'), findsOneWidget);
-    expect(
-      find.text('Name, timezone, and ZIP/postcode'),
-      findsOneWidget,
-    );
+    expect(find.text('Name, timezone, and ZIP/postcode'), findsOneWidget);
   });
 
-  testWidgets('Tapping Personal profile row opens ProfilePage', (
-    tester,
-  ) async {
+  testWidgets('Tapping Personal profile row opens ProfilePage', (tester) async {
     final client = _StubClient();
     await tester.pumpWidget(
       MaterialApp(
@@ -195,27 +190,26 @@ void main() {
   });
 
   // 4. User cannot edit email (no editable email field).
-  testWidgets('Email is read-only — no enabled TextFormField with email value', (
-    tester,
-  ) async {
-    await tester.pumpWidget(_wrapProfile(_StubClient()));
-    await tester.pumpAndSettle();
+  testWidgets(
+    'Email is read-only — no enabled TextFormField with email value',
+    (tester) async {
+      await tester.pumpWidget(_wrapProfile(_StubClient()));
+      await tester.pumpAndSettle();
 
-    // The email is shown as plain Text, not in an enabled TextFormField.
-    final emailTextWidgets = tester
-        .widgetList<Text>(find.text('alice@example.com'))
-        .toList();
-    expect(emailTextWidgets, isNotEmpty);
+      // The email is shown as plain Text, not in an enabled TextFormField.
+      final emailTextWidgets = tester
+          .widgetList<Text>(find.text('alice@example.com'))
+          .toList();
+      expect(emailTextWidgets, isNotEmpty);
 
-    // No enabled TextFormField contains the email value.
-    final editableFields = tester
-        .widgetList<EditableText>(find.byType(EditableText))
-        .where(
-          (e) => e.controller.text == 'alice@example.com',
-        )
-        .toList();
-    expect(editableFields, isEmpty);
-  });
+      // No enabled TextFormField contains the email value.
+      final editableFields = tester
+          .widgetList<EditableText>(find.byType(EditableText))
+          .where((e) => e.controller.text == 'alice@example.com')
+          .toList();
+      expect(editableFields, isEmpty);
+    },
+  );
 
   // 5. Save does not send email.
   testWidgets('Save does not include email in updateProfile call', (
@@ -339,9 +333,7 @@ void main() {
 
   // 12. Save with warnings shows non-blocking warning message.
   testWidgets('Save with warnings shows warning snackbar', (tester) async {
-    final client = _StubClient(
-      updateResult: _kProfileWithWarnings,
-    );
+    final client = _StubClient(updateResult: _kProfileWithWarnings);
     await tester.pumpWidget(_wrapProfile(client));
     await tester.pumpAndSettle();
 
@@ -374,10 +366,7 @@ void main() {
   // 14. Auth refresh/retry still works through CaleeHubClient.
   test('ProfileRepository uses CaleeHubClient methods (not direct HTTP)', () {
     final client = _StubClient();
-    final repo = ProfileRepository(
-      hubClient: client,
-      accessToken: 'tok',
-    );
+    final repo = ProfileRepository(hubClient: client, accessToken: 'tok');
     // Verifying by type: repo delegates to hubClient, not raw HTTP.
     expect(repo.hubClient, same(client));
     expect(repo.accessToken, equals('tok'));
@@ -387,10 +376,7 @@ void main() {
   test('ProfileController transitions through load states', () async {
     final client = _StubClient();
     final controller = ProfileController(
-      repository: ProfileRepository(
-        hubClient: client,
-        accessToken: 'tok',
-      ),
+      repository: ProfileRepository(hubClient: client, accessToken: 'tok'),
     );
 
     expect(controller.isLoading, isFalse);

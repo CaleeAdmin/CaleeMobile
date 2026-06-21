@@ -256,8 +256,9 @@ void _clientCalDavAccountTests() {
     });
 
     test('does not expose a generic password field in the model source', () {
-      final source = File('lib/data/models/client_caldav_account.dart')
-          .readAsStringSync();
+      final source = File(
+        'lib/data/models/client_caldav_account.dart',
+      ).readAsStringSync();
 
       expect(source, contains('final String appPassword;'));
       expect(source, isNot(contains('final String password;')));

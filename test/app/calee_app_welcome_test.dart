@@ -97,60 +97,55 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
 
-  testWidgets(
-    'signed out, no pending intent → WelcomePage shown',
-    (tester) async {
-      final session = _FakeSessionController();
+  testWidgets('signed out, no pending intent → WelcomePage shown', (
+    tester,
+  ) async {
+    final session = _FakeSessionController();
 
-      await tester.pumpWidget(
-        CaleeApp.forTesting(testDeps: _makeDeps(session: session)),
-      );
-      session.finishRestore(signedIn: false);
-      await tester.pump();
+    await tester.pumpWidget(
+      CaleeApp.forTesting(testDeps: _makeDeps(session: session)),
+    );
+    session.finishRestore(signedIn: false);
+    await tester.pump();
 
-      expect(find.text('Welcome to Calee'), findsOneWidget);
-      expect(find.text('Create account'), findsOneWidget);
-      expect(find.text('I already have an account'), findsOneWidget);
-    },
-  );
+    expect(find.text('Welcome to Calee'), findsOneWidget);
+    expect(find.text('Create account'), findsOneWidget);
+    expect(find.text('I already have an account'), findsOneWidget);
+  });
 
-  testWidgets(
-    'tap "I already have an account" → LoginPage shown',
-    (tester) async {
-      final session = _FakeSessionController();
+  testWidgets('tap "I already have an account" → LoginPage shown', (
+    tester,
+  ) async {
+    final session = _FakeSessionController();
 
-      await tester.pumpWidget(
-        CaleeApp.forTesting(testDeps: _makeDeps(session: session)),
-      );
-      session.finishRestore(signedIn: false);
-      await tester.pump();
+    await tester.pumpWidget(
+      CaleeApp.forTesting(testDeps: _makeDeps(session: session)),
+    );
+    session.finishRestore(signedIn: false);
+    await tester.pump();
 
-      await tester.tap(find.text('I already have an account'));
-      await tester.pump();
+    await tester.tap(find.text('I already have an account'));
+    await tester.pump();
 
-      expect(find.text('Sign in to Calee'), findsOneWidget);
-      expect(find.text('Welcome to Calee'), findsNothing);
-    },
-  );
+    expect(find.text('Sign in to Calee'), findsOneWidget);
+    expect(find.text('Welcome to Calee'), findsNothing);
+  });
 
-  testWidgets(
-    'tap "Create account" → CreateAccountPage shown',
-    (tester) async {
-      final session = _FakeSessionController();
+  testWidgets('tap "Create account" → CreateAccountPage shown', (tester) async {
+    final session = _FakeSessionController();
 
-      await tester.pumpWidget(
-        CaleeApp.forTesting(testDeps: _makeDeps(session: session)),
-      );
-      session.finishRestore(signedIn: false);
-      await tester.pump();
+    await tester.pumpWidget(
+      CaleeApp.forTesting(testDeps: _makeDeps(session: session)),
+    );
+    session.finishRestore(signedIn: false);
+    await tester.pump();
 
-      await tester.tap(find.text('Create account'));
-      await tester.pump();
+    await tester.tap(find.text('Create account'));
+    await tester.pump();
 
-      expect(find.text('Create your Calee account'), findsOneWidget);
-      expect(find.text('Welcome to Calee'), findsNothing);
-    },
-  );
+    expect(find.text('Create your Calee account'), findsOneWidget);
+    expect(find.text('Welcome to Calee'), findsNothing);
+  });
 
   testWidgets(
     'display QR opened directly (deep link) while signed out → DisplaySetupLandingPage, not WelcomePage',
@@ -170,43 +165,41 @@ void main() {
       session.finishRestore(signedIn: false);
       await tester.pump();
 
-      expect(find.text('Set up your Calee display'), findsOneWidget);
+      expect(find.text('Connect this display to Calee'), findsOneWidget);
       expect(find.text('Welcome to Calee'), findsNothing);
     },
   );
 
-  testWidgets(
-    'Create account does not open signed-out QR scanner',
-    (tester) async {
-      final session = _FakeSessionController();
+  testWidgets('Create account does not open signed-out QR scanner', (
+    tester,
+  ) async {
+    final session = _FakeSessionController();
 
-      await tester.pumpWidget(
-        CaleeApp.forTesting(testDeps: _makeDeps(session: session)),
-      );
-      session.finishRestore(signedIn: false);
-      await tester.pump();
+    await tester.pumpWidget(
+      CaleeApp.forTesting(testDeps: _makeDeps(session: session)),
+    );
+    session.finishRestore(signedIn: false);
+    await tester.pump();
 
-      await tester.tap(find.text('Create account'));
-      await tester.pump();
+    await tester.tap(find.text('Create account'));
+    await tester.pump();
 
-      expect(find.text('Create your Calee account'), findsOneWidget);
-      expect(find.text('Scan display QR'), findsNothing);
-    },
-  );
+    expect(find.text('Create your Calee account'), findsOneWidget);
+    expect(find.text('Scan display QR'), findsNothing);
+  });
 
-  testWidgets(
-    'signed-in user → home page shown, no WelcomePage',
-    (tester) async {
-      final session = _FakeSessionController();
+  testWidgets('signed-in user → home page shown, no WelcomePage', (
+    tester,
+  ) async {
+    final session = _FakeSessionController();
 
-      await tester.pumpWidget(
-        CaleeApp.forTesting(testDeps: _makeDeps(session: session)),
-      );
-      session.finishRestore(signedIn: true);
-      await tester.pump();
+    await tester.pumpWidget(
+      CaleeApp.forTesting(testDeps: _makeDeps(session: session)),
+    );
+    session.finishRestore(signedIn: true);
+    await tester.pump();
 
-      expect(find.text('Welcome to Calee'), findsNothing);
-      expect(find.text('Sign in to Calee'), findsNothing);
-    },
-  );
+    expect(find.text('Welcome to Calee'), findsNothing);
+    expect(find.text('Sign in to Calee'), findsNothing);
+  });
 }

@@ -10,7 +10,14 @@ void main() {
         countryCode: 'AU',
       );
       final body = d.toProfilePatchBody();
-      expect(body, equals({'timeZone': 'Australia/Perth', 'locale': 'en-AU', 'countryCode': 'AU'}));
+      expect(
+        body,
+        equals({
+          'timeZone': 'Australia/Perth',
+          'locale': 'en-AU',
+          'countryCode': 'AU',
+        }),
+      );
     });
 
     test('excludes null timeZone', () {
@@ -26,7 +33,10 @@ void main() {
     });
 
     test('excludes null countryCode', () {
-      const d = DeviceProfileDefaults(timeZone: 'Australia/Perth', locale: 'en');
+      const d = DeviceProfileDefaults(
+        timeZone: 'Australia/Perth',
+        locale: 'en',
+      );
       final body = d.toProfilePatchBody();
       expect(body.containsKey('countryCode'), isFalse);
     });
@@ -68,7 +78,10 @@ void main() {
     });
 
     test('true when countryCode is set', () {
-      expect(const DeviceProfileDefaults(countryCode: 'AU').hasAnyValue, isTrue);
+      expect(
+        const DeviceProfileDefaults(countryCode: 'AU').hasAnyValue,
+        isTrue,
+      );
     });
 
     test('false when all fields are null', () {

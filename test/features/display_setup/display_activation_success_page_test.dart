@@ -72,17 +72,18 @@ void main() {
     expect(find.text('Where is your calendar?'), findsOneWidget);
   });
 
-  testWidgets('shows Add calendars and not Add another calendar with services', (
-    tester,
-  ) async {
-    await tester.pumpWidget(
-      _wrap(onDone: () {}, services: [_portalService()]),
-    );
-    await _pushSuccess(tester);
+  testWidgets(
+    'shows Add calendars and not Add another calendar with services',
+    (tester) async {
+      await tester.pumpWidget(
+        _wrap(onDone: () {}, services: [_portalService()]),
+      );
+      await _pushSuccess(tester);
 
-    expect(find.text('Add calendars'), findsOneWidget);
-    expect(find.text('Add another calendar'), findsNothing);
-    expect(find.text('Done'), findsNothing);
-    expect(find.text('Do this later'), findsOneWidget);
-  });
+      expect(find.text('Add calendars'), findsOneWidget);
+      expect(find.text('Add another calendar'), findsNothing);
+      expect(find.text('Done'), findsNothing);
+      expect(find.text('Do this later'), findsOneWidget);
+    },
+  );
 }

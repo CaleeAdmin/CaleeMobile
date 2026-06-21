@@ -1,9 +1,5 @@
 class DeviceProfileDefaults {
-  const DeviceProfileDefaults({
-    this.timeZone,
-    this.locale,
-    this.countryCode,
-  });
+  const DeviceProfileDefaults({this.timeZone, this.locale, this.countryCode});
 
   final String? timeZone;
   final String? locale;

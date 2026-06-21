@@ -2,10 +2,7 @@ import '../../data/api/calee_hub_client.dart';
 import '../../data/models/client_profile.dart';
 
 class ProfileRepository {
-  const ProfileRepository({
-    required this.hubClient,
-    required this.accessToken,
-  });
+  const ProfileRepository({required this.hubClient, required this.accessToken});
 
   final CaleeHubClient hubClient;
   final String accessToken;

@@ -140,9 +140,9 @@ void main() {
 
     testWidgets('View calendar calls onViewCalendar callback', (tester) async {
       var viewCalled = false;
-      await tester.pumpWidget(_wrapWithoutNamedPicker(
-        onViewCalendar: () => viewCalled = true,
-      ));
+      await tester.pumpWidget(
+        _wrapWithoutNamedPicker(onViewCalendar: () => viewCalled = true),
+      );
       await tester.tap(find.text('Home'));
       await tester.pumpAndSettle();
 
@@ -176,7 +176,9 @@ void main() {
         expect(find.text('Where is your calendar?'), findsOneWidget);
 
         // Push success page on top of source picker (simulates completing a calendar add).
-        final pickerContext = tester.element(find.text('Where is your calendar?'));
+        final pickerContext = tester.element(
+          find.text('Where is your calendar?'),
+        );
         Navigator.of(pickerContext).push(
           MaterialPageRoute<void>(
             builder: (_) => CalendarAddedSuccessPage(onViewCalendar: () {}),

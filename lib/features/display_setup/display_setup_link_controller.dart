@@ -71,7 +71,9 @@ class DisplaySetupLinkController extends ChangeNotifier {
       final token = routeName.substring('/native-login/'.length);
       if (token.isEmpty || token.contains('/')) return null;
       if (!tokenRe.hasMatch(token)) return null;
-      final sourceUri = Uri.parse('https://hub.calee.com.au/native-login/$token');
+      final sourceUri = Uri.parse(
+        'https://hub.calee.com.au/native-login/$token',
+      );
       return DisplaySetupIntent(token: token, sourceUri: sourceUri);
     }
 

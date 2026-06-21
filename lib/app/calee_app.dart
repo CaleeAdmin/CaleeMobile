@@ -1,6 +1,6 @@
+// ignore_for_file: prefer_initializing_formals
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../data/api/calee_hub_client.dart';
@@ -509,12 +509,15 @@ class _CaleeAppState extends State<CaleeApp> {
               _justRegistered = !hasPendingDisplayIntent;
             });
             await _sessionController.completeSignIn(result);
-            unawaited(applyPostRegistrationProfileDefaults(
-              hubClient: _hubClient,
-              accessToken: result.accessToken,
-              provider: widget._testDeps?.deviceProfileDefaultsProvider ??
-                  DeviceProfileDefaultsProvider(),
-            ));
+            unawaited(
+              applyPostRegistrationProfileDefaults(
+                hubClient: _hubClient,
+                accessToken: result.accessToken,
+                provider:
+                    widget._testDeps?.deviceProfileDefaultsProvider ??
+                    DeviceProfileDefaultsProvider(),
+              ),
+            );
           },
         );
       }
@@ -646,12 +649,15 @@ class _CaleeAppState extends State<CaleeApp> {
               _justRegistered = true;
             });
             await _sessionController.completeSignIn(result);
-            unawaited(applyPostRegistrationProfileDefaults(
-              hubClient: _hubClient,
-              accessToken: result.accessToken,
-              provider: widget._testDeps?.deviceProfileDefaultsProvider ??
-                  DeviceProfileDefaultsProvider(),
-            ));
+            unawaited(
+              applyPostRegistrationProfileDefaults(
+                hubClient: _hubClient,
+                accessToken: result.accessToken,
+                provider:
+                    widget._testDeps?.deviceProfileDefaultsProvider ??
+                    DeviceProfileDefaultsProvider(),
+              ),
+            );
           },
         );
       }

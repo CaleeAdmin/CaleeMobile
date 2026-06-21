@@ -5,25 +5,27 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('DeviceProfileDefaultsProvider.buildFromLocales()', () {
-    test('builds locale string as en-AU when language is en and country is AU',
-        () {
-      final result = DeviceProfileDefaultsProvider.buildFromLocales(
-        const [Locale('en', 'AU')],
-      );
-      expect(result.locale, equals('en-AU'));
-    });
+    test(
+      'builds locale string as en-AU when language is en and country is AU',
+      () {
+        final result = DeviceProfileDefaultsProvider.buildFromLocales(const [
+          Locale('en', 'AU'),
+        ]);
+        expect(result.locale, equals('en-AU'));
+      },
+    );
 
     test('countryCode is uppercase from platform locale', () {
-      final result = DeviceProfileDefaultsProvider.buildFromLocales(
-        const [Locale('en', 'AU')],
-      );
+      final result = DeviceProfileDefaultsProvider.buildFromLocales(const [
+        Locale('en', 'AU'),
+      ]);
       expect(result.countryCode, equals('AU'));
     });
 
     test('locale is language-only when countryCode is absent', () {
-      final result = DeviceProfileDefaultsProvider.buildFromLocales(
-        const [Locale('en')],
-      );
+      final result = DeviceProfileDefaultsProvider.buildFromLocales(const [
+        Locale('en'),
+      ]);
       expect(result.locale, equals('en'));
       expect(result.countryCode, isNull);
     });
@@ -35,17 +37,16 @@ void main() {
     });
 
     test('preserves timeZone when provided', () {
-      final result = DeviceProfileDefaultsProvider.buildFromLocales(
-        const [Locale('en', 'AU')],
-        timeZone: 'Australia/Perth',
-      );
+      final result = DeviceProfileDefaultsProvider.buildFromLocales(const [
+        Locale('en', 'AU'),
+      ], timeZone: 'Australia/Perth');
       expect(result.timeZone, equals('Australia/Perth'));
     });
 
     test('null values are omitted from patch body', () {
-      final result = DeviceProfileDefaultsProvider.buildFromLocales(
-        const [Locale('en', 'AU')],
-      );
+      final result = DeviceProfileDefaultsProvider.buildFromLocales(const [
+        Locale('en', 'AU'),
+      ]);
       final body = result.toProfilePatchBody();
       expect(body.containsKey('timeZone'), isFalse);
       expect(body.containsKey('locale'), isTrue);
@@ -58,9 +59,10 @@ void main() {
     });
 
     test('uses first locale when multiple are provided', () {
-      final result = DeviceProfileDefaultsProvider.buildFromLocales(
-        const [Locale('en', 'AU'), Locale('fr', 'FR')],
-      );
+      final result = DeviceProfileDefaultsProvider.buildFromLocales(const [
+        Locale('en', 'AU'),
+        Locale('fr', 'FR'),
+      ]);
       expect(result.locale, equals('en-AU'));
       expect(result.countryCode, equals('AU'));
     });

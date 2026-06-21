@@ -39,7 +39,7 @@ void main() {
     await server.close(force: true);
   });
 
-  Future<CaleeHubClient> _startServer({int statusCode = 200}) async {
+  Future<CaleeHubClient> startServer({int statusCode = 200}) async {
     server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     server.listen((req) async {
       final body = await utf8.decoder.bind(req).join();
@@ -49,23 +49,27 @@ void main() {
       req.response.headers.contentType = ContentType.json;
       req.response.statusCode = statusCode;
       if (statusCode == 200) {
-        req.response.write(jsonEncode({
-          'data': {
-            'profile': {
-              'accountId': 'acct-1',
-              'email': 'alice@example.com',
-              'firstName': 'Alice',
-              'lastName': 'Smith',
-              'timeZone': 'Australia/Perth',
-              'locale': 'en-AU',
-              'countryCode': 'AU',
+        req.response.write(
+          jsonEncode({
+            'data': {
+              'profile': {
+                'accountId': 'acct-1',
+                'email': 'alice@example.com',
+                'firstName': 'Alice',
+                'lastName': 'Smith',
+                'timeZone': 'Australia/Perth',
+                'locale': 'en-AU',
+                'countryCode': 'AU',
+              },
             },
-          },
-        }));
+          }),
+        );
       } else {
-        req.response.write(jsonEncode({
-          'error': {'message': 'Server error'},
-        }));
+        req.response.write(
+          jsonEncode({
+            'error': {'message': 'Server error'},
+          }),
+        );
       }
       await req.response.close();
     });
@@ -74,31 +78,36 @@ void main() {
     );
   }
 
-  test('calls PATCH /client/v1/profile with timezone, locale, countryCode', () async {
-    final client = await _startServer();
-    final provider = _FakeProvider(const DeviceProfileDefaults(
-      timeZone: 'Australia/Perth',
-      locale: 'en-AU',
-      countryCode: 'AU',
-    ));
+  test(
+    'calls PATCH /client/v1/profile with timezone, locale, countryCode',
+    () async {
+      final client = await startServer();
+      final provider = _FakeProvider(
+        const DeviceProfileDefaults(
+          timeZone: 'Australia/Perth',
+          locale: 'en-AU',
+          countryCode: 'AU',
+        ),
+      );
 
-    await applyPostRegistrationProfileDefaults(
-      hubClient: client,
-      accessToken: 'tok',
-      provider: provider,
-    );
+      await applyPostRegistrationProfileDefaults(
+        hubClient: client,
+        accessToken: 'tok',
+        provider: provider,
+      );
 
-    expect(patchRequests, hasLength(1));
-    final sent = patchRequests.first;
-    expect(sent['timeZone'], equals('Australia/Perth'));
-    expect(sent['locale'], equals('en-AU'));
-    expect(sent['countryCode'], equals('AU'));
-    expect(sent.containsKey('email'), isFalse);
-    expect(sent.containsKey('postalCode'), isFalse);
-  });
+      expect(patchRequests, hasLength(1));
+      final sent = patchRequests.first;
+      expect(sent['timeZone'], equals('Australia/Perth'));
+      expect(sent['locale'], equals('en-AU'));
+      expect(sent['countryCode'], equals('AU'));
+      expect(sent.containsKey('email'), isFalse);
+      expect(sent.containsKey('postalCode'), isFalse);
+    },
+  );
 
   test('does nothing when provider returns no defaults', () async {
-    final client = await _startServer();
+    final client = await startServer();
     final provider = _FakeProvider(const DeviceProfileDefaults());
 
     await applyPostRegistrationProfileDefaults(
@@ -111,7 +120,7 @@ void main() {
   });
 
   test('swallows provider errors without rethrowing', () async {
-    final client = await _startServer();
+    final client = await startServer();
 
     await expectLater(
       applyPostRegistrationProfileDefaults(
@@ -125,10 +134,10 @@ void main() {
   });
 
   test('swallows API errors without rethrowing', () async {
-    final client = await _startServer(statusCode: 500);
-    final provider = _FakeProvider(const DeviceProfileDefaults(
-      timeZone: 'Australia/Perth',
-    ));
+    final client = await startServer(statusCode: 500);
+    final provider = _FakeProvider(
+      const DeviceProfileDefaults(timeZone: 'Australia/Perth'),
+    );
 
     await expectLater(
       applyPostRegistrationProfileDefaults(

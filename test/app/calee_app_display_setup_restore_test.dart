@@ -121,7 +121,9 @@ void main() {
       final displaySetup = _FakeDisplaySetupLinkController();
 
       await tester.pumpWidget(
-        CaleeApp.forTesting(testDeps: _makeDeps(session: session, displaySetup: displaySetup)),
+        CaleeApp.forTesting(
+          testDeps: _makeDeps(session: session, displaySetup: displaySetup),
+        ),
       );
 
       // Inject the intent while still restoring.
@@ -132,7 +134,7 @@ void main() {
       session.finishRestore(signedIn: false);
       await tester.pump();
 
-      expect(find.text('Set up your Calee display'), findsOneWidget);
+      expect(find.text('Connect this display to Calee'), findsOneWidget);
       expect(find.text('Create account'), findsOneWidget);
       expect(find.text('I already have an account'), findsOneWidget);
     },
@@ -145,7 +147,9 @@ void main() {
       final displaySetup = _FakeDisplaySetupLinkController();
 
       await tester.pumpWidget(
-        CaleeApp.forTesting(testDeps: _makeDeps(session: session, displaySetup: displaySetup)),
+        CaleeApp.forTesting(
+          testDeps: _makeDeps(session: session, displaySetup: displaySetup),
+        ),
       );
 
       displaySetup.injectIntent(_validToken);
@@ -155,7 +159,7 @@ void main() {
       session.finishRestore(signedIn: true);
       await tester.pump();
 
-      expect(find.text('Set up your Calee display'), findsNothing);
+      expect(find.text('Connect this display to Calee'), findsNothing);
       // Confirmation page is pushed via navigator — landing page must not show.
       expect(find.text('Sign in to Calee'), findsNothing);
     },
@@ -177,7 +181,7 @@ void main() {
       expect(find.text('Welcome to Calee'), findsOneWidget);
       expect(find.text('Create account'), findsOneWidget);
       expect(find.text('I already have an account'), findsOneWidget);
-      expect(find.text('Set up your Calee display'), findsNothing);
+      expect(find.text('Connect this display to Calee'), findsNothing);
     },
   );
 
@@ -188,7 +192,9 @@ void main() {
       final displaySetup = _FakeDisplaySetupLinkController();
 
       await tester.pumpWidget(
-        CaleeApp.forTesting(testDeps: _makeDeps(session: session, displaySetup: displaySetup)),
+        CaleeApp.forTesting(
+          testDeps: _makeDeps(session: session, displaySetup: displaySetup),
+        ),
       );
 
       displaySetup.injectIntent(_validToken);
@@ -196,7 +202,7 @@ void main() {
       session.finishRestore(signedIn: false);
       await tester.pump();
 
-      expect(find.text('Set up your Calee display'), findsOneWidget);
+      expect(find.text('Connect this display to Calee'), findsOneWidget);
 
       await tester.tap(find.text('Create account'));
       await tester.pump();
@@ -214,7 +220,9 @@ void main() {
       final displaySetup = _FakeDisplaySetupLinkController();
 
       await tester.pumpWidget(
-        CaleeApp.forTesting(testDeps: _makeDeps(session: session, displaySetup: displaySetup)),
+        CaleeApp.forTesting(
+          testDeps: _makeDeps(session: session, displaySetup: displaySetup),
+        ),
       );
 
       displaySetup.injectIntent(_validToken);
@@ -222,7 +230,7 @@ void main() {
       session.finishRestore(signedIn: false);
       await tester.pump();
 
-      expect(find.text('Set up your Calee display'), findsOneWidget);
+      expect(find.text('Connect this display to Calee'), findsOneWidget);
 
       await tester.tap(find.text('I already have an account'));
       await tester.pump();
