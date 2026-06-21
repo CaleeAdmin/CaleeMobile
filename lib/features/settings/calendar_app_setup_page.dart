@@ -232,7 +232,7 @@ class _PasswordRow extends StatelessWidget {
           const SizedBox(
             width: 96,
             child: Text(
-              'Password',
+              'App Password',
               style: TextStyle(fontSize: 16, color: CaleeColors.textPrimary),
             ),
           ),
