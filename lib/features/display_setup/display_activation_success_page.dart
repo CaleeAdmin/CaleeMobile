@@ -28,6 +28,9 @@ class DisplayActivationSuccessPage extends StatelessWidget {
   void _addCalendars(BuildContext context) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
+        settings: const RouteSettings(
+          name: CalendarSourcePickerPage.routeName,
+        ),
         builder: (_) => CalendarSourcePickerPage(
           hubClient: hubClient,
           accessToken: accessToken,

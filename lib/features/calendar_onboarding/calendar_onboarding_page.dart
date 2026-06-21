@@ -50,7 +50,7 @@ class CalendarOnboardingPage extends StatelessWidget {
   void _addExistingCalendars(BuildContext context) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        settings: const RouteSettings(name: 'calendar_source_picker'),
+        settings: const RouteSettings(name: CalendarSourcePickerPage.routeName),
         builder: (_) => CalendarSourcePickerPage(
           hubClient: hubClient,
           accessToken: accessToken,
