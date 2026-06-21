@@ -150,11 +150,14 @@ void main() {
 
       // Submit
       final createButton = find.widgetWithText(FilledButton, 'Create account');
-      await tester.scrollUntilVisible(
-        createButton,
-        300,
-        scrollable: find.byType(Scrollable).first,
-      );
+      final listView = find.byType(ListView);
+
+      for (var i = 0; i < 8 && createButton.evaluate().isEmpty; i++) {
+        await tester.drag(listView, const Offset(0, -300));
+        await tester.pump();
+      }
+
+      expect(createButton, findsOneWidget);
       await tester.tap(createButton);
       // Process the tap, the async register() call, and the state rebuild.
       await tester.pump();
