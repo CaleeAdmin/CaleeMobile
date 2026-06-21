@@ -109,7 +109,7 @@ void main() {
       await tester.pump();
 
       expect(find.text('Welcome to Calee'), findsOneWidget);
-      expect(find.text('Set up a Calee display'), findsOneWidget);
+      expect(find.text('Create account'), findsOneWidget);
       expect(find.text('I already have an account'), findsOneWidget);
     },
   );
@@ -134,7 +134,7 @@ void main() {
   );
 
   testWidgets(
-    'tap "Set up a Calee display" → signed-out QR scanner shown',
+    'tap "Create account" → CreateAccountPage shown',
     (tester) async {
       final session = _FakeSessionController();
 
@@ -144,10 +144,10 @@ void main() {
       session.finishRestore(signedIn: false);
       await tester.pump();
 
-      await tester.tap(find.text('Set up a Calee display'));
+      await tester.tap(find.text('Create account'));
       await tester.pump();
 
-      expect(find.text('Scan display QR'), findsOneWidget);
+      expect(find.text('Create your Calee account'), findsOneWidget);
       expect(find.text('Welcome to Calee'), findsNothing);
     },
   );
@@ -176,7 +176,7 @@ void main() {
   );
 
   testWidgets(
-    'QR entry back button → returns to WelcomePage',
+    'Create account does not open signed-out QR scanner',
     (tester) async {
       final session = _FakeSessionController();
 
@@ -186,16 +186,10 @@ void main() {
       session.finishRestore(signedIn: false);
       await tester.pump();
 
-      // Navigate to QR scanner.
-      await tester.tap(find.text('Set up a Calee display'));
-      await tester.pump();
-      expect(find.text('Scan display QR'), findsOneWidget);
-
-      // Tap Back.
-      await tester.tap(find.byType(BackButton));
+      await tester.tap(find.text('Create account'));
       await tester.pump();
 
-      expect(find.text('Welcome to Calee'), findsOneWidget);
+      expect(find.text('Create your Calee account'), findsOneWidget);
       expect(find.text('Scan display QR'), findsNothing);
     },
   );

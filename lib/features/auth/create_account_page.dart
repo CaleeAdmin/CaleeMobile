@@ -23,8 +23,9 @@ class CreateAccountPage extends StatefulWidget {
 
 class _CreateAccountPageState extends State<CreateAccountPage> {
   final _formKey = GlobalKey<FormState>();
-  final _nameController = TextEditingController();
   final _emailController = TextEditingController();
+  final _confirmEmailController = TextEditingController();
+  final _redeemCodeController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _obscurePassword = true;
   late final CreateAccountController _controller;
@@ -37,8 +38,9 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
 
   @override
   void dispose() {
-    _nameController.dispose();
     _emailController.dispose();
+    _confirmEmailController.dispose();
+    _redeemCodeController.dispose();
     _passwordController.dispose();
     _controller.dispose();
     super.dispose();
@@ -49,8 +51,9 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
 
     final result = await _controller.register(
       email: _emailController.text.trim(),
+      confirmEmail: _confirmEmailController.text.trim(),
+      redeemCode: _redeemCodeController.text.trim(),
       password: _passwordController.text,
-      displayName: _nameController.text.trim(),
     );
 
     if (!mounted || result == null) return;
@@ -99,23 +102,6 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                       ),
                       const SizedBox(height: 32),
                       TextFormField(
-                        controller: _nameController,
-                        keyboardType: TextInputType.name,
-                        textInputAction: TextInputAction.next,
-                        autofillHints: const [AutofillHints.name],
-                        decoration: const InputDecoration(
-                          labelText: 'Name',
-                          border: OutlineInputBorder(),
-                        ),
-                        validator: (value) {
-                          if (value == null || value.trim().isEmpty) {
-                            return 'Enter your name';
-                          }
-                          return null;
-                        },
-                      ),
-                      const SizedBox(height: 16),
-                      TextFormField(
                         controller: _emailController,
                         keyboardType: TextInputType.emailAddress,
                         textInputAction: TextInputAction.next,
@@ -126,7 +112,48 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                         ),
                         validator: (value) {
                           if (value == null || value.trim().isEmpty) {
-                            return 'Enter your email';
+                            return 'Email is required.';
+                          }
+                          final emailRegex = RegExp(
+                            r'^[^@\s]+@[^@\s]+\.[^@\s]+$',
+                          );
+                          if (!emailRegex.hasMatch(value.trim())) {
+                            return 'Enter a valid email address.';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        controller: _confirmEmailController,
+                        keyboardType: TextInputType.emailAddress,
+                        textInputAction: TextInputAction.next,
+                        autofillHints: const [AutofillHints.email],
+                        decoration: const InputDecoration(
+                          labelText: 'Confirm email',
+                          border: OutlineInputBorder(),
+                        ),
+                        validator: (value) {
+                          if (value == null || value.trim().isEmpty) {
+                            return 'Confirm email is required.';
+                          }
+                          if (value.trim() != _emailController.text.trim()) {
+                            return 'Confirm email must match email.';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        controller: _redeemCodeController,
+                        textInputAction: TextInputAction.next,
+                        decoration: const InputDecoration(
+                          labelText: 'Redeem code',
+                          border: OutlineInputBorder(),
+                        ),
+                        validator: (value) {
+                          if (value == null || value.trim().isEmpty) {
+                            return 'Redeem code is required.';
                           }
                           return null;
                         },
@@ -158,7 +185,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                         ),
                         validator: (value) {
                           if (value == null || value.isEmpty) {
-                            return 'Enter a password';
+                            return 'Password must be at least 8 characters';
                           }
                           if (value.length < 8) {
                             return 'Password must be at least 8 characters';

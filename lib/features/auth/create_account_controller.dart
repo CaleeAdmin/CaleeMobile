@@ -14,8 +14,9 @@ class CreateAccountController extends ChangeNotifier {
 
   Future<ClientLoginResult?> register({
     required String email,
+    required String confirmEmail,
+    required String redeemCode,
     required String password,
-    required String displayName,
   }) async {
     isLoading = true;
     errorMessage = null;
@@ -24,8 +25,9 @@ class CreateAccountController extends ChangeNotifier {
     try {
       final result = await repository.register(
         email: email,
+        confirmEmail: confirmEmail,
+        redeemCode: redeemCode,
         password: password,
-        displayName: displayName,
       );
       isLoading = false;
       notifyListeners();

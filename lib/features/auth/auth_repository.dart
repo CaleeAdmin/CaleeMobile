@@ -34,12 +34,14 @@ class AuthRepository {
 
   Future<ClientLoginResult> register({
     required String email,
+    required String confirmEmail,
+    required String redeemCode,
     required String password,
-    required String displayName,
   }) => hubClient.register(
     email: email,
+    confirmEmail: confirmEmail,
+    redeemCode: redeemCode,
     password: password,
-    displayName: displayName,
   );
 
   Future<void> clearSession() => sessionStore.clear();

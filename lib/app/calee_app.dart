@@ -17,12 +17,11 @@ import '../features/calendar_onboarding/calendar_onboarding_page.dart';
 import '../features/calendar_onboarding/calendar_onboarding_status.dart';
 import '../features/display_setup/display_activation_controller.dart';
 import '../features/display_setup/display_activation_success_page.dart';
+import '../features/display_setup/connect_display_page.dart';
 import '../features/display_setup/display_setup_confirmation_page.dart';
 import '../features/display_setup/display_setup_intent.dart';
 import '../features/display_setup/display_setup_landing_page.dart';
 import '../features/display_setup/display_setup_repository.dart';
-import '../features/display_setup/display_setup_qr_entry_page.dart';
-import '../features/display_setup/display_setup_scan_page.dart';
 import '../features/display_setup/display_setup_link_controller.dart';
 import '../features/local_subscriber/local_calendar_subscription.dart';
 import '../features/onboarding/welcome_page.dart';
@@ -94,7 +93,8 @@ class _CaleeAppState extends State<CaleeApp> {
 
   // Welcome screen state (first-run signed-out, no pending intent)
   bool _showingSignInFromWelcome = false;
-  bool _showingDisplayQrScanFromWelcome = false;
+  bool _showingCreateAccountFromWelcome = false;
+  bool _showingConnectDisplayAfterAuth = false;
 
   // Onboarding gate state (only active after fresh sign-in, not session restore)
   bool _checkingOnboarding = false;
@@ -200,32 +200,12 @@ class _CaleeAppState extends State<CaleeApp> {
 
     if (!_sessionController.isSignedIn) return;
 
-    // Fresh registration with no display context (state 4): offer QR scan.
+    // Fresh registration/sign-in with no display context: offer display connection.
     if (_justRegistered) {
       _justRegistered = false;
-      setState(() => _showingDisplaySetupCreateAccount = false);
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        _navigatorKey.currentState?.push(
-          MaterialPageRoute<void>(
-            builder: (_) => DisplaySetupScanPage(
-              hubClient: _hubClient,
-              accessToken: _sessionController.accessToken!,
-              services: _sessionController.bootstrap!.services,
-              accountId: _sessionController.bootstrap!.account.id,
-              onDone: () {
-                Navigator.of(
-                  _navigatorKey.currentContext!,
-                ).popUntil((r) => r.isFirst);
-                unawaited(
-                  _checkAndShowOnboarding(
-                    _sessionController.bootstrap!.account.id,
-                  ),
-                );
-              },
-            ),
-          ),
-        );
+      setState(() {
+        _showingDisplaySetupCreateAccount = false;
+        _showingConnectDisplayAfterAuth = true;
       });
       return;
     }
@@ -640,32 +620,30 @@ class _CaleeAppState extends State<CaleeApp> {
             });
             await _sessionController.completeSignIn(result);
             if (!hasPendingIntent) {
-              unawaited(
-                _checkAndShowOnboarding(result.bootstrap.account.id),
-              );
+              setState(() => _showingConnectDisplayAfterAuth = true);
             }
           },
         );
       }
 
-      // Welcome → "Set up a Calee display" path (signed-out QR scanner)
-      if (_showingDisplayQrScanFromWelcome) {
-        return DisplaySetupQrEntryPage(
-          onBack: () => setState(() => _showingDisplayQrScanFromWelcome = false),
-          onIntentFound: (intent) {
+      // Welcome → "Create account" path
+      if (_showingCreateAccountFromWelcome) {
+        return CreateAccountPage(
+          authRepository: _sessionController.repository,
+          onAccountCreated: (result) async {
             setState(() {
-              _showingDisplayQrScanFromWelcome = false;
-              _showingSignInFromWelcome = false;
+              _showingCreateAccountFromWelcome = false;
+              _justRegistered = true;
             });
-            _displaySetupLinkController.handleDisplaySetupIntent(intent);
+            await _sessionController.completeSignIn(result);
           },
         );
       }
 
       // Default first-run screen for signed-out users with no pending intent
       return WelcomePage(
-        onSetupDisplay: () =>
-            setState(() => _showingDisplayQrScanFromWelcome = true),
+        onCreateAccount: () =>
+            setState(() => _showingCreateAccountFromWelcome = true),
         onSignIn: () => setState(() => _showingSignInFromWelcome = true),
       );
     }
@@ -674,6 +652,21 @@ class _CaleeAppState extends State<CaleeApp> {
 
     // Show loading spinner while checking onboarding status after fresh sign-in
     if (_checkingOnboarding) return const _SessionRestorePage();
+
+    if (_showingConnectDisplayAfterAuth) {
+      return ConnectDisplayPage(
+        hubClient: _hubClient,
+        accessToken: _sessionController.accessToken!,
+        services: _sessionController.bootstrap!.services,
+        accountId: _sessionController.bootstrap!.account.id,
+        onDone: () {
+          setState(() => _showingConnectDisplayAfterAuth = false);
+          unawaited(
+            _checkAndShowOnboarding(_sessionController.bootstrap!.account.id),
+          );
+        },
+      );
+    }
 
     if (_showingOnboarding) {
       return CalendarOnboardingPage(
