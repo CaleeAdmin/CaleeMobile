@@ -20,9 +20,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 class _StubHub extends CaleeHubClient {
   _StubHub() : super();
 
+  int calendarLoadCount = 0;
+
   @override
-  Future<ClientCalendarList> calendars({required String accessToken}) async =>
-      const ClientCalendarList(calendars: []);
+  Future<ClientCalendarList> calendars({required String accessToken}) async {
+    calendarLoadCount++;
+    return const ClientCalendarList(calendars: []);
+  }
 
   @override
   Future<ClientEventList> events({
@@ -123,6 +127,47 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byType(CalendarPage), findsOneWidget);
+    });
+
+    testWidgets('refreshes when refreshGeneration increments', (tester) async {
+      final hub = _StubHub();
+      int generation = 0;
+
+      await tester.pumpWidget(
+        StatefulBuilder(
+          builder: (context, setState) => MaterialApp(
+            theme: CaleeTheme.buildThemeData(),
+            home: Scaffold(
+              body: Column(
+                children: [
+                  Expanded(
+                    child: CalendarPage(
+                      hubClient: hub,
+                      accessToken: 'tok',
+                      services: const [_service],
+                      accountId: 'acct1',
+                      refreshGeneration: generation,
+                    ),
+                  ),
+                  ElevatedButton(
+                    onPressed: () => setState(() => generation++),
+                    child: const Text('Bump'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final countAfterInit = hub.calendarLoadCount;
+      expect(countAfterInit, greaterThan(0));
+
+      await tester.tap(find.text('Bump'));
+      await tester.pumpAndSettle();
+
+      expect(hub.calendarLoadCount, greaterThan(countAfterInit));
     });
   });
 }

@@ -867,7 +867,15 @@ class CaleeHubClient {
       '/client/v1/profile',
       accessToken: accessToken,
     );
-    return ClientProfile.fromJson(_data(json));
+    final data = _data(json);
+    final profileJson = data['profile'];
+    if (profileJson is! Map<String, dynamic>) {
+      throw const CaleeHubException(
+        statusCode: 0,
+        message: 'Could not load your profile. Please try again.',
+      );
+    }
+    return ClientProfile.fromJson(profileJson);
   }
 
   Future<ClientProfile> updateProfile({
@@ -895,7 +903,20 @@ class CaleeHubClient {
       accessToken: accessToken,
       body: body,
     );
-    return ClientProfile.fromJson(_data(json));
+    final data = _data(json);
+    final rawProfile = data['profile'];
+    if (rawProfile is! Map<String, dynamic>) {
+      throw const CaleeHubException(
+        statusCode: 0,
+        message: 'Could not load your profile. Please try again.',
+      );
+    }
+    final profileJson = Map<String, dynamic>.from(rawProfile);
+    final warnings = data['warnings'];
+    if (warnings is List) {
+      profileJson['warnings'] = warnings.whereType<String>().toList();
+    }
+    return ClientProfile.fromJson(profileJson);
   }
 
   // ── Auth retry helper ────────────────────────────────────────────────────────────────────────────
