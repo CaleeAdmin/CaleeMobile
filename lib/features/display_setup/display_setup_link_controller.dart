@@ -63,6 +63,35 @@ class DisplaySetupLinkController extends ChangeNotifier {
     return DisplaySetupIntent(token: token, sourceUri: uri);
   }
 
+  static DisplaySetupIntent? parseDisplaySetupRouteName(String? routeName) {
+    if (routeName == null || routeName.isEmpty) return null;
+    final tokenRe = RegExp(_tokenPattern);
+
+    if (routeName.startsWith('/native-login/')) {
+      final token = routeName.substring('/native-login/'.length);
+      if (token.isEmpty || token.contains('/')) return null;
+      if (!tokenRe.hasMatch(token)) return null;
+      final sourceUri = Uri.parse('https://hub.calee.com.au/native-login/$token');
+      return DisplaySetupIntent(token: token, sourceUri: sourceUri);
+    }
+
+    if (routeName.startsWith('/')) {
+      final token = routeName.substring(1);
+      if (token.isEmpty || token.contains('/')) return null;
+      if (!tokenRe.hasMatch(token)) return null;
+      final sourceUri = Uri.parse('calee://native-login/$token');
+      return DisplaySetupIntent(token: token, sourceUri: sourceUri);
+    }
+
+    return null;
+  }
+
+  void handleDisplaySetupIntent(DisplaySetupIntent intent) {
+    pendingIntent = intent;
+    pendingError = null;
+    notifyListeners();
+  }
+
   void clearPending() {
     pendingIntent = null;
     pendingError = null;
