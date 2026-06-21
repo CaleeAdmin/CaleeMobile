@@ -424,17 +424,28 @@ class _CaleeAppState extends State<CaleeApp> {
         ]),
         builder: (context, _) => _buildHome(),
       ),
-      onUnknownRoute: (settings) => MaterialPageRoute<void>(
-        settings: const RouteSettings(name: '/'),
-        builder: (_) => AnimatedBuilder(
-          animation: Listenable.merge([
-            _sessionController,
-            _followLinkController,
-            _displaySetupLinkController,
-          ]),
-          builder: (context, _) => _buildHome(),
-        ),
-      ),
+      onUnknownRoute: (settings) {
+        final intent = DisplaySetupLinkController.parseDisplaySetupRouteName(
+          settings.name,
+        );
+        if (intent != null) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            _displaySetupLinkController.handleDisplaySetupIntent(intent);
+          });
+        }
+        return MaterialPageRoute<void>(
+          settings: const RouteSettings(name: '/'),
+          builder: (_) => AnimatedBuilder(
+            animation: Listenable.merge([
+              _sessionController,
+              _followLinkController,
+              _displaySetupLinkController,
+            ]),
+            builder: (context, _) => _buildHome(),
+          ),
+        );
+      },
     );
   }
 
