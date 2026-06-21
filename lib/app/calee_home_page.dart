@@ -37,6 +37,7 @@ class CaleeHomePage extends StatefulWidget {
 class _CaleeHomePageState extends State<CaleeHomePage> {
   late int _selectedIndex;
   late final List<_CaleeTab> _tabs;
+  int _calendarRefreshGeneration = 0;
 
   bool get _hasChoreService =>
       widget.bootstrap.services.any((service) => service.supportsChores);
@@ -66,72 +67,81 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
     }
 
     _tabs = [
-      _CaleeTab(
+      const _CaleeTab(
         title: 'Today',
         icon: Icons.today_outlined,
         selectedIcon: Icons.today,
-        page: TodayPage(
+      ),
+      const _CaleeTab(
+        title: 'Calendar',
+        icon: Icons.calendar_month_outlined,
+        selectedIcon: Icons.calendar_month,
+      ),
+      const _CaleeTab(
+        title: 'Tasks',
+        icon: Icons.checklist_outlined,
+        selectedIcon: Icons.checklist,
+      ),
+      if (_hasChoreService)
+        const _CaleeTab(
+          title: 'Chores',
+          icon: Icons.cleaning_services_outlined,
+          selectedIcon: Icons.cleaning_services,
+        ),
+      const _CaleeTab(
+        title: 'Settings',
+        icon: Icons.settings_outlined,
+        selectedIcon: Icons.settings,
+      ),
+    ];
+  }
+
+  List<Widget> _buildPages() {
+    return [
+      TodayPage(
+        hubClient: widget.hubClient,
+        accessToken: widget.accessToken,
+        services: widget.bootstrap.services,
+        households: widget.bootstrap.contexts.households,
+        onNavigateToCalendar: () =>
+            setState(() => _selectedIndex = _calendarTabIndex),
+        onNavigateToTasks: () =>
+            setState(() => _selectedIndex = _tasksTabIndex),
+        onNavigateToChores: _hasChoreService
+            ? () => setState(() => _selectedIndex = _choresTabIndex)
+            : null,
+      ),
+      CalendarPage(
+        hubClient: widget.hubClient,
+        accessToken: widget.accessToken,
+        services: widget.bootstrap.services,
+        accountId: widget.bootstrap.account.id,
+        refreshGeneration: _calendarRefreshGeneration,
+      ),
+      TasksPage(
+        hubClient: widget.hubClient,
+        accessToken: widget.accessToken,
+        services: widget.bootstrap.services,
+        accountId: widget.bootstrap.account.id,
+      ),
+      if (_hasChoreService)
+        ChoresPage(
           hubClient: widget.hubClient,
           accessToken: widget.accessToken,
           services: widget.bootstrap.services,
           households: widget.bootstrap.contexts.households,
-          onNavigateToCalendar: () =>
-              setState(() => _selectedIndex = _calendarTabIndex),
-          onNavigateToTasks: () =>
-              setState(() => _selectedIndex = _tasksTabIndex),
-          onNavigateToChores: _hasChoreService
-              ? () => setState(() => _selectedIndex = _choresTabIndex)
-              : null,
-        ),
-      ),
-      _CaleeTab(
-        title: 'Calendar',
-        icon: Icons.calendar_month_outlined,
-        selectedIcon: Icons.calendar_month,
-        page: CalendarPage(
-          hubClient: widget.hubClient,
-          accessToken: widget.accessToken,
-          services: widget.bootstrap.services,
           accountId: widget.bootstrap.account.id,
         ),
-      ),
-      _CaleeTab(
-        title: 'Tasks',
-        icon: Icons.checklist_outlined,
-        selectedIcon: Icons.checklist,
-        page: TasksPage(
-          hubClient: widget.hubClient,
-          accessToken: widget.accessToken,
-          services: widget.bootstrap.services,
-          accountId: widget.bootstrap.account.id,
-        ),
-      ),
-      if (_hasChoreService)
-        _CaleeTab(
-          title: 'Chores',
-          icon: Icons.cleaning_services_outlined,
-          selectedIcon: Icons.cleaning_services,
-          page: ChoresPage(
-            hubClient: widget.hubClient,
-            accessToken: widget.accessToken,
-            services: widget.bootstrap.services,
-            households: widget.bootstrap.contexts.households,
-            accountId: widget.bootstrap.account.id,
-          ),
-        ),
-      _CaleeTab(
-        title: 'Settings',
-        icon: Icons.settings_outlined,
-        selectedIcon: Icons.settings,
-        page: SettingsPage(
-          hubClient: widget.hubClient,
-          accessToken: widget.accessToken,
-          bootstrap: widget.bootstrap,
-          onSignOut: widget.onSignOut,
-          onBootstrapRefreshed: widget.onBootstrapRefreshed,
-          onNavigateToCalendar: () =>
-              setState(() => _selectedIndex = _calendarTabIndex),
-        ),
+      SettingsPage(
+        hubClient: widget.hubClient,
+        accessToken: widget.accessToken,
+        bootstrap: widget.bootstrap,
+        onSignOut: widget.onSignOut,
+        onBootstrapRefreshed: widget.onBootstrapRefreshed,
+        onNavigateToCalendar: () => setState(() {
+          _selectedIndex = _calendarTabIndex;
+          _calendarRefreshGeneration++;
+        }),
       ),
     ];
   }
@@ -144,7 +154,7 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
           : AppBar(title: Text(_tabs[_selectedIndex].title)),
       body: IndexedStack(
         index: _selectedIndex,
-        children: _tabs.map((tab) => tab.page).toList(),
+        children: _buildPages(),
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _selectedIndex,
@@ -172,11 +182,9 @@ class _CaleeTab {
     required this.title,
     required this.icon,
     required this.selectedIcon,
-    required this.page,
   });
 
   final String title;
   final IconData icon;
   final IconData selectedIcon;
-  final Widget page;
 }

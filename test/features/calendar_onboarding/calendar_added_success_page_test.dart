@@ -1,5 +1,4 @@
 import 'package:calee_mobile/data/api/calee_hub_client.dart';
-import 'package:calee_mobile/data/models/client_bootstrap.dart';
 import 'package:calee_mobile/features/calendar_onboarding/calendar_added_success_page.dart';
 import 'package:calee_mobile/features/calendar_onboarding/calendar_onboarding_page.dart';
 import 'package:calee_mobile/features/calendar_onboarding/calendar_source_picker_page.dart';
