@@ -13,10 +13,13 @@ class CreateAccountController extends ChangeNotifier {
   String? errorMessage;
 
   Future<ClientLoginResult?> register({
+    required String firstName,
+    required String lastName,
     required String email,
     required String confirmEmail,
     required String redeemCode,
     required String password,
+    required String confirmPassword,
   }) async {
     isLoading = true;
     errorMessage = null;
@@ -24,10 +27,13 @@ class CreateAccountController extends ChangeNotifier {
 
     try {
       final result = await repository.register(
+        firstName: firstName,
+        lastName: lastName,
         email: email,
         confirmEmail: confirmEmail,
         redeemCode: redeemCode,
         password: password,
+        confirmPassword: confirmPassword,
       );
       isLoading = false;
       notifyListeners();

@@ -23,6 +23,8 @@ class CreateAccountPage extends StatefulWidget {
 
 class _CreateAccountPageState extends State<CreateAccountPage> {
   final _formKey = GlobalKey<FormState>();
+  final _firstNameController = TextEditingController();
+  final _lastNameController = TextEditingController();
   final _emailController = TextEditingController();
   final _confirmEmailController = TextEditingController();
   final _redeemCodeController = TextEditingController();
@@ -39,6 +41,8 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
 
   @override
   void dispose() {
+    _firstNameController.dispose();
+    _lastNameController.dispose();
     _emailController.dispose();
     _confirmEmailController.dispose();
     _redeemCodeController.dispose();
@@ -52,10 +56,13 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
     if (!_formKey.currentState!.validate()) return;
 
     final result = await _controller.register(
+      firstName: _firstNameController.text.trim(),
+      lastName: _lastNameController.text.trim(),
       email: _emailController.text.trim(),
       confirmEmail: _confirmEmailController.text.trim(),
       redeemCode: _redeemCodeController.text.trim(),
       password: _passwordController.text,
+      confirmPassword: _confirmPasswordController.text,
     );
 
     if (!mounted || result == null) return;
@@ -103,6 +110,38 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                         ),
                       ),
                       const SizedBox(height: 32),
+                      TextFormField(
+                        controller: _firstNameController,
+                        textInputAction: TextInputAction.next,
+                        autofillHints: const [AutofillHints.givenName],
+                        decoration: const InputDecoration(
+                          labelText: 'First name',
+                          border: OutlineInputBorder(),
+                        ),
+                        validator: (value) {
+                          if (value == null || value.trim().isEmpty) {
+                            return 'First name is required.';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        controller: _lastNameController,
+                        textInputAction: TextInputAction.next,
+                        autofillHints: const [AutofillHints.familyName],
+                        decoration: const InputDecoration(
+                          labelText: 'Last name',
+                          border: OutlineInputBorder(),
+                        ),
+                        validator: (value) {
+                          if (value == null || value.trim().isEmpty) {
+                            return 'Last name is required.';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 16),
                       TextFormField(
                         controller: _emailController,
                         keyboardType: TextInputType.emailAddress,
