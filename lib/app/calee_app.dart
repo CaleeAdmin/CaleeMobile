@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../data/api/calee_hub_client.dart';
@@ -29,8 +30,36 @@ import '../features/settings/calendar_collections_page.dart';
 import '../ui/calee_design.dart';
 import 'calee_home_page.dart';
 
+/// Overrides injected by tests to avoid platform channels and network calls.
+@visibleForTesting
+class CaleeAppTestDependencies {
+  const CaleeAppTestDependencies({
+    required this.hubClient,
+    required this.sessionController,
+    required this.displaySetupLinkController,
+    required this.followLinkController,
+    required this.displayActivationController,
+    required this.localSubscriptionRepo,
+  });
+
+  final CaleeHubClient hubClient;
+  final SessionController sessionController;
+  final DisplaySetupLinkController displaySetupLinkController;
+  final CalendarFollowLinkController followLinkController;
+  final DisplayActivationController displayActivationController;
+  final LocalCalendarSubscriptionRepository localSubscriptionRepo;
+}
+
 class CaleeApp extends StatefulWidget {
-  const CaleeApp({super.key});
+  const CaleeApp({super.key}) : _testDeps = null;
+
+  @visibleForTesting
+  const CaleeApp.forTesting({
+    required CaleeAppTestDependencies testDeps,
+    super.key,
+  }) : _testDeps = testDeps;
+
+  final CaleeAppTestDependencies? _testDeps;
 
   @override
   State<CaleeApp> createState() => _CaleeAppState();
@@ -72,31 +101,37 @@ class _CaleeAppState extends State<CaleeApp> {
   @override
   void initState() {
     super.initState();
-    _hubClient = CaleeHubClient();
-    final repository = AuthRepository(
-      hubClient: _hubClient,
-      sessionStore: SessionStore(),
-    );
-    _sessionController = SessionController(repository: repository);
-    _hubClient.onUnauthorized = _sessionController.handleUnauthorized;
+    final testDeps = widget._testDeps;
+    if (testDeps != null) {
+      _hubClient = testDeps.hubClient;
+      _sessionController = testDeps.sessionController;
+      _followLinkController = testDeps.followLinkController;
+      _displaySetupLinkController = testDeps.displaySetupLinkController;
+      _displayActivationController = testDeps.displayActivationController;
+      _localSubscriptionRepo = testDeps.localSubscriptionRepo;
+    } else {
+      _hubClient = CaleeHubClient();
+      final repository = AuthRepository(
+        hubClient: _hubClient,
+        sessionStore: SessionStore(),
+      );
+      _sessionController = SessionController(repository: repository);
+      _hubClient.onUnauthorized = _sessionController.handleUnauthorized;
+      _followLinkController = CalendarFollowLinkController();
+      _displaySetupLinkController = DisplaySetupLinkController();
+      _displayActivationController = DisplayActivationController(
+        repository: DisplaySetupRepository(hubClient: _hubClient),
+      );
+      _localSubscriptionRepo = LocalCalendarSubscriptionRepository();
+      unawaited(_followLinkController.init());
+      unawaited(_displaySetupLinkController.init());
+    }
 
-    _followLinkController = CalendarFollowLinkController();
     _followLinkController.addListener(_onFollowLinkChanged);
-
-    _displaySetupLinkController = DisplaySetupLinkController();
     _displaySetupLinkController.addListener(_onDisplaySetupLinkChanged);
-
-    _displayActivationController = DisplayActivationController(
-      repository: DisplaySetupRepository(hubClient: _hubClient),
-    );
-
     _sessionController.addListener(_onSessionChanged);
 
-    _localSubscriptionRepo = LocalCalendarSubscriptionRepository();
-
     _sessionController.restoreSession();
-    unawaited(_followLinkController.init());
-    unawaited(_displaySetupLinkController.init());
     unawaited(_loadLocalSubscriptions());
   }
 
@@ -122,28 +157,42 @@ class _CaleeAppState extends State<CaleeApp> {
   }
 
   void _onSessionChanged() {
-    if (!_sessionController.isSignedIn) return;
-
-    // Display setup intent pending.
+    // Display setup intent must be checked before the signed-out early return
+    // so that a pending intent from session-restore is routed correctly even
+    // when the user is not signed in.
     final displayIntent = _displaySetupLinkController.pendingIntent;
     if (displayIntent != null) {
-      if (_displaySetupThroughLandingPage) {
-        // State 2: user came through the landing page, auto-activate.
-        _displaySetupThroughLandingPage = false;
-        _displaySetupFromLoggedOut = false;
-        _displaySetupLinkController.clearPending();
+      if (_sessionController.isSignedIn) {
+        if (_displaySetupThroughLandingPage) {
+          // State 2: user came through the landing page, auto-activate.
+          _displaySetupThroughLandingPage = false;
+          _displaySetupFromLoggedOut = false;
+          _displaySetupLinkController.clearPending();
+          setState(() {
+            _showingDisplaySetupCreateAccount = false;
+            _showingDisplaySetupSignIn = false;
+          });
+          unawaited(_activateDisplayAndShowSuccess(displayIntent.token));
+        } else {
+          // Intent arrived during session restore (or after sign-in from
+          // default login page): treat as state 3 and show confirmation.
+          _openDisplaySetupConfirmation(displayIntent);
+        }
+        return;
+      } else if (!_sessionController.isRestoringSession) {
+        // State 2: session restore finished with no session — show landing page.
         setState(() {
+          _displaySetupFromLoggedOut = true;
           _showingDisplaySetupCreateAccount = false;
           _showingDisplaySetupSignIn = false;
         });
-        unawaited(_activateDisplayAndShowSuccess(displayIntent.token));
-      } else {
-        // Intent arrived during session restore (or after sign-in from default
-        // login page): treat as state 3 and show confirmation.
-        _openDisplaySetupConfirmation(displayIntent);
+        return;
       }
+      // Still restoring — wait for the next notification.
       return;
     }
+
+    if (!_sessionController.isSignedIn) return;
 
     // Fresh registration with no display context (state 4): offer QR scan.
     if (_justRegistered) {
