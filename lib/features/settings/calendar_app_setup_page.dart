@@ -124,11 +124,11 @@ class _CalendarAppSetupPageState extends State<CalendarAppSetupPage> {
               onCopy: () => _copy(context, account.username),
             ),
             _PasswordRow(
-              value: account.password,
+              value: account.appPassword,
               visible: _passwordVisible,
               onToggleVisibility: () =>
                   setState(() => _passwordVisible = !_passwordVisible),
-              onCopy: () => _copy(context, account.password),
+              onCopy: () => _copy(context, account.appPassword),
             ),
             _FieldRow(
               label: 'Description',
