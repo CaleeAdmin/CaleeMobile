@@ -9,6 +9,7 @@ import '../../ui/calee_theme.dart';
 import '../../ui/calee_widgets.dart';
 import '../calendar_onboarding/calendar_onboarding_page.dart';
 import '../display_setup/connect_display_page.dart';
+import '../profile/profile_page.dart';
 import 'calendar_collections_page.dart';
 import 'family_setup_page.dart';
 import 'household_people_page.dart';
@@ -126,6 +127,17 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+  void _openProfile() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ProfilePage(
+          hubClient: widget.hubClient,
+          accessToken: widget.accessToken,
+        ),
+      ),
+    );
+  }
+
   bool _serviceNeedsAttention(ClientService s) =>
       s.hasMissingCalendarCredential ||
       !{'connected', 'active', 'healthy'}.contains(s.accessStatus);
@@ -214,6 +226,16 @@ class _SettingsPageState extends State<SettingsPage> {
                   color: CaleeColors.primary,
                 ),
               ),
+            ),
+            CaleeListRow(
+              title: 'Personal profile',
+              subtitle: 'Name, timezone, and ZIP/postcode',
+              leading: const Icon(
+                Icons.manage_accounts_outlined,
+                size: 20,
+                color: CaleeColors.primary,
+              ),
+              onTap: _openProfile,
             ),
           ],
         ),
