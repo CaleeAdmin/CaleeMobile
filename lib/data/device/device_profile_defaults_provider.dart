@@ -38,4 +38,26 @@ class DeviceProfileDefaultsProvider {
       countryCode: countryCode,
     );
   }
+
+  @visibleForTesting
+  static DeviceProfileDefaults buildFromLocales(
+    List<Locale> locales, {
+    String? timeZone,
+  }) {
+    String? locale;
+    String? countryCode;
+    if (locales.isNotEmpty) {
+      final primary = locales.first;
+      final cc = primary.countryCode;
+      locale = cc != null && cc.isNotEmpty
+          ? '${primary.languageCode}-$cc'
+          : primary.languageCode;
+      if (cc != null && cc.isNotEmpty) countryCode = cc;
+    }
+    return DeviceProfileDefaults(
+      timeZone: timeZone,
+      locale: locale,
+      countryCode: countryCode,
+    );
+  }
 }
