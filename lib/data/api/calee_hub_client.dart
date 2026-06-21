@@ -9,6 +9,7 @@ import '../models/client_chore.dart';
 import '../models/client_chore_metadata.dart';
 import '../models/client_deleted_items.dart';
 import '../models/client_person.dart';
+import '../models/client_profile.dart';
 import '../models/client_task.dart';
 
 class CaleeHubClient {
@@ -859,6 +860,42 @@ class CaleeHubClient {
     );
 
     return ClientRefreshResult.fromJson(_data(json));
+  }
+
+  Future<ClientProfile> profile({required String accessToken}) async {
+    final json = await _getJson(
+      '/client/v1/profile',
+      accessToken: accessToken,
+    );
+    return ClientProfile.fromJson(_data(json));
+  }
+
+  Future<ClientProfile> updateProfile({
+    required String accessToken,
+    required String firstName,
+    required String lastName,
+    String? displayName,
+    String? timeZone,
+    String? postalCode,
+    String? countryCode,
+    String? locale,
+  }) async {
+    final body = <String, dynamic>{
+      'firstName': firstName,
+      'lastName': lastName,
+      if (displayName != null) 'displayName': displayName,
+      if (timeZone != null) 'timeZone': timeZone,
+      if (postalCode != null) 'postalCode': postalCode,
+      if (countryCode != null) 'countryCode': countryCode,
+      if (locale != null) 'locale': locale,
+    };
+
+    final json = await _patchJson(
+      '/client/v1/profile',
+      accessToken: accessToken,
+      body: body,
+    );
+    return ClientProfile.fromJson(_data(json));
   }
 
   // ── Auth retry helper ────────────────────────────────────────────────────────────────────────────
