@@ -1,3 +1,4 @@
+// ignore_for_file: prefer_initializing_formals
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -8,7 +9,9 @@ import '../data/auth/session_store.dart';
 import '../features/auth/auth_repository.dart';
 import '../features/auth/create_account_page.dart';
 import '../features/auth/login_page.dart';
+import '../features/auth/post_registration_profile_defaults.dart';
 import '../features/auth/session_controller.dart';
+import '../data/device/device_profile_defaults_provider.dart';
 import '../features/calendar_follow/calendar_follow_intent.dart';
 import '../features/calendar_follow/calendar_follow_link_controller.dart';
 import '../features/calendar_follow/follow_calendar_page.dart';
@@ -16,21 +19,52 @@ import '../features/calendar_onboarding/calendar_onboarding_page.dart';
 import '../features/calendar_onboarding/calendar_onboarding_status.dart';
 import '../features/display_setup/display_activation_controller.dart';
 import '../features/display_setup/display_activation_success_page.dart';
+import '../features/display_setup/connect_display_page.dart';
 import '../features/display_setup/display_setup_confirmation_page.dart';
 import '../features/display_setup/display_setup_intent.dart';
 import '../features/display_setup/display_setup_landing_page.dart';
 import '../features/display_setup/display_setup_repository.dart';
-import '../features/display_setup/display_setup_scan_page.dart';
 import '../features/display_setup/display_setup_link_controller.dart';
 import '../features/local_subscriber/local_calendar_subscription.dart';
+import '../features/onboarding/welcome_page.dart';
 import '../features/local_subscriber/local_calendar_subscription_repository.dart';
 import '../features/local_subscriber/local_subscriber_calendar_page.dart';
 import '../features/settings/calendar_collections_page.dart';
 import '../ui/calee_design.dart';
 import 'calee_home_page.dart';
 
+/// Overrides injected by tests to avoid platform channels and network calls.
+@visibleForTesting
+class CaleeAppTestDependencies {
+  const CaleeAppTestDependencies({
+    required this.hubClient,
+    required this.sessionController,
+    required this.displaySetupLinkController,
+    required this.followLinkController,
+    required this.displayActivationController,
+    required this.localSubscriptionRepo,
+    this.deviceProfileDefaultsProvider,
+  });
+
+  final CaleeHubClient hubClient;
+  final SessionController sessionController;
+  final DisplaySetupLinkController displaySetupLinkController;
+  final CalendarFollowLinkController followLinkController;
+  final DisplayActivationController displayActivationController;
+  final LocalCalendarSubscriptionRepository localSubscriptionRepo;
+  final DeviceProfileDefaultsProvider? deviceProfileDefaultsProvider;
+}
+
 class CaleeApp extends StatefulWidget {
-  const CaleeApp({super.key});
+  const CaleeApp({super.key}) : _testDeps = null;
+
+  @visibleForTesting
+  const CaleeApp.forTesting({
+    required CaleeAppTestDependencies testDeps,
+    super.key,
+  }) : _testDeps = testDeps;
+
+  final CaleeAppTestDependencies? _testDeps;
 
   @override
   State<CaleeApp> createState() => _CaleeAppState();
@@ -61,6 +95,11 @@ class _CaleeAppState extends State<CaleeApp> {
   bool _showingDisplaySetupSignIn = false;
   bool _justRegistered = false;
 
+  // Welcome screen state (first-run signed-out, no pending intent)
+  bool _showingSignInFromWelcome = false;
+  bool _showingCreateAccountFromWelcome = false;
+  bool _showingConnectDisplayAfterAuth = false;
+
   // Onboarding gate state (only active after fresh sign-in, not session restore)
   bool _checkingOnboarding = false;
   bool _showingOnboarding = false;
@@ -72,31 +111,37 @@ class _CaleeAppState extends State<CaleeApp> {
   @override
   void initState() {
     super.initState();
-    _hubClient = CaleeHubClient();
-    final repository = AuthRepository(
-      hubClient: _hubClient,
-      sessionStore: SessionStore(),
-    );
-    _sessionController = SessionController(repository: repository);
-    _hubClient.onUnauthorized = _sessionController.handleUnauthorized;
+    final testDeps = widget._testDeps;
+    if (testDeps != null) {
+      _hubClient = testDeps.hubClient;
+      _sessionController = testDeps.sessionController;
+      _followLinkController = testDeps.followLinkController;
+      _displaySetupLinkController = testDeps.displaySetupLinkController;
+      _displayActivationController = testDeps.displayActivationController;
+      _localSubscriptionRepo = testDeps.localSubscriptionRepo;
+    } else {
+      _hubClient = CaleeHubClient();
+      final repository = AuthRepository(
+        hubClient: _hubClient,
+        sessionStore: SessionStore(),
+      );
+      _sessionController = SessionController(repository: repository);
+      _hubClient.onUnauthorized = _sessionController.handleUnauthorized;
+      _followLinkController = CalendarFollowLinkController();
+      _displaySetupLinkController = DisplaySetupLinkController();
+      _displayActivationController = DisplayActivationController(
+        repository: DisplaySetupRepository(hubClient: _hubClient),
+      );
+      _localSubscriptionRepo = LocalCalendarSubscriptionRepository();
+      unawaited(_followLinkController.init());
+      unawaited(_displaySetupLinkController.init());
+    }
 
-    _followLinkController = CalendarFollowLinkController();
     _followLinkController.addListener(_onFollowLinkChanged);
-
-    _displaySetupLinkController = DisplaySetupLinkController();
     _displaySetupLinkController.addListener(_onDisplaySetupLinkChanged);
-
-    _displayActivationController = DisplayActivationController(
-      repository: DisplaySetupRepository(hubClient: _hubClient),
-    );
-
     _sessionController.addListener(_onSessionChanged);
 
-    _localSubscriptionRepo = LocalCalendarSubscriptionRepository();
-
     _sessionController.restoreSession();
-    unawaited(_followLinkController.init());
-    unawaited(_displaySetupLinkController.init());
     unawaited(_loadLocalSubscriptions());
   }
 
@@ -122,55 +167,49 @@ class _CaleeAppState extends State<CaleeApp> {
   }
 
   void _onSessionChanged() {
-    if (!_sessionController.isSignedIn) return;
-
-    // Display setup intent pending.
+    // Display setup intent must be checked before the signed-out early return
+    // so that a pending intent from session-restore is routed correctly even
+    // when the user is not signed in.
     final displayIntent = _displaySetupLinkController.pendingIntent;
     if (displayIntent != null) {
-      if (_displaySetupThroughLandingPage) {
-        // State 2: user came through the landing page, auto-activate.
-        _displaySetupThroughLandingPage = false;
-        _displaySetupFromLoggedOut = false;
-        _displaySetupLinkController.clearPending();
+      if (_sessionController.isSignedIn) {
+        if (_displaySetupThroughLandingPage) {
+          // State 2: user came through the landing page, auto-activate.
+          _displaySetupThroughLandingPage = false;
+          _displaySetupFromLoggedOut = false;
+          _displaySetupLinkController.clearPending();
+          setState(() {
+            _showingDisplaySetupCreateAccount = false;
+            _showingDisplaySetupSignIn = false;
+          });
+          unawaited(_activateDisplayAndShowSuccess(displayIntent.token));
+        } else {
+          // Intent arrived during session restore (or after sign-in from
+          // default login page): treat as state 3 and show confirmation.
+          _openDisplaySetupConfirmation(displayIntent);
+        }
+        return;
+      } else if (!_sessionController.isRestoringSession) {
+        // State 2: session restore finished with no session — show landing page.
         setState(() {
+          _displaySetupFromLoggedOut = true;
           _showingDisplaySetupCreateAccount = false;
           _showingDisplaySetupSignIn = false;
         });
-        unawaited(_activateDisplayAndShowSuccess(displayIntent.token));
-      } else {
-        // Intent arrived during session restore (or after sign-in from default
-        // login page): treat as state 3 and show confirmation.
-        _openDisplaySetupConfirmation(displayIntent);
+        return;
       }
+      // Still restoring — wait for the next notification.
       return;
     }
 
-    // Fresh registration with no display context (state 4): offer QR scan.
+    if (!_sessionController.isSignedIn) return;
+
+    // Fresh registration/sign-in with no display context: offer display connection.
     if (_justRegistered) {
       _justRegistered = false;
-      setState(() => _showingDisplaySetupCreateAccount = false);
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        _navigatorKey.currentState?.push(
-          MaterialPageRoute<void>(
-            builder: (_) => DisplaySetupScanPage(
-              hubClient: _hubClient,
-              accessToken: _sessionController.accessToken!,
-              services: _sessionController.bootstrap!.services,
-              accountId: _sessionController.bootstrap!.account.id,
-              onDone: () {
-                Navigator.of(
-                  _navigatorKey.currentContext!,
-                ).popUntil((r) => r.isFirst);
-                unawaited(
-                  _checkAndShowOnboarding(
-                    _sessionController.bootstrap!.account.id,
-                  ),
-                );
-              },
-            ),
-          ),
-        );
+      setState(() {
+        _showingDisplaySetupCreateAccount = false;
+        _showingConnectDisplayAfterAuth = true;
       });
       return;
     }
@@ -424,17 +463,28 @@ class _CaleeAppState extends State<CaleeApp> {
         ]),
         builder: (context, _) => _buildHome(),
       ),
-      onUnknownRoute: (settings) => MaterialPageRoute<void>(
-        settings: const RouteSettings(name: '/'),
-        builder: (_) => AnimatedBuilder(
-          animation: Listenable.merge([
-            _sessionController,
-            _followLinkController,
-            _displaySetupLinkController,
-          ]),
-          builder: (context, _) => _buildHome(),
-        ),
-      ),
+      onUnknownRoute: (settings) {
+        final intent = DisplaySetupLinkController.parseDisplaySetupRouteName(
+          settings.name,
+        );
+        if (intent != null) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            _displaySetupLinkController.handleDisplaySetupIntent(intent);
+          });
+        }
+        return MaterialPageRoute<void>(
+          settings: const RouteSettings(name: '/'),
+          builder: (_) => AnimatedBuilder(
+            animation: Listenable.merge([
+              _sessionController,
+              _followLinkController,
+              _displaySetupLinkController,
+            ]),
+            builder: (context, _) => _buildHome(),
+          ),
+        );
+      },
     );
   }
 
@@ -459,6 +509,15 @@ class _CaleeAppState extends State<CaleeApp> {
               _justRegistered = !hasPendingDisplayIntent;
             });
             await _sessionController.completeSignIn(result);
+            unawaited(
+              applyPostRegistrationProfileDefaults(
+                hubClient: _hubClient,
+                accessToken: result.accessToken,
+                provider:
+                    widget._testDeps?.deviceProfileDefaultsProvider ??
+                    DeviceProfileDefaultsProvider(),
+              ),
+            );
           },
         );
       }
@@ -561,17 +620,53 @@ class _CaleeAppState extends State<CaleeApp> {
         );
       }
 
-      // Default → login; on success check if onboarding should be shown
-      return LoginPage(
-        authRepository: _sessionController.repository,
-        onSignedIn: (result) async {
-          final hasPendingIntent = _followLinkController.pendingIntent != null;
-          setState(() => _showingFollowSignIn = false);
-          await _sessionController.completeSignIn(result);
-          if (!hasPendingIntent) {
-            unawaited(_checkAndShowOnboarding(result.bootstrap.account.id));
-          }
-        },
+      // Welcome → "I already have an account" path
+      if (_showingSignInFromWelcome) {
+        return LoginPage(
+          authRepository: _sessionController.repository,
+          onSignedIn: (result) async {
+            final hasPendingIntent =
+                _followLinkController.pendingIntent != null;
+            setState(() {
+              _showingSignInFromWelcome = false;
+              _showingFollowSignIn = false;
+            });
+            await _sessionController.completeSignIn(result);
+            if (!hasPendingIntent) {
+              setState(() => _showingConnectDisplayAfterAuth = true);
+            }
+          },
+        );
+      }
+
+      // Welcome → "Create account" path
+      if (_showingCreateAccountFromWelcome) {
+        return CreateAccountPage(
+          authRepository: _sessionController.repository,
+          onAccountCreated: (result) async {
+            setState(() {
+              _showingCreateAccountFromWelcome = false;
+              _justRegistered = true;
+            });
+            await _sessionController.completeSignIn(result);
+            unawaited(
+              applyPostRegistrationProfileDefaults(
+                hubClient: _hubClient,
+                accessToken: result.accessToken,
+                provider:
+                    widget._testDeps?.deviceProfileDefaultsProvider ??
+                    DeviceProfileDefaultsProvider(),
+              ),
+            );
+          },
+        );
+      }
+
+      // Default first-run screen for signed-out users with no pending intent
+      return WelcomePage(
+        onCreateAccount: () =>
+            setState(() => _showingCreateAccountFromWelcome = true),
+        onSignIn: () => setState(() => _showingSignInFromWelcome = true),
       );
     }
 
@@ -579,6 +674,21 @@ class _CaleeAppState extends State<CaleeApp> {
 
     // Show loading spinner while checking onboarding status after fresh sign-in
     if (_checkingOnboarding) return const _SessionRestorePage();
+
+    if (_showingConnectDisplayAfterAuth) {
+      return ConnectDisplayPage(
+        hubClient: _hubClient,
+        accessToken: _sessionController.accessToken!,
+        services: _sessionController.bootstrap!.services,
+        accountId: _sessionController.bootstrap!.account.id,
+        onDone: () {
+          setState(() => _showingConnectDisplayAfterAuth = false);
+          unawaited(
+            _checkAndShowOnboarding(_sessionController.bootstrap!.account.id),
+          );
+        },
+      );
+    }
 
     if (_showingOnboarding) {
       return CalendarOnboardingPage(

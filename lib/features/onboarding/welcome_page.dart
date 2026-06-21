@@ -1,16 +1,24 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
-class DisplaySetupLandingPage extends StatelessWidget {
-  const DisplaySetupLandingPage({
+const _kTermsAndConditionsUrl = 'https://portal.calee.com.au/terms';
+
+class WelcomePage extends StatelessWidget {
+  const WelcomePage({
     required this.onCreateAccount,
     required this.onSignIn,
-    required this.onCancel,
     super.key,
   });
 
   final VoidCallback onCreateAccount;
   final VoidCallback onSignIn;
-  final VoidCallback onCancel;
+
+  Future<void> _openTerms() async {
+    final uri = Uri.parse(_kTermsAndConditionsUrl);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -26,23 +34,23 @@ class DisplaySetupLandingPage extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const Icon(Icons.tv_outlined, size: 48),
-                const SizedBox(height: 16),
+                const SizedBox(height: 24),
                 Text(
-                  'Connect this display to Calee',
+                  'Welcome to Calee',
                   textAlign: TextAlign.center,
                   style: theme.textTheme.headlineSmall?.copyWith(
                     fontWeight: FontWeight.bold,
                   ),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 12),
                 Text(
-                  'Sign in or create a Calee account to connect this display.',
+                  'Connect a Calee display and bring your calendars, tasks and reminders together.',
                   textAlign: TextAlign.center,
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
                 ),
-                const SizedBox(height: 32),
+                const SizedBox(height: 40),
                 FilledButton(
                   onPressed: onCreateAccount,
                   child: const Text('Create account'),
@@ -52,10 +60,25 @@ class DisplaySetupLandingPage extends StatelessWidget {
                   onPressed: onSignIn,
                   child: const Text('I already have an account'),
                 ),
-                const SizedBox(height: 12),
-                OutlinedButton(
-                  onPressed: onCancel,
-                  child: const Text('Cancel'),
+                const SizedBox(height: 24),
+                Center(
+                  child: TextButton(
+                    onPressed: _openTerms,
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      minimumSize: const Size(0, 36),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    child: Text(
+                      'Terms and Conditions',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.primary,
+                      ),
+                    ),
+                  ),
                 ),
               ],
             ),

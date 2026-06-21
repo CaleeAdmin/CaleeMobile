@@ -1,6 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:calee_mobile/features/display_setup/display_setup_link_controller.dart';
-import 'package:calee_mobile/features/display_setup/display_setup_intent.dart';
 
 const _validToken = 'AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-AB';
 const _shortToken = 'abc123';
@@ -37,9 +36,7 @@ void main() {
     });
 
     test('rejects wrong HTTPS path prefix', () {
-      final uri = Uri.parse(
-        'https://hub.calee.com.au/login/$_validToken',
-      );
+      final uri = Uri.parse('https://hub.calee.com.au/login/$_validToken');
       expect(DisplaySetupLinkController.parseDisplaySetupUri(uri), isNull);
     });
 
@@ -107,6 +104,112 @@ void main() {
       final uri = Uri.parse('calee://native-login/$_validToken');
       final intent = DisplaySetupLinkController.parseDisplaySetupUri(uri);
       expect(intent!.sourceUri, uri);
+    });
+  });
+
+  group('parseDisplaySetupRouteName — /<token>', () {
+    test('accepts valid token-only route', () {
+      expect(
+        DisplaySetupLinkController.parseDisplaySetupRouteName('/$_validToken'),
+        isNotNull,
+      );
+    });
+
+    test('extracts token from /<token>', () {
+      final intent = DisplaySetupLinkController.parseDisplaySetupRouteName(
+        '/$_validToken',
+      );
+      expect(intent!.token, _validToken);
+    });
+
+    test('sourceUri is calee://native-login/<token> for /<token>', () {
+      final intent = DisplaySetupLinkController.parseDisplaySetupRouteName(
+        '/$_validToken',
+      );
+      expect(intent!.sourceUri, Uri.parse('calee://native-login/$_validToken'));
+    });
+
+    test('rejects root route /', () {
+      expect(
+        DisplaySetupLinkController.parseDisplaySetupRouteName('/'),
+        isNull,
+      );
+    });
+
+    test('rejects /login (too short)', () {
+      expect(
+        DisplaySetupLinkController.parseDisplaySetupRouteName('/login'),
+        isNull,
+      );
+    });
+
+    test('rejects short token', () {
+      expect(
+        DisplaySetupLinkController.parseDisplaySetupRouteName('/$_shortToken'),
+        isNull,
+      );
+    });
+  });
+
+  group('parseDisplaySetupRouteName — /native-login/<token>', () {
+    test('accepts valid /native-login/<token> route', () {
+      expect(
+        DisplaySetupLinkController.parseDisplaySetupRouteName(
+          '/native-login/$_validToken',
+        ),
+        isNotNull,
+      );
+    });
+
+    test('extracts token from /native-login/<token>', () {
+      final intent = DisplaySetupLinkController.parseDisplaySetupRouteName(
+        '/native-login/$_validToken',
+      );
+      expect(intent!.token, _validToken);
+    });
+
+    test('sourceUri is HTTPS for /native-login/<token>', () {
+      final intent = DisplaySetupLinkController.parseDisplaySetupRouteName(
+        '/native-login/$_validToken',
+      );
+      expect(
+        intent!.sourceUri,
+        Uri.parse('https://hub.calee.com.au/native-login/$_validToken'),
+      );
+    });
+
+    test('rejects /native-login/ with empty token', () {
+      expect(
+        DisplaySetupLinkController.parseDisplaySetupRouteName('/native-login/'),
+        isNull,
+      );
+    });
+
+    test('rejects /native-login/ with short token', () {
+      expect(
+        DisplaySetupLinkController.parseDisplaySetupRouteName(
+          '/native-login/$_shortToken',
+        ),
+        isNull,
+      );
+    });
+
+    test('rejects /native-login/<token>/extra', () {
+      expect(
+        DisplaySetupLinkController.parseDisplaySetupRouteName(
+          '/native-login/$_validToken/extra',
+        ),
+        isNull,
+      );
+    });
+
+    test('rejects /v1/native-login/<token>', () {
+      expect(
+        DisplaySetupLinkController.parseDisplaySetupRouteName(
+          '/v1/native-login/$_validToken',
+        ),
+        isNull,
+      );
     });
   });
 

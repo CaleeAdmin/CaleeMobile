@@ -84,11 +84,15 @@ void main() {
     expect(find.text('Calendars and lists'), findsOneWidget);
   });
 
-  testWidgets('Settings does not show a "Calee displays" row', (tester) async {
+  testWidgets('Settings shows "Connect a display" row', (tester) async {
     await tester.pumpWidget(_wrap());
     await tester.pumpAndSettle();
 
-    expect(find.text('Calee displays'), findsNothing);
+    expect(find.text('Connect a display'), findsOneWidget);
+    expect(
+      find.text('Scan the QR code shown on your Calee display.'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('Settings shows "Add existing calendars" row', (tester) async {

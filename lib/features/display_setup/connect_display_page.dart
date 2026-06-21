@@ -2,10 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../../data/api/calee_hub_client.dart';
 import '../../data/models/client_bootstrap.dart';
-import '../calendar_onboarding/calendar_source_picker_page.dart';
+import 'display_setup_scan_page.dart';
 
-class DisplayActivationSuccessPage extends StatelessWidget {
-  const DisplayActivationSuccessPage({
+class ConnectDisplayPage extends StatelessWidget {
+  const ConnectDisplayPage({
     required this.hubClient,
     required this.accessToken,
     required this.services,
@@ -20,22 +20,15 @@ class DisplayActivationSuccessPage extends StatelessWidget {
   final String accountId;
   final VoidCallback onDone;
 
-  void _finish(BuildContext context) {
-    Navigator.of(context).popUntil((route) => route.isFirst);
-    onDone();
-  }
-
-  void _addCalendars(BuildContext context) {
+  void _scanDisplayQr(BuildContext context) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        settings: const RouteSettings(name: CalendarSourcePickerPage.routeName),
-        builder: (_) => CalendarSourcePickerPage(
+        builder: (_) => DisplaySetupScanPage(
           hubClient: hubClient,
           accessToken: accessToken,
           services: services,
           accountId: accountId,
-          onDone: () => _finish(context),
-          onViewCalendar: () => _finish(context),
+          onDone: onDone,
         ),
       ),
     );
@@ -45,6 +38,7 @@ class DisplayActivationSuccessPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
+      appBar: AppBar(title: const Text('Connect display')),
       body: SafeArea(
         minimum: const EdgeInsets.all(24),
         child: Center(
@@ -54,36 +48,32 @@ class DisplayActivationSuccessPage extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Icon(
-                  Icons.check_circle_outline,
-                  size: 64,
-                  color: theme.colorScheme.primary,
-                ),
-                const SizedBox(height: 16),
+                const Icon(Icons.qr_code_scanner_outlined, size: 48),
+                const SizedBox(height: 24),
                 Text(
-                  'Your Calee display is ready',
+                  'Connect your Calee display',
                   textAlign: TextAlign.center,
                   style: theme.textTheme.headlineSmall?.copyWith(
                     fontWeight: FontWeight.bold,
                   ),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 12),
                 Text(
-                  'Add the calendars you already use so their events appear on your display.',
+                  'Scan the QR code shown on your Calee display.',
                   textAlign: TextAlign.center,
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
                 ),
-                const SizedBox(height: 32),
+                const SizedBox(height: 40),
                 FilledButton(
-                  onPressed: () => _addCalendars(context),
-                  child: const Text('Add calendars'),
+                  onPressed: () => _scanDisplayQr(context),
+                  child: const Text('Scan display QR'),
                 ),
                 const SizedBox(height: 12),
-                OutlinedButton(
-                  onPressed: () => _finish(context),
-                  child: const Text('Do this later'),
+                TextButton(
+                  onPressed: onDone,
+                  child: const Text('Skip for now'),
                 ),
               ],
             ),

@@ -62,6 +62,11 @@ class _DisplaySetupScanPageState extends State<DisplaySetupScanPage> {
     return token.isNotEmpty ? token : null;
   }
 
+  void _finish(BuildContext context) {
+    Navigator.of(context).popUntil((route) => route.isFirst);
+    widget.onDone();
+  }
+
   Future<void> _onDetect(BarcodeCapture capture) async {
     if (_scanned) return;
     final barcode = capture.barcodes.firstOrNull;
@@ -96,7 +101,7 @@ class _DisplaySetupScanPageState extends State<DisplaySetupScanPage> {
             accessToken: widget.accessToken,
             services: widget.services,
             accountId: widget.accountId,
-            onDone: widget.onDone,
+            onDone: () => _finish(context),
           ),
         ),
       );
@@ -158,7 +163,7 @@ class _DisplaySetupScanPageState extends State<DisplaySetupScanPage> {
                       return const CircularProgressIndicator();
                     }
                     return TextButton(
-                      onPressed: widget.onDone,
+                      onPressed: () => _finish(context),
                       child: const Text('Skip for now'),
                     );
                   },

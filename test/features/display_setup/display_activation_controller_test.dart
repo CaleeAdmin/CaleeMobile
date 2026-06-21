@@ -38,18 +38,21 @@ void main() {
       controller.dispose();
     });
 
-    test('successful activation returns true and clears errorMessage', () async {
-      controller.errorMessage = 'stale';
+    test(
+      'successful activation returns true and clears errorMessage',
+      () async {
+        controller.errorMessage = 'stale';
 
-      final result = await controller.activate(
-        accessToken: 'tok',
-        token: 'display-token',
-      );
+        final result = await controller.activate(
+          accessToken: 'tok',
+          token: 'display-token',
+        );
 
-      expect(result, isTrue);
-      expect(controller.errorMessage, isNull);
-      expect(repo.callCount, 1);
-    });
+        expect(result, isTrue);
+        expect(controller.errorMessage, isNull);
+        expect(repo.callCount, 1);
+      },
+    );
 
     test('CaleeHubException sets errorMessage and returns false', () async {
       repo.error = const CaleeHubException(
@@ -96,21 +99,23 @@ void main() {
       expect(controller.errorMessage, isNotNull);
     });
 
-    test('unknown exception sets generic errorMessage and returns false',
-        () async {
-      repo.error = Exception('unexpected network failure');
+    test(
+      'unknown exception sets generic errorMessage and returns false',
+      () async {
+        repo.error = Exception('unexpected network failure');
 
-      final result = await controller.activate(
-        accessToken: 'tok',
-        token: 'tok',
-      );
+        final result = await controller.activate(
+          accessToken: 'tok',
+          token: 'tok',
+        );
 
-      expect(result, isFalse);
-      expect(
-        controller.errorMessage,
-        'Unable to connect the display. Please try again.',
-      );
-    });
+        expect(result, isFalse);
+        expect(
+          controller.errorMessage,
+          'Unable to connect the display. Please try again.',
+        );
+      },
+    );
 
     test('isLoading toggles true then false around the request', () async {
       final loadingStates = <bool>[];
@@ -133,25 +138,27 @@ void main() {
       expect(controller.isLoading, isFalse);
     });
 
-    test('activate calls repository with correct token and accessToken',
-        () async {
-      String? capturedToken;
-      String? capturedAccessToken;
+    test(
+      'activate calls repository with correct token and accessToken',
+      () async {
+        String? capturedToken;
+        String? capturedAccessToken;
 
-      final captureRepo = _CapturingRepository(
-        onCall: (at, t) {
-          capturedAccessToken = at;
-          capturedToken = t;
-        },
-      );
-      final ctrl = DisplayActivationController(repository: captureRepo);
-      addTearDown(ctrl.dispose);
+        final captureRepo = _CapturingRepository(
+          onCall: (at, t) {
+            capturedAccessToken = at;
+            capturedToken = t;
+          },
+        );
+        final ctrl = DisplayActivationController(repository: captureRepo);
+        addTearDown(ctrl.dispose);
 
-      await ctrl.activate(accessToken: 'my-access-token', token: 'my-token');
+        await ctrl.activate(accessToken: 'my-access-token', token: 'my-token');
 
-      expect(capturedAccessToken, 'my-access-token');
-      expect(capturedToken, 'my-token');
-    });
+        expect(capturedAccessToken, 'my-access-token');
+        expect(capturedToken, 'my-token');
+      },
+    );
   });
 }
 

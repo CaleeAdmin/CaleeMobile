@@ -90,9 +90,13 @@ class _FakeRepository implements AuthRepository {
 
   @override
   Future<ClientLoginResult> register({
+    required String firstName,
+    required String lastName,
     required String email,
+    required String confirmEmail,
+    required String redeemCode,
     required String password,
-    required String displayName,
+    required String confirmPassword,
   }) => throw UnimplementedError();
 
   @override

@@ -197,7 +197,7 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                       const SizedBox(height: 32),
                       // TODO(CaleeMobile onboarding):
-                      // Add the "New to Calee? Set up a Calee display" entry point after the
+                      // Add the "New to Calee? Connect a Calee display" entry point after the
                       // Calee Display auth changeover is stable.
                       //
                       // End-to-end target flow:
@@ -209,7 +209,7 @@ class _LoginPageState extends State<LoginPage> {
                       //    - email/password sign-in
                       //    - "Forgot password?"
                       //    - Terms and Conditions
-                      //    - future link: "New to Calee? Set up a Calee display"
+                      //    - future link: "New to Calee? Connect a Calee display"
                       //
                       // 3. When the future setup link is enabled, tapping it should start the
                       //    official Hub/Core onboarding flow, not a separate CaleeMobile-only

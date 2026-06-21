@@ -26,6 +26,7 @@ class CalendarPage extends StatefulWidget {
     required this.accessToken,
     required this.services,
     required this.accountId,
+    this.refreshGeneration = 0,
     super.key,
   });
 
@@ -33,6 +34,8 @@ class CalendarPage extends StatefulWidget {
   final String accessToken;
   final List<ClientService> services;
   final String accountId;
+  // Increment to trigger a refresh of calendars and events from the parent.
+  final int refreshGeneration;
 
   @override
   State<CalendarPage> createState() => _CalendarPageState();
@@ -53,6 +56,14 @@ class _CalendarPageState extends State<CalendarPage> {
     );
     _controller = CalendarController(repository: repository);
     _controller.loadMonth();
+  }
+
+  @override
+  void didUpdateWidget(CalendarPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.refreshGeneration != widget.refreshGeneration) {
+      _controller.refresh();
+    }
   }
 
   @override
