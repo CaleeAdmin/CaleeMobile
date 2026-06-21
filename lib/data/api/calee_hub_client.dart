@@ -100,6 +100,9 @@ class CaleeHubClient {
     }
   }
 
+  /// Returns CalDAV/Nextcloud service credentials for external calendar setup.
+  /// These credentials are not the CaleeMobile app session auth.
+  /// CaleeMobile API calls must continue to use Hub access/refresh tokens.
   Future<ClientCalDavAccount> caldavAccount({
     required String accessToken,
     required String serviceId,

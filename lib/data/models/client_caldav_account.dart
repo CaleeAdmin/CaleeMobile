@@ -4,7 +4,7 @@ class ClientCalDavAccount {
     required this.serviceName,
     required this.server,
     required this.username,
-    required this.password,
+    required this.appPassword,
     required this.description,
   });
 
@@ -14,7 +14,7 @@ class ClientCalDavAccount {
       serviceName: json['serviceName'] as String? ?? '',
       server: json['server'] as String? ?? '',
       username: json['username'] as String? ?? '',
-      password: json['password'] as String? ?? '',
+      appPassword: json['password'] as String? ?? '',
       description: json['description'] as String? ?? '',
     );
   }
@@ -23,6 +23,10 @@ class ClientCalDavAccount {
   final String serviceName;
   final String server;
   final String username;
-  final String password;
+
+  /// CalDAV/Nextcloud service credential returned by Hub for external calendar setup.
+  /// This is not the CaleeMobile app login password and is not used as app
+  /// session auth.
+  final String appPassword;
   final String description;
 }
