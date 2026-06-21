@@ -80,8 +80,7 @@ class _ProfilePageState extends State<ProfilePage> {
       final msg = hasWarnings
           ? 'Profile saved, but some connected services may update later.'
           : 'Profile updated';
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(msg)));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
       _controller.clearSaveStatus();
       widget.onProfileSaved?.call();
     } else if (status == ProfileSaveStatus.error) {
@@ -89,8 +88,7 @@ class _ProfilePageState extends State<ProfilePage> {
       final msg = raw.contains('EMAIL_NOT_EDITABLE')
           ? 'Email cannot be changed in the app. Contact Calee support.'
           : raw.replaceFirst('Exception: ', '');
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(msg)));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
       _controller.clearSaveStatus();
     }
   }
@@ -258,7 +256,8 @@ class _ProfilePageState extends State<ProfilePage> {
                 value: _selectedTimezone,
                 enabled: !isSaving,
                 onChanged: (tz) => setState(() => _selectedTimezone = tz),
-                validator: () => (_selectedTimezone == null || _selectedTimezone!.isEmpty)
+                validator: () =>
+                    (_selectedTimezone == null || _selectedTimezone!.isEmpty)
                     ? 'Required'
                     : null,
               ),
@@ -350,12 +349,7 @@ class _TimezoneRowState extends State<_TimezoneRow> {
                   : null,
               enabled: widget.enabled,
               items: _kCommonTimezones
-                  .map(
-                    (tz) => DropdownMenuItem(
-                      value: tz,
-                      child: Text(tz),
-                    ),
-                  )
+                  .map((tz) => DropdownMenuItem(value: tz, child: Text(tz)))
                   .toList(),
               onChanged: (v) {
                 widget.onChanged(v);

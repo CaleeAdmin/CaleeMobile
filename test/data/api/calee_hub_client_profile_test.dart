@@ -22,9 +22,7 @@ void main() {
     await server.close(force: true);
   });
 
-  Future<CaleeHubClient> _startServer(
-    Map<String, dynamic> responseBody,
-  ) async {
+  Future<CaleeHubClient> startServer(Map<String, dynamic> responseBody) async {
     server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     server.listen((req) async {
       final body = await utf8.decoder.bind(req).join();
@@ -43,7 +41,7 @@ void main() {
 
   group('CaleeHubClient.profile()', () {
     test('parses data.profile correctly', () async {
-      final client = await _startServer({
+      final client = await startServer({
         'data': {
           'profile': {
             'accountId': 'acct-1',
@@ -69,7 +67,7 @@ void main() {
     });
 
     test('throws CaleeHubException when data.profile is missing', () async {
-      final client = await _startServer({
+      final client = await startServer({
         'data': {'other': 'field'},
       });
 
@@ -88,7 +86,7 @@ void main() {
 
   group('CaleeHubClient.updateProfile()', () {
     test('parses data.profile correctly', () async {
-      final client = await _startServer({
+      final client = await startServer({
         'data': {
           'profile': {
             'accountId': 'acct-1',
@@ -111,7 +109,7 @@ void main() {
     });
 
     test('preserves top-level warnings into ClientProfile.warnings', () async {
-      final client = await _startServer({
+      final client = await startServer({
         'data': {
           'profile': {
             'accountId': 'acct-1',
@@ -129,11 +127,14 @@ void main() {
         lastName: 'Smith',
       );
 
-      expect(profile.warnings, containsAll(['CALDAV_SYNC_PENDING', 'TIMEZONE_MISMATCH']));
+      expect(
+        profile.warnings,
+        containsAll(['CALDAV_SYNC_PENDING', 'TIMEZONE_MISMATCH']),
+      );
     });
 
     test('returns empty warnings when none present', () async {
-      final client = await _startServer({
+      final client = await startServer({
         'data': {
           'profile': {
             'accountId': 'acct-1',
@@ -154,7 +155,7 @@ void main() {
     });
 
     test('throws CaleeHubException when data.profile is missing', () async {
-      final client = await _startServer({
+      final client = await startServer({
         'data': {'other': 'field'},
       });
 
@@ -175,7 +176,7 @@ void main() {
     });
 
     test('does not require firstName or lastName (partial update)', () async {
-      final client = await _startServer({
+      final client = await startServer({
         'data': {
           'profile': {
             'accountId': 'acct-1',
@@ -201,36 +202,39 @@ void main() {
       expect(profile.countryCode, equals('AU'));
     });
 
-    test('sends only timeZone/locale/countryCode when no firstName/lastName', () async {
-      final client = await _startServer({
-        'data': {
-          'profile': {
-            'accountId': 'acct-1',
-            'email': 'alice@example.com',
-            'firstName': 'Alice',
-            'lastName': 'Smith',
+    test(
+      'sends only timeZone/locale/countryCode when no firstName/lastName',
+      () async {
+        final client = await startServer({
+          'data': {
+            'profile': {
+              'accountId': 'acct-1',
+              'email': 'alice@example.com',
+              'firstName': 'Alice',
+              'lastName': 'Smith',
+            },
           },
-        },
-      });
+        });
 
-      await client.updateProfile(
-        accessToken: 'tok',
-        timeZone: 'Australia/Perth',
-        locale: 'en-AU',
-        countryCode: 'AU',
-      );
+        await client.updateProfile(
+          accessToken: 'tok',
+          timeZone: 'Australia/Perth',
+          locale: 'en-AU',
+          countryCode: 'AU',
+        );
 
-      expect(capturedBodies, hasLength(1));
-      final sent = capturedBodies.first;
-      expect(sent.containsKey('firstName'), isFalse);
-      expect(sent.containsKey('lastName'), isFalse);
-      expect(sent['timeZone'], equals('Australia/Perth'));
-      expect(sent['locale'], equals('en-AU'));
-      expect(sent['countryCode'], equals('AU'));
-    });
+        expect(capturedBodies, hasLength(1));
+        final sent = capturedBodies.first;
+        expect(sent.containsKey('firstName'), isFalse);
+        expect(sent.containsKey('lastName'), isFalse);
+        expect(sent['timeZone'], equals('Australia/Perth'));
+        expect(sent['locale'], equals('en-AU'));
+        expect(sent['countryCode'], equals('AU'));
+      },
+    );
 
     test('does not send email or postalCode in partial update', () async {
-      final client = await _startServer({
+      final client = await startServer({
         'data': {
           'profile': {
             'accountId': 'acct-1',
@@ -256,7 +260,7 @@ void main() {
     });
 
     test('throws CaleeHubException when no fields provided', () async {
-      final client = await _startServer({'data': {}});
+      final client = await startServer({'data': {}});
 
       expect(
         () => client.updateProfile(accessToken: 'tok'),

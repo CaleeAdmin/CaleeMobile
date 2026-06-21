@@ -40,8 +40,9 @@ class _DisplaySetupQrEntryPageState extends State<DisplaySetupQrEntryPage> {
     if (rawValue == null) return;
 
     final uri = Uri.tryParse(rawValue);
-    final intent =
-        uri != null ? DisplaySetupLinkController.parseDisplaySetupUri(uri) : null;
+    final intent = uri != null
+        ? DisplaySetupLinkController.parseDisplaySetupUri(uri)
+        : null;
 
     if (intent == null) {
       setState(() {

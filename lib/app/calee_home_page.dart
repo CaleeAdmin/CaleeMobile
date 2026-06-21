@@ -152,10 +152,7 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
       appBar: _selectedTabOwnsTopBar
           ? null
           : AppBar(title: Text(_tabs[_selectedIndex].title)),
-      body: IndexedStack(
-        index: _selectedIndex,
-        children: _buildPages(),
-      ),
+      body: IndexedStack(index: _selectedIndex, children: _buildPages()),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _selectedIndex,
         onDestinationSelected: (index) {
