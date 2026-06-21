@@ -1,8 +1,4 @@
-// Widget tests: display-setup QR flow routing after session restore.
-//
-// Verifies that _onSessionChanged correctly routes to DisplaySetupLandingPage
-// when a pending display-setup intent exists and session restore finishes
-// with no signed-in session.
+// Widget tests: first-run welcome screen and signed-out QR entry flow.
 
 import 'package:calee_mobile/app/calee_app.dart';
 import 'package:calee_mobile/data/api/calee_hub_client.dart';
@@ -16,17 +12,11 @@ import 'package:calee_mobile/features/display_setup/display_setup_intent.dart';
 import 'package:calee_mobile/features/display_setup/display_setup_link_controller.dart';
 import 'package:calee_mobile/features/display_setup/display_setup_repository.dart';
 import 'package:calee_mobile/features/local_subscriber/local_calendar_subscription_repository.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-// ── Token ─────────────────────────────────────────────────────────────────────
-
 const _validToken = 'AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-AB';
 
-// ── Fake controllers ──────────────────────────────────────────────────────────
-
-/// SessionController whose [restoreSession] is a no-op so tests drive state.
 class _FakeSessionController extends SessionController {
   _FakeSessionController()
     : super(
@@ -36,11 +26,9 @@ class _FakeSessionController extends SessionController {
         ),
       );
 
-  /// No-op — tests set state directly via [finishRestore].
   @override
   Future<void> restoreSession() async {}
 
-  /// Simulates session restore finishing.
   void finishRestore({bool signedIn = false}) {
     if (signedIn) {
       accessToken = 'test_access_token';
@@ -54,7 +42,6 @@ class _FakeSessionController extends SessionController {
   }
 }
 
-/// DisplaySetupLinkController whose [init] is a no-op.
 class _FakeDisplaySetupLinkController extends DisplaySetupLinkController {
   @override
   Future<void> init() async {}
@@ -68,13 +55,10 @@ class _FakeDisplaySetupLinkController extends DisplaySetupLinkController {
   }
 }
 
-/// CalendarFollowLinkController whose [init] is a no-op.
 class _FakeFollowLinkController extends CalendarFollowLinkController {
   @override
   Future<void> init() async {}
 }
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
 
 ClientBootstrap _stubBootstrap() => const ClientBootstrap(
   account: ClientAccount(
@@ -108,129 +92,127 @@ CaleeAppTestDependencies _makeDeps({
   );
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────────────
-
 void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
   });
 
   testWidgets(
-    'pending display intent + restore finishes logged out → DisplaySetupLandingPage',
-    (tester) async {
-      final session = _FakeSessionController();
-      final displaySetup = _FakeDisplaySetupLinkController();
-
-      await tester.pumpWidget(
-        CaleeApp.forTesting(testDeps: _makeDeps(session: session, displaySetup: displaySetup)),
-      );
-
-      // Inject the intent while still restoring.
-      displaySetup.injectIntent(_validToken);
-      await tester.pump();
-
-      // Session restore completes with no session.
-      session.finishRestore(signedIn: false);
-      await tester.pump();
-
-      expect(find.text('Set up your Calee display'), findsOneWidget);
-      expect(find.text('Create account'), findsOneWidget);
-      expect(find.text('I already have an account'), findsOneWidget);
-    },
-  );
-
-  testWidgets(
-    'pending display intent + restore finishes signed in → does NOT show landing page',
-    (tester) async {
-      final session = _FakeSessionController();
-      final displaySetup = _FakeDisplaySetupLinkController();
-
-      await tester.pumpWidget(
-        CaleeApp.forTesting(testDeps: _makeDeps(session: session, displaySetup: displaySetup)),
-      );
-
-      displaySetup.injectIntent(_validToken);
-      await tester.pump();
-
-      // Session restore completes with a signed-in session.
-      session.finishRestore(signedIn: true);
-      await tester.pump();
-
-      expect(find.text('Set up your Calee display'), findsNothing);
-      // Confirmation page is pushed via navigator — landing page must not show.
-      expect(find.text('Sign in to Calee'), findsNothing);
-    },
-  );
-
-  testWidgets(
-    'no pending display intent + restore finishes logged out → WelcomePage',
+    'signed out, no pending intent → WelcomePage shown',
     (tester) async {
       final session = _FakeSessionController();
 
       await tester.pumpWidget(
         CaleeApp.forTesting(testDeps: _makeDeps(session: session)),
       );
-
-      // Session restore completes with no session, and no display intent.
       session.finishRestore(signedIn: false);
       await tester.pump();
 
       expect(find.text('Welcome to Calee'), findsOneWidget);
       expect(find.text('Set up a Calee display'), findsOneWidget);
       expect(find.text('I already have an account'), findsOneWidget);
-      expect(find.text('Set up your Calee display'), findsNothing);
     },
   );
 
   testWidgets(
-    'display setup landing → Create account preserves pending intent',
+    'tap "I already have an account" → LoginPage shown',
     (tester) async {
       final session = _FakeSessionController();
-      final displaySetup = _FakeDisplaySetupLinkController();
 
       await tester.pumpWidget(
-        CaleeApp.forTesting(testDeps: _makeDeps(session: session, displaySetup: displaySetup)),
+        CaleeApp.forTesting(testDeps: _makeDeps(session: session)),
       );
-
-      displaySetup.injectIntent(_validToken);
-      await tester.pump();
       session.finishRestore(signedIn: false);
       await tester.pump();
-
-      expect(find.text('Set up your Calee display'), findsOneWidget);
-
-      await tester.tap(find.text('Create account'));
-      await tester.pump();
-
-      // Intent must still be pending after tapping Create account.
-      expect(displaySetup.pendingIntent, isNotNull);
-      expect(displaySetup.pendingIntent!.token, _validToken);
-    },
-  );
-
-  testWidgets(
-    'display setup landing → I already have an account preserves pending intent',
-    (tester) async {
-      final session = _FakeSessionController();
-      final displaySetup = _FakeDisplaySetupLinkController();
-
-      await tester.pumpWidget(
-        CaleeApp.forTesting(testDeps: _makeDeps(session: session, displaySetup: displaySetup)),
-      );
-
-      displaySetup.injectIntent(_validToken);
-      await tester.pump();
-      session.finishRestore(signedIn: false);
-      await tester.pump();
-
-      expect(find.text('Set up your Calee display'), findsOneWidget);
 
       await tester.tap(find.text('I already have an account'));
       await tester.pump();
 
-      // Intent must still be pending after tapping sign-in.
-      expect(displaySetup.pendingIntent, isNotNull);
-      expect(displaySetup.pendingIntent!.token, _validToken);
+      expect(find.text('Sign in to Calee'), findsOneWidget);
+      expect(find.text('Welcome to Calee'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'tap "Set up a Calee display" → signed-out QR scanner shown',
+    (tester) async {
+      final session = _FakeSessionController();
+
+      await tester.pumpWidget(
+        CaleeApp.forTesting(testDeps: _makeDeps(session: session)),
+      );
+      session.finishRestore(signedIn: false);
+      await tester.pump();
+
+      await tester.tap(find.text('Set up a Calee display'));
+      await tester.pump();
+
+      expect(find.text('Scan display QR'), findsOneWidget);
+      expect(find.text('Welcome to Calee'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'display QR opened directly (deep link) while signed out → DisplaySetupLandingPage, not WelcomePage',
+    (tester) async {
+      final session = _FakeSessionController();
+      final displaySetup = _FakeDisplaySetupLinkController();
+
+      await tester.pumpWidget(
+        CaleeApp.forTesting(
+          testDeps: _makeDeps(session: session, displaySetup: displaySetup),
+        ),
+      );
+
+      displaySetup.injectIntent(_validToken);
+      await tester.pump();
+
+      session.finishRestore(signedIn: false);
+      await tester.pump();
+
+      expect(find.text('Set up your Calee display'), findsOneWidget);
+      expect(find.text('Welcome to Calee'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'QR entry back button → returns to WelcomePage',
+    (tester) async {
+      final session = _FakeSessionController();
+
+      await tester.pumpWidget(
+        CaleeApp.forTesting(testDeps: _makeDeps(session: session)),
+      );
+      session.finishRestore(signedIn: false);
+      await tester.pump();
+
+      // Navigate to QR scanner.
+      await tester.tap(find.text('Set up a Calee display'));
+      await tester.pump();
+      expect(find.text('Scan display QR'), findsOneWidget);
+
+      // Tap Back.
+      await tester.tap(find.byType(BackButton));
+      await tester.pump();
+
+      expect(find.text('Welcome to Calee'), findsOneWidget);
+      expect(find.text('Scan display QR'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'signed-in user → home page shown, no WelcomePage',
+    (tester) async {
+      final session = _FakeSessionController();
+
+      await tester.pumpWidget(
+        CaleeApp.forTesting(testDeps: _makeDeps(session: session)),
+      );
+      session.finishRestore(signedIn: true);
+      await tester.pump();
+
+      expect(find.text('Welcome to Calee'), findsNothing);
+      expect(find.text('Sign in to Calee'), findsNothing);
     },
   );
 }
