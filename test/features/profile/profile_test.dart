@@ -79,18 +79,6 @@ class _StubClient extends CaleeHubClient {
   }
 }
 
-class _FailLoadClient extends CaleeHubClient {
-  _FailLoadClient() : super(baseUri: Uri.parse('http://localhost'));
-
-  @override
-  Future<ClientProfile> profile({required String accessToken}) async {
-    throw const CaleeHubException(
-      statusCode: 500,
-      message: 'Server error',
-    );
-  }
-}
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 Widget _wrapProfile(CaleeHubClient client) => MaterialApp(

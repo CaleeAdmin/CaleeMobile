@@ -335,8 +335,6 @@ class _TimezoneRow extends StatefulWidget {
 }
 
 class _TimezoneRowState extends State<_TimezoneRow> {
-  String? _error;
-
   @override
   Widget build(BuildContext context) {
     return FormField<String>(
@@ -362,7 +360,6 @@ class _TimezoneRowState extends State<_TimezoneRow> {
               onChanged: (v) {
                 widget.onChanged(v);
                 field.didChange(v);
-                setState(() => _error = null);
               },
             ),
             if (field.errorText != null)
