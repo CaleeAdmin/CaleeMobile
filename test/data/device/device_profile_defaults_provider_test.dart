@@ -22,6 +22,18 @@ void main() {
       expect(result.countryCode, equals('AU'));
     });
 
+    test('countryCode is normalised to uppercase even if locale uses lowercase',
+        () {
+      // Dart's Locale constructor uppercases the country code internally, but
+      // we guard against any future path that might deliver lower-case.
+      // buildFromLocales calls .toUpperCase() unconditionally.
+      final result = DeviceProfileDefaultsProvider.buildFromLocales(const [
+        Locale('en', 'au'),
+      ]);
+      expect(result.countryCode, equals('AU'));
+      expect(result.locale, equals('en-AU'));
+    });
+
     test('locale is language-only when countryCode is absent', () {
       final result = DeviceProfileDefaultsProvider.buildFromLocales(const [
         Locale('en'),

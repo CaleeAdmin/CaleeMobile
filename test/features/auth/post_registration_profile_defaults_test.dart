@@ -27,12 +27,26 @@ class _ThrowingProvider extends DeviceProfileDefaultsProvider {
   }
 }
 
+class _CapturedRequest {
+  _CapturedRequest({
+    required this.method,
+    required this.path,
+    required this.authorization,
+    required this.body,
+  });
+
+  final String method;
+  final String path;
+  final String? authorization;
+  final Map<String, dynamic> body;
+}
+
 void main() {
   late HttpServer server;
-  final patchRequests = <Map<String, dynamic>>[];
+  final capturedRequests = <_CapturedRequest>[];
 
   setUp(() {
-    patchRequests.clear();
+    capturedRequests.clear();
   });
 
   tearDown(() async {
@@ -43,9 +57,14 @@ void main() {
     server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     server.listen((req) async {
       final body = await utf8.decoder.bind(req).join();
-      if (body.isNotEmpty) {
-        patchRequests.add(jsonDecode(body) as Map<String, dynamic>);
-      }
+      capturedRequests.add(_CapturedRequest(
+        method: req.method,
+        path: req.uri.path,
+        authorization: req.headers.value('authorization'),
+        body: body.isNotEmpty
+            ? jsonDecode(body) as Map<String, dynamic>
+            : {},
+      ));
       req.response.headers.contentType = ContentType.json;
       req.response.statusCode = statusCode;
       if (statusCode == 200) {
@@ -96,12 +115,24 @@ void main() {
         provider: provider,
       );
 
-      expect(patchRequests, hasLength(1));
-      final sent = patchRequests.first;
+      expect(capturedRequests, hasLength(1));
+      final captured = capturedRequests.first;
+
+      // Request mechanics
+      expect(captured.method, equals('PATCH'));
+      expect(captured.path, equals('/client/v1/profile'));
+      expect(captured.authorization, equals('Bearer tok'));
+
+      // Allowed default fields
+      final sent = captured.body;
       expect(sent['timeZone'], equals('Australia/Perth'));
       expect(sent['locale'], equals('en-AU'));
       expect(sent['countryCode'], equals('AU'));
+
+      // Fields that must never be sent by post-registration defaulting
       expect(sent.containsKey('email'), isFalse);
+      expect(sent.containsKey('primaryEmail'), isFalse);
+      expect(sent.containsKey('loginName'), isFalse);
       expect(sent.containsKey('postalCode'), isFalse);
     },
   );
@@ -116,7 +147,7 @@ void main() {
       provider: provider,
     );
 
-    expect(patchRequests, isEmpty);
+    expect(capturedRequests, isEmpty);
   });
 
   test('swallows provider errors without rethrowing', () async {
@@ -130,7 +161,7 @@ void main() {
       ),
       completes,
     );
-    expect(patchRequests, isEmpty);
+    expect(capturedRequests, isEmpty);
   });
 
   test('swallows API errors without rethrowing', () async {
