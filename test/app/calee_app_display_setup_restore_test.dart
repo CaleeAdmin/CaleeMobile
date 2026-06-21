@@ -16,7 +16,6 @@ import 'package:calee_mobile/features/display_setup/display_setup_intent.dart';
 import 'package:calee_mobile/features/display_setup/display_setup_link_controller.dart';
 import 'package:calee_mobile/features/display_setup/display_setup_repository.dart';
 import 'package:calee_mobile/features/local_subscriber/local_calendar_subscription_repository.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
