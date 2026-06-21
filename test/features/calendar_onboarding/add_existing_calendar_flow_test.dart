@@ -95,19 +95,20 @@ Widget _wrapGenericLink({bool showExamples = true}) => MaterialApp(
   ),
 );
 
-Widget _wrapGoogleGuide({Future<void> Function(String url)? launchWebsiteGuide}) =>
-    MaterialApp(
-      theme: CaleeTheme.buildThemeData(),
-      home: GoogleCalendarGuidePage(
-        hubClient: _StubHubClient(),
-        accessToken: 'token',
-        services: const [],
-        accountId: 'acct1',
-        onDone: () {},
-        onViewCalendar: () {},
-        launchWebsiteGuide: launchWebsiteGuide,
-      ),
-    );
+Widget _wrapGoogleGuide({
+  Future<void> Function(String url)? launchWebsiteGuide,
+}) => MaterialApp(
+  theme: CaleeTheme.buildThemeData(),
+  home: GoogleCalendarGuidePage(
+    hubClient: _StubHubClient(),
+    accessToken: 'token',
+    services: const [],
+    accountId: 'acct1',
+    onDone: () {},
+    onViewCalendar: () {},
+    launchWebsiteGuide: launchWebsiteGuide,
+  ),
+);
 
 Widget _wrapAppleGuide() => MaterialApp(
   theme: CaleeTheme.buildThemeData(),
@@ -226,33 +227,34 @@ void main() {
     expect(find.textContaining('school calendar'), findsNothing);
   });
 
-  testWidgets('Google computer view opens website guide via injected launcher', (
-    tester,
-  ) async {
-    final launchedUrls = <String>[];
+  testWidgets(
+    'Google computer view opens website guide via injected launcher',
+    (tester) async {
+      final launchedUrls = <String>[];
 
-    await tester.pumpWidget(
-      _wrapGoogleGuide(
-        launchWebsiteGuide: (url) async {
-          launchedUrls.add(url);
-        },
-      ),
-    );
+      await tester.pumpWidget(
+        _wrapGoogleGuide(
+          launchWebsiteGuide: (url) async {
+            launchedUrls.add(url);
+          },
+        ),
+      );
 
-    await tester.tap(find.text('Continue on computer'));
-    await tester.pumpAndSettle();
+      await tester.tap(find.text('Continue on computer'));
+      await tester.pumpAndSettle();
 
-    expect(find.textContaining('calee.com.au/start'), findsWidgets);
-    expect(find.text('Copy website address'), findsOneWidget);
+      expect(find.textContaining('calee.com.au/start'), findsWidgets);
+      expect(find.text('Copy website address'), findsOneWidget);
 
-    await tester.ensureVisible(find.text('Open guide on this phone'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Open guide on this phone'));
-    await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Open guide on this phone'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Open guide on this phone'));
+      await tester.pumpAndSettle();
 
-    expect(launchedUrls, contains('https://calee.com.au/start'));
-    expect(find.text('Use your phone instead'), findsNothing);
-  });
+      expect(launchedUrls, contains('https://calee.com.au/start'));
+      expect(find.text('Use your phone instead'), findsNothing);
+    },
+  );
 
   testWidgets('Google No computer available opens phone fallback', (
     tester,
@@ -284,7 +286,9 @@ void main() {
     expect(find.text('https://example.com/calendar.ics'), findsNothing);
   });
 
-  testWidgets('Outlook guide uses Calendar Share Alias wording', (tester) async {
+  testWidgets('Outlook guide uses Calendar Share Alias wording', (
+    tester,
+  ) async {
     await tester.pumpWidget(_wrapOutlookGuide());
     await tester.pump(const Duration(milliseconds: 100));
 

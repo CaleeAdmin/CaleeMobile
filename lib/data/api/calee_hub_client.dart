@@ -9,6 +9,7 @@ import '../models/client_chore.dart';
 import '../models/client_chore_metadata.dart';
 import '../models/client_deleted_items.dart';
 import '../models/client_person.dart';
+import '../models/client_profile.dart';
 import '../models/client_task.dart';
 
 class CaleeHubClient {
@@ -100,6 +101,9 @@ class CaleeHubClient {
     }
   }
 
+  /// Returns CalDAV/Nextcloud service credentials for external calendar setup.
+  /// These credentials are not the CaleeMobile app session auth.
+  /// CaleeMobile API calls must continue to use Hub access/refresh tokens.
   Future<ClientCalDavAccount> caldavAccount({
     required String accessToken,
     required String serviceId,
@@ -813,6 +817,42 @@ class CaleeHubClient {
     );
   }
 
+  Future<ClientLoginResult> register({
+    required String firstName,
+    required String lastName,
+    required String email,
+    required String confirmEmail,
+    required String redeemCode,
+    required String password,
+    required String confirmPassword,
+  }) async {
+    final json = await _postJson(
+      '/client/v1/auth/register',
+      body: {
+        'firstName': firstName,
+        'lastName': lastName,
+        'email': email,
+        'confirmEmail': confirmEmail,
+        'redeemCode': redeemCode,
+        'password': password,
+        'confirmPassword': confirmPassword,
+      },
+    );
+    return ClientLoginResult.fromJson(_data(json));
+  }
+
+  Future<void> approveDisplayLogin({
+    required String accessToken,
+    required String token,
+  }) async {
+    final encodedToken = Uri.encodeComponent(token);
+    await _postJson(
+      '/client/v1/displays/native-login/$encodedToken/approve',
+      accessToken: accessToken,
+      body: {},
+    );
+  }
+
   Future<ClientRefreshResult> refresh({required String refreshToken}) async {
     final json = await _postJson(
       '/client/v1/auth/refresh',
@@ -820,6 +860,67 @@ class CaleeHubClient {
     );
 
     return ClientRefreshResult.fromJson(_data(json));
+  }
+
+  Future<ClientProfile> profile({required String accessToken}) async {
+    final json = await _getJson('/client/v1/profile', accessToken: accessToken);
+    final data = _data(json);
+    final profileJson = data['profile'];
+    if (profileJson is! Map<String, dynamic>) {
+      throw const CaleeHubException(
+        statusCode: 0,
+        message: 'Could not load your profile. Please try again.',
+      );
+    }
+    return ClientProfile.fromJson(profileJson);
+  }
+
+  Future<ClientProfile> updateProfile({
+    required String accessToken,
+    String? firstName,
+    String? lastName,
+    String? displayName,
+    String? timeZone,
+    String? postalCode,
+    String? countryCode,
+    String? locale,
+  }) async {
+    final body = <String, dynamic>{
+      if (firstName != null) 'firstName': firstName,
+      if (lastName != null) 'lastName': lastName,
+      if (displayName != null) 'displayName': displayName,
+      if (timeZone != null) 'timeZone': timeZone,
+      if (postalCode != null) 'postalCode': postalCode,
+      if (countryCode != null) 'countryCode': countryCode,
+      if (locale != null) 'locale': locale,
+    };
+
+    if (body.isEmpty) {
+      throw const CaleeHubException(
+        statusCode: 0,
+        message: 'No profile updates provided',
+      );
+    }
+
+    final json = await _patchJson(
+      '/client/v1/profile',
+      accessToken: accessToken,
+      body: body,
+    );
+    final data = _data(json);
+    final rawProfile = data['profile'];
+    if (rawProfile is! Map<String, dynamic>) {
+      throw const CaleeHubException(
+        statusCode: 0,
+        message: 'Could not load your profile. Please try again.',
+      );
+    }
+    final profileJson = Map<String, dynamic>.from(rawProfile);
+    final warnings = data['warnings'];
+    if (warnings is List) {
+      profileJson['warnings'] = warnings.whereType<String>().toList();
+    }
+    return ClientProfile.fromJson(profileJson);
   }
 
   // ── Auth retry helper ────────────────────────────────────────────────────────────────────────────

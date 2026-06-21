@@ -1,8 +1,11 @@
-import 'package:flutter_test/flutter_test.dart';
+import 'dart:io';
+
 import 'package:calee_mobile/data/models/client_bootstrap.dart';
 import 'package:calee_mobile/data/models/client_calendar.dart';
+import 'package:calee_mobile/data/models/client_caldav_account.dart';
 import 'package:calee_mobile/data/models/client_deleted_items.dart';
 import 'package:calee_mobile/data/models/client_task.dart';
+import 'package:flutter_test/flutter_test.dart';
 
 ClientEvent _event({
   required String id,
@@ -38,6 +41,7 @@ ClientTask _task(String status) => ClientTask(
 void main() {
   _capabilityTests();
   _deletedItemsModelTests();
+  _clientCalDavAccountTests();
 
   group('ClientEvent.writableEventId', () {
     test('returns seriesId for recurring event with seriesId', () {
@@ -224,6 +228,42 @@ void _deletedItemsModelTests() {
     test('displayName falls back to Connected service', () {
       final s = UnsupportedDeletedItemsService.fromJson({});
       expect(s.displayName, 'Connected service');
+    });
+  });
+}
+
+void _clientCalDavAccountTests() {
+  group('ClientCalDavAccount.fromJson', () {
+    test('maps backend password to appPassword', () {
+      final account = ClientCalDavAccount.fromJson({
+        'serviceId': 'svc1',
+        'serviceName': 'Nextcloud',
+        'server': 'https://nextcloud.example.com',
+        'username': 'family-calendar',
+        'password': 'nextcloud-app-password',
+        'description': 'Use these credentials in an external calendar app.',
+      });
+
+      expect(account.serviceId, 'svc1');
+      expect(account.serviceName, 'Nextcloud');
+      expect(account.server, 'https://nextcloud.example.com');
+      expect(account.username, 'family-calendar');
+      expect(account.appPassword, 'nextcloud-app-password');
+      expect(
+        account.description,
+        'Use these credentials in an external calendar app.',
+      );
+    });
+
+    test('does not expose a generic password field in the model source', () {
+      final source = File(
+        'lib/data/models/client_caldav_account.dart',
+      ).readAsStringSync();
+
+      expect(source, contains('final String appPassword;'));
+      expect(source, isNot(contains('final String password;')));
+      expect(source, isNot(contains('required this.password')));
+      expect(source, isNot(contains('password:')));
     });
   });
 }

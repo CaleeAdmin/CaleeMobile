@@ -6,8 +6,10 @@
 import 'package:calee_mobile/app/calee_home_page.dart';
 import 'package:calee_mobile/data/api/calee_hub_client.dart';
 import 'package:calee_mobile/data/models/client_bootstrap.dart';
+import 'package:calee_mobile/data/models/client_calendar.dart';
 import 'package:calee_mobile/ui/calee_design.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -16,9 +18,24 @@ import 'package:shared_preferences/shared_preferences.dart';
 class _StubHubClient extends CaleeHubClient {
   _StubHubClient() : super();
 
+  int calendarLoadCount = 0;
+
   @override
   Future<ClientBootstrap> bootstrap({required String accessToken}) async =>
       _noChoresBootstrap();
+
+  @override
+  Future<ClientCalendarList> calendars({required String accessToken}) async {
+    calendarLoadCount++;
+    return const ClientCalendarList(calendars: []);
+  }
+
+  @override
+  Future<ClientEventList> events({
+    required String accessToken,
+    required String from,
+    required String to,
+  }) async => ClientEventList(from: from, to: to, events: const []);
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -246,6 +263,49 @@ void main() {
       expect(appBar, isNotNull);
       expect(appBar!.title, isA<Text>());
       expect((appBar.title as Text).data, 'Settings');
+    });
+  });
+
+  group('CaleeHomePage — calendar navigation', () {
+    setUp(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(
+            const MethodChannel('plugins.it_nomads.com/flutter_secure_storage'),
+            (call) async => <String, String>{},
+          );
+    });
+
+    tearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(
+            const MethodChannel('plugins.it_nomads.com/flutter_secure_storage'),
+            null,
+          );
+    });
+
+    testWidgets('Calendar tab can be selected without throwing', (
+      tester,
+    ) async {
+      final hub = _StubHubClient();
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: CaleeTheme.buildThemeData(),
+          home: CaleeHomePage(
+            hubClient: hub,
+            accessToken: 'tok',
+            bootstrap: _noChoresBootstrap(),
+            onSignOut: () {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.calendar_month_outlined));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('Calendar'), findsWidgets);
     });
   });
 

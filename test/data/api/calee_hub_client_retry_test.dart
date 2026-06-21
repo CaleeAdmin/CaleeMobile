@@ -64,6 +64,31 @@ void main() {
       expect(result.calendars, isEmpty);
     });
 
+    test('sends Authorization Bearer access token on Hub API calls', () async {
+      String? authorization;
+
+      server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      server.listen((req) async {
+        authorization = req.headers.value(HttpHeaders.authorizationHeader);
+        req.response.statusCode = HttpStatus.ok;
+        req.response.headers.contentType = ContentType.json;
+        req.response.write(
+          jsonEncode({
+            'data': {'calendars': []},
+          }),
+        );
+        await req.response.close();
+      });
+
+      final client = CaleeHubClient(
+        baseUri: Uri.parse('http://127.0.0.1:${server.port}'),
+      );
+
+      await client.calendars(accessToken: 'access-token');
+
+      expect(authorization, 'Bearer access-token');
+    });
+
     test('does not retry when onUnauthorized is null', () async {
       int requestCount = 0;
 
@@ -172,8 +197,8 @@ void main() {
 
       expect(requestCount, 3);
       // Retry request and subsequent call both use the fresh token.
-      expect(receivedTokens[1], contains('fresh-token'));
-      expect(receivedTokens[2], contains('fresh-token'));
+      expect(receivedTokens[1], 'Bearer fresh-token');
+      expect(receivedTokens[2], 'Bearer fresh-token');
     });
 
     test(
@@ -221,7 +246,7 @@ void main() {
         await client.calendars(accessToken: 'new-token');
 
         expect(requestCount, 3);
-        expect(receivedTokens[2], contains('new-token'));
+        expect(receivedTokens[2], 'Bearer new-token');
       },
     );
   });

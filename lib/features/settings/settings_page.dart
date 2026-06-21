@@ -8,6 +8,8 @@ import '../../data/models/client_calendar.dart';
 import '../../ui/calee_theme.dart';
 import '../../ui/calee_widgets.dart';
 import '../calendar_onboarding/calendar_onboarding_page.dart';
+import '../display_setup/connect_display_page.dart';
+import '../profile/profile_page.dart';
 import 'calendar_collections_page.dart';
 import 'family_setup_page.dart';
 import 'household_people_page.dart';
@@ -125,6 +127,17 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+  void _openProfile() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ProfilePage(
+          hubClient: widget.hubClient,
+          accessToken: widget.accessToken,
+        ),
+      ),
+    );
+  }
+
   bool _serviceNeedsAttention(ClientService s) =>
       s.hasMissingCalendarCredential ||
       !{'connected', 'active', 'healthy'}.contains(s.accessStatus);
@@ -214,6 +227,16 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
               ),
             ),
+            CaleeListRow(
+              title: 'Personal profile',
+              subtitle: 'Name, timezone, and ZIP/postcode',
+              leading: const Icon(
+                Icons.manage_accounts_outlined,
+                size: 20,
+                color: CaleeColors.primary,
+              ),
+              onTap: _openProfile,
+            ),
           ],
         ),
 
@@ -293,18 +316,33 @@ class _SettingsPageState extends State<SettingsPage> {
         const SizedBox(height: CaleeSpacing.sectionSpacing),
 
         // ── Manage ───────────────────────────────────
-        // TODO(displays): Re-enable Calee displays in Settings when the secure
-        // display-linking flow is ready.
-        // Future flow:
-        //   - signed-in CaleeMobile user scans a Calee display QR code
-        //   - app sends a short-lived, single-use display linking token to Hub/Core
-        //   - Hub/Core approves the display login using the signed-in Calee account
-        //   - Calee display signs in automatically
-        // Security: do not pass passwords, app passwords, or long-lived tokens
-        // through URLs; token must be short-lived and single-use.
         CaleeSection(
           title: 'Manage',
           children: [
+            CaleeListRow(
+              title: 'Connect a display',
+              subtitle: 'Scan the QR code shown on your Calee display.',
+              leading: const Icon(
+                Icons.qr_code_scanner_outlined,
+                size: 20,
+                color: CaleeColors.primary,
+              ),
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => ConnectDisplayPage(
+                      hubClient: widget.hubClient,
+                      accessToken: widget.accessToken,
+                      services: _controller.bootstrap.services,
+                      accountId: _controller.bootstrap.account.id,
+                      onDone: () => Navigator.of(
+                        context,
+                      ).popUntil((route) => route.isFirst),
+                    ),
+                  ),
+                );
+              },
+            ),
             CaleeListRow(
               title: 'Add existing calendars',
               subtitle:

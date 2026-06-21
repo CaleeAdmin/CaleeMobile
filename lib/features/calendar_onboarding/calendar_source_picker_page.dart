@@ -9,6 +9,8 @@ import 'provider_guides/google_calendar_guide_page.dart';
 import 'provider_guides/outlook_calendar_guide_page.dart';
 
 class CalendarSourcePickerPage extends StatelessWidget {
+  static const routeName = 'calendar_source_picker';
+
   const CalendarSourcePickerPage({
     required this.hubClient,
     required this.accessToken,

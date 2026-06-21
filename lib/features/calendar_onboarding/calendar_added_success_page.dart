@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../ui/calee_design.dart';
+import 'calendar_source_picker_page.dart';
 
 class CalendarAddedSuccessPage extends StatelessWidget {
   const CalendarAddedSuccessPage({required this.onViewCalendar, super.key});
@@ -44,9 +45,12 @@ class CalendarAddedSuccessPage extends StatelessWidget {
               const Spacer(),
               FilledButton(
                 onPressed: () {
-                  Navigator.of(
-                    context,
-                  ).popUntil(ModalRoute.withName('calendar_source_picker'));
+                  Navigator.of(context).popUntil(
+                    (route) =>
+                        route.settings.name ==
+                            CalendarSourcePickerPage.routeName ||
+                        route.isFirst,
+                  );
                 },
                 child: const Text('Add another calendar'),
               ),
