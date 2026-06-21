@@ -5,12 +5,12 @@ const _kTermsAndConditionsUrl = 'https://portal.calee.com.au/terms';
 
 class WelcomePage extends StatelessWidget {
   const WelcomePage({
-    required this.onSetupDisplay,
+    required this.onCreateAccount,
     required this.onSignIn,
     super.key,
   });
 
-  final VoidCallback onSetupDisplay;
+  final VoidCallback onCreateAccount;
   final VoidCallback onSignIn;
 
   Future<void> _openTerms() async {
@@ -52,8 +52,8 @@ class WelcomePage extends StatelessWidget {
                 ),
                 const SizedBox(height: 40),
                 FilledButton(
-                  onPressed: onSetupDisplay,
-                  child: const Text('Set up a Calee display'),
+                  onPressed: onCreateAccount,
+                  child: const Text('Create account'),
                 ),
                 const SizedBox(height: 12),
                 TextButton(

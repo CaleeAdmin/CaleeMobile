@@ -176,7 +176,7 @@ void main() {
       await tester.pump();
 
       expect(find.text('Welcome to Calee'), findsOneWidget);
-      expect(find.text('Set up a Calee display'), findsOneWidget);
+      expect(find.text('Create account'), findsOneWidget);
       expect(find.text('I already have an account'), findsOneWidget);
       expect(find.text('Set up your Calee display'), findsNothing);
     },

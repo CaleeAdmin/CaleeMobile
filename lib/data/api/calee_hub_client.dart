@@ -818,12 +818,18 @@ class CaleeHubClient {
 
   Future<ClientLoginResult> register({
     required String email,
+    required String confirmEmail,
+    required String redeemCode,
     required String password,
-    required String displayName,
   }) async {
     final json = await _postJson(
       '/client/v1/auth/register',
-      body: {'email': email, 'password': password, 'displayName': displayName},
+      body: {
+        'email': email,
+        'confirmEmail': confirmEmail,
+        'redeemCode': redeemCode,
+        'password': password,
+      },
     );
     return ClientLoginResult.fromJson(_data(json));
   }
