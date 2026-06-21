@@ -12,6 +12,11 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   late HttpServer server;
+  List<Map<String, dynamic>> capturedBodies = [];
+
+  setUp(() {
+    capturedBodies = [];
+  });
 
   tearDown(() async {
     await server.close(force: true);
@@ -22,6 +27,10 @@ void main() {
   ) async {
     server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     server.listen((req) async {
+      final body = await utf8.decoder.bind(req).join();
+      if (body.isNotEmpty) {
+        capturedBodies.add(jsonDecode(body) as Map<String, dynamic>);
+      }
       req.response.headers.contentType = ContentType.json;
       req.response.statusCode = HttpStatus.ok;
       req.response.write(jsonEncode(responseBody));
@@ -160,6 +169,102 @@ void main() {
             (e) => e.message,
             'message',
             contains('Could not load your profile'),
+          ),
+        ),
+      );
+    });
+
+    test('does not require firstName or lastName (partial update)', () async {
+      final client = await _startServer({
+        'data': {
+          'profile': {
+            'accountId': 'acct-1',
+            'email': 'alice@example.com',
+            'firstName': 'Alice',
+            'lastName': 'Smith',
+            'timeZone': 'Australia/Perth',
+            'locale': 'en-AU',
+            'countryCode': 'AU',
+          },
+        },
+      });
+
+      final profile = await client.updateProfile(
+        accessToken: 'tok',
+        timeZone: 'Australia/Perth',
+        locale: 'en-AU',
+        countryCode: 'AU',
+      );
+
+      expect(profile.timeZone, equals('Australia/Perth'));
+      expect(profile.locale, equals('en-AU'));
+      expect(profile.countryCode, equals('AU'));
+    });
+
+    test('sends only timeZone/locale/countryCode when no firstName/lastName', () async {
+      final client = await _startServer({
+        'data': {
+          'profile': {
+            'accountId': 'acct-1',
+            'email': 'alice@example.com',
+            'firstName': 'Alice',
+            'lastName': 'Smith',
+          },
+        },
+      });
+
+      await client.updateProfile(
+        accessToken: 'tok',
+        timeZone: 'Australia/Perth',
+        locale: 'en-AU',
+        countryCode: 'AU',
+      );
+
+      expect(capturedBodies, hasLength(1));
+      final sent = capturedBodies.first;
+      expect(sent.containsKey('firstName'), isFalse);
+      expect(sent.containsKey('lastName'), isFalse);
+      expect(sent['timeZone'], equals('Australia/Perth'));
+      expect(sent['locale'], equals('en-AU'));
+      expect(sent['countryCode'], equals('AU'));
+    });
+
+    test('does not send email or postalCode in partial update', () async {
+      final client = await _startServer({
+        'data': {
+          'profile': {
+            'accountId': 'acct-1',
+            'email': 'alice@example.com',
+            'firstName': 'Alice',
+            'lastName': 'Smith',
+          },
+        },
+      });
+
+      await client.updateProfile(
+        accessToken: 'tok',
+        timeZone: 'Australia/Perth',
+        locale: 'en-AU',
+        countryCode: 'AU',
+      );
+
+      expect(capturedBodies, hasLength(1));
+      final sent = capturedBodies.first;
+      expect(sent.containsKey('email'), isFalse);
+      expect(sent.containsKey('primaryEmail'), isFalse);
+      expect(sent.containsKey('postalCode'), isFalse);
+    });
+
+    test('throws CaleeHubException when no fields provided', () async {
+      final client = await _startServer({'data': {}});
+
+      expect(
+        () => client.updateProfile(accessToken: 'tok'),
+        throwsA(
+          isA<CaleeHubException>().having(
+            (e) => e.message,
+            'message',
+            contains('No profile updates provided'),
           ),
         ),
       );

@@ -9,7 +9,9 @@ import '../data/auth/session_store.dart';
 import '../features/auth/auth_repository.dart';
 import '../features/auth/create_account_page.dart';
 import '../features/auth/login_page.dart';
+import '../features/auth/post_registration_profile_defaults.dart';
 import '../features/auth/session_controller.dart';
+import '../data/device/device_profile_defaults_provider.dart';
 import '../features/calendar_follow/calendar_follow_intent.dart';
 import '../features/calendar_follow/calendar_follow_link_controller.dart';
 import '../features/calendar_follow/follow_calendar_page.dart';
@@ -41,6 +43,7 @@ class CaleeAppTestDependencies {
     required this.followLinkController,
     required this.displayActivationController,
     required this.localSubscriptionRepo,
+    this.deviceProfileDefaultsProvider,
   });
 
   final CaleeHubClient hubClient;
@@ -49,6 +52,7 @@ class CaleeAppTestDependencies {
   final CalendarFollowLinkController followLinkController;
   final DisplayActivationController displayActivationController;
   final LocalCalendarSubscriptionRepository localSubscriptionRepo;
+  final DeviceProfileDefaultsProvider? deviceProfileDefaultsProvider;
 }
 
 class CaleeApp extends StatefulWidget {
@@ -505,6 +509,12 @@ class _CaleeAppState extends State<CaleeApp> {
               _justRegistered = !hasPendingDisplayIntent;
             });
             await _sessionController.completeSignIn(result);
+            unawaited(applyPostRegistrationProfileDefaults(
+              hubClient: _hubClient,
+              accessToken: result.accessToken,
+              provider: widget._testDeps?.deviceProfileDefaultsProvider ??
+                  DeviceProfileDefaultsProvider(),
+            ));
           },
         );
       }
@@ -636,6 +646,12 @@ class _CaleeAppState extends State<CaleeApp> {
               _justRegistered = true;
             });
             await _sessionController.completeSignIn(result);
+            unawaited(applyPostRegistrationProfileDefaults(
+              hubClient: _hubClient,
+              accessToken: result.accessToken,
+              provider: widget._testDeps?.deviceProfileDefaultsProvider ??
+                  DeviceProfileDefaultsProvider(),
+            ));
           },
         );
       }

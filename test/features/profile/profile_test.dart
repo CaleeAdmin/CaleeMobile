@@ -54,8 +54,8 @@ class _StubClient extends CaleeHubClient {
   @override
   Future<ClientProfile> updateProfile({
     required String accessToken,
-    required String firstName,
-    required String lastName,
+    String? firstName,
+    String? lastName,
     String? displayName,
     String? timeZone,
     String? postalCode,
@@ -63,8 +63,8 @@ class _StubClient extends CaleeHubClient {
     String? locale,
   }) async {
     lastUpdateBody = {
-      'firstName': firstName,
-      'lastName': lastName,
+      if (firstName != null) 'firstName': firstName,
+      if (lastName != null) 'lastName': lastName,
       if (displayName != null) 'displayName': displayName,
       if (timeZone != null) 'timeZone': timeZone,
       if (postalCode != null) 'postalCode': postalCode,
