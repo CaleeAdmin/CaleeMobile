@@ -28,7 +28,7 @@ class DisplaySetupLandingPage extends StatelessWidget {
                 const Icon(Icons.tv_outlined, size: 48),
                 const SizedBox(height: 16),
                 Text(
-                  'Set up your Calee display',
+                  'Connect this display to Calee',
                   textAlign: TextAlign.center,
                   style: theme.textTheme.headlineSmall?.copyWith(
                     fontWeight: FontWeight.bold,
@@ -36,7 +36,7 @@ class DisplaySetupLandingPage extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Create a Calee account or sign in to connect this display.',
+                  'Sign in or create a Calee account to connect this display.',
                   textAlign: TextAlign.center,
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
