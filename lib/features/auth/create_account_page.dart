@@ -27,6 +27,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
   final _confirmEmailController = TextEditingController();
   final _redeemCodeController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _confirmPasswordController = TextEditingController();
   bool _obscurePassword = true;
   late final CreateAccountController _controller;
 
@@ -42,6 +43,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
     _confirmEmailController.dispose();
     _redeemCodeController.dispose();
     _passwordController.dispose();
+    _confirmPasswordController.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -137,7 +139,11 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                           if (value == null || value.trim().isEmpty) {
                             return 'Confirm email is required.';
                           }
-                          if (value.trim() != _emailController.text.trim()) {
+                          final email = _emailController.text
+                              .trim()
+                              .toLowerCase();
+                          final confirmEmail = value.trim().toLowerCase();
+                          if (confirmEmail != email) {
                             return 'Confirm email must match email.';
                           }
                           return null;
@@ -162,9 +168,8 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                       TextFormField(
                         controller: _passwordController,
                         obscureText: _obscurePassword,
-                        textInputAction: TextInputAction.done,
+                        textInputAction: TextInputAction.next,
                         autofillHints: const [AutofillHints.newPassword],
-                        onFieldSubmitted: (_) => isLoading ? null : _register(),
                         decoration: InputDecoration(
                           labelText: 'Password',
                           border: const OutlineInputBorder(),
@@ -189,6 +194,27 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                           }
                           if (value.length < 8) {
                             return 'Password must be at least 8 characters';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        controller: _confirmPasswordController,
+                        obscureText: _obscurePassword,
+                        textInputAction: TextInputAction.done,
+                        autofillHints: const [AutofillHints.newPassword],
+                        onFieldSubmitted: (_) => isLoading ? null : _register(),
+                        decoration: const InputDecoration(
+                          labelText: 'Confirm password',
+                          border: OutlineInputBorder(),
+                        ),
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Confirm password is required.';
+                          }
+                          if (value != _passwordController.text) {
+                            return 'Confirm password must match password.';
                           }
                           return null;
                         },
