@@ -1,3 +1,4 @@
+// ignore_for_file: prefer_initializing_formals
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -58,7 +59,6 @@ class CaleeApp extends StatefulWidget {
   const CaleeApp({super.key}) : _testDeps = null;
 
   @visibleForTesting
-  // ignore: prefer_initializing_formals
   const CaleeApp.forTesting({
     required CaleeAppTestDependencies testDeps,
     super.key,
