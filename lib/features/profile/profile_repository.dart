@@ -34,4 +34,17 @@ class ProfileRepository {
       locale: locale,
     );
   }
+
+  Future<ClientProfile> saveProfileDefaults({
+    String? timeZone,
+    String? countryCode,
+    String? locale,
+  }) {
+    return hubClient.updateProfile(
+      accessToken: accessToken,
+      timeZone: timeZone,
+      countryCode: countryCode,
+      locale: locale,
+    );
+  }
 }

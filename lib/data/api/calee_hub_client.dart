@@ -880,8 +880,8 @@ class CaleeHubClient {
 
   Future<ClientProfile> updateProfile({
     required String accessToken,
-    required String firstName,
-    required String lastName,
+    String? firstName,
+    String? lastName,
     String? displayName,
     String? timeZone,
     String? postalCode,
@@ -889,14 +889,21 @@ class CaleeHubClient {
     String? locale,
   }) async {
     final body = <String, dynamic>{
-      'firstName': firstName,
-      'lastName': lastName,
+      if (firstName != null) 'firstName': firstName,
+      if (lastName != null) 'lastName': lastName,
       if (displayName != null) 'displayName': displayName,
       if (timeZone != null) 'timeZone': timeZone,
       if (postalCode != null) 'postalCode': postalCode,
       if (countryCode != null) 'countryCode': countryCode,
       if (locale != null) 'locale': locale,
     };
+
+    if (body.isEmpty) {
+      throw const CaleeHubException(
+        statusCode: 0,
+        message: 'No profile updates provided',
+      );
+    }
 
     final json = await _patchJson(
       '/client/v1/profile',
