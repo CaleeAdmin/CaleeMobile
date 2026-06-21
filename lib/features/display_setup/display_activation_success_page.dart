@@ -20,7 +20,10 @@ class DisplayActivationSuccessPage extends StatelessWidget {
   final String accountId;
   final VoidCallback onDone;
 
-  bool get _hasCalendars => services.isNotEmpty;
+  void _finish(BuildContext context) {
+    Navigator.of(context).popUntil((route) => route.isFirst);
+    onDone();
+  }
 
   void _addCalendars(BuildContext context) {
     Navigator.of(context).push(
@@ -30,8 +33,8 @@ class DisplayActivationSuccessPage extends StatelessWidget {
           accessToken: accessToken,
           services: services,
           accountId: accountId,
-          onDone: onDone,
-          onViewCalendar: onDone,
+          onDone: () => _finish(context),
+          onViewCalendar: () => _finish(context),
         ),
       ),
     );
@@ -63,35 +66,24 @@ class DisplayActivationSuccessPage extends StatelessWidget {
                     fontWeight: FontWeight.bold,
                   ),
                 ),
-                if (!_hasCalendars) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    'Add the calendars you already use so their events appear on your display.',
-                    textAlign: TextAlign.center,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
+                const SizedBox(height: 8),
+                Text(
+                  'Add the calendars you already use so their events appear on your display.',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
                   ),
-                ],
+                ),
                 const SizedBox(height: 32),
-                if (_hasCalendars) ...[
-                  FilledButton(onPressed: onDone, child: const Text('Done')),
-                  const SizedBox(height: 12),
-                  OutlinedButton(
-                    onPressed: () => _addCalendars(context),
-                    child: const Text('Add another calendar'),
-                  ),
-                ] else ...[
-                  FilledButton(
-                    onPressed: () => _addCalendars(context),
-                    child: const Text('Add calendars'),
-                  ),
-                  const SizedBox(height: 12),
-                  OutlinedButton(
-                    onPressed: onDone,
-                    child: const Text('Do this later'),
-                  ),
-                ],
+                FilledButton(
+                  onPressed: () => _addCalendars(context),
+                  child: const Text('Add calendars'),
+                ),
+                const SizedBox(height: 12),
+                OutlinedButton(
+                  onPressed: () => _finish(context),
+                  child: const Text('Do this later'),
+                ),
               ],
             ),
           ),
