@@ -71,8 +71,8 @@ void main() {
         'data': {'other': 'field'},
       });
 
-      expect(
-        () => client.profile(accessToken: 'tok'),
+      await expectLater(
+        client.profile(accessToken: 'tok'),
         throwsA(
           isA<CaleeHubException>().having(
             (e) => e.message,
@@ -159,8 +159,8 @@ void main() {
         'data': {'other': 'field'},
       });
 
-      expect(
-        () => client.updateProfile(
+      await expectLater(
+        client.updateProfile(
           accessToken: 'tok',
           firstName: 'Alice',
           lastName: 'Smith',
@@ -232,6 +232,55 @@ void main() {
         expect(sent['countryCode'], equals('AU'));
       },
     );
+
+    test('can send only timeZone', () async {
+      final client = await startServer({
+        'data': {
+          'profile': {
+            'accountId': 'acct-1',
+            'email': 'alice@example.com',
+            'timeZone': 'Australia/Perth',
+          },
+        },
+      });
+
+      final profile = await client.updateProfile(
+        accessToken: 'tok',
+        timeZone: 'Australia/Perth',
+      );
+
+      expect(profile.timeZone, equals('Australia/Perth'));
+      expect(capturedBodies, hasLength(1));
+      expect(capturedBodies.first.keys, containsAll(['timeZone']));
+      expect(capturedBodies.first.containsKey('locale'), isFalse);
+      expect(capturedBodies.first.containsKey('countryCode'), isFalse);
+      expect(capturedBodies.first.containsKey('firstName'), isFalse);
+    });
+
+    test('can send only locale and countryCode', () async {
+      final client = await startServer({
+        'data': {
+          'profile': {
+            'accountId': 'acct-1',
+            'email': 'alice@example.com',
+            'locale': 'en-AU',
+            'countryCode': 'AU',
+          },
+        },
+      });
+
+      final profile = await client.updateProfile(
+        accessToken: 'tok',
+        locale: 'en-AU',
+        countryCode: 'AU',
+      );
+
+      expect(profile.locale, equals('en-AU'));
+      expect(profile.countryCode, equals('AU'));
+      expect(capturedBodies, hasLength(1));
+      expect(capturedBodies.first.containsKey('timeZone'), isFalse);
+      expect(capturedBodies.first.containsKey('firstName'), isFalse);
+    });
 
     test('does not send email or postalCode in partial update', () async {
       final client = await startServer({

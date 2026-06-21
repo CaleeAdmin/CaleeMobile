@@ -18,6 +18,10 @@ Future<void> applyPostRegistrationProfileDefaults({
       countryCode: defaults.countryCode,
     );
   } catch (e) {
-    debugPrint('[applyPostRegistrationProfileDefaults] failed (non-fatal): $e');
+    if (kDebugMode) {
+      debugPrint(
+        '[applyPostRegistrationProfileDefaults] failed (non-fatal): $e',
+      );
+    }
   }
 }

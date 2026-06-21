@@ -15,7 +15,9 @@ class DeviceProfileDefaultsProvider {
       final tz = await FlutterTimezone.getLocalTimezone();
       if (tz.isNotEmpty) timeZone = tz;
     } catch (e) {
-      debugPrint('[DeviceProfileDefaultsProvider] timezone lookup failed: $e');
+      if (kDebugMode) {
+        debugPrint('[DeviceProfileDefaultsProvider] timezone lookup failed: $e');
+      }
     }
 
     try {
@@ -24,12 +26,14 @@ class DeviceProfileDefaultsProvider {
         final primary = locales.first;
         final cc = primary.countryCode;
         locale = cc != null && cc.isNotEmpty
-            ? '${primary.languageCode}-$cc'
+            ? '${primary.languageCode}-${cc.toUpperCase()}'
             : primary.languageCode;
-        if (cc != null && cc.isNotEmpty) countryCode = cc;
+        if (cc != null && cc.isNotEmpty) countryCode = cc.toUpperCase();
       }
     } catch (e) {
-      debugPrint('[DeviceProfileDefaultsProvider] locale lookup failed: $e');
+      if (kDebugMode) {
+        debugPrint('[DeviceProfileDefaultsProvider] locale lookup failed: $e');
+      }
     }
 
     return DeviceProfileDefaults(
@@ -50,9 +54,9 @@ class DeviceProfileDefaultsProvider {
       final primary = locales.first;
       final cc = primary.countryCode;
       locale = cc != null && cc.isNotEmpty
-          ? '${primary.languageCode}-$cc'
+          ? '${primary.languageCode}-${cc.toUpperCase()}'
           : primary.languageCode;
-      if (cc != null && cc.isNotEmpty) countryCode = cc;
+      if (cc != null && cc.isNotEmpty) countryCode = cc.toUpperCase();
     }
     return DeviceProfileDefaults(
       timeZone: timeZone,
