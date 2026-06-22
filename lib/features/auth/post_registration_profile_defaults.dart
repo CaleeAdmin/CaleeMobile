@@ -16,6 +16,7 @@ Future<void> applyPostRegistrationProfileDefaults({
       timeZone: defaults.timeZone,
       locale: defaults.locale,
       countryCode: defaults.countryCode,
+      postalCode: defaults.postalCode,
     );
   } catch (e) {
     if (kDebugMode) {
