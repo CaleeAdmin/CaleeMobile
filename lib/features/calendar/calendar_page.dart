@@ -174,6 +174,8 @@ class _CalendarPageState extends State<CalendarPage> {
         initialDate: _controller.selectedDay,
         defaultCalendarId: _controller.preferences.defaultCalendarId,
         onCreate: _controller.createEvent,
+        hubClient: widget.hubClient,
+        accessToken: widget.accessToken,
       ),
     );
 
@@ -299,6 +301,8 @@ class _CalendarPageState extends State<CalendarPage> {
         editScope: editScope,
         onCreate: _controller.createEvent,
         onUpdate: _controller.updateEvent,
+        hubClient: widget.hubClient,
+        accessToken: widget.accessToken,
       ),
     );
 

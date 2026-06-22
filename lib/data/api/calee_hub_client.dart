@@ -8,6 +8,7 @@ import '../models/client_calendar.dart';
 import '../models/client_chore.dart';
 import '../models/client_chore_metadata.dart';
 import '../models/client_deleted_items.dart';
+import '../models/client_event_draft.dart';
 import '../models/client_person.dart';
 import '../models/client_profile.dart';
 import '../models/client_task.dart';
@@ -724,6 +725,25 @@ class CaleeHubClient {
     );
 
     return ClientEvent.fromJson(_data(json)['event'] as Map<String, dynamic>);
+  }
+
+  Future<List<ClientEventDraft>> eventDraftsFromImage({
+    required String accessToken,
+    required List<int> imageBytes,
+    required String mimeType,
+  }) async {
+    final base64Image = base64.encode(imageBytes);
+    final json = await _postJson(
+      '/v1/ai/calendar/event-drafts/from-image',
+      accessToken: accessToken,
+      body: {'image': base64Image, 'mimeType': mimeType},
+    );
+    final draftsRaw = _data(json)['drafts'];
+    if (draftsRaw is! List) return [];
+    return draftsRaw
+        .whereType<Map<String, dynamic>>()
+        .map(ClientEventDraft.fromJson)
+        .toList();
   }
 
   Future<ClientEventList> events({
