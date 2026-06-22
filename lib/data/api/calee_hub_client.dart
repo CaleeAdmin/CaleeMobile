@@ -841,6 +841,13 @@ class CaleeHubClient {
     return ClientLoginResult.fromJson(_data(json));
   }
 
+  Future<void> requestPasswordReset({required String email}) async {
+    await _postJson(
+      '/client/v1/auth/password-resets/request',
+      body: {'email': email.trim()},
+    );
+  }
+
   Future<void> approveDisplayLogin({
     required String accessToken,
     required String token,

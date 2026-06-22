@@ -53,4 +53,7 @@ class AuthRepository {
   Future<void> clearSession() => sessionStore.clear();
 
   void clearAuthCache() => hubClient.clearAuthCache();
+
+  Future<void> requestPasswordReset({required String email}) =>
+      hubClient.requestPasswordReset(email: email);
 }

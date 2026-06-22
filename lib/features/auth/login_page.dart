@@ -3,9 +3,9 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../data/models/client_bootstrap.dart';
 import 'auth_repository.dart';
+import 'forgot_password_page.dart';
 import 'login_controller.dart';
 
-const _kForgotPasswordUrl = 'https://hub.calee.com.au/login';
 const _kTermsAndConditionsUrl = 'https://portal.calee.com.au/terms';
 
 class LoginPage extends StatefulWidget {
@@ -164,7 +164,13 @@ class _LoginPageState extends State<LoginPage> {
                       Align(
                         alignment: Alignment.centerRight,
                         child: TextButton(
-                          onPressed: () => _openUrl(_kForgotPasswordUrl),
+                          onPressed: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => ForgotPasswordPage(
+                                authRepository: widget.authRepository,
+                              ),
+                            ),
+                          ),
                           style: TextButton.styleFrom(
                             padding: const EdgeInsets.symmetric(
                               horizontal: 0,
