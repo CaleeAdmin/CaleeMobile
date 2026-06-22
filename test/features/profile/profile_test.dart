@@ -144,7 +144,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Personal profile'), findsOneWidget);
-    expect(find.text('Name, timezone, and ZIP/postcode'), findsOneWidget);
+    expect(find.text('Name, timezone, and postcode'), findsOneWidget);
   });
 
   testWidgets('Tapping Personal profile row opens ProfilePage', (tester) async {
@@ -297,8 +297,8 @@ void main() {
     expect(client.lastUpdateBody, isNull);
   });
 
-  // 10. Invalid ZIP/postcode blocks submit.
-  testWidgets('Invalid ZIP/postcode shows validation error', (tester) async {
+  // 10. Invalid postcode blocks submit.
+  testWidgets('Invalid postcode shows validation error', (tester) async {
     final client = _StubClient();
     await tester.pumpWidget(_wrapProfile(client));
     await tester.pumpAndSettle();
@@ -313,7 +313,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(
-      find.textContaining('Letters, numbers, spaces, hyphen only'),
+      find.textContaining('Letters, numbers, spaces, or hyphen only'),
       findsOneWidget,
     );
     expect(client.lastUpdateBody, isNull);

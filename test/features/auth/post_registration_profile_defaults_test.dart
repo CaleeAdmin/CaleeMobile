@@ -57,14 +57,14 @@ void main() {
     server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     server.listen((req) async {
       final body = await utf8.decoder.bind(req).join();
-      capturedRequests.add(_CapturedRequest(
-        method: req.method,
-        path: req.uri.path,
-        authorization: req.headers.value('authorization'),
-        body: body.isNotEmpty
-            ? jsonDecode(body) as Map<String, dynamic>
-            : {},
-      ));
+      capturedRequests.add(
+        _CapturedRequest(
+          method: req.method,
+          path: req.uri.path,
+          authorization: req.headers.value('authorization'),
+          body: body.isNotEmpty ? jsonDecode(body) as Map<String, dynamic> : {},
+        ),
+      );
       req.response.headers.contentType = ContentType.json;
       req.response.statusCode = statusCode;
       if (statusCode == 200) {
@@ -98,7 +98,7 @@ void main() {
   }
 
   test(
-    'calls PATCH /client/v1/profile with timezone, locale, countryCode',
+    'calls PATCH /client/v1/profile with timezone, locale, countryCode; no postalCode when null',
     () async {
       final client = await startServer();
       final provider = _FakeProvider(
@@ -136,6 +136,50 @@ void main() {
       expect(sent.containsKey('postalCode'), isFalse);
     },
   );
+
+  test('sends postalCode when defaults include one', () async {
+    final client = await startServer();
+    final provider = _FakeProvider(
+      const DeviceProfileDefaults(
+        timeZone: 'Australia/Perth',
+        locale: 'en-AU',
+        countryCode: 'AU',
+        postalCode: '6000',
+      ),
+    );
+
+    await applyPostRegistrationProfileDefaults(
+      hubClient: client,
+      accessToken: 'tok',
+      provider: provider,
+    );
+
+    expect(capturedRequests, hasLength(1));
+    final sent = capturedRequests.first.body;
+    expect(sent['postalCode'], equals('6000'));
+  });
+
+  test('sends postalCode with leading zero for Darwin (0800)', () async {
+    final client = await startServer();
+    final provider = _FakeProvider(
+      const DeviceProfileDefaults(
+        timeZone: 'Australia/Darwin',
+        locale: 'en-AU',
+        countryCode: 'AU',
+        postalCode: '0800',
+      ),
+    );
+
+    await applyPostRegistrationProfileDefaults(
+      hubClient: client,
+      accessToken: 'tok',
+      provider: provider,
+    );
+
+    expect(capturedRequests, hasLength(1));
+    final sent = capturedRequests.first.body;
+    expect(sent['postalCode'], equals('0800'));
+  });
 
   test('does nothing when provider returns no defaults', () async {
     final client = await startServer();

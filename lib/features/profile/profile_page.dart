@@ -113,9 +113,7 @@ class _ProfilePageState extends State<ProfilePage> {
           ? null
           : _displayNameCtrl.text.trim(),
       timeZone: _selectedTimezone,
-      postalCode: _postalCodeCtrl.text.trim().isEmpty
-          ? null
-          : _postalCodeCtrl.text.trim(),
+      postalCode: _postalCodeCtrl.text.trim(),
     );
   }
 
@@ -262,14 +260,14 @@ class _ProfilePageState extends State<ProfilePage> {
                     : null,
               ),
               CaleeSectionLabeledTextFormField(
-                label: 'ZIP / postcode',
+                label: 'Postcode',
                 controller: _postalCodeCtrl,
                 hintText: 'Optional',
                 enabled: !isSaving,
                 validator: (v) {
                   if (v == null || v.trim().isEmpty) return null;
                   if (!_kPostalCodeRe.hasMatch(v.trim())) {
-                    return 'Letters, numbers, spaces, hyphen only (max 32)';
+                    return 'Letters, numbers, spaces, or hyphen only (max 32)';
                   }
                   return null;
                 },
