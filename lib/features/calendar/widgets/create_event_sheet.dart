@@ -523,6 +523,11 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
     try {
       compressedFile = await EventDraftImagePreparer().prepare(xFile);
 
+      if (kDebugMode) {
+        debugPrint('EventDraftsFromImage: picked ${xFile.path}');
+        debugPrint('EventDraftsFromImage: compressed ${compressedFile.path}');
+      }
+
       String tz = 'Australia/Perth';
       try {
         tz = await FlutterTimezone.getLocalTimezone();
@@ -546,6 +551,9 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
       setState(() => _isScanningImage = false);
 
       final drafts = response.drafts;
+      if (kDebugMode) {
+        debugPrint('EventDraftsFromImage: drafts=${drafts.length}');
+      }
       if (drafts.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -594,8 +602,13 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
         SnackBar(content: Text(message)),
       );
     } finally {
-      if (compressedFile != null && compressedFile.path != xFile.path) {
-        compressedFile.delete().catchError((_) => compressedFile);
+      final fileToDelete = compressedFile;
+      if (fileToDelete != null && fileToDelete.path != xFile.path) {
+        try {
+          await fileToDelete.delete();
+        } catch (_) {
+          // Ignore temporary-file cleanup failures.
+        }
       }
     }
   }
