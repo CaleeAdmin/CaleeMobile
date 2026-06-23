@@ -24,14 +24,14 @@ class EventDraftImagePreparer {
     try {
       final result =
           await image_compress.FlutterImageCompress.compressAndGetFile(
-        xFile.path,
-        tmpPath,
-        minWidth: _targetLongestSide,
-        minHeight: _targetLongestSide,
-        quality: _jpegQuality,
-        format: image_compress.CompressFormat.jpeg,
-        keepExif: false,
-      );
+            xFile.path,
+            tmpPath,
+            minWidth: _targetLongestSide,
+            minHeight: _targetLongestSide,
+            quality: _jpegQuality,
+            format: image_compress.CompressFormat.jpeg,
+            keepExif: false,
+          );
 
       if (result != null) {
         final compressed = File(result.path);

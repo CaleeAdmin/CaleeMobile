@@ -414,11 +414,7 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
 
       final startsAt = draft.startsAt?.toLocal();
       if (startsAt != null) {
-        _selectedDate = DateTime(
-          startsAt.year,
-          startsAt.month,
-          startsAt.day,
-        );
+        _selectedDate = DateTime(startsAt.year, startsAt.month, startsAt.day);
         _startTime = TimeOfDay(hour: startsAt.hour, minute: startsAt.minute);
         if (_selectedEndDate.isBefore(_selectedDate)) {
           _selectedEndDate = _selectedDate;
@@ -428,8 +424,11 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
       final endsAt = draft.endsAt?.toLocal();
       if (endsAt != null) {
         if (_allDay) {
-          _selectedEndDate = DateTime(endsAt.year, endsAt.month, endsAt.day)
-              .subtract(const Duration(days: 1));
+          _selectedEndDate = DateTime(
+            endsAt.year,
+            endsAt.month,
+            endsAt.day,
+          ).subtract(const Duration(days: 1));
           if (_selectedEndDate.isBefore(_selectedDate)) {
             _selectedEndDate = _selectedDate;
           }
@@ -513,7 +512,8 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
     final xFile = await ImagePicker().pickImage(source: source);
     if (xFile == null || !mounted) return;
 
-    final formHasContent = _titleController.text.trim().isNotEmpty ||
+    final formHasContent =
+        _titleController.text.trim().isNotEmpty ||
         _locationController.text.trim().isNotEmpty ||
         _descriptionController.text.trim().isNotEmpty;
 
@@ -603,8 +603,7 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
       if (error is UnsupportedImageFormatException) {
         message = 'Please choose a JPEG, PNG, or WebP image.';
       } else if (error is ImageTooLargeException) {
-        message =
-            'This image is too large. Please choose an image under 8 MB.';
+        message = 'This image is too large. Please choose an image under 8 MB.';
       } else if (error is CaleeHubException) {
         if (error.code == 'AI_IMAGE_TIMEOUT') {
           message = 'Image scanning is taking too long. Please try again.';
@@ -631,9 +630,9 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
         }
       }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
     } finally {
       final fileToDelete = compressedFile;
       if (fileToDelete != null && fileToDelete.path != xFile.path) {
@@ -813,9 +812,7 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
                                 )
                               : const Icon(Icons.document_scanner_outlined),
                           label: Text(
-                            _isScanningImage
-                                ? 'Scanning image…'
-                                : 'Scan image',
+                            _isScanningImage ? 'Scanning image…' : 'Scan image',
                           ),
                         ),
                       ],

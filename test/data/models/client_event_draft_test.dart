@@ -132,7 +132,11 @@ void main() {
 
     test('malformed draft entries are skipped', () {
       final response = EventDraftsFromImageResponse.fromJson({
-        'drafts': ['not-a-map', {'title': 'Valid'}, 42],
+        'drafts': [
+          'not-a-map',
+          {'title': 'Valid'},
+          42,
+        ],
       });
 
       expect(response.drafts.length, 1);
