@@ -1,6 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:flutter/foundation.dart';
 
 import '../models/client_bootstrap.dart';
 import '../models/client_caldav_account.dart';
@@ -8,6 +11,7 @@ import '../models/client_calendar.dart';
 import '../models/client_chore.dart';
 import '../models/client_chore_metadata.dart';
 import '../models/client_deleted_items.dart';
+import '../models/client_event_draft.dart';
 import '../models/client_person.dart';
 import '../models/client_profile.dart';
 import '../models/client_task.dart';
@@ -25,6 +29,7 @@ class CaleeHubClient {
   final HttpClient _httpClient;
 
   static const _kTimeout = Duration(seconds: 25);
+  static const _kImageAiTimeout = Duration(seconds: 90);
 
   // Set by CaleeApp after construction to enable transparent 401 refresh+retry.
   // The callback should refresh the access token and return the new one,
@@ -726,6 +731,171 @@ class CaleeHubClient {
     return ClientEvent.fromJson(_data(json)['event'] as Map<String, dynamic>);
   }
 
+  Future<EventDraftsFromImageResponse> eventDraftsFromImage({
+    required String accessToken,
+    required File imageFile,
+    String? timezone,
+    String? referenceDate,
+    String? sourceHint,
+  }) async {
+    final mimeType = _inferImageMimeType(imageFile.path);
+    final fileSize = await imageFile.length();
+    if (fileSize > 8 * 1024 * 1024) {
+      throw const CaleeHubException(
+        statusCode: 0,
+        code: 'FILE_TOO_LARGE',
+        message: 'This image is too large. Please choose an image under 8 MB.',
+      );
+    }
+
+    const path = '/v1/ai/calendar/event-drafts/from-image';
+    final Map<String, dynamic> raw;
+    try {
+      raw = await _withRetry(
+        (token) => _doMultipartPost(
+          path,
+          accessToken: token,
+          imageFile: imageFile,
+          mimeType: mimeType,
+          timezone: timezone,
+          referenceDate: referenceDate,
+          sourceHint: sourceHint,
+        ),
+        accessToken,
+      );
+    } on CaleeHubException catch (e) {
+      if (e.statusCode == 401 && kDebugMode) {
+        debugPrint(
+          'EventDraftsFromImage: /v1 endpoint exists, but bearer token was rejected. '
+          'Check whether this route expects device token or client token.',
+        );
+      }
+      rethrow;
+    }
+
+    final payload =
+        raw.containsKey('data') && raw['data'] is Map<String, dynamic>
+            ? raw['data'] as Map<String, dynamic>
+            : raw;
+    return EventDraftsFromImageResponse.fromJson(payload);
+  }
+
+  static String _inferImageMimeType(String filePath) {
+    final ext = filePath.split('.').last.toLowerCase();
+    return switch (ext) {
+      'jpg' || 'jpeg' => 'image/jpeg',
+      'png' => 'image/png',
+      'webp' => 'image/webp',
+      _ => throw const CaleeHubException(
+        statusCode: 0,
+        code: 'UNSUPPORTED_FORMAT',
+        message: 'Please choose a JPEG, PNG, or WebP image.',
+      ),
+    };
+  }
+
+  Future<Map<String, dynamic>> _doMultipartPost(
+    String path, {
+    required String accessToken,
+    required File imageFile,
+    required String mimeType,
+    String? timezone,
+    String? referenceDate,
+    String? sourceHint,
+  }) {
+    return _executeImageAiRequest(() async {
+      final boundary =
+          'CaleeBoundary${DateTime.now().millisecondsSinceEpoch}';
+      final request = await _httpClient.postUrl(baseUri.resolve(path));
+      request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+      request.headers.set(
+        HttpHeaders.authorizationHeader,
+        'Bearer $accessToken',
+      );
+      request.headers.contentType = ContentType(
+        'multipart',
+        'form-data',
+        parameters: {'boundary': boundary},
+      );
+
+      final body = BytesBuilder();
+
+      void addTextField(String name, String value) {
+        body.add(utf8.encode('--$boundary\r\n'));
+        body.add(
+          utf8.encode('Content-Disposition: form-data; name="$name"\r\n\r\n'),
+        );
+        body.add(utf8.encode('$value\r\n'));
+      }
+
+      final filename = imageFile.path.split('/').last;
+      body.add(utf8.encode('--$boundary\r\n'));
+      body.add(
+        utf8.encode(
+          'Content-Disposition: form-data; name="image"; filename="$filename"\r\n',
+        ),
+      );
+      body.add(utf8.encode('Content-Type: $mimeType\r\n\r\n'));
+      body.add(await imageFile.readAsBytes());
+      body.add(utf8.encode('\r\n'));
+
+      if (timezone != null && timezone.isNotEmpty) {
+        addTextField('timezone', timezone);
+      }
+      if (referenceDate != null && referenceDate.isNotEmpty) {
+        addTextField('reference_date', referenceDate);
+      }
+      if (sourceHint != null && sourceHint.isNotEmpty) {
+        addTextField('source_hint', sourceHint);
+      }
+
+      body.add(utf8.encode('--$boundary--\r\n'));
+
+      final bodyBytes = body.toBytes();
+      if (kDebugMode) {
+        debugPrint('EventDraftsFromImage: POST $path bytes=${bodyBytes.length}');
+      }
+      request.contentLength = bodyBytes.length;
+      request.add(bodyBytes);
+
+      final response = await request.close();
+      if (kDebugMode) {
+        debugPrint(
+          'EventDraftsFromImage: response status=${response.statusCode}',
+        );
+      }
+      return _readJsonResponse(response, endpoint: path);
+    });
+  }
+
+  Future<Map<String, dynamic>> _executeImageAiRequest(
+    Future<Map<String, dynamic>> Function() fn,
+  ) async {
+    try {
+      return await fn().timeout(_kImageAiTimeout);
+    } on CaleeHubException {
+      rethrow;
+    } on TimeoutException {
+      throw const CaleeHubException(
+        statusCode: 0,
+        code: 'AI_IMAGE_TIMEOUT',
+        message: 'Image scanning is taking too long. Please try again.',
+      );
+    } on SocketException {
+      throw const CaleeHubException(
+        statusCode: 0,
+        code: 'NETWORK_ERROR',
+        message: 'Check your connection and try again.',
+      );
+    } on HandshakeException {
+      throw const CaleeHubException(
+        statusCode: 0,
+        code: 'NETWORK_ERROR',
+        message: 'Check your connection and try again.',
+      );
+    }
+  }
+
   Future<ClientEventList> events({
     required String accessToken,
     required String from,
@@ -839,6 +1009,13 @@ class CaleeHubClient {
       },
     );
     return ClientLoginResult.fromJson(_data(json));
+  }
+
+  Future<void> requestPasswordReset({required String email}) async {
+    await _postJson(
+      '/client/v1/auth/password-resets/request',
+      body: {'email': email.trim()},
+    );
   }
 
   Future<void> approveDisplayLogin({

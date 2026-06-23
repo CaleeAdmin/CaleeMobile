@@ -1,15 +1,24 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_timezone/flutter_timezone.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../../data/api/calee_hub_client.dart';
 import '../../../data/models/client_calendar.dart';
+import '../../../data/models/client_event_draft.dart';
 import '../../../ui/calee_design.dart';
+import '../event_draft_image_preparer.dart';
 import 'calendar_widget_helpers.dart';
 
 class CreateEventSheet extends StatefulWidget {
   const CreateEventSheet({
     required this.calendars,
     required this.onCreate,
+    required this.hubClient,
+    required this.accessToken,
     this.initialDate,
     this.initialEvent,
     this.editScope,
@@ -23,6 +32,8 @@ class CreateEventSheet extends StatefulWidget {
   final ClientEvent? initialEvent;
   final String? editScope;
   final String? defaultCalendarId;
+  final CaleeHubClient hubClient;
+  final String accessToken;
   final Future<void> Function({
     required ClientCalendar calendar,
     required String title,
@@ -68,6 +79,7 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
   late DateTime _recurrenceEndDate;
   bool _allDay = false;
   bool _isSubmitting = false;
+  bool _isScanningImage = false;
 
   bool get _isEditing => widget.initialEvent != null;
   bool get _isEditingSingleOccurrence =>
@@ -79,6 +91,8 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
       _isEditing &&
       widget.initialEvent!.recurring &&
       widget.editScope == 'series';
+
+  bool get _isLocked => _isSubmitting || _isScanningImage;
 
   @override
   void initState() {
@@ -366,6 +380,274 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
     }
   }
 
+  // ── Scan image ────────────────────────────────────────────────────────────
+
+  Future<ImageSource?> _pickImageSource() async {
+    final result = Completer<ImageSource?>();
+    await CaleeActionSheet.show(
+      context: context,
+      actions: [
+        CaleeAction(
+          label: 'Take photo',
+          icon: Icons.camera_alt_outlined,
+          onTap: () => result.complete(ImageSource.camera),
+        ),
+        CaleeAction(
+          label: 'Choose photo',
+          icon: Icons.photo_library_outlined,
+          onTap: () => result.complete(ImageSource.gallery),
+        ),
+      ],
+    );
+    if (!result.isCompleted) result.complete(null);
+    return result.future;
+  }
+
+  void _applyDraft(ClientEventDraft draft) {
+    setState(() {
+      if (draft.title.isNotEmpty) _titleController.text = draft.title;
+      if (draft.location != null) _locationController.text = draft.location!;
+      if (draft.description != null) {
+        _descriptionController.text = draft.description!;
+      }
+      _allDay = draft.allDay;
+
+      final startsAt = draft.startsAt?.toLocal();
+      if (startsAt != null) {
+        _selectedDate = DateTime(
+          startsAt.year,
+          startsAt.month,
+          startsAt.day,
+        );
+        _startTime = TimeOfDay(hour: startsAt.hour, minute: startsAt.minute);
+        if (_selectedEndDate.isBefore(_selectedDate)) {
+          _selectedEndDate = _selectedDate;
+        }
+      }
+
+      final endsAt = draft.endsAt?.toLocal();
+      if (endsAt != null) {
+        if (_allDay) {
+          _selectedEndDate = DateTime(endsAt.year, endsAt.month, endsAt.day)
+              .subtract(const Duration(days: 1));
+          if (_selectedEndDate.isBefore(_selectedDate)) {
+            _selectedEndDate = _selectedDate;
+          }
+        } else {
+          _endTime = TimeOfDay(hour: endsAt.hour, minute: endsAt.minute);
+        }
+      } else if (startsAt != null && !_allDay) {
+        final inferredEnd = startsAt.add(const Duration(hours: 1));
+        _endTime = TimeOfDay(
+          hour: inferredEnd.hour % 24,
+          minute: inferredEnd.minute,
+        );
+      }
+    });
+  }
+
+  Future<ClientEventDraft?> _pickDraft(List<ClientEventDraft> drafts) {
+    return showDialog<ClientEventDraft>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: const Text('Multiple events found'),
+        children: [
+          for (final draft in drafts)
+            SimpleDialogOption(
+              onPressed: () => Navigator.of(ctx).pop(draft),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    draft.title.isNotEmpty ? draft.title : 'Untitled event',
+                    style: Theme.of(ctx).textTheme.bodyMedium,
+                  ),
+                  if (draft.startsAt != null)
+                    Text(
+                      _formatDraftDateTime(draft.startsAt!),
+                      style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                        color: CaleeColors.textSecondary,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  String _formatDraftDateTime(DateTime dt) {
+    final local = dt.toLocal();
+    final h = local.hour.toString().padLeft(2, '0');
+    final m = local.minute.toString().padLeft(2, '0');
+    return '${local.day}/${local.month}/${local.year} $h:$m';
+  }
+
+  Future<bool?> _confirmReplace() {
+    return showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Replace event details?'),
+        content: const Text(
+          'Replace current event details with scanned details?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Replace'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _scanImage() async {
+    final source = await _pickImageSource();
+    if (source == null || !mounted) return;
+
+    final xFile = await ImagePicker().pickImage(source: source);
+    if (xFile == null || !mounted) return;
+
+    final formHasContent = _titleController.text.trim().isNotEmpty ||
+        _locationController.text.trim().isNotEmpty ||
+        _descriptionController.text.trim().isNotEmpty;
+
+    setState(() => _isScanningImage = true);
+
+    File? compressedFile;
+    try {
+      compressedFile = await EventDraftImagePreparer().prepare(xFile);
+
+      if (kDebugMode) {
+        debugPrint('EventDraftsFromImage: picked ${xFile.path}');
+        debugPrint('EventDraftsFromImage: compressed ${compressedFile.path}');
+      }
+
+      String tz = 'Australia/Perth';
+      try {
+        tz = await FlutterTimezone.getLocalTimezone();
+      } catch (_) {}
+
+      final now = DateTime.now();
+      final referenceDate =
+          '${now.year.toString().padLeft(4, '0')}-'
+          '${now.month.toString().padLeft(2, '0')}-'
+          '${now.day.toString().padLeft(2, '0')}';
+
+      if (kDebugMode) {
+        debugPrint('EventDraftsFromImage: uploading ${compressedFile.path}');
+      }
+
+      final response = await widget.hubClient.eventDraftsFromImage(
+        accessToken: widget.accessToken,
+        imageFile: compressedFile,
+        timezone: tz,
+        referenceDate: referenceDate,
+        sourceHint: 'calendar image',
+      );
+
+      if (kDebugMode) {
+        debugPrint(
+          'EventDraftsFromImage: upload returned drafts=${response.drafts.length}',
+        );
+      }
+
+      if (!mounted) return;
+      setState(() => _isScanningImage = false);
+
+      final drafts = response.drafts;
+      if (kDebugMode) {
+        debugPrint('EventDraftsFromImage: drafts=${drafts.length}');
+      }
+      if (drafts.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("I couldn't find an event in this image."),
+          ),
+        );
+        return;
+      }
+
+      ClientEventDraft selectedDraft;
+      if (drafts.length == 1) {
+        selectedDraft = drafts.first;
+      } else {
+        final picked = await _pickDraft(drafts);
+        if (picked == null || !mounted) return;
+        selectedDraft = picked;
+      }
+
+      if (formHasContent) {
+        final replace = await _confirmReplace();
+        if (!mounted || replace != true) return;
+      }
+
+      _applyDraft(selectedDraft);
+    } catch (error) {
+      if (kDebugMode) {
+        debugPrint('EventDraftsFromImage: error=$error');
+        if (error is CaleeHubException) {
+          debugPrint('EventDraftsFromImage: ${error.debugSummary}');
+        }
+      }
+
+      if (!mounted) return;
+      setState(() => _isScanningImage = false);
+
+      String message = 'Could not scan image. Please try again.';
+      if (error is UnsupportedImageFormatException) {
+        message = 'Please choose a JPEG, PNG, or WebP image.';
+      } else if (error is ImageTooLargeException) {
+        message =
+            'This image is too large. Please choose an image under 8 MB.';
+      } else if (error is CaleeHubException) {
+        if (error.code == 'AI_IMAGE_TIMEOUT') {
+          message = 'Image scanning is taking too long. Please try again.';
+        } else if (error.code == 'NETWORK_ERROR') {
+          message = 'Check your connection and try again.';
+        } else if (error.code == 'FILE_TOO_LARGE') {
+          message = error.message;
+        } else if (error.statusCode == 401) {
+          assert(() {
+            if (error.message.contains('Invalid device token')) {
+              debugPrint(
+                'Image scan endpoint is using device auth. Mobile must call the client-auth AI endpoint.',
+              );
+            }
+            return true;
+          }());
+          message = 'Could not scan image. Please try again.';
+        } else if (error.statusCode == 404) {
+          message = 'Image scan is not available yet.';
+        } else if (error.statusCode == 500 ||
+            error.statusCode == 502 ||
+            error.statusCode == 503) {
+          message = 'Image scanning is temporarily unavailable.';
+        }
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    } finally {
+      final fileToDelete = compressedFile;
+      if (fileToDelete != null && fileToDelete.path != xFile.path) {
+        try {
+          await fileToDelete.delete();
+        } catch (_) {
+          // Ignore temporary-file cleanup failures.
+        }
+      }
+    }
+  }
+
+  // ── Submit ────────────────────────────────────────────────────────────────
+
   Future<void> _submit() async {
     if (_isSubmitting || !_formKey.currentState!.validate()) return;
 
@@ -515,6 +797,29 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
                         sheetTitle,
                         style: Theme.of(context).textTheme.titleLarge,
                       ),
+
+                      // Scan image button (create mode only)
+                      if (!_isEditing) ...[
+                        const SizedBox(height: CaleeSpacing.sm),
+                        OutlinedButton.icon(
+                          onPressed: _isLocked ? null : _scanImage,
+                          icon: _isScanningImage
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.document_scanner_outlined),
+                          label: Text(
+                            _isScanningImage
+                                ? 'Scanning image…'
+                                : 'Scan image',
+                          ),
+                        ),
+                      ],
+
                       const SizedBox(height: CaleeSpacing.md),
 
                       // ── Event ─────────────────────────────────────────────
@@ -523,7 +828,7 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
                           // Title field
                           CaleeSectionTextFormField(
                             controller: _titleController,
-                            enabled: !_isSubmitting,
+                            enabled: !_isLocked,
                             autofocus: true,
                             hintText: 'Title',
                             textInputAction: TextInputAction.next,
@@ -550,7 +855,7 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
                                 setState(() => _selectedCalendar = cal);
                               }
                             },
-                            enabled: !_isSubmitting && !_isEditing,
+                            enabled: !_isLocked && !_isEditing,
                           ),
                         ],
                       ),
@@ -563,40 +868,40 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
                             CaleeSectionSwitchRow(
                               label: 'All day',
                               value: _allDay,
-                              enabled: !_isSubmitting,
+                              enabled: !_isLocked,
                               onChanged: (v) => setState(() => _allDay = v),
                             ),
                             if (_allDay) ...[
                               CaleeSectionPickerRow(
                                 label: 'Date',
                                 value: _dateLabel(_selectedDate),
-                                onTap: _isSubmitting ? null : _pickDate,
-                                enabled: !_isSubmitting,
+                                onTap: _isLocked ? null : _pickDate,
+                                enabled: !_isLocked,
                               ),
                               CaleeSectionPickerRow(
                                 label: 'End',
                                 value: _dateLabel(_selectedEndDate),
-                                onTap: _isSubmitting ? null : _pickEndDate,
-                                enabled: !_isSubmitting,
+                                onTap: _isLocked ? null : _pickEndDate,
+                                enabled: !_isLocked,
                               ),
                             ] else ...[
                               CaleeSectionPickerRow(
                                 label: 'Date',
                                 value: _dateLabel(_selectedDate),
-                                onTap: _isSubmitting ? null : _pickDate,
-                                enabled: !_isSubmitting,
+                                onTap: _isLocked ? null : _pickDate,
+                                enabled: !_isLocked,
                               ),
                               CaleeSectionPickerRow(
                                 label: 'Start',
                                 value: _timeLabel(_startTime),
-                                onTap: _isSubmitting ? null : _pickStartTime,
-                                enabled: !_isSubmitting,
+                                onTap: _isLocked ? null : _pickStartTime,
+                                enabled: !_isLocked,
                               ),
                               CaleeSectionPickerRow(
                                 label: 'End',
                                 value: _timeLabel(_endTime),
-                                onTap: _isSubmitting ? null : _pickEndTime,
-                                enabled: !_isSubmitting,
+                                onTap: _isLocked ? null : _pickEndTime,
+                                enabled: !_isLocked,
                               ),
                             ],
                           ],
@@ -639,7 +944,7 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
                                   setState(() => _selectedRecurrence = value);
                                 }
                               },
-                              enabled: !_isSubmitting,
+                              enabled: !_isLocked,
                             ),
                             if (_selectedRecurrence != 'none') ...[
                               CaleeSectionDropdownRow<String>(
@@ -664,22 +969,22 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
                                     setState(() => _recurrenceEnd = value);
                                   }
                                 },
-                                enabled: !_isSubmitting,
+                                enabled: !_isLocked,
                               ),
                               if (_recurrenceEnd == 'date')
                                 CaleeSectionPickerRow(
                                   label: 'Ends on',
                                   value: _dateLabel(_recurrenceEndDate),
-                                  onTap: _isSubmitting
+                                  onTap: _isLocked
                                       ? null
                                       : _pickRecurrenceEndDate,
-                                  enabled: !_isSubmitting,
+                                  enabled: !_isLocked,
                                 ),
                               if (_recurrenceEnd == 'count')
                                 CaleeSectionLabeledTextFormField(
                                   label: 'Times',
                                   controller: _recurrenceCountController,
-                                  enabled: !_isSubmitting,
+                                  enabled: !_isLocked,
                                   keyboardType: TextInputType.number,
                                   textAlign: TextAlign.right,
                                   hintText: '10',
@@ -724,12 +1029,12 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
                         children: [
                           CaleeSectionTextFormField(
                             controller: _locationController,
-                            enabled: !_isSubmitting,
+                            enabled: !_isLocked,
                             hintText: 'Location',
                           ),
                           CaleeSectionTextFormField(
                             controller: _descriptionController,
-                            enabled: !_isSubmitting,
+                            enabled: !_isLocked,
                             hintText: 'Notes',
                             maxLines: 3,
                           ),
@@ -739,7 +1044,7 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
                       // ── Submit ────────────────────────────────────────────
                       const SizedBox(height: CaleeSpacing.lg),
                       FilledButton(
-                        onPressed: _isSubmitting ? null : _submit,
+                        onPressed: _isLocked ? null : _submit,
                         child: _isSubmitting
                             ? const SizedBox(
                                 width: 18,

@@ -41,7 +41,7 @@ void main() {
       expect(body.containsKey('countryCode'), isFalse);
     });
 
-    test('never includes postalCode', () {
+    test('excludes null postalCode', () {
       const d = DeviceProfileDefaults(
         timeZone: 'Australia/Perth',
         locale: 'en-AU',
@@ -49,6 +49,23 @@ void main() {
       );
       final body = d.toProfilePatchBody();
       expect(body.containsKey('postalCode'), isFalse);
+    });
+
+    test('includes postalCode when set', () {
+      const d = DeviceProfileDefaults(
+        timeZone: 'Australia/Perth',
+        locale: 'en-AU',
+        countryCode: 'AU',
+        postalCode: '6000',
+      );
+      final body = d.toProfilePatchBody();
+      expect(body['postalCode'], equals('6000'));
+    });
+
+    test('preserves leading zero in postalCode', () {
+      const d = DeviceProfileDefaults(postalCode: '0800');
+      final body = d.toProfilePatchBody();
+      expect(body['postalCode'], equals('0800'));
     });
 
     test('never includes email', () {
@@ -80,6 +97,13 @@ void main() {
     test('true when countryCode is set', () {
       expect(
         const DeviceProfileDefaults(countryCode: 'AU').hasAnyValue,
+        isTrue,
+      );
+    });
+
+    test('true when postalCode is set', () {
+      expect(
+        const DeviceProfileDefaults(postalCode: '6000').hasAnyValue,
         isTrue,
       );
     });

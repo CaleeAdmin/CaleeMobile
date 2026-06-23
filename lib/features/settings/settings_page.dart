@@ -229,7 +229,7 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
             CaleeListRow(
               title: 'Personal profile',
-              subtitle: 'Name, timezone, and ZIP/postcode',
+              subtitle: 'Name, timezone, and postcode',
               leading: const Icon(
                 Icons.manage_accounts_outlined,
                 size: 20,
