@@ -144,7 +144,7 @@ class _ChoresPageState extends State<ChoresPage> {
               String? scheduledAt,
               String? description,
               String? recurrence,
-              required String? assigneePersonId,
+              required List<String> assigneePersonIds,
               required int points,
             }) => _controller.createChore(
               calendar: calendar,
@@ -152,7 +152,7 @@ class _ChoresPageState extends State<ChoresPage> {
               scheduledAt: scheduledAt,
               description: description,
               recurrence: recurrence,
-              assigneePersonId: assigneePersonId,
+              assigneePersonIds: assigneePersonIds,
               points: points,
             ),
       ),
