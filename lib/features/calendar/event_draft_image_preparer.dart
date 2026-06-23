@@ -1,7 +1,8 @@
 import 'dart:io';
 
-import 'package:flutter_image_compress/flutter_image_compress.dart';
-import 'package:image_picker/image_picker.dart';
+import 'package:flutter_image_compress/flutter_image_compress.dart'
+    as image_compress;
+import 'package:image_picker/image_picker.dart' show XFile;
 
 class EventDraftImagePreparer {
   static const _maxUploadBytes = 8 * 1024 * 1024;
@@ -21,13 +22,14 @@ class EventDraftImagePreparer {
         '${Directory.systemTemp.path}/calee_draft_${DateTime.now().millisecondsSinceEpoch}.jpg';
 
     try {
-      final result = await FlutterImageCompress.compressAndGetFile(
+      final result =
+          await image_compress.FlutterImageCompress.compressAndGetFile(
         xFile.path,
         tmpPath,
         minWidth: _targetLongestSide,
         minHeight: _targetLongestSide,
         quality: _jpegQuality,
-        format: CompressFormat.jpeg,
+        format: image_compress.CompressFormat.jpeg,
         keepExif: false,
       );
 
@@ -37,7 +39,11 @@ class EventDraftImagePreparer {
         if (compressedSize <= _maxUploadBytes) {
           return compressed;
         }
-        await compressed.delete().catchError((_) => compressed);
+        try {
+          await compressed.delete();
+        } catch (_) {
+          // Ignore temporary-file cleanup failures.
+        }
       }
     } catch (_) {
       // Fall through to original
