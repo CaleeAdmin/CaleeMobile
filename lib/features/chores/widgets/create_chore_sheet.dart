@@ -22,13 +22,61 @@ class CreateChoreSheet extends StatefulWidget {
     String? scheduledAt,
     String? description,
     String? recurrence,
-    required String? assigneePersonId,
+    required List<String> assigneePersonIds,
     required int points,
   })
   onCreate;
 
   @override
   State<CreateChoreSheet> createState() => _CreateChoreSheetState();
+}
+
+class _AssigneeRow extends StatelessWidget {
+  const _AssigneeRow({
+    required this.label,
+    required this.selected,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: enabled ? onTap : null,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: CaleeSpacing.md,
+          vertical: 11,
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: 16,
+                  color: enabled
+                      ? CaleeColors.textPrimary
+                      : CaleeColors.textTertiary,
+                ),
+              ),
+            ),
+            if (selected)
+              const Icon(
+                Icons.check,
+                size: 20,
+                color: CaleeColors.primary,
+              ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _CreateChoreSheetState extends State<CreateChoreSheet> {
@@ -40,7 +88,7 @@ class _CreateChoreSheetState extends State<CreateChoreSheet> {
   DateTime? _selectedDate;
   String? _selectedRecurrence;
   late final TextEditingController _pointsController;
-  String? _assigneePersonId;
+  final Set<String> _selectedPersonIds = {};
   bool _isSubmitting = false;
 
   @override
@@ -92,7 +140,7 @@ class _CreateChoreSheetState extends State<CreateChoreSheet> {
             : formatChoreDate(_selectedDate!),
         description: _descriptionController.text.trim(),
         recurrence: choreRecurrenceToRrule(_selectedRecurrence),
-        assigneePersonId: _assigneePersonId,
+        assigneePersonIds: _selectedPersonIds.toList(),
         points: points,
       );
 
@@ -236,28 +284,41 @@ class _CreateChoreSheetState extends State<CreateChoreSheet> {
               const SizedBox(height: CaleeSpacing.sectionSpacing),
 
               CaleeSection(
+                title: 'Create for',
                 children: [
-                  CaleeSectionDropdownRow<String?>(
-                    label: 'Assign to',
-                    value: _assigneePersonId,
+                  _AssigneeRow(
+                    label: 'Unassigned',
+                    selected: _selectedPersonIds.isEmpty,
                     enabled: !_isSubmitting,
-                    items: [
-                      const DropdownMenuItem<String?>(
-                        value: null,
-                        child: Text('Unassigned'),
-                      ),
-                      for (final person in widget.people)
-                        DropdownMenuItem<String?>(
-                          value: person.id,
-                          child: Text(person.displayName),
-                        ),
-                    ],
-                    onChanged: (value) {
+                    onTap: () {
                       setState(() {
-                        _assigneePersonId = value;
+                        _selectedPersonIds.clear();
                       });
                     },
                   ),
+                  for (final person in widget.people)
+                    _AssigneeRow(
+                      label: person.displayName.trim().isNotEmpty
+                          ? person.displayName
+                          : 'Unnamed',
+                      selected: _selectedPersonIds.contains(person.id),
+                      enabled: !_isSubmitting,
+                      onTap: () {
+                        setState(() {
+                          if (_selectedPersonIds.contains(person.id)) {
+                            _selectedPersonIds.remove(person.id);
+                          } else {
+                            _selectedPersonIds.add(person.id);
+                          }
+                        });
+                      },
+                    ),
+                ],
+              ),
+              const SizedBox(height: CaleeSpacing.sectionSpacing),
+
+              CaleeSection(
+                children: [
                   CaleeSectionLabeledTextFormField(
                     label: 'Points',
                     controller: _pointsController,
@@ -297,7 +358,11 @@ class _CreateChoreSheetState extends State<CreateChoreSheet> {
                         height: 18,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : const Text('Create chore'),
+                    : Text(
+                        _selectedPersonIds.length > 1
+                            ? 'Create ${_selectedPersonIds.length} chores'
+                            : 'Create chore',
+                      ),
               ),
             ],
           ),

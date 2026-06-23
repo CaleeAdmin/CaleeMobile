@@ -51,7 +51,7 @@ class ChoresController extends ChangeNotifier {
     String? scheduledAt,
     String? description,
     String? recurrence,
-    required String? assigneePersonId,
+    required List<String> assigneePersonIds,
     required int points,
   }) async {
     await repository.createChore(
@@ -60,7 +60,7 @@ class ChoresController extends ChangeNotifier {
       scheduledAt: scheduledAt,
       description: description,
       recurrence: recurrence,
-      assigneePersonId: assigneePersonId,
+      assigneePersonIds: assigneePersonIds,
       points: points,
     );
     await load();

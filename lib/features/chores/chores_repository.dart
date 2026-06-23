@@ -103,6 +103,46 @@ class ChoresRepository {
     String? scheduledAt,
     String? description,
     String? recurrence,
+    required List<String> assigneePersonIds,
+    required int points,
+  }) async {
+    final deduped = assigneePersonIds
+        .map((id) => id.trim())
+        .where((id) => id.isNotEmpty)
+        .toSet()
+        .toList();
+
+    if (deduped.isEmpty) {
+      await _createSingleChore(
+        calendar: calendar,
+        title: title,
+        scheduledAt: scheduledAt,
+        description: description,
+        recurrence: recurrence,
+        assigneePersonId: null,
+        points: points,
+      );
+    } else {
+      for (final personId in deduped) {
+        await _createSingleChore(
+          calendar: calendar,
+          title: title,
+          scheduledAt: scheduledAt,
+          description: description,
+          recurrence: recurrence,
+          assigneePersonId: personId,
+          points: points,
+        );
+      }
+    }
+  }
+
+  Future<void> _createSingleChore({
+    required ClientCalendar calendar,
+    required String title,
+    String? scheduledAt,
+    String? description,
+    String? recurrence,
     required String? assigneePersonId,
     required int points,
   }) async {
