@@ -33,14 +33,10 @@ class _FakeAuthRepository extends AuthRepository {
 
 // ─── Pump helpers ─────────────────────────────────────────────────────────────
 
-Future<_FakeAuthRepository> _pumpForgotPasswordPage(
-  WidgetTester tester,
-) async {
+Future<_FakeAuthRepository> _pumpForgotPasswordPage(WidgetTester tester) async {
   final repository = _FakeAuthRepository();
   await tester.pumpWidget(
-    MaterialApp(
-      home: ForgotPasswordPage(authRepository: repository),
-    ),
+    MaterialApp(home: ForgotPasswordPage(authRepository: repository)),
   );
   return repository;
 }
@@ -49,10 +45,7 @@ Future<_FakeAuthRepository> _pumpLoginPage(WidgetTester tester) async {
   final repository = _FakeAuthRepository();
   await tester.pumpWidget(
     MaterialApp(
-      home: LoginPage(
-        authRepository: repository,
-        onSignedIn: (_) async {},
-      ),
+      home: LoginPage(authRepository: repository, onSignedIn: (_) async {}),
     ),
   );
   return repository;
@@ -92,9 +85,7 @@ void main() {
       },
     );
 
-    testWidgets('Terms and Conditions button is still present', (
-      tester,
-    ) async {
+    testWidgets('Terms and Conditions button is still present', (tester) async {
       await _pumpLoginPage(tester);
 
       expect(find.text('Terms and Conditions'), findsOneWidget);

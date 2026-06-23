@@ -31,12 +31,12 @@ class ClientEventDraft {
 
     DateTime? startsAt;
     if (rawStartsAt is String) {
-      startsAt = DateTime.tryParse(rawStartsAt);
+      startsAt = _tryParseDate(rawStartsAt);
     }
 
     DateTime? endsAt;
     if (rawEndsAt is String) {
-      endsAt = DateTime.tryParse(rawEndsAt);
+      endsAt = _tryParseDate(rawEndsAt);
     }
 
     final missingFields = rawMissingFields is List
@@ -60,6 +60,21 @@ class ClientEventDraft {
       warnings: warnings,
     );
   }
+}
+
+// DateTime.tryParse overflows out-of-range month/day values into a valid DateTime,
+// so we validate the date components before returning.
+DateTime? _tryParseDate(String s) {
+  final dt = DateTime.tryParse(s);
+  if (dt == null) return null;
+  final datePart = s.split('T').first;
+  final parts = datePart.split('-');
+  if (parts.length < 3) return null;
+  final month = int.tryParse(parts[parts.length - 2]);
+  final day = int.tryParse(parts[parts.length - 1]);
+  if (month == null || month < 1 || month > 12) return null;
+  if (day == null || day < 1 || day > 31) return null;
+  return dt;
 }
 
 class EventDraftsFromImageResponse {

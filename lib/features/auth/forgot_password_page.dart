@@ -125,7 +125,9 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                         child: isLoading
                             ? const SizedBox.square(
                                 dimension: 20,
-                                child: CircularProgressIndicator(strokeWidth: 2),
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
                               )
                             : const Text('Send reset link'),
                       ),

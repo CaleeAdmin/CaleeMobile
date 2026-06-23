@@ -81,9 +81,7 @@ void main() {
       server.listen((req) async {
         req.response.statusCode = HttpStatus.internalServerError;
         req.response.headers.contentType = ContentType.json;
-        req.response.write(
-          jsonEncode({'message': 'Internal server error'}),
-        );
+        req.response.write(jsonEncode({'message': 'Internal server error'}));
         await req.response.close();
       });
 
