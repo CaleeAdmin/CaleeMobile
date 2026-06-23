@@ -595,7 +595,7 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
       );
     } finally {
       if (compressedFile != null && compressedFile.path != xFile.path) {
-        compressedFile.delete().catchError((_) {});
+        compressedFile.delete().catchError((_) => compressedFile);
       }
     }
   }
