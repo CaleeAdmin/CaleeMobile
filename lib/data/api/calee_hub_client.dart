@@ -775,8 +775,8 @@ class CaleeHubClient {
 
     final payload =
         raw.containsKey('data') && raw['data'] is Map<String, dynamic>
-            ? raw['data'] as Map<String, dynamic>
-            : raw;
+        ? raw['data'] as Map<String, dynamic>
+        : raw;
     return EventDraftsFromImageResponse.fromJson(payload);
   }
 
@@ -804,8 +804,7 @@ class CaleeHubClient {
     String? sourceHint,
   }) {
     return _executeImageAiRequest(() async {
-      final boundary =
-          'CaleeBoundary${DateTime.now().millisecondsSinceEpoch}';
+      final boundary = 'CaleeBoundary${DateTime.now().millisecondsSinceEpoch}';
       final request = await _httpClient.postUrl(baseUri.resolve(path));
       request.headers.set(HttpHeaders.acceptHeader, 'application/json');
       request.headers.set(
@@ -853,7 +852,9 @@ class CaleeHubClient {
 
       final bodyBytes = body.toBytes();
       if (kDebugMode) {
-        debugPrint('EventDraftsFromImage: POST $path bytes=${bodyBytes.length}');
+        debugPrint(
+          'EventDraftsFromImage: POST $path bytes=${bodyBytes.length}',
+        );
       }
       request.contentLength = bodyBytes.length;
       request.add(bodyBytes);

@@ -61,16 +61,17 @@ void main() {
       home: Scaffold(
         body: CreateEventSheet(
           calendars: const [_calendar],
-          onCreate: ({
-            required calendar,
-            required title,
-            required startsAt,
-            required endsAt,
-            required allDay,
-            location,
-            description,
-            recurrence,
-          }) async {},
+          onCreate:
+              ({
+                required calendar,
+                required title,
+                required startsAt,
+                required endsAt,
+                required allDay,
+                location,
+                description,
+                recurrence,
+              }) async {},
           hubClient: _StubHub(),
           accessToken: 'test-token',
           initialEvent: initialEvent,
