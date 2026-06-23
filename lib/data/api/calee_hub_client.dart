@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import '../models/client_bootstrap.dart';
 import '../models/client_caldav_account.dart';
