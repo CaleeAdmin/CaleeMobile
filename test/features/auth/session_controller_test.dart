@@ -100,6 +100,10 @@ class _FakeRepository implements AuthRepository {
   }) => throw UnimplementedError();
 
   @override
+  Future<void> requestPasswordReset({required String email}) =>
+      throw UnimplementedError();
+
+  @override
   void clearAuthCache() {
     clearAuthCacheCalled = true;
   }
