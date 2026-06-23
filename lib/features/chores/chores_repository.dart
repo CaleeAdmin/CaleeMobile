@@ -106,10 +106,10 @@ class ChoresRepository {
     required List<String> assigneePersonIds,
     required int points,
   }) async {
+    final seen = <String>{};
     final deduped = assigneePersonIds
         .map((id) => id.trim())
-        .where((id) => id.isNotEmpty)
-        .toSet()
+        .where((id) => id.isNotEmpty && seen.add(id))
         .toList();
 
     if (deduped.isEmpty) {

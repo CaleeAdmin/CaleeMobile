@@ -406,6 +406,43 @@ void main() {
         expect(assignees, containsAll(['person-1', 'person-2']));
       },
     );
+
+    test(
+      'duplicate assignee IDs are deduped preserving first-seen order',
+      () async {
+        final client = _CreateTrackingHubClient();
+        final repo = _repositoryWithHousehold(client);
+
+        await repo.createChore(
+          calendar: _calendar('cal-1'),
+          title: 'Chore',
+          assigneePersonIds: ['person-2', 'person-1', 'person-2'],
+          points: 3,
+        );
+
+        expect(client.createCalls, hasLength(2));
+        expect(client.createCalls[0]['assigneePersonId'], 'person-2');
+        expect(client.createCalls[1]['assigneePersonId'], 'person-1');
+      },
+    );
+
+    test(
+      'whitespace-only and empty IDs are skipped',
+      () async {
+        final client = _CreateTrackingHubClient();
+        final repo = _repositoryWithHousehold(client);
+
+        await repo.createChore(
+          calendar: _calendar('cal-1'),
+          title: 'Chore',
+          assigneePersonIds: ['  ', '', 'person-1'],
+          points: 1,
+        );
+
+        expect(client.createCalls, hasLength(1));
+        expect(client.createCalls.single['assigneePersonId'], 'person-1');
+      },
+    );
   });
 
   group('ChoresRepository updateChore', () {
