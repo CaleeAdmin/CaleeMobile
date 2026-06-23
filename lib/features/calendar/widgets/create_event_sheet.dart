@@ -613,7 +613,15 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
         } else if (error.code == 'FILE_TOO_LARGE') {
           message = error.message;
         } else if (error.statusCode == 401) {
-          message = 'Please sign in again.';
+          assert(() {
+            if (error.message.contains('Invalid device token')) {
+              debugPrint(
+                'Image scan endpoint is using device auth. Mobile must call the client-auth AI endpoint.',
+              );
+            }
+            return true;
+          }());
+          message = 'Could not scan image. Please try again.';
         } else if (error.statusCode == 404) {
           message = 'Image scan is not available yet.';
         } else if (error.statusCode == 500 ||

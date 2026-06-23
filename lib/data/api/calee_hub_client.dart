@@ -748,7 +748,8 @@ class CaleeHubClient {
       );
     }
 
-    const path = '/v1/ai/calendar/event-drafts/from-image';
+    // CaleeMobile uses client/user auth. Do not call the device-auth /v1/ai route.
+    const path = '/client/v1/ai/calendar/event-drafts/from-image';
     final raw = await _withRetry(
       (token) => _doMultipartPost(
         path,
