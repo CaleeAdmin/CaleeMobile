@@ -91,11 +91,15 @@ List<String> choreSubtitleParts({
   required String calendarName,
   required String scheduledLabel,
 }) {
-  final isHistory =
-      chore.isCompletionLog || chore.normalizedSection == 'history';
+  final isHistoryOrDone =
+      chore.isCompletionLog ||
+      chore.normalizedSection == 'history' ||
+      chore.normalizedSection == 'doneToday';
 
-  if (isHistory) {
+  if (isHistoryOrDone) {
+    final assignee = chore.assigneeName?.trim();
     return [
+      if (assignee != null && assignee.isNotEmpty) assignee,
       if (scheduledLabel.isNotEmpty) scheduledLabel,
       if (calendarName.isNotEmpty) calendarName,
     ];
@@ -105,8 +109,6 @@ List<String> choreSubtitleParts({
   final parts = <String>[
     assignee != null && assignee.isNotEmpty ? assignee : 'Unassigned',
   ];
-
-  if (chore.points > 0) parts.add('${chore.points} pts');
 
   final rrule = _rruleLabel(chore.recurrence);
   if (rrule.isNotEmpty) parts.add(rrule);

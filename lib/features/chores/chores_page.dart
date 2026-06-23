@@ -45,6 +45,7 @@ class ChoresPage extends StatefulWidget {
 class _ChoresPageState extends State<ChoresPage> {
   late final ChoresRepository _repository;
   late final ChoresController _controller;
+  bool _doneTodayExpanded = false;
   bool _historyExpanded = false;
 
   @override
@@ -568,7 +569,9 @@ class _ChoresPageState extends State<ChoresPage> {
   String _formatScheduledAt(ClientChore chore) {
     final value = chore.scheduledDate ?? chore.scheduledAt;
     final isHistory =
-        chore.isCompletionLog || chore.normalizedSection == 'history';
+        chore.isCompletionLog ||
+        chore.normalizedSection == 'history' ||
+        chore.normalizedSection == 'doneToday';
 
     if (value == null || value.trim().isEmpty) {
       return isHistory ? 'Completed date unknown' : 'No scheduled date';
@@ -625,6 +628,24 @@ class _ChoresPageState extends State<ChoresPage> {
     List<ClientChore> sectionChores,
     List<ClientCalendar> choreCalendars,
   ) {
+    if (section == 'doneToday' && !_doneTodayExpanded) {
+      return CaleeSection(
+        title: 'Done today',
+        trailing: '${sectionChores.length}',
+        children: [
+          CaleeListRow(
+            leading: const Icon(
+              Icons.check_circle_outline,
+              size: 22,
+              color: CaleeColors.textTertiary,
+            ),
+            title: 'Show completed chores',
+            onTap: () => setState(() => _doneTodayExpanded = true),
+          ),
+        ],
+      );
+    }
+
     if (section == 'history' && !_historyExpanded) {
       return CaleeSection(
         children: [

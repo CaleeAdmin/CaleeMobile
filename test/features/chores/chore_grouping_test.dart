@@ -229,7 +229,7 @@ void main() {
   // ── choreSubtitleParts ───────────────────────────────────────────────────
 
   group('choreSubtitleParts', () {
-    test('active chore: assignee · pts · repeat · list', () {
+    test('active chore: assignee · repeat · list (no pts in subtitle)', () {
       final chore = _chore(
         assigneeName: 'Mia',
         points: 2,
@@ -240,7 +240,7 @@ void main() {
         calendarName: 'Kids chores',
         scheduledLabel: 'Scheduled 1/6/2026',
       );
-      expect(parts, ['Mia', '2 pts', 'Daily', 'Kids chores']);
+      expect(parts, ['Mia', 'Daily', 'Kids chores']);
     });
 
     test('active chore with 0 points omits pts', () {
@@ -263,17 +263,17 @@ void main() {
       expect(parts.first, 'Unassigned');
     });
 
-    test('active chore without recurrence omits repeat label', () {
+    test('active chore without recurrence omits repeat label and pts', () {
       final chore = _chore(assigneeName: 'Tom', points: 1);
       final parts = choreSubtitleParts(
         chore: chore,
         calendarName: 'Chores',
         scheduledLabel: '',
       );
-      expect(parts, ['Tom', '1 pts', 'Chores']);
+      expect(parts, ['Tom', 'Chores']);
     });
 
-    test('history chore: date · list only', () {
+    test('history chore: assignee · date · list', () {
       final chore = _chore(
         section: 'history',
         kind: 'completionLog',
@@ -286,7 +286,45 @@ void main() {
         calendarName: 'Kids chores',
         scheduledLabel: 'Completed 1/6/2026',
       );
+      expect(parts, ['Mia', 'Completed 1/6/2026', 'Kids chores']);
+    });
+
+    test('history chore without assignee: date · list only', () {
+      final chore = _chore(
+        section: 'history',
+        kind: 'completionLog',
+        points: 5,
+      );
+      final parts = choreSubtitleParts(
+        chore: chore,
+        calendarName: 'Kids chores',
+        scheduledLabel: 'Completed 1/6/2026',
+      );
       expect(parts, ['Completed 1/6/2026', 'Kids chores']);
+    });
+
+    test('doneToday chore shows assignee · date · list', () {
+      final chore = _chore(
+        section: 'doneToday',
+        assigneeName: 'Noah',
+        points: 1,
+      );
+      final parts = choreSubtitleParts(
+        chore: chore,
+        calendarName: 'Kids Chores',
+        scheduledLabel: 'Completed 23/6/2026',
+      );
+      expect(parts, ['Noah', 'Completed 23/6/2026', 'Kids Chores']);
+    });
+
+    test('doneToday chore without assignee shows date · list', () {
+      final chore = _chore(section: 'doneToday', points: 1);
+      final parts = choreSubtitleParts(
+        chore: chore,
+        calendarName: 'Kids Chores',
+        scheduledLabel: 'Completed 23/6/2026',
+      );
+      expect(parts, ['Completed 23/6/2026', 'Kids Chores']);
     });
 
     test('history chore with empty scheduledLabel omits date', () {
@@ -298,5 +336,15 @@ void main() {
       );
       expect(parts, ['Chores']);
     });
+  });
+
+  // ── points badge pluralisation ───────────────────────────────────────────
+
+  String ptLabel(int points) => '$points ${points == 1 ? 'pt' : 'pts'}';
+
+  group('points badge label pluralisation', () {
+    test('1 point → "1 pt"', () => expect(ptLabel(1), '1 pt'));
+    test('2 points → "2 pts"', () => expect(ptLabel(2), '2 pts'));
+    test('100 points → "100 pts"', () => expect(ptLabel(100), '100 pts'));
   });
 }
