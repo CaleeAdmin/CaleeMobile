@@ -539,6 +539,10 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
           '${now.month.toString().padLeft(2, '0')}-'
           '${now.day.toString().padLeft(2, '0')}';
 
+      if (kDebugMode) {
+        debugPrint('EventDraftsFromImage: uploading ${compressedFile.path}');
+      }
+
       final response = await widget.hubClient.eventDraftsFromImage(
         accessToken: widget.accessToken,
         imageFile: compressedFile,
@@ -546,6 +550,12 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
         referenceDate: referenceDate,
         sourceHint: 'calendar image',
       );
+
+      if (kDebugMode) {
+        debugPrint(
+          'EventDraftsFromImage: upload returned drafts=${response.drafts.length}',
+        );
+      }
 
       if (!mounted) return;
       setState(() => _isScanningImage = false);
@@ -579,6 +589,13 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
 
       _applyDraft(selectedDraft);
     } catch (error) {
+      if (kDebugMode) {
+        debugPrint('EventDraftsFromImage: error=$error');
+        if (error is CaleeHubException) {
+          debugPrint('EventDraftsFromImage: ${error.debugSummary}');
+        }
+      }
+
       if (!mounted) return;
       setState(() => _isScanningImage = false);
 
@@ -589,12 +606,20 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
         message =
             'This image is too large. Please choose an image under 8 MB.';
       } else if (error is CaleeHubException) {
-        if (error.code == 'FILE_TOO_LARGE') {
+        if (error.code == 'AI_IMAGE_TIMEOUT') {
+          message = 'Image scanning is taking too long. Please try again.';
+        } else if (error.code == 'NETWORK_ERROR') {
+          message = 'Check your connection and try again.';
+        } else if (error.code == 'FILE_TOO_LARGE') {
           message = error.message;
-        } else if (kDebugMode) {
-          message =
-              'Could not scan image. Please try again.\n'
-              'Debug: ${error.debugSummary}';
+        } else if (error.statusCode == 401) {
+          message = 'Please sign in again.';
+        } else if (error.statusCode == 404) {
+          message = 'Image scan is not available yet.';
+        } else if (error.statusCode == 500 ||
+            error.statusCode == 502 ||
+            error.statusCode == 503) {
+          message = 'Image scanning is temporarily unavailable.';
         }
       }
 

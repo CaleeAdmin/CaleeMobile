@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
+
 import '../models/client_bootstrap.dart';
 import '../models/client_caldav_account.dart';
 import '../models/client_calendar.dart';
@@ -27,6 +29,7 @@ class CaleeHubClient {
   final HttpClient _httpClient;
 
   static const _kTimeout = Duration(seconds: 25);
+  static const _kImageAiTimeout = Duration(seconds: 90);
 
   // Set by CaleeApp after construction to enable transparent 401 refresh+retry.
   // The callback should refresh the access token and return the new one,
@@ -789,7 +792,7 @@ class CaleeHubClient {
     String? referenceDate,
     String? sourceHint,
   }) {
-    return _executeRequest(() async {
+    return _executeImageAiRequest(() async {
       final boundary =
           'CaleeBoundary${DateTime.now().millisecondsSinceEpoch}';
       final request = await _httpClient.postUrl(baseUri.resolve(path));
@@ -838,11 +841,48 @@ class CaleeHubClient {
       body.add(utf8.encode('--$boundary--\r\n'));
 
       final bodyBytes = body.toBytes();
+      if (kDebugMode) {
+        debugPrint('EventDraftsFromImage: POST $path bytes=${bodyBytes.length}');
+      }
       request.contentLength = bodyBytes.length;
       request.add(bodyBytes);
 
-      return _readJsonResponse(await request.close(), endpoint: path);
+      final response = await request.close();
+      if (kDebugMode) {
+        debugPrint(
+          'EventDraftsFromImage: response status=${response.statusCode}',
+        );
+      }
+      return _readJsonResponse(response, endpoint: path);
     });
+  }
+
+  Future<Map<String, dynamic>> _executeImageAiRequest(
+    Future<Map<String, dynamic>> Function() fn,
+  ) async {
+    try {
+      return await fn().timeout(_kImageAiTimeout);
+    } on CaleeHubException {
+      rethrow;
+    } on TimeoutException {
+      throw const CaleeHubException(
+        statusCode: 0,
+        code: 'AI_IMAGE_TIMEOUT',
+        message: 'Image scanning is taking too long. Please try again.',
+      );
+    } on SocketException {
+      throw const CaleeHubException(
+        statusCode: 0,
+        code: 'NETWORK_ERROR',
+        message: 'Check your connection and try again.',
+      );
+    } on HandshakeException {
+      throw const CaleeHubException(
+        statusCode: 0,
+        code: 'NETWORK_ERROR',
+        message: 'Check your connection and try again.',
+      );
+    }
   }
 
   Future<ClientEventList> events({
