@@ -5,7 +5,9 @@
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>Calee needs camera access to scan your Calee display QR code.</string>
+	<string>Calee uses the camera to scan display QR codes and event details from flyers and notices.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Calee uses your photo library to scan event details from selected images.</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
