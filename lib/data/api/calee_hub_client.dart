@@ -748,20 +748,30 @@ class CaleeHubClient {
       );
     }
 
-    // CaleeMobile uses client/user auth. Do not call the device-auth /v1/ai route.
-    const path = '/client/v1/ai/calendar/event-drafts/from-image';
-    final raw = await _withRetry(
-      (token) => _doMultipartPost(
-        path,
-        accessToken: token,
-        imageFile: imageFile,
-        mimeType: mimeType,
-        timezone: timezone,
-        referenceDate: referenceDate,
-        sourceHint: sourceHint,
-      ),
-      accessToken,
-    );
+    const path = '/v1/ai/calendar/event-drafts/from-image';
+    final Map<String, dynamic> raw;
+    try {
+      raw = await _withRetry(
+        (token) => _doMultipartPost(
+          path,
+          accessToken: token,
+          imageFile: imageFile,
+          mimeType: mimeType,
+          timezone: timezone,
+          referenceDate: referenceDate,
+          sourceHint: sourceHint,
+        ),
+        accessToken,
+      );
+    } on CaleeHubException catch (e) {
+      if (e.statusCode == 401 && kDebugMode) {
+        debugPrint(
+          'EventDraftsFromImage: /v1 endpoint exists, but bearer token was rejected. '
+          'Check whether this route expects device token or client token.',
+        );
+      }
+      rethrow;
+    }
 
     final payload =
         raw.containsKey('data') && raw['data'] is Map<String, dynamic>
