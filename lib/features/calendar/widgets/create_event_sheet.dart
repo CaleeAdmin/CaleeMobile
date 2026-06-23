@@ -1,13 +1,16 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../../data/api/calee_hub_client.dart';
 import '../../../data/models/client_calendar.dart';
 import '../../../data/models/client_event_draft.dart';
 import '../../../ui/calee_design.dart';
+import '../event_draft_image_preparer.dart';
 import 'calendar_widget_helpers.dart';
 
 class CreateEventSheet extends StatefulWidget {
@@ -402,35 +405,43 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
 
   void _applyDraft(ClientEventDraft draft) {
     setState(() {
-      if (draft.title != null) _titleController.text = draft.title!;
+      if (draft.title.isNotEmpty) _titleController.text = draft.title;
       if (draft.location != null) _locationController.text = draft.location!;
       if (draft.description != null) {
         _descriptionController.text = draft.description!;
       }
-      if (draft.allDay != null) _allDay = draft.allDay!;
-      if (draft.startsAt != null) {
-        final start = DateTime.tryParse(draft.startsAt!)?.toLocal();
-        if (start != null) {
-          _selectedDate = DateTime(start.year, start.month, start.day);
-          _startTime = TimeOfDay(hour: start.hour, minute: start.minute);
+      _allDay = draft.allDay;
+
+      final startsAt = draft.startsAt?.toLocal();
+      if (startsAt != null) {
+        _selectedDate = DateTime(
+          startsAt.year,
+          startsAt.month,
+          startsAt.day,
+        );
+        _startTime = TimeOfDay(hour: startsAt.hour, minute: startsAt.minute);
+        if (_selectedEndDate.isBefore(_selectedDate)) {
+          _selectedEndDate = _selectedDate;
+        }
+      }
+
+      final endsAt = draft.endsAt?.toLocal();
+      if (endsAt != null) {
+        if (_allDay) {
+          _selectedEndDate = DateTime(endsAt.year, endsAt.month, endsAt.day)
+              .subtract(const Duration(days: 1));
           if (_selectedEndDate.isBefore(_selectedDate)) {
             _selectedEndDate = _selectedDate;
           }
+        } else {
+          _endTime = TimeOfDay(hour: endsAt.hour, minute: endsAt.minute);
         }
-      }
-      if (draft.endsAt != null) {
-        final end = DateTime.tryParse(draft.endsAt!)?.toLocal();
-        if (end != null) {
-          if (_allDay) {
-            _selectedEndDate = DateTime(end.year, end.month, end.day)
-                .subtract(const Duration(days: 1));
-            if (_selectedEndDate.isBefore(_selectedDate)) {
-              _selectedEndDate = _selectedDate;
-            }
-          } else {
-            _endTime = TimeOfDay(hour: end.hour, minute: end.minute);
-          }
-        }
+      } else if (startsAt != null && !_allDay) {
+        final inferredEnd = startsAt.add(const Duration(hours: 1));
+        _endTime = TimeOfDay(
+          hour: inferredEnd.hour % 24,
+          minute: inferredEnd.minute,
+        );
       }
     });
   }
@@ -448,12 +459,12 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    draft.title ?? 'Untitled event',
+                    draft.title.isNotEmpty ? draft.title : 'Untitled event',
                     style: Theme.of(ctx).textTheme.bodyMedium,
                   ),
                   if (draft.startsAt != null)
                     Text(
-                      draft.startsAt!,
+                      _formatDraftDateTime(draft.startsAt!),
                       style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
                         color: CaleeColors.textSecondary,
                       ),
@@ -464,6 +475,13 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
         ],
       ),
     );
+  }
+
+  String _formatDraftDateTime(DateTime dt) {
+    final local = dt.toLocal();
+    final h = local.hour.toString().padLeft(2, '0');
+    final m = local.minute.toString().padLeft(2, '0');
+    return '${local.day}/${local.month}/${local.year} $h:$m';
   }
 
   Future<bool?> _confirmReplace() {
@@ -492,12 +510,7 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
     final source = await _pickImageSource();
     if (source == null || !mounted) return;
 
-    final xFile = await ImagePicker().pickImage(
-      source: source,
-      maxWidth: 1024,
-      maxHeight: 1024,
-      imageQuality: 75,
-    );
+    final xFile = await ImagePicker().pickImage(source: source);
     if (xFile == null || !mounted) return;
 
     final formHasContent = _titleController.text.trim().isNotEmpty ||
@@ -506,18 +519,33 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
 
     setState(() => _isScanningImage = true);
 
+    File? compressedFile;
     try {
-      final bytes = await xFile.readAsBytes();
-      final mimeType = xFile.mimeType ?? 'image/jpeg';
-      final drafts = await widget.hubClient.eventDraftsFromImage(
+      compressedFile = await EventDraftImagePreparer().prepare(xFile);
+
+      String tz = 'Australia/Perth';
+      try {
+        tz = await FlutterTimezone.getLocalTimezone();
+      } catch (_) {}
+
+      final now = DateTime.now();
+      final referenceDate =
+          '${now.year.toString().padLeft(4, '0')}-'
+          '${now.month.toString().padLeft(2, '0')}-'
+          '${now.day.toString().padLeft(2, '0')}';
+
+      final response = await widget.hubClient.eventDraftsFromImage(
         accessToken: widget.accessToken,
-        imageBytes: bytes,
-        mimeType: mimeType,
+        imageFile: compressedFile,
+        timezone: tz,
+        referenceDate: referenceDate,
+        sourceHint: 'calendar image',
       );
 
       if (!mounted) return;
       setState(() => _isScanningImage = false);
 
+      final drafts = response.drafts;
       if (drafts.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -545,15 +573,30 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
     } catch (error) {
       if (!mounted) return;
       setState(() => _isScanningImage = false);
+
+      String message = 'Could not scan image. Please try again.';
+      if (error is UnsupportedImageFormatException) {
+        message = 'Please choose a JPEG, PNG, or WebP image.';
+      } else if (error is ImageTooLargeException) {
+        message =
+            'This image is too large. Please choose an image under 8 MB.';
+      } else if (error is CaleeHubException) {
+        if (error.code == 'FILE_TOO_LARGE') {
+          message = error.message;
+        } else if (kDebugMode) {
+          message =
+              'Could not scan image. Please try again.\n'
+              'Debug: ${error.debugSummary}';
+        }
+      }
+
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            kDebugMode && error is CaleeHubException
-                ? 'Could not scan image.\nDebug: ${error.debugSummary}'
-                : 'Could not scan image. Please try again.',
-          ),
-        ),
+        SnackBar(content: Text(message)),
       );
+    } finally {
+      if (compressedFile != null && compressedFile.path != xFile.path) {
+        compressedFile.delete().catchError((_) {});
+      }
     }
   }
 
@@ -955,7 +998,7 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
                       // ── Submit ────────────────────────────────────────────
                       const SizedBox(height: CaleeSpacing.lg),
                       FilledButton(
-                        onPressed: _isSubmitting ? null : _submit,
+                        onPressed: _isLocked ? null : _submit,
                         child: _isSubmitting
                             ? const SizedBox(
                                 width: 18,

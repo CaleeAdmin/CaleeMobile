@@ -1,6 +1,9 @@
+import 'dart:io';
+
 import '../../data/api/calee_hub_client.dart';
 import '../../data/auth/calee_preferences.dart';
 import '../../data/models/client_calendar.dart';
+import '../../data/models/client_event_draft.dart';
 
 // ─── Public model ─────────────────────────────────────────────────────────────
 
@@ -162,6 +165,21 @@ class CalendarRepository {
       recurrence: editOccurrence || editSeriesMetadataOnly ? null : recurrence,
       includeRecurrence: !editOccurrence && !editSeriesMetadataOnly,
       scope: event.recurring ? editScope : null,
+    );
+  }
+
+  Future<EventDraftsFromImageResponse> eventDraftsFromImage({
+    required File imageFile,
+    String? timezone,
+    String? referenceDate,
+    String? sourceHint,
+  }) {
+    return hubClient.eventDraftsFromImage(
+      accessToken: accessToken,
+      imageFile: imageFile,
+      timezone: timezone,
+      referenceDate: referenceDate,
+      sourceHint: sourceHint,
     );
   }
 

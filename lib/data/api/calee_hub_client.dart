@@ -727,23 +727,121 @@ class CaleeHubClient {
     return ClientEvent.fromJson(_data(json)['event'] as Map<String, dynamic>);
   }
 
-  Future<List<ClientEventDraft>> eventDraftsFromImage({
+  Future<EventDraftsFromImageResponse> eventDraftsFromImage({
     required String accessToken,
-    required List<int> imageBytes,
-    required String mimeType,
+    required File imageFile,
+    String? timezone,
+    String? referenceDate,
+    String? sourceHint,
   }) async {
-    final base64Image = base64.encode(imageBytes);
-    final json = await _postJson(
-      '/v1/ai/calendar/event-drafts/from-image',
-      accessToken: accessToken,
-      body: {'image': base64Image, 'mimeType': mimeType},
+    final mimeType = _inferImageMimeType(imageFile.path);
+    final fileSize = await imageFile.length();
+    if (fileSize > 8 * 1024 * 1024) {
+      throw const CaleeHubException(
+        statusCode: 0,
+        code: 'FILE_TOO_LARGE',
+        message: 'This image is too large. Please choose an image under 8 MB.',
+      );
+    }
+
+    const path = '/v1/ai/calendar/event-drafts/from-image';
+    final raw = await _withRetry(
+      (token) => _doMultipartPost(
+        path,
+        accessToken: token,
+        imageFile: imageFile,
+        mimeType: mimeType,
+        timezone: timezone,
+        referenceDate: referenceDate,
+        sourceHint: sourceHint,
+      ),
+      accessToken,
     );
-    final draftsRaw = _data(json)['drafts'];
-    if (draftsRaw is! List) return [];
-    return draftsRaw
-        .whereType<Map<String, dynamic>>()
-        .map(ClientEventDraft.fromJson)
-        .toList();
+
+    final payload =
+        raw.containsKey('data') && raw['data'] is Map<String, dynamic>
+            ? raw['data'] as Map<String, dynamic>
+            : raw;
+    return EventDraftsFromImageResponse.fromJson(payload);
+  }
+
+  static String _inferImageMimeType(String filePath) {
+    final ext = filePath.split('.').last.toLowerCase();
+    return switch (ext) {
+      'jpg' || 'jpeg' => 'image/jpeg',
+      'png' => 'image/png',
+      'webp' => 'image/webp',
+      _ => throw const CaleeHubException(
+        statusCode: 0,
+        code: 'UNSUPPORTED_FORMAT',
+        message: 'Please choose a JPEG, PNG, or WebP image.',
+      ),
+    };
+  }
+
+  Future<Map<String, dynamic>> _doMultipartPost(
+    String path, {
+    required String accessToken,
+    required File imageFile,
+    required String mimeType,
+    String? timezone,
+    String? referenceDate,
+    String? sourceHint,
+  }) {
+    return _executeRequest(() async {
+      final boundary =
+          'CaleeBoundary${DateTime.now().millisecondsSinceEpoch}';
+      final request = await _httpClient.postUrl(baseUri.resolve(path));
+      request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+      request.headers.set(
+        HttpHeaders.authorizationHeader,
+        'Bearer $accessToken',
+      );
+      request.headers.contentType = ContentType(
+        'multipart',
+        'form-data',
+        parameters: {'boundary': boundary},
+      );
+
+      final body = BytesBuilder();
+
+      void addTextField(String name, String value) {
+        body.add(utf8.encode('--$boundary\r\n'));
+        body.add(
+          utf8.encode('Content-Disposition: form-data; name="$name"\r\n\r\n'),
+        );
+        body.add(utf8.encode('$value\r\n'));
+      }
+
+      final filename = imageFile.path.split('/').last;
+      body.add(utf8.encode('--$boundary\r\n'));
+      body.add(
+        utf8.encode(
+          'Content-Disposition: form-data; name="image"; filename="$filename"\r\n',
+        ),
+      );
+      body.add(utf8.encode('Content-Type: $mimeType\r\n\r\n'));
+      body.add(await imageFile.readAsBytes());
+      body.add(utf8.encode('\r\n'));
+
+      if (timezone != null && timezone.isNotEmpty) {
+        addTextField('timezone', timezone);
+      }
+      if (referenceDate != null && referenceDate.isNotEmpty) {
+        addTextField('reference_date', referenceDate);
+      }
+      if (sourceHint != null && sourceHint.isNotEmpty) {
+        addTextField('source_hint', sourceHint);
+      }
+
+      body.add(utf8.encode('--$boundary--\r\n'));
+
+      final bodyBytes = body.toBytes();
+      request.contentLength = bodyBytes.length;
+      request.add(bodyBytes);
+
+      return _readJsonResponse(await request.close(), endpoint: path);
+    });
   }
 
   Future<ClientEventList> events({
