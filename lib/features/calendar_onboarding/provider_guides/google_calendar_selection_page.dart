@@ -50,10 +50,12 @@ class _GoogleCalendarSelectionPageState
         accessToken: widget.accessToken,
         connectionId: widget.connection.id,
       );
-      if (mounted) setState(() {
-        _calendars = cals;
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _calendars = cals;
+          _isLoading = false;
+        });
+      }
     } catch (error) {
       if (mounted) {
         setState(() {
@@ -335,11 +337,11 @@ class _GoogleCalendarSelectionPageState
             children: [
               _DetailInfoRow(
                 label: 'Status',
-                value: connection.isActive ? 'Connected' : 'Needs attention',
+                value: widget.connection.isActive ? 'Connected' : 'Needs attention',
               ),
               _DetailInfoRow(
                 label: 'Account',
-                value: connection.externalAccountEmail ?? 'Google Calendar',
+                value: widget.connection.externalAccountEmail ?? 'Google Calendar',
               ),
             ],
           ),

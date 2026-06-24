@@ -16,11 +16,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 class _StubHubClient extends CaleeHubClient {
   _StubHubClient({
     List<ExternalCalendar>? calendars,
-    bool syncShouldFail = false,
-    bool disconnectShouldFail = false,
+    this._syncShouldFail = false,
+    this._disconnectShouldFail = false,
   }) : _calendars = calendars ?? [],
-       _syncShouldFail = syncShouldFail,
-       _disconnectShouldFail = disconnectShouldFail,
        super(baseUri: Uri.parse('http://localhost'));
 
   final List<ExternalCalendar> _calendars;
