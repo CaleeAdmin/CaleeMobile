@@ -1218,7 +1218,14 @@ class CaleeHubClient {
       body: {},
     );
     final data = _data(json);
-    return ExternalCalendarSyncResult.fromJson(data);
+    final sync = data['sync'];
+    if (sync is! Map<String, dynamic>) {
+      throw const CaleeHubException(
+        statusCode: 0,
+        message: 'Could not sync Google Calendar. Please try again.',
+      );
+    }
+    return ExternalCalendarSyncResult.fromJson(sync);
   }
 
   Future<void> disconnectExternalCalendarConnection({

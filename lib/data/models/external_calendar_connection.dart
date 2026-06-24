@@ -190,27 +190,27 @@ class ExternalCalendar {
 class ExternalCalendarSyncResult {
   const ExternalCalendarSyncResult({
     required this.status,
-    this.message,
-    this.eventsAdded,
-    this.eventsUpdated,
-    this.eventsDeleted,
+    required this.mode,
+    required this.eventCount,
+    required this.deletedCount,
+    required this.nextSyncAvailable,
   });
 
   factory ExternalCalendarSyncResult.fromJson(Map<String, dynamic> json) {
     return ExternalCalendarSyncResult(
       status: json['status'] as String? ?? '',
-      message: json['message'] as String?,
-      eventsAdded: json['eventsAdded'] as int?,
-      eventsUpdated: json['eventsUpdated'] as int?,
-      eventsDeleted: json['eventsDeleted'] as int?,
+      mode: json['mode'] as String? ?? '',
+      eventCount: json['eventCount'] as int? ?? 0,
+      deletedCount: json['deletedCount'] as int? ?? 0,
+      nextSyncAvailable: json['nextSyncAvailable'] as bool? ?? false,
     );
   }
 
   final String status;
-  final String? message;
-  final int? eventsAdded;
-  final int? eventsUpdated;
-  final int? eventsDeleted;
+  final String mode;
+  final int eventCount;
+  final int deletedCount;
+  final bool nextSyncAvailable;
 
-  bool get isSuccess => status == 'success' || status == 'ok';
+  bool get isSuccess => status == 'ok' || status == 'success';
 }

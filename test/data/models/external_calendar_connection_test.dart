@@ -194,6 +194,59 @@ void main() {
     });
   });
 
+  group('ExternalCalendarSyncResult.fromJson', () {
+    test('parses all fields from backend sync subobject', () {
+      final result = ExternalCalendarSyncResult.fromJson({
+        'status': 'ok',
+        'mode': 'full',
+        'eventCount': 84,
+        'deletedCount': 3,
+        'nextSyncAvailable': true,
+      });
+
+      expect(result.status, 'ok');
+      expect(result.mode, 'full');
+      expect(result.eventCount, 84);
+      expect(result.deletedCount, 3);
+      expect(result.nextSyncAvailable, isTrue);
+      expect(result.isSuccess, isTrue);
+    });
+
+    test('isSuccess true for status "success"', () {
+      final result = ExternalCalendarSyncResult.fromJson({'status': 'success'});
+      expect(result.isSuccess, isTrue);
+    });
+
+    test('isSuccess false for non-ok status', () {
+      final result = ExternalCalendarSyncResult.fromJson({'status': 'error'});
+      expect(result.isSuccess, isFalse);
+    });
+
+    test('defaults when fields are missing', () {
+      final result = ExternalCalendarSyncResult.fromJson({});
+
+      expect(result.status, '');
+      expect(result.mode, '');
+      expect(result.eventCount, 0);
+      expect(result.deletedCount, 0);
+      expect(result.nextSyncAvailable, isFalse);
+      expect(result.isSuccess, isFalse);
+    });
+
+    test('parses incremental sync mode', () {
+      final result = ExternalCalendarSyncResult.fromJson({
+        'status': 'ok',
+        'mode': 'incremental',
+        'eventCount': 5,
+        'deletedCount': 0,
+        'nextSyncAvailable': false,
+      });
+
+      expect(result.mode, 'incremental');
+      expect(result.nextSyncAvailable, isFalse);
+    });
+  });
+
   group('ClientEvent extended fields', () {
     test('parses providerKey, readOnly, timeZone', () {
       final event = ClientEvent.fromJson({
