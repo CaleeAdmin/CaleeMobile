@@ -143,7 +143,7 @@ class _CalendarPageState extends State<CalendarPage> {
 
   Future<void> _openCreateEventSheet() async {
     final writableCalendars = _controller.calendars
-        .where((c) => !c.readOnly)
+        .where((c) => !c.readOnly && !c.isExternal)
         .toList();
 
     if (writableCalendars.isEmpty) {
@@ -190,20 +190,28 @@ class _CalendarPageState extends State<CalendarPage> {
 
   void _openEventActions(ClientEvent event) {
     final calendar = _controller.calendarForEvent(event);
-    final canWrite = calendar != null && !calendar.readOnly;
+    final isReadOnly = calendar == null ||
+        calendar.readOnly ||
+        calendar.isExternal ||
+        event.isReadOnly;
 
-    if (!canWrite) {
+    if (isReadOnly) {
+      final isGoogle =
+          event.isGoogleEvent || (calendar?.isGoogleCalendar ?? false);
+      final message = isGoogle
+          ? 'This event comes from Google Calendar. Edit it in Google Calendar.'
+          : event.recurring
+          ? 'This recurring event is from a read-only calendar.\nYou can view it, but changes must be made in the original calendar.'
+          : 'This event is from a read-only calendar.\nYou can view it, but changes must be made in the original calendar.';
       CaleeActionSheet.show(
         context: context,
-        title: event.recurring
-            ? 'This recurring event is from a read-only calendar.\nYou can view it, but changes must be made in the original calendar.'
-            : 'This event is from a read-only calendar.\nYou can view it, but changes must be made in the original calendar.',
+        title: message,
         actions: const [],
       );
       return;
     }
 
-    final writeableCalendar = calendar;
+    final writeableCalendar = calendar!;
 
     CaleeActionSheet.show(
       context: context,
