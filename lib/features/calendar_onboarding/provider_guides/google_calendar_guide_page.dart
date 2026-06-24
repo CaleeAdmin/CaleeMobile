@@ -3,7 +3,6 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../../data/api/calee_hub_client.dart';
 import '../../../data/models/client_bootstrap.dart';
-import '../../../data/models/external_calendar_connection.dart';
 import '../../../ui/calee_design.dart';
 import 'generic_calendar_link_page.dart';
 import 'google_calendar_selection_page.dart';

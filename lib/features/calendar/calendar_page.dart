@@ -211,7 +211,7 @@ class _CalendarPageState extends State<CalendarPage> {
       return;
     }
 
-    final writeableCalendar = calendar!;
+    final writeableCalendar = calendar;
 
     CaleeActionSheet.show(
       context: context,
