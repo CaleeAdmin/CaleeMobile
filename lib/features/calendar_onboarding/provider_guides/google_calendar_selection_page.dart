@@ -182,6 +182,10 @@ class _GoogleCalendarSelectionPageState
     for (final cal in cals) {
       await _syncCalendar(cal);
     }
+    // widget.onDone() is intentionally not called here: in the onboarding
+    // flow it resolves to Navigator.pop(), which would auto-navigate away
+    // before the user has confirmed they are done. The "View calendar" button
+    // (widget.onViewCalendar) lets the user navigate when ready.
   }
 
   Future<void> _disconnect() async {
@@ -220,6 +224,10 @@ class _GoogleCalendarSelectionPageState
       return 'Something went wrong. Please try again.';
     }
     return switch (error.code) {
+      'READ_ONLY_CALENDAR' => 'This Google calendar is read-only in Calee.',
+      'READ_ONLY_EVENT' =>
+        'This Google event is read-only. Edit it in Google Calendar.',
+      'CONNECTION_SECRET_MISSING' => 'Google needs to be reconnected.',
       'GOOGLE_REFRESH_FAILED' => 'Google needs to be reconnected.',
       'GOOGLE_EVENTS_FAILED' =>
         'We could not sync Google Calendar right now. Please try again.',
