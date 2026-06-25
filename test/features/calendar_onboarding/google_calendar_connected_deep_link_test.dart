@@ -28,7 +28,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────────────────
 
 ExternalCalendarConnection _makeConnection({
   required String id,
@@ -43,7 +43,7 @@ ExternalCalendarConnection _makeConnection({
   'sourceOfTruthPolicy': 'external',
 });
 
-// ── Stub hub clients ──────────────────────────────────────────────────────────
+// ── Stub hub clients ───────────────────────────────────────────────────────────────────
 
 class _StubHubClient extends CaleeHubClient {
   _StubHubClient({
@@ -80,7 +80,7 @@ class _StubHubClient extends CaleeHubClient {
   }
 }
 
-// ── Fake controllers for CaleeApp tests ──────────────────────────────────────
+// ── Fake controllers for CaleeApp tests ────────────────────────────────────────────
 
 class _FakeSessionController extends SessionController {
   _FakeSessionController()
@@ -142,7 +142,7 @@ ClientBootstrap _stubBootstrap() => const ClientBootstrap(
   capabilities: {},
 );
 
-// ── Shared prefs setup ────────────────────────────────────────────────────────
+// ── Shared prefs setup ────────────────────────────────────────────────────────────────
 
 void _setUpSharedPrefs() {
   SharedPreferences.setMockInitialValues({
@@ -182,9 +182,47 @@ CaleeAppTestDependencies _makeAppDeps({
   );
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────────────
+// ── Tests ──────────────────────────────────────────────────────────────────────────────
 
 void main() {
+  group('ExternalCalendarConnectedLinkController.parseUri', () {
+    test('success link with connectionId is parsed correctly', () {
+      final uri = Uri.parse(
+        'calee://external-calendar-connected'
+        '?providerKey=google_calendar&connectionId=abc123',
+      );
+      final intent = ExternalCalendarConnectedLinkController.parseUri(uri);
+      expect(intent, isNotNull);
+      expect(intent!.providerKey, 'google_calendar');
+      expect(intent.connectionId, 'abc123');
+      expect(intent.isError, isFalse);
+      expect(intent.isGoogle, isTrue);
+    });
+
+    test('error link is parsed correctly', () {
+      final uri = Uri.parse(
+        'calee://external-calendar-connected?status=error&reason=access_denied',
+      );
+      final intent = ExternalCalendarConnectedLinkController.parseUri(uri);
+      expect(intent, isNotNull);
+      expect(intent!.isError, isTrue);
+      expect(intent.reason, 'access_denied');
+      expect(intent.isGoogle, isFalse);
+    });
+
+    test('non-calendar calee URI returns null', () {
+      final uri = Uri.parse('calee://display-setup?token=abc');
+      expect(ExternalCalendarConnectedLinkController.parseUri(uri), isNull);
+    });
+
+    test('non-calee scheme returns null', () {
+      final uri = Uri.parse(
+        'https://example.com/external-calendar-connected',
+      );
+      expect(ExternalCalendarConnectedLinkController.parseUri(uri), isNull);
+    });
+  });
+
   group('GoogleCalendarGuidePage — I finished in browser', () {
     setUp(_setUpSharedPrefs);
     tearDown(_tearDownSharedPrefs);
@@ -455,6 +493,49 @@ void main() {
         session.finishRestore(signedIn: true);
         await tester.pumpAndSettle();
 
+        expect(find.byType(GoogleCalendarSelectionPage), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'duplicate deep link does not push a second GoogleCalendarSelectionPage',
+      (tester) async {
+        final conn1 = _makeConnection(id: 'conn1');
+        final hubClient = _StubHubClient(connections: [conn1]);
+        final session = _FakeSessionController();
+        final linkController = _FakeExternalCalendarConnectedLinkController();
+
+        await tester.pumpWidget(
+          CaleeApp.forTesting(
+            testDeps: _makeAppDeps(
+              hubClient: hubClient,
+              session: session,
+              calendarConnected: linkController,
+            ),
+          ),
+        );
+
+        session.finishRestore(signedIn: true);
+        await tester.pump();
+
+        // Inject the same intent twice in rapid succession.
+        linkController.injectIntent(
+          const ExternalCalendarConnectedIntent(
+            providerKey: 'google_calendar',
+            connectionId: 'conn1',
+          ),
+        );
+        await tester.pump();
+
+        linkController.injectIntent(
+          const ExternalCalendarConnectedIntent(
+            providerKey: 'google_calendar',
+            connectionId: 'conn1',
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        // Only one GoogleCalendarSelectionPage should be on the stack.
         expect(find.byType(GoogleCalendarSelectionPage), findsOneWidget);
       },
     );

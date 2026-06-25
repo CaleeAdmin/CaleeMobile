@@ -102,6 +102,9 @@ class _GoogleCalendarGuidePageState extends State<GoogleCalendarGuidePage> {
 
       if (googleConnection.isNotEmpty) {
         final connection = googleConnection.first;
+        debugPrint(
+          '[GoogleCalendarGuide] active Google connection found: id=${connection.id}',
+        );
         Navigator.of(context).push(
           MaterialPageRoute<void>(
             builder: (_) => GoogleCalendarSelectionPage(
@@ -115,6 +118,7 @@ class _GoogleCalendarGuidePageState extends State<GoogleCalendarGuidePage> {
         );
         setState(() => _isCheckingConnection = false);
       } else {
+        debugPrint('[GoogleCalendarGuide] no active Google connection found');
         setState(() {
           _isCheckingConnection = false;
           _view = _GoogleGuideView.connectionNotFound;
@@ -200,7 +204,7 @@ class _GoogleCalendarGuidePageState extends State<GoogleCalendarGuidePage> {
   }
 }
 
-// ── Main view ──────────────────────────────────────────────────────────────
+// ── Main view ──────────────────────────────────────────────────────────
 
 class _MainView extends StatelessWidget {
   const _MainView({
@@ -276,7 +280,7 @@ class _MainView extends StatelessWidget {
   }
 }
 
-// ── Waiting for browser view ───────────────────────────────────────────────
+// ── Waiting for browser view ─────────────────────────────────────────────────
 
 class _WaitingView extends StatelessWidget {
   const _WaitingView({
@@ -351,7 +355,7 @@ class _WaitingView extends StatelessWidget {
   }
 }
 
-// ── Connection not found view ──────────────────────────────────────────────
+// ── Connection not found view ────────────────────────────────────────────────
 
 class _NotFoundView extends StatelessWidget {
   const _NotFoundView({

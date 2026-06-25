@@ -2,6 +2,8 @@
 //
 // Uses a stub CaleeHubClient to avoid real network calls.
 
+import 'dart:async';
+
 import 'package:calee_mobile/data/api/calee_hub_client.dart';
 import 'package:calee_mobile/data/models/external_calendar_connection.dart';
 import 'package:calee_mobile/features/calendar_onboarding/provider_guides/google_calendar_selection_page.dart';
@@ -11,19 +13,21 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-// ── Stubs ─────────────────────────────────────────────────────────────────────
+// ── Stubs ────────────────────────────────────────────────────────────────────────────────
 
 class _StubHubClient extends CaleeHubClient {
   _StubHubClient({
     List<ExternalCalendar>? calendars,
     this._syncShouldFail = false,
     this._disconnectShouldFail = false,
+    this._syncCompleter,
   }) : _calendars = calendars ?? [],
        super(baseUri: Uri.parse('http://localhost'));
 
   final List<ExternalCalendar> _calendars;
   final bool _syncShouldFail;
   final bool _disconnectShouldFail;
+  final Completer<void>? _syncCompleter;
 
   @override
   Future<List<ExternalCalendar>> externalCalendarsForConnection({
@@ -62,6 +66,9 @@ class _StubHubClient extends CaleeHubClient {
     required String accessToken,
     required String externalCalendarId,
   }) async {
+    if (_syncCompleter != null) {
+      await _syncCompleter!.future;
+    }
     if (_syncShouldFail) {
       throw const CaleeHubException(
         statusCode: 500,
@@ -92,7 +99,7 @@ class _StubHubClient extends CaleeHubClient {
   }
 }
 
-// ── Test helpers ──────────────────────────────────────────────────────────────
+// ── Test helpers ───────────────────────────────────────────────────────────────────
 
 ExternalCalendarConnection _activeConnection({
   String? email,
@@ -158,7 +165,7 @@ void _tearDownSharedPrefs() {
       );
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────────────
+// ── Tests ──────────────────────────────────────────────────────────────────────────────
 
 void main() {
   setUp(_setUpSharedPrefs);
@@ -300,4 +307,37 @@ void main() {
       findsOneWidget,
     );
   });
+
+  testWidgets(
+    'View calendar button is disabled while sync is in progress',
+    (tester) async {
+      final syncCompleter = Completer<void>();
+      final client = _StubHubClient(
+        calendars: [_fakeCalendar(syncEnabled: true)],
+        syncCompleter: syncCompleter,
+      );
+      await tester.pumpWidget(_wrapPage(hubClient: client));
+      await tester.pump(const Duration(milliseconds: 50));
+
+      // Start sync — the completer keeps it in-flight.
+      await tester.tap(find.text('Sync selected calendars now'));
+      await tester.pump();
+
+      // View calendar should be disabled while sync is in progress.
+      final button = tester.widget<OutlinedButton>(
+        find.widgetWithText(OutlinedButton, 'View calendar'),
+      );
+      expect(button.onPressed, isNull);
+
+      // Let sync complete.
+      syncCompleter.complete();
+      await tester.pumpAndSettle();
+
+      // View calendar should be re-enabled after sync.
+      final enabledButton = tester.widget<OutlinedButton>(
+        find.widgetWithText(OutlinedButton, 'View calendar'),
+      );
+      expect(enabledButton.onPressed, isNotNull);
+    },
+  );
 }

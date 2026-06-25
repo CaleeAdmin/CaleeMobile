@@ -113,6 +113,7 @@ class _CaleeAppState extends State<CaleeApp> {
   bool _checkingOnboarding = false;
   bool _showingOnboarding = false;
   int? _initialHomeTab;
+  bool _openingGoogleCalendarSelection = false;
 
   List<LocalCalendarSubscription> _localSubscriptions = [];
   bool _localSubscriptionsLoaded = false;
@@ -347,12 +348,22 @@ class _CaleeAppState extends State<CaleeApp> {
   Future<void> _openGoogleCalendarSelectionFromDeepLink(
     ExternalCalendarConnectedIntent intent,
   ) async {
+    if (_openingGoogleCalendarSelection) return;
+    _openingGoogleCalendarSelection = true;
+    debugPrint(
+      '[CaleeApp] external-calendar-connected: '
+      'providerKey=${intent.providerKey}, connectionId=${intent.connectionId}',
+    );
+
     try {
       final connections = await _hubClient.externalCalendarConnections(
         accessToken: _sessionController.accessToken!,
       );
 
-      if (!mounted) return;
+      if (!mounted) {
+        _openingGoogleCalendarSelection = false;
+        return;
+      }
 
       // Prefer the connection matching the deep-link connectionId; fall back to
       // the first active Google connection.
@@ -368,15 +379,20 @@ class _CaleeAppState extends State<CaleeApp> {
           .firstOrNull;
 
       if (connection == null) {
+        debugPrint('[CaleeApp] external-calendar-connected: no active Google connection found');
+        _openingGoogleCalendarSelection = false;
         _showSnackBar(
           'Google Calendar connection not found. Please try again.',
         );
         return;
       }
 
+      debugPrint('[CaleeApp] external-calendar-connected: found connection id=${connection.id}');
       final resolvedConnection = connection;
       WidgetsBinding.instance.addPostFrameCallback((_) {
+        _openingGoogleCalendarSelection = false;
         if (!mounted) return;
+        debugPrint('[CaleeApp] external-calendar-connected: opening GoogleCalendarSelectionPage');
         _navigatorKey.currentState?.push(
           MaterialPageRoute<void>(
             builder: (_) => GoogleCalendarSelectionPage(
@@ -392,6 +408,7 @@ class _CaleeAppState extends State<CaleeApp> {
         );
       });
     } catch (_) {
+      _openingGoogleCalendarSelection = false;
       if (!mounted) return;
       _showSnackBar(
         'Could not load Google Calendar connection. Please try again.',
@@ -606,7 +623,7 @@ class _CaleeAppState extends State<CaleeApp> {
     }
 
     if (!_sessionController.isSignedIn) {
-      // ── Display setup flows (state 2) ─────────────────────────────────────
+      // ── Display setup flows (state 2) ─────────────────────────────────────────
 
       // Create account from display setup landing.
       if (_showingDisplaySetupCreateAccount) {
@@ -668,7 +685,7 @@ class _CaleeAppState extends State<CaleeApp> {
         );
       }
 
-      // ── Calendar follow flows ──────────────────────────────────────────────
+      // ── Calendar follow flows ───────────────────────────────────────────────────────
 
       // User chose "Add to Calee" → show login (pending intent present, skip onboarding)
       if (_showingFollowSignIn) {
@@ -782,7 +799,7 @@ class _CaleeAppState extends State<CaleeApp> {
       );
     }
 
-    // ── Signed-in flows ────────────────────────────────────────────────────
+    // ── Signed-in flows ────────────────────────────────────────────────────────
 
     // Show loading spinner while checking onboarding status after fresh sign-in
     if (_checkingOnboarding) return const _SessionRestorePage();

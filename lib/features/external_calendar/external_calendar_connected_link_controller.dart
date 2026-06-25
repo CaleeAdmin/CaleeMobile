@@ -34,6 +34,13 @@ class ExternalCalendarConnectedLinkController extends ChangeNotifier {
     if (intent == null) return;
     if (_disposed) return;
 
+    debugPrint(
+      '[ExternalCalendarLink] deep link received: '
+      'providerKey=${intent.providerKey}, '
+      'connectionId=${intent.connectionId}, '
+      'status=${intent.status}',
+    );
+
     pendingIntent = intent;
     notifyListeners();
   }
