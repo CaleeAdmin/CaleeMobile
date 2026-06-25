@@ -216,7 +216,7 @@ class _CalendarDetailSheetState extends State<CalendarDetailSheet> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Header: color dot + calendar name
+          // Header: color dot + calendar name + close button
           Row(
             children: [
               Container(
@@ -235,6 +235,12 @@ class _CalendarDetailSheetState extends State<CalendarDetailSheet> {
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: () => Navigator.of(context).maybePop(),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
               ),
             ],
           ),
