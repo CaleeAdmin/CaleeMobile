@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../../data/auth/calee_preferences.dart';
+import '../../data/models/calendar_service_error.dart';
 import '../../data/models/client_calendar.dart';
 import 'calendar_repository.dart';
 
@@ -27,6 +28,7 @@ class CalendarController extends ChangeNotifier {
   StoredPreferences preferences = const StoredPreferences();
   List<ClientCalendar> calendars = [];
   List<ClientEvent> events = [];
+  List<CalendarServiceError> calendarServiceErrors = [];
   bool isLoading = false;
   Object? error;
   final Set<String> hiddenCalendarIds = {};
@@ -47,12 +49,14 @@ class CalendarController extends ChangeNotifier {
       gridStart = overview.gridStart;
       calendars = overview.calendars;
       events = overview.events;
+      calendarServiceErrors = overview.serviceErrors;
       hiddenCalendarIds.removeWhere(
         (id) => !calendars.any((cal) => cal.id == id),
       );
       error = null;
     } catch (e) {
       error = e;
+      calendarServiceErrors = [];
     } finally {
       isLoading = false;
       notifyListeners();

@@ -1,5 +1,6 @@
 import '../../data/api/calee_hub_client.dart';
 import '../../data/auth/calee_preferences.dart';
+import '../../data/models/calendar_service_error.dart';
 import '../../data/models/client_bootstrap.dart';
 import '../../data/models/client_calendar.dart';
 import '../../data/models/client_task.dart';
@@ -15,6 +16,7 @@ class TasksOverview {
     required this.preferences,
     required this.from,
     required this.to,
+    this.calendarServiceErrors = const [],
   });
 
   final ClientCalendarList calendarList;
@@ -22,6 +24,7 @@ class TasksOverview {
   final StoredPreferences preferences;
   final String from;
   final String to;
+  final List<CalendarServiceError> calendarServiceErrors;
 }
 
 // ─────────────────────────────────────────────
@@ -48,18 +51,35 @@ class TasksRepository {
     required String from,
     required String to,
   }) async {
-    final results = await Future.wait([
-      _preferences.load(),
-      hubClient.calendars(accessToken: accessToken),
-      hubClient.tasks(accessToken: accessToken, from: from, to: to),
-    ]);
+    final prefs = await _preferences.load();
 
-    return TasksOverview(
-      preferences: results[0] as StoredPreferences,
-      calendarList: results[1] as ClientCalendarList,
-      taskList: results[2] as ClientTaskList,
+    ClientCalendarList calList = const ClientCalendarList(calendars: []);
+    final calendarServiceErrors = <CalendarServiceError>[];
+
+    try {
+      calList = await hubClient.calendars(accessToken: accessToken);
+      calendarServiceErrors.addAll(calList.serviceErrors);
+    } on CaleeHubException catch (e) {
+      if (isCalendarServiceConnectionCode(e.code)) {
+        calendarServiceErrors.add(CalendarServiceError.fromException(e));
+      } else {
+        rethrow;
+      }
+    }
+
+    final taskList = await hubClient.tasks(
+      accessToken: accessToken,
       from: from,
       to: to,
+    );
+
+    return TasksOverview(
+      preferences: prefs,
+      calendarList: calList,
+      taskList: taskList,
+      from: from,
+      to: to,
+      calendarServiceErrors: calendarServiceErrors,
     );
   }
 

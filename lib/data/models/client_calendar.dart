@@ -1,5 +1,10 @@
+import 'calendar_service_error.dart';
+
 class ClientCalendarList {
-  const ClientCalendarList({required this.calendars});
+  const ClientCalendarList({
+    required this.calendars,
+    this.serviceErrors = const [],
+  });
 
   factory ClientCalendarList.fromJson(Map<String, dynamic> json) {
     return ClientCalendarList(
@@ -7,10 +12,15 @@ class ClientCalendarList {
           .whereType<Map<String, dynamic>>()
           .map(ClientCalendar.fromJson)
           .toList(),
+      serviceErrors: (json['serviceErrors'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(CalendarServiceError.fromJson)
+          .toList(),
     );
   }
 
   final List<ClientCalendar> calendars;
+  final List<CalendarServiceError> serviceErrors;
 }
 
 // Calee calendar model

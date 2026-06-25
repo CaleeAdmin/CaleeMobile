@@ -199,7 +199,15 @@ class _TodayPageState extends State<TodayPage> {
     final rows = <Widget>[];
     String? trailing;
 
-    if (overview.hasCalendarError) {
+    if (overview.hasCalendarServiceError) {
+      final err = overview.calendarServiceErrors.first;
+      rows.add(
+        _errorRow(
+          '${err.displayServiceName} connection needs repair. '
+          'Contact Calee support.',
+        ),
+      );
+    } else if (overview.hasCalendarError) {
       rows.add(_errorRow('Could not load calendar events.'));
     } else if (overview.eventsToday.isEmpty) {
       rows.add(_emptyRow('No events today'));

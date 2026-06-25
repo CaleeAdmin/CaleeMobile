@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../data/api/calee_hub_client.dart';
 import '../../data/models/client_bootstrap.dart';
+import '../calendar/widgets/calendar_error_state.dart';
 import '../settings/calendar_collections_page.dart';
 import '../settings/household_people_page.dart';
 import '../../data/models/client_calendar.dart';
@@ -816,6 +817,15 @@ class _ChoresPageState extends State<ChoresPage> {
         final hasUnassignedChores = _hasUnassignedChores(allChores);
 
         if (choreCalendars.isEmpty && allChores.isEmpty) {
+          final serviceErrors = _controller.calendarServiceErrors;
+          if (serviceErrors.isNotEmpty) {
+            return CaleeScaffold(
+              body: CalendarServiceConnectionErrorState(
+                errors: serviceErrors,
+                onRetry: _controller.refresh,
+              ),
+            );
+          }
           return CaleeScaffold(
             body: CaleeEmptyState(
               icon: Icons.checklist_outlined,
@@ -862,6 +872,7 @@ class _ChoresPageState extends State<ChoresPage> {
                 : p.displayName.trim(),
         };
 
+        final choreServiceErrors = _controller.calendarServiceErrors;
         return CaleeScaffold(
           appBar: _buildTopBar(
             label: filterLabel,
@@ -883,7 +894,12 @@ class _ChoresPageState extends State<ChoresPage> {
               }
             },
           ),
-          body: RefreshIndicator(
+          body: Column(
+            children: [
+              if (choreServiceErrors.isNotEmpty && choreCalendars.isNotEmpty)
+                CalendarServiceWarningBanner(errors: choreServiceErrors),
+              Expanded(
+                child: RefreshIndicator(
             onRefresh: _controller.refresh,
             child: ListView(
               padding: const EdgeInsets.symmetric(
@@ -942,6 +958,9 @@ class _ChoresPageState extends State<ChoresPage> {
                 const SizedBox(height: 96),
               ],
             ),
+                ),
+              ),
+            ],
           ),
         );
       },

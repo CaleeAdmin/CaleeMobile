@@ -1468,9 +1468,13 @@ class CaleeHubClient {
 
       if (decoded is Map<String, dynamic>) {
         final errorMap = decoded['error'];
+        String? serviceId;
+        String? serviceName;
         if (errorMap is Map<String, dynamic>) {
           code = errorMap['code'] as String?;
           message = errorMap['message'] as String?;
+          serviceId = errorMap['serviceId'] as String?;
+          serviceName = errorMap['serviceName'] as String?;
         } else {
           message = decoded['message'] as String?;
         }
@@ -1478,6 +1482,23 @@ class CaleeHubClient {
         if (meta is Map<String, dynamic>) {
           metaRequestId = meta['requestId'] as String?;
         }
+
+        final requestId =
+            response.headers.value('x-calee-request-id') ??
+            response.headers.value('x-request-id') ??
+            metaRequestId;
+
+        throw CaleeHubException(
+          statusCode: response.statusCode,
+          message: message is String && message.trim().isNotEmpty
+              ? message
+              : 'Hub request failed',
+          code: code,
+          requestId: requestId,
+          endpoint: endpoint,
+          serviceId: serviceId,
+          serviceName: serviceName,
+        );
       }
 
       final requestId =
@@ -1487,9 +1508,7 @@ class CaleeHubClient {
 
       throw CaleeHubException(
         statusCode: response.statusCode,
-        message: message is String && message.trim().isNotEmpty
-            ? message
-            : 'Hub request failed',
+        message: 'Hub request failed',
         code: code,
         requestId: requestId,
         endpoint: endpoint,
@@ -1528,6 +1547,8 @@ class CaleeHubException implements Exception {
     this.code,
     this.requestId,
     this.endpoint,
+    this.serviceId,
+    this.serviceName,
   });
 
   final int statusCode;
@@ -1535,6 +1556,8 @@ class CaleeHubException implements Exception {
   final String? code;
   final String? requestId;
   final String? endpoint;
+  final String? serviceId;
+  final String? serviceName;
 
   String get debugSummary {
     final parts = <String>['HTTP $statusCode'];

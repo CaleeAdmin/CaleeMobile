@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../../data/api/calee_hub_client.dart';
+import '../../data/models/calendar_service_error.dart';
 import '../../data/models/client_bootstrap.dart';
+import '../calendar/widgets/calendar_error_state.dart';
 import '../settings/calendar_collections_page.dart';
 import '../../data/models/client_calendar.dart';
 import '../../data/models/client_task.dart';
@@ -496,6 +498,19 @@ class _TasksPageState extends State<TasksPage> {
         }
 
         if (taskCalendars.isEmpty && allTasks.isEmpty) {
+          final serviceErrors = _controller.calendarServiceErrors;
+          if (serviceErrors.isNotEmpty) {
+            return CaleeScaffold(
+              appBar: _buildTopBar(
+                taskCalendars: taskCalendars,
+                allTasks: allTasks,
+              ),
+              body: CalendarServiceConnectionErrorState(
+                errors: serviceErrors,
+                onRetry: _controller.refresh,
+              ),
+            );
+          }
           return CaleeScaffold(
             appBar: _buildTopBar(
               taskCalendars: taskCalendars,
@@ -552,12 +567,18 @@ class _TasksPageState extends State<TasksPage> {
                 .toList()
               ..sort((a, b) => a.title.compareTo(b.title));
 
+        final taskServiceErrors = _controller.calendarServiceErrors;
         return CaleeScaffold(
           appBar: _buildTopBar(
             taskCalendars: taskCalendars,
             allTasks: allTasks,
           ),
-          body: RefreshIndicator(
+          body: Column(
+            children: [
+              if (taskServiceErrors.isNotEmpty && taskCalendars.isNotEmpty)
+                CalendarServiceWarningBanner(errors: taskServiceErrors),
+              Expanded(
+                child: RefreshIndicator(
             onRefresh: () => _controller.refresh(),
             child: ListView(
               padding: const EdgeInsets.symmetric(
@@ -643,6 +664,9 @@ class _TasksPageState extends State<TasksPage> {
                 const SizedBox(height: 96),
               ],
             ),
+                ),
+              ),
+            ],
           ),
         );
       },

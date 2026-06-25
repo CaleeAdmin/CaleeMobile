@@ -2,6 +2,7 @@ import 'dart:io';
 
 import '../../data/api/calee_hub_client.dart';
 import '../../data/auth/calee_preferences.dart';
+import '../../data/models/calendar_service_error.dart';
 import '../../data/models/client_calendar.dart';
 import '../../data/models/client_event_draft.dart';
 
@@ -14,6 +15,7 @@ class CalendarOverview {
     required this.preferences,
     required this.gridStart,
     required this.gridEnd,
+    this.serviceErrors = const [],
   });
 
   final List<ClientCalendar> calendars;
@@ -21,6 +23,7 @@ class CalendarOverview {
   final StoredPreferences preferences;
   final DateTime gridStart;
   final DateTime gridEnd;
+  final List<CalendarServiceError> serviceErrors;
 }
 
 // ─── Repository ───────────────────────────────────────────────────────────────
@@ -82,27 +85,43 @@ class CalendarRepository {
     );
     final gridEnd = gridStart.add(const Duration(days: 41)); // 6 weeks − 1 day
 
-    final results = await Future.wait([
-      hubClient.calendars(accessToken: accessToken),
-      hubClient.events(
-        accessToken: accessToken,
-        from: formatDate(gridStart),
-        to: formatDate(gridEnd),
-      ),
-    ]);
+    try {
+      final results = await Future.wait([
+        hubClient.calendars(accessToken: accessToken),
+        hubClient.events(
+          accessToken: accessToken,
+          from: formatDate(gridStart),
+          to: formatDate(gridEnd),
+        ),
+      ]);
 
-    final calendars = (results[0] as ClientCalendarList).calendars
-        .where((c) => c.isCalendarKind)
-        .toList();
-    final events = (results[1] as ClientEventList).events;
+      final calList = results[0] as ClientCalendarList;
+      final calendars = calList.calendars
+          .where((c) => c.isCalendarKind)
+          .toList();
+      final events = (results[1] as ClientEventList).events;
 
-    return CalendarOverview(
-      calendars: calendars,
-      events: events,
-      preferences: freshPrefs,
-      gridStart: gridStart,
-      gridEnd: gridEnd,
-    );
+      return CalendarOverview(
+        calendars: calendars,
+        events: events,
+        preferences: freshPrefs,
+        gridStart: gridStart,
+        gridEnd: gridEnd,
+        serviceErrors: calList.serviceErrors,
+      );
+    } on CaleeHubException catch (e) {
+      if (isCalendarServiceConnectionCode(e.code)) {
+        return CalendarOverview(
+          calendars: const [],
+          events: const [],
+          preferences: freshPrefs,
+          gridStart: gridStart,
+          gridEnd: gridEnd,
+          serviceErrors: [CalendarServiceError.fromException(e)],
+        );
+      }
+      rethrow;
+    }
   }
 
   // ── CRUD ──────────────────────────────────────────────────────────────────
