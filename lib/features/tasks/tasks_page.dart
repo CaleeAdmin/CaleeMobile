@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../data/api/calee_hub_client.dart';
 import '../../data/models/client_bootstrap.dart';
+import '../calendar/widgets/calendar_error_state.dart';
 import '../settings/calendar_collections_page.dart';
 import '../../data/models/client_calendar.dart';
 import '../../data/models/client_task.dart';
@@ -496,6 +497,19 @@ class _TasksPageState extends State<TasksPage> {
         }
 
         if (taskCalendars.isEmpty && allTasks.isEmpty) {
+          final serviceErrors = _controller.calendarServiceErrors;
+          if (serviceErrors.isNotEmpty) {
+            return CaleeScaffold(
+              appBar: _buildTopBar(
+                taskCalendars: taskCalendars,
+                allTasks: allTasks,
+              ),
+              body: CalendarServiceConnectionErrorState(
+                errors: serviceErrors,
+                onRetry: _controller.refresh,
+              ),
+            );
+          }
           return CaleeScaffold(
             appBar: _buildTopBar(
               taskCalendars: taskCalendars,
@@ -552,97 +566,115 @@ class _TasksPageState extends State<TasksPage> {
                 .toList()
               ..sort((a, b) => a.title.compareTo(b.title));
 
+        final taskServiceErrors = _controller.calendarServiceErrors;
         return CaleeScaffold(
           appBar: _buildTopBar(
             taskCalendars: taskCalendars,
             allTasks: allTasks,
           ),
-          body: RefreshIndicator(
-            onRefresh: () => _controller.refresh(),
-            child: ListView(
-              padding: const EdgeInsets.symmetric(
-                horizontal: CaleeSpacing.pagePadding,
-                vertical: CaleeSpacing.md,
-              ),
-              children: [
-                // ── Empty state when no open tasks ───────────────────
-                if (openTasks.isEmpty && taskCalendars.isNotEmpty)
-                  CaleeSection(
+          body: Column(
+            children: [
+              if (taskServiceErrors.isNotEmpty && taskCalendars.isNotEmpty)
+                CalendarServiceWarningBanner(errors: taskServiceErrors),
+              Expanded(
+                child: RefreshIndicator(
+                  onRefresh: () => _controller.refresh(),
+                  child: ListView(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: CaleeSpacing.pagePadding,
+                      vertical: CaleeSpacing.md,
+                    ),
                     children: [
-                      CaleeListRow(
-                        title: 'No open tasks',
-                        subtitle: 'You\'re all caught up.',
-                        leading: const Icon(
-                          Icons.check_circle_outline,
-                          color: CaleeColors.textTertiary,
-                          size: 22,
+                      // ── Empty state when no open tasks ───────────────────
+                      if (openTasks.isEmpty && taskCalendars.isNotEmpty)
+                        CaleeSection(
+                          children: [
+                            CaleeListRow(
+                              title: 'No open tasks',
+                              subtitle: 'You\'re all caught up.',
+                              leading: const Icon(
+                                Icons.check_circle_outline,
+                                color: CaleeColors.textTertiary,
+                                size: 22,
+                              ),
+                            ),
+                          ],
                         ),
-                      ),
+
+                      // ── Today (includes overdue) ──────────────────────────
+                      if (todayTasks.isNotEmpty) ...[
+                        _buildSmartSection('Today', todayTasks, taskCalendars),
+                        const SizedBox(height: CaleeSpacing.sectionSpacing),
+                      ],
+
+                      // ── Upcoming ──────────────────────────────────────────
+                      if (upcomingTasks.isNotEmpty) ...[
+                        _buildSmartSection(
+                          'Upcoming',
+                          upcomingTasks,
+                          taskCalendars,
+                        ),
+                        const SizedBox(height: CaleeSpacing.sectionSpacing),
+                      ],
+
+                      // ── No Date ───────────────────────────────────────────
+                      if (noDateTasks.isNotEmpty) ...[
+                        _buildSmartSection(
+                          'No Date',
+                          noDateTasks,
+                          taskCalendars,
+                        ),
+                        const SizedBox(height: CaleeSpacing.sectionSpacing),
+                      ],
+
+                      // ── No task lists ─────────────────────────────────────
+                      if (taskCalendars.isEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: CaleeSpacing.md),
+                          child: CaleeSection(
+                            footer:
+                                'Connect a task list to start adding tasks.',
+                            children: [
+                              CaleeListRow(
+                                title: 'Add task list',
+                                leading: const Icon(
+                                  Icons.add_circle_outline,
+                                  color: CaleeColors.primary,
+                                  size: 22,
+                                ),
+                                onTap: _openCollectionCreateShortcut,
+                              ),
+                            ],
+                          ),
+                        ),
+
+                      // ── Completed tasks ───────────────────────────────────
+                      if (completedTasks.isNotEmpty)
+                        CompletedTasksSection(
+                          tasks: completedTasks,
+                          calendars: taskCalendars,
+                          isExpanded: _controller.completedExpanded,
+                          onToggleExpanded: () {
+                            _controller.setCompletedExpanded(
+                              !_controller.completedExpanded,
+                            );
+                          },
+                          updatingIds: _controller.updatingTaskIds,
+                          deletingIds: _controller.deletingTaskIds,
+                          editingIds: _controller.editingTaskIds,
+                          onToggle: _toggleTaskStatus,
+                          onEdit: _openEditTaskSheet,
+                          onDelete: _confirmDeleteTask,
+                          calendarNameForTask: _calendarNameForTask,
+                          formatDueLabel: _formatDueLabel,
+                        ),
+
+                      const SizedBox(height: 96),
                     ],
                   ),
-
-                // ── Today (includes overdue) ──────────────────────────
-                if (todayTasks.isNotEmpty) ...[
-                  _buildSmartSection('Today', todayTasks, taskCalendars),
-                  const SizedBox(height: CaleeSpacing.sectionSpacing),
-                ],
-
-                // ── Upcoming ──────────────────────────────────────────
-                if (upcomingTasks.isNotEmpty) ...[
-                  _buildSmartSection('Upcoming', upcomingTasks, taskCalendars),
-                  const SizedBox(height: CaleeSpacing.sectionSpacing),
-                ],
-
-                // ── No Date ───────────────────────────────────────────
-                if (noDateTasks.isNotEmpty) ...[
-                  _buildSmartSection('No Date', noDateTasks, taskCalendars),
-                  const SizedBox(height: CaleeSpacing.sectionSpacing),
-                ],
-
-                // ── No task lists ─────────────────────────────────────
-                if (taskCalendars.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: CaleeSpacing.md),
-                    child: CaleeSection(
-                      footer: 'Connect a task list to start adding tasks.',
-                      children: [
-                        CaleeListRow(
-                          title: 'Add task list',
-                          leading: const Icon(
-                            Icons.add_circle_outline,
-                            color: CaleeColors.primary,
-                            size: 22,
-                          ),
-                          onTap: _openCollectionCreateShortcut,
-                        ),
-                      ],
-                    ),
-                  ),
-
-                // ── Completed tasks ───────────────────────────────────
-                if (completedTasks.isNotEmpty)
-                  CompletedTasksSection(
-                    tasks: completedTasks,
-                    calendars: taskCalendars,
-                    isExpanded: _controller.completedExpanded,
-                    onToggleExpanded: () {
-                      _controller.setCompletedExpanded(
-                        !_controller.completedExpanded,
-                      );
-                    },
-                    updatingIds: _controller.updatingTaskIds,
-                    deletingIds: _controller.deletingTaskIds,
-                    editingIds: _controller.editingTaskIds,
-                    onToggle: _toggleTaskStatus,
-                    onEdit: _openEditTaskSheet,
-                    onDelete: _confirmDeleteTask,
-                    calendarNameForTask: _calendarNameForTask,
-                    formatDueLabel: _formatDueLabel,
-                  ),
-
-                const SizedBox(height: 96),
-              ],
-            ),
+                ),
+              ),
+            ],
           ),
         );
       },

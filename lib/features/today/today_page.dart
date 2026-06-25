@@ -199,7 +199,9 @@ class _TodayPageState extends State<TodayPage> {
     final rows = <Widget>[];
     String? trailing;
 
-    if (overview.hasCalendarError) {
+    if (overview.hasCalendarServiceError) {
+      rows.add(_errorRow(overview.calendarServiceErrors.first.repairMessage));
+    } else if (overview.hasCalendarError) {
       rows.add(_errorRow('Could not load calendar events.'));
     } else if (overview.eventsToday.isEmpty) {
       rows.add(_emptyRow('No events today'));

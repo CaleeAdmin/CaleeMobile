@@ -68,6 +68,29 @@ class _TaskSearchSheetState extends State<TaskSearchSheet> {
               ),
             ),
           ),
+          // Sheet header
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              CaleeSpacing.md,
+              CaleeSpacing.sm,
+              CaleeSpacing.sm,
+              0,
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Search Tasks',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.of(context).maybePop(),
+                ),
+              ],
+            ),
+          ),
           Padding(
             padding: const EdgeInsets.all(CaleeSpacing.md),
             child: TextField(

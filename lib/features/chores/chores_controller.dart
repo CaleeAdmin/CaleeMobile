@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import '../../data/models/calendar_service_error.dart';
 import '../../data/models/client_calendar.dart';
 import '../../data/models/client_chore.dart';
 import '../../data/models/client_chore_metadata.dart';
@@ -21,6 +22,7 @@ class ChoresController extends ChangeNotifier {
   bool isLoading = false;
   Object? error;
   ChoresOverview? overview;
+  List<CalendarServiceError> calendarServiceErrors = [];
   final Set<String> updatingChoreIds = {};
   String selectedAssigneeFilter = 'all';
 
@@ -34,9 +36,11 @@ class ChoresController extends ChangeNotifier {
       final from = _formatChoreDate(DateTime(today.year, 1, 1));
       final to = _formatChoreDate(DateTime(today.year, 12, 31));
       overview = await repository.loadOverview(from: from, to: to);
+      calendarServiceErrors = overview?.calendarServiceErrors ?? [];
       error = null;
     } catch (e) {
       error = e;
+      calendarServiceErrors = [];
     } finally {
       isLoading = false;
       notifyListeners();
@@ -51,7 +55,7 @@ class ChoresController extends ChangeNotifier {
     String? scheduledAt,
     String? description,
     String? recurrence,
-    required String? assigneePersonId,
+    required List<String> assigneePersonIds,
     required int points,
   }) async {
     await repository.createChore(
@@ -60,7 +64,7 @@ class ChoresController extends ChangeNotifier {
       scheduledAt: scheduledAt,
       description: description,
       recurrence: recurrence,
-      assigneePersonId: assigneePersonId,
+      assigneePersonIds: assigneePersonIds,
       points: points,
     );
     await load();

@@ -69,6 +69,29 @@ class _CalendarSearchSheetState extends State<CalendarSearchSheet> {
               ),
             ),
           ),
+          // Sheet header
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              CaleeSpacing.md,
+              CaleeSpacing.sm,
+              CaleeSpacing.sm,
+              0,
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Search Events',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.of(context).maybePop(),
+                ),
+              ],
+            ),
+          ),
           // Search field
           Padding(
             padding: const EdgeInsets.all(CaleeSpacing.md),

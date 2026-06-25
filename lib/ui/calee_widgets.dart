@@ -288,7 +288,17 @@ class CaleeBottomSheet extends StatelessWidget {
                   ),
                 ),
               ),
-            Text(title, style: theme.textTheme.titleLarge),
+            Row(
+              children: [
+                Expanded(child: Text(title, style: theme.textTheme.titleLarge)),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.of(context).maybePop(),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                ),
+              ],
+            ),
             const SizedBox(height: CaleeSpacing.md),
             Flexible(child: child),
           ],

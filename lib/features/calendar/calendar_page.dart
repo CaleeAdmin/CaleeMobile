@@ -143,7 +143,7 @@ class _CalendarPageState extends State<CalendarPage> {
 
   Future<void> _openCreateEventSheet() async {
     final writableCalendars = _controller.calendars
-        .where((c) => !c.readOnly)
+        .where((c) => !c.readOnly && !c.isExternal)
         .toList();
 
     if (writableCalendars.isEmpty) {
@@ -190,14 +190,23 @@ class _CalendarPageState extends State<CalendarPage> {
 
   void _openEventActions(ClientEvent event) {
     final calendar = _controller.calendarForEvent(event);
-    final canWrite = calendar != null && !calendar.readOnly;
+    final isReadOnly =
+        calendar == null ||
+        calendar.readOnly ||
+        calendar.isExternal ||
+        event.isReadOnly;
 
-    if (!canWrite) {
+    if (isReadOnly) {
+      final isGoogle =
+          event.isGoogleEvent || (calendar?.isGoogleCalendar ?? false);
+      final message = isGoogle
+          ? 'This event comes from Google Calendar. Edit it in Google Calendar.'
+          : event.recurring
+          ? 'This recurring event is from a read-only calendar.\nYou can view it, but changes must be made in the original calendar.'
+          : 'This event is from a read-only calendar.\nYou can view it, but changes must be made in the original calendar.';
       CaleeActionSheet.show(
         context: context,
-        title: event.recurring
-            ? 'This recurring event is from a read-only calendar.\nYou can view it, but changes must be made in the original calendar.'
-            : 'This event is from a read-only calendar.\nYou can view it, but changes must be made in the original calendar.',
+        title: message,
         actions: const [],
       );
       return;
@@ -463,6 +472,18 @@ class _CalendarPageState extends State<CalendarPage> {
           );
         }
 
+        if (_controller.calendarServiceErrors.isNotEmpty &&
+            _controller.calendars.isEmpty &&
+            _controller.events.isEmpty &&
+            !_controller.isLoading) {
+          return CaleeScaffold(
+            body: CalendarServiceConnectionErrorState(
+              errors: _controller.calendarServiceErrors,
+              onRetry: _controller.refresh,
+            ),
+          );
+        }
+
         final use24h = _use24h(context);
         final firstDayOfWeek =
             _controller.preferences.firstDayOfWeek == FirstDayOfWeek.monday
@@ -472,61 +493,74 @@ class _CalendarPageState extends State<CalendarPage> {
             ? 32.0
             : 36.0;
 
+        final serviceErrors = _controller.calendarServiceErrors;
+        final hasPartialServiceError =
+            serviceErrors.isNotEmpty && _controller.calendars.isNotEmpty;
+
+        final calendarView = ReadOnlyCalendarView(
+          selectedMonth: _controller.selectedMonth,
+          selectedDay: _controller.selectedDay,
+          today: _controller.today,
+          firstDayOfWeek: firstDayOfWeek,
+          events: _visibleDisplayEvents,
+          viewMode: _viewMode,
+          onViewModeChanged: (m) => setState(() => _viewMode = m),
+          onPreviousMonth: _controller.previousMonth,
+          onNextMonth: _controller.nextMonth,
+          onGoToToday: _controller.goToToday,
+          onSelectDay: _controller.selectDay,
+          onEventTap: _onDisplayEventTap,
+          use24h: use24h,
+          actionWidgets: [
+            IconButton(
+              onPressed: _openSearchSheet,
+              icon: const Icon(Icons.search),
+              iconSize: 22,
+              padding: EdgeInsets.zero,
+              constraints: BoxConstraints(
+                minWidth: 44,
+                minHeight: actionIconMinH,
+              ),
+              color: CaleeColors.primary,
+              tooltip: 'Search events',
+            ),
+            IconButton(
+              onPressed: _openCalendarChooser,
+              icon: const Icon(Icons.tune),
+              iconSize: 22,
+              padding: EdgeInsets.zero,
+              constraints: BoxConstraints(
+                minWidth: 44,
+                minHeight: actionIconMinH,
+              ),
+              color: CaleeColors.primary,
+              tooltip: 'Calendars',
+            ),
+            IconButton(
+              onPressed: _openCreateEventSheet,
+              icon: const Icon(Icons.add),
+              iconSize: 22,
+              padding: EdgeInsets.zero,
+              constraints: BoxConstraints(
+                minWidth: 44,
+                minHeight: actionIconMinH,
+              ),
+              color: CaleeColors.primary,
+              tooltip: 'Add event',
+            ),
+          ],
+        );
+
         return CaleeScaffold(
           body: SafeArea(
-            child: ReadOnlyCalendarView(
-              selectedMonth: _controller.selectedMonth,
-              selectedDay: _controller.selectedDay,
-              today: _controller.today,
-              firstDayOfWeek: firstDayOfWeek,
-              events: _visibleDisplayEvents,
-              viewMode: _viewMode,
-              onViewModeChanged: (m) => setState(() => _viewMode = m),
-              onPreviousMonth: _controller.previousMonth,
-              onNextMonth: _controller.nextMonth,
-              onGoToToday: _controller.goToToday,
-              onSelectDay: _controller.selectDay,
-              onEventTap: _onDisplayEventTap,
-              use24h: use24h,
-              actionWidgets: [
-                IconButton(
-                  onPressed: _openSearchSheet,
-                  icon: const Icon(Icons.search),
-                  iconSize: 22,
-                  padding: EdgeInsets.zero,
-                  constraints: BoxConstraints(
-                    minWidth: 44,
-                    minHeight: actionIconMinH,
-                  ),
-                  color: CaleeColors.primary,
-                  tooltip: 'Search events',
-                ),
-                IconButton(
-                  onPressed: _openCalendarChooser,
-                  icon: const Icon(Icons.tune),
-                  iconSize: 22,
-                  padding: EdgeInsets.zero,
-                  constraints: BoxConstraints(
-                    minWidth: 44,
-                    minHeight: actionIconMinH,
-                  ),
-                  color: CaleeColors.primary,
-                  tooltip: 'Calendars',
-                ),
-                IconButton(
-                  onPressed: _openCreateEventSheet,
-                  icon: const Icon(Icons.add),
-                  iconSize: 22,
-                  padding: EdgeInsets.zero,
-                  constraints: BoxConstraints(
-                    minWidth: 44,
-                    minHeight: actionIconMinH,
-                  ),
-                  color: CaleeColors.primary,
-                  tooltip: 'Add event',
-                ),
-              ],
-            ),
+            child: hasPartialServiceError
+                ? Column(
+                    children: [
+                      CalendarServiceWarningBanner(errors: serviceErrors),
+                      Expanded(child: calendarView),
+                    ],
+                  )
+                : calendarView,
           ),
         );
       },

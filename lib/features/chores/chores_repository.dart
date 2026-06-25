@@ -1,4 +1,5 @@
 import '../../data/api/calee_hub_client.dart';
+import '../../data/models/calendar_service_error.dart';
 import '../../data/models/client_bootstrap.dart';
 import '../../data/models/client_calendar.dart';
 import '../../data/models/client_chore.dart';
@@ -16,6 +17,7 @@ class ChoresOverview {
     required this.people,
     required this.from,
     required this.to,
+    this.calendarServiceErrors = const [],
   });
 
   final ClientCalendarList calendarList;
@@ -23,6 +25,7 @@ class ChoresOverview {
   final List<ClientPerson> people;
   final String from;
   final String to;
+  final List<CalendarServiceError> calendarServiceErrors;
 }
 
 // ─────────────────────────────────────────────
@@ -58,7 +61,20 @@ class ChoresRepository {
     required String from,
     required String to,
   }) async {
-    final calendarList = await hubClient.calendars(accessToken: accessToken);
+    ClientCalendarList calList = const ClientCalendarList(calendars: []);
+    final calendarServiceErrors = <CalendarServiceError>[];
+
+    try {
+      calList = await hubClient.calendars(accessToken: accessToken);
+      calendarServiceErrors.addAll(calList.serviceErrors);
+    } on CaleeHubException catch (e) {
+      if (isCalendarServiceConnectionCode(e.code)) {
+        calendarServiceErrors.add(CalendarServiceError.fromException(e));
+      } else {
+        rethrow;
+      }
+    }
+
     final choreList = await hubClient.chores(
       accessToken: accessToken,
       from: from,
@@ -81,11 +97,12 @@ class ChoresRepository {
     }
 
     return ChoresOverview(
-      calendarList: calendarList,
+      calendarList: calList,
       choreList: choreList,
       people: people,
       from: from,
       to: to,
+      calendarServiceErrors: calendarServiceErrors,
     );
   }
 
@@ -98,6 +115,46 @@ class ChoresRepository {
   }
 
   Future<void> createChore({
+    required ClientCalendar calendar,
+    required String title,
+    String? scheduledAt,
+    String? description,
+    String? recurrence,
+    required List<String> assigneePersonIds,
+    required int points,
+  }) async {
+    final seen = <String>{};
+    final deduped = assigneePersonIds
+        .map((id) => id.trim())
+        .where((id) => id.isNotEmpty && seen.add(id))
+        .toList();
+
+    if (deduped.isEmpty) {
+      await _createSingleChore(
+        calendar: calendar,
+        title: title,
+        scheduledAt: scheduledAt,
+        description: description,
+        recurrence: recurrence,
+        assigneePersonId: null,
+        points: points,
+      );
+    } else {
+      for (final personId in deduped) {
+        await _createSingleChore(
+          calendar: calendar,
+          title: title,
+          scheduledAt: scheduledAt,
+          description: description,
+          recurrence: recurrence,
+          assigneePersonId: personId,
+          points: points,
+        );
+      }
+    }
+  }
+
+  Future<void> _createSingleChore({
     required ClientCalendar calendar,
     required String title,
     String? scheduledAt,

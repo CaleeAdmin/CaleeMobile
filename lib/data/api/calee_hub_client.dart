@@ -15,18 +15,18 @@ import '../models/client_event_draft.dart';
 import '../models/client_person.dart';
 import '../models/client_profile.dart';
 import '../models/client_task.dart';
+import '../models/external_calendar_connection.dart';
 
 class CaleeHubClient {
   CaleeHubClient({Uri? baseUri, HttpClient? httpClient})
     : baseUri = baseUri ?? Uri.parse('https://hub.calee.com.au'),
-      _httpClient =
-          httpClient ??
-          (HttpClient()
-            ..connectionTimeout = const Duration(seconds: 25)
-            ..idleTimeout = const Duration(seconds: 30));
+      _isInjectedClient = httpClient != null {
+    _httpClient = httpClient ?? _newHttpClient();
+  }
 
   final Uri baseUri;
-  final HttpClient _httpClient;
+  final bool _isInjectedClient;
+  late HttpClient _httpClient;
 
   static const _kTimeout = Duration(seconds: 25);
   static const _kImageAiTimeout = Duration(seconds: 90);
@@ -43,6 +43,24 @@ class CaleeHubClient {
 
   // Call this when signing out or signing in to discard any cached token.
   void clearAuthCache() => _refreshedToken = null;
+
+  HttpClient _newHttpClient() {
+    return HttpClient()
+      ..connectionTimeout = const Duration(seconds: 25)
+      ..idleTimeout = const Duration(seconds: 30);
+  }
+
+  /// Closes the current HTTP transport and opens a fresh one.
+  /// Safe to call after returning from background; no-op for injected clients.
+  void resetTransport() {
+    if (_isInjectedClient) return;
+    try {
+      _httpClient.close(force: true);
+    } catch (_) {
+      // Ignore close failures.
+    }
+    _httpClient = _newHttpClient();
+  }
 
   Future<ClientLoginResult> login({
     required String email,
@@ -1101,7 +1119,144 @@ class CaleeHubClient {
     return ClientProfile.fromJson(profileJson);
   }
 
-  // ── Auth retry helper ────────────────────────────────────────────────────────────────────────────
+  // ── External calendar connections ─────────────────────────────────────────────────────
+
+  Future<List<ExternalCalendarProvider>> externalCalendarProviders({
+    required String accessToken,
+  }) async {
+    final json = await _getJson(
+      '/client/v1/external-calendar-providers',
+      accessToken: accessToken,
+    );
+    final data = _data(json);
+    final list = data['providers'] as List<dynamic>? ?? const [];
+    return list
+        .whereType<Map<String, dynamic>>()
+        .map(ExternalCalendarProvider.fromJson)
+        .toList();
+  }
+
+  Future<String> startExternalCalendarOAuth({
+    required String accessToken,
+    required String providerKey,
+    String accessMode = 'read_only',
+  }) async {
+    final json = await _postJson(
+      '/client/v1/external-calendar-connections/oauth/start',
+      accessToken: accessToken,
+      body: {'providerKey': providerKey, 'accessMode': accessMode},
+    );
+    final data = _data(json);
+    final url = data['authorizationUrl'] as String?;
+    if (url == null || url.trim().isEmpty) {
+      throw const CaleeHubException(
+        statusCode: 0,
+        message: 'Could not start Google sign-in. Please try again.',
+      );
+    }
+    return url;
+  }
+
+  Future<List<ExternalCalendarConnection>> externalCalendarConnections({
+    required String accessToken,
+  }) async {
+    final json = await _getJson(
+      '/client/v1/external-calendar-connections',
+      accessToken: accessToken,
+    );
+    final data = _data(json);
+    final list = data['connections'] as List<dynamic>? ?? const [];
+    return list
+        .whereType<Map<String, dynamic>>()
+        .map(ExternalCalendarConnection.fromJson)
+        .toList();
+  }
+
+  Future<List<ExternalCalendar>> externalCalendarsForConnection({
+    required String accessToken,
+    required String connectionId,
+  }) async {
+    final encodedId = Uri.encodeComponent(connectionId);
+    final json = await _getJson(
+      '/client/v1/external-calendar-connections/$encodedId/calendars',
+      accessToken: accessToken,
+    );
+    final data = _data(json);
+    final list = data['calendars'] as List<dynamic>? ?? const [];
+    return list
+        .whereType<Map<String, dynamic>>()
+        .map(ExternalCalendar.fromJson)
+        .toList();
+  }
+
+  Future<ExternalCalendar> updateExternalCalendar({
+    required String accessToken,
+    required String externalCalendarId,
+    bool? syncEnabled,
+    String? displayName,
+    String? color,
+    ExternalCalendarPrivacySettings? privacySettings,
+  }) async {
+    final body = <String, dynamic>{};
+    if (syncEnabled != null) body['syncEnabled'] = syncEnabled;
+    if (displayName != null) body['displayName'] = displayName;
+    if (color != null) body['color'] = color;
+    if (privacySettings != null) {
+      body['privacySettings'] = privacySettings.toJson();
+    }
+
+    if (body.isEmpty) {
+      throw const CaleeHubException(
+        statusCode: 0,
+        message: 'No external calendar updates provided',
+      );
+    }
+
+    final encodedId = Uri.encodeComponent(externalCalendarId);
+    final json = await _putJson(
+      '/client/v1/external-calendars/$encodedId',
+      accessToken: accessToken,
+      body: body,
+    );
+    final data = _data(json);
+    return ExternalCalendar.fromJson(
+      data['calendar'] as Map<String, dynamic>? ?? data,
+    );
+  }
+
+  Future<ExternalCalendarSyncResult> syncExternalCalendarNow({
+    required String accessToken,
+    required String externalCalendarId,
+  }) async {
+    final encodedId = Uri.encodeComponent(externalCalendarId);
+    final json = await _postJson(
+      '/client/v1/external-calendars/$encodedId/sync-now',
+      accessToken: accessToken,
+      body: {},
+    );
+    final data = _data(json);
+    final sync = data['sync'];
+    if (sync is! Map<String, dynamic>) {
+      throw const CaleeHubException(
+        statusCode: 0,
+        message: 'Could not sync Google Calendar. Please try again.',
+      );
+    }
+    return ExternalCalendarSyncResult.fromJson(sync);
+  }
+
+  Future<void> disconnectExternalCalendarConnection({
+    required String accessToken,
+    required String connectionId,
+  }) async {
+    final encodedId = Uri.encodeComponent(connectionId);
+    await _deleteJson(
+      '/client/v1/external-calendar-connections/$encodedId',
+      accessToken: accessToken,
+    );
+  }
+
+  // ── Auth retry helper ──────────────────────────────────────────────────────────────────
   //
   // On 401, calls onUnauthorized() once to get a fresh token and retries.
   // Also uses any previously refreshed token so feature pages don't need to
@@ -1124,7 +1279,7 @@ class CaleeHubClient {
     }
   }
 
-  // ── Low-level HTTP helpers ───────────────────────────────────────────────────────────────────────────
+  // ── Low-level HTTP helpers ────────────────────────────────────────────────────────────────────────
 
   Future<Map<String, dynamic>> _deleteJson(
     String path, {
@@ -1154,6 +1309,36 @@ class CaleeHubClient {
         request.headers.contentType = ContentType.json;
         request.write(jsonEncode(body));
       }
+
+      return _readJsonResponse(await request.close(), endpoint: path);
+    });
+  }
+
+  Future<Map<String, dynamic>> _putJson(
+    String path, {
+    required String accessToken,
+    required Map<String, dynamic> body,
+  }) {
+    return _withRetry(
+      (token) => _doPutJson(path, accessToken: token, body: body),
+      accessToken,
+    );
+  }
+
+  Future<Map<String, dynamic>> _doPutJson(
+    String path, {
+    required String accessToken,
+    required Map<String, dynamic> body,
+  }) {
+    return _executeRequest(() async {
+      final request = await _httpClient.putUrl(baseUri.resolve(path));
+      request.headers.contentType = ContentType.json;
+      request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+      request.headers.set(
+        HttpHeaders.authorizationHeader,
+        'Bearer $accessToken',
+      );
+      request.write(jsonEncode(body));
 
       return _readJsonResponse(await request.close(), endpoint: path);
     });
@@ -1231,14 +1416,42 @@ class CaleeHubClient {
     });
   }
 
+  // GET with one safe retry on transient transport failures (stale keep-alive).
+  // POST/PUT/PATCH/DELETE are not retried here; only idempotent GETs are safe.
   Future<Map<String, dynamic>> _getJson(
     String path, {
     required String accessToken,
-  }) {
-    return _withRetry(
-      (token) => _doGetJson(path, accessToken: token),
-      accessToken,
-    );
+  }) async {
+    try {
+      return await _withRetry(
+        (token) => _doGetJson(path, accessToken: token),
+        accessToken,
+      );
+    } catch (error) {
+      if (_isTransientTransportError(error)) {
+        if (kDebugMode) {
+          debugPrint(
+            'CaleeHubClient: transient GET transport error for $path; '
+            'retrying once: $error',
+          );
+        }
+        resetTransport();
+        return await _withRetry(
+          (token) => _doGetJson(path, accessToken: token),
+          accessToken,
+        );
+      }
+      rethrow;
+    }
+  }
+
+  bool _isTransientTransportError(Object error) {
+    if (error is HttpException) {
+      return error.message.contains(
+        'Connection closed before full header was received',
+      );
+    }
+    return error is SocketException || error is HandshakeException;
   }
 
   Future<Map<String, dynamic>> _doGetJson(
@@ -1300,9 +1513,13 @@ class CaleeHubClient {
 
       if (decoded is Map<String, dynamic>) {
         final errorMap = decoded['error'];
+        String? serviceId;
+        String? serviceName;
         if (errorMap is Map<String, dynamic>) {
           code = errorMap['code'] as String?;
           message = errorMap['message'] as String?;
+          serviceId = errorMap['serviceId'] as String?;
+          serviceName = errorMap['serviceName'] as String?;
         } else {
           message = decoded['message'] as String?;
         }
@@ -1310,6 +1527,23 @@ class CaleeHubClient {
         if (meta is Map<String, dynamic>) {
           metaRequestId = meta['requestId'] as String?;
         }
+
+        final requestId =
+            response.headers.value('x-calee-request-id') ??
+            response.headers.value('x-request-id') ??
+            metaRequestId;
+
+        throw CaleeHubException(
+          statusCode: response.statusCode,
+          message: message is String && message.trim().isNotEmpty
+              ? message
+              : 'Hub request failed',
+          code: code,
+          requestId: requestId,
+          endpoint: endpoint,
+          serviceId: serviceId,
+          serviceName: serviceName,
+        );
       }
 
       final requestId =
@@ -1319,9 +1553,7 @@ class CaleeHubClient {
 
       throw CaleeHubException(
         statusCode: response.statusCode,
-        message: message is String && message.trim().isNotEmpty
-            ? message
-            : 'Hub request failed',
+        message: 'Hub request failed',
         code: code,
         requestId: requestId,
         endpoint: endpoint,
@@ -1360,6 +1592,8 @@ class CaleeHubException implements Exception {
     this.code,
     this.requestId,
     this.endpoint,
+    this.serviceId,
+    this.serviceName,
   });
 
   final int statusCode;
@@ -1367,6 +1601,8 @@ class CaleeHubException implements Exception {
   final String? code;
   final String? requestId;
   final String? endpoint;
+  final String? serviceId;
+  final String? serviceName;
 
   String get debugSummary {
     final parts = <String>['HTTP $statusCode'];

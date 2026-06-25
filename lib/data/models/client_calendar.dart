@@ -1,5 +1,10 @@
+import 'calendar_service_error.dart';
+
 class ClientCalendarList {
-  const ClientCalendarList({required this.calendars});
+  const ClientCalendarList({
+    required this.calendars,
+    this.serviceErrors = const [],
+  });
 
   factory ClientCalendarList.fromJson(Map<String, dynamic> json) {
     return ClientCalendarList(
@@ -7,10 +12,15 @@ class ClientCalendarList {
           .whereType<Map<String, dynamic>>()
           .map(ClientCalendar.fromJson)
           .toList(),
+      serviceErrors: (json['serviceErrors'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(CalendarServiceError.fromJson)
+          .toList(),
     );
   }
 
   final List<ClientCalendar> calendars;
+  final List<CalendarServiceError> serviceErrors;
 }
 
 // Calee calendar model
@@ -55,6 +65,11 @@ class ClientCalendar {
     required this.source,
     this.color,
     this.subscriptionUrl,
+    this.providerKey,
+    this.accessMode,
+    this.sourceOfTruthPolicy,
+    this.syncStatus,
+    this.lastSyncedAt,
   });
 
   factory ClientCalendar.fromJson(Map<String, dynamic> json) {
@@ -75,6 +90,11 @@ class ClientCalendar {
       isSubscription: json['isSubscription'] as bool? ?? false,
       subscriptionUrl: json['subscriptionUrl'] as String?,
       source: json['source'] as String? ?? '',
+      providerKey: json['providerKey'] as String?,
+      accessMode: json['accessMode'] as String?,
+      sourceOfTruthPolicy: json['sourceOfTruthPolicy'] as String?,
+      syncStatus: json['syncStatus'] as String?,
+      lastSyncedAt: json['lastSyncedAt'] as String?,
     );
   }
 
@@ -92,10 +112,22 @@ class ClientCalendar {
   final bool isSubscription;
   final String? subscriptionUrl;
   final String source;
+  final String? providerKey;
+  final String? accessMode;
+  final String? sourceOfTruthPolicy;
+  final String? syncStatus;
+  final String? lastSyncedAt;
 
   bool get isCalendarKind => primaryKind == 'calendar';
   bool get isTaskKind => primaryKind == 'tasks';
   bool get isChoreKind => primaryKind == 'chores';
+
+  bool get isExternal =>
+      source == 'external' ||
+      serviceId == 'external' ||
+      id.startsWith('external:');
+
+  bool get isGoogleCalendar => providerKey == 'google_calendar';
 }
 
 class ClientEventList {
@@ -139,6 +171,9 @@ class ClientEvent {
     this.seriesId,
     this.recurrenceId,
     this.occurrenceId,
+    this.providerKey,
+    this.readOnly = false,
+    this.timeZone,
   });
 
   factory ClientEvent.fromJson(Map<String, dynamic> json) {
@@ -159,6 +194,9 @@ class ClientEvent {
       seriesId: json['seriesId'] as String?,
       recurrenceId: json['recurrenceId'] as String?,
       occurrenceId: json['occurrenceId'] as String?,
+      providerKey: json['providerKey'] as String?,
+      readOnly: json['readOnly'] as bool? ?? false,
+      timeZone: json['timeZone'] as String?,
     );
   }
 
@@ -178,8 +216,22 @@ class ClientEvent {
   final String? seriesId;
   final String? recurrenceId;
   final String? occurrenceId;
+  final String? providerKey;
+  final bool readOnly;
+  final String? timeZone;
+
+  bool get isExternal =>
+      source == 'external' ||
+      serviceId == 'external' ||
+      id.startsWith('external:');
+
+  bool get isReadOnly => readOnly || isExternal;
+
+  bool get isGoogleEvent => providerKey == 'google_calendar';
 
   String get writableEventId {
+    if (isReadOnly) return id;
+
     if (recurring && (seriesId ?? '').trim().isNotEmpty) {
       return seriesId!.trim();
     }

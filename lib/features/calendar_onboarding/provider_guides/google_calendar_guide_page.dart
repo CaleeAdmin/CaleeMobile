@@ -1,18 +1,13 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../data/api/calee_hub_client.dart';
 import '../../../data/models/client_bootstrap.dart';
 import '../../../ui/calee_design.dart';
 import 'generic_calendar_link_page.dart';
+import 'google_calendar_selection_page.dart';
 
-enum _GoogleGuideView { main, continueOnComputer, phoneFallback }
-
-const _kWebsiteGuideUrl = 'calee.com.au/start';
-const _kWebsiteGuideFullUrl = 'https://calee.com.au/start';
+enum _GoogleGuideView { main, waitingForBrowser, connectionNotFound }
 
 class GoogleCalendarGuidePage extends StatefulWidget {
   const GoogleCalendarGuidePage({
@@ -22,7 +17,7 @@ class GoogleCalendarGuidePage extends StatefulWidget {
     required this.accountId,
     required this.onDone,
     required this.onViewCalendar,
-    this.launchWebsiteGuide,
+    this.launchUrl,
     super.key,
   });
 
@@ -33,9 +28,8 @@ class GoogleCalendarGuidePage extends StatefulWidget {
   final VoidCallback onDone;
   final VoidCallback onViewCalendar;
 
-  /// Optional launcher override used by widget tests so the guide-open action
-  /// can be verified without depending on the platform url_launcher channel.
-  final Future<void> Function(String url)? launchWebsiteGuide;
+  /// Optional URL launcher override used by widget tests.
+  final Future<void> Function(String url)? launchUrl;
 
   @override
   State<GoogleCalendarGuidePage> createState() =>
@@ -44,37 +38,99 @@ class GoogleCalendarGuidePage extends StatefulWidget {
 
 class _GoogleCalendarGuidePageState extends State<GoogleCalendarGuidePage> {
   _GoogleGuideView _view = _GoogleGuideView.main;
-  _GoogleGuideView? _previousView;
+  bool _isStarting = false;
+  bool _isCheckingConnection = false;
+  String? _errorMessage;
 
-  void _goTo(_GoogleGuideView view) {
+  Future<void> _startOAuth() async {
     setState(() {
-      _previousView = _view;
-      _view = view;
+      _isStarting = true;
+      _errorMessage = null;
     });
-  }
 
-  void _goBack() {
-    setState(() {
-      _view = _previousView ?? _GoogleGuideView.main;
-      _previousView = null;
-    });
-  }
-
-  Future<void> _launchWebsiteGuide() async {
-    final testLauncher = widget.launchWebsiteGuide;
-    if (testLauncher != null) {
-      await testLauncher(_kWebsiteGuideFullUrl);
-    } else {
-      await launchUrl(
-        Uri.parse(_kWebsiteGuideFullUrl),
-        mode: LaunchMode.externalApplication,
+    try {
+      final url = await widget.hubClient.startExternalCalendarOAuth(
+        accessToken: widget.accessToken,
+        providerKey: 'google_calendar',
+        accessMode: 'read_only',
       );
-    }
 
-    // The button intentionally keeps the user on this screen. Schedule a frame
-    // after the async launch completes so widget tests that tap the button can
-    // settle before asserting that the launch request was made.
-    if (mounted) setState(() {});
+      final launch = widget.launchUrl;
+      if (launch != null) {
+        await launch(url);
+      } else {
+        await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+      }
+
+      if (mounted) {
+        setState(() {
+          _view = _GoogleGuideView.waitingForBrowser;
+          _isStarting = false;
+        });
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _isStarting = false;
+          _errorMessage = error is CaleeHubException
+              ? error.message
+              : 'Could not start Google sign-in. Please try again.';
+        });
+      }
+    }
+  }
+
+  Future<void> _checkConnection() async {
+    setState(() {
+      _isCheckingConnection = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final connections = await widget.hubClient.externalCalendarConnections(
+        accessToken: widget.accessToken,
+      );
+
+      final googleConnection = connections
+          .where((c) => c.isGoogle && c.isActive)
+          .toList();
+
+      if (!mounted) return;
+
+      if (googleConnection.isNotEmpty) {
+        final connection = googleConnection.first;
+        debugPrint(
+          '[GoogleCalendarGuide] active Google connection found: id=${connection.id}',
+        );
+        Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => GoogleCalendarSelectionPage(
+              hubClient: widget.hubClient,
+              accessToken: widget.accessToken,
+              connection: connection,
+              onViewCalendar: widget.onViewCalendar,
+              onDone: widget.onDone,
+            ),
+          ),
+        );
+        setState(() => _isCheckingConnection = false);
+      } else {
+        debugPrint('[GoogleCalendarGuide] no active Google connection found');
+        setState(() {
+          _isCheckingConnection = false;
+          _view = _GoogleGuideView.connectionNotFound;
+        });
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _isCheckingConnection = false;
+          _errorMessage = error is CaleeHubException
+              ? error.message
+              : 'Could not check your connection. Please try again.';
+        });
+      }
+    }
   }
 
   void _openLink(BuildContext context) {
@@ -108,33 +164,34 @@ class _GoogleCalendarGuidePageState extends State<GoogleCalendarGuidePage> {
     return CaleeScaffold(
       appBar: AppBar(
         title: const Text('Add Google Calendar'),
-        leading: _view == _GoogleGuideView.main
-            ? null
-            : BackButton(onPressed: _goBack),
+        leading: _view != _GoogleGuideView.main
+            ? BackButton(
+                onPressed: () => setState(() => _view = _GoogleGuideView.main),
+              )
+            : null,
       ),
       body: AnimatedSwitcher(
         duration: const Duration(milliseconds: 200),
         child: switch (_view) {
           _GoogleGuideView.main => _MainView(
             key: const ValueKey('main'),
-            onContinueOnComputer: () =>
-                _goTo(_GoogleGuideView.continueOnComputer),
-            onPasteLink: () => _openLink(context),
-            onNoComputer: () => _goTo(_GoogleGuideView.phoneFallback),
-          ),
-          _GoogleGuideView.continueOnComputer => _ComputerView(
-            key: const ValueKey('computer'),
-            onCopyWebsiteAddress: () {
-              Clipboard.setData(const ClipboardData(text: _kWebsiteGuideUrl));
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Website address copied')),
-              );
-            },
-            onOpenGuideOnPhone: () => unawaited(_launchWebsiteGuide()),
+            isStarting: _isStarting,
+            errorMessage: _errorMessage,
+            onConnect: _startOAuth,
             onPasteLink: () => _openLink(context),
           ),
-          _GoogleGuideView.phoneFallback => _PhoneFallbackView(
-            key: const ValueKey('phone'),
+          _GoogleGuideView.waitingForBrowser => _WaitingView(
+            key: const ValueKey('waiting'),
+            isChecking: _isCheckingConnection,
+            errorMessage: _errorMessage,
+            onFinished: _checkConnection,
+            onPasteLink: () => _openLink(context),
+          ),
+          _GoogleGuideView.connectionNotFound => _NotFoundView(
+            key: const ValueKey('notfound'),
+            isChecking: _isCheckingConnection,
+            errorMessage: _errorMessage,
+            onCheckAgain: _checkConnection,
             onPasteLink: () => _openLink(context),
           ),
         },
@@ -143,19 +200,21 @@ class _GoogleCalendarGuidePageState extends State<GoogleCalendarGuidePage> {
   }
 }
 
-// ── Main view ──────────────────────────────────────────────────────────────
+// ── Main view ──────────────────────────────────────────────────────────
 
 class _MainView extends StatelessWidget {
   const _MainView({
-    required this.onContinueOnComputer,
+    required this.isStarting,
+    required this.onConnect,
     required this.onPasteLink,
-    required this.onNoComputer,
+    this.errorMessage,
     super.key,
   });
 
-  final VoidCallback onContinueOnComputer;
+  final bool isStarting;
+  final VoidCallback onConnect;
   final VoidCallback onPasteLink;
-  final VoidCallback onNoComputer;
+  final String? errorMessage;
 
   @override
   Widget build(BuildContext context) {
@@ -171,33 +230,45 @@ class _MainView extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            'Google Calendar is easiest to connect from a computer.',
+            'Connect Google Calendar to show your existing Google events on '
+            'your Calee display. Google Calendar stays in Google, and events '
+            'are read-only in Calee.',
             style: theme.textTheme.bodyMedium?.copyWith(
               color: CaleeColors.textSecondary,
             ),
           ),
-          const SizedBox(height: CaleeSpacing.sm),
+          const SizedBox(height: CaleeSpacing.xs),
           Text(
-            'Calee will show your Google Calendar events on your Calee display. '
-            'Your Google Calendar stays in Google, and you still edit events in Google Calendar.',
-            style: theme.textTheme.bodyMedium?.copyWith(
+            'You will sign in with Google in your browser. Calee does not see '
+            'your Google password.',
+            style: theme.textTheme.bodySmall?.copyWith(
               color: CaleeColors.textSecondary,
             ),
           ),
+          if (errorMessage != null) ...[
+            const SizedBox(height: CaleeSpacing.sm),
+            Text(
+              errorMessage!,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: CaleeColors.destructive,
+              ),
+            ),
+          ],
           const SizedBox(height: CaleeSpacing.sectionSpacing),
           FilledButton(
-            onPressed: onContinueOnComputer,
-            child: const Text('Continue on computer'),
+            onPressed: isStarting ? null : onConnect,
+            child: isStarting
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Text('Connect Google Calendar'),
           ),
           const SizedBox(height: CaleeSpacing.sm),
           OutlinedButton(
             onPressed: onPasteLink,
-            child: const Text('Paste the link in Calee'),
-          ),
-          const SizedBox(height: CaleeSpacing.sm),
-          TextButton(
-            onPressed: onNoComputer,
-            child: const Text('No computer available?'),
+            child: const Text('Paste calendar link instead'),
           ),
         ],
       ),
@@ -205,19 +276,21 @@ class _MainView extends StatelessWidget {
   }
 }
 
-// ── Computer view ─────────────────────────────────────────────────────────
+// ── Waiting for browser view ─────────────────────────────────────────────────
 
-class _ComputerView extends StatelessWidget {
-  const _ComputerView({
-    required this.onCopyWebsiteAddress,
-    required this.onOpenGuideOnPhone,
+class _WaitingView extends StatelessWidget {
+  const _WaitingView({
+    required this.isChecking,
+    required this.onFinished,
     required this.onPasteLink,
+    this.errorMessage,
     super.key,
   });
 
-  final VoidCallback onCopyWebsiteAddress;
-  final VoidCallback onOpenGuideOnPhone;
+  final bool isChecking;
+  final VoidCallback onFinished;
   final VoidCallback onPasteLink;
+  final String? errorMessage;
 
   @override
   Widget build(BuildContext context) {
@@ -233,99 +306,7 @@ class _ComputerView extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            'Use the website guide on your computer so you can follow the Google Calendar steps more easily.',
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: CaleeColors.textSecondary,
-            ),
-          ),
-          const SizedBox(height: CaleeSpacing.md),
-          Text(
-            'On your computer, go to:',
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: CaleeColors.textSecondary,
-            ),
-          ),
-          const SizedBox(height: CaleeSpacing.xs),
-          Text(
-            _kWebsiteGuideUrl,
-            style: theme.textTheme.bodyLarge?.copyWith(
-              color: CaleeColors.primary,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: CaleeSpacing.xs),
-          Text(
-            'Then choose "Add Google Calendar to Calee".',
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: CaleeColors.textSecondary,
-            ),
-          ),
-          const SizedBox(height: CaleeSpacing.md),
-          CaleeSection(
-            children: [
-              _StepRow(
-                number: 1,
-                text: 'On your computer, open $_kWebsiteGuideUrl.',
-              ),
-              _StepRow(
-                number: 2,
-                text: 'Choose "Add Google Calendar to Calee".',
-              ),
-              _StepRow(
-                number: 3,
-                text: 'Follow the guide to open Google Calendar.',
-              ),
-              _StepRow(
-                number: 4,
-                text: 'Copy your Secret address in iCal format.',
-              ),
-              _StepRow(number: 5, text: 'Open Calee Portal from the guide.'),
-              _StepRow(number: 6, text: 'Paste the link into Calee.'),
-            ],
-          ),
-          const SizedBox(height: CaleeSpacing.sectionSpacing),
-          FilledButton(
-            onPressed: onCopyWebsiteAddress,
-            child: const Text('Copy website address'),
-          ),
-          const SizedBox(height: CaleeSpacing.sm),
-          OutlinedButton(
-            onPressed: onOpenGuideOnPhone,
-            child: const Text('Open guide on this phone'),
-          ),
-          const SizedBox(height: CaleeSpacing.sm),
-          TextButton(
-            onPressed: onPasteLink,
-            child: const Text('Paste the link in Calee'),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ── Phone fallback view ───────────────────────────────────────────────────
-
-class _PhoneFallbackView extends StatelessWidget {
-  const _PhoneFallbackView({required this.onPasteLink, super.key});
-
-  final VoidCallback onPasteLink;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(
-        CaleeSpacing.pagePadding,
-        CaleeSpacing.md,
-        CaleeSpacing.pagePadding,
-        96,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            'Use your phone instead',
+            'Sign in to Google in your browser',
             style: theme.textTheme.titleMedium?.copyWith(
               color: CaleeColors.textPrimary,
               fontWeight: FontWeight.w600,
@@ -333,35 +314,36 @@ class _PhoneFallbackView extends StatelessWidget {
           ),
           const SizedBox(height: CaleeSpacing.sm),
           Text(
-            'This is harder on a phone, but you can try using desktop mode in your browser.',
+            'Follow the steps in your browser to sign in with Google. '
+            'Once you have finished, come back here and tap the button below.',
             style: theme.textTheme.bodyMedium?.copyWith(
               color: CaleeColors.textSecondary,
             ),
           ),
-          const SizedBox(height: CaleeSpacing.md),
-          CaleeSection(
-            children: [
-              _StepRow(
-                number: 1,
-                text: 'Open Google Calendar in your phone browser.',
+          if (errorMessage != null) ...[
+            const SizedBox(height: CaleeSpacing.sm),
+            Text(
+              errorMessage!,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: CaleeColors.destructive,
               ),
-              _StepRow(number: 2, text: 'Turn on "Desktop site".'),
-              _StepRow(number: 3, text: 'Open the calendar\'s settings.'),
-              _StepRow(
-                number: 4,
-                text:
-                    'Under "Integrate calendar", copy the Secret address in iCal format.',
-              ),
-              _StepRow(
-                number: 5,
-                text: 'Come back to Calee and paste the link.',
-              ),
-            ],
-          ),
+            ),
+          ],
           const SizedBox(height: CaleeSpacing.sectionSpacing),
           FilledButton(
+            onPressed: isChecking ? null : onFinished,
+            child: isChecking
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Text('I finished in browser'),
+          ),
+          const SizedBox(height: CaleeSpacing.sm),
+          TextButton(
             onPressed: onPasteLink,
-            child: const Text('Paste the link in Calee'),
+            child: const Text('Paste calendar link instead'),
           ),
         ],
       ),
@@ -369,42 +351,74 @@ class _PhoneFallbackView extends StatelessWidget {
   }
 }
 
-// ── Step row widget ───────────────────────────────────────────────────────
+// ── Connection not found view ────────────────────────────────────────────────
 
-class _StepRow extends StatelessWidget {
-  const _StepRow({required this.number, required this.text});
+class _NotFoundView extends StatelessWidget {
+  const _NotFoundView({
+    required this.isChecking,
+    required this.onCheckAgain,
+    required this.onPasteLink,
+    this.errorMessage,
+    super.key,
+  });
 
-  final int number;
-  final String text;
+  final bool isChecking;
+  final VoidCallback onCheckAgain;
+  final VoidCallback onPasteLink;
+  final String? errorMessage;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(
-        horizontal: CaleeSpacing.md,
-        vertical: 8,
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(
+        CaleeSpacing.pagePadding,
+        CaleeSpacing.md,
+        CaleeSpacing.pagePadding,
+        96,
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          SizedBox(
-            width: 20,
-            child: Text(
-              '$number.',
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: CaleeColors.textSecondary,
-              ),
+          Text(
+            'Connection not found yet',
+            style: theme.textTheme.titleMedium?.copyWith(
+              color: CaleeColors.textPrimary,
+              fontWeight: FontWeight.w600,
             ),
           ),
-          const SizedBox(width: CaleeSpacing.sm),
-          Expanded(
-            child: Text(
-              text,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: CaleeColors.textPrimary,
+          const SizedBox(height: CaleeSpacing.sm),
+          Text(
+            'We could not find an active Google connection. If you completed '
+            'the sign-in steps, tap Check again. Otherwise go back and try again.',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: CaleeColors.textSecondary,
+            ),
+          ),
+          if (errorMessage != null) ...[
+            const SizedBox(height: CaleeSpacing.sm),
+            Text(
+              errorMessage!,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: CaleeColors.destructive,
               ),
             ),
+          ],
+          const SizedBox(height: CaleeSpacing.sectionSpacing),
+          FilledButton(
+            onPressed: isChecking ? null : onCheckAgain,
+            child: isChecking
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Text('Check again'),
+          ),
+          const SizedBox(height: CaleeSpacing.sm),
+          TextButton(
+            onPressed: onPasteLink,
+            child: const Text('Paste calendar link instead'),
           ),
         ],
       ),

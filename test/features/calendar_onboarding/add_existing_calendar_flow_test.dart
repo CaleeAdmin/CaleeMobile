@@ -27,6 +27,24 @@ class _StubHubClient extends CaleeHubClient {
   }
 }
 
+class _StubOAuthHubClient extends CaleeHubClient {
+  _StubOAuthHubClient() : super(baseUri: Uri.parse('http://localhost'));
+
+  @override
+  Future<ClientCalendarList> calendars({required String accessToken}) async {
+    return const ClientCalendarList(calendars: []);
+  }
+
+  @override
+  Future<String> startExternalCalendarOAuth({
+    required String accessToken,
+    required String providerKey,
+    String accessMode = 'read_only',
+  }) async {
+    return 'https://accounts.google.com/oauth';
+  }
+}
+
 ClientService _sharingService() => const ClientService(
   id: 'svc1',
   displayName: 'Calee',
@@ -96,17 +114,18 @@ Widget _wrapGenericLink({bool showExamples = true}) => MaterialApp(
 );
 
 Widget _wrapGoogleGuide({
-  Future<void> Function(String url)? launchWebsiteGuide,
+  Future<void> Function(String url)? launchUrl,
+  CaleeHubClient? hubClient,
 }) => MaterialApp(
   theme: CaleeTheme.buildThemeData(),
   home: GoogleCalendarGuidePage(
-    hubClient: _StubHubClient(),
+    hubClient: hubClient ?? _StubHubClient(),
     accessToken: 'token',
     services: const [],
     accountId: 'acct1',
     onDone: () {},
     onViewCalendar: () {},
-    launchWebsiteGuide: launchWebsiteGuide,
+    launchUrl: launchUrl,
   ),
 );
 
@@ -215,10 +234,30 @@ void main() {
     expect(find.textContaining('school calendar'), findsWidgets);
   });
 
+  testWidgets('Google guide shows Connect Google Calendar button', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_wrapGoogleGuide());
+
+    expect(find.text('Connect Google Calendar'), findsOneWidget);
+    expect(
+      find.textContaining('Calee does not see your Google password'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('Google guide exposes Paste calendar link instead fallback', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_wrapGoogleGuide());
+
+    expect(find.text('Paste calendar link instead'), findsOneWidget);
+  });
+
   testWidgets('Google paste-link form is provider-specific', (tester) async {
     await tester.pumpWidget(_wrapGoogleGuide());
 
-    await tester.tap(find.text('Paste the link in Calee'));
+    await tester.tap(find.text('Paste calendar link instead'));
     await tester.pumpAndSettle();
 
     expect(find.text('Add Google Calendar link'), findsOneWidget);
@@ -228,53 +267,26 @@ void main() {
   });
 
   testWidgets(
-    'Google computer view opens website guide via injected launcher',
+    'Google Connect button launches OAuth URL via injected launcher',
     (tester) async {
       final launchedUrls = <String>[];
 
       await tester.pumpWidget(
         _wrapGoogleGuide(
-          launchWebsiteGuide: (url) async {
-            launchedUrls.add(url);
-          },
+          hubClient: _StubOAuthHubClient(),
+          launchUrl: (url) async => launchedUrls.add(url),
         ),
       );
 
-      await tester.tap(find.text('Continue on computer'));
+      await tester.tap(find.text('Connect Google Calendar'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
       await tester.pumpAndSettle();
 
-      expect(find.textContaining('calee.com.au/start'), findsWidgets);
-      expect(find.text('Copy website address'), findsOneWidget);
-
-      await tester.ensureVisible(find.text('Open guide on this phone'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Open guide on this phone'));
-      await tester.pumpAndSettle();
-
-      expect(launchedUrls, contains('https://calee.com.au/start'));
-      expect(find.text('Use your phone instead'), findsNothing);
+      expect(launchedUrls, contains('https://accounts.google.com/oauth'));
+      expect(find.text('I finished in browser'), findsOneWidget);
     },
   );
-
-  testWidgets('Google No computer available opens phone fallback', (
-    tester,
-  ) async {
-    final launchedUrls = <String>[];
-
-    await tester.pumpWidget(
-      _wrapGoogleGuide(
-        launchWebsiteGuide: (url) async {
-          launchedUrls.add(url);
-        },
-      ),
-    );
-
-    await tester.tap(find.text('No computer available?'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Use your phone instead'), findsOneWidget);
-    expect(launchedUrls, isEmpty);
-  });
 
   testWidgets('Apple guide copy is polished', (tester) async {
     await tester.pumpWidget(_wrapAppleGuide());
