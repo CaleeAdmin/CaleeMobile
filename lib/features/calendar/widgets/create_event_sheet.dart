@@ -471,6 +471,13 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
                 ],
               ),
             ),
+          SimpleDialogOption(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: Text(
+              'Cancel',
+              style: TextStyle(color: CaleeColors.primary),
+            ),
+          ),
         ],
       ),
     );
@@ -792,9 +799,23 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       // Sheet title
-                      Text(
-                        sheetTitle,
-                        style: Theme.of(context).textTheme.titleLarge,
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              sheetTitle,
+                              style: Theme.of(context).textTheme.titleLarge,
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.close),
+                            onPressed: _isLocked
+                                ? null
+                                : () => Navigator.of(context).maybePop(),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                          ),
+                        ],
                       ),
 
                       // Scan image button (create mode only)

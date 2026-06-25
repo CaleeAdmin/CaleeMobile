@@ -129,6 +129,12 @@ class _CalendarChooserSheetState extends State<CalendarChooserSheet> {
                       ),
                       child: const Text('Show All'),
                     ),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.of(context).maybePop(),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                  ),
                 ],
               ),
             ),
