@@ -1,4 +1,5 @@
 import '../../data/api/calee_hub_client.dart';
+import '../../data/models/calendar_service_error.dart';
 import '../../data/models/client_bootstrap.dart';
 import '../../data/models/client_calendar.dart';
 import '../../data/models/client_chore.dart';
@@ -34,6 +35,7 @@ class TodayRepository {
 
     List<ClientEvent> eventsToday = [];
     Object? calendarError;
+    final calendarServiceErrors = <CalendarServiceError>[];
 
     List<ClientTask> tasksDueToday = [];
     List<ClientTask> overdueTasks = [];
@@ -51,6 +53,12 @@ class TodayRepository {
         to: todayStr,
       );
       eventsToday = _filterEventsToday(eventList.events, now);
+    } on CaleeHubException catch (e) {
+      if (isCalendarServiceConnectionCode(e.code)) {
+        calendarServiceErrors.add(CalendarServiceError.fromException(e));
+      } else {
+        calendarError = e;
+      }
     } catch (e) {
       calendarError = e;
     }
@@ -94,6 +102,7 @@ class TodayRepository {
       calendarError: calendarError,
       tasksError: tasksError,
       choresError: choresError,
+      calendarServiceErrors: calendarServiceErrors,
     );
   }
 

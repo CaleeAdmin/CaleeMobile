@@ -1,3 +1,4 @@
+import '../../data/models/calendar_service_error.dart';
 import '../../data/models/client_calendar.dart';
 import '../../data/models/client_chore.dart';
 import '../../data/models/client_task.dart';
@@ -12,6 +13,7 @@ class TodayOverview {
     this.calendarError,
     this.tasksError,
     this.choresError,
+    this.calendarServiceErrors = const [],
   });
 
   final List<ClientEvent> eventsToday;
@@ -22,8 +24,10 @@ class TodayOverview {
   final Object? calendarError;
   final Object? tasksError;
   final Object? choresError;
+  final List<CalendarServiceError> calendarServiceErrors;
 
   bool get hasCalendarError => calendarError != null;
   bool get hasTasksError => tasksError != null;
   bool get hasChoresError => choresError != null;
+  bool get hasCalendarServiceError => calendarServiceErrors.isNotEmpty;
 }

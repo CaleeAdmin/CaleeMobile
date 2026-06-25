@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import '../../data/models/calendar_service_error.dart';
 import '../../data/models/client_calendar.dart';
 import '../../data/models/client_task.dart';
 import 'tasks_repository.dart';
@@ -19,6 +20,7 @@ class TasksController extends ChangeNotifier {
   bool isLoading = false;
   Object? error;
   TasksOverview? overview;
+  List<CalendarServiceError> calendarServiceErrors = [];
   bool isCreatingTask = false;
   final Set<String> updatingTaskIds = {};
   final Set<String> deletingTaskIds = {};
@@ -37,9 +39,11 @@ class TasksController extends ChangeNotifier {
       final from = _formatTaskDate(DateTime(today.year - 2, 1, 1));
       final to = _formatTaskDate(DateTime(today.year + 2, 12, 31));
       overview = await repository.loadOverview(from: from, to: to);
+      calendarServiceErrors = overview?.calendarServiceErrors ?? [];
       error = null;
     } catch (e) {
       error = e;
+      calendarServiceErrors = [];
     } finally {
       isLoading = false;
       notifyListeners();
