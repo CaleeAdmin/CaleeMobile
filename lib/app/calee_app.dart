@@ -77,7 +77,7 @@ class CaleeApp extends StatefulWidget {
   State<CaleeApp> createState() => _CaleeAppState();
 }
 
-class _CaleeAppState extends State<CaleeApp> {
+class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
   late final CaleeHubClient _hubClient;
   late final SessionController _sessionController;
   late final CalendarFollowLinkController _followLinkController;
@@ -87,6 +87,9 @@ class _CaleeAppState extends State<CaleeApp> {
   late final DisplayActivationController _displayActivationController;
   late final LocalCalendarSubscriptionRepository _localSubscriptionRepo;
   final _navigatorKey = GlobalKey<NavigatorState>();
+
+  // Set to true when the app goes to background; cleared and transport reset on resume.
+  bool _transportMayBeStale = false;
 
   // Calendar follow state
   bool _showingFollowSignIn = false;
@@ -121,6 +124,7 @@ class _CaleeAppState extends State<CaleeApp> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     final testDeps = widget._testDeps;
     if (testDeps != null) {
       _hubClient = testDeps.hubClient;
@@ -166,6 +170,7 @@ class _CaleeAppState extends State<CaleeApp> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _followLinkController.removeListener(_onFollowLinkChanged);
     _displaySetupLinkController.removeListener(_onDisplaySetupLinkChanged);
     _externalCalendarConnectedLinkController.removeListener(
@@ -178,6 +183,19 @@ class _CaleeAppState extends State<CaleeApp> {
     _displayActivationController.dispose();
     _sessionController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.detached) {
+      _transportMayBeStale = true;
+    }
+    if (state == AppLifecycleState.resumed && _transportMayBeStale) {
+      _transportMayBeStale = false;
+      _hubClient.resetTransport();
+    }
   }
 
   Future<void> _loadLocalSubscriptions() async {
@@ -354,6 +372,13 @@ class _CaleeAppState extends State<CaleeApp> {
       '[CaleeApp] external-calendar-connected: '
       'providerKey=${intent.providerKey}, connectionId=${intent.connectionId}',
     );
+    debugPrint(
+      '[CaleeApp] external-calendar-connected: about to load connections; '
+      'isSignedIn=${_sessionController.isSignedIn}, '
+      'isRestoringSession=${_sessionController.isRestoringSession}, '
+      'hasAccessToken=${_sessionController.accessToken != null}, '
+      'hasBootstrap=${_sessionController.bootstrap != null}',
+    );
 
     try {
       final connections = await _hubClient.externalCalendarConnections(
@@ -364,6 +389,11 @@ class _CaleeAppState extends State<CaleeApp> {
         _openingGoogleCalendarSelection = false;
         return;
       }
+
+      debugPrint(
+        '[CaleeApp] external-calendar-connected: '
+        'loaded ${connections.length} connections',
+      );
 
       // Prefer the connection matching the deep-link connectionId; fall back to
       // the first active Google connection.
@@ -379,7 +409,10 @@ class _CaleeAppState extends State<CaleeApp> {
           .firstOrNull;
 
       if (connection == null) {
-        debugPrint('[CaleeApp] external-calendar-connected: no active Google connection found');
+        debugPrint(
+          '[CaleeApp] external-calendar-connected: '
+          'no active Google connection found',
+        );
         _openingGoogleCalendarSelection = false;
         _showSnackBar(
           'Google Calendar connection not found. Please try again.',
@@ -387,12 +420,18 @@ class _CaleeAppState extends State<CaleeApp> {
         return;
       }
 
-      debugPrint('[CaleeApp] external-calendar-connected: found connection id=${connection.id}');
+      debugPrint(
+        '[CaleeApp] external-calendar-connected: '
+        'found connection id=${connection.id}',
+      );
       final resolvedConnection = connection;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _openingGoogleCalendarSelection = false;
         if (!mounted) return;
-        debugPrint('[CaleeApp] external-calendar-connected: opening GoogleCalendarSelectionPage');
+        debugPrint(
+          '[CaleeApp] external-calendar-connected: '
+          'opening GoogleCalendarSelectionPage',
+        );
         _navigatorKey.currentState?.push(
           MaterialPageRoute<void>(
             builder: (_) => GoogleCalendarSelectionPage(
@@ -407,8 +446,26 @@ class _CaleeAppState extends State<CaleeApp> {
           ),
         );
       });
-    } catch (_) {
+    } on CaleeHubException catch (error, stackTrace) {
       _openingGoogleCalendarSelection = false;
+      debugPrint(
+        '[CaleeApp] external-calendar-connected failed: ${error.debugSummary}',
+      );
+      debugPrintStack(
+        label: '[CaleeApp] external-calendar-connected stack',
+        stackTrace: stackTrace,
+      );
+      if (!mounted) return;
+      _showSnackBar(
+        'Could not load Google Calendar connection. Please try again.',
+      );
+    } catch (error, stackTrace) {
+      _openingGoogleCalendarSelection = false;
+      debugPrint('[CaleeApp] external-calendar-connected failed: $error');
+      debugPrintStack(
+        label: '[CaleeApp] external-calendar-connected stack',
+        stackTrace: stackTrace,
+      );
       if (!mounted) return;
       _showSnackBar(
         'Could not load Google Calendar connection. Please try again.',
@@ -555,7 +612,9 @@ class _CaleeAppState extends State<CaleeApp> {
     });
   }
 
-  Future<void> _handleFollowLocally(ResolvedCalendarFollowIntent intent) async {
+  Future<void> _handleFollowLocally(
+    ResolvedCalendarFollowIntent intent,
+  ) async {
     try {
       await _localSubscriptionRepo.add(
         title: intent.title,
@@ -623,7 +682,7 @@ class _CaleeAppState extends State<CaleeApp> {
     }
 
     if (!_sessionController.isSignedIn) {
-      // ── Display setup flows (state 2) ─────────────────────────────────────────
+      // ── Display setup flows (state 2) ───────────────────────────────────────────────────────
 
       // Create account from display setup landing.
       if (_showingDisplaySetupCreateAccount) {
@@ -685,7 +744,7 @@ class _CaleeAppState extends State<CaleeApp> {
         );
       }
 
-      // ── Calendar follow flows ───────────────────────────────────────────────────────
+      // ── Calendar follow flows ─────────────────────────────────────────────────────────────────────
 
       // User chose "Add to Calee" → show login (pending intent present, skip onboarding)
       if (_showingFollowSignIn) {
@@ -799,7 +858,7 @@ class _CaleeAppState extends State<CaleeApp> {
       );
     }
 
-    // ── Signed-in flows ────────────────────────────────────────────────────────
+    // ── Signed-in flows ────────────────────────────────────────────────────────────────
 
     // Show loading spinner while checking onboarding status after fresh sign-in
     if (_checkingOnboarding) return const _SessionRestorePage();

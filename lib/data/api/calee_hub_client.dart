@@ -20,14 +20,13 @@ import '../models/external_calendar_connection.dart';
 class CaleeHubClient {
   CaleeHubClient({Uri? baseUri, HttpClient? httpClient})
     : baseUri = baseUri ?? Uri.parse('https://hub.calee.com.au'),
-      _httpClient =
-          httpClient ??
-          (HttpClient()
-            ..connectionTimeout = const Duration(seconds: 25)
-            ..idleTimeout = const Duration(seconds: 30));
+      _isInjectedClient = httpClient != null {
+    _httpClient = httpClient ?? _newHttpClient();
+  }
 
   final Uri baseUri;
-  final HttpClient _httpClient;
+  final bool _isInjectedClient;
+  late HttpClient _httpClient;
 
   static const _kTimeout = Duration(seconds: 25);
   static const _kImageAiTimeout = Duration(seconds: 90);
@@ -44,6 +43,24 @@ class CaleeHubClient {
 
   // Call this when signing out or signing in to discard any cached token.
   void clearAuthCache() => _refreshedToken = null;
+
+  HttpClient _newHttpClient() {
+    return HttpClient()
+      ..connectionTimeout = const Duration(seconds: 25)
+      ..idleTimeout = const Duration(seconds: 30);
+  }
+
+  /// Closes the current HTTP transport and opens a fresh one.
+  /// Safe to call after returning from background; no-op for injected clients.
+  void resetTransport() {
+    if (_isInjectedClient) return;
+    try {
+      _httpClient.close(force: true);
+    } catch (_) {
+      // Ignore close failures.
+    }
+    _httpClient = _newHttpClient();
+  }
 
   Future<ClientLoginResult> login({
     required String email,
@@ -1102,7 +1119,7 @@ class CaleeHubClient {
     return ClientProfile.fromJson(profileJson);
   }
 
-  // ── External calendar connections ────────────────────────────────────────────────────────────────
+  // ── External calendar connections ─────────────────────────────────────────────────────
 
   Future<List<ExternalCalendarProvider>> externalCalendarProviders({
     required String accessToken,
@@ -1239,7 +1256,7 @@ class CaleeHubClient {
     );
   }
 
-  // ── Auth retry helper ────────────────────────────────────────────────────────────────────────────
+  // ── Auth retry helper ──────────────────────────────────────────────────────────────────
   //
   // On 401, calls onUnauthorized() once to get a fresh token and retries.
   // Also uses any previously refreshed token so feature pages don't need to
@@ -1262,7 +1279,7 @@ class CaleeHubClient {
     }
   }
 
-  // ── Low-level HTTP helpers ───────────────────────────────────────────────────────────────────────────
+  // ── Low-level HTTP helpers ────────────────────────────────────────────────────────────────────────
 
   Future<Map<String, dynamic>> _deleteJson(
     String path, {
@@ -1399,14 +1416,42 @@ class CaleeHubClient {
     });
   }
 
+  // GET with one safe retry on transient transport failures (stale keep-alive).
+  // POST/PUT/PATCH/DELETE are not retried here; only idempotent GETs are safe.
   Future<Map<String, dynamic>> _getJson(
     String path, {
     required String accessToken,
-  }) {
-    return _withRetry(
-      (token) => _doGetJson(path, accessToken: token),
-      accessToken,
-    );
+  }) async {
+    try {
+      return await _withRetry(
+        (token) => _doGetJson(path, accessToken: token),
+        accessToken,
+      );
+    } catch (error) {
+      if (_isTransientTransportError(error)) {
+        if (kDebugMode) {
+          debugPrint(
+            'CaleeHubClient: transient GET transport error for $path; '
+            'retrying once: $error',
+          );
+        }
+        resetTransport();
+        return await _withRetry(
+          (token) => _doGetJson(path, accessToken: token),
+          accessToken,
+        );
+      }
+      rethrow;
+    }
+  }
+
+  bool _isTransientTransportError(Object error) {
+    if (error is HttpException) {
+      return error.message.contains(
+        'Connection closed before full header was received',
+      );
+    }
+    return error is SocketException || error is HandshakeException;
   }
 
   Future<Map<String, dynamic>> _doGetJson(

@@ -250,4 +250,207 @@ void main() {
       },
     );
   });
+
+  group('CaleeHubClient transport retry', () {
+    // Uses ServerSocket so we can close connections before sending HTTP headers,
+    // simulating a stale keep-alive connection (the real-world failure mode).
+
+    test(
+      'GET retries once on HttpException (stale connection) and succeeds',
+      () async {
+        int connectionCount = 0;
+        const body = '{"data":{"connections":[]}}';
+
+        final serverSocket = await ServerSocket.bind(
+          InternetAddress.loopbackIPv4,
+          0,
+        );
+        final sub = serverSocket.listen((socket) async {
+          connectionCount++;
+          if (connectionCount == 1) {
+            // Simulate stale keep-alive: close without sending HTTP headers.
+            await socket.close();
+          } else {
+            // Respond with a minimal valid HTTP 200.
+            socket.write(
+              'HTTP/1.1 200 OK\r\n'
+              'Content-Type: application/json\r\n'
+              'Content-Length: ${body.length}\r\n'
+              'Connection: close\r\n'
+              '\r\n'
+              '$body',
+            );
+            await socket.flush();
+            await socket.close();
+          }
+        });
+
+        final client = CaleeHubClient(
+          baseUri: Uri.parse('http://127.0.0.1:${serverSocket.port}'),
+        );
+
+        final result = await client.externalCalendarConnections(
+          accessToken: 'test-token',
+        );
+
+        expect(result, isEmpty);
+        expect(
+          connectionCount,
+          2,
+          reason: 'original attempt + one retry after transport reset',
+        );
+
+        await sub.cancel();
+        await serverSocket.close();
+      },
+    );
+
+    test(
+      'GET does not retry more than once on repeated transport failure',
+      () async {
+        int connectionCount = 0;
+
+        final serverSocket = await ServerSocket.bind(
+          InternetAddress.loopbackIPv4,
+          0,
+        );
+        final sub = serverSocket.listen((socket) async {
+          connectionCount++;
+          await socket.close(); // Always close without responding.
+        });
+
+        final client = CaleeHubClient(
+          baseUri: Uri.parse('http://127.0.0.1:${serverSocket.port}'),
+        );
+
+        await expectLater(
+          client.externalCalendarConnections(accessToken: 'test-token'),
+          throwsA(anything),
+        );
+
+        expect(
+          connectionCount,
+          2,
+          reason: 'original attempt + exactly one retry, then error propagates',
+        );
+
+        await sub.cancel();
+        await serverSocket.close();
+      },
+    );
+
+    test('POST does not retry on transport failure', () async {
+      int connectionCount = 0;
+
+      final serverSocket = await ServerSocket.bind(
+        InternetAddress.loopbackIPv4,
+        0,
+      );
+      final sub = serverSocket.listen((socket) async {
+        connectionCount++;
+        await socket.close();
+      });
+
+      final client = CaleeHubClient(
+        baseUri: Uri.parse('http://127.0.0.1:${serverSocket.port}'),
+      );
+
+      await expectLater(
+        client.approveDisplayLogin(
+          accessToken: 'tok',
+          token: 'display-tok',
+        ),
+        throwsA(anything),
+      );
+
+      expect(
+        connectionCount,
+        1,
+        reason: 'POST must not be retried on transport failure',
+      );
+
+      await sub.cancel();
+      await serverSocket.close();
+    });
+
+    test('resetTransport is no-op for injected HttpClient', () {
+      final injected = HttpClient();
+      final client = CaleeHubClient(
+        baseUri: Uri.parse('http://localhost'),
+        httpClient: injected,
+      );
+
+      // Must not throw and must not replace the injected client.
+      expect(() => client.resetTransport(), returnsNormally);
+
+      injected.close();
+    });
+
+    test(
+      'GET transport retry preserves 401 refresh behaviour on the retry attempt',
+      () async {
+        // Sequence: stale connection → retry → 401 on retry → refresh → success.
+        int connectionCount = 0;
+        const body = '{"data":{"connections":[]}}';
+
+        final serverSocket = await ServerSocket.bind(
+          InternetAddress.loopbackIPv4,
+          0,
+        );
+        final sub = serverSocket.listen((socket) async {
+          connectionCount++;
+          if (connectionCount == 1) {
+            // Stale connection: close without headers.
+            await socket.close();
+          } else if (connectionCount == 2) {
+            // Retry arrives with stale token → respond 401.
+            const err =
+                '{"error":{"message":"Token expired"},"meta":{}}';
+            socket.write(
+              'HTTP/1.1 401 Unauthorized\r\n'
+              'Content-Type: application/json\r\n'
+              'Content-Length: ${err.length}\r\n'
+              'Connection: close\r\n'
+              '\r\n'
+              '$err',
+            );
+            await socket.flush();
+            await socket.close();
+          } else {
+            // Auth-retry with fresh token → success.
+            socket.write(
+              'HTTP/1.1 200 OK\r\n'
+              'Content-Type: application/json\r\n'
+              'Content-Length: ${body.length}\r\n'
+              'Connection: close\r\n'
+              '\r\n'
+              '$body',
+            );
+            await socket.flush();
+            await socket.close();
+          }
+        });
+
+        int onUnauthorizedCount = 0;
+        final client = CaleeHubClient(
+          baseUri: Uri.parse('http://127.0.0.1:${serverSocket.port}'),
+        );
+        client.onUnauthorized = () async {
+          onUnauthorizedCount++;
+          return 'fresh-token';
+        };
+
+        final result = await client.externalCalendarConnections(
+          accessToken: 'stale-token',
+        );
+
+        expect(result, isEmpty);
+        expect(connectionCount, 3);
+        expect(onUnauthorizedCount, 1);
+
+        await sub.cancel();
+        await serverSocket.close();
+      },
+    );
+  });
 }
