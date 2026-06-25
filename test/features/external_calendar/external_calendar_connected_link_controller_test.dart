@@ -1,6 +1,5 @@
 // Unit tests for ExternalCalendarConnectedLinkController URI parsing and deduplication.
 
-import 'package:calee_mobile/features/external_calendar/external_calendar_connected_intent.dart';
 import 'package:calee_mobile/features/external_calendar/external_calendar_connected_link_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -82,40 +81,28 @@ void main() {
           'https://hub.calee.com.au/external-calendar-connected'
           '?providerKey=google_calendar',
         );
-        expect(
-          ExternalCalendarConnectedLinkController.parseUri(uri),
-          isNull,
-        );
+        expect(ExternalCalendarConnectedLinkController.parseUri(uri), isNull);
       });
 
       test('returns null for wrong host', () {
         final uri = Uri.parse(
           'calee://native-login?providerKey=google_calendar',
         );
-        expect(
-          ExternalCalendarConnectedLinkController.parseUri(uri),
-          isNull,
-        );
+        expect(ExternalCalendarConnectedLinkController.parseUri(uri), isNull);
       });
 
       test('returns null for different calee host', () {
         final uri = Uri.parse(
           'calee://external-calendar-return?providerKey=google_calendar',
         );
-        expect(
-          ExternalCalendarConnectedLinkController.parseUri(uri),
-          isNull,
-        );
+        expect(ExternalCalendarConnectedLinkController.parseUri(uri), isNull);
       });
 
       test('returns null for http scheme', () {
         final uri = Uri.parse(
           'http://external-calendar-connected?providerKey=google_calendar',
         );
-        expect(
-          ExternalCalendarConnectedLinkController.parseUri(uri),
-          isNull,
-        );
+        expect(ExternalCalendarConnectedLinkController.parseUri(uri), isNull);
       });
     });
   });
@@ -224,7 +211,8 @@ void main() {
       expect(
         notifications,
         2,
-        reason: 'handleUri notification + clearPending notification; '
+        reason:
+            'handleUri notification + clearPending notification; '
             'second handleUri must be deduplicated',
       );
     });

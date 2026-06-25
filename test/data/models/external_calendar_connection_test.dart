@@ -270,18 +270,20 @@ void main() {
       expect(event.isGoogleEvent, isTrue);
     });
 
-    test('isReadOnly true for external source even if readOnly field is false',
-        () {
-      final event = ClientEvent.fromJson({
-        'id': 'external:evt2',
-        'source': 'external',
-        'readOnly': false,
-        'recurring': false,
-      });
+    test(
+      'isReadOnly true for external source even if readOnly field is false',
+      () {
+        final event = ClientEvent.fromJson({
+          'id': 'external:evt2',
+          'source': 'external',
+          'readOnly': false,
+          'recurring': false,
+        });
 
-      expect(event.isExternal, isTrue);
-      expect(event.isReadOnly, isTrue);
-    });
+        expect(event.isExternal, isTrue);
+        expect(event.isReadOnly, isTrue);
+      },
+    );
 
     test('writableEventId returns id when isReadOnly', () {
       final event = ClientEvent.fromJson({

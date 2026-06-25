@@ -900,64 +900,65 @@ class _ChoresPageState extends State<ChoresPage> {
                 CalendarServiceWarningBanner(errors: choreServiceErrors),
               Expanded(
                 child: RefreshIndicator(
-            onRefresh: _controller.refresh,
-            child: ListView(
-              padding: const EdgeInsets.symmetric(
-                horizontal: CaleeSpacing.pagePadding,
-                vertical: CaleeSpacing.md,
-              ),
-              children: [
-                if (activeSections.isEmpty && choreCalendars.isNotEmpty)
-                  CaleeSection(
-                    title: 'Chores',
-                    children: [
-                      CaleeListRow(
-                        title: allChores.isEmpty
-                            ? 'No chores yet'
-                            : 'No chores for this filter',
-                        subtitle: allChores.isEmpty
-                            ? 'Tap + to add your first chore.'
-                            : 'Choose another assignee filter.',
-                        leading: const Icon(
-                          Icons.check_circle_outline,
-                          color: CaleeColors.textTertiary,
-                          size: 22,
-                        ),
-                      ),
-                    ],
-                  )
-                else
-                  for (final section in activeSections) ...[
-                    _buildSectionWidget(
-                      section,
-                      choresBySection[section]!,
-                      choreCalendars,
+                  onRefresh: _controller.refresh,
+                  child: ListView(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: CaleeSpacing.pagePadding,
+                      vertical: CaleeSpacing.md,
                     ),
-                    const SizedBox(height: CaleeSpacing.sectionSpacing),
-                  ],
-
-                if (choreCalendars.isEmpty) ...[
-                  if (activeSections.isNotEmpty)
-                    const SizedBox(height: CaleeSpacing.sectionSpacing),
-                  CaleeSection(
-                    footer: 'Connect a chore list to start adding chores.',
                     children: [
-                      CaleeListRow(
-                        title: 'Add chore list',
-                        leading: const Icon(
-                          Icons.add_circle_outline,
-                          color: CaleeColors.primary,
-                          size: 22,
+                      if (activeSections.isEmpty && choreCalendars.isNotEmpty)
+                        CaleeSection(
+                          title: 'Chores',
+                          children: [
+                            CaleeListRow(
+                              title: allChores.isEmpty
+                                  ? 'No chores yet'
+                                  : 'No chores for this filter',
+                              subtitle: allChores.isEmpty
+                                  ? 'Tap + to add your first chore.'
+                                  : 'Choose another assignee filter.',
+                              leading: const Icon(
+                                Icons.check_circle_outline,
+                                color: CaleeColors.textTertiary,
+                                size: 22,
+                              ),
+                            ),
+                          ],
+                        )
+                      else
+                        for (final section in activeSections) ...[
+                          _buildSectionWidget(
+                            section,
+                            choresBySection[section]!,
+                            choreCalendars,
+                          ),
+                          const SizedBox(height: CaleeSpacing.sectionSpacing),
+                        ],
+
+                      if (choreCalendars.isEmpty) ...[
+                        if (activeSections.isNotEmpty)
+                          const SizedBox(height: CaleeSpacing.sectionSpacing),
+                        CaleeSection(
+                          footer:
+                              'Connect a chore list to start adding chores.',
+                          children: [
+                            CaleeListRow(
+                              title: 'Add chore list',
+                              leading: const Icon(
+                                Icons.add_circle_outline,
+                                color: CaleeColors.primary,
+                                size: 22,
+                              ),
+                              onTap: _openCollectionCreateShortcut,
+                            ),
+                          ],
                         ),
-                        onTap: _openCollectionCreateShortcut,
-                      ),
+                      ],
+
+                      const SizedBox(height: 96),
                     ],
                   ),
-                ],
-
-                const SizedBox(height: 96),
-              ],
-            ),
                 ),
               ),
             ],

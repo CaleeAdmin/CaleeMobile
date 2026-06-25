@@ -28,8 +28,7 @@ class _StubHubClient extends CaleeHubClient {
     required String accessToken,
     required String from,
     required String to,
-  }) async =>
-      ClientEventList(from: from, to: to, events: const []);
+  }) async => ClientEventList(from: from, to: to, events: const []);
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -98,173 +97,233 @@ void main() {
       expect(ctrl.error, isNull);
     });
 
-    test('CalendarServiceError.isCalendarServiceConnectionCode returns false for empty code', () {
-      expect(isCalendarServiceConnectionCode(null), isFalse);
-      expect(isCalendarServiceConnectionCode(''), isFalse);
-      expect(isCalendarServiceConnectionCode('SOME_OTHER_ERROR'), isFalse);
-    });
+    test(
+      'CalendarServiceError.isCalendarServiceConnectionCode returns false for empty code',
+      () {
+        expect(isCalendarServiceConnectionCode(null), isFalse);
+        expect(isCalendarServiceConnectionCode(''), isFalse);
+        expect(isCalendarServiceConnectionCode('SOME_OTHER_ERROR'), isFalse);
+      },
+    );
   });
 
   // ── B: Business calendar connection broken ───────────────────────────────────
 
   group('B: Business calendar connection broken', () {
-    test('BUSINESS_CALENDAR_CONNECTION_BROKEN exception is caught as service error', () async {
-      final ctrl = _makeController(
-        () async => throw _hubException(
-          statusCode: 503,
-          code: 'BUSINESS_CALENDAR_CONNECTION_BROKEN',
-          serviceName: 'Business Calendar',
-        ),
-      );
+    test(
+      'BUSINESS_CALENDAR_CONNECTION_BROKEN exception is caught as service error',
+      () async {
+        final ctrl = _makeController(
+          () async => throw _hubException(
+            statusCode: 503,
+            code: 'BUSINESS_CALENDAR_CONNECTION_BROKEN',
+            serviceName: 'Business Calendar',
+          ),
+        );
 
-      await ctrl.loadMonth();
+        await ctrl.loadMonth();
 
-      expect(ctrl.calendarServiceErrors, hasLength(1));
-      expect(ctrl.error, isNull);
-      expect(ctrl.calendars, isEmpty);
-    });
+        expect(ctrl.calendarServiceErrors, hasLength(1));
+        expect(ctrl.error, isNull);
+        expect(ctrl.calendars, isEmpty);
+      },
+    );
 
-    test('BUSINESS_CALENDAR_CONNECTION_BROKEN sets correct service name', () async {
-      final ctrl = _makeController(
-        () async => throw _hubException(
-          statusCode: 503,
-          code: 'BUSINESS_CALENDAR_CONNECTION_BROKEN',
-          serviceName: 'Acme Business',
-        ),
-      );
+    test(
+      'BUSINESS_CALENDAR_CONNECTION_BROKEN sets correct service name',
+      () async {
+        final ctrl = _makeController(
+          () async => throw _hubException(
+            statusCode: 503,
+            code: 'BUSINESS_CALENDAR_CONNECTION_BROKEN',
+            serviceName: 'Acme Business',
+          ),
+        );
 
-      await ctrl.loadMonth();
+        await ctrl.loadMonth();
 
-      final err = ctrl.calendarServiceErrors.first;
-      expect(err.displayServiceName, 'Acme Business');
-      expect(err.repairMessage, contains('Acme Business'));
-      expect(err.repairMessage, contains('repair'));
-    });
+        final err = ctrl.calendarServiceErrors.first;
+        expect(err.displayServiceName, 'Acme Business');
+        expect(err.repairMessage, contains('Acme Business'));
+        expect(err.repairMessage, contains('repair'));
+      },
+    );
 
-    test('BUSINESS_CALENDAR_CONNECTION_BROKEN does not surface as network error', () async {
-      final ctrl = _makeController(
-        () async => throw _hubException(
-          statusCode: 503,
-          code: 'BUSINESS_CALENDAR_CONNECTION_BROKEN',
-          serviceName: 'Business',
-        ),
-      );
+    test(
+      'BUSINESS_CALENDAR_CONNECTION_BROKEN does not surface as network error',
+      () async {
+        final ctrl = _makeController(
+          () async => throw _hubException(
+            statusCode: 503,
+            code: 'BUSINESS_CALENDAR_CONNECTION_BROKEN',
+            serviceName: 'Business',
+          ),
+        );
 
-      await ctrl.loadMonth();
+        await ctrl.loadMonth();
 
-      expect(ctrl.error, isNull,
-          reason: 'Service connection error must not appear as a generic error');
-    });
+        expect(
+          ctrl.error,
+          isNull,
+          reason: 'Service connection error must not appear as a generic error',
+        );
+      },
+    );
   });
 
   // ── C: Portal calendar connection broken ─────────────────────────────────────
 
   group('C: Portal calendar connection broken', () {
-    test('PORTAL_CALENDAR_CONNECTION_BROKEN exception is caught as service error', () async {
-      final ctrl = _makeController(
-        () async => throw _hubException(
-          statusCode: 503,
-          code: 'PORTAL_CALENDAR_CONNECTION_BROKEN',
-          serviceName: 'Calee Portal',
-        ),
-      );
+    test(
+      'PORTAL_CALENDAR_CONNECTION_BROKEN exception is caught as service error',
+      () async {
+        final ctrl = _makeController(
+          () async => throw _hubException(
+            statusCode: 503,
+            code: 'PORTAL_CALENDAR_CONNECTION_BROKEN',
+            serviceName: 'Calee Portal',
+          ),
+        );
 
-      await ctrl.loadMonth();
+        await ctrl.loadMonth();
 
-      expect(ctrl.calendarServiceErrors, hasLength(1));
-      expect(ctrl.error, isNull);
-    });
+        expect(ctrl.calendarServiceErrors, hasLength(1));
+        expect(ctrl.error, isNull);
+      },
+    );
 
-    test('PORTAL_CALENDAR_CONNECTION_BROKEN uses serviceName in repair message', () async {
-      final ctrl = _makeController(
-        () async => throw _hubException(
-          statusCode: 503,
-          code: 'PORTAL_CALENDAR_CONNECTION_BROKEN',
-          serviceName: 'My Portal',
-        ),
-      );
+    test(
+      'PORTAL_CALENDAR_CONNECTION_BROKEN uses serviceName in repair message',
+      () async {
+        final ctrl = _makeController(
+          () async => throw _hubException(
+            statusCode: 503,
+            code: 'PORTAL_CALENDAR_CONNECTION_BROKEN',
+            serviceName: 'My Portal',
+          ),
+        );
 
-      await ctrl.loadMonth();
+        await ctrl.loadMonth();
 
-      expect(ctrl.calendarServiceErrors.first.displayServiceName, 'My Portal');
-    });
+        expect(
+          ctrl.calendarServiceErrors.first.displayServiceName,
+          'My Portal',
+        );
+      },
+    );
   });
 
   // ── D: Generic / SERVICE_CREDENTIAL_INVALID with service name ───────────────
 
   group('D: Generic service credential invalid', () {
-    test('SERVICE_CREDENTIAL_INVALID with serviceId is caught as service error', () async {
-      final ctrl = _makeController(
-        () async => throw _hubException(
-          statusCode: 401,
-          code: 'SERVICE_CREDENTIAL_INVALID',
-          serviceId: 'google',
-          serviceName: 'Google Calendar',
-        ),
-      );
+    test(
+      'SERVICE_CREDENTIAL_INVALID with serviceId is caught as service error',
+      () async {
+        final ctrl = _makeController(
+          () async => throw _hubException(
+            statusCode: 401,
+            code: 'SERVICE_CREDENTIAL_INVALID',
+            serviceId: 'google',
+            serviceName: 'Google Calendar',
+          ),
+        );
 
-      await ctrl.loadMonth();
+        await ctrl.loadMonth();
 
-      expect(ctrl.calendarServiceErrors, hasLength(1));
-      expect(ctrl.error, isNull);
-    });
+        expect(ctrl.calendarServiceErrors, hasLength(1));
+        expect(ctrl.error, isNull);
+      },
+    );
 
-    test('SERVICE_CREDENTIAL_INVALID falls back to serviceId when no serviceName', () async {
-      final ctrl = _makeController(
-        () async => throw _hubException(
-          statusCode: 401,
-          code: 'SERVICE_CREDENTIAL_INVALID',
-          serviceId: 'my-service',
-        ),
-      );
+    test(
+      'SERVICE_CREDENTIAL_INVALID falls back to serviceId when no serviceName',
+      () async {
+        final ctrl = _makeController(
+          () async => throw _hubException(
+            statusCode: 401,
+            code: 'SERVICE_CREDENTIAL_INVALID',
+            serviceId: 'my-service',
+          ),
+        );
 
-      await ctrl.loadMonth();
+        await ctrl.loadMonth();
 
-      expect(ctrl.calendarServiceErrors.first.displayServiceName, 'my-service');
-    });
+        expect(
+          ctrl.calendarServiceErrors.first.displayServiceName,
+          'my-service',
+        );
+      },
+    );
 
-    test('displayServiceName falls back to "Calendar service" when no serviceId or serviceName', () {
-      final err = CalendarServiceError.fromException(
-        _hubException(statusCode: 503, code: 'CALENDAR_SERVICE_UNAVAILABLE'),
-      );
-      expect(err.displayServiceName, 'Calendar service');
-    });
+    test(
+      'displayServiceName falls back to "Calendar service" when no serviceId or serviceName',
+      () {
+        final err = CalendarServiceError.fromException(
+          _hubException(statusCode: 503, code: 'CALENDAR_SERVICE_UNAVAILABLE'),
+        );
+        expect(err.displayServiceName, 'Calendar service');
+      },
+    );
 
-    test('CALENDAR_SERVICE_UNAVAILABLE is recognised as a service connection code', () {
-      expect(isCalendarServiceConnectionCode('CALENDAR_SERVICE_UNAVAILABLE'), isTrue);
-    });
+    test(
+      'CALENDAR_SERVICE_UNAVAILABLE is recognised as a service connection code',
+      () {
+        expect(
+          isCalendarServiceConnectionCode('CALENDAR_SERVICE_UNAVAILABLE'),
+          isTrue,
+        );
+      },
+    );
 
-    test('SCHOOL_CALENDAR_CONNECTION_BROKEN is recognised as a service connection code', () {
-      expect(isCalendarServiceConnectionCode('SCHOOL_CALENDAR_CONNECTION_BROKEN'), isTrue);
-    });
+    test(
+      'SCHOOL_CALENDAR_CONNECTION_BROKEN is recognised as a service connection code',
+      () {
+        expect(
+          isCalendarServiceConnectionCode('SCHOOL_CALENDAR_CONNECTION_BROKEN'),
+          isTrue,
+        );
+      },
+    );
 
-    test('CALENDAR_SERVICE_CONNECTION_BROKEN is recognised as a service connection code', () {
-      expect(isCalendarServiceConnectionCode('CALENDAR_SERVICE_CONNECTION_BROKEN'), isTrue);
-    });
+    test(
+      'CALENDAR_SERVICE_CONNECTION_BROKEN is recognised as a service connection code',
+      () {
+        expect(
+          isCalendarServiceConnectionCode('CALENDAR_SERVICE_CONNECTION_BROKEN'),
+          isTrue,
+        );
+      },
+    );
   });
 
   // ── E: Hybrid partial success ────────────────────────────────────────────────
 
   group('E: Hybrid partial success (serviceErrors in response body)', () {
-    test('calendars with inline serviceErrors returns both calendars and errors', () async {
-      final calList = ClientCalendarList(
-        calendars: [_calendar('cal1')],
-        serviceErrors: [
-          const CalendarServiceError(
-            code: 'PORTAL_CALENDAR_CONNECTION_BROKEN',
-            serviceName: 'School Portal',
-          ),
-        ],
-      );
+    test(
+      'calendars with inline serviceErrors returns both calendars and errors',
+      () async {
+        final calList = ClientCalendarList(
+          calendars: [_calendar('cal1')],
+          serviceErrors: [
+            const CalendarServiceError(
+              code: 'PORTAL_CALENDAR_CONNECTION_BROKEN',
+              serviceName: 'School Portal',
+            ),
+          ],
+        );
 
-      final ctrl = _makeController(() async => calList);
-      await ctrl.loadMonth();
+        final ctrl = _makeController(() async => calList);
+        await ctrl.loadMonth();
 
-      expect(ctrl.calendars, hasLength(1));
-      expect(ctrl.calendarServiceErrors, hasLength(1));
-      expect(ctrl.error, isNull);
-      expect(ctrl.calendarServiceErrors.first.displayServiceName, 'School Portal');
-    });
+        expect(ctrl.calendars, hasLength(1));
+        expect(ctrl.calendarServiceErrors, hasLength(1));
+        expect(ctrl.error, isNull);
+        expect(
+          ctrl.calendarServiceErrors.first.displayServiceName,
+          'School Portal',
+        );
+      },
+    );
 
     test('partial success keeps existing calendars accessible', () async {
       final calList = ClientCalendarList(
@@ -301,57 +360,76 @@ void main() {
 
       expect(result.calendars, isEmpty);
       expect(result.serviceErrors, hasLength(1));
-      expect(result.serviceErrors.first.code, 'BUSINESS_CALENDAR_CONNECTION_BROKEN');
+      expect(
+        result.serviceErrors.first.code,
+        'BUSINESS_CALENDAR_CONNECTION_BROKEN',
+      );
       expect(result.serviceErrors.first.serviceName, 'ACME');
       expect(result.serviceErrors.first.serviceId, 'acme-svc');
     });
 
-    test('ClientCalendarList.fromJson handles missing serviceErrors gracefully', () {
-      final json = {'calendars': <dynamic>[]};
-      final result = ClientCalendarList.fromJson(json);
-      expect(result.serviceErrors, isEmpty);
-    });
+    test(
+      'ClientCalendarList.fromJson handles missing serviceErrors gracefully',
+      () {
+        final json = {'calendars': <dynamic>[]};
+        final result = ClientCalendarList.fromJson(json);
+        expect(result.serviceErrors, isEmpty);
+      },
+    );
   });
 
   // ── F: Network error ─────────────────────────────────────────────────────────
 
   group('F: Network / connectivity error', () {
-    test('generic exception sets error field, not calendarServiceErrors', () async {
-      final ctrl = _makeController(
-        () async => throw Exception('Connection refused'),
-      );
+    test(
+      'generic exception sets error field, not calendarServiceErrors',
+      () async {
+        final ctrl = _makeController(
+          () async => throw Exception('Connection refused'),
+        );
 
-      await ctrl.loadMonth();
+        await ctrl.loadMonth();
 
-      expect(ctrl.error, isNotNull);
-      expect(ctrl.calendarServiceErrors, isEmpty);
-    });
+        expect(ctrl.error, isNotNull);
+        expect(ctrl.calendarServiceErrors, isEmpty);
+      },
+    );
 
-    test('non-service CaleeHubException sets error field, not calendarServiceErrors', () async {
-      final ctrl = _makeController(
-        () async => throw const CaleeHubException(
-          statusCode: 500,
-          message: 'Internal server error',
-          code: 'INTERNAL_ERROR',
-        ),
-      );
+    test(
+      'non-service CaleeHubException sets error field, not calendarServiceErrors',
+      () async {
+        final ctrl = _makeController(
+          () async => throw const CaleeHubException(
+            statusCode: 500,
+            message: 'Internal server error',
+            code: 'INTERNAL_ERROR',
+          ),
+        );
 
-      await ctrl.loadMonth();
+        await ctrl.loadMonth();
 
-      expect(ctrl.error, isNotNull);
-      expect(ctrl.calendarServiceErrors, isEmpty);
-    });
+        expect(ctrl.error, isNotNull);
+        expect(ctrl.calendarServiceErrors, isEmpty);
+      },
+    );
 
-    test('network error does not produce a service connection error message', () async {
-      final ctrl = _makeController(
-        () async => throw Exception('SocketException: Failed host lookup'),
-      );
+    test(
+      'network error does not produce a service connection error message',
+      () async {
+        final ctrl = _makeController(
+          () async => throw Exception('SocketException: Failed host lookup'),
+        );
 
-      await ctrl.loadMonth();
+        await ctrl.loadMonth();
 
-      expect(ctrl.calendarServiceErrors, isEmpty,
-          reason: 'Network failure must not be misidentified as a service connection problem');
-    });
+        expect(
+          ctrl.calendarServiceErrors,
+          isEmpty,
+          reason:
+              'Network failure must not be misidentified as a service connection problem',
+        );
+      },
+    );
   });
 
   // ── G: Hub 401 / auth error ──────────────────────────────────────────────────
@@ -372,41 +450,44 @@ void main() {
       expect(ctrl.error, isNotNull);
     });
 
-    test('onUnauthorized callback is invoked and token refreshed on 401', () async {
-      var refreshCalled = false;
-      var callCount = 0;
+    test(
+      'onUnauthorized callback is invoked and token refreshed on 401',
+      () async {
+        var refreshCalled = false;
+        var callCount = 0;
 
-      final hub = _StubHubClientWithAuth(
-        onFirstCall: () {
-          callCount++;
-          if (callCount == 1) {
-            throw const CaleeHubException(
-              statusCode: 401,
-              message: 'Unauthorized',
-            );
-          }
-          return ClientCalendarList(calendars: [_calendar('cal1')]);
-        },
-      );
+        final hub = _StubHubClientWithAuth(
+          onFirstCall: () {
+            callCount++;
+            if (callCount == 1) {
+              throw const CaleeHubException(
+                statusCode: 401,
+                message: 'Unauthorized',
+              );
+            }
+            return ClientCalendarList(calendars: [_calendar('cal1')]);
+          },
+        );
 
-      hub.onUnauthorized = () async {
-        refreshCalled = true;
-        return 'refreshed-token';
-      };
+        hub.onUnauthorized = () async {
+          refreshCalled = true;
+          return 'refreshed-token';
+        };
 
-      final repo = CalendarRepository(
-        hubClient: hub,
-        accessToken: 'old-tok',
-        preferences: _StubPrefs(),
-      );
-      final ctrl = CalendarController(repository: repo);
+        final repo = CalendarRepository(
+          hubClient: hub,
+          accessToken: 'old-tok',
+          preferences: _StubPrefs(),
+        );
+        final ctrl = CalendarController(repository: repo);
 
-      // The 401 handling happens inside CaleeHubClient._getJson transparently.
-      // Here we just verify the callback wiring exists on the hub client.
-      expect(hub.onUnauthorized, isNotNull);
-      expect(refreshCalled, isFalse); // not yet called
-      ctrl.dispose();
-    });
+        // The 401 handling happens inside CaleeHubClient._getJson transparently.
+        // Here we just verify the callback wiring exists on the hub client.
+        expect(hub.onUnauthorized, isNotNull);
+        expect(refreshCalled, isFalse); // not yet called
+        ctrl.dispose();
+      },
+    );
   });
 
   // ── CalendarServiceError model ───────────────────────────────────────────────
@@ -453,7 +534,10 @@ void main() {
         code: 'BUSINESS_CALENDAR_CONNECTION_BROKEN',
         serviceName: 'Acme Corp',
       );
-      expect(err.repairMessage, 'Acme Corp calendar connection needs repair. Please contact Calee support.');
+      expect(
+        err.repairMessage,
+        'Acme Corp calendar connection needs repair. Please contact Calee support.',
+      );
     });
   });
 }
@@ -474,6 +558,5 @@ class _StubHubClientWithAuth extends CaleeHubClient {
     required String accessToken,
     required String from,
     required String to,
-  }) async =>
-      ClientEventList(from: from, to: to, events: const []);
+  }) async => ClientEventList(from: from, to: to, events: const []);
 }

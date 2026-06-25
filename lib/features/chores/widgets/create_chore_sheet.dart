@@ -67,11 +67,7 @@ class _AssigneeRow extends StatelessWidget {
               ),
             ),
             if (selected)
-              const Icon(
-                Icons.check,
-                size: 20,
-                color: CaleeColors.primary,
-              ),
+              const Icon(Icons.check, size: 20, color: CaleeColors.primary),
           ],
         ),
       ),

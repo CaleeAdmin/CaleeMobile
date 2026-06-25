@@ -45,10 +45,7 @@ class CalendarServiceConnectionErrorState extends StatelessWidget {
 }
 
 class CalendarServiceWarningBanner extends StatelessWidget {
-  const CalendarServiceWarningBanner({
-    required this.errors,
-    super.key,
-  });
+  const CalendarServiceWarningBanner({required this.errors, super.key});
 
   final List<CalendarServiceError> errors;
 

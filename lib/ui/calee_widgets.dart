@@ -290,9 +290,7 @@ class CaleeBottomSheet extends StatelessWidget {
               ),
             Row(
               children: [
-                Expanded(
-                  child: Text(title, style: theme.textTheme.titleLarge),
-                ),
+                Expanded(child: Text(title, style: theme.textTheme.titleLarge)),
                 IconButton(
                   icon: const Icon(Icons.close),
                   onPressed: () => Navigator.of(context).maybePop(),

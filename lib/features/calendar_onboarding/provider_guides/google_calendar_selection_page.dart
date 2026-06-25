@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../../data/api/calee_hub_client.dart';
@@ -33,6 +35,7 @@ class _GoogleCalendarSelectionPageState
 
   final _syncingIds = <String>{};
   final _syncSuccessIds = <String>{};
+  final _syncSuccessTimers = <String, Timer>{};
   final _togglingIds = <String>{};
   bool _isSyncingAll = false;
 
@@ -40,6 +43,14 @@ class _GoogleCalendarSelectionPageState
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void dispose() {
+    for (final t in _syncSuccessTimers.values) {
+      t.cancel();
+    }
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -96,11 +107,7 @@ class _GoogleCalendarSelectionPageState
 
     setState(() {
       _togglingIds.add(cal.id);
-      _calendars = [
-        ...cals.sublist(0, idx),
-        updated,
-        ...cals.sublist(idx + 1),
-      ];
+      _calendars = [...cals.sublist(0, idx), updated, ...cals.sublist(idx + 1)];
     });
 
     try {
@@ -142,9 +149,9 @@ class _GoogleCalendarSelectionPageState
             ];
           }
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(_friendlyError(error))),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(_friendlyError(error))));
       }
     }
   }
@@ -159,23 +166,29 @@ class _GoogleCalendarSelectionPageState
         accessToken: widget.accessToken,
         externalCalendarId: cal.id,
       );
-      debugPrint('[GoogleCalendarSelection] sync succeeded: calendarId=${cal.id}');
+      debugPrint(
+        '[GoogleCalendarSelection] sync succeeded: calendarId=${cal.id}',
+      );
       if (mounted) {
         setState(() {
           _syncingIds.remove(cal.id);
           _syncSuccessIds.add(cal.id);
         });
-        Future.delayed(const Duration(seconds: 3), () {
+        _syncSuccessTimers[cal.id]?.cancel();
+        _syncSuccessTimers[cal.id] = Timer(const Duration(seconds: 3), () {
+          _syncSuccessTimers.remove(cal.id);
           if (mounted) setState(() => _syncSuccessIds.remove(cal.id));
         });
       }
     } catch (error) {
-      debugPrint('[GoogleCalendarSelection] sync failed: calendarId=${cal.id}, error=$error');
+      debugPrint(
+        '[GoogleCalendarSelection] sync failed: calendarId=${cal.id}, error=$error',
+      );
       if (mounted) {
         setState(() => _syncingIds.remove(cal.id));
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(_friendlyError(error))),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(_friendlyError(error))));
       }
     }
   }
@@ -194,7 +207,9 @@ class _GoogleCalendarSelectionPageState
       return;
     }
     if (mounted) setState(() => _isSyncingAll = true);
-    debugPrint('[GoogleCalendarSelection] sync all started: ${cals.length} calendar(s)');
+    debugPrint(
+      '[GoogleCalendarSelection] sync all started: ${cals.length} calendar(s)',
+    );
     for (final cal in cals) {
       if (!mounted) break;
       await _syncCalendar(cal);
@@ -230,9 +245,9 @@ class _GoogleCalendarSelectionPageState
       }
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(_friendlyError(error))),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(_friendlyError(error))));
       }
     }
   }
@@ -252,7 +267,8 @@ class _GoogleCalendarSelectionPageState
       'GOOGLE_CALENDAR_LIST_FAILED' =>
         'We could not load your Google calendars right now. Please try again.',
       'CALENDAR_NOT_ENABLED' => 'Turn this calendar on before syncing.',
-      'CONNECTION_NOT_FOUND' => 'Google connection not found. Please reconnect.',
+      'CONNECTION_NOT_FOUND' =>
+        'Google connection not found. Please reconnect.',
       'CONNECTION_NOT_ACTIVE' =>
         'Google connection is no longer active. Please reconnect.',
       _ => error.message,
@@ -272,24 +288,18 @@ class _GoogleCalendarSelectionPageState
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final connection = widget.connection;
-    final accountLabel =
-        connection.externalAccountEmail ?? 'Google Calendar connected';
 
     return CaleeScaffold(
       appBar: AppBar(title: const Text('Choose Google Calendars')),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _loadError != null
-          ? _ErrorBody(
-              message: _loadError!,
-              onRetry: _load,
-            )
-          : _buildBody(theme, accountLabel),
+          ? _ErrorBody(message: _loadError!, onRetry: _load)
+          : _buildBody(theme),
     );
   }
 
-  Widget _buildBody(ThemeData theme, String accountLabel) {
+  Widget _buildBody(ThemeData theme) {
     final cals = _calendars ?? [];
 
     return SingleChildScrollView(
@@ -310,7 +320,7 @@ class _GoogleCalendarSelectionPageState
           ),
           const SizedBox(height: CaleeSpacing.xs),
           Text(
-            accountLabel,
+            'Google Calendar connected',
             style: theme.textTheme.bodySmall?.copyWith(
               color: CaleeColors.textSecondary,
             ),
@@ -355,11 +365,14 @@ class _GoogleCalendarSelectionPageState
             children: [
               _DetailInfoRow(
                 label: 'Status',
-                value: widget.connection.isActive ? 'Connected' : 'Needs attention',
+                value: widget.connection.isActive
+                    ? 'Connected'
+                    : 'Needs attention',
               ),
               _DetailInfoRow(
                 label: 'Account',
-                value: widget.connection.externalAccountEmail ?? 'Google Calendar',
+                value:
+                    widget.connection.externalAccountEmail ?? 'Google Calendar',
               ),
             ],
           ),
@@ -414,10 +427,7 @@ class _CalendarRow extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  calendar.displayName,
-                  style: theme.textTheme.bodyMedium,
-                ),
+                Text(calendar.displayName, style: theme.textTheme.bodyMedium),
                 Text(
                   'Read-only from Google',
                   style: theme.textTheme.bodySmall?.copyWith(
@@ -447,10 +457,7 @@ class _CalendarRow extends StatelessWidget {
                     tooltip: 'Sync now',
                     onPressed: onSync,
                   ),
-          Switch(
-            value: calendar.syncEnabled,
-            onChanged: onToggle,
-          ),
+          Switch(value: calendar.syncEnabled, onChanged: onToggle),
         ],
       ),
     );

@@ -99,6 +99,7 @@ class ExternalCalendarConnectedLinkController extends ChangeNotifier {
 
   @override
   void dispose() {
+    if (_disposed) return;
     _disposed = true;
     _linkSubscription?.cancel();
     super.dispose();

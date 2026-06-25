@@ -13,7 +13,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 class _StubHubClient extends CaleeHubClient {
   _StubHubClient({required this.calendarsResult})
-      : super(baseUri: Uri.parse('http://localhost'));
+    : super(baseUri: Uri.parse('http://localhost'));
 
   final Future<ClientCalendarList> Function() calendarsResult;
 
@@ -122,51 +122,49 @@ void main() {
     },
   );
 
-  testWidgets(
-    'Partial failure shows warning banner and available calendars',
-    (tester) async {
-      final client = _StubHubClient(
-        calendarsResult: () async => ClientCalendarList(
-          calendars: [_calendar()],
-          serviceErrors: const [
-            CalendarServiceError(
-              code: 'CALENDAR_SERVICE_CONNECTION_BROKEN',
-              serviceId: 'svc2',
-              serviceName: 'Other Service',
-            ),
-          ],
-        ),
-      );
-      await tester.pumpWidget(_wrap(client));
-      await tester.pumpAndSettle();
-
-      expect(find.byType(CalendarServiceWarningBanner), findsOneWidget);
-      expect(find.byType(CalendarServiceConnectionErrorState), findsNothing);
-      expect(find.text('Personal'), findsOneWidget);
-    },
-  );
-
-  testWidgets(
-    'SERVICE_CREDENTIAL_INVALID exception shows error state',
-    (tester) async {
-      final client = _StubHubClient(
-        calendarsResult: () => Future.error(
-          const CaleeHubException(
-            statusCode: 401,
-            message: 'Credential invalid',
-            code: 'SERVICE_CREDENTIAL_INVALID',
-            serviceId: 'svc1',
-            serviceName: 'My Nextcloud',
+  testWidgets('Partial failure shows warning banner and available calendars', (
+    tester,
+  ) async {
+    final client = _StubHubClient(
+      calendarsResult: () async => ClientCalendarList(
+        calendars: [_calendar()],
+        serviceErrors: const [
+          CalendarServiceError(
+            code: 'CALENDAR_SERVICE_CONNECTION_BROKEN',
+            serviceId: 'svc2',
+            serviceName: 'Other Service',
           ),
-        ),
-      );
-      await tester.pumpWidget(_wrap(client));
-      await tester.pumpAndSettle();
+        ],
+      ),
+    );
+    await tester.pumpWidget(_wrap(client));
+    await tester.pumpAndSettle();
 
-      expect(find.byType(CalendarServiceConnectionErrorState), findsOneWidget);
-      expect(find.text('No calendars yet.'), findsNothing);
-    },
-  );
+    expect(find.byType(CalendarServiceWarningBanner), findsOneWidget);
+    expect(find.byType(CalendarServiceConnectionErrorState), findsNothing);
+    expect(find.text('Personal'), findsOneWidget);
+  });
+
+  testWidgets('SERVICE_CREDENTIAL_INVALID exception shows error state', (
+    tester,
+  ) async {
+    final client = _StubHubClient(
+      calendarsResult: () => Future.error(
+        const CaleeHubException(
+          statusCode: 401,
+          message: 'Credential invalid',
+          code: 'SERVICE_CREDENTIAL_INVALID',
+          serviceId: 'svc1',
+          serviceName: 'My Nextcloud',
+        ),
+      ),
+    );
+    await tester.pumpWidget(_wrap(client));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(CalendarServiceConnectionErrorState), findsOneWidget);
+    expect(find.text('No calendars yet.'), findsNothing);
+  });
 
   testWidgets(
     'Generic network error shows "Unable to load", not service error state',
