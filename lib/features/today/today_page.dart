@@ -200,13 +200,7 @@ class _TodayPageState extends State<TodayPage> {
     String? trailing;
 
     if (overview.hasCalendarServiceError) {
-      final err = overview.calendarServiceErrors.first;
-      rows.add(
-        _errorRow(
-          '${err.displayServiceName} connection needs repair. '
-          'Contact Calee support.',
-        ),
-      );
+      rows.add(_errorRow(overview.calendarServiceErrors.first.repairMessage));
     } else if (overview.hasCalendarError) {
       rows.add(_errorRow('Could not load calendar events.'));
     } else if (overview.eventsToday.isEmpty) {

@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../../data/api/calee_hub_client.dart';
+import '../../data/models/calendar_service_error.dart';
 import '../../data/models/client_bootstrap.dart';
 import '../../data/models/client_calendar.dart';
 import '../../ui/calee_design.dart';
+import '../calendar/widgets/calendar_error_state.dart';
 import '../calendar_onboarding/calendar_source_picker_page.dart';
 
 // ─── File-level helpers ───────────────────────────────────────────────────────
@@ -597,6 +599,14 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
           }
 
           if (snapshot.hasError) {
+            final error = snapshot.error;
+            if (error is CaleeHubException &&
+                isCalendarServiceConnectionCode(error.code)) {
+              return CalendarServiceConnectionErrorState(
+                errors: [CalendarServiceError.fromException(error)],
+                onRetry: _reload,
+              );
+            }
             return CaleeEmptyState(
               icon: Icons.error_outline,
               title: 'Unable to load',
@@ -611,41 +621,58 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
             );
           }
 
-          final calendars =
-              snapshot.data?.calendars ?? const <ClientCalendar>[];
+          final data = snapshot.data;
+          final calendars = data?.calendars ?? const <ClientCalendar>[];
+          final serviceErrors =
+              data?.serviceErrors ?? const <CalendarServiceError>[];
 
-          return RefreshIndicator(
-            onRefresh: () async => _reload(),
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(
-                CaleeSpacing.pagePadding,
-                CaleeSpacing.md,
-                CaleeSpacing.pagePadding,
-                96,
+          if (serviceErrors.isNotEmpty && calendars.isEmpty) {
+            return CalendarServiceConnectionErrorState(
+              errors: serviceErrors,
+              onRetry: _reload,
+            );
+          }
+
+          return Column(
+            children: [
+              if (serviceErrors.isNotEmpty)
+                CalendarServiceWarningBanner(errors: serviceErrors),
+              Expanded(
+                child: RefreshIndicator(
+                  onRefresh: () async => _reload(),
+                  child: ListView(
+                    padding: const EdgeInsets.fromLTRB(
+                      CaleeSpacing.pagePadding,
+                      CaleeSpacing.md,
+                      CaleeSpacing.pagePadding,
+                      96,
+                    ),
+                    children: [
+                      _buildSection(
+                        context,
+                        title: 'Calendars',
+                        calendars: _byKind(calendars, 'calendar'),
+                        emptyMessage: 'No calendars yet.',
+                      ),
+                      const SizedBox(height: CaleeSpacing.sectionSpacing),
+                      _buildSection(
+                        context,
+                        title: 'Task lists',
+                        calendars: _byKind(calendars, 'tasks'),
+                        emptyMessage: 'No task lists yet.',
+                      ),
+                      const SizedBox(height: CaleeSpacing.sectionSpacing),
+                      _buildSection(
+                        context,
+                        title: 'Chore lists',
+                        calendars: _byKind(calendars, 'chores'),
+                        emptyMessage: 'No chore lists yet.',
+                      ),
+                    ],
+                  ),
+                ),
               ),
-              children: [
-                _buildSection(
-                  context,
-                  title: 'Calendars',
-                  calendars: _byKind(calendars, 'calendar'),
-                  emptyMessage: 'No calendars yet.',
-                ),
-                const SizedBox(height: CaleeSpacing.sectionSpacing),
-                _buildSection(
-                  context,
-                  title: 'Task lists',
-                  calendars: _byKind(calendars, 'tasks'),
-                  emptyMessage: 'No task lists yet.',
-                ),
-                const SizedBox(height: CaleeSpacing.sectionSpacing),
-                _buildSection(
-                  context,
-                  title: 'Chore lists',
-                  calendars: _byKind(calendars, 'chores'),
-                  emptyMessage: 'No chore lists yet.',
-                ),
-              ],
-            ),
+            ],
           );
         },
       ),
