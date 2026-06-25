@@ -33,6 +33,8 @@ class _GoogleCalendarSelectionPageState
 
   final _syncingIds = <String>{};
   final _syncSuccessIds = <String>{};
+  final _togglingIds = <String>{};
+  bool _isSyncingAll = false;
 
   @override
   void initState() {
@@ -67,6 +69,7 @@ class _GoogleCalendarSelectionPageState
   }
 
   Future<void> _toggleCalendar(ExternalCalendar cal, bool enabled) async {
+    if (_togglingIds.contains(cal.id)) return;
     final cals = _calendars;
     if (cals == null) return;
 
@@ -92,6 +95,7 @@ class _GoogleCalendarSelectionPageState
     });
 
     setState(() {
+      _togglingIds.add(cal.id);
       _calendars = [
         ...cals.sublist(0, idx),
         updated,
@@ -105,10 +109,12 @@ class _GoogleCalendarSelectionPageState
         externalCalendarId: cal.id,
         syncEnabled: enabled,
       );
+      if (mounted) setState(() => _togglingIds.remove(cal.id));
     } catch (error) {
       if (mounted) {
         // Roll back
         setState(() {
+          _togglingIds.remove(cal.id);
           final rollback = ExternalCalendar.fromJson({
             'id': cal.id,
             'providerKey': cal.providerKey,
@@ -146,12 +152,14 @@ class _GoogleCalendarSelectionPageState
   Future<void> _syncCalendar(ExternalCalendar cal) async {
     if (_syncingIds.contains(cal.id)) return;
     setState(() => _syncingIds.add(cal.id));
+    debugPrint('[GoogleCalendarSelection] sync started: calendarId=${cal.id}');
 
     try {
       await widget.hubClient.syncExternalCalendarNow(
         accessToken: widget.accessToken,
         externalCalendarId: cal.id,
       );
+      debugPrint('[GoogleCalendarSelection] sync succeeded: calendarId=${cal.id}');
       if (mounted) {
         setState(() {
           _syncingIds.remove(cal.id);
@@ -162,6 +170,7 @@ class _GoogleCalendarSelectionPageState
         });
       }
     } catch (error) {
+      debugPrint('[GoogleCalendarSelection] sync failed: calendarId=${cal.id}, error=$error');
       if (mounted) {
         setState(() => _syncingIds.remove(cal.id));
         ScaffoldMessenger.of(context).showSnackBar(
@@ -172,18 +181,25 @@ class _GoogleCalendarSelectionPageState
   }
 
   Future<void> _syncAll() async {
+    if (_isSyncingAll) return;
     final cals = _calendars?.where((c) => c.syncEnabled).toList();
     if (cals == null || cals.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Turn on at least one calendar before syncing.'),
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Turn on at least one calendar before syncing.'),
+          ),
+        );
+      }
       return;
     }
+    if (mounted) setState(() => _isSyncingAll = true);
+    debugPrint('[GoogleCalendarSelection] sync all started: ${cals.length} calendar(s)');
     for (final cal in cals) {
+      if (!mounted) break;
       await _syncCalendar(cal);
     }
+    if (mounted) setState(() => _isSyncingAll = false);
     // widget.onDone() is intentionally not called here: in the onboarding
     // flow it resolves to Navigator.pop(), which would auto-navigate away
     // before the user has confirmed they are done. The "View calendar" button
@@ -328,11 +344,13 @@ class _GoogleCalendarSelectionPageState
           ),
           const SizedBox(height: CaleeSpacing.sm),
           OutlinedButton(
-            onPressed: widget.onViewCalendar,
+            onPressed: (_syncingIds.isNotEmpty || _isSyncingAll)
+                ? null
+                : widget.onViewCalendar,
             child: const Text('View calendar'),
           ),
           const SizedBox(height: CaleeSpacing.sectionSpacing),
-          // ── Connection management ──────────────────────────────────────
+          // ── Connection management ──────────────────────────────────────────────
           CaleeSection(
             children: [
               _DetailInfoRow(
