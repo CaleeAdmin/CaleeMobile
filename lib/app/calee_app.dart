@@ -58,7 +58,7 @@ class CaleeAppTestDependencies {
   final DisplayActivationController displayActivationController;
   final LocalCalendarSubscriptionRepository localSubscriptionRepo;
   final ExternalCalendarConnectedLinkController?
-      externalCalendarConnectedLinkController;
+  externalCalendarConnectedLinkController;
   final DeviceProfileDefaultsProvider? deviceProfileDefaultsProvider;
 }
 
@@ -83,7 +83,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
   late final CalendarFollowLinkController _followLinkController;
   late final DisplaySetupLinkController _displaySetupLinkController;
   late final ExternalCalendarConnectedLinkController
-      _externalCalendarConnectedLinkController;
+  _externalCalendarConnectedLinkController;
   late final DisplayActivationController _displayActivationController;
   late final LocalCalendarSubscriptionRepository _localSubscriptionRepo;
   final _navigatorKey = GlobalKey<NavigatorState>();
@@ -117,6 +117,8 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
   bool _showingOnboarding = false;
   int? _initialHomeTab;
   bool _openingGoogleCalendarSelection = false;
+  String? _lastExternalCalendarIntentKey;
+  DateTime? _lastExternalCalendarIntentAt;
 
   List<LocalCalendarSubscription> _localSubscriptions = [];
   bool _localSubscriptionsLoaded = false;
@@ -358,6 +360,22 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
       // Leave pendingIntent in place; _onSessionChanged will process it after restore.
       return;
     }
+
+    // App-level dedup: ignore the same intent key within 5 seconds.
+    final intentKey = [
+      intent.providerKey ?? '',
+      intent.connectionId ?? '',
+    ].join('|');
+    final now = DateTime.now();
+    if (_lastExternalCalendarIntentKey == intentKey &&
+        _lastExternalCalendarIntentAt != null &&
+        now.difference(_lastExternalCalendarIntentAt!) <
+            const Duration(seconds: 5)) {
+      _externalCalendarConnectedLinkController.clearPending();
+      return;
+    }
+    _lastExternalCalendarIntentKey = intentKey;
+    _lastExternalCalendarIntentAt = now;
 
     _externalCalendarConnectedLinkController.clearPending();
     unawaited(_openGoogleCalendarSelectionFromDeepLink(intent));
@@ -612,9 +630,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
     });
   }
 
-  Future<void> _handleFollowLocally(
-    ResolvedCalendarFollowIntent intent,
-  ) async {
+  Future<void> _handleFollowLocally(ResolvedCalendarFollowIntent intent) async {
     try {
       await _localSubscriptionRepo.add(
         title: intent.title,

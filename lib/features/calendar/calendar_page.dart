@@ -190,7 +190,8 @@ class _CalendarPageState extends State<CalendarPage> {
 
   void _openEventActions(ClientEvent event) {
     final calendar = _controller.calendarForEvent(event);
-    final isReadOnly = calendar == null ||
+    final isReadOnly =
+        calendar == null ||
         calendar.readOnly ||
         calendar.isExternal ||
         event.isReadOnly;

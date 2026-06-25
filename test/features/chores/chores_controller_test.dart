@@ -386,26 +386,23 @@ void main() {
       },
     );
 
-    test(
-      'two assignees make two separate backend create calls',
-      () async {
-        final client = _CreateTrackingHubClient();
-        final repo = _repositoryWithHousehold(client);
+    test('two assignees make two separate backend create calls', () async {
+      final client = _CreateTrackingHubClient();
+      final repo = _repositoryWithHousehold(client);
 
-        await repo.createChore(
-          calendar: _calendar('cal-1'),
-          title: 'Chore',
-          assigneePersonIds: ['person-1', 'person-2'],
-          points: 5,
-        );
+      await repo.createChore(
+        calendar: _calendar('cal-1'),
+        title: 'Chore',
+        assigneePersonIds: ['person-1', 'person-2'],
+        points: 5,
+      );
 
-        expect(client.createCalls, hasLength(2));
-        final assignees = client.createCalls
-            .map((c) => c['assigneePersonId'])
-            .toSet();
-        expect(assignees, containsAll(['person-1', 'person-2']));
-      },
-    );
+      expect(client.createCalls, hasLength(2));
+      final assignees = client.createCalls
+          .map((c) => c['assigneePersonId'])
+          .toSet();
+      expect(assignees, containsAll(['person-1', 'person-2']));
+    });
 
     test(
       'duplicate assignee IDs are deduped preserving first-seen order',
@@ -426,23 +423,20 @@ void main() {
       },
     );
 
-    test(
-      'whitespace-only and empty IDs are skipped',
-      () async {
-        final client = _CreateTrackingHubClient();
-        final repo = _repositoryWithHousehold(client);
+    test('whitespace-only and empty IDs are skipped', () async {
+      final client = _CreateTrackingHubClient();
+      final repo = _repositoryWithHousehold(client);
 
-        await repo.createChore(
-          calendar: _calendar('cal-1'),
-          title: 'Chore',
-          assigneePersonIds: ['  ', '', 'person-1'],
-          points: 1,
-        );
+      await repo.createChore(
+        calendar: _calendar('cal-1'),
+        title: 'Chore',
+        assigneePersonIds: ['  ', '', 'person-1'],
+        points: 1,
+      );
 
-        expect(client.createCalls, hasLength(1));
-        expect(client.createCalls.single['assigneePersonId'], 'person-1');
-      },
-    );
+      expect(client.createCalls, hasLength(1));
+      expect(client.createCalls.single['assigneePersonId'], 'person-1');
+    });
   });
 
   group('ChoresRepository updateChore', () {

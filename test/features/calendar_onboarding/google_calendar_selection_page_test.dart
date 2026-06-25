@@ -19,14 +19,12 @@ class _StubHubClient extends CaleeHubClient {
   _StubHubClient({
     List<ExternalCalendar>? calendars,
     this._syncShouldFail = false,
-    this._disconnectShouldFail = false,
     this._syncCompleter,
   }) : _calendars = calendars ?? [],
        super(baseUri: Uri.parse('http://localhost'));
 
   final List<ExternalCalendar> _calendars;
   final bool _syncShouldFail;
-  final bool _disconnectShouldFail;
   final Completer<void>? _syncCompleter;
 
   @override
@@ -67,7 +65,7 @@ class _StubHubClient extends CaleeHubClient {
     required String externalCalendarId,
   }) async {
     if (_syncCompleter != null) {
-      await _syncCompleter!.future;
+      await _syncCompleter.future;
     }
     if (_syncShouldFail) {
       throw const CaleeHubException(
@@ -89,29 +87,21 @@ class _StubHubClient extends CaleeHubClient {
   Future<void> disconnectExternalCalendarConnection({
     required String accessToken,
     required String connectionId,
-  }) async {
-    if (_disconnectShouldFail) {
-      throw const CaleeHubException(
-        statusCode: 500,
-        message: 'Disconnect failed',
-      );
-    }
-  }
+  }) async {}
 }
 
 // ── Test helpers ───────────────────────────────────────────────────────────────────
 
-ExternalCalendarConnection _activeConnection({
-  String? email,
-}) => ExternalCalendarConnection.fromJson({
-  'id': 'conn1',
-  'providerKey': 'google_calendar',
-  'displayName': 'Google Calendar',
-  'externalAccountEmail': email,
-  'connectionStatus': 'active',
-  'accessMode': 'read_only',
-  'sourceOfTruthPolicy': 'external',
-});
+ExternalCalendarConnection _activeConnection({String? email}) =>
+    ExternalCalendarConnection.fromJson({
+      'id': 'conn1',
+      'providerKey': 'google_calendar',
+      'displayName': 'Google Calendar',
+      'externalAccountEmail': email,
+      'connectionStatus': 'active',
+      'accessMode': 'read_only',
+      'sourceOfTruthPolicy': 'external',
+    });
 
 ExternalCalendar _fakeCalendar({
   String id = 'cal1',
@@ -247,7 +237,9 @@ void main() {
   testWidgets('shows empty-state text when no calendars returned', (
     tester,
   ) async {
-    await tester.pumpWidget(_wrapPage(hubClient: _StubHubClient(calendars: [])));
+    await tester.pumpWidget(
+      _wrapPage(hubClient: _StubHubClient(calendars: [])),
+    );
     await tester.pump(const Duration(milliseconds: 50));
 
     expect(
@@ -308,36 +300,35 @@ void main() {
     );
   });
 
-  testWidgets(
-    'View calendar button is disabled while sync is in progress',
-    (tester) async {
-      final syncCompleter = Completer<void>();
-      final client = _StubHubClient(
-        calendars: [_fakeCalendar(syncEnabled: true)],
-        syncCompleter: syncCompleter,
-      );
-      await tester.pumpWidget(_wrapPage(hubClient: client));
-      await tester.pump(const Duration(milliseconds: 50));
+  testWidgets('View calendar button is disabled while sync is in progress', (
+    tester,
+  ) async {
+    final syncCompleter = Completer<void>();
+    final client = _StubHubClient(
+      calendars: [_fakeCalendar(syncEnabled: true)],
+      syncCompleter: syncCompleter,
+    );
+    await tester.pumpWidget(_wrapPage(hubClient: client));
+    await tester.pump(const Duration(milliseconds: 50));
 
-      // Start sync — the completer keeps it in-flight.
-      await tester.tap(find.text('Sync selected calendars now'));
-      await tester.pump();
+    // Start sync — the completer keeps it in-flight.
+    await tester.tap(find.text('Sync selected calendars now'));
+    await tester.pump();
 
-      // View calendar should be disabled while sync is in progress.
-      final button = tester.widget<OutlinedButton>(
-        find.widgetWithText(OutlinedButton, 'View calendar'),
-      );
-      expect(button.onPressed, isNull);
+    // View calendar should be disabled while sync is in progress.
+    final button = tester.widget<OutlinedButton>(
+      find.widgetWithText(OutlinedButton, 'View calendar'),
+    );
+    expect(button.onPressed, isNull);
 
-      // Let sync complete.
-      syncCompleter.complete();
-      await tester.pumpAndSettle();
+    // Let sync complete.
+    syncCompleter.complete();
+    await tester.pumpAndSettle();
 
-      // View calendar should be re-enabled after sync.
-      final enabledButton = tester.widget<OutlinedButton>(
-        find.widgetWithText(OutlinedButton, 'View calendar'),
-      );
-      expect(enabledButton.onPressed, isNotNull);
-    },
-  );
+    // View calendar should be re-enabled after sync.
+    final enabledButton = tester.widget<OutlinedButton>(
+      find.widgetWithText(OutlinedButton, 'View calendar'),
+    );
+    expect(enabledButton.onPressed, isNotNull);
+  });
 }

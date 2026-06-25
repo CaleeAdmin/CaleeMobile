@@ -46,15 +46,10 @@ ExternalCalendarConnection _makeConnection({
 // ── Stub hub clients ───────────────────────────────────────────────────────────────────
 
 class _StubHubClient extends CaleeHubClient {
-  _StubHubClient({
-    List<ExternalCalendarConnection> connections = const [],
-    String oauthUrl = 'https://accounts.google.com/oauth',
-  }) : _connections = connections,
-       _oauthUrl = oauthUrl,
-       super(baseUri: Uri.parse('http://localhost'));
+  _StubHubClient({this._connections = const []})
+    : super(baseUri: Uri.parse('http://localhost'));
 
   final List<ExternalCalendarConnection> _connections;
-  final String _oauthUrl;
 
   String? lastCalledConnectionId;
 
@@ -63,7 +58,7 @@ class _StubHubClient extends CaleeHubClient {
     required String accessToken,
     required String providerKey,
     String accessMode = 'read_only',
-  }) async => _oauthUrl;
+  }) async => 'https://accounts.google.com/oauth';
 
   @override
   Future<List<ExternalCalendarConnection>> externalCalendarConnections({
@@ -216,9 +211,7 @@ void main() {
     });
 
     test('non-calee scheme returns null', () {
-      final uri = Uri.parse(
-        'https://example.com/external-calendar-connected',
-      );
+      final uri = Uri.parse('https://example.com/external-calendar-connected');
       expect(ExternalCalendarConnectedLinkController.parseUri(uri), isNull);
     });
   });
@@ -268,43 +261,40 @@ void main() {
       },
     );
 
-    testWidgets(
-      '"I finished in browser" shows connection-not-found view '
-      'when no active Google connection exists',
-      (tester) async {
-        final hubClient = _StubHubClient(connections: []);
-        bool urlLaunched = false;
+    testWidgets('"I finished in browser" shows connection-not-found view '
+        'when no active Google connection exists', (tester) async {
+      final hubClient = _StubHubClient(connections: []);
+      bool urlLaunched = false;
 
-        await tester.pumpWidget(
-          MaterialApp(
-            theme: CaleeTheme.buildThemeData(),
-            home: GoogleCalendarGuidePage(
-              hubClient: hubClient,
-              accessToken: 'token',
-              services: const [],
-              accountId: 'acct1',
-              onDone: () {},
-              onViewCalendar: () {},
-              launchUrl: (url) async {
-                urlLaunched = true;
-              },
-            ),
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: CaleeTheme.buildThemeData(),
+          home: GoogleCalendarGuidePage(
+            hubClient: hubClient,
+            accessToken: 'token',
+            services: const [],
+            accountId: 'acct1',
+            onDone: () {},
+            onViewCalendar: () {},
+            launchUrl: (url) async {
+              urlLaunched = true;
+            },
           ),
-        );
+        ),
+      );
 
-        await tester.tap(find.text('Connect Google Calendar'));
-        await tester.pumpAndSettle();
+      await tester.tap(find.text('Connect Google Calendar'));
+      await tester.pumpAndSettle();
 
-        expect(urlLaunched, isTrue);
+      expect(urlLaunched, isTrue);
 
-        await tester.tap(find.text('I finished in browser'));
-        await tester.pumpAndSettle();
+      await tester.tap(find.text('I finished in browser'));
+      await tester.pumpAndSettle();
 
-        // Should stay on guide page and show not-found state.
-        expect(find.byType(GoogleCalendarSelectionPage), findsNothing);
-        expect(find.text('Connection not found yet'), findsOneWidget);
-      },
-    );
+      // Should stay on guide page and show not-found state.
+      expect(find.byType(GoogleCalendarSelectionPage), findsNothing);
+      expect(find.text('Connection not found yet'), findsOneWidget);
+    });
   });
 
   group('CaleeApp — external-calendar-connected deep link', () {
@@ -320,8 +310,7 @@ void main() {
         final conn2 = _makeConnection(id: 'conn2');
         final hubClient = _StubHubClient(connections: [conn1, conn2]);
         final session = _FakeSessionController();
-        final linkController =
-            _FakeExternalCalendarConnectedLinkController();
+        final linkController = _FakeExternalCalendarConnectedLinkController();
 
         await tester.pumpWidget(
           CaleeApp.forTesting(
@@ -359,8 +348,7 @@ void main() {
         final conn1 = _makeConnection(id: 'conn1');
         final hubClient = _StubHubClient(connections: [conn1]);
         final session = _FakeSessionController();
-        final linkController =
-            _FakeExternalCalendarConnectedLinkController();
+        final linkController = _FakeExternalCalendarConnectedLinkController();
 
         await tester.pumpWidget(
           CaleeApp.forTesting(
@@ -376,9 +364,7 @@ void main() {
         await tester.pump();
 
         linkController.injectIntent(
-          const ExternalCalendarConnectedIntent(
-            providerKey: 'google_calendar',
-          ),
+          const ExternalCalendarConnectedIntent(providerKey: 'google_calendar'),
         );
         await tester.pumpAndSettle();
 
@@ -392,8 +378,7 @@ void main() {
       (tester) async {
         final hubClient = _StubHubClient(connections: []);
         final session = _FakeSessionController();
-        final linkController =
-            _FakeExternalCalendarConnectedLinkController();
+        final linkController = _FakeExternalCalendarConnectedLinkController();
 
         await tester.pumpWidget(
           CaleeApp.forTesting(
@@ -414,7 +399,10 @@ void main() {
             reason: 'access_denied',
           ),
         );
-        await tester.pumpAndSettle();
+        // Use bounded pumps: pumpAndSettle times out because the home screen
+        // contains an infinite animation (CircularProgressIndicator).
+        await tester.pump(); // fire postFrameCallback → show snackbar
+        await tester.pump(const Duration(milliseconds: 400)); // snackbar entry
 
         expect(find.byType(GoogleCalendarSelectionPage), findsNothing);
         expect(
@@ -432,8 +420,7 @@ void main() {
         final conn2 = _makeConnection(id: 'conn2');
         final hubClient = _StubHubClient(connections: [conn1, conn2]);
         final session = _FakeSessionController();
-        final linkController =
-            _FakeExternalCalendarConnectedLinkController();
+        final linkController = _FakeExternalCalendarConnectedLinkController();
 
         await tester.pumpWidget(
           CaleeApp.forTesting(
@@ -467,8 +454,7 @@ void main() {
         final conn1 = _makeConnection(id: 'conn1');
         final hubClient = _StubHubClient(connections: [conn1]);
         final session = _FakeSessionController();
-        final linkController =
-            _FakeExternalCalendarConnectedLinkController();
+        final linkController = _FakeExternalCalendarConnectedLinkController();
 
         await tester.pumpWidget(
           CaleeApp.forTesting(

@@ -473,10 +473,7 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
             ),
           SimpleDialogOption(
             onPressed: () => Navigator.of(ctx).pop(),
-            child: Text(
-              'Cancel',
-              style: TextStyle(color: CaleeColors.primary),
-            ),
+            child: Text('Cancel', style: TextStyle(color: CaleeColors.primary)),
           ),
         ],
       ),

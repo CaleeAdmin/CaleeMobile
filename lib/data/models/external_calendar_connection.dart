@@ -95,8 +95,7 @@ class ExternalCalendarPrivacySettings {
       showDescription: json['showDescription'] as bool? ?? false,
       showAttendees: json['showAttendees'] as bool? ?? false,
       showOrganizer: json['showOrganizer'] as bool? ?? false,
-      privateEventMode:
-          json['privateEventMode'] as String? ?? 'busy_only',
+      privateEventMode: json['privateEventMode'] as String? ?? 'busy_only',
     );
   }
 

@@ -356,10 +356,7 @@ void main() {
       );
 
       await expectLater(
-        client.approveDisplayLogin(
-          accessToken: 'tok',
-          token: 'display-tok',
-        ),
+        client.approveDisplayLogin(accessToken: 'tok', token: 'display-tok'),
         throwsA(anything),
       );
 
@@ -404,8 +401,7 @@ void main() {
             await socket.close();
           } else if (connectionCount == 2) {
             // Retry arrives with stale token → respond 401.
-            const err =
-                '{"error":{"message":"Token expired"},"meta":{}}';
+            const err = '{"error":{"message":"Token expired"},"meta":{}}';
             socket.write(
               'HTTP/1.1 401 Unauthorized\r\n'
               'Content-Type: application/json\r\n'

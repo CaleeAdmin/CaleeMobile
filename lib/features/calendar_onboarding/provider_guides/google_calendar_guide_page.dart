@@ -59,10 +59,7 @@ class _GoogleCalendarGuidePageState extends State<GoogleCalendarGuidePage> {
       if (launch != null) {
         await launch(url);
       } else {
-        await launchUrl(
-          Uri.parse(url),
-          mode: LaunchMode.externalApplication,
-        );
+        await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
       }
 
       if (mounted) {
@@ -169,8 +166,7 @@ class _GoogleCalendarGuidePageState extends State<GoogleCalendarGuidePage> {
         title: const Text('Add Google Calendar'),
         leading: _view != _GoogleGuideView.main
             ? BackButton(
-                onPressed: () =>
-                    setState(() => _view = _GoogleGuideView.main),
+                onPressed: () => setState(() => _view = _GoogleGuideView.main),
               )
             : null,
       ),
