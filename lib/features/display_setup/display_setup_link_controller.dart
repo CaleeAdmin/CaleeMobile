@@ -24,7 +24,9 @@ class DisplaySetupLinkController extends ChangeNotifier {
       if (initialUri != null) {
         _handleUri(initialUri);
       }
-    } catch (_) {}
+    } catch (_) {
+      // Platform may not provide an initial link — this is expected on some platforms.
+    }
 
     _linkSubscription = _appLinks.uriLinkStream.listen(
       _handleUri,

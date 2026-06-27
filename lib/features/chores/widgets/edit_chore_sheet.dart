@@ -44,7 +44,7 @@ class _EditChoreSheetState extends State<EditChoreSheet> {
   DateTime? _selectedDate;
   String? _selectedRecurrence;
   String? _assigneePersonId;
-  late String _approvalState;
+  late final String _approvalState;
   bool _isSubmitting = false;
 
   @override
