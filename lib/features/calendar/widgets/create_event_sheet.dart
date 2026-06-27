@@ -535,7 +535,9 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
       String tz = 'Australia/Perth';
       try {
         tz = await FlutterTimezone.getLocalTimezone();
-      } catch (_) {}
+      } catch (_) {
+        // Timezone unavailable; default 'Australia/Perth' is used.
+      }
 
       final now = DateTime.now();
       final referenceDate =
@@ -765,7 +767,7 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
         : 'Add event';
 
     return SafeArea(
-      child: Container(
+      child: ColoredBox(
         color: CaleeColors.scaffoldBackground,
         child: Form(
           key: _formKey,
