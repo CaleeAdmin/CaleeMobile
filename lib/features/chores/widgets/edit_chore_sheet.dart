@@ -13,6 +13,7 @@ class EditChoreSheet extends StatefulWidget {
     required this.people,
     required this.metadata,
     required this.onUpdate,
+    required this.onDelete,
     super.key,
   });
 
@@ -30,6 +31,7 @@ class EditChoreSheet extends StatefulWidget {
     required String approvalState,
   })
   onUpdate;
+  final Future<void> Function() onDelete;
 
   @override
   State<EditChoreSheet> createState() => _EditChoreSheetState();
@@ -200,9 +202,9 @@ class _EditChoreSheetState extends State<EditChoreSheet> {
               CaleeSection(
                 children: [
                   CaleeSectionPickerRow(
-                    label: 'Date',
+                    label: 'Due date',
                     value: _selectedDate == null
-                        ? 'No Date'
+                        ? 'No date'
                         : '${_selectedDate!.day}/${_selectedDate!.month}/${_selectedDate!.year}',
                     onTap: _isSubmitting ? null : _pickDate,
                     enabled: !_isSubmitting,
@@ -222,7 +224,7 @@ class _EditChoreSheetState extends State<EditChoreSheet> {
                           vertical: 11,
                         ),
                         child: Text(
-                          'Clear Date',
+                          'Clear date',
                           style: TextStyle(
                             fontSize: 16,
                             color: _isSubmitting
@@ -328,6 +330,18 @@ class _EditChoreSheetState extends State<EditChoreSheet> {
                       )
                     : const Text('Save chore'),
               ),
+              const SizedBox(height: CaleeSpacing.sectionSpacing),
+              const Divider(),
+              const SizedBox(height: CaleeSpacing.sm),
+              TextButton(
+                onPressed: _isSubmitting ? null : widget.onDelete,
+                style: TextButton.styleFrom(
+                  foregroundColor: CaleeColors.destructive,
+                  minimumSize: const Size.fromHeight(44),
+                ),
+                child: const Text('Delete chore'),
+              ),
+              const SizedBox(height: CaleeSpacing.md),
             ],
           ),
         ),

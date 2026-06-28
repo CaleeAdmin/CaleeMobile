@@ -211,9 +211,39 @@ class _ChoresPageState extends State<ChoresPage> {
               points: points,
               approvalState: approvalState,
             ),
+        onDelete: () => _deleteChoreFromEditSheet(chore),
       ),
     );
-    // Controller reloads after updateChore; nothing more needed.
+    // Controller reloads after updateChore or permanentlyDeleteChore.
+  }
+
+  Future<void> _deleteChoreFromEditSheet(ClientChore chore) async {
+    final confirmed = await CaleeDestructiveDialog.show(
+      context: context,
+      title: 'Delete this chore?',
+      body: 'This cannot be undone.',
+      confirmLabel: 'Delete',
+    );
+
+    if (!confirmed || !mounted) return;
+
+    try {
+      await _controller.permanentlyDeleteChore(chore);
+      if (mounted) {
+        Navigator.of(context).pop();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Chore deleted.')),
+        );
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(choreErrorMessage(error, 'Unable to delete chore.')),
+          ),
+        );
+      }
+    }
   }
 
   Future<void> _toggleChoreCompletion(ClientChore chore) async {
@@ -236,26 +266,30 @@ class _ChoresPageState extends State<ChoresPage> {
 
     final isDone =
         chore.completedToday || chore.normalizedSection == 'doneToday';
-    final actions = <CaleeAction>[
-      if (chore.canToggleCompletion)
+    final actions = <CaleeAction>[];
+
+    if (isDone && chore.canToggleCompletion) {
+      actions.add(
         CaleeAction(
-          label: isDone ? 'Undo done' : 'Mark done',
-          icon: isDone
-              ? Icons.unpublished_outlined
-              : Icons.check_circle_outline,
+          label: 'Mark as not done',
+          icon: Icons.unpublished_outlined,
           onTap: () => _toggleChoreCompletion(chore),
         ),
+      );
+    }
+
+    actions.add(
       CaleeAction(
         label: 'Edit chore',
         icon: Icons.edit_outlined,
         onTap: () => _openEditChoreSheet(chore),
       ),
-    ];
+    );
 
-    if (chore.isRecurring) {
+    if (!isDone && chore.isRecurring) {
       actions.addAll([
         CaleeAction(
-          label: 'Skip this time',
+          label: 'Skip this occurrence',
           icon: Icons.event_busy_outlined,
           onTap: () => _skipChore(chore),
         ),
@@ -265,22 +299,7 @@ class _ChoresPageState extends State<ChoresPage> {
           isDestructive: true,
           onTap: () => _stopRepeatingChore(chore),
         ),
-        CaleeAction(
-          label: 'Delete permanently',
-          icon: Icons.delete_outline,
-          isDestructive: true,
-          onTap: () => _confirmAndDeletePermanentChore(chore),
-        ),
       ]);
-    } else {
-      actions.add(
-        CaleeAction(
-          label: 'Delete chore',
-          icon: Icons.delete_outline,
-          isDestructive: true,
-          onTap: () => _confirmAndDeletePermanentChore(chore),
-        ),
-      );
     }
 
     CaleeActionSheet.show(
@@ -357,37 +376,6 @@ class _ChoresPageState extends State<ChoresPage> {
             SnackBar(
               content: Text(
                 choreErrorMessage(error, 'Unable to stop repeating chore.'),
-              ),
-            ),
-          );
-        }
-      }
-    }
-  }
-
-  Future<void> _confirmAndDeletePermanentChore(ClientChore chore) async {
-    final confirmed = await CaleeDestructiveDialog.show(
-      context: context,
-      title: 'Delete chore permanently?',
-      body:
-          'This will permanently delete "${chore.title}" and its completion records. This cannot be undone.',
-      confirmLabel: 'Delete permanently',
-    );
-
-    if (confirmed && mounted) {
-      try {
-        await _controller.permanentlyDeleteChore(chore);
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Chore deleted permanently.')),
-          );
-        }
-      } catch (error) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                choreErrorMessage(error, 'Unable to delete chore.'),
               ),
             ),
           );

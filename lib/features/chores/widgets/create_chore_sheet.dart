@@ -215,9 +215,9 @@ class _CreateChoreSheetState extends State<CreateChoreSheet> {
               CaleeSection(
                 children: [
                   CaleeSectionPickerRow(
-                    label: 'Date',
+                    label: 'Due date',
                     value: _selectedDate == null
-                        ? 'No Date'
+                        ? 'No date'
                         : '${_selectedDate!.day}/${_selectedDate!.month}/${_selectedDate!.year}',
                     onTap: _isSubmitting ? null : _pickDate,
                     enabled: !_isSubmitting,
@@ -237,7 +237,7 @@ class _CreateChoreSheetState extends State<CreateChoreSheet> {
                           vertical: 11,
                         ),
                         child: Text(
-                          'Clear Date',
+                          'Clear date',
                           style: TextStyle(
                             fontSize: 16,
                             color: _isSubmitting
