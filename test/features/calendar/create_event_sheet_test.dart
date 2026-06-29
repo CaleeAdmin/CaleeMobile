@@ -5,6 +5,7 @@ import 'package:calee_mobile/data/models/client_calendar.dart';
 import 'package:calee_mobile/data/models/client_event_draft.dart';
 import 'package:calee_mobile/features/calendar/widgets/create_event_sheet.dart';
 import 'package:calee_mobile/shared/recurrence/calee_repeat_rule.dart';
+import 'package:calee_mobile/ui/calee_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -79,6 +80,7 @@ Widget _buildSheet({
   void Function(String?)? onUpdateRecurrence,
 }) {
   return MaterialApp(
+    theme: CaleeTheme.buildThemeData(),
     home: Scaffold(
       body: CreateEventSheet(
         calendars: const [_calendar],
@@ -117,13 +119,35 @@ Widget _buildSheet({
   );
 }
 
-Future<void> _selectRepeat(WidgetTester tester, String label) async {
-  await tester.tap(
-    find.byWidgetPredicate((w) => w is DropdownButton<CaleeRepeatRule>),
+Future<void> _openRepeatPicker(WidgetTester tester) async {
+  final repeatRow = find.ancestor(
+    of: find.text('Repeat'),
+    matching: find.byType(InkWell),
   );
+  await tester.tap(repeatRow.first);
   await tester.pumpAndSettle();
-  // Items appear in an overlay; use last to prefer the overlay copy.
-  await tester.tap(find.text(label).last);
+}
+
+Future<void> _selectRepeat(WidgetTester tester, String label) async {
+  await _openRepeatPicker(tester);
+  await tester.tap(find.text(label));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text('Done'));
+  await tester.pumpAndSettle();
+}
+
+Future<void> _selectCustomRepeat(
+  WidgetTester tester,
+  List<String> pillLabels,
+) async {
+  await _openRepeatPicker(tester);
+  await tester.tap(find.text('Custom days'));
+  await tester.pumpAndSettle();
+  for (final pill in pillLabels) {
+    await tester.tap(find.text(pill));
+    await tester.pumpAndSettle();
+  }
+  await tester.tap(find.text('Done'));
   await tester.pumpAndSettle();
 }
 
@@ -231,6 +255,24 @@ void main() {
       },
     );
 
+    testWidgets('custom Mon/Wed/Fri sends FREQ=WEEKLY;BYDAY=MO,WE,FR', (
+      tester,
+    ) async {
+      String? captured;
+      await tester.pumpWidget(_buildSheet(onRecurrence: (r) => captured = r));
+
+      await tester.enterText(find.byType(TextFormField).first, 'Test Event');
+      await tester.pumpAndSettle();
+
+      await _selectCustomRepeat(tester, ['Mon', 'Wed', 'Fri']);
+
+      await tester.ensureVisible(find.text('Save Event'));
+      await tester.tap(find.text('Save Event'));
+      await tester.pumpAndSettle();
+
+      expect(captured, 'FREQ=WEEKLY;BYDAY=MO,WE,FR');
+    });
+
     testWidgets(
       'edit all events can clear recurrence',
       (tester) async {
@@ -247,7 +289,7 @@ void main() {
           ),
         );
 
-        // Repeat dropdown is visible for series editing.
+        // Repeat picker row is visible for series editing.
         expect(find.text('Repeat'), findsOneWidget);
 
         await _selectRepeat(tester, 'Does not repeat');

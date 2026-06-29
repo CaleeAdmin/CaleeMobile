@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../data/models/client_calendar.dart';
 import '../../../data/models/client_person.dart';
+import '../../../shared/recurrence/calee_repeat_picker_sheet.dart';
 import '../../../ui/calee_theme.dart';
 import '../../../ui/calee_widgets.dart';
 import 'chore_widget_helpers.dart';
@@ -118,46 +119,16 @@ class _CreateChoreSheetState extends State<CreateChoreSheet> {
     }
   }
 
-  List<DropdownMenuItem<CaleeRepeatRule>> get _repeatItems {
+  Future<void> _pickRepeat() async {
     final anchorDate = _selectedDate ?? DateTime.now();
-    return [
-      DropdownMenuItem(
-        value: CaleeRepeatRule.none,
-        child: Text(CaleeRepeatRule.none.label(anchorDate: anchorDate)),
-      ),
-      DropdownMenuItem(
-        value: CaleeRepeatRule.daily,
-        child: Text(CaleeRepeatRule.daily.label(anchorDate: anchorDate)),
-      ),
-      DropdownMenuItem(
-        value: CaleeRepeatRule.weekdaysOnly,
-        child: Text(CaleeRepeatRule.weekdaysOnly.label(anchorDate: anchorDate)),
-      ),
-      DropdownMenuItem(
-        value: const CaleeRepeatRule(kind: CaleeRepeatKind.weekly),
-        child: Text(
-          const CaleeRepeatRule(
-            kind: CaleeRepeatKind.weekly,
-          ).label(anchorDate: anchorDate),
-        ),
-      ),
-      DropdownMenuItem(
-        value: const CaleeRepeatRule(kind: CaleeRepeatKind.fortnightly),
-        child: Text(
-          const CaleeRepeatRule(
-            kind: CaleeRepeatKind.fortnightly,
-          ).label(anchorDate: anchorDate),
-        ),
-      ),
-      DropdownMenuItem(
-        value: CaleeRepeatRule.monthly,
-        child: Text(CaleeRepeatRule.monthly.label(anchorDate: anchorDate)),
-      ),
-      DropdownMenuItem(
-        value: CaleeRepeatRule.yearly,
-        child: Text(CaleeRepeatRule.yearly.label(anchorDate: anchorDate)),
-      ),
-    ];
+    await CaleeRepeatPickerSheet.show(
+      context: context,
+      current: _selectedRecurrence,
+      anchorDate: anchorDate,
+      onSelected: (rule) {
+        setState(() => _selectedRecurrence = rule);
+      },
+    );
   }
 
   Future<void> _submit() async {
@@ -292,17 +263,13 @@ class _CreateChoreSheetState extends State<CreateChoreSheet> {
                         ),
                       ),
                     ),
-                  CaleeSectionDropdownRow<CaleeRepeatRule>(
+                  CaleeSectionPickerRow(
                     label: 'Repeat',
-                    value: _selectedRecurrence,
+                    value: _selectedRecurrence.label(
+                      anchorDate: _selectedDate ?? DateTime.now(),
+                    ),
+                    onTap: _isSubmitting ? null : _pickRepeat,
                     enabled: !_isSubmitting,
-                    items: _repeatItems,
-                    onChanged: (value) {
-                      if (value == null) return;
-                      setState(() {
-                        _selectedRecurrence = value;
-                      });
-                    },
                   ),
                 ],
               ),
