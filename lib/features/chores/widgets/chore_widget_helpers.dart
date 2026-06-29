@@ -1,6 +1,8 @@
 import '../../../data/api/calee_hub_client.dart';
 import '../../../shared/recurrence/calee_repeat_rule.dart';
 
+export '../../../shared/recurrence/calee_repeat_rule.dart';
+
 String formatChoreDate(DateTime value) {
   final year = value.year.toString().padLeft(4, '0');
   final month = value.month.toString().padLeft(2, '0');
