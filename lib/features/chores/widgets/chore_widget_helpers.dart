@@ -1,4 +1,5 @@
 import '../../../data/api/calee_hub_client.dart';
+import '../../../shared/recurrence/calee_repeat_rule.dart';
 
 String formatChoreDate(DateTime value) {
   final year = value.year.toString().padLeft(4, '0');
@@ -14,26 +15,14 @@ DateTime? parseChoreDate(String? value) {
   return parsed.toLocal();
 }
 
-String? choreRecurrenceToRrule(String? value) {
-  switch (value) {
-    case 'daily':
-      return 'FREQ=DAILY';
-    case 'weekly':
-      return 'FREQ=WEEKLY';
-    case 'monthly':
-      return 'FREQ=MONTHLY';
-    default:
-      return null;
-  }
-}
+String choreRepeatValue(CaleeRepeatRule rule, {DateTime? anchorDate}) =>
+    rule.label(anchorDate: anchorDate);
 
-String? choreRruleToRecurrence(String? value) {
-  final rrule = value?.trim().toUpperCase();
-  if (rrule == 'FREQ=DAILY') return 'daily';
-  if (rrule == 'FREQ=WEEKLY') return 'weekly';
-  if (rrule == 'FREQ=MONTHLY') return 'monthly';
-  return null;
-}
+String? choreRecurrenceToRrule(CaleeRepeatRule rule, {DateTime? anchorDate}) =>
+    rule.toRrule(anchorDate: anchorDate);
+
+CaleeRepeatRule choreRruleToRecurrence(String? value, {DateTime? anchorDate}) =>
+    CaleeRepeatRule.fromRrule(value, anchorDate: anchorDate);
 
 String choreErrorMessage(Object error, String fallback) {
   if (error is CaleeHubException && error.message.trim().isNotEmpty) {
