@@ -44,7 +44,7 @@ class _EditChoreSheetState extends State<EditChoreSheet> {
   late final TextEditingController _pointsController;
 
   DateTime? _selectedDate;
-  String? _selectedRecurrence;
+  CaleeRepeatRule _selectedRecurrence = CaleeRepeatRule.none;
   String? _assigneePersonId;
   late final String _approvalState;
   bool _isSubmitting = false;
@@ -59,7 +59,10 @@ class _EditChoreSheetState extends State<EditChoreSheet> {
     _selectedDate = parseChoreDate(
       widget.chore.scheduledDate ?? widget.chore.scheduledAt,
     );
-    _selectedRecurrence = choreRruleToRecurrence(widget.chore.recurrence);
+    _selectedRecurrence = choreRruleToRecurrence(
+      widget.chore.recurrence,
+      anchorDate: _selectedDate,
+    );
 
     final activePeopleIds = widget.people.map((person) => person.id).toSet();
     final existingAssignee =
@@ -99,6 +102,48 @@ class _EditChoreSheetState extends State<EditChoreSheet> {
     }
   }
 
+  List<DropdownMenuItem<CaleeRepeatRule>> get _repeatItems {
+    final anchorDate = _selectedDate ?? DateTime.now();
+    return [
+      DropdownMenuItem(
+        value: CaleeRepeatRule.none,
+        child: Text(CaleeRepeatRule.none.label(anchorDate: anchorDate)),
+      ),
+      DropdownMenuItem(
+        value: CaleeRepeatRule.daily,
+        child: Text(CaleeRepeatRule.daily.label(anchorDate: anchorDate)),
+      ),
+      DropdownMenuItem(
+        value: CaleeRepeatRule.weekdaysOnly,
+        child: Text(CaleeRepeatRule.weekdaysOnly.label(anchorDate: anchorDate)),
+      ),
+      DropdownMenuItem(
+        value: const CaleeRepeatRule(kind: CaleeRepeatKind.weekly),
+        child: Text(
+          const CaleeRepeatRule(
+            kind: CaleeRepeatKind.weekly,
+          ).label(anchorDate: anchorDate),
+        ),
+      ),
+      DropdownMenuItem(
+        value: const CaleeRepeatRule(kind: CaleeRepeatKind.fortnightly),
+        child: Text(
+          const CaleeRepeatRule(
+            kind: CaleeRepeatKind.fortnightly,
+          ).label(anchorDate: anchorDate),
+        ),
+      ),
+      DropdownMenuItem(
+        value: CaleeRepeatRule.monthly,
+        child: Text(CaleeRepeatRule.monthly.label(anchorDate: anchorDate)),
+      ),
+      DropdownMenuItem(
+        value: CaleeRepeatRule.yearly,
+        child: Text(CaleeRepeatRule.yearly.label(anchorDate: anchorDate)),
+      ),
+    ];
+  }
+
   Future<void> _submit() async {
     if (_isSubmitting || !_formKey.currentState!.validate()) return;
 
@@ -116,7 +161,10 @@ class _EditChoreSheetState extends State<EditChoreSheet> {
             ? null
             : formatChoreDate(_selectedDate!),
         description: _descriptionController.text.trim(),
-        recurrence: choreRecurrenceToRrule(_selectedRecurrence),
+        recurrence: choreRecurrenceToRrule(
+          _selectedRecurrence,
+          anchorDate: _selectedDate,
+        ),
         assigneePersonId: _assigneePersonId,
         points: points,
         approvalState: _approvalState,
@@ -169,7 +217,7 @@ class _EditChoreSheetState extends State<EditChoreSheet> {
                       const SizedBox(width: CaleeSpacing.sm),
                       Expanded(
                         child: Text(
-                          'Repeating chore — changes apply going forward.',
+                          '${CaleeRepeatRule.labelFromRrule(widget.chore.recurrence, anchorDate: _selectedDate)} — changes apply going forward.',
                           style: Theme.of(context).textTheme.bodySmall
                               ?.copyWith(color: CaleeColors.primary),
                         ),
@@ -234,29 +282,13 @@ class _EditChoreSheetState extends State<EditChoreSheet> {
                         ),
                       ),
                     ),
-                  CaleeSectionDropdownRow<String?>(
+                  CaleeSectionDropdownRow<CaleeRepeatRule>(
                     label: 'Repeat',
                     value: _selectedRecurrence,
                     enabled: !_isSubmitting,
-                    items: const [
-                      DropdownMenuItem<String?>(
-                        value: null,
-                        child: Text('Does not repeat'),
-                      ),
-                      DropdownMenuItem<String?>(
-                        value: 'daily',
-                        child: Text('Daily'),
-                      ),
-                      DropdownMenuItem<String?>(
-                        value: 'weekly',
-                        child: Text('Weekly'),
-                      ),
-                      DropdownMenuItem<String?>(
-                        value: 'monthly',
-                        child: Text('Monthly'),
-                      ),
-                    ],
+                    items: _repeatItems,
                     onChanged: (value) {
+                      if (value == null) return;
                       setState(() {
                         _selectedRecurrence = value;
                       });
