@@ -4,6 +4,7 @@ import 'package:calee_mobile/data/api/calee_hub_client.dart';
 import 'package:calee_mobile/data/models/client_calendar.dart';
 import 'package:calee_mobile/data/models/client_event_draft.dart';
 import 'package:calee_mobile/features/calendar/widgets/create_event_sheet.dart';
+import 'package:calee_mobile/shared/recurrence/calee_repeat_rule.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -53,63 +54,239 @@ const _existingEvent = ClientEvent(
   recurring: false,
 );
 
+// 2026-06-28 is a Sunday.
+const _recurringEvent = ClientEvent(
+  id: 'evt2',
+  calendarId: 'cal1',
+  serviceId: 'svc1',
+  serviceName: 'Test Service',
+  title: 'Recurring Event',
+  startsAt: '2026-06-28T01:00:00.000Z',
+  endsAt: '2026-06-28T02:00:00.000Z',
+  allDay: false,
+  source: 'test',
+  recurring: true,
+  recurrence: 'FREQ=WEEKLY;BYDAY=SU',
+);
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+Widget _buildSheet({
+  ClientEvent? initialEvent,
+  String? editScope,
+  DateTime? initialDate,
+  void Function(String?)? onRecurrence,
+  void Function(String?)? onUpdateRecurrence,
+}) {
+  return MaterialApp(
+    home: Scaffold(
+      body: CreateEventSheet(
+        calendars: const [_calendar],
+        onCreate: ({
+          required calendar,
+          required title,
+          required startsAt,
+          required endsAt,
+          required allDay,
+          location,
+          description,
+          recurrence,
+        }) async {
+          onRecurrence?.call(recurrence);
+        },
+        onUpdate: ({
+          required event,
+          required title,
+          required startsAt,
+          required endsAt,
+          required allDay,
+          location,
+          description,
+          recurrence,
+          editScope,
+        }) async {
+          onUpdateRecurrence?.call(recurrence);
+        },
+        hubClient: _StubHub(),
+        accessToken: 'test-token',
+        initialEvent: initialEvent,
+        editScope: editScope,
+        initialDate: initialDate,
+      ),
+    ),
+  );
+}
+
+Future<void> _selectRepeat(WidgetTester tester, String label) async {
+  await tester.tap(
+    find.byWidgetPredicate((w) => w is DropdownButton<CaleeRepeatRule>),
+  );
+  await tester.pumpAndSettle();
+  // Items appear in an overlay; use last to prefer the overlay copy.
+  await tester.tap(find.text(label).last);
+  await tester.pumpAndSettle();
+}
+
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
 void main() {
-  Widget buildSheet({ClientEvent? initialEvent, String? editScope}) {
-    return MaterialApp(
-      home: Scaffold(
-        body: CreateEventSheet(
-          calendars: const [_calendar],
-          onCreate:
-              ({
-                required calendar,
-                required title,
-                required startsAt,
-                required endsAt,
-                required allDay,
-                location,
-                description,
-                recurrence,
-              }) async {},
-          hubClient: _StubHub(),
-          accessToken: 'test-token',
-          initialEvent: initialEvent,
-          editScope: editScope,
-        ),
-      ),
-    );
-  }
-
   group('CreateEventSheet', () {
     testWidgets('opens for manual event creation', (tester) async {
-      await tester.pumpWidget(buildSheet());
+      await tester.pumpWidget(_buildSheet());
       expect(find.byType(CreateEventSheet), findsOneWidget);
       expect(find.text('Add event'), findsOneWidget);
     });
 
     testWidgets('shows Scan image button in create mode', (tester) async {
-      await tester.pumpWidget(buildSheet());
+      await tester.pumpWidget(_buildSheet());
       expect(find.text('Scan image'), findsOneWidget);
     });
 
     testWidgets('does not show Scan image button in edit mode', (tester) async {
       await tester.pumpWidget(
-        buildSheet(initialEvent: _existingEvent, editScope: null),
+        _buildSheet(initialEvent: _existingEvent, editScope: null),
       );
       expect(find.text('Scan image'), findsNothing);
     });
 
     testWidgets('shows Save Event button in create mode', (tester) async {
-      await tester.pumpWidget(buildSheet());
+      await tester.pumpWidget(_buildSheet());
       expect(find.text('Save Event'), findsOneWidget);
     });
 
     testWidgets('shows update label in edit mode', (tester) async {
       await tester.pumpWidget(
-        buildSheet(initialEvent: _existingEvent, editScope: null),
+        _buildSheet(initialEvent: _existingEvent, editScope: null),
       );
       expect(find.text('Update Event'), findsOneWidget);
     });
+  });
+
+  group('event recurrence', () {
+    testWidgets(
+      'create weekdays sends FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR',
+      (tester) async {
+        String? captured;
+        await tester.pumpWidget(_buildSheet(onRecurrence: (r) => captured = r));
+
+        await tester.enterText(find.byType(TextFormField).first, 'Test Event');
+        await tester.pumpAndSettle();
+
+        await _selectRepeat(tester, 'Weekdays');
+
+        await tester.ensureVisible(find.text('Save Event'));
+        await tester.tap(find.text('Save Event'));
+        await tester.pumpAndSettle();
+
+        expect(captured, 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR');
+      },
+    );
+
+    // 2026-06-28 is a Sunday.
+    testWidgets(
+      'create starting Sunday with weekly sends FREQ=WEEKLY;BYDAY=SU',
+      (tester) async {
+        String? captured;
+        await tester.pumpWidget(
+          _buildSheet(
+            initialDate: DateTime(2026, 6, 28),
+            onRecurrence: (r) => captured = r,
+          ),
+        );
+
+        await tester.enterText(find.byType(TextFormField).first, 'Test Event');
+        await tester.pumpAndSettle();
+
+        await _selectRepeat(tester, 'Every Sunday');
+
+        await tester.ensureVisible(find.text('Save Event'));
+        await tester.tap(find.text('Save Event'));
+        await tester.pumpAndSettle();
+
+        expect(captured, 'FREQ=WEEKLY;BYDAY=SU');
+      },
+    );
+
+    testWidgets(
+      'create starting Sunday with fortnightly sends FREQ=WEEKLY;INTERVAL=2;BYDAY=SU',
+      (tester) async {
+        String? captured;
+        await tester.pumpWidget(
+          _buildSheet(
+            initialDate: DateTime(2026, 6, 28),
+            onRecurrence: (r) => captured = r,
+          ),
+        );
+
+        await tester.enterText(find.byType(TextFormField).first, 'Test Event');
+        await tester.pumpAndSettle();
+
+        await _selectRepeat(tester, 'Every 2 weeks on Sunday');
+
+        await tester.ensureVisible(find.text('Save Event'));
+        await tester.tap(find.text('Save Event'));
+        await tester.pumpAndSettle();
+
+        expect(captured, 'FREQ=WEEKLY;INTERVAL=2;BYDAY=SU');
+      },
+    );
+
+    testWidgets(
+      'edit all events can clear recurrence',
+      (tester) async {
+        String? captured;
+        var called = false;
+        await tester.pumpWidget(
+          _buildSheet(
+            initialEvent: _recurringEvent,
+            editScope: 'series',
+            onUpdateRecurrence: (r) {
+              captured = r;
+              called = true;
+            },
+          ),
+        );
+
+        // Repeat dropdown is visible for series editing.
+        expect(find.text('Repeat'), findsOneWidget);
+
+        await _selectRepeat(tester, 'Does not repeat');
+
+        await tester.ensureVisible(find.text('Update Series'));
+        await tester.tap(find.text('Update Series'));
+        await tester.pumpAndSettle();
+
+        expect(called, isTrue);
+        expect(captured, isNull);
+      },
+    );
+
+    testWidgets(
+      'this event only hides repeat and sends null recurrence',
+      (tester) async {
+        String? captured;
+        var called = false;
+        await tester.pumpWidget(
+          _buildSheet(
+            initialEvent: _recurringEvent,
+            editScope: 'occurrence',
+            onUpdateRecurrence: (r) {
+              captured = r;
+              called = true;
+            },
+          ),
+        );
+
+        // Repeat section is hidden for single-occurrence editing.
+        expect(find.text('Repeat'), findsNothing);
+
+        await tester.ensureVisible(find.text('Update Event'));
+        await tester.tap(find.text('Update Event'));
+        await tester.pumpAndSettle();
+
+        expect(called, isTrue);
+        expect(captured, isNull);
+      },
+    );
   });
 }
