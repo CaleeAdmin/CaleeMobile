@@ -24,12 +24,35 @@ class CaleeRepeatRule {
   static const daily = CaleeRepeatRule(kind: CaleeRepeatKind.daily);
   static const weekdaysOnly = CaleeRepeatRule(
     kind: CaleeRepeatKind.weekdays,
-    weekdays: {DateTime.monday, DateTime.tuesday, DateTime.wednesday, DateTime.thursday, DateTime.friday},
+    weekdays: {
+      DateTime.monday,
+      DateTime.tuesday,
+      DateTime.wednesday,
+      DateTime.thursday,
+      DateTime.friday,
+    },
   );
   static const monthly = CaleeRepeatRule(kind: CaleeRepeatKind.monthly);
   static const yearly = CaleeRepeatRule(kind: CaleeRepeatKind.yearly);
 
   bool get isNone => kind == CaleeRepeatKind.none;
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    if (other is! CaleeRepeatRule) return false;
+    return kind == other.kind && _setEquals(weekdays, other.weekdays);
+  }
+
+  @override
+  int get hashCode {
+    final sorted = weekdays.toList()..sort();
+    var hash = kind.hashCode;
+    for (final day in sorted) {
+      hash = Object.hash(hash, day);
+    }
+    return hash;
+  }
 
   String? toRrule({DateTime? anchorDate}) {
     final anchorWeekday = anchorDate?.weekday ?? DateTime.monday;
