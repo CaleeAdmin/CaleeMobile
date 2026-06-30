@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'display_activation_controller.dart';
@@ -17,7 +19,7 @@ class DisplaySetupConfirmationPage extends StatefulWidget {
   final String accountEmail;
   final DisplayActivationController activationController;
   final String accessToken;
-  final VoidCallback onActivated;
+  final FutureOr<void> Function() onActivated;
   final VoidCallback onUseDifferentAccount;
 
   @override
@@ -33,7 +35,7 @@ class _DisplaySetupConfirmationPageState
       token: widget.token,
     );
     if (success && mounted) {
-      widget.onActivated();
+      await widget.onActivated();
     }
   }
 

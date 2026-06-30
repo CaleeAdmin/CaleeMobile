@@ -4,6 +4,8 @@
 // when a pending display-setup intent exists and session restore finishes
 // with no signed-in session.
 
+import 'dart:async';
+
 import 'package:calee_mobile/app/calee_app.dart';
 import 'package:calee_mobile/data/api/calee_hub_client.dart';
 import 'package:calee_mobile/data/auth/session_store.dart';
@@ -12,10 +14,12 @@ import 'package:calee_mobile/features/auth/auth_repository.dart';
 import 'package:calee_mobile/features/auth/session_controller.dart';
 import 'package:calee_mobile/features/calendar_follow/calendar_follow_link_controller.dart';
 import 'package:calee_mobile/features/display_setup/display_activation_controller.dart';
+import 'package:calee_mobile/features/display_setup/display_activation_success_page.dart';
 import 'package:calee_mobile/features/display_setup/display_setup_intent.dart';
 import 'package:calee_mobile/features/display_setup/display_setup_link_controller.dart';
 import 'package:calee_mobile/features/display_setup/display_setup_repository.dart';
 import 'package:calee_mobile/features/local_subscriber/local_calendar_subscription_repository.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -51,6 +55,20 @@ class _FakeSessionController extends SessionController {
     isRestoringSession = false;
     notifyListeners();
   }
+
+  int refreshBootstrapCallCount = 0;
+  Completer<void>? refreshBootstrapCompleter;
+
+  @override
+  Future<void> refreshBootstrap() async {
+    refreshBootstrapCallCount += 1;
+    final completer = refreshBootstrapCompleter;
+    if (completer != null) {
+      await completer.future;
+    }
+    bootstrap = _stubBootstrap();
+    notifyListeners();
+  }
 }
 
 /// DisplaySetupLinkController whose [init] is a no-op.
@@ -73,6 +91,25 @@ class _FakeFollowLinkController extends CalendarFollowLinkController {
   Future<void> init() async {}
 }
 
+class _FakeDisplayActivationController extends DisplayActivationController {
+  _FakeDisplayActivationController()
+    : super(
+        repository: DisplaySetupRepository(hubClient: CaleeHubClient()),
+      );
+
+  @override
+  Future<bool> activate({
+    required String accessToken,
+    required String token,
+  }) async {
+    isLoading = true;
+    notifyListeners();
+    isLoading = false;
+    notifyListeners();
+    return true;
+  }
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 ClientBootstrap _stubBootstrap() => const ClientBootstrap(
@@ -92,6 +129,7 @@ ClientBootstrap _stubBootstrap() => const ClientBootstrap(
 CaleeAppTestDependencies _makeDeps({
   _FakeSessionController? session,
   _FakeDisplaySetupLinkController? displaySetup,
+  DisplayActivationController? displayActivationController,
 }) {
   final hub = CaleeHubClient();
   return CaleeAppTestDependencies(
@@ -100,9 +138,11 @@ CaleeAppTestDependencies _makeDeps({
     displaySetupLinkController:
         displaySetup ?? _FakeDisplaySetupLinkController(),
     followLinkController: _FakeFollowLinkController(),
-    displayActivationController: DisplayActivationController(
-      repository: DisplaySetupRepository(hubClient: hub),
-    ),
+    displayActivationController:
+        displayActivationController ??
+        DisplayActivationController(
+          repository: DisplaySetupRepository(hubClient: hub),
+        ),
     localSubscriptionRepo: LocalCalendarSubscriptionRepository(),
   );
 }
@@ -182,6 +222,86 @@ void main() {
       expect(find.text('Create account'), findsOneWidget);
       expect(find.text('I already have an account'), findsOneWidget);
       expect(find.text('Connect this display to Calee'), findsNothing);
+    },
+  );
+
+  testWidgets('app resume refreshes bootstrap when signed in', (tester) async {
+    final session = _FakeSessionController();
+
+    await tester.pumpWidget(
+      CaleeApp.forTesting(testDeps: _makeDeps(session: session)),
+    );
+
+    session.finishRestore(signedIn: true);
+    await tester.pump();
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pump();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(session.refreshBootstrapCallCount, 1);
+  });
+
+  testWidgets('app resume does not refresh bootstrap when signed out', (
+    tester,
+  ) async {
+    final session = _FakeSessionController();
+
+    await tester.pumpWidget(
+      CaleeApp.forTesting(testDeps: _makeDeps(session: session)),
+    );
+
+    session.finishRestore(signedIn: false);
+    await tester.pump();
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pump();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(session.refreshBootstrapCallCount, 0);
+  });
+
+  testWidgets(
+    'successful display activation refreshes bootstrap before success page',
+    (tester) async {
+      final session = _FakeSessionController();
+      final displaySetup = _FakeDisplaySetupLinkController();
+      session.refreshBootstrapCompleter = Completer<void>();
+
+      await tester.pumpWidget(
+        CaleeApp.forTesting(
+          testDeps: _makeDeps(
+            session: session,
+            displaySetup: displaySetup,
+            displayActivationController: _FakeDisplayActivationController(),
+          ),
+        ),
+      );
+
+      displaySetup.injectIntent(_validToken);
+      await tester.pump();
+      session.finishRestore(signedIn: true);
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.text('Connect this Calee display?'), findsOneWidget);
+
+      await tester.tap(find.text('Connect display'));
+      await tester.pump();
+      await tester.pump();
+
+      expect(session.refreshBootstrapCallCount, 1);
+      expect(find.byType(DisplayActivationSuccessPage), findsNothing);
+
+      session.refreshBootstrapCompleter!.complete();
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.byType(DisplayActivationSuccessPage), findsOneWidget);
     },
   );
 
