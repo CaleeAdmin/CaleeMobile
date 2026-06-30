@@ -90,6 +90,8 @@ void main() {
       await tester.pumpAndSettle();
 
       await _tapOption(tester, 'Custom days');
+      await tester.ensureVisible(find.text('Mon'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Mon'));
       await tester.pumpAndSettle();
 
@@ -101,19 +103,18 @@ void main() {
       tester,
     ) async {
       CaleeRepeatRule? result;
-      await tester.pumpWidget(
-        _buildPicker(onSelected: (r) => result = r),
-      );
+      await tester.pumpWidget(_buildPicker(onSelected: (r) => result = r));
       await tester.pumpAndSettle();
 
       await _tapOption(tester, 'Custom days');
-      await tester.tap(find.text('Mon'));
+      for (final pill in ['Mon', 'Wed', 'Fri']) {
+        await tester.ensureVisible(find.text(pill));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text(pill));
+        await tester.pumpAndSettle();
+      }
+      await tester.ensureVisible(find.text('Done'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Wed'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Fri'));
-      await tester.pumpAndSettle();
-
       await tester.tap(find.text('Done'));
       await tester.pumpAndSettle();
 
@@ -126,17 +127,18 @@ void main() {
 
     testWidgets('custom Sat/Sun label is Every weekend', (tester) async {
       CaleeRepeatRule? result;
-      await tester.pumpWidget(
-        _buildPicker(onSelected: (r) => result = r),
-      );
+      await tester.pumpWidget(_buildPicker(onSelected: (r) => result = r));
       await tester.pumpAndSettle();
 
       await _tapOption(tester, 'Custom days');
-      await tester.tap(find.text('Sat'));
+      for (final pill in ['Sat', 'Sun']) {
+        await tester.ensureVisible(find.text(pill));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text(pill));
+        await tester.pumpAndSettle();
+      }
+      await tester.ensureVisible(find.text('Done'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Sun'));
-      await tester.pumpAndSettle();
-
       await tester.tap(find.text('Done'));
       await tester.pumpAndSettle();
 
@@ -146,9 +148,7 @@ void main() {
 
     testWidgets('selecting Weekdays emits weekdaysOnly rule', (tester) async {
       CaleeRepeatRule? result;
-      await tester.pumpWidget(
-        _buildPicker(onSelected: (r) => result = r),
-      );
+      await tester.pumpWidget(_buildPicker(onSelected: (r) => result = r));
       await tester.pumpAndSettle();
 
       await _tapOption(tester, 'Weekdays');
@@ -161,9 +161,7 @@ void main() {
 
     testWidgets('selecting Every Monday emits weekly rule', (tester) async {
       CaleeRepeatRule? result;
-      await tester.pumpWidget(
-        _buildPicker(onSelected: (r) => result = r),
-      );
+      await tester.pumpWidget(_buildPicker(onSelected: (r) => result = r));
       await tester.pumpAndSettle();
 
       await _tapOption(tester, 'Every Monday');
@@ -171,17 +169,12 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(result, const CaleeRepeatRule(kind: CaleeRepeatKind.weekly));
-      expect(
-        result!.toRrule(anchorDate: _anchor),
-        'FREQ=WEEKLY;BYDAY=MO',
-      );
+      expect(result!.toRrule(anchorDate: _anchor), 'FREQ=WEEKLY;BYDAY=MO');
     });
 
     testWidgets('fortnightly rule emits correct RRULE', (tester) async {
       CaleeRepeatRule? result;
-      await tester.pumpWidget(
-        _buildPicker(onSelected: (r) => result = r),
-      );
+      await tester.pumpWidget(_buildPicker(onSelected: (r) => result = r));
       await tester.pumpAndSettle();
 
       await _tapOption(tester, 'Every 2 weeks on Monday');

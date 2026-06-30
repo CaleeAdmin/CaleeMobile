@@ -337,7 +337,9 @@ class _WeekdayPill extends StatelessWidget {
           vertical: CaleeSpacing.xs,
         ),
         decoration: BoxDecoration(
-          color: selected ? CaleeColors.primary : CaleeColors.scaffoldBackground,
+          color: selected
+              ? CaleeColors.primary
+              : CaleeColors.scaffoldBackground,
           borderRadius: BorderRadius.circular(CaleeRadius.card),
           border: Border.all(
             color: selected ? CaleeColors.primary : CaleeColors.separator,

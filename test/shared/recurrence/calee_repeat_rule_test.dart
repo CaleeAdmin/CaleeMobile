@@ -13,16 +13,21 @@ void main() {
         'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR',
       );
       expect(
-        const CaleeRepeatRule(kind: CaleeRepeatKind.weekly)
-            .toRrule(anchorDate: sunday),
+        const CaleeRepeatRule(
+          kind: CaleeRepeatKind.weekly,
+        ).toRrule(anchorDate: sunday),
         'FREQ=WEEKLY;BYDAY=SU',
       );
       expect(
-        const CaleeRepeatRule(kind: CaleeRepeatKind.fortnightly)
-            .toRrule(anchorDate: sunday),
+        const CaleeRepeatRule(
+          kind: CaleeRepeatKind.fortnightly,
+        ).toRrule(anchorDate: sunday),
         'FREQ=WEEKLY;INTERVAL=2;BYDAY=SU',
       );
-      expect(CaleeRepeatRule.monthly.toRrule(anchorDate: sunday), 'FREQ=MONTHLY');
+      expect(
+        CaleeRepeatRule.monthly.toRrule(anchorDate: sunday),
+        'FREQ=MONTHLY',
+      );
       expect(CaleeRepeatRule.yearly.toRrule(anchorDate: sunday), 'FREQ=YEARLY');
     });
 

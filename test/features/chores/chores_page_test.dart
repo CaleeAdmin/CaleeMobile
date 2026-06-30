@@ -70,7 +70,7 @@ const _service = ClientService(
 
 class _StubHubClientWithChore extends CaleeHubClient {
   _StubHubClientWithChore({required this.chore})
-      : super(baseUri: Uri.parse('http://localhost'));
+    : super(baseUri: Uri.parse('http://localhost'));
 
   final ClientChore chore;
 
@@ -238,19 +238,18 @@ void main() {
       },
     );
 
-    testWidgets(
-      'incomplete chore does not show "Mark done" in action sheet',
-      (tester) async {
-        await tester.pumpWidget(_wrapWithChore(_incompleteChore()));
-        await tester.pumpAndSettle();
+    testWidgets('incomplete chore does not show "Mark done" in action sheet', (
+      tester,
+    ) async {
+      await tester.pumpWidget(_wrapWithChore(_incompleteChore()));
+      await tester.pumpAndSettle();
 
-        await tester.tap(find.byIcon(Icons.more_horiz));
-        await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.more_horiz));
+      await tester.pumpAndSettle();
 
-        expect(find.text('Mark done'), findsNothing);
-        expect(find.text('Mark as not done'), findsNothing);
-      },
-    );
+      expect(find.text('Mark done'), findsNothing);
+      expect(find.text('Mark as not done'), findsNothing);
+    });
 
     testWidgets('action sheet does not show delete actions', (tester) async {
       await tester.pumpWidget(_wrapWithChore(_incompleteChore()));

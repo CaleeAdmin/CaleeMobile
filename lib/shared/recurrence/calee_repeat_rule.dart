@@ -10,10 +10,7 @@ enum CaleeRepeatKind {
 }
 
 class CaleeRepeatRule {
-  const CaleeRepeatRule({
-    required this.kind,
-    this.weekdays = const <int>{},
-  });
+  const CaleeRepeatRule({required this.kind, this.weekdays = const <int>{}});
 
   final CaleeRepeatKind kind;
 
@@ -60,8 +57,10 @@ class CaleeRepeatRule {
       CaleeRepeatKind.none => null,
       CaleeRepeatKind.daily => 'FREQ=DAILY',
       CaleeRepeatKind.weekdays => 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR',
-      CaleeRepeatKind.weekly => 'FREQ=WEEKLY;BYDAY=${_icalWeekday(anchorWeekday)}',
-      CaleeRepeatKind.fortnightly => 'FREQ=WEEKLY;INTERVAL=2;BYDAY=${_icalWeekday(anchorWeekday)}',
+      CaleeRepeatKind.weekly =>
+        'FREQ=WEEKLY;BYDAY=${_icalWeekday(anchorWeekday)}',
+      CaleeRepeatKind.fortnightly =>
+        'FREQ=WEEKLY;INTERVAL=2;BYDAY=${_icalWeekday(anchorWeekday)}',
       CaleeRepeatKind.monthly => 'FREQ=MONTHLY',
       CaleeRepeatKind.yearly => 'FREQ=YEARLY',
       CaleeRepeatKind.customDays => _customDaysRrule(weekdays),
@@ -75,7 +74,8 @@ class CaleeRepeatRule {
       CaleeRepeatKind.daily => 'Daily',
       CaleeRepeatKind.weekdays => 'Weekdays',
       CaleeRepeatKind.weekly => 'Every ${_weekdayName(anchorWeekday)}',
-      CaleeRepeatKind.fortnightly => 'Every 2 weeks on ${_weekdayName(anchorWeekday)}',
+      CaleeRepeatKind.fortnightly =>
+        'Every 2 weeks on ${_weekdayName(anchorWeekday)}',
       CaleeRepeatKind.monthly => 'Monthly',
       CaleeRepeatKind.yearly => 'Yearly',
       CaleeRepeatKind.customDays => _customDaysLabel(weekdays),
@@ -114,7 +114,10 @@ class CaleeRepeatRule {
   }
 
   static String labelFromRrule(String? recurrence, {DateTime? anchorDate}) =>
-      fromRrule(recurrence, anchorDate: anchorDate).label(anchorDate: anchorDate);
+      fromRrule(
+        recurrence,
+        anchorDate: anchorDate,
+      ).label(anchorDate: anchorDate);
 
   static Map<String, String> _parseRrule(String? recurrence) {
     final value = (recurrence ?? '').trim();
@@ -124,14 +127,17 @@ class CaleeRepeatRule {
     for (final part in value.split(';')) {
       final separator = part.indexOf('=');
       if (separator <= 0 || separator == part.length - 1) continue;
-      parts[part.substring(0, separator).trim().toUpperCase()] =
-          part.substring(separator + 1).trim().toUpperCase();
+      parts[part.substring(0, separator).trim().toUpperCase()] = part
+          .substring(separator + 1)
+          .trim()
+          .toUpperCase();
     }
     return parts;
   }
 
   static String? _customDaysRrule(Set<int> weekdays) {
-    final sorted = weekdays.where((day) => day >= 1 && day <= 7).toList()..sort();
+    final sorted = weekdays.where((day) => day >= 1 && day <= 7).toList()
+      ..sort();
     if (sorted.isEmpty) return null;
     return 'FREQ=WEEKLY;BYDAY=${sorted.map(_icalWeekday).join(',')}';
   }
@@ -195,7 +201,8 @@ class CaleeRepeatRule {
   }
 
   static String _customDaysLabel(Set<int> weekdays) {
-    final sorted = weekdays.where((day) => day >= 1 && day <= 7).toList()..sort();
+    final sorted = weekdays.where((day) => day >= 1 && day <= 7).toList()
+      ..sort();
     if (sorted.isEmpty) return 'Custom days';
     if (_setEquals(sorted.toSet(), weekdaysOnly.weekdays)) return 'Weekdays';
     if (_setEquals(sorted.toSet(), {DateTime.saturday, DateTime.sunday})) {
