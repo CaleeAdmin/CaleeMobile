@@ -5,6 +5,32 @@ import 'package:calee_mobile/ui/calee_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+// ── Repeat helpers ────────────────────────────────────────────────────────────
+
+Future<void> _openRepeatPicker(WidgetTester tester) async {
+  final repeatRow = find.ancestor(
+    of: find.text('Repeat'),
+    matching: find.byType(InkWell),
+  );
+  await tester.tap(repeatRow.first);
+  await tester.pumpAndSettle();
+}
+
+Future<void> _selectCustomRepeat(
+  WidgetTester tester,
+  List<String> pillLabels,
+) async {
+  await _openRepeatPicker(tester);
+  await tester.tap(find.text('Custom days'));
+  await tester.pumpAndSettle();
+  for (final pill in pillLabels) {
+    await tester.tap(find.text(pill));
+    await tester.pumpAndSettle();
+  }
+  await tester.tap(find.text('Done'));
+  await tester.pumpAndSettle();
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 ClientChore _chore() => ClientChore(
@@ -32,7 +58,10 @@ ClientChore _chore() => ClientChore(
   approvalState: 'none',
 );
 
-Widget _wrap({VoidCallback? onDeleteInvoked}) => MaterialApp(
+Widget _wrap({
+  VoidCallback? onDeleteInvoked,
+  void Function(String?)? onUpdateRecurrence,
+}) => MaterialApp(
   theme: CaleeTheme.buildThemeData(),
   home: Scaffold(
     body: SingleChildScrollView(
@@ -49,7 +78,9 @@ Widget _wrap({VoidCallback? onDeleteInvoked}) => MaterialApp(
           required assigneePersonId,
           required points,
           required approvalState,
-        }) async {},
+        }) async {
+          onUpdateRecurrence?.call(recurrence);
+        },
         onDelete: () async {
           onDeleteInvoked?.call();
         },
@@ -89,5 +120,23 @@ void main() {
 
     expect(find.text('Due date'), findsOneWidget);
     expect(find.text('Date'), findsNothing);
+  });
+
+  testWidgets('chore custom Mon/Wed/Fri sends FREQ=WEEKLY;BYDAY=MO,WE,FR', (
+    tester,
+  ) async {
+    String? captured;
+    await tester.pumpWidget(
+      _wrap(onUpdateRecurrence: (r) => captured = r),
+    );
+    await tester.pumpAndSettle();
+
+    await _selectCustomRepeat(tester, ['Mon', 'Wed', 'Fri']);
+
+    await tester.ensureVisible(find.text('Save chore'));
+    await tester.tap(find.text('Save chore'));
+    await tester.pumpAndSettle();
+
+    expect(captured, 'FREQ=WEEKLY;BYDAY=MO,WE,FR');
   });
 }

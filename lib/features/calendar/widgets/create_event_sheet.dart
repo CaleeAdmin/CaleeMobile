@@ -9,6 +9,7 @@ import 'package:image_picker/image_picker.dart';
 import '../../../data/api/calee_hub_client.dart';
 import '../../../data/models/client_calendar.dart';
 import '../../../data/models/client_event_draft.dart';
+import '../../../shared/recurrence/calee_repeat_picker_sheet.dart';
 import '../../../shared/recurrence/calee_repeat_rule.dart';
 import '../../../ui/calee_design.dart';
 import '../event_draft_image_preparer.dart';
@@ -194,45 +195,15 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
   String? _recurrenceValue() =>
       _selectedRepeatRule.toRrule(anchorDate: _selectedDate);
 
-  List<DropdownMenuItem<CaleeRepeatRule>> get _repeatItems {
-    return [
-      DropdownMenuItem(
-        value: CaleeRepeatRule.none,
-        child: Text(CaleeRepeatRule.none.label()),
-      ),
-      DropdownMenuItem(
-        value: CaleeRepeatRule.daily,
-        child: Text(CaleeRepeatRule.daily.label()),
-      ),
-      DropdownMenuItem(
-        value: CaleeRepeatRule.weekdaysOnly,
-        child: Text(CaleeRepeatRule.weekdaysOnly.label()),
-      ),
-      DropdownMenuItem(
-        value: const CaleeRepeatRule(kind: CaleeRepeatKind.weekly),
-        child: Text(
-          const CaleeRepeatRule(
-            kind: CaleeRepeatKind.weekly,
-          ).label(anchorDate: _selectedDate),
-        ),
-      ),
-      DropdownMenuItem(
-        value: const CaleeRepeatRule(kind: CaleeRepeatKind.fortnightly),
-        child: Text(
-          const CaleeRepeatRule(
-            kind: CaleeRepeatKind.fortnightly,
-          ).label(anchorDate: _selectedDate),
-        ),
-      ),
-      DropdownMenuItem(
-        value: CaleeRepeatRule.monthly,
-        child: Text(CaleeRepeatRule.monthly.label()),
-      ),
-      DropdownMenuItem(
-        value: CaleeRepeatRule.yearly,
-        child: Text(CaleeRepeatRule.yearly.label()),
-      ),
-    ];
+  Future<void> _pickRepeat() async {
+    await CaleeRepeatPickerSheet.show(
+      context: context,
+      current: _selectedRepeatRule,
+      anchorDate: _selectedDate,
+      onSelected: (rule) {
+        setState(() => _selectedRepeatRule = rule);
+      },
+    );
   }
 
   Future<void> _pickDate() async {
@@ -838,15 +809,12 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
                         const SizedBox(height: CaleeSpacing.sectionSpacing),
                         CaleeSection(
                           children: [
-                            CaleeSectionDropdownRow<CaleeRepeatRule>(
+                            CaleeSectionPickerRow(
                               label: 'Repeat',
-                              value: _selectedRepeatRule,
-                              items: _repeatItems,
-                              onChanged: (value) {
-                                if (value != null) {
-                                  setState(() => _selectedRepeatRule = value);
-                                }
-                              },
+                              value: _selectedRepeatRule.label(
+                                anchorDate: _selectedDate,
+                              ),
+                              onTap: _isLocked ? null : _pickRepeat,
                               enabled: !_isLocked,
                             ),
                           ],
