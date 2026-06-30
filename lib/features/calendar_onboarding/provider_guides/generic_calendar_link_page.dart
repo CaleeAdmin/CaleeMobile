@@ -83,7 +83,8 @@ class _GenericCalendarLinkPageState extends State<GenericCalendarLinkPage> {
   List<ClientService> get _calendarServices => _freshServices
       .where(
         (s) =>
-            s.serviceType == 'nextcloud_calendar' &&
+            (s.serviceType == 'nextcloud_calendar' ||
+                s.serviceType == 'nextcloud_portal') &&
             s.hasConnectedCalendarCredential,
       )
       .toList();
@@ -147,7 +148,9 @@ class _GenericCalendarLinkPageState extends State<GenericCalendarLinkPage> {
     }
     final hasMissingCredential = _freshServices.any(
       (s) =>
-          s.serviceType == 'nextcloud_calendar' && s.hasMissingCalendarCredential,
+          (s.serviceType == 'nextcloud_calendar' ||
+              s.serviceType == 'nextcloud_portal') &&
+          s.hasMissingCalendarCredential,
     );
     if (hasMissingCredential) {
       return 'Your calendar service credential is missing. Please sign out and sign in again.';

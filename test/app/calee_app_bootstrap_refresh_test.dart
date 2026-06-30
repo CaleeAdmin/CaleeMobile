@@ -251,6 +251,34 @@ void main() {
     },
   );
 
+  testWidgets('app resume refreshes bootstrap when signed in', (tester) async {
+    final session = _TrackingSessionController();
+
+    await tester.pumpWidget(
+      CaleeApp.forTesting(testDeps: _makeDeps(session: session)),
+    );
+
+    // Start as signed in.
+    session.finishRestore(signedIn: true);
+    await tester.pump();
+
+    final countBefore = session.refreshBootstrapCallCount;
+
+    // Pause the app so _transportMayBeStale is set.
+    await tester.binding.handleLifecycleMessage('AppLifecycleState.paused');
+    await tester.pump();
+
+    // Resume — should trigger refreshBootstrap() because session is signed in.
+    await tester.binding.handleLifecycleMessage('AppLifecycleState.resumed');
+    await tester.pump();
+
+    expect(
+      session.refreshBootstrapCallCount,
+      greaterThan(countBefore),
+      reason: 'app resume while signed in should refresh bootstrap',
+    );
+  });
+
   testWidgets(
     'refreshBootstrap is called after Google OAuth deep link is handled',
     (tester) async {
