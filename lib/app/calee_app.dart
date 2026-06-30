@@ -200,6 +200,9 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed && _transportMayBeStale) {
       _transportMayBeStale = false;
       _hubClient.resetTransport();
+      if (_sessionController.isSignedIn) {
+        unawaited(_sessionController.refreshBootstrap());
+      }
     }
   }
 
@@ -446,6 +449,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
         'found connection id=${connection.id}',
       );
       final resolvedConnection = connection;
+      await _sessionController.refreshBootstrap();
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _openingGoogleCalendarSelection = false;
         if (!mounted) return;
@@ -535,6 +539,8 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
       );
       return;
     }
+    await _sessionController.refreshBootstrap();
+    if (!mounted) return;
     _openDisplayActivationSuccess();
   }
 
@@ -716,6 +722,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
               _justRegistered = !hasPendingDisplayIntent;
             });
             await _sessionController.completeSignIn(result);
+            unawaited(_sessionController.refreshBootstrap());
             unawaited(
               applyPostRegistrationProfileDefaults(
                 hubClient: _hubClient,
@@ -737,6 +744,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
           onSignedIn: (result) async {
             setState(() => _showingDisplaySetupSignIn = false);
             await _sessionController.completeSignIn(result);
+            unawaited(_sessionController.refreshBootstrap());
           },
         );
       }
@@ -772,6 +780,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
           onSignedIn: (result) async {
             setState(() => _showingFollowSignIn = false);
             await _sessionController.completeSignIn(result);
+            unawaited(_sessionController.refreshBootstrap());
           },
         );
       }
@@ -839,6 +848,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
               _showingFollowSignIn = false;
             });
             await _sessionController.completeSignIn(result);
+            unawaited(_sessionController.refreshBootstrap());
             if (!hasPendingIntent) {
               setState(() => _showingConnectDisplayAfterAuth = true);
             }
@@ -856,6 +866,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
               _justRegistered = true;
             });
             await _sessionController.completeSignIn(result);
+            unawaited(_sessionController.refreshBootstrap());
             unawaited(
               applyPostRegistrationProfileDefaults(
                 hubClient: _hubClient,
