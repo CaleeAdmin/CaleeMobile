@@ -264,7 +264,9 @@ void main() {
       await tester.pump();
 
       expect(
-        find.textContaining('Your account setup is not complete'),
+        find.text(
+          'Your account setup is not complete. Please sign out and sign in again.',
+        ),
         findsOneWidget,
       );
     },

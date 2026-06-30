@@ -12,7 +12,9 @@ import 'package:calee_mobile/data/models/external_calendar_connection.dart';
 import 'package:calee_mobile/features/auth/auth_repository.dart';
 import 'package:calee_mobile/features/auth/session_controller.dart';
 import 'package:calee_mobile/features/calendar_follow/calendar_follow_link_controller.dart';
+import 'package:calee_mobile/features/calendar_onboarding/provider_guides/google_calendar_selection_page.dart';
 import 'package:calee_mobile/features/display_setup/display_activation_controller.dart';
+import 'package:calee_mobile/features/display_setup/display_activation_success_page.dart';
 import 'package:calee_mobile/features/display_setup/display_setup_intent.dart';
 import 'package:calee_mobile/features/display_setup/display_setup_link_controller.dart';
 import 'package:calee_mobile/features/display_setup/display_setup_repository.dart';
@@ -85,11 +87,14 @@ class _FakeSessionController extends SessionController {
 /// Wraps [_FakeSessionController] and counts calls to [refreshBootstrap].
 class _TrackingSessionController extends _FakeSessionController {
   int refreshBootstrapCallCount = 0;
+  bool refreshBootstrapCompleted = false;
 
   @override
   Future<void> refreshBootstrap() async {
     refreshBootstrapCallCount++;
-    // Don't call super — no actual network call needed in tests.
+    bootstrap = _stubBootstrap();
+    refreshBootstrapCompleted = true;
+    notifyListeners();
   }
 }
 
@@ -152,6 +157,13 @@ class _SucceedingActivationController extends DisplayActivationController {
 /// - Returns one active Google connection so refreshBootstrap() is reached.
 /// - Returns an empty calendars list to avoid further network calls.
 class _FakeHubClient extends CaleeHubClient {
+  int resetTransportCallCount = 0;
+
+  @override
+  void resetTransport() {
+    resetTransportCallCount += 1;
+  }
+
   @override
   Future<List<ExternalCalendarConnection>> externalCalendarConnections({
     required String accessToken,
@@ -247,15 +259,20 @@ void main() {
       // Wait for activation + bootstrap refresh to complete.
       await tester.pumpAndSettle();
 
-      expect(session.refreshBootstrapCallCount, greaterThanOrEqualTo(1));
+      expect(session.refreshBootstrapCallCount, 1);
+      expect(session.refreshBootstrapCompleted, isTrue);
+      expect(find.byType(DisplayActivationSuccessPage), findsOneWidget);
     },
   );
 
   testWidgets('app resume refreshes bootstrap when signed in', (tester) async {
     final session = _TrackingSessionController();
+    final hub = _FakeHubClient();
 
     await tester.pumpWidget(
-      CaleeApp.forTesting(testDeps: _makeDeps(session: session)),
+      CaleeApp.forTesting(
+        testDeps: _makeDeps(session: session, hubClient: hub),
+      ),
     );
 
     // Start as signed in.
@@ -274,10 +291,36 @@ void main() {
 
     expect(
       session.refreshBootstrapCallCount,
-      greaterThan(countBefore),
+      countBefore + 1,
       reason: 'app resume while signed in should refresh bootstrap',
     );
+    expect(hub.resetTransportCallCount, 1);
   });
+
+  testWidgets(
+    'app resume does not refresh bootstrap when signed out',
+    (tester) async {
+      final session = _TrackingSessionController();
+      final hub = _FakeHubClient();
+
+      await tester.pumpWidget(
+        CaleeApp.forTesting(
+          testDeps: _makeDeps(session: session, hubClient: hub),
+        ),
+      );
+
+      session.finishRestore(signedIn: false);
+      await tester.pump();
+
+      await tester.binding.handleLifecycleMessage('AppLifecycleState.inactive');
+      await tester.pump();
+      await tester.binding.handleLifecycleMessage('AppLifecycleState.resumed');
+      await tester.pump();
+
+      expect(hub.resetTransportCallCount, 1);
+      expect(session.refreshBootstrapCallCount, 0);
+    },
+  );
 
   testWidgets(
     'refreshBootstrap is called after Google OAuth deep link is handled',
@@ -307,7 +350,9 @@ void main() {
       // Wait for async handling (connections fetch + bootstrap refresh).
       await tester.pumpAndSettle();
 
-      expect(session.refreshBootstrapCallCount, greaterThanOrEqualTo(1));
+      expect(session.refreshBootstrapCallCount, 1);
+      expect(session.refreshBootstrapCompleted, isTrue);
+      expect(find.byType(GoogleCalendarSelectionPage), findsOneWidget);
     },
   );
 }
