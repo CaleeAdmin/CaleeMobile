@@ -22,6 +22,23 @@ class _StubHubClient extends CaleeHubClient {
   _StubHubClient() : super(baseUri: Uri.parse('http://localhost'));
 
   @override
+  Future<ClientBootstrap> bootstrap({required String accessToken}) async {
+    return const ClientBootstrap(
+      account: ClientAccount(
+        id: '',
+        displayName: null,
+        primaryEmail: null,
+        timeZone: null,
+        status: null,
+      ),
+      services: [],
+      contexts: ClientContexts(households: [], organisations: []),
+      availableContexts: [],
+      capabilities: {},
+    );
+  }
+
+  @override
   Future<ClientCalendarList> calendars({required String accessToken}) async {
     return const ClientCalendarList(calendars: []);
   }
@@ -228,6 +245,7 @@ void main() {
     tester,
   ) async {
     await tester.pumpWidget(_wrapGenericLink());
+    await tester.pumpAndSettle();
 
     expect(find.text('Shared calendar'), findsOneWidget);
     expect(find.text('School calendar'), findsNothing);
