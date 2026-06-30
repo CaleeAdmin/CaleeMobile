@@ -11,9 +11,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 class _BootstrapStubClient extends CaleeHubClient {
-  _BootstrapStubClient({required Future<ClientBootstrap> bootstrapFuture})
-      : _bootstrapFuture = bootstrapFuture,
-        super(baseUri: Uri.parse('http://localhost'));
+  _BootstrapStubClient({required this._bootstrapFuture})
+    : super(baseUri: Uri.parse('http://localhost'));
 
   final Future<ClientBootstrap> _bootstrapFuture;
 
@@ -196,8 +195,7 @@ void main() {
     tester,
   ) async {
     final completer = Completer<ClientBootstrap>();
-    final client =
-        _BootstrapStubClient(bootstrapFuture: completer.future);
+    final client = _BootstrapStubClient(bootstrapFuture: completer.future);
 
     await tester.pumpWidget(_wrap(client));
     await tester.pump();
@@ -228,13 +226,15 @@ void main() {
   testWidgets('falls back to widget.services when bootstrap throws', (
     tester,
   ) async {
-    final client = _BootstrapStubClient(
-      bootstrapFuture: Future.error(Exception('network error')),
-    );
+    final completer = Completer<ClientBootstrap>();
+    final client = _BootstrapStubClient(bootstrapFuture: completer.future);
 
-    await tester.pumpWidget(
-      _wrap(client, services: [_kConnectedService]),
-    );
+    await tester.pumpWidget(_wrap(client, services: [_kConnectedService]));
+    await tester.pump();
+
+    // Complete with error after the widget has attached a listener so the
+    // error is handled (not reported as unawaited) by the test zone.
+    completer.completeError(Exception('network error'));
     await tester.pumpAndSettle();
 
     // Form renders — fallback service is connected, so it is selected
@@ -252,10 +252,7 @@ void main() {
       await tester.pumpWidget(_wrap(client));
       await tester.pumpAndSettle();
 
-      await tester.enterText(
-        find.byType(TextFormField).first,
-        'My Calendar',
-      );
+      await tester.enterText(find.byType(TextFormField).first, 'My Calendar');
       await tester.enterText(
         find.byType(TextFormField).last,
         'https://example.com/calendar.ics',
@@ -280,10 +277,7 @@ void main() {
     await tester.pumpWidget(_wrap(client));
     await tester.pumpAndSettle();
 
-    await tester.enterText(
-      find.byType(TextFormField).first,
-      'My Calendar',
-    );
+    await tester.enterText(find.byType(TextFormField).first, 'My Calendar');
     await tester.enterText(
       find.byType(TextFormField).last,
       'https://example.com/calendar.ics',
@@ -292,9 +286,7 @@ void main() {
     await tester.pump();
 
     expect(
-      find.textContaining(
-        'Your calendar service credential is missing',
-      ),
+      find.textContaining('Your calendar service credential is missing'),
       findsOneWidget,
     );
   });
@@ -314,49 +306,44 @@ void main() {
     expect(find.text('Calendar name'), findsOneWidget);
   });
 
-  testWidgets(
-    'accepts nextcloud_portal service with connected credential',
-    (tester) async {
-      final client = _BootstrapStubClient(
-        bootstrapFuture: Future.value(_kConnectedPortalBootstrap),
-      );
+  testWidgets('accepts nextcloud_portal service with connected credential', (
+    tester,
+  ) async {
+    final client = _BootstrapStubClient(
+      bootstrapFuture: Future.value(_kConnectedPortalBootstrap),
+    );
 
-      await tester.pumpWidget(_wrap(client));
-      await tester.pumpAndSettle();
+    await tester.pumpWidget(_wrap(client));
+    await tester.pumpAndSettle();
 
-      // Form is shown — the nextcloud_portal service is usable.
-      expect(find.text('Calendar name'), findsOneWidget);
-      expect(find.text('Add to Calee'), findsOneWidget);
-      // Single service: no dropdown.
-      expect(find.byType(DropdownButtonFormField<ClientService>), findsNothing);
-    },
-  );
+    // Form is shown — the nextcloud_portal service is usable.
+    expect(find.text('Calendar name'), findsOneWidget);
+    expect(find.text('Add to Calee'), findsOneWidget);
+    // Single service: no dropdown.
+    expect(find.byType(DropdownButtonFormField<ClientService>), findsNothing);
+  });
 
-  testWidgets(
-    'shows missing credential message for nextcloud_portal service',
-    (tester) async {
-      final client = _BootstrapStubClient(
-        bootstrapFuture: Future.value(_kMissingCredentialPortalBootstrap),
-      );
+  testWidgets('shows missing credential message for nextcloud_portal service', (
+    tester,
+  ) async {
+    final client = _BootstrapStubClient(
+      bootstrapFuture: Future.value(_kMissingCredentialPortalBootstrap),
+    );
 
-      await tester.pumpWidget(_wrap(client));
-      await tester.pumpAndSettle();
+    await tester.pumpWidget(_wrap(client));
+    await tester.pumpAndSettle();
 
-      await tester.enterText(
-        find.byType(TextFormField).first,
-        'My Calendar',
-      );
-      await tester.enterText(
-        find.byType(TextFormField).last,
-        'https://example.com/calendar.ics',
-      );
-      await tester.tap(find.text('Add to Calee'));
-      await tester.pump();
+    await tester.enterText(find.byType(TextFormField).first, 'My Calendar');
+    await tester.enterText(
+      find.byType(TextFormField).last,
+      'https://example.com/calendar.ics',
+    );
+    await tester.tap(find.text('Add to Calee'));
+    await tester.pump();
 
-      expect(
-        find.textContaining('Your calendar service credential is missing'),
-        findsOneWidget,
-      );
-    },
-  );
+    expect(
+      find.textContaining('Your calendar service credential is missing'),
+      findsOneWidget,
+    );
+  });
 }

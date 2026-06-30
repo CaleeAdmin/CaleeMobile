@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:timezone/timezone.dart' as tz;
+
 import 'local_calendar_event.dart';
 import 'local_calendar_subscription.dart';
 
@@ -505,12 +507,26 @@ class LocalCalendarIcsService {
     // Formats handled (ICS compact, not ISO 8601 with dashes):
     //   DTSTART;VALUE=DATE:20240101        → all-day
     //   DTSTART:20240101T120000Z           → UTC timed
-    //   DTSTART;TZID=Australia/Sydney:...  → local timed (treated as floating)
-    //   DTSTART:20240101T120000            → floating timed
+    //   DTSTART;TZID=America/New_York:...  → converted to UTC via timezone data
+    //   DTSTART:20240101T120000            → floating timed (treated as local)
     //   UNTIL:20240101                     → date-only (no VALUE=DATE needed)
 
     final colonIdx = line.indexOf(':');
     if (colonIdx == -1) return (null, false);
+
+    // Extract TZID parameter if present.
+    // e.g. "DTSTART;TZID=America/New_York:20240101T120000"
+    String? tzid;
+    final propPart = line.substring(0, colonIdx);
+    final semiIdx = propPart.indexOf(';');
+    if (semiIdx != -1) {
+      for (final param in propPart.substring(semiIdx + 1).split(';')) {
+        if (param.startsWith('TZID=')) {
+          tzid = param.substring(5);
+          break;
+        }
+      }
+    }
 
     final value = line.substring(colonIdx + 1).trim();
 
@@ -533,6 +549,17 @@ class LocalCalendarIcsService {
         final sec = int.parse(value.substring(13, 15));
         if (value.endsWith('Z')) {
           return (DateTime.utc(year, month, day, hour, min, sec), false);
+        }
+        if (tzid != null) {
+          try {
+            final location = tz.getLocation(tzid);
+            return (
+              tz.TZDateTime(location, year, month, day, hour, min, sec).toUtc(),
+              false,
+            );
+          } catch (_) {
+            // Unknown TZID — fall through to floating local time.
+          }
         }
         return (DateTime(year, month, day, hour, min, sec), false);
       }

@@ -104,7 +104,9 @@ class _GenericCalendarLinkPageState extends State<GenericCalendarLinkPage> {
       if (!mounted) return;
       setState(() {
         _freshServices = bs.services;
-        _bootstrapProblem = bs.calendarServiceReady ? null : bs.readinessProblem;
+        _bootstrapProblem = bs.calendarServiceReady
+            ? null
+            : bs.readinessProblem;
         final services = _calendarServices;
         _selectedService = services.isEmpty ? null : services.first;
         _isLoadingBootstrap = false;
@@ -169,9 +171,9 @@ class _GenericCalendarLinkPageState extends State<GenericCalendarLinkPage> {
 
     final service = _selectedService;
     if (service == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(_noServiceMessage())),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_noServiceMessage())));
       return;
     }
 

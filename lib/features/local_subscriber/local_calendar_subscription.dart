@@ -36,8 +36,8 @@ class LocalCalendarSubscription {
     'title': title,
     'url': url,
     'source': source,
-    'createdAt': createdAt.toIso8601String(),
-    'lastFetchedAt': lastFetchedAt?.toIso8601String(),
+    'createdAt': createdAt.toUtc().toIso8601String(),
+    'lastFetchedAt': lastFetchedAt?.toUtc().toIso8601String(),
     'enabled': enabled,
   };
 
