@@ -231,9 +231,9 @@ class _ChoresPageState extends State<ChoresPage> {
       await _controller.permanentlyDeleteChore(chore);
       if (mounted) {
         Navigator.of(context).pop();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Chore deleted.')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Chore deleted.')));
       }
     } catch (error) {
       if (mounted) {
