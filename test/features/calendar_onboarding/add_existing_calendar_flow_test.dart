@@ -19,23 +19,28 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class _StubHubClient extends CaleeHubClient {
-  _StubHubClient() : super(baseUri: Uri.parse('http://localhost'));
+  _StubHubClient({ClientBootstrap? bootstrap})
+    : _bootstrap = bootstrap,
+      super(baseUri: Uri.parse('http://localhost'));
+
+  final ClientBootstrap? _bootstrap;
 
   @override
   Future<ClientBootstrap> bootstrap({required String accessToken}) async {
-    return const ClientBootstrap(
-      account: ClientAccount(
-        id: '',
-        displayName: null,
-        primaryEmail: null,
-        timeZone: null,
-        status: null,
-      ),
-      services: [],
-      contexts: ClientContexts(households: [], organisations: []),
-      availableContexts: [],
-      capabilities: {},
-    );
+    return _bootstrap ??
+        const ClientBootstrap(
+          account: ClientAccount(
+            id: '',
+            displayName: null,
+            primaryEmail: null,
+            timeZone: null,
+            status: null,
+          ),
+          services: [],
+          contexts: ClientContexts(households: [], organisations: []),
+          availableContexts: [],
+          capabilities: {},
+        );
   }
 
   @override
@@ -72,6 +77,38 @@ ClientService _sharingService() => const ClientService(
   calendarCredentialStatus: 'connected',
   source: 'calee',
   capabilities: {'calendarSharingAddress': true},
+);
+
+ClientBootstrap _bootstrapForGenericLink({
+  List<ClientService> services = const [],
+  Map<String, dynamic> readiness = const {},
+}) => ClientBootstrap(
+  account: const ClientAccount(
+    id: 'acct1',
+    displayName: 'Test',
+    primaryEmail: 'test@example.com',
+    timeZone: 'UTC',
+    status: 'active',
+  ),
+  services: services,
+  contexts: const ClientContexts(households: [], organisations: []),
+  availableContexts: const [],
+  capabilities: const {},
+  readiness: readiness,
+);
+
+ClientService _portalService({
+  String calendarCredentialStatus = 'connected',
+}) => ClientService(
+  id: 'portal',
+  displayName: 'Portal',
+  serviceType: 'nextcloud_portal',
+  baseUrl: 'http://localhost',
+  launchUrl: '',
+  accessStatus: 'active',
+  calendarCredentialStatus: calendarCredentialStatus,
+  source: 'calee',
+  capabilities: const {},
 );
 
 void _setUpSharedPrefs() {
@@ -117,10 +154,13 @@ Widget _wrapSourcePicker() => MaterialApp(
   ),
 );
 
-Widget _wrapGenericLink({bool showExamples = true}) => MaterialApp(
+Widget _wrapGenericLink({
+  bool showExamples = true,
+  CaleeHubClient? hubClient,
+}) => MaterialApp(
   theme: CaleeTheme.buildThemeData(),
   home: GenericCalendarLinkPage(
-    hubClient: _StubHubClient(),
+    hubClient: hubClient ?? _StubHubClient(),
     accessToken: 'token',
     services: const [],
     accountId: 'acct1',
@@ -250,6 +290,100 @@ void main() {
     expect(find.text('Shared calendar'), findsOneWidget);
     expect(find.text('School calendar'), findsNothing);
     expect(find.textContaining('school calendar'), findsWidgets);
+  });
+
+  testWidgets('generic link accepts connected nextcloud portal service', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _wrapGenericLink(
+        hubClient: _StubHubClient(
+          bootstrap: _bootstrapForGenericLink(
+            services: [_portalService()],
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text(
+        'No calendar service access found. Please sign out and sign in again.',
+      ),
+      findsNothing,
+    );
+    expect(find.text('Calendar name'), findsOneWidget);
+    expect(find.text('Calendar link'), findsOneWidget);
+    expect(find.text('Add to Calee'), findsOneWidget);
+  });
+
+  testWidgets('generic link explains no connected calendar service readiness', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _wrapGenericLink(
+        hubClient: _StubHubClient(
+          bootstrap: _bootstrapForGenericLink(
+            readiness: const {
+              'calendarServiceReady': false,
+              'problem': 'no_connected_calendar_service',
+            },
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Calendar name'),
+      'Shared',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Calendar link'),
+      'https://example.com/calendar.ics',
+    );
+    await tester.tap(find.text('Add to Calee'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text(
+        'Your account setup is not complete. Please sign out and sign in again.',
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('generic link explains missing nextcloud portal credential', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _wrapGenericLink(
+        hubClient: _StubHubClient(
+          bootstrap: _bootstrapForGenericLink(
+            services: [_portalService(calendarCredentialStatus: 'missing')],
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Calendar name'),
+      'Shared',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Calendar link'),
+      'https://example.com/calendar.ics',
+    );
+    await tester.tap(find.text('Add to Calee'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text(
+        'Your calendar service credential is missing. Please sign out and sign in again.',
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets('Google guide shows Connect Google Calendar button', (

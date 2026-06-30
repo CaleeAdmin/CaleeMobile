@@ -509,8 +509,10 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
                 _sessionController.bootstrap?.account.primaryEmail ?? '',
             activationController: _displayActivationController,
             accessToken: _sessionController.accessToken!,
-            onActivated: () {
+            onActivated: () async {
               _displaySetupLinkController.clearPending();
+              await _sessionController.refreshBootstrap();
+              if (!mounted) return;
               Navigator.of(_navigatorKey.currentContext!).pop();
               _openDisplayActivationSuccess();
             },
