@@ -64,6 +64,30 @@ const _kMissingCredentialService = ClientService(
   capabilities: {},
 );
 
+const _kConnectedPortalService = ClientService(
+  id: 'portal',
+  displayName: 'Calee Portal',
+  serviceType: 'nextcloud_portal',
+  baseUrl: 'http://localhost',
+  launchUrl: '',
+  accessStatus: 'active',
+  calendarCredentialStatus: 'connected',
+  source: 'calee',
+  capabilities: {},
+);
+
+const _kMissingCredentialPortalService = ClientService(
+  id: 'portal',
+  displayName: 'Calee Portal',
+  serviceType: 'nextcloud_portal',
+  baseUrl: 'http://localhost',
+  launchUrl: '',
+  accessStatus: 'active',
+  calendarCredentialStatus: 'missing',
+  source: 'calee',
+  capabilities: {},
+);
+
 const _kEmptyBootstrap = ClientBootstrap(
   account: ClientAccount(
     id: '',
@@ -101,6 +125,34 @@ const _kMissingCredentialBootstrap = ClientBootstrap(
     status: null,
   ),
   services: [_kMissingCredentialService],
+  contexts: ClientContexts(households: [], organisations: []),
+  availableContexts: [],
+  capabilities: {},
+);
+
+const _kConnectedPortalBootstrap = ClientBootstrap(
+  account: ClientAccount(
+    id: '',
+    displayName: null,
+    primaryEmail: null,
+    timeZone: null,
+    status: null,
+  ),
+  services: [_kConnectedPortalService],
+  contexts: ClientContexts(households: [], organisations: []),
+  availableContexts: [],
+  capabilities: {},
+);
+
+const _kMissingCredentialPortalBootstrap = ClientBootstrap(
+  account: ClientAccount(
+    id: '',
+    displayName: null,
+    primaryEmail: null,
+    timeZone: null,
+    status: null,
+  ),
+  services: [_kMissingCredentialPortalService],
   contexts: ClientContexts(households: [], organisations: []),
   availableContexts: [],
   capabilities: {},
@@ -259,4 +311,50 @@ void main() {
     expect(find.byType(DropdownButtonFormField<ClientService>), findsNothing);
     expect(find.text('Calendar name'), findsOneWidget);
   });
+
+  testWidgets(
+    'accepts nextcloud_portal service with connected credential',
+    (tester) async {
+      final client = _BootstrapStubClient(
+        bootstrapFuture: Future.value(_kConnectedPortalBootstrap),
+      );
+
+      await tester.pumpWidget(_wrap(client));
+      await tester.pumpAndSettle();
+
+      // Form is shown — the nextcloud_portal service is usable.
+      expect(find.text('Calendar name'), findsOneWidget);
+      expect(find.text('Add to Calee'), findsOneWidget);
+      // Single service: no dropdown.
+      expect(find.byType(DropdownButtonFormField<ClientService>), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'shows missing credential message for nextcloud_portal service',
+    (tester) async {
+      final client = _BootstrapStubClient(
+        bootstrapFuture: Future.value(_kMissingCredentialPortalBootstrap),
+      );
+
+      await tester.pumpWidget(_wrap(client));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+        find.byType(TextFormField).first,
+        'My Calendar',
+      );
+      await tester.enterText(
+        find.byType(TextFormField).last,
+        'https://example.com/calendar.ics',
+      );
+      await tester.tap(find.text('Add to Calee'));
+      await tester.pump();
+
+      expect(
+        find.textContaining('Your calendar service credential is missing'),
+        findsOneWidget,
+      );
+    },
+  );
 }
