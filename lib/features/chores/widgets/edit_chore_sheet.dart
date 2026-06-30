@@ -175,7 +175,7 @@ class _EditChoreSheetState extends State<EditChoreSheet> {
                     vertical: CaleeSpacing.sm,
                   ),
                   decoration: BoxDecoration(
-                    color: CaleeColors.primary.withAlpha(15),
+                    color: CaleeColors.primary.withAlpha(CaleeAlpha.pct6),
                     borderRadius: BorderRadius.circular(CaleeRadius.card),
                   ),
                   child: Row(

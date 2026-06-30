@@ -353,7 +353,7 @@ class _CalendarsSheet extends StatelessWidget {
             width: 36,
             height: 4,
             decoration: BoxDecoration(
-              color: theme.colorScheme.onSurfaceVariant.withAlpha(60),
+              color: theme.colorScheme.onSurfaceVariant.withAlpha(CaleeAlpha.pct24),
               borderRadius: BorderRadius.circular(2),
             ),
           ),

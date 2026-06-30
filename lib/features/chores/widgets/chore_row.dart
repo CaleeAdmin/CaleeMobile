@@ -118,7 +118,7 @@ class _PointsBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color: CaleeColors.primary.withAlpha(20),
+        color: CaleeColors.primary.withAlpha(CaleeAlpha.pct8),
         borderRadius: BorderRadius.circular(CaleeRadius.dot),
       ),
       child: Text(

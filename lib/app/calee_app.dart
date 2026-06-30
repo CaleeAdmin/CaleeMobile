@@ -37,6 +37,9 @@ import '../features/settings/calendar_collections_page.dart';
 import '../ui/calee_design.dart';
 import 'calee_home_page.dart';
 
+// Home-page tab indices for CaleeHomePage's bottom navigation bar.
+const _kCalendarTabIndex = 1;
+
 /// Overrides injected by tests to avoid platform channels and network calls.
 @visibleForTesting
 class CaleeAppTestDependencies {
@@ -611,7 +614,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
     setState(() {
       _showingOnboarding = false;
       _checkingOnboarding = false;
-      _initialHomeTab = 1; // Calendar tab
+      _initialHomeTab = _kCalendarTabIndex;
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;

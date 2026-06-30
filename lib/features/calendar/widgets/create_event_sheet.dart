@@ -92,6 +92,10 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
   void initState() {
     super.initState();
 
+    assert(
+      widget.calendars.isNotEmpty,
+      'CreateEventSheet requires at least one calendar',
+    );
     _selectedCalendar = widget.calendars.first;
     if (widget.defaultCalendarId != null) {
       for (final cal in widget.calendars) {

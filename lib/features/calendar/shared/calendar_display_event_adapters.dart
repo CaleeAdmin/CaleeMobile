@@ -41,6 +41,10 @@ CalendarDisplayEvent calendarDisplayEventFromClientEvent(
   try {
     start = DateTime.parse(event.startsAt).toLocal();
   } catch (_) {
+    debugPrint(
+      '[CalendarDisplayEvent] could not parse startsAt "${event.startsAt}" '
+      'for event ${event.id}; defaulting to now',
+    );
     start = DateTime.now();
   }
   try {
