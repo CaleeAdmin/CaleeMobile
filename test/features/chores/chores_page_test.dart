@@ -6,6 +6,7 @@ import 'package:calee_mobile/data/models/client_calendar.dart';
 import 'package:calee_mobile/data/models/client_chore.dart';
 import 'package:calee_mobile/data/models/client_person.dart';
 import 'package:calee_mobile/features/chores/chores_page.dart';
+import 'package:calee_mobile/features/chores/widgets/chore_row.dart';
 import 'package:calee_mobile/ui/calee_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -220,6 +221,33 @@ void main() {
     expect(find.text('All chores'), findsOneWidget);
     // The label must not append a count such as "All chores (0)".
     expect(find.textContaining('All chores ('), findsNothing);
+  });
+
+  group('Today section circle tap', () {
+    testWidgets('tapping circle fires onToggleCompletion for incomplete chore', (
+      tester,
+    ) async {
+      var tapCount = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: CaleeTheme.buildThemeData(),
+          home: Scaffold(
+            body: ChoreRow(
+              chore: _incompleteChore(),
+              calendarName: 'Chores',
+              scheduledLabel: '',
+              isUpdating: false,
+              onToggleCompletion: () => tapCount++,
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.bySemanticsLabel('Mark chore complete'));
+      await tester.pump();
+
+      expect(tapCount, 1);
+    });
   });
 
   group('Chore action sheet', () {

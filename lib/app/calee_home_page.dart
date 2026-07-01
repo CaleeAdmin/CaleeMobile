@@ -4,6 +4,7 @@ import '../data/api/calee_hub_client.dart';
 import '../data/models/client_bootstrap.dart';
 import '../features/calendar/calendar_page.dart';
 import '../features/chores/chores_page.dart';
+import '../features/meals/meals_page.dart';
 import '../features/settings/settings_page.dart';
 import '../features/tasks/tasks_page.dart';
 import '../features/today/today_page.dart';
@@ -42,18 +43,30 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
   bool get _hasChoreService =>
       widget.bootstrap.services.any((service) => service.supportsChores);
 
+  bool get _hasMealsService {
+    final portal = widget.bootstrap.services
+        .where((s) => s.id == 'portal')
+        .firstOrNull;
+    if (portal != null && portal.isActive && portal.supportsMeals) return true;
+    return widget.bootstrap.services.any(
+      (s) => s.isActive && s.supportsMeals,
+    );
+  }
+
   bool get _selectedTabOwnsTopBar {
     final title = _tabs[_selectedIndex].title;
     return title == 'Today' ||
         title == 'Calendar' ||
         title == 'Tasks' ||
-        title == 'Chores';
+        title == 'Chores' ||
+        title == 'Meals';
   }
 
   // Tab index helpers (computed after _tabs is built)
   int get _calendarTabIndex => _tabs.indexWhere((t) => t.title == 'Calendar');
   int get _tasksTabIndex => _tabs.indexWhere((t) => t.title == 'Tasks');
   int get _choresTabIndex => _tabs.indexWhere((t) => t.title == 'Chores');
+  int get _mealsTabIndex => _tabs.indexWhere((t) => t.title == 'Meals');
 
   @override
   void initState() {
@@ -88,6 +101,12 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
           icon: Icons.cleaning_services_outlined,
           selectedIcon: Icons.cleaning_services,
         ),
+      if (_hasMealsService)
+        const _CaleeTab(
+          title: 'Meals',
+          icon: Icons.restaurant_menu_outlined,
+          selectedIcon: Icons.restaurant_menu,
+        ),
       const _CaleeTab(
         title: 'Settings',
         icon: Icons.settings_outlined,
@@ -110,6 +129,9 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
         onNavigateToChores: _hasChoreService
             ? () => setState(() => _selectedIndex = _choresTabIndex)
             : null,
+        onNavigateToMeals: _hasMealsService
+            ? () => setState(() => _selectedIndex = _mealsTabIndex)
+            : null,
       ),
       CalendarPage(
         hubClient: widget.hubClient,
@@ -131,6 +153,11 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
           services: widget.bootstrap.services,
           households: widget.bootstrap.contexts.households,
           accountId: widget.bootstrap.account.id,
+        ),
+      if (_hasMealsService)
+        MealsPage(
+          hubClient: widget.hubClient,
+          accessToken: widget.accessToken,
         ),
       SettingsPage(
         hubClient: widget.hubClient,

@@ -635,6 +635,47 @@ class _ChoresPageState extends State<ChoresPage> {
       );
     }
 
+    if (section == 'doneToday' && _doneTodayExpanded) {
+      return CaleeSection(
+        title: 'Done today',
+        trailing: '${sectionChores.length}',
+        children: [
+          CaleeListRow(
+            leading: const Icon(
+              Icons.expand_less,
+              size: 22,
+              color: CaleeColors.textTertiary,
+            ),
+            title: 'Hide completed chores',
+            onTap: () => setState(() => _doneTodayExpanded = false),
+          ),
+          ...sectionChores.map((chore) {
+            final onActions =
+                chore.completionActionId.trim().isNotEmpty &&
+                    !chore.isCompletionLog &&
+                    chore.normalizedSection != 'history'
+                ? () => _showChoreActions(chore)
+                : null;
+            return ChoreRow(
+              key: ValueKey(chore.id),
+              chore: chore,
+              calendarName: _calendarNameForChore(chore, choreCalendars),
+              scheduledLabel: _formatScheduledAt(chore),
+              isUpdating: _controller.updatingChoreIds.contains(
+                chore.completionActionId,
+              ),
+              onToggleCompletion: !chore.canToggleCompletion
+                  ? null
+                  : () => _toggleChoreCompletion(chore),
+              onCircleTap: null,
+              onMoreTap: onActions,
+              onRowTap: null,
+            );
+          }),
+        ],
+      );
+    }
+
     if (section == 'history' && !_historyExpanded) {
       return CaleeSection(
         children: [
@@ -657,33 +698,39 @@ class _ChoresPageState extends State<ChoresPage> {
       );
     }
 
+    final isFutureSection =
+        section == 'tomorrow' ||
+        section == 'laterThisWeek' ||
+        section == 'later';
+
     return CaleeSection(
       title: _sectionTitle(section),
       trailing: '${sectionChores.length}',
       children: sectionChores
           .map(
-            (chore) => ChoreRow(
-              key: ValueKey(
-                chore.completionActionId.isNotEmpty
-                    ? chore.completionActionId
-                    : chore.id,
-              ),
-              chore: chore,
-              calendarName: _calendarNameForChore(chore, choreCalendars),
-              scheduledLabel: _formatScheduledAt(chore),
-              isUpdating: _controller.updatingChoreIds.contains(
-                chore.completionActionId,
-              ),
-              onToggleCompletion: chore.canToggleCompletion
-                  ? () => _toggleChoreCompletion(chore)
-                  : null,
-              onMoreTap:
+            (chore) {
+              final onActions =
                   chore.completionActionId.trim().isNotEmpty &&
                       !chore.isCompletionLog &&
                       chore.normalizedSection != 'history'
                   ? () => _showChoreActions(chore)
-                  : null,
-            ),
+                  : null;
+              return ChoreRow(
+                key: ValueKey(chore.id),
+                chore: chore,
+                calendarName: _calendarNameForChore(chore, choreCalendars),
+                scheduledLabel: _formatScheduledAt(chore),
+                isUpdating: _controller.updatingChoreIds.contains(
+                  chore.completionActionId,
+                ),
+                onToggleCompletion: isFutureSection || !chore.canToggleCompletion
+                    ? null
+                    : () => _toggleChoreCompletion(chore),
+                onCircleTap: isFutureSection ? onActions : null,
+                onMoreTap: onActions,
+                onRowTap: isFutureSection ? onActions : null,
+              );
+            },
           )
           .toList(),
     );

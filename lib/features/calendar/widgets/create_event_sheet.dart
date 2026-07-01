@@ -21,6 +21,7 @@ class CreateEventSheet extends StatefulWidget {
     required this.onCreate,
     required this.hubClient,
     required this.accessToken,
+    required this.use24h,
     this.initialDate,
     this.initialEvent,
     this.editScope,
@@ -30,6 +31,7 @@ class CreateEventSheet extends StatefulWidget {
   });
 
   final List<ClientCalendar> calendars;
+  final bool use24h;
   final DateTime? initialDate;
   final ClientEvent? initialEvent;
   final String? editScope;
@@ -186,9 +188,15 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
   }
 
   String _timeLabel(TimeOfDay value) {
-    final hour = value.hour.toString().padLeft(2, '0');
-    final minute = value.minute.toString().padLeft(2, '0');
-    return '$hour:$minute';
+    if (widget.use24h) {
+      final hour = value.hour.toString().padLeft(2, '0');
+      final minute = value.minute.toString().padLeft(2, '0');
+      return '$hour:$minute';
+    }
+    final h12 = value.hour % 12 == 0 ? 12 : value.hour % 12;
+    final period = value.hour < 12 ? 'AM' : 'PM';
+    if (value.minute == 0) return '$h12 $period';
+    return '$h12:${value.minute.toString().padLeft(2, '0')} $period';
   }
 
   void _applyInitialRecurrence(String? recurrence) {

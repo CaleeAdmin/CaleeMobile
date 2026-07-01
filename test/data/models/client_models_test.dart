@@ -40,6 +40,7 @@ ClientTask _task(String status) => ClientTask(
 
 void main() {
   _capabilityTests();
+  _bootstrapMealsCapabilityTests();
   _deletedItemsModelTests();
   _clientCalDavAccountTests();
 
@@ -110,6 +111,20 @@ void main() {
   });
 }
 
+ClientBootstrap _bootstrap(Map<String, dynamic> caps) => ClientBootstrap(
+  account: const ClientAccount(
+    id: '',
+    displayName: null,
+    primaryEmail: null,
+    timeZone: null,
+    status: null,
+  ),
+  services: const [],
+  contexts: const ClientContexts(households: [], organisations: []),
+  availableContexts: const [],
+  capabilities: caps,
+);
+
 ClientService _svc(Map<String, dynamic> caps) => ClientService(
   id: 'svc',
   displayName: 'Service',
@@ -169,6 +184,53 @@ void _capabilityTests() {
         _svc({'deletedItems': true}).supportsDeletedItemsPermanentDelete,
         isTrue,
       );
+    });
+  });
+
+  group('ClientService.supportsMeals', () {
+    test('returns true when meals capability is true', () {
+      expect(_svc({'meals': true}).supportsMeals, isTrue);
+    });
+
+    test('returns false when meals capability is absent', () {
+      expect(_svc({}).supportsMeals, isFalse);
+    });
+
+    test('returns false when meals capability is false', () {
+      expect(_svc({'meals': false}).supportsMeals, isFalse);
+    });
+  });
+}
+
+void _bootstrapMealsCapabilityTests() {
+  group('ClientBootstrap.supportsMeals', () {
+    test('returns true when meals capability is true', () {
+      expect(_bootstrap({'meals': true}).supportsMeals, isTrue);
+    });
+
+    test('returns false when meals capability is false', () {
+      expect(_bootstrap({'meals': false}).supportsMeals, isFalse);
+    });
+
+    test('returns false when meals capability is absent', () {
+      expect(_bootstrap({}).supportsMeals, isFalse);
+    });
+  });
+
+  group('ClientBootstrap.supportsMealTemplates', () {
+    test('returns true when mealTemplates capability is true', () {
+      expect(
+        _bootstrap({'mealTemplates': true}).supportsMealTemplates,
+        isTrue,
+      );
+    });
+
+    test('returns true when only meals is true (fallback)', () {
+      expect(_bootstrap({'meals': true}).supportsMealTemplates, isTrue);
+    });
+
+    test('returns false when neither capability is set', () {
+      expect(_bootstrap({}).supportsMealTemplates, isFalse);
     });
   });
 }
