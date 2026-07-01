@@ -513,7 +513,7 @@ class _MealFormSheetState extends State<MealFormSheet> {
         await widget.controller.updateMeal(
           mealId: widget.existingMeal!.id,
           title: title,
-          notes: notes.isEmpty ? null : notes,
+          notes: notes,
         );
       } else {
         await widget.controller.createMeal(
