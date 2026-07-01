@@ -2,7 +2,7 @@ name: calee_mobile
 description: "Mobile calendars, tasks, people, and display management for Calee."
 publish_to: 'none'
 
-version: 0.0.15+15
+version: 0.0.16+16
 
 environment:
   sdk: ^3.12.0
