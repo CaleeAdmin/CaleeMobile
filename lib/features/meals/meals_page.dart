@@ -117,7 +117,7 @@ class _MealsPageState extends State<MealsPage> {
         const SizedBox(height: CaleeSpacing.md),
         _buildWeekSelector(),
         const SizedBox(height: CaleeSpacing.md),
-        _buildGrid(),
+        _buildMealList(),
         const SizedBox(height: CaleeSpacing.lg),
       ],
     );
@@ -182,7 +182,7 @@ class _MealsPageState extends State<MealsPage> {
     );
   }
 
-  Widget _buildGrid() {
+  Widget _buildMealList() {
     if (_controller.isLoading && _controller.mealList == null) {
       return const Center(
         child: Padding(
@@ -205,132 +205,86 @@ class _MealsPageState extends State<MealsPage> {
       ),
     );
 
-    final today = DateTime.now();
-    final todayStr = _fmt(DateTime(today.year, today.month, today.day));
-
-    return Container(
-      decoration: BoxDecoration(
-        color: CaleeColors.surface,
-        borderRadius: BorderRadius.circular(CaleeRadius.card),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(CaleeRadius.card),
-        child: Table(
-          defaultColumnWidth: const FlexColumnWidth(),
-          border: TableBorder.all(
-            color: CaleeColors.separator,
-            width: 0.5,
-          ),
-          children: [
-            _buildHeaderRow(days, todayStr),
-            ..._kMealTypes.map(
-              (mealType) => _buildMealRow(days, mealType, todayStr),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  TableRow _buildHeaderRow(List<DateTime> days, String todayStr) {
-    return TableRow(
-      decoration: const BoxDecoration(color: CaleeColors.scaffoldBackground),
+    return Column(
       children: [
-        const SizedBox.shrink(),
-        ...days.asMap().entries.map((entry) {
-          final i = entry.key;
-          final d = entry.value;
-          final dateStr = _fmt(d);
-          final isToday = dateStr == todayStr;
-          return Padding(
-            padding: const EdgeInsets.symmetric(vertical: 6),
-            child: Column(
-              children: [
-                Text(
-                  _kWeekdayShort[i],
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600,
-                    color: isToday
-                        ? CaleeColors.primary
-                        : CaleeColors.textSecondary,
-                    letterSpacing: 0.3,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Container(
-                  width: 22,
-                  height: 22,
-                  decoration: isToday
-                      ? const BoxDecoration(
-                          color: CaleeColors.primary,
-                          shape: BoxShape.circle,
-                        )
-                      : null,
-                  child: Center(
-                    child: Text(
-                      '${d.day}',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: isToday
-                            ? Colors.white
-                            : CaleeColors.textPrimary,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          );
-        }),
+        for (var i = 0; i < days.length; i++) ...[
+          if (i > 0) const SizedBox(height: CaleeSpacing.sectionSpacing),
+          _buildDaySection(days[i]),
+        ],
       ],
     );
   }
 
-  TableRow _buildMealRow(
-    List<DateTime> days,
-    String mealType,
-    String todayStr,
-  ) {
-    return TableRow(
-      children: [
-        Container(
-          color: CaleeColors.scaffoldBackground,
-          padding: const EdgeInsets.symmetric(
-            vertical: 10,
-            horizontal: 4,
+  Widget _buildDaySection(DateTime day) {
+    final dateStr = _fmt(day);
+    final count = _plannedCountForDay(dateStr);
+    final subtitleTheme = Theme.of(context).textTheme.bodySmall;
+
+    return CaleeSection(
+      title: _dayTitle(day),
+      trailing: count > 0 ? '$count planned' : null,
+      children: _kMealTypes.map((mealType) {
+        final meal = _controller.mealFor(dateStr, mealType);
+
+        return CaleeListRow(
+          leading: Icon(
+            _mealTypeIcon(mealType),
+            size: 20,
+            color: CaleeColors.textTertiary,
           ),
-          child: RotatedBox(
-            quarterTurns: 3,
-            child: Text(
-              _kMealTypeLabels[mealType] ?? mealType,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.w600,
-                color: CaleeColors.textSecondary,
-                letterSpacing: 0.3,
-              ),
-            ),
-          ),
-        ),
-        ...days.map((d) {
-          final dateStr = _fmt(d);
-          final meal = _controller.mealFor(dateStr, mealType);
-          return _MealCell(
+          title: _kMealTypeLabels[mealType] ?? mealType,
+          subtitle: meal != null ? meal.title : 'Not planned',
+          subtitleStyle: meal != null
+              ? subtitleTheme?.copyWith(color: CaleeColors.textPrimary)
+              : null,
+          trailing: meal != null
+              ? null
+              : const Icon(
+                  Icons.add,
+                  size: 20,
+                  color: CaleeColors.textTertiary,
+                ),
+          onTap: () => _openSheet(
+            date: dateStr,
+            mealType: mealType,
             meal: meal,
-            onTap: () => _openSheet(
-              date: dateStr,
-              mealType: mealType,
-              meal: meal,
-            ),
-          );
-        }),
-      ],
+          ),
+        );
+      }).toList(),
     );
+  }
+
+  String _dayTitle(DateTime day) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final tomorrow = today.add(const Duration(days: 1));
+    final dayDate = DateTime(day.year, day.month, day.day);
+
+    if (dayDate == today) return 'Today';
+    if (dayDate == tomorrow) return 'Tomorrow';
+
+    final weekday = _kWeekdayShort[day.weekday - 1];
+    final month = _kMonths[day.month - 1];
+    return '$weekday, ${day.day} $month';
+  }
+
+  int _plannedCountForDay(String dateStr) {
+    return _kMealTypes
+        .where((t) => _controller.mealFor(dateStr, t) != null)
+        .length;
+  }
+
+  IconData _mealTypeIcon(String mealType) {
+    switch (mealType) {
+      case 'breakfast':
+        return Icons.wb_sunny_outlined;
+      case 'lunch':
+        return Icons.restaurant_outlined;
+      case 'dinner':
+        return Icons.restaurant_menu_outlined;
+      default:
+        return Icons.restaurant_outlined;
+    }
   }
 
   Widget _buildError() {
@@ -373,44 +327,6 @@ class _MealsPageState extends State<MealsPage> {
       mealType: mealType,
       existingMeal: meal,
       controller: _controller,
-    );
-  }
-}
-
-class _MealCell extends StatelessWidget {
-  const _MealCell({required this.meal, required this.onTap});
-
-  final ClientMeal? meal;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final hasMeal = meal != null;
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        constraints: const BoxConstraints(minHeight: 52),
-        padding: const EdgeInsets.all(4),
-        child: hasMeal
-            ? Text(
-                meal!.title,
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 10,
-                  color: CaleeColors.textPrimary,
-                  height: 1.3,
-                ),
-              )
-            : const Center(
-                child: Icon(
-                  Icons.add,
-                  size: 14,
-                  color: CaleeColors.textTertiary,
-                ),
-              ),
-      ),
     );
   }
 }

@@ -1,6 +1,6 @@
 // Widget tests for MealsPage and MealFormSheet.
 //
-// Covers: grid shows a meal from the current week; edit sheet pre-fills
+// Covers: list shows a meal from the current week; edit sheet pre-fills
 // existing data; clearing notes during edit sends an empty string so the
 // backend can clear the field.
 
@@ -112,8 +112,8 @@ Widget _buildFormSheet({
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
 void main() {
-  group('MealsPage — grid', () {
-    testWidgets('shows meal title in current-week grid', (tester) async {
+  group('MealsPage — list', () {
+    testWidgets('shows meal title in weekly list', (tester) async {
       final monday = _mondayOf(DateTime.now());
       final meal = ClientMeal(
         id: 1,
@@ -130,7 +130,14 @@ void main() {
       await tester.pump();
       await tester.pump();
 
+      // Day sections exist with Breakfast/Lunch/Dinner rows for each day.
+      expect(find.text('Breakfast'), findsWidgets);
+      expect(find.text('Lunch'), findsWidgets);
+      expect(find.text('Dinner'), findsWidgets);
+      // Existing meal title appears in the Breakfast row.
       expect(find.text('Scrambled Eggs'), findsOneWidget);
+      // Empty meal slots show 'Not planned'.
+      expect(find.text('Not planned'), findsWidgets);
     });
   });
 
