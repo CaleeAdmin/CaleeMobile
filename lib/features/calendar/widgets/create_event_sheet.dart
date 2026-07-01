@@ -9,6 +9,8 @@ import 'package:image_picker/image_picker.dart';
 import '../../../data/api/calee_hub_client.dart';
 import '../../../data/models/client_calendar.dart';
 import '../../../data/models/client_event_draft.dart';
+import '../../../shared/recurrence/calee_repeat_picker_sheet.dart';
+import '../../../shared/recurrence/calee_repeat_rule.dart';
 import '../../../ui/calee_design.dart';
 import '../event_draft_image_preparer.dart';
 import 'calendar_widget_helpers.dart';
@@ -19,6 +21,7 @@ class CreateEventSheet extends StatefulWidget {
     required this.onCreate,
     required this.hubClient,
     required this.accessToken,
+    required this.use24h,
     this.initialDate,
     this.initialEvent,
     this.editScope,
@@ -28,6 +31,7 @@ class CreateEventSheet extends StatefulWidget {
   });
 
   final List<ClientCalendar> calendars;
+  final bool use24h;
   final DateTime? initialDate;
   final ClientEvent? initialEvent;
   final String? editScope;
@@ -67,16 +71,13 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
   final _titleController = TextEditingController();
   final _locationController = TextEditingController();
   final _descriptionController = TextEditingController();
-  final _recurrenceCountController = TextEditingController(text: '10');
 
   late ClientCalendar _selectedCalendar;
   late DateTime _selectedDate;
   late DateTime _selectedEndDate;
   late TimeOfDay _startTime;
   late TimeOfDay _endTime;
-  String _selectedRecurrence = 'none';
-  String _recurrenceEnd = 'never';
-  late DateTime _recurrenceEndDate;
+  CaleeRepeatRule _selectedRepeatRule = CaleeRepeatRule.none;
   bool _allDay = false;
   bool _isSubmitting = false;
   bool _isScanningImage = false;
@@ -87,17 +88,16 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
       widget.initialEvent!.recurring &&
       widget.editScope == 'occurrence';
 
-  bool get _isEditingRecurringSeriesMetadata =>
-      _isEditing &&
-      widget.initialEvent!.recurring &&
-      widget.editScope == 'series';
-
   bool get _isLocked => _isSubmitting || _isScanningImage;
 
   @override
   void initState() {
     super.initState();
 
+    assert(
+      widget.calendars.isNotEmpty,
+      'CreateEventSheet requires at least one calendar',
+    );
     _selectedCalendar = widget.calendars.first;
     if (widget.defaultCalendarId != null) {
       for (final cal in widget.calendars) {
@@ -122,7 +122,6 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
           start.add(const Duration(hours: 1));
 
       _selectedDate = DateTime(start.year, start.month, start.day);
-      _recurrenceEndDate = _selectedDate.add(const Duration(days: 30));
       _selectedEndDate = event.allDay
           ? DateTime(
               end.year,
@@ -152,13 +151,14 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
         ? DateTime(initial.year, initial.month, initial.day)
         : today;
     _selectedEndDate = _selectedDate;
-    _recurrenceEndDate = _selectedDate.add(const Duration(days: 30));
 
     // Default times: 9:00–10:00 for future dates, next hour for today
     if (isSameCalendarDay(_selectedDate, today)) {
       final nextHour = now.add(const Duration(hours: 1));
-      _startTime = TimeOfDay(hour: nextHour.hour, minute: 0);
-      _endTime = TimeOfDay(hour: (nextHour.hour + 1) % 24, minute: 0);
+      // Clamp to 22 so end (start + 1) never wraps past midnight on the same day.
+      final startHour = nextHour.hour.clamp(0, 22);
+      _startTime = TimeOfDay(hour: startHour, minute: 0);
+      _endTime = TimeOfDay(hour: startHour + 1, minute: 0);
     } else {
       _startTime = const TimeOfDay(hour: 9, minute: 0);
       _endTime = const TimeOfDay(hour: 10, minute: 0);
@@ -170,7 +170,6 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
     _titleController.dispose();
     _locationController.dispose();
     _descriptionController.dispose();
-    _recurrenceCountController.dispose();
     super.dispose();
   }
 
@@ -189,117 +188,36 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
   }
 
   String _timeLabel(TimeOfDay value) {
-    final hour = value.hour.toString().padLeft(2, '0');
-    final minute = value.minute.toString().padLeft(2, '0');
-    return '$hour:$minute';
-  }
-
-  Map<String, String> _parseRRule(String? recurrence) {
-    final value = (recurrence ?? '').trim();
-    if (value.isEmpty) return {};
-
-    final parts = <String, String>{};
-    for (final part in value.split(';')) {
-      final separator = part.indexOf('=');
-      if (separator <= 0 || separator == part.length - 1) continue;
-      final key = part.substring(0, separator).trim().toUpperCase();
-      final parsedValue = part.substring(separator + 1).trim().toUpperCase();
-      parts[key] = parsedValue;
+    if (widget.use24h) {
+      final hour = value.hour.toString().padLeft(2, '0');
+      final minute = value.minute.toString().padLeft(2, '0');
+      return '$hour:$minute';
     }
-    return parts;
-  }
-
-  DateTime? _dateFromRRuleUntil(String? value) {
-    if (value == null || value.length < 8) return null;
-    final rawDate = value.substring(0, 8);
-    final year = int.tryParse(rawDate.substring(0, 4));
-    final month = int.tryParse(rawDate.substring(4, 6));
-    final day = int.tryParse(rawDate.substring(6, 8));
-    if (year == null || month == null || day == null) return null;
-    return DateTime(year, month, day);
+    final h12 = value.hour % 12 == 0 ? 12 : value.hour % 12;
+    final period = value.hour < 12 ? 'AM' : 'PM';
+    if (value.minute == 0) return '$h12 $period';
+    return '$h12:${value.minute.toString().padLeft(2, '0')} $period';
   }
 
   void _applyInitialRecurrence(String? recurrence) {
-    final parts = _parseRRule(recurrence);
-    final frequency = parts['FREQ'];
-
-    _selectedRecurrence = switch (frequency) {
-      'DAILY' => 'daily',
-      'WEEKLY' => 'weekly',
-      'MONTHLY' => 'monthly',
-      'YEARLY' => 'yearly',
-      _ => 'none',
-    };
-
-    final count = parts['COUNT'];
-    final until = parts['UNTIL'];
-
-    if (count != null && count.isNotEmpty) {
-      _recurrenceEnd = 'count';
-      _recurrenceCountController.text = count;
-    } else if (until != null && until.isNotEmpty) {
-      _recurrenceEnd = 'date';
-      final parsedUntil = _dateFromRRuleUntil(until);
-      if (parsedUntil != null) {
-        _recurrenceEndDate = parsedUntil;
-      }
-    } else {
-      _recurrenceEnd = 'never';
-    }
-  }
-
-  String? _recurrenceValue() {
-    final frequency = switch (_selectedRecurrence) {
-      'daily' => 'DAILY',
-      'weekly' => 'WEEKLY',
-      'monthly' => 'MONTHLY',
-      'yearly' => 'YEARLY',
-      _ => null,
-    };
-
-    if (frequency == null) return null;
-
-    final parts = <String>['FREQ=$frequency'];
-
-    if (_recurrenceEnd == 'count') {
-      final count = int.tryParse(_recurrenceCountController.text.trim());
-      if (count == null || count < 1) {
-        throw const FormatException('Enter a repeat count of at least 1.');
-      }
-      parts.add('COUNT=$count');
-    } else if (_recurrenceEnd == 'date') {
-      parts.add('UNTIL=${_formatRRuleUntil(_recurrenceEndDate)}');
-    }
-
-    return parts.join(';');
-  }
-
-  String _formatRRuleUntil(DateTime value) {
-    if (_allDay) {
-      final year = value.year.toString().padLeft(4, '0');
-      final month = value.month.toString().padLeft(2, '0');
-      final day = value.day.toString().padLeft(2, '0');
-      return '$year$month$day';
-    }
-
-    final localEndOfDay = DateTime(
-      value.year,
-      value.month,
-      value.day,
-      23,
-      59,
-      59,
+    _selectedRepeatRule = CaleeRepeatRule.fromRrule(
+      recurrence,
+      anchorDate: _selectedDate,
     );
-    final utc = localEndOfDay.toUtc();
+  }
 
-    final year = utc.year.toString().padLeft(4, '0');
-    final month = utc.month.toString().padLeft(2, '0');
-    final day = utc.day.toString().padLeft(2, '0');
-    final hour = utc.hour.toString().padLeft(2, '0');
-    final minute = utc.minute.toString().padLeft(2, '0');
-    final second = utc.second.toString().padLeft(2, '0');
+  String? _recurrenceValue() =>
+      _selectedRepeatRule.toRrule(anchorDate: _selectedDate);
 
-    return '$year$month${day}T$hour$minute${second}Z';
+  Future<void> _pickRepeat() async {
+    await CaleeRepeatPickerSheet.show(
+      context: context,
+      current: _selectedRepeatRule,
+      anchorDate: _selectedDate,
+      onSelected: (rule) {
+        setState(() => _selectedRepeatRule = rule);
+      },
+    );
   }
 
   Future<void> _pickDate() async {
@@ -316,23 +234,6 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
         if (_selectedEndDate.isBefore(_selectedDate)) {
           _selectedEndDate = _selectedDate;
         }
-      });
-    }
-  }
-
-  Future<void> _pickRecurrenceEndDate() async {
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: _recurrenceEndDate.isBefore(_selectedDate)
-          ? _selectedDate
-          : _recurrenceEndDate,
-      firstDate: _selectedDate,
-      lastDate: DateTime(2100),
-    );
-
-    if (picked != null && mounted) {
-      setState(() {
-        _recurrenceEndDate = DateTime(picked.year, picked.month, picked.day);
       });
     }
   }
@@ -532,10 +433,12 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
         debugPrint('EventDraftsFromImage: compressed ${compressedFile.path}');
       }
 
-      String tz = 'Australia/Perth';
+      String? tz;
       try {
         tz = await FlutterTimezone.getLocalTimezone();
-      } catch (_) {}
+      } catch (_) {
+        // Timezone unavailable; omit timezone hint from the request.
+      }
 
       final now = DateTime.now();
       final referenceDate =
@@ -654,30 +557,28 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
   Future<void> _submit() async {
     if (_isSubmitting || !_formKey.currentState!.validate()) return;
 
-    final metadataOnly = _isEditingRecurringSeriesMetadata;
-    DateTime? startsAt;
-    DateTime? endsAt;
+    final startsAt = _dateTimeFor(_startTime);
+    late final DateTime endsAt;
 
-    if (!metadataOnly) {
-      startsAt = _dateTimeFor(_startTime);
-      endsAt = _dateTimeFor(_endTime);
-
-      if (_allDay) {
-        if (_selectedEndDate.isBefore(_selectedDate)) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('End date must be on or after start date.'),
-            ),
-          );
-          return;
-        }
-        endsAt = _selectedEndDate.add(const Duration(days: 1));
-      } else if (!endsAt.isAfter(startsAt)) {
+    if (_allDay) {
+      if (_selectedEndDate.isBefore(_selectedDate)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('End date must be on or after start date.'),
+          ),
+        );
+        return;
+      }
+      endsAt = _selectedEndDate.add(const Duration(days: 1));
+    } else {
+      final end = _dateTimeFor(_endTime);
+      if (!end.isAfter(startsAt)) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('End time must be after start time.')),
         );
         return;
       }
+      endsAt = end;
     }
 
     setState(() {
@@ -699,20 +600,18 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
           title: title,
           startsAt: startsAt,
           endsAt: endsAt,
-          allDay: metadataOnly ? null : _allDay,
+          allDay: _allDay,
           location: location,
           description: description,
-          recurrence: _isEditingSingleOccurrence || metadataOnly
-              ? null
-              : _recurrenceValue(),
+          recurrence: _isEditingSingleOccurrence ? null : _recurrenceValue(),
           editScope: widget.editScope,
         );
       } else {
         await widget.onCreate(
           calendar: _selectedCalendar,
           title: title,
-          startsAt: startsAt!,
-          endsAt: endsAt!,
+          startsAt: startsAt,
+          endsAt: endsAt,
           allDay: _allDay,
           location: location,
           description: description,
@@ -757,15 +656,13 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
     final sheetTitle = _isEditing
         ? _isEditingSingleOccurrence
               ? 'Edit this event'
-              : _isEditingRecurringSeriesMetadata
-              ? 'Edit series details'
               : widget.initialEvent!.recurring
               ? 'Edit series'
               : 'Edit event'
         : 'Add event';
 
     return SafeArea(
-      child: Container(
+      child: ColoredBox(
         color: CaleeColors.scaffoldBackground,
         child: Form(
           key: _formKey,
@@ -876,165 +773,65 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
                       ),
 
                       // ── Time ──────────────────────────────────────────────
-                      if (!_isEditingRecurringSeriesMetadata) ...[
-                        const SizedBox(height: CaleeSpacing.sectionSpacing),
-                        CaleeSection(
-                          children: [
-                            CaleeSectionSwitchRow(
-                              label: 'All day',
-                              value: _allDay,
+                      const SizedBox(height: CaleeSpacing.sectionSpacing),
+                      CaleeSection(
+                        children: [
+                          CaleeSectionSwitchRow(
+                            label: 'All day',
+                            value: _allDay,
+                            enabled: !_isLocked,
+                            onChanged: (v) => setState(() => _allDay = v),
+                          ),
+                          if (_allDay) ...[
+                            CaleeSectionPickerRow(
+                              label: 'Date',
+                              value: _dateLabel(_selectedDate),
+                              onTap: _isLocked ? null : _pickDate,
                               enabled: !_isLocked,
-                              onChanged: (v) => setState(() => _allDay = v),
                             ),
-                            if (_allDay) ...[
-                              CaleeSectionPickerRow(
-                                label: 'Date',
-                                value: _dateLabel(_selectedDate),
-                                onTap: _isLocked ? null : _pickDate,
-                                enabled: !_isLocked,
-                              ),
-                              CaleeSectionPickerRow(
-                                label: 'End',
-                                value: _dateLabel(_selectedEndDate),
-                                onTap: _isLocked ? null : _pickEndDate,
-                                enabled: !_isLocked,
-                              ),
-                            ] else ...[
-                              CaleeSectionPickerRow(
-                                label: 'Date',
-                                value: _dateLabel(_selectedDate),
-                                onTap: _isLocked ? null : _pickDate,
-                                enabled: !_isLocked,
-                              ),
-                              CaleeSectionPickerRow(
-                                label: 'Start',
-                                value: _timeLabel(_startTime),
-                                onTap: _isLocked ? null : _pickStartTime,
-                                enabled: !_isLocked,
-                              ),
-                              CaleeSectionPickerRow(
-                                label: 'End',
-                                value: _timeLabel(_endTime),
-                                onTap: _isLocked ? null : _pickEndTime,
-                                enabled: !_isLocked,
-                              ),
-                            ],
+                            CaleeSectionPickerRow(
+                              label: 'End',
+                              value: _dateLabel(_selectedEndDate),
+                              onTap: _isLocked ? null : _pickEndDate,
+                              enabled: !_isLocked,
+                            ),
+                          ] else ...[
+                            CaleeSectionPickerRow(
+                              label: 'Date',
+                              value: _dateLabel(_selectedDate),
+                              onTap: _isLocked ? null : _pickDate,
+                              enabled: !_isLocked,
+                            ),
+                            CaleeSectionPickerRow(
+                              label: 'Start',
+                              value: _timeLabel(_startTime),
+                              onTap: _isLocked ? null : _pickStartTime,
+                              enabled: !_isLocked,
+                            ),
+                            CaleeSectionPickerRow(
+                              label: 'End',
+                              value: _timeLabel(_endTime),
+                              onTap: _isLocked ? null : _pickEndTime,
+                              enabled: !_isLocked,
+                            ),
                           ],
-                        ),
-                      ],
+                        ],
+                      ),
 
                       // ── Repeat ────────────────────────────────────────────
-                      if (!_isEditingSingleOccurrence &&
-                          !_isEditingRecurringSeriesMetadata) ...[
+                      if (!_isEditingSingleOccurrence) ...[
                         const SizedBox(height: CaleeSpacing.sectionSpacing),
                         CaleeSection(
                           children: [
-                            CaleeSectionDropdownRow<String>(
+                            CaleeSectionPickerRow(
                               label: 'Repeat',
-                              value: _selectedRecurrence,
-                              items: const [
-                                DropdownMenuItem(
-                                  value: 'none',
-                                  child: Text('Does not repeat'),
-                                ),
-                                DropdownMenuItem(
-                                  value: 'daily',
-                                  child: Text('Daily'),
-                                ),
-                                DropdownMenuItem(
-                                  value: 'weekly',
-                                  child: Text('Weekly'),
-                                ),
-                                DropdownMenuItem(
-                                  value: 'monthly',
-                                  child: Text('Monthly'),
-                                ),
-                                DropdownMenuItem(
-                                  value: 'yearly',
-                                  child: Text('Yearly'),
-                                ),
-                              ],
-                              onChanged: (value) {
-                                if (value != null) {
-                                  setState(() => _selectedRecurrence = value);
-                                }
-                              },
+                              value: _selectedRepeatRule.label(
+                                anchorDate: _selectedDate,
+                              ),
+                              onTap: _isLocked ? null : _pickRepeat,
                               enabled: !_isLocked,
                             ),
-                            if (_selectedRecurrence != 'none') ...[
-                              CaleeSectionDropdownRow<String>(
-                                label: 'Ends',
-                                value: _recurrenceEnd,
-                                items: const [
-                                  DropdownMenuItem(
-                                    value: 'never',
-                                    child: Text('Never'),
-                                  ),
-                                  DropdownMenuItem(
-                                    value: 'date',
-                                    child: Text('On date'),
-                                  ),
-                                  DropdownMenuItem(
-                                    value: 'count',
-                                    child: Text('After count'),
-                                  ),
-                                ],
-                                onChanged: (value) {
-                                  if (value != null) {
-                                    setState(() => _recurrenceEnd = value);
-                                  }
-                                },
-                                enabled: !_isLocked,
-                              ),
-                              if (_recurrenceEnd == 'date')
-                                CaleeSectionPickerRow(
-                                  label: 'Ends on',
-                                  value: _dateLabel(_recurrenceEndDate),
-                                  onTap: _isLocked
-                                      ? null
-                                      : _pickRecurrenceEndDate,
-                                  enabled: !_isLocked,
-                                ),
-                              if (_recurrenceEnd == 'count')
-                                CaleeSectionLabeledTextFormField(
-                                  label: 'Times',
-                                  controller: _recurrenceCountController,
-                                  enabled: !_isLocked,
-                                  keyboardType: TextInputType.number,
-                                  textAlign: TextAlign.right,
-                                  hintText: '10',
-                                  fieldWidth: 80,
-                                  validator: (value) {
-                                    if (_selectedRecurrence == 'none' ||
-                                        _recurrenceEnd != 'count') {
-                                      return null;
-                                    }
-                                    final count = int.tryParse(
-                                      (value ?? '').trim(),
-                                    );
-                                    if (count == null || count < 1) {
-                                      return 'Enter a number of at least 1';
-                                    }
-                                    return null;
-                                  },
-                                ),
-                            ],
                           ],
-                        ),
-                      ],
-
-                      // ── Series metadata note ───────────────────────────────
-                      if (_isEditingRecurringSeriesMetadata) ...[
-                        const SizedBox(height: CaleeSpacing.sectionSpacing),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: CaleeSpacing.sm,
-                          ),
-                          child: Text(
-                            'Series date, time, and repeat settings are preserved.',
-                            style: Theme.of(context).textTheme.bodySmall
-                                ?.copyWith(color: CaleeColors.textSecondary),
-                          ),
                         ),
                       ],
 

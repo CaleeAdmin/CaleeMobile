@@ -217,7 +217,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 width: 32,
                 height: 32,
                 decoration: BoxDecoration(
-                  color: CaleeColors.primary.withAlpha(26),
+                  color: CaleeColors.primary.withAlpha(CaleeAlpha.pct10),
                   shape: BoxShape.circle,
                 ),
                 child: const Icon(

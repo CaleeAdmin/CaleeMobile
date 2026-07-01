@@ -88,6 +88,17 @@ class SessionController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> refreshBootstrap() async {
+    final token = accessToken;
+    if (token == null) return;
+    try {
+      final bs = await repository.bootstrap(accessToken: token);
+      updateBootstrap(bs);
+    } catch (_) {
+      // Silently ignore — stale bootstrap is better than surfacing an error here.
+    }
+  }
+
   Future<void> signOut() async {
     repository.clearAuthCache();
     await repository.clearSession();

@@ -46,7 +46,7 @@ class CalendarDayCell extends StatelessWidget {
     if (isToday || isSelected) {
       bgColor = isToday
           ? CaleeColors.primary
-          : CaleeColors.primary.withAlpha(30);
+          : CaleeColors.primary.withAlpha(CaleeAlpha.pct12);
       numberColor = isToday ? Colors.white : CaleeColors.primary;
     } else if (isCurrentMonth) {
       bgColor = null;

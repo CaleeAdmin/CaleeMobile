@@ -86,8 +86,19 @@ class _FakeSessionController extends SessionController {
         ),
       );
 
+  int refreshBootstrapCallCount = 0;
+  bool refreshBootstrapCompleted = false;
+
   @override
   Future<void> restoreSession() async {}
+
+  @override
+  Future<void> refreshBootstrap() async {
+    refreshBootstrapCallCount += 1;
+    bootstrap = _stubBootstrap();
+    refreshBootstrapCompleted = true;
+    notifyListeners();
+  }
 
   void finishRestore({bool signedIn = false}) {
     if (signedIn) {
@@ -303,8 +314,8 @@ void main() {
     });
 
     testWidgets(
-      'deep link with connectionId navigates to GoogleCalendarSelectionPage '
-      'using the matching connection',
+      'external-calendar-connected deep link refreshes bootstrap before opening '
+      'GoogleCalendarSelectionPage',
       (tester) async {
         final conn1 = _makeConnection(id: 'conn1');
         final conn2 = _makeConnection(id: 'conn2');
@@ -334,10 +345,12 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        // GoogleCalendarSelectionPage should be shown.
+        expect(session.refreshBootstrapCallCount, 1);
+        expect(session.refreshBootstrapCompleted, isTrue);
         expect(find.byType(GoogleCalendarSelectionPage), findsOneWidget);
 
-        // The selection page fetches calendars for the correct connection.
+        // The selection page fetches calendars for the correct connection,
+        // proving navigation happened after refresh completed.
         expect(hubClient.lastCalledConnectionId, 'conn2');
       },
     );

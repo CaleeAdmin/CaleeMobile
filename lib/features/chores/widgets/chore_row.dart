@@ -12,7 +12,9 @@ class ChoreRow extends StatelessWidget {
     required this.scheduledLabel,
     required this.isUpdating,
     this.onToggleCompletion,
+    this.onCircleTap,
     this.onMoreTap,
+    this.onRowTap,
     super.key,
   });
 
@@ -21,7 +23,9 @@ class ChoreRow extends StatelessWidget {
   final String scheduledLabel;
   final bool isUpdating;
   final VoidCallback? onToggleCompletion;
+  final VoidCallback? onCircleTap;
   final VoidCallback? onMoreTap;
+  final VoidCallback? onRowTap;
 
   @override
   Widget build(BuildContext context) {
@@ -45,13 +49,18 @@ class ChoreRow extends StatelessWidget {
         color: CaleeColors.textTertiary,
       );
     } else {
+      final effectiveCircleTap = onCircleTap ?? onToggleCompletion;
       leading = Semantics(
-        label: isDone ? 'Mark chore not complete' : 'Mark chore complete',
+        label: onCircleTap != null
+            ? 'View chore actions'
+            : isDone
+            ? 'Mark chore not complete'
+            : 'Mark chore complete',
         button: true,
         excludeSemantics: true,
         child: CaleeCheckCircle(
           isChecked: isDone,
-          onTap: onToggleCompletion,
+          onTap: effectiveCircleTap,
           isLoading: isUpdating,
           size: 22,
         ),
@@ -95,7 +104,9 @@ class ChoreRow extends StatelessWidget {
 
     final effectiveTrailing =
         trailing ??
-        (onToggleCompletion != null ? const SizedBox.shrink() : null);
+        (onToggleCompletion != null || onCircleTap != null
+            ? const SizedBox.shrink()
+            : null);
 
     return CaleeListRow(
       leading: leading,
@@ -103,7 +114,7 @@ class ChoreRow extends StatelessWidget {
       subtitle: subtitle.isNotEmpty ? subtitle : null,
       trailing: effectiveTrailing,
       titleStyle: titleStyle,
-      onTap: onToggleCompletion,
+      onTap: onRowTap,
     );
   }
 }
@@ -118,7 +129,7 @@ class _PointsBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color: CaleeColors.primary.withAlpha(20),
+        color: CaleeColors.primary.withAlpha(CaleeAlpha.pct8),
         borderRadius: BorderRadius.circular(CaleeRadius.dot),
       ),
       child: Text(

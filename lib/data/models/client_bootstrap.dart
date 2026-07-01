@@ -5,6 +5,7 @@ class ClientBootstrap {
     required this.contexts,
     required this.availableContexts,
     required this.capabilities,
+    this.readiness = const {},
   });
 
   factory ClientBootstrap.fromJson(Map<String, dynamic> json) {
@@ -27,6 +28,9 @@ class ClientBootstrap {
       capabilities: Map<String, dynamic>.from(
         json['capabilities'] as Map<String, dynamic>? ?? const {},
       ),
+      readiness: Map<String, dynamic>.from(
+        json['readiness'] as Map<String, dynamic>? ?? const {},
+      ),
     );
   }
 
@@ -35,6 +39,19 @@ class ClientBootstrap {
   final ClientContexts contexts;
   final List<ClientContext> availableContexts;
   final Map<String, dynamic> capabilities;
+
+  bool get supportsMeals => capabilities['meals'] == true;
+
+  bool get supportsMealTemplates =>
+      capabilities['mealTemplates'] == true || supportsMeals;
+  /// Server-reported readiness flags. Keys: calendarServiceReady (bool),
+  /// problem (String?). Absent on older backends — treat missing as ready.
+  final Map<String, dynamic> readiness;
+
+  bool get calendarServiceReady =>
+      readiness['calendarServiceReady'] as bool? ?? true;
+
+  String? get readinessProblem => readiness['problem'] as String?;
 }
 
 class ClientAccount {
@@ -103,6 +120,8 @@ class ClientService {
   final String source;
   final Map<String, dynamic> capabilities;
 
+  bool get isActive => accessStatus == 'active';
+
   bool get hasConnectedCalendarCredential =>
       calendarCredentialStatus == 'connected';
   bool get hasMissingCalendarCredential =>
@@ -167,6 +186,11 @@ class ClientService {
     return capabilities['deletedItemsPermanentDelete'] == true ||
         supportsRecentlyDeleted;
   }
+
+  bool get supportsMeals => capabilities['meals'] == true;
+
+  bool get supportsMealTemplates =>
+      capabilities['mealTemplates'] == true || supportsMeals;
 }
 
 class ClientContexts {

@@ -587,19 +587,36 @@ class _TasksPageState extends State<TasksPage> {
                     children: [
                       // ── Empty state when no open tasks ───────────────────
                       if (openTasks.isEmpty && taskCalendars.isNotEmpty)
-                        CaleeSection(
-                          children: [
-                            CaleeListRow(
-                              title: 'No open tasks',
-                              subtitle: 'You\'re all caught up.',
-                              leading: const Icon(
-                                Icons.check_circle_outline,
-                                color: CaleeColors.textTertiary,
-                                size: 22,
+                        allTasks.isEmpty
+                            ? CaleeSection(
+                                children: [
+                                  CaleeListRow(
+                                    title: 'Add your first task',
+                                    subtitle:
+                                        'Your task list is ready — tap here to add a task.',
+                                    leading: const Icon(
+                                      Icons.add_circle_outline,
+                                      color: CaleeColors.primary,
+                                      size: 22,
+                                    ),
+                                    onTap: () =>
+                                        _openCreateTaskSheet(taskCalendars),
+                                  ),
+                                ],
+                              )
+                            : CaleeSection(
+                                children: [
+                                  CaleeListRow(
+                                    title: 'No open tasks',
+                                    subtitle: 'You\'re all caught up.',
+                                    leading: const Icon(
+                                      Icons.check_circle_outline,
+                                      color: CaleeColors.textTertiary,
+                                      size: 22,
+                                    ),
+                                  ),
+                                ],
                               ),
-                            ),
-                          ],
-                        ),
 
                       // ── Today (includes overdue) ──────────────────────────
                       if (todayTasks.isNotEmpty) ...[

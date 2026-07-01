@@ -12,6 +12,7 @@ import '../models/client_chore.dart';
 import '../models/client_chore_metadata.dart';
 import '../models/client_deleted_items.dart';
 import '../models/client_event_draft.dart';
+import '../models/client_meal.dart';
 import '../models/client_person.dart';
 import '../models/client_profile.dart';
 import '../models/client_task.dart';
@@ -647,6 +648,98 @@ class CaleeHubClient {
 
     return ClientTaskList.fromJson(_data(json));
   }
+
+  // ── Meals ─────────────────────────────────────────────────────────────────
+
+  Future<ClientMealList> meals({
+    required String accessToken,
+    required String from,
+    required String to,
+  }) async {
+    final uri = Uri(
+      path: '/client/v1/meals',
+      queryParameters: {'from': from, 'to': to},
+    );
+    final json = await _getJson(uri.toString(), accessToken: accessToken);
+    return ClientMealList.fromJson(_data(json));
+  }
+
+  Future<ClientMeal> createMeal({
+    required String accessToken,
+    required String mealDate,
+    required String mealType,
+    required String title,
+    String? notes,
+  }) async {
+    final body = <String, Object?>{
+      'mealDate': mealDate,
+      'mealType': mealType,
+      'title': title,
+      if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
+    };
+    final json = await _postJson(
+      '/client/v1/meals',
+      accessToken: accessToken,
+      body: body,
+    );
+    return ClientMeal.fromJson(_data(json)['meal'] as Map<String, dynamic>);
+  }
+
+  Future<ClientMeal> updateMeal({
+    required String accessToken,
+    required int mealId,
+    String? mealDate,
+    String? mealType,
+    String? title,
+    String? notes,
+    String? status,
+  }) async {
+    final body = <String, dynamic>{
+      if (mealDate != null) 'mealDate': mealDate,
+      if (mealType != null) 'mealType': mealType,
+      if (title != null) 'title': title,
+      if (notes != null) 'notes': notes,
+      if (status != null) 'status': status,
+    };
+    if (body.isEmpty) {
+      throw const CaleeHubException(
+        statusCode: 0,
+        message: 'No meal updates provided',
+      );
+    }
+    final json = await _patchJson(
+      '/client/v1/meals/$mealId',
+      accessToken: accessToken,
+      body: body,
+    );
+    return ClientMeal.fromJson(_data(json)['meal'] as Map<String, dynamic>);
+  }
+
+  Future<void> deleteMeal({
+    required String accessToken,
+    required int mealId,
+  }) async {
+    await _deleteJson('/client/v1/meals/$mealId', accessToken: accessToken);
+  }
+
+  Future<ClientMealTemplateList> mealTemplates({
+    required String accessToken,
+    String? mealType,
+  }) async {
+    final queryParameters = <String, String>{
+      if (mealType != null && mealType.trim().isNotEmpty) 'mealType': mealType,
+    };
+    final uri = queryParameters.isEmpty
+        ? Uri(path: '/client/v1/meal-templates')
+        : Uri(
+            path: '/client/v1/meal-templates',
+            queryParameters: queryParameters,
+          );
+    final json = await _getJson(uri.toString(), accessToken: accessToken);
+    return ClientMealTemplateList.fromJson(_data(json));
+  }
+
+  // ── Events ────────────────────────────────────────────────────────────────
 
   Future<ClientEvent> updateEvent({
     required String accessToken,
