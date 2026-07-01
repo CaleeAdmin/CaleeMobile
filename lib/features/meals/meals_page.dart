@@ -238,7 +238,11 @@ class _MealsPageState extends State<MealsPage> {
               ? subtitleTheme?.copyWith(color: CaleeColors.textPrimary)
               : null,
           trailing: meal != null
-              ? null
+              ? const Icon(
+                  Icons.chevron_right,
+                  size: 20,
+                  color: CaleeColors.textTertiary,
+                )
               : const Icon(
                   Icons.add,
                   size: 20,
