@@ -4,6 +4,7 @@ import '../../data/api/calee_hub_client.dart';
 import '../../data/models/client_bootstrap.dart';
 import '../../data/models/client_calendar.dart';
 import '../../data/models/client_chore.dart';
+import '../../data/models/client_meal.dart';
 import '../../data/models/client_task.dart';
 import '../../ui/calee_design.dart';
 import '../calendar/calendar_utils.dart';
@@ -19,6 +20,7 @@ class TodayPage extends StatefulWidget {
     this.onNavigateToCalendar,
     this.onNavigateToTasks,
     this.onNavigateToChores,
+    this.onNavigateToMeals,
     super.key,
   });
 
@@ -29,6 +31,7 @@ class TodayPage extends StatefulWidget {
   final VoidCallback? onNavigateToCalendar;
   final VoidCallback? onNavigateToTasks;
   final VoidCallback? onNavigateToChores;
+  final VoidCallback? onNavigateToMeals;
 
   @override
   State<TodayPage> createState() => _TodayPageState();
@@ -43,6 +46,13 @@ class _TodayPageState extends State<TodayPage> {
   Object? _fatalError;
 
   bool get _hasChoreService => widget.services.any((s) => s.supportsChores);
+
+  bool get _hasMealsService {
+    final portal =
+        widget.services.where((s) => s.id == 'portal').firstOrNull;
+    if (portal != null && portal.supportsMeals) return true;
+    return widget.services.any((s) => s.isActive && s.supportsMeals);
+  }
 
   @override
   void initState() {
@@ -184,16 +194,20 @@ class _TodayPageState extends State<TodayPage> {
       _buildCalendarSection(overview),
       const SizedBox(height: CaleeSpacing.sectionSpacing),
       _buildTasksSection(overview),
-      if (_hasChoreService) ...[
+      if (_hasChoreService) ...[  
         const SizedBox(height: CaleeSpacing.sectionSpacing),
         _buildChoresSection(overview),
+      ],
+      if (_hasMealsService) ...[  
+        const SizedBox(height: CaleeSpacing.sectionSpacing),
+        _buildMealsSection(overview),
       ],
       const SizedBox(height: CaleeSpacing.sectionSpacing),
       _buildCaleeDisplaySection(),
     ];
   }
 
-  // ── Calendar section ─────────────────────────────────────────────────────
+  // ── Calendar section ──────────────────────────────────────────────────────────────
 
   Widget _buildCalendarSection(TodayOverview overview) {
     final rows = <Widget>[];
@@ -230,7 +244,7 @@ class _TodayPageState extends State<TodayPage> {
     );
   }
 
-  // ── Tasks section ────────────────────────────────────────────────────────
+  // ── Tasks section ────────────────────────────────────────────────────────────────
 
   Widget _buildTasksSection(TodayOverview overview) {
     final hasItems =
@@ -278,7 +292,7 @@ class _TodayPageState extends State<TodayPage> {
     );
   }
 
-  // ── Chores section ───────────────────────────────────────────────────────
+  // ── Chores section ───────────────────────────────────────────────────────────────
 
   Widget _buildChoresSection(TodayOverview overview) {
     final hasItems =
@@ -326,7 +340,49 @@ class _TodayPageState extends State<TodayPage> {
     );
   }
 
-  // ── Calee Display section ────────────────────────────────────────────────
+  // ── Meals section ────────────────────────────────────────────────────────────────
+
+  Widget _buildMealsSection(TodayOverview overview) {
+    final rows = <Widget>[];
+
+    if (overview.hasMealsError) {
+      rows.add(_errorRow('Could not load meals.'));
+    } else {
+      for (final mealType in ['breakfast', 'lunch', 'dinner']) {
+        final meal = overview.mealsToday
+            .where((m) => m.mealType == mealType)
+            .firstOrNull;
+        final label = switch (mealType) {
+          'breakfast' => 'Breakfast',
+          'lunch' => 'Lunch',
+          'dinner' => 'Dinner',
+          _ => mealType,
+        };
+        rows.add(
+          CaleeListRow(
+            title: meal?.title ?? 'Not planned',
+            titleStyle: meal == null
+                ? const TextStyle(
+                    fontSize: 15,
+                    color: CaleeColors.textSecondary,
+                  )
+                : null,
+            subtitle: label,
+            leading: const Icon(
+              Icons.restaurant,
+              size: 18,
+              color: CaleeColors.textTertiary,
+            ),
+            onTap: widget.onNavigateToMeals,
+          ),
+        );
+      }
+    }
+
+    return CaleeSection(title: "Today's Meals", children: rows);
+  }
+
+  // ── Calee Display section ───────────────────────────────────────────────────────
 
   // TODO(displays): Replace this placeholder once display linking is implemented.
   Widget _buildCaleeDisplaySection() {
@@ -336,7 +392,7 @@ class _TodayPageState extends State<TodayPage> {
     );
   }
 
-  // ── Fatal error ──────────────────────────────────────────────────────────
+  // ── Fatal error ───────────────────────────────────────────────────────────────
 
   Widget _buildFatalError() {
     return ListView(
@@ -368,7 +424,7 @@ class _TodayPageState extends State<TodayPage> {
     );
   }
 
-  // ── Shared row helpers ────────────────────────────────────────────────────
+  // ── Shared row helpers ───────────────────────────────────────────────────────────
 
   Widget _emptyRow(String message) {
     return CaleeListRow(
