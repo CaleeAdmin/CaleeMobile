@@ -635,6 +635,47 @@ class _ChoresPageState extends State<ChoresPage> {
       );
     }
 
+    if (section == 'doneToday' && _doneTodayExpanded) {
+      return CaleeSection(
+        title: 'Done today',
+        trailing: '${sectionChores.length}',
+        children: [
+          CaleeListRow(
+            leading: const Icon(
+              Icons.expand_less,
+              size: 22,
+              color: CaleeColors.textTertiary,
+            ),
+            title: 'Hide completed chores',
+            onTap: () => setState(() => _doneTodayExpanded = false),
+          ),
+          ...sectionChores.map((chore) {
+            final onActions =
+                chore.completionActionId.trim().isNotEmpty &&
+                    !chore.isCompletionLog &&
+                    chore.normalizedSection != 'history'
+                ? () => _showChoreActions(chore)
+                : null;
+            return ChoreRow(
+              key: ValueKey(chore.id),
+              chore: chore,
+              calendarName: _calendarNameForChore(chore, choreCalendars),
+              scheduledLabel: _formatScheduledAt(chore),
+              isUpdating: _controller.updatingChoreIds.contains(
+                chore.completionActionId,
+              ),
+              onToggleCompletion: !chore.canToggleCompletion
+                  ? null
+                  : () => _toggleChoreCompletion(chore),
+              onCircleTap: null,
+              onMoreTap: onActions,
+              onRowTap: null,
+            );
+          }),
+        ],
+      );
+    }
+
     if (section == 'history' && !_historyExpanded) {
       return CaleeSection(
         children: [
