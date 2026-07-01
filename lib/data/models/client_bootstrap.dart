@@ -35,6 +35,11 @@ class ClientBootstrap {
   final ClientContexts contexts;
   final List<ClientContext> availableContexts;
   final Map<String, dynamic> capabilities;
+
+  bool get supportsMeals => capabilities['meals'] == true;
+
+  bool get supportsMealTemplates =>
+      capabilities['mealTemplates'] == true || supportsMeals;
 }
 
 class ClientAccount {
@@ -103,6 +108,8 @@ class ClientService {
   final String source;
   final Map<String, dynamic> capabilities;
 
+  bool get isActive => accessStatus == 'active';
+
   bool get hasConnectedCalendarCredential =>
       calendarCredentialStatus == 'connected';
   bool get hasMissingCalendarCredential =>
@@ -167,6 +174,8 @@ class ClientService {
     return capabilities['deletedItemsPermanentDelete'] == true ||
         supportsRecentlyDeleted;
   }
+
+  bool get supportsMeals => capabilities['meals'] == true;
 }
 
 class ClientContexts {
