@@ -1,8 +1,9 @@
 // Widget tests: verifying refreshBootstrap() is called at key lifecycle points.
 //
 // 1. After display activation succeeds, refreshBootstrap() should be called.
-// 2. After a Google OAuth deep link is received and handled, refreshBootstrap()
-//    should be called.
+// 2. After a Google OAuth deep link is received and handled, the
+//    GoogleCalendarSelectionPage is opened WITHOUT an extra refreshBootstrap()
+//    call (the lifecycle resume already handles that).
 
 import 'package:calee_mobile/app/calee_app.dart';
 import 'package:calee_mobile/data/api/calee_hub_client.dart';
@@ -322,7 +323,7 @@ void main() {
   });
 
   testWidgets(
-    'refreshBootstrap is called after Google OAuth deep link is handled',
+    'Google OAuth deep link opens GoogleCalendarSelectionPage without extra refreshBootstrap',
     (tester) async {
       final session = _TrackingSessionController();
       final externalCalendar = _FakeExternalCalendarConnectedLinkController();
@@ -342,16 +343,30 @@ void main() {
       session.finishRestore(signedIn: true);
       await tester.pump();
 
+      final bootstrapCountAfterRestore = session.refreshBootstrapCallCount;
+
       // Simulate the Google OAuth deep link arriving.
       externalCalendar.injectGoogleIntent();
       await tester.pump();
 
-      // Wait for async handling (connections fetch + bootstrap refresh).
+      // Wait for async handling (connections fetch only — no extra bootstrap).
       await tester.pumpAndSettle();
 
-      expect(session.refreshBootstrapCallCount, 1);
-      expect(session.refreshBootstrapCompleted, isTrue);
+      // Regression: no extra refreshBootstrap() call should happen inside
+      // _openGoogleCalendarSelectionFromDeepLink; the lifecycle resume already
+      // handles it, and duplicating it causes a brief disconnected-state flash.
+      expect(
+        session.refreshBootstrapCallCount,
+        bootstrapCountAfterRestore,
+        reason: 'no extra refreshBootstrap should occur during OAuth return',
+      );
+
+      // GoogleCalendarSelectionPage must still open.
       expect(find.byType(GoogleCalendarSelectionPage), findsOneWidget);
+
+      // Existing signed-in state must be intact.
+      expect(session.isSignedIn, isTrue);
+      expect(session.bootstrap, isNotNull);
     },
   );
 }
