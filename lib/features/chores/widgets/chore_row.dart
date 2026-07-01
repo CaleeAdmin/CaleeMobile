@@ -13,6 +13,7 @@ class ChoreRow extends StatelessWidget {
     required this.isUpdating,
     this.onToggleCompletion,
     this.onMoreTap,
+    this.onRowTap,
     super.key,
   });
 
@@ -22,6 +23,7 @@ class ChoreRow extends StatelessWidget {
   final bool isUpdating;
   final VoidCallback? onToggleCompletion;
   final VoidCallback? onMoreTap;
+  final VoidCallback? onRowTap;
 
   @override
   Widget build(BuildContext context) {
@@ -103,7 +105,7 @@ class ChoreRow extends StatelessWidget {
       subtitle: subtitle.isNotEmpty ? subtitle : null,
       trailing: effectiveTrailing,
       titleStyle: titleStyle,
-      onTap: onToggleCompletion,
+      onTap: onRowTap ?? onToggleCompletion,
     );
   }
 }

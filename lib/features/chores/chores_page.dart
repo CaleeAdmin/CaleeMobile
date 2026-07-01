@@ -657,33 +657,42 @@ class _ChoresPageState extends State<ChoresPage> {
       );
     }
 
+    final isFutureSection =
+        section == 'tomorrow' ||
+        section == 'laterThisWeek' ||
+        section == 'later';
+
     return CaleeSection(
       title: _sectionTitle(section),
       trailing: '${sectionChores.length}',
       children: sectionChores
           .map(
-            (chore) => ChoreRow(
-              key: ValueKey(
-                chore.completionActionId.isNotEmpty
-                    ? chore.completionActionId
-                    : chore.id,
-              ),
-              chore: chore,
-              calendarName: _calendarNameForChore(chore, choreCalendars),
-              scheduledLabel: _formatScheduledAt(chore),
-              isUpdating: _controller.updatingChoreIds.contains(
-                chore.completionActionId,
-              ),
-              onToggleCompletion: chore.canToggleCompletion
-                  ? () => _toggleChoreCompletion(chore)
-                  : null,
-              onMoreTap:
+            (chore) {
+              final onActions =
                   chore.completionActionId.trim().isNotEmpty &&
                       !chore.isCompletionLog &&
                       chore.normalizedSection != 'history'
                   ? () => _showChoreActions(chore)
-                  : null,
-            ),
+                  : null;
+              return ChoreRow(
+                key: ValueKey(
+                  chore.completionActionId.isNotEmpty
+                      ? chore.completionActionId
+                      : chore.id,
+                ),
+                chore: chore,
+                calendarName: _calendarNameForChore(chore, choreCalendars),
+                scheduledLabel: _formatScheduledAt(chore),
+                isUpdating: _controller.updatingChoreIds.contains(
+                  chore.completionActionId,
+                ),
+                onToggleCompletion: chore.canToggleCompletion
+                    ? () => _toggleChoreCompletion(chore)
+                    : null,
+                onMoreTap: onActions,
+                onRowTap: isFutureSection ? onActions : null,
+              );
+            },
           )
           .toList(),
     );
