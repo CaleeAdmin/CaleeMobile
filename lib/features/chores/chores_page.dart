@@ -211,9 +211,39 @@ class _ChoresPageState extends State<ChoresPage> {
               points: points,
               approvalState: approvalState,
             ),
+        onDelete: () => _deleteChoreFromEditSheet(chore),
       ),
     );
-    // Controller reloads after updateChore; nothing more needed.
+    // Controller reloads after updateChore or permanentlyDeleteChore.
+  }
+
+  Future<void> _deleteChoreFromEditSheet(ClientChore chore) async {
+    final confirmed = await CaleeDestructiveDialog.show(
+      context: context,
+      title: 'Delete this chore?',
+      body: 'This cannot be undone.',
+      confirmLabel: 'Delete',
+    );
+
+    if (!confirmed || !mounted) return;
+
+    try {
+      await _controller.permanentlyDeleteChore(chore);
+      if (mounted) {
+        Navigator.of(context).pop();
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Chore deleted.')));
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(choreErrorMessage(error, 'Unable to delete chore.')),
+          ),
+        );
+      }
+    }
   }
 
   Future<void> _toggleChoreCompletion(ClientChore chore) async {
@@ -236,26 +266,30 @@ class _ChoresPageState extends State<ChoresPage> {
 
     final isDone =
         chore.completedToday || chore.normalizedSection == 'doneToday';
-    final actions = <CaleeAction>[
-      if (chore.canToggleCompletion)
+    final actions = <CaleeAction>[];
+
+    if (isDone && chore.canToggleCompletion) {
+      actions.add(
         CaleeAction(
-          label: isDone ? 'Undo done' : 'Mark done',
-          icon: isDone
-              ? Icons.unpublished_outlined
-              : Icons.check_circle_outline,
+          label: 'Mark as not done',
+          icon: Icons.unpublished_outlined,
           onTap: () => _toggleChoreCompletion(chore),
         ),
+      );
+    }
+
+    actions.add(
       CaleeAction(
         label: 'Edit chore',
         icon: Icons.edit_outlined,
         onTap: () => _openEditChoreSheet(chore),
       ),
-    ];
+    );
 
-    if (chore.isRecurring) {
+    if (!isDone && chore.isRecurring) {
       actions.addAll([
         CaleeAction(
-          label: 'Skip this time',
+          label: 'Skip this occurrence',
           icon: Icons.event_busy_outlined,
           onTap: () => _skipChore(chore),
         ),
@@ -265,22 +299,7 @@ class _ChoresPageState extends State<ChoresPage> {
           isDestructive: true,
           onTap: () => _stopRepeatingChore(chore),
         ),
-        CaleeAction(
-          label: 'Delete permanently',
-          icon: Icons.delete_outline,
-          isDestructive: true,
-          onTap: () => _confirmAndDeletePermanentChore(chore),
-        ),
       ]);
-    } else {
-      actions.add(
-        CaleeAction(
-          label: 'Delete chore',
-          icon: Icons.delete_outline,
-          isDestructive: true,
-          onTap: () => _confirmAndDeletePermanentChore(chore),
-        ),
-      );
     }
 
     CaleeActionSheet.show(
@@ -357,37 +376,6 @@ class _ChoresPageState extends State<ChoresPage> {
             SnackBar(
               content: Text(
                 choreErrorMessage(error, 'Unable to stop repeating chore.'),
-              ),
-            ),
-          );
-        }
-      }
-    }
-  }
-
-  Future<void> _confirmAndDeletePermanentChore(ClientChore chore) async {
-    final confirmed = await CaleeDestructiveDialog.show(
-      context: context,
-      title: 'Delete chore permanently?',
-      body:
-          'This will permanently delete "${chore.title}" and its completion records. This cannot be undone.',
-      confirmLabel: 'Delete permanently',
-    );
-
-    if (confirmed && mounted) {
-      try {
-        await _controller.permanentlyDeleteChore(chore);
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Chore deleted permanently.')),
-          );
-        }
-      } catch (error) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                choreErrorMessage(error, 'Unable to delete chore.'),
               ),
             ),
           );
@@ -826,11 +814,27 @@ class _ChoresPageState extends State<ChoresPage> {
               ),
             );
           }
+          if (overview.people.isEmpty) {
+            return CaleeScaffold(
+              body: CaleeEmptyState(
+                icon: Icons.people_outline,
+                title: 'Set up chores',
+                body:
+                    'Add family members and create a chore list before adding chores.',
+                action: FilledButton.icon(
+                  onPressed: _openAddPersonSheet,
+                  icon: const Icon(Icons.person_add_outlined),
+                  label: const Text('Set up family'),
+                ),
+              ),
+            );
+          }
           return CaleeScaffold(
             body: CaleeEmptyState(
               icon: Icons.checklist_outlined,
-              title: 'No chore lists yet',
-              body: 'Create a chore list to start tracking chores.',
+              title: 'Create a chore list to start',
+              body:
+                  'Chores need a list before you can add them. Your family members are ready — create your first chore list now.',
               action: FilledButton.icon(
                 onPressed: _openCollectionCreateShortcut,
                 icon: const Icon(Icons.add),
@@ -908,24 +912,36 @@ class _ChoresPageState extends State<ChoresPage> {
                     ),
                     children: [
                       if (activeSections.isEmpty && choreCalendars.isNotEmpty)
-                        CaleeSection(
-                          title: 'Chores',
-                          children: [
-                            CaleeListRow(
-                              title: allChores.isEmpty
-                                  ? 'No chores yet'
-                                  : 'No chores for this filter',
-                              subtitle: allChores.isEmpty
-                                  ? 'Tap + to add your first chore.'
-                                  : 'Choose another assignee filter.',
-                              leading: const Icon(
-                                Icons.check_circle_outline,
-                                color: CaleeColors.textTertiary,
-                                size: 22,
-                              ),
-                            ),
-                          ],
-                        )
+                        allChores.isEmpty
+                            ? CaleeSection(
+                                children: [
+                                  CaleeListRow(
+                                    title: 'Add your first chore',
+                                    subtitle:
+                                        'Your chore list is ready — tap here to add a chore.',
+                                    leading: const Icon(
+                                      Icons.add_circle_outline,
+                                      color: CaleeColors.primary,
+                                      size: 22,
+                                    ),
+                                    onTap: () =>
+                                        _openCreateChoreSheet(choreCalendars),
+                                  ),
+                                ],
+                              )
+                            : CaleeSection(
+                                children: [
+                                  CaleeListRow(
+                                    title: 'No chores for this filter',
+                                    subtitle: 'Choose another assignee filter.',
+                                    leading: const Icon(
+                                      Icons.check_circle_outline,
+                                      color: CaleeColors.textTertiary,
+                                      size: 22,
+                                    ),
+                                  ),
+                                ],
+                              )
                       else
                         for (final section in activeSections) ...[
                           _buildSectionWidget(

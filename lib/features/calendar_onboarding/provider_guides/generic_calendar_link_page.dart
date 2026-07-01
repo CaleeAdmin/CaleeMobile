@@ -75,12 +75,16 @@ class _GenericCalendarLinkPageState extends State<GenericCalendarLinkPage> {
   final _colorController = TextEditingController(text: '#007AFF');
   bool _showMoreOptions = false;
   bool _isSubmitting = false;
+  bool _isLoadingBootstrap = true;
   ClientService? _selectedService;
+  List<ClientService> _freshServices = const [];
+  String? _bootstrapProblem;
 
-  List<ClientService> get _calendarServices => widget.services
+  List<ClientService> get _calendarServices => _freshServices
       .where(
         (s) =>
-            s.serviceType == 'nextcloud_calendar' &&
+            (s.serviceType == 'nextcloud_calendar' ||
+                s.serviceType == 'nextcloud_portal') &&
             s.hasConnectedCalendarCredential,
       )
       .toList();
@@ -88,9 +92,35 @@ class _GenericCalendarLinkPageState extends State<GenericCalendarLinkPage> {
   @override
   void initState() {
     super.initState();
-    final services = _calendarServices;
-    _selectedService = services.isEmpty ? null : services.first;
     _colorController.addListener(() => setState(() {}));
+    _refreshBootstrap();
+  }
+
+  Future<void> _refreshBootstrap() async {
+    try {
+      final bs = await widget.hubClient.bootstrap(
+        accessToken: widget.accessToken,
+      );
+      if (!mounted) return;
+      setState(() {
+        _freshServices = bs.services;
+        _bootstrapProblem = bs.calendarServiceReady
+            ? null
+            : bs.readinessProblem;
+        final services = _calendarServices;
+        _selectedService = services.isEmpty ? null : services.first;
+        _isLoadingBootstrap = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _freshServices = widget.services;
+        _bootstrapProblem = null;
+        final services = _calendarServices;
+        _selectedService = services.isEmpty ? null : services.first;
+        _isLoadingBootstrap = false;
+      });
+    }
   }
 
   @override
@@ -114,16 +144,36 @@ class _GenericCalendarLinkPageState extends State<GenericCalendarLinkPage> {
   bool _isPaletteColorSelected(String hex) =>
       _colorController.text.trim().toUpperCase() == hex.toUpperCase();
 
+  String _noServiceMessage() {
+    if (_bootstrapProblem == 'no_connected_calendar_service') {
+      return 'Your account setup is not complete. Please sign out and sign in again.';
+    }
+    final hasMissingCredential = _freshServices.any(
+      (s) =>
+          (s.serviceType == 'nextcloud_calendar' ||
+              s.serviceType == 'nextcloud_portal') &&
+          s.hasMissingCalendarCredential,
+    );
+    if (hasMissingCredential) {
+      return 'Your calendar service credential is missing. Please sign out and sign in again.';
+    }
+    final hasBusinessService = _freshServices.any(
+      (s) => s.id == 'business' && s.accessStatus == 'active',
+    );
+    if (hasBusinessService) {
+      return 'Your business calendar credential is not ready. Please contact your administrator.';
+    }
+    return 'No calendar service access found. Please sign out and sign in again.';
+  }
+
   Future<void> _submit() async {
     if (_isSubmitting || !_formKey.currentState!.validate()) return;
 
     final service = _selectedService;
     if (service == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('No connected calendar service available.'),
-        ),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_noServiceMessage())));
       return;
     }
 
@@ -171,6 +221,13 @@ class _GenericCalendarLinkPageState extends State<GenericCalendarLinkPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final services = _calendarServices;
+
+    if (_isLoadingBootstrap) {
+      return CaleeScaffold(
+        appBar: AppBar(title: Text(widget.pageTitle)),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
 
     return CaleeScaffold(
       appBar: AppBar(title: Text(widget.pageTitle)),

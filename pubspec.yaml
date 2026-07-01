@@ -18,6 +18,7 @@ dependencies:
   shared_preferences: ^2.3.0
   url_launcher: ^6.3.2
   flutter_timezone: ^3.0.0
+  timezone: ^0.9.4
 
 dev_dependencies:
   flutter_test:
