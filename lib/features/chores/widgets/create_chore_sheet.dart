@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../data/models/client_calendar.dart';
 import '../../../data/models/client_person.dart';
+import '../../../shared/recurrence/calee_repeat_picker_sheet.dart';
 import '../../../ui/calee_theme.dart';
 import '../../../ui/calee_widgets.dart';
 import 'chore_widget_helpers.dart';
@@ -82,7 +83,7 @@ class _CreateChoreSheetState extends State<CreateChoreSheet> {
 
   late ClientCalendar _selectedCalendar;
   DateTime? _selectedDate;
-  String? _selectedRecurrence;
+  CaleeRepeatRule _selectedRecurrence = CaleeRepeatRule.none;
   late final TextEditingController _pointsController;
   final Set<String> _selectedPersonIds = {};
   bool _isSubmitting = false;
@@ -118,6 +119,18 @@ class _CreateChoreSheetState extends State<CreateChoreSheet> {
     }
   }
 
+  Future<void> _pickRepeat() async {
+    final anchorDate = _selectedDate ?? DateTime.now();
+    await CaleeRepeatPickerSheet.show(
+      context: context,
+      current: _selectedRecurrence,
+      anchorDate: anchorDate,
+      onSelected: (rule) {
+        setState(() => _selectedRecurrence = rule);
+      },
+    );
+  }
+
   Future<void> _submit() async {
     if (_isSubmitting || !_formKey.currentState!.validate()) return;
 
@@ -135,7 +148,10 @@ class _CreateChoreSheetState extends State<CreateChoreSheet> {
             ? null
             : formatChoreDate(_selectedDate!),
         description: _descriptionController.text.trim(),
-        recurrence: choreRecurrenceToRrule(_selectedRecurrence),
+        recurrence: choreRecurrenceToRrule(
+          _selectedRecurrence,
+          anchorDate: _selectedDate,
+        ),
         assigneePersonIds: _selectedPersonIds.toList(),
         points: points,
       );
@@ -215,9 +231,9 @@ class _CreateChoreSheetState extends State<CreateChoreSheet> {
               CaleeSection(
                 children: [
                   CaleeSectionPickerRow(
-                    label: 'Date',
+                    label: 'Due date',
                     value: _selectedDate == null
-                        ? 'No Date'
+                        ? 'No date'
                         : '${_selectedDate!.day}/${_selectedDate!.month}/${_selectedDate!.year}',
                     onTap: _isSubmitting ? null : _pickDate,
                     enabled: !_isSubmitting,
@@ -237,7 +253,7 @@ class _CreateChoreSheetState extends State<CreateChoreSheet> {
                           vertical: 11,
                         ),
                         child: Text(
-                          'Clear Date',
+                          'Clear date',
                           style: TextStyle(
                             fontSize: 16,
                             color: _isSubmitting
@@ -247,33 +263,13 @@ class _CreateChoreSheetState extends State<CreateChoreSheet> {
                         ),
                       ),
                     ),
-                  CaleeSectionDropdownRow<String?>(
+                  CaleeSectionPickerRow(
                     label: 'Repeat',
-                    value: _selectedRecurrence,
+                    value: _selectedRecurrence.label(
+                      anchorDate: _selectedDate ?? DateTime.now(),
+                    ),
+                    onTap: _isSubmitting ? null : _pickRepeat,
                     enabled: !_isSubmitting,
-                    items: const [
-                      DropdownMenuItem<String?>(
-                        value: null,
-                        child: Text('Does not repeat'),
-                      ),
-                      DropdownMenuItem<String?>(
-                        value: 'daily',
-                        child: Text('Daily'),
-                      ),
-                      DropdownMenuItem<String?>(
-                        value: 'weekly',
-                        child: Text('Weekly'),
-                      ),
-                      DropdownMenuItem<String?>(
-                        value: 'monthly',
-                        child: Text('Monthly'),
-                      ),
-                    ],
-                    onChanged: (value) {
-                      setState(() {
-                        _selectedRecurrence = value;
-                      });
-                    },
                   ),
                 ],
               ),

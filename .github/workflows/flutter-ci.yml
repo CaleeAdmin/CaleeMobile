@@ -2,7 +2,7 @@ name: Flutter CI
 
 on:
   pull_request:
-    branches: ['stage']
+    branches: ['stage', 'main']
 
 jobs:
   analyze-and-test:

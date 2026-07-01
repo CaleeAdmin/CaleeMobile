@@ -28,6 +28,7 @@ Map<String, List<ClientChore>> groupChoresBySection(
     final uiSection = apiSection == 'future'
         ? _futureSubsection(
             chore,
+            todayDate: todayDate,
             tomorrowDate: tomorrowDate,
             endOfWeekDate: endOfWeekDate,
           )
@@ -44,16 +45,22 @@ Map<String, List<ClientChore>> groupChoresBySection(
 
 String _futureSubsection(
   ClientChore chore, {
+  required DateTime todayDate,
   required DateTime tomorrowDate,
   required DateTime endOfWeekDate,
 }) {
   final dateStr = chore.scheduledDate ?? chore.scheduledAt;
-  if (dateStr == null || dateStr.trim().isEmpty) return 'later';
+  if (dateStr == null || dateStr.trim().isEmpty) {
+    // A recurring chore with no explicit start date begins today.
+    return chore.isRecurring ? 'todoToday' : 'later';
+  }
 
   final parsed = DateTime.tryParse(dateStr)?.toLocal();
   if (parsed == null) return 'later';
 
   final d = DateTime(parsed.year, parsed.month, parsed.day);
+  if (d.isBefore(todayDate)) return 'overdue';
+  if (d.isAtSameMomentAs(todayDate)) return 'todoToday';
   if (d.isAtSameMomentAs(tomorrowDate)) return 'tomorrow';
   if (!d.isAfter(endOfWeekDate)) return 'laterThisWeek';
   return 'later';

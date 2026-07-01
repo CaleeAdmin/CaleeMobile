@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../data/models/client_chore.dart';
 import '../../../data/models/client_chore_metadata.dart';
 import '../../../data/models/client_person.dart';
+import '../../../shared/recurrence/calee_repeat_picker_sheet.dart';
 import '../../../ui/calee_theme.dart';
 import '../../../ui/calee_widgets.dart';
 import 'chore_widget_helpers.dart';
@@ -13,6 +14,7 @@ class EditChoreSheet extends StatefulWidget {
     required this.people,
     required this.metadata,
     required this.onUpdate,
+    required this.onDelete,
     super.key,
   });
 
@@ -30,6 +32,7 @@ class EditChoreSheet extends StatefulWidget {
     required String approvalState,
   })
   onUpdate;
+  final Future<void> Function() onDelete;
 
   @override
   State<EditChoreSheet> createState() => _EditChoreSheetState();
@@ -42,9 +45,9 @@ class _EditChoreSheetState extends State<EditChoreSheet> {
   late final TextEditingController _pointsController;
 
   DateTime? _selectedDate;
-  String? _selectedRecurrence;
+  CaleeRepeatRule _selectedRecurrence = CaleeRepeatRule.none;
   String? _assigneePersonId;
-  late String _approvalState;
+  late final String _approvalState;
   bool _isSubmitting = false;
 
   @override
@@ -57,7 +60,10 @@ class _EditChoreSheetState extends State<EditChoreSheet> {
     _selectedDate = parseChoreDate(
       widget.chore.scheduledDate ?? widget.chore.scheduledAt,
     );
-    _selectedRecurrence = choreRruleToRecurrence(widget.chore.recurrence);
+    _selectedRecurrence = choreRruleToRecurrence(
+      widget.chore.recurrence,
+      anchorDate: _selectedDate,
+    );
 
     final activePeopleIds = widget.people.map((person) => person.id).toSet();
     final existingAssignee =
@@ -97,6 +103,18 @@ class _EditChoreSheetState extends State<EditChoreSheet> {
     }
   }
 
+  Future<void> _pickRepeat() async {
+    final anchorDate = _selectedDate ?? DateTime.now();
+    await CaleeRepeatPickerSheet.show(
+      context: context,
+      current: _selectedRecurrence,
+      anchorDate: anchorDate,
+      onSelected: (rule) {
+        setState(() => _selectedRecurrence = rule);
+      },
+    );
+  }
+
   Future<void> _submit() async {
     if (_isSubmitting || !_formKey.currentState!.validate()) return;
 
@@ -114,7 +132,10 @@ class _EditChoreSheetState extends State<EditChoreSheet> {
             ? null
             : formatChoreDate(_selectedDate!),
         description: _descriptionController.text.trim(),
-        recurrence: choreRecurrenceToRrule(_selectedRecurrence),
+        recurrence: choreRecurrenceToRrule(
+          _selectedRecurrence,
+          anchorDate: _selectedDate,
+        ),
         assigneePersonId: _assigneePersonId,
         points: points,
         approvalState: _approvalState,
@@ -154,7 +175,7 @@ class _EditChoreSheetState extends State<EditChoreSheet> {
                     vertical: CaleeSpacing.sm,
                   ),
                   decoration: BoxDecoration(
-                    color: CaleeColors.primary.withAlpha(15),
+                    color: CaleeColors.primary.withAlpha(CaleeAlpha.pct6),
                     borderRadius: BorderRadius.circular(CaleeRadius.card),
                   ),
                   child: Row(
@@ -167,7 +188,7 @@ class _EditChoreSheetState extends State<EditChoreSheet> {
                       const SizedBox(width: CaleeSpacing.sm),
                       Expanded(
                         child: Text(
-                          'Repeating chore — changes apply going forward.',
+                          '${CaleeRepeatRule.labelFromRrule(widget.chore.recurrence, anchorDate: _selectedDate)} — changes apply going forward.',
                           style: Theme.of(context).textTheme.bodySmall
                               ?.copyWith(color: CaleeColors.primary),
                         ),
@@ -200,9 +221,9 @@ class _EditChoreSheetState extends State<EditChoreSheet> {
               CaleeSection(
                 children: [
                   CaleeSectionPickerRow(
-                    label: 'Date',
+                    label: 'Due date',
                     value: _selectedDate == null
-                        ? 'No Date'
+                        ? 'No date'
                         : '${_selectedDate!.day}/${_selectedDate!.month}/${_selectedDate!.year}',
                     onTap: _isSubmitting ? null : _pickDate,
                     enabled: !_isSubmitting,
@@ -222,7 +243,7 @@ class _EditChoreSheetState extends State<EditChoreSheet> {
                           vertical: 11,
                         ),
                         child: Text(
-                          'Clear Date',
+                          'Clear date',
                           style: TextStyle(
                             fontSize: 16,
                             color: _isSubmitting
@@ -232,33 +253,13 @@ class _EditChoreSheetState extends State<EditChoreSheet> {
                         ),
                       ),
                     ),
-                  CaleeSectionDropdownRow<String?>(
+                  CaleeSectionPickerRow(
                     label: 'Repeat',
-                    value: _selectedRecurrence,
+                    value: _selectedRecurrence.label(
+                      anchorDate: _selectedDate ?? DateTime.now(),
+                    ),
+                    onTap: _isSubmitting ? null : _pickRepeat,
                     enabled: !_isSubmitting,
-                    items: const [
-                      DropdownMenuItem<String?>(
-                        value: null,
-                        child: Text('Does not repeat'),
-                      ),
-                      DropdownMenuItem<String?>(
-                        value: 'daily',
-                        child: Text('Daily'),
-                      ),
-                      DropdownMenuItem<String?>(
-                        value: 'weekly',
-                        child: Text('Weekly'),
-                      ),
-                      DropdownMenuItem<String?>(
-                        value: 'monthly',
-                        child: Text('Monthly'),
-                      ),
-                    ],
-                    onChanged: (value) {
-                      setState(() {
-                        _selectedRecurrence = value;
-                      });
-                    },
                   ),
                 ],
               ),
@@ -328,6 +329,18 @@ class _EditChoreSheetState extends State<EditChoreSheet> {
                       )
                     : const Text('Save chore'),
               ),
+              const SizedBox(height: CaleeSpacing.sectionSpacing),
+              const Divider(),
+              const SizedBox(height: CaleeSpacing.sm),
+              TextButton(
+                onPressed: _isSubmitting ? null : widget.onDelete,
+                style: TextButton.styleFrom(
+                  foregroundColor: CaleeColors.destructive,
+                  minimumSize: const Size.fromHeight(44),
+                ),
+                child: const Text('Delete chore'),
+              ),
+              const SizedBox(height: CaleeSpacing.md),
             ],
           ),
         ),

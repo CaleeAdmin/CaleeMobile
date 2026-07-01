@@ -25,7 +25,7 @@ class ChoreSummaryStrip extends StatelessWidget {
         if (overdueCount > 0)
           _StripChip(
             label: '$overdueCount overdue',
-            color: const Color(0xFFFF9500),
+            color: CaleeColors.dotOrange,
           ),
         if (todoTodayCount > 0) _StripChip(label: '$todoTodayCount today'),
         if (doneTodayCount > 0) _StripChip(label: '$doneTodayCount done'),
@@ -48,7 +48,7 @@ class _StripChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: effectiveColor.withAlpha(26),
+        color: effectiveColor.withAlpha(CaleeAlpha.pct10),
         borderRadius: BorderRadius.circular(CaleeRadius.dot),
       ),
       child: Text(

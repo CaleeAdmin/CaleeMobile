@@ -54,6 +54,15 @@ abstract final class CaleeRadius {
   static const double dot = 100;
 }
 
+abstract final class CaleeAlpha {
+  // Named 0-255 alpha values for withAlpha() calls.
+  static const int pct6 = 15;
+  static const int pct8 = 20;
+  static const int pct10 = 26;
+  static const int pct12 = 30;
+  static const int pct24 = 60;
+}
+
 abstract final class CaleeTheme {
   static ThemeData buildThemeData() {
     final colorScheme = ColorScheme.fromSeed(
@@ -93,7 +102,7 @@ abstract final class CaleeTheme {
       ),
       navigationBarTheme: NavigationBarThemeData(
         backgroundColor: CaleeColors.surface,
-        indicatorColor: CaleeColors.primary.withAlpha(26),
+        indicatorColor: CaleeColors.primary.withAlpha(CaleeAlpha.pct10),
         labelTextStyle: WidgetStateProperty.all(
           const TextStyle(fontSize: 11, fontWeight: FontWeight.w500),
         ),

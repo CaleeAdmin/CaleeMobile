@@ -141,8 +141,10 @@ class CalendarRepository {
       serviceId: calendar.serviceId,
       calendarId: calendar.id,
       title: title,
-      startsAt: allDay ? formatDate(startsAt) : startsAt.toIso8601String(),
-      endsAt: allDay ? formatDate(endsAt) : endsAt.toIso8601String(),
+      startsAt: allDay
+          ? formatDate(startsAt)
+          : startsAt.toUtc().toIso8601String(),
+      endsAt: allDay ? formatDate(endsAt) : endsAt.toUtc().toIso8601String(),
       allDay: allDay,
       location: location,
       description: description,
@@ -162,27 +164,26 @@ class CalendarRepository {
     String? editScope,
   }) async {
     final editOccurrence = event.recurring && editScope == 'occurrence';
-    final editSeriesMetadataOnly = event.recurring && editScope == 'series';
 
     await hubClient.updateEvent(
       accessToken: accessToken,
       eventId: editOccurrence ? event.id : event.writableEventId,
       title: title,
-      startsAt: editSeriesMetadataOnly || startsAt == null
+      startsAt: startsAt == null
           ? null
           : allDay == true
           ? formatDate(startsAt)
-          : startsAt.toIso8601String(),
-      endsAt: editSeriesMetadataOnly || endsAt == null
+          : startsAt.toUtc().toIso8601String(),
+      endsAt: endsAt == null
           ? null
           : allDay == true
           ? formatDate(endsAt)
-          : endsAt.toIso8601String(),
-      allDay: editSeriesMetadataOnly ? null : allDay,
+          : endsAt.toUtc().toIso8601String(),
+      allDay: allDay,
       location: location,
       description: description,
-      recurrence: editOccurrence || editSeriesMetadataOnly ? null : recurrence,
-      includeRecurrence: !editOccurrence && !editSeriesMetadataOnly,
+      recurrence: editOccurrence ? null : recurrence,
+      includeRecurrence: !editOccurrence,
       scope: event.recurring ? editScope : null,
     );
   }

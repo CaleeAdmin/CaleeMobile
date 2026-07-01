@@ -37,6 +37,9 @@ import '../features/settings/calendar_collections_page.dart';
 import '../ui/calee_design.dart';
 import 'calee_home_page.dart';
 
+// Home-page tab indices for CaleeHomePage's bottom navigation bar.
+const _kCalendarTabIndex = 1;
+
 /// Overrides injected by tests to avoid platform channels and network calls.
 @visibleForTesting
 class CaleeAppTestDependencies {
@@ -197,6 +200,9 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed && _transportMayBeStale) {
       _transportMayBeStale = false;
       _hubClient.resetTransport();
+      if (_sessionController.isSignedIn) {
+        unawaited(_sessionController.refreshBootstrap());
+      }
     }
   }
 
@@ -443,6 +449,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
         'found connection id=${connection.id}',
       );
       final resolvedConnection = connection;
+      await _sessionController.refreshBootstrap();
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _openingGoogleCalendarSelection = false;
         if (!mounted) return;
@@ -502,8 +509,10 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
                 _sessionController.bootstrap?.account.primaryEmail ?? '',
             activationController: _displayActivationController,
             accessToken: _sessionController.accessToken!,
-            onActivated: () {
+            onActivated: () async {
               _displaySetupLinkController.clearPending();
+              await _sessionController.refreshBootstrap();
+              if (!mounted) return;
               Navigator.of(_navigatorKey.currentContext!).pop();
               _openDisplayActivationSuccess();
             },
@@ -532,6 +541,8 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
       );
       return;
     }
+    await _sessionController.refreshBootstrap();
+    if (!mounted) return;
     _openDisplayActivationSuccess();
   }
 
@@ -611,7 +622,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
     setState(() {
       _showingOnboarding = false;
       _checkingOnboarding = false;
-      _initialHomeTab = 1; // Calendar tab
+      _initialHomeTab = _kCalendarTabIndex;
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -713,6 +724,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
               _justRegistered = !hasPendingDisplayIntent;
             });
             await _sessionController.completeSignIn(result);
+            unawaited(_sessionController.refreshBootstrap());
             unawaited(
               applyPostRegistrationProfileDefaults(
                 hubClient: _hubClient,
@@ -734,6 +746,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
           onSignedIn: (result) async {
             setState(() => _showingDisplaySetupSignIn = false);
             await _sessionController.completeSignIn(result);
+            unawaited(_sessionController.refreshBootstrap());
           },
         );
       }
@@ -769,6 +782,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
           onSignedIn: (result) async {
             setState(() => _showingFollowSignIn = false);
             await _sessionController.completeSignIn(result);
+            unawaited(_sessionController.refreshBootstrap());
           },
         );
       }
@@ -836,6 +850,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
               _showingFollowSignIn = false;
             });
             await _sessionController.completeSignIn(result);
+            unawaited(_sessionController.refreshBootstrap());
             if (!hasPendingIntent) {
               setState(() => _showingConnectDisplayAfterAuth = true);
             }
@@ -853,6 +868,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
               _justRegistered = true;
             });
             await _sessionController.completeSignIn(result);
+            unawaited(_sessionController.refreshBootstrap());
             unawaited(
               applyPostRegistrationProfileDefaults(
                 hubClient: _hubClient,

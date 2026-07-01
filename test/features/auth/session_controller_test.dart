@@ -40,6 +40,8 @@ class _FakeRepository implements AuthRepository {
 
   StoredSession? storedSession;
   ClientRefreshResult? refreshResult;
+  ClientBootstrap? bootstrapResult;
+  int bootstrapCallCount = 0;
   Exception? bootstrapError;
   Exception? refreshError;
   bool clearSessionCalled = false;
@@ -65,8 +67,9 @@ class _FakeRepository implements AuthRepository {
 
   @override
   Future<ClientBootstrap> bootstrap({required String accessToken}) async {
+    bootstrapCallCount++;
     if (bootstrapError != null) throw bootstrapError!;
-    return _makeBootstrap();
+    return bootstrapResult ?? _makeBootstrap();
   }
 
   @override
@@ -272,5 +275,44 @@ void main() {
 
       expect(notifyCount, greaterThan(0));
     });
+
+    // ── refreshBootstrap ──────────────────────────────────────────────────────
+
+    test(
+      'refreshBootstrap when signed in fetches and updates bootstrap',
+      () async {
+        controller.accessToken = 'at';
+        controller.bootstrap = _makeBootstrap();
+        final freshBootstrap = _makeBootstrap();
+        repo.bootstrapResult = freshBootstrap;
+
+        await controller.refreshBootstrap();
+
+        expect(controller.bootstrap, freshBootstrap);
+        expect(repo.bootstrapCallCount, 1);
+      },
+    );
+
+    test('refreshBootstrap when signed out is a no-op', () async {
+      controller.accessToken = null;
+
+      await controller.refreshBootstrap();
+
+      expect(repo.bootstrapCallCount, 0);
+    });
+
+    test(
+      'refreshBootstrap ignores errors and keeps existing bootstrap',
+      () async {
+        final existing = _makeBootstrap();
+        controller.accessToken = 'at';
+        controller.bootstrap = existing;
+        repo.bootstrapError = Exception('network failure');
+
+        await controller.refreshBootstrap();
+
+        expect(controller.bootstrap, existing);
+      },
+    );
   });
 }
