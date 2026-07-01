@@ -3,6 +3,7 @@ import '../../data/models/calendar_service_error.dart';
 import '../../data/models/client_bootstrap.dart';
 import '../../data/models/client_calendar.dart';
 import '../../data/models/client_chore.dart';
+import '../../data/models/client_meal.dart';
 import '../../data/models/client_task.dart';
 import 'today_models.dart';
 
@@ -29,6 +30,13 @@ class TodayRepository {
 
   bool get _hasChoreService => services.any((s) => s.supportsChores);
 
+  // Prefer service id "portal"; fall back to first active service with meals.
+  bool get _hasMealsService {
+    final portal = services.where((s) => s.id == 'portal').firstOrNull;
+    if (portal != null && portal.supportsMeals) return true;
+    return services.any((s) => s.isActive && s.supportsMeals);
+  }
+
   Future<TodayOverview> loadToday() async {
     final now = DateTime.now();
     final todayStr = _formatDate(now);
@@ -44,6 +52,9 @@ class TodayRepository {
     List<ClientChore> choresDueToday = [];
     List<ClientChore> overdueChores = [];
     Object? choresError;
+
+    List<ClientMeal> mealsToday = [];
+    Object? mealsError;
 
     // Calendar
     try {
@@ -93,15 +104,31 @@ class TodayRepository {
       }
     }
 
+    // Meals — only if any active service supports meals
+    if (_hasMealsService) {
+      try {
+        final mealList = await hubClient.meals(
+          accessToken: accessToken,
+          from: todayStr,
+          to: todayStr,
+        );
+        mealsToday = mealList.meals;
+      } catch (e) {
+        mealsError = e;
+      }
+    }
+
     return TodayOverview(
       eventsToday: eventsToday,
       tasksDueToday: tasksDueToday,
       overdueTasks: overdueTasks,
       choresDueToday: choresDueToday,
       overdueChores: overdueChores,
+      mealsToday: mealsToday,
       calendarError: calendarError,
       tasksError: tasksError,
       choresError: choresError,
+      mealsError: mealsError,
       calendarServiceErrors: calendarServiceErrors,
     );
   }
@@ -114,7 +141,6 @@ class TodayRepository {
       final start = DateTime.tryParse(e.startsAt)?.toLocal();
       if (start == null) return false;
       if (e.allDay) {
-        // all-day: startsAt is a date string like '2024-01-15'
         return start.year == now.year &&
             start.month == now.month &&
             start.day == now.day;
@@ -123,7 +149,6 @@ class TodayRepository {
           start.isBefore(todayEnd);
     }).toList();
 
-    // All-day first, then timed by start time
     filtered.sort((a, b) {
       if (a.allDay && !b.allDay) return -1;
       if (!a.allDay && b.allDay) return 1;
