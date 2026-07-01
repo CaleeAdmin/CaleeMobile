@@ -188,6 +188,9 @@ class ClientService {
   }
 
   bool get supportsMeals => capabilities['meals'] == true;
+
+  bool get supportsMealTemplates =>
+      capabilities['mealTemplates'] == true || supportsMeals;
 }
 
 class ClientContexts {
