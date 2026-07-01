@@ -49,7 +49,7 @@ class _TodayPageState extends State<TodayPage> {
   bool get _hasMealsService {
     final portal =
         widget.services.where((s) => s.id == 'portal').firstOrNull;
-    if (portal != null && portal.supportsMeals) return true;
+    if (portal != null && portal.isActive && portal.supportsMeals) return true;
     return widget.services.any((s) => s.isActive && s.supportsMeals);
   }
 
