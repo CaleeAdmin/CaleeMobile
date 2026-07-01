@@ -627,10 +627,14 @@ class CaleeCheckCircle extends StatelessWidget {
     final effectiveColor = color ?? Theme.of(context).colorScheme.primary;
 
     if (isLoading) {
-      return SizedBox(
-        width: size,
-        height: size,
-        child: CircularProgressIndicator(strokeWidth: 2, color: effectiveColor),
+      return GestureDetector(
+        onTap: () {},
+        behavior: HitTestBehavior.opaque,
+        child: SizedBox(
+          width: size,
+          height: size,
+          child: CircularProgressIndicator(strokeWidth: 2, color: effectiveColor),
+        ),
       );
     }
 
