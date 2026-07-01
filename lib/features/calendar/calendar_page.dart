@@ -171,6 +171,7 @@ class _CalendarPageState extends State<CalendarPage> {
       ),
       builder: (context) => CreateEventSheet(
         calendars: writableCalendars,
+        use24h: _use24h(context),
         initialDate: _controller.selectedDay,
         defaultCalendarId: _controller.preferences.defaultCalendarId,
         onCreate: _controller.createEvent,
@@ -306,6 +307,7 @@ class _CalendarPageState extends State<CalendarPage> {
       ),
       builder: (context) => CreateEventSheet(
         calendars: [calendar],
+        use24h: _use24h(context),
         initialEvent: event,
         editScope: editScope,
         onCreate: _controller.createEvent,
