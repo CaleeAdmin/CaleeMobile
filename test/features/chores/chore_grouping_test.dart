@@ -16,6 +16,7 @@ ClientChore _chore({
   String calendarId = 'cal1',
   String title = 'Test chore',
   String kind = 'baseChore',
+  bool completedToday = false,
 }) {
   return ClientChore(
     id: id,
@@ -31,7 +32,7 @@ ClientChore _chore({
     choreUid: id,
     parentChoreUid: null,
     completionLogId: null,
-    completedToday: false,
+    completedToday: completedToday,
     section: section,
     recurrence: recurrence,
     points: points,
@@ -189,6 +190,46 @@ void main() {
       final chore = _chore(section: '');
       final groups = groupChoresBySection([chore], _monday);
       expect(groups['todoToday'], isNotNull);
+    });
+
+    // completedToday override ─────────────────────────────────────────────────
+
+    test('completedToday=true overrides todoToday section → doneToday', () {
+      final chore = _chore(
+        section: 'todoToday',
+        completedToday: true,
+      );
+      final groups = groupChoresBySection([chore], _monday);
+
+      expect(groups['doneToday'], contains(chore));
+      expect(groups.containsKey('todoToday'), isFalse);
+    });
+
+    test('completedToday=true overrides overdue section → doneToday', () {
+      final chore = _chore(
+        section: 'overdue',
+        completedToday: true,
+        kind: 'completionLog',
+      );
+      final groups = groupChoresBySection([chore], _monday);
+
+      expect(groups['doneToday'], contains(chore));
+      expect(groups.containsKey('overdue'), isFalse);
+    });
+
+    test('completedToday=true with section=doneToday stays in doneToday', () {
+      final chore = _chore(section: 'doneToday', completedToday: true);
+      final groups = groupChoresBySection([chore], _monday);
+
+      expect(groups['doneToday'], contains(chore));
+    });
+
+    test('completedToday=false with section=todoToday stays in todoToday', () {
+      final chore = _chore(section: 'todoToday', completedToday: false);
+      final groups = groupChoresBySection([chore], _monday);
+
+      expect(groups['todoToday'], contains(chore));
+      expect(groups.containsKey('doneToday'), isFalse);
     });
   });
 
@@ -364,6 +405,31 @@ void main() {
       );
       expect(parts, ['Chores']);
     });
+
+    test(
+      'completedToday=true uses done format even when section=todoToday',
+      () {
+        final chore = _chore(
+          section: 'todoToday',
+          completedToday: true,
+          assigneeName: 'Mia',
+          recurrence: 'FREQ=DAILY',
+        );
+        final parts = choreSubtitleParts(
+          chore: chore,
+          calendarName: 'Kids chores',
+          scheduledLabel: 'Completed 1/6/2026',
+        );
+
+        expect(parts, contains('Mia'));
+        expect(parts, contains('Completed 1/6/2026'));
+        expect(parts, contains('Kids chores'));
+        // Repeat label must not appear for a completed chore row
+        expect(parts, isNot(contains('Daily')));
+        // 'Unassigned' must not appear when assignee is set
+        expect(parts, isNot(contains('Unassigned')));
+      },
+    );
   });
 
   // ── points badge pluralisation ───────────────────────────────────────────

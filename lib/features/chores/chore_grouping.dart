@@ -24,6 +24,13 @@ Map<String, List<ClientChore>> groupChoresBySection(
   final grouped = <String, List<ClientChore>>{};
 
   for (final chore in chores) {
+    // completedToday overrides any stale section value. A UTC vs local timezone
+    // mismatch can cause the server to assign the wrong section for a chore that
+    // was completed today in local time but before UTC midnight.
+    if (chore.completedToday) {
+      grouped.putIfAbsent('doneToday', () => []).add(chore);
+      continue;
+    }
     final apiSection = chore.normalizedSection;
     final uiSection = apiSection == 'future'
         ? _futureSubsection(
@@ -100,6 +107,7 @@ List<String> choreSubtitleParts({
 }) {
   final isHistoryOrDone =
       chore.isCompletionLog ||
+      chore.completedToday ||
       chore.normalizedSection == 'history' ||
       chore.normalizedSection == 'doneToday';
 
