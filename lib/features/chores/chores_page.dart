@@ -723,10 +723,10 @@ class _ChoresPageState extends State<ChoresPage> {
                 isUpdating: _controller.updatingChoreIds.contains(
                   chore.completionActionId,
                 ),
-                onToggleCompletion: isFutureSection || !chore.canToggleCompletion
+                onToggleCompletion: !chore.canToggleCompletion
                     ? null
                     : () => _toggleChoreCompletion(chore),
-                onCircleTap: isFutureSection ? onActions : null,
+                onCircleTap: null,
                 onMoreTap: onActions,
                 onRowTap: isFutureSection ? onActions : null,
               );
