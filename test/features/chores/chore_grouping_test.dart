@@ -92,6 +92,27 @@ void main() {
       expect(groups['later']!.first.id, 'c1');
     });
 
+    test('future chore scheduled today → todoToday', () {
+      final chore = _chore(
+        section: 'future',
+        scheduledDate: '2026-06-01', // same as _monday
+      );
+      final groups = groupChoresBySection([chore], _monday);
+      expect(groups['todoToday'], isNotNull);
+      expect(groups['todoToday']!.first.id, 'c1');
+    });
+
+    test('future chore scheduled in the past → overdue', () {
+      final yesterday = _monday.subtract(const Duration(days: 1));
+      final chore = _chore(
+        section: 'future',
+        scheduledDate:
+            '${yesterday.year}-${yesterday.month.toString().padLeft(2, '0')}-${yesterday.day.toString().padLeft(2, '0')}',
+      );
+      final groups = groupChoresBySection([chore], _monday);
+      expect(groups['overdue'], isNotNull);
+    });
+
     test('future chore scheduled tomorrow → tomorrow', () {
       final tomorrow = _monday.add(const Duration(days: 1)); // 2026-06-02
       final chore = _chore(

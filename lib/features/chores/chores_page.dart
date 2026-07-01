@@ -675,11 +675,7 @@ class _ChoresPageState extends State<ChoresPage> {
                   ? () => _showChoreActions(chore)
                   : null;
               return ChoreRow(
-                key: ValueKey(
-                  chore.completionActionId.isNotEmpty
-                      ? chore.completionActionId
-                      : chore.id,
-                ),
+                key: ValueKey(chore.id),
                 chore: chore,
                 calendarName: _calendarNameForChore(chore, choreCalendars),
                 scheduledLabel: _formatScheduledAt(chore),
