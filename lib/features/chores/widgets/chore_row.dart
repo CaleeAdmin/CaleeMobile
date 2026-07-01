@@ -12,6 +12,7 @@ class ChoreRow extends StatelessWidget {
     required this.scheduledLabel,
     required this.isUpdating,
     this.onToggleCompletion,
+    this.onCircleTap,
     this.onMoreTap,
     this.onRowTap,
     super.key,
@@ -22,6 +23,7 @@ class ChoreRow extends StatelessWidget {
   final String scheduledLabel;
   final bool isUpdating;
   final VoidCallback? onToggleCompletion;
+  final VoidCallback? onCircleTap;
   final VoidCallback? onMoreTap;
   final VoidCallback? onRowTap;
 
@@ -47,13 +49,18 @@ class ChoreRow extends StatelessWidget {
         color: CaleeColors.textTertiary,
       );
     } else {
+      final effectiveCircleTap = onCircleTap ?? onToggleCompletion;
       leading = Semantics(
-        label: isDone ? 'Mark chore not complete' : 'Mark chore complete',
+        label: onCircleTap != null
+            ? 'View chore actions'
+            : isDone
+            ? 'Mark chore not complete'
+            : 'Mark chore complete',
         button: true,
         excludeSemantics: true,
         child: CaleeCheckCircle(
           isChecked: isDone,
-          onTap: onToggleCompletion,
+          onTap: effectiveCircleTap,
           isLoading: isUpdating,
           size: 22,
         ),
@@ -97,7 +104,9 @@ class ChoreRow extends StatelessWidget {
 
     final effectiveTrailing =
         trailing ??
-        (onToggleCompletion != null ? const SizedBox.shrink() : null);
+        (onToggleCompletion != null || onCircleTap != null
+            ? const SizedBox.shrink()
+            : null);
 
     return CaleeListRow(
       leading: leading,
