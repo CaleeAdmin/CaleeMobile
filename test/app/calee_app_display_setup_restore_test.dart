@@ -93,9 +93,7 @@ class _FakeFollowLinkController extends CalendarFollowLinkController {
 
 class _FakeDisplayActivationController extends DisplayActivationController {
   _FakeDisplayActivationController()
-    : super(
-        repository: DisplaySetupRepository(hubClient: CaleeHubClient()),
-      );
+    : super(repository: DisplaySetupRepository(hubClient: CaleeHubClient()));
 
   @override
   Future<bool> activate({
@@ -287,6 +285,7 @@ void main() {
       session.finishRestore(signedIn: true);
       await tester.pump();
       await tester.pump();
+      await tester.pump();
 
       expect(find.text('Connect this Calee display?'), findsOneWidget);
 
@@ -298,6 +297,7 @@ void main() {
       expect(find.byType(DisplayActivationSuccessPage), findsNothing);
 
       session.refreshBootstrapCompleter!.complete();
+      await tester.pump();
       await tester.pump();
       await tester.pump();
 

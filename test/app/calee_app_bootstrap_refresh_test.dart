@@ -20,6 +20,7 @@ import 'package:calee_mobile/features/display_setup/display_setup_link_controlle
 import 'package:calee_mobile/features/display_setup/display_setup_repository.dart';
 import 'package:calee_mobile/features/external_calendar/external_calendar_connected_link_controller.dart';
 import 'package:calee_mobile/features/local_subscriber/local_calendar_subscription_repository.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -222,48 +223,47 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
 
-  testWidgets(
-    'refreshBootstrap is called after display activation succeeds',
-    (tester) async {
-      final session = _TrackingSessionController();
-      final displaySetup = _FakeDisplaySetupLinkController();
-      final activation = _SucceedingActivationController();
+  testWidgets('refreshBootstrap is called after display activation succeeds', (
+    tester,
+  ) async {
+    final session = _TrackingSessionController();
+    final displaySetup = _FakeDisplaySetupLinkController();
+    final activation = _SucceedingActivationController();
 
-      await tester.pumpWidget(
-        CaleeApp.forTesting(
-          testDeps: _makeDeps(
-            session: session,
-            displaySetup: displaySetup,
-            activationController: activation,
-          ),
+    await tester.pumpWidget(
+      CaleeApp.forTesting(
+        testDeps: _makeDeps(
+          session: session,
+          displaySetup: displaySetup,
+          activationController: activation,
         ),
-      );
+      ),
+    );
 
-      // Inject intent while still restoring — CaleeApp will wait for session.
-      displaySetup.injectIntent(_validToken);
-      await tester.pump();
+    // Inject intent while still restoring — CaleeApp will wait for session.
+    displaySetup.injectIntent(_validToken);
+    await tester.pump();
 
-      // Finish restore as logged-out → landing page is shown.
-      session.finishRestore(signedIn: false);
-      await tester.pump();
+    // Finish restore as logged-out → landing page is shown.
+    session.finishRestore(signedIn: false);
+    await tester.pump();
 
-      // Tap "I already have an account" — sets _displaySetupThroughLandingPage=true.
-      expect(find.text('Connect this display to Calee'), findsOneWidget);
-      await tester.tap(find.text('I already have an account'));
-      await tester.pump();
+    // Tap "I already have an account" — sets _displaySetupThroughLandingPage=true.
+    expect(find.text('Connect this display to Calee'), findsOneWidget);
+    await tester.tap(find.text('I already have an account'));
+    await tester.pump();
 
-      // Simulate sign-in completing (bypasses the LoginPage form).
-      session.simulateSignIn();
-      await tester.pump();
+    // Simulate sign-in completing (bypasses the LoginPage form).
+    session.simulateSignIn();
+    await tester.pump();
 
-      // Wait for activation + bootstrap refresh to complete.
-      await tester.pumpAndSettle();
+    // Wait for activation + bootstrap refresh to complete.
+    await tester.pumpAndSettle();
 
-      expect(session.refreshBootstrapCallCount, 1);
-      expect(session.refreshBootstrapCompleted, isTrue);
-      expect(find.byType(DisplayActivationSuccessPage), findsOneWidget);
-    },
-  );
+    expect(session.refreshBootstrapCallCount, 1);
+    expect(session.refreshBootstrapCompleted, isTrue);
+    expect(find.byType(DisplayActivationSuccessPage), findsOneWidget);
+  });
 
   testWidgets('app resume refreshes bootstrap when signed in', (tester) async {
     final session = _TrackingSessionController();
@@ -282,11 +282,11 @@ void main() {
     final countBefore = session.refreshBootstrapCallCount;
 
     // Pause the app so _transportMayBeStale is set.
-    await tester.binding.handleLifecycleMessage('AppLifecycleState.paused');
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
     await tester.pump();
 
     // Resume — should trigger refreshBootstrap() because session is signed in.
-    await tester.binding.handleLifecycleMessage('AppLifecycleState.resumed');
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pump();
 
     expect(
@@ -297,30 +297,29 @@ void main() {
     expect(hub.resetTransportCallCount, 1);
   });
 
-  testWidgets(
-    'app resume does not refresh bootstrap when signed out',
-    (tester) async {
-      final session = _TrackingSessionController();
-      final hub = _FakeHubClient();
+  testWidgets('app resume does not refresh bootstrap when signed out', (
+    tester,
+  ) async {
+    final session = _TrackingSessionController();
+    final hub = _FakeHubClient();
 
-      await tester.pumpWidget(
-        CaleeApp.forTesting(
-          testDeps: _makeDeps(session: session, hubClient: hub),
-        ),
-      );
+    await tester.pumpWidget(
+      CaleeApp.forTesting(
+        testDeps: _makeDeps(session: session, hubClient: hub),
+      ),
+    );
 
-      session.finishRestore(signedIn: false);
-      await tester.pump();
+    session.finishRestore(signedIn: false);
+    await tester.pump();
 
-      await tester.binding.handleLifecycleMessage('AppLifecycleState.inactive');
-      await tester.pump();
-      await tester.binding.handleLifecycleMessage('AppLifecycleState.resumed');
-      await tester.pump();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    await tester.pump();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
 
-      expect(hub.resetTransportCallCount, 1);
-      expect(session.refreshBootstrapCallCount, 0);
-    },
-  );
+    expect(hub.resetTransportCallCount, 1);
+    expect(session.refreshBootstrapCallCount, 0);
+  });
 
   testWidgets(
     'refreshBootstrap is called after Google OAuth deep link is handled',

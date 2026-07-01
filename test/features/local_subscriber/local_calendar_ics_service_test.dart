@@ -1,11 +1,16 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:timezone/data/latest.dart' as tz_data;
 
 import 'package:calee_mobile/features/local_subscriber/local_calendar_ics_service.dart';
 import 'package:calee_mobile/features/local_subscriber/local_calendar_subscription.dart';
 import 'package:calee_mobile/features/local_subscriber/local_calendar_subscription_repository.dart';
 
 void main() {
+  setUpAll(() {
+    tz_data.initializeTimeZones();
+  });
+
   const service = LocalCalendarIcsService();
 
   // ── Helpers ───────────────────────────────────────────────────────────────
@@ -566,7 +571,7 @@ void main() {
       expect(service.parseBody(ics, fakeSub()), isEmpty);
     });
 
-    test('DTSTART with TZID parameter is parsed without crash', () {
+    test('DTSTART with TZID parameter is converted to UTC', () {
       final ics = icsWrap(
         [
           'BEGIN:VEVENT',
@@ -578,7 +583,41 @@ void main() {
       );
 
       expect(() => service.parseBody(ics, fakeSub()), returnsNormally);
-      // Should parse the datetime (treated as floating/local).
+      final events = service.parseBody(ics, fakeSub());
+      expect(events.length, 1);
+      expect(events[0].start.isUtc, isTrue);
+    });
+
+    test(
+      'DTSTART;TZID=Australia/Sydney:20260701T100000 converts to UTC+10',
+      () {
+        // Sydney AEST in July (no DST, UTC+10): 10:00 → 00:00Z same day.
+        const ics =
+            'BEGIN:VEVENT\r\n'
+            'UID:tzid-utc@example.com\r\n'
+            'SUMMARY:Sydney to UTC\r\n'
+            'DTSTART;TZID=Australia/Sydney:20260701T100000\r\n'
+            'END:VEVENT';
+
+        final events = service.parseBody(icsWrap(ics), fakeSub());
+        expect(events.length, 1);
+        expect(events[0].start.isUtc, isTrue);
+        expect(events[0].start, DateTime.utc(2026, 7, 1, 0, 0, 0));
+      },
+    );
+
+    test('DTSTART with unknown TZID falls back to floating local time', () {
+      final ics = icsWrap(
+        [
+          'BEGIN:VEVENT',
+          'UID:tzid-unknown@example.com',
+          'SUMMARY:Unknown Zone Event',
+          'DTSTART;TZID=Unknown/Timezone:${fmtDateTime(tomorrow)}',
+          'END:VEVENT',
+        ].join('\r\n'),
+      );
+
+      expect(() => service.parseBody(ics, fakeSub()), returnsNormally);
       final events = service.parseBody(ics, fakeSub());
       expect(events.length, 1);
     });

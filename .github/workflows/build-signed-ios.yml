@@ -30,6 +30,8 @@ jobs:
         run: flutter pub get
 
       - name: Run automation tests
+        env:
+          TZ: Australia/Perth
         run: flutter test
 
       - name: Resolve release version from pubspec

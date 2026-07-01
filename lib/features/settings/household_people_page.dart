@@ -487,7 +487,8 @@ class _PersonAvatar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color =
-        _parseColor(person.avatarColor) ?? CaleeColors.primary.withAlpha(CaleeAlpha.pct10);
+        _parseColor(person.avatarColor) ??
+        CaleeColors.primary.withAlpha(CaleeAlpha.pct10);
 
     return Container(
       width: 34,

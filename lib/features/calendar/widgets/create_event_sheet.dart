@@ -153,8 +153,10 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
     // Default times: 9:00–10:00 for future dates, next hour for today
     if (isSameCalendarDay(_selectedDate, today)) {
       final nextHour = now.add(const Duration(hours: 1));
-      _startTime = TimeOfDay(hour: nextHour.hour, minute: 0);
-      _endTime = TimeOfDay(hour: (nextHour.hour + 1) % 24, minute: 0);
+      // Clamp to 22 so end (start + 1) never wraps past midnight on the same day.
+      final startHour = nextHour.hour.clamp(0, 22);
+      _startTime = TimeOfDay(hour: startHour, minute: 0);
+      _endTime = TimeOfDay(hour: startHour + 1, minute: 0);
     } else {
       _startTime = const TimeOfDay(hour: 9, minute: 0);
       _endTime = const TimeOfDay(hour: 10, minute: 0);
@@ -423,11 +425,11 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
         debugPrint('EventDraftsFromImage: compressed ${compressedFile.path}');
       }
 
-      String tz = 'Australia/Perth';
+      String? tz;
       try {
         tz = await FlutterTimezone.getLocalTimezone();
       } catch (_) {
-        // Timezone unavailable; default 'Australia/Perth' is used.
+        // Timezone unavailable; omit timezone hint from the request.
       }
 
       final now = DateTime.now();

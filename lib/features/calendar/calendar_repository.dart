@@ -141,8 +141,10 @@ class CalendarRepository {
       serviceId: calendar.serviceId,
       calendarId: calendar.id,
       title: title,
-      startsAt: allDay ? formatDate(startsAt) : startsAt.toIso8601String(),
-      endsAt: allDay ? formatDate(endsAt) : endsAt.toIso8601String(),
+      startsAt: allDay
+          ? formatDate(startsAt)
+          : startsAt.toUtc().toIso8601String(),
+      endsAt: allDay ? formatDate(endsAt) : endsAt.toUtc().toIso8601String(),
       allDay: allDay,
       location: location,
       description: description,
@@ -171,12 +173,12 @@ class CalendarRepository {
           ? null
           : allDay == true
           ? formatDate(startsAt)
-          : startsAt.toIso8601String(),
+          : startsAt.toUtc().toIso8601String(),
       endsAt: endsAt == null
           ? null
           : allDay == true
           ? formatDate(endsAt)
-          : endsAt.toIso8601String(),
+          : endsAt.toUtc().toIso8601String(),
       allDay: allDay,
       location: location,
       description: description,

@@ -19,9 +19,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class _StubHubClient extends CaleeHubClient {
-  _StubHubClient({ClientBootstrap? bootstrap})
-    : _bootstrap = bootstrap,
-      super(baseUri: Uri.parse('http://localhost'));
+  _StubHubClient({this._bootstrap})
+    : super(baseUri: Uri.parse('http://localhost'));
 
   final ClientBootstrap? _bootstrap;
 
@@ -97,19 +96,18 @@ ClientBootstrap _bootstrapForGenericLink({
   readiness: readiness,
 );
 
-ClientService _portalService({
-  String calendarCredentialStatus = 'connected',
-}) => ClientService(
-  id: 'portal',
-  displayName: 'Portal',
-  serviceType: 'nextcloud_portal',
-  baseUrl: 'http://localhost',
-  launchUrl: '',
-  accessStatus: 'active',
-  calendarCredentialStatus: calendarCredentialStatus,
-  source: 'calee',
-  capabilities: const {},
-);
+ClientService _portalService({String calendarCredentialStatus = 'connected'}) =>
+    ClientService(
+      id: 'portal',
+      displayName: 'Portal',
+      serviceType: 'nextcloud_portal',
+      baseUrl: 'http://localhost',
+      launchUrl: '',
+      accessStatus: 'active',
+      calendarCredentialStatus: calendarCredentialStatus,
+      source: 'calee',
+      capabilities: const {},
+    );
 
 void _setUpSharedPrefs() {
   SharedPreferences.setMockInitialValues({
@@ -298,9 +296,7 @@ void main() {
     await tester.pumpWidget(
       _wrapGenericLink(
         hubClient: _StubHubClient(
-          bootstrap: _bootstrapForGenericLink(
-            services: [_portalService()],
-          ),
+          bootstrap: _bootstrapForGenericLink(services: [_portalService()]),
         ),
       ),
     );
