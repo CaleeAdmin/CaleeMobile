@@ -112,6 +112,7 @@ Widget _buildSheet({
             },
         hubClient: _StubHub(),
         accessToken: 'test-token',
+        use24h: true,
         initialEvent: initialEvent,
         editScope: editScope,
         initialDate: initialDate,
