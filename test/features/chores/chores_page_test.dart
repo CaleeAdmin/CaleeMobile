@@ -243,7 +243,7 @@ void main() {
         ),
       );
 
-      await tester.tap(find.bySemanticsLabel('Mark chore complete'));
+      await tester.tap(find.byIcon(Icons.radio_button_unchecked));
       await tester.pump();
 
       expect(tapCount, 1);
@@ -255,6 +255,9 @@ void main() {
       'completed chore shows "Mark as not done" and not "Mark done"',
       (tester) async {
         await tester.pumpWidget(_wrapWithChore(_completedChore()));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('Show completed chores'));
         await tester.pumpAndSettle();
 
         await tester.tap(find.byIcon(Icons.more_horiz));
