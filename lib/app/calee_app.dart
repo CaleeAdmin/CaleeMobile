@@ -449,7 +449,6 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
         'found connection id=${connection.id}',
       );
       final resolvedConnection = connection;
-      await _sessionController.refreshBootstrap();
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _openingGoogleCalendarSelection = false;
         if (!mounted) return;
