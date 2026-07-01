@@ -223,11 +223,9 @@ class _MealsPageState extends State<MealsPage> {
           ),
           children: [
             _buildHeaderRow(days, todayStr),
-            ..._kMealTypes.map((mealType) => _buildMealRow(
-              days,
-              mealType,
-              todayStr,
-            )),
+            ..._kMealTypes.map(
+              (mealType) => _buildMealRow(days, mealType, todayStr),
+            ),
           ],
         ),
       ),
@@ -544,7 +542,7 @@ class _MealFormSheetState extends State<MealFormSheet> {
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('Delete meal?'),
-        content: Text('Remove “${meal.title}”?'),
+        content: Text('Remove "${meal.title}"?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
@@ -683,7 +681,7 @@ class _MealFormSheetState extends State<MealFormSheet> {
                   ),
                 ],
               ),
-              if (_saveError != null) ...[  
+              if (_saveError != null) ...[
                 const SizedBox(height: CaleeSpacing.sm),
                 Text(
                   _saveError!,
@@ -708,7 +706,7 @@ class _MealFormSheetState extends State<MealFormSheet> {
                       )
                     : const Text('Save'),
               ),
-              if (_isEditing) ...[  
+              if (_isEditing) ...[
                 const SizedBox(height: CaleeSpacing.sm),
                 OutlinedButton(
                   onPressed: _isSaving ? null : _delete,

@@ -4,7 +4,6 @@ import '../../data/api/calee_hub_client.dart';
 import '../../data/models/client_bootstrap.dart';
 import '../../data/models/client_calendar.dart';
 import '../../data/models/client_chore.dart';
-import '../../data/models/client_meal.dart';
 import '../../data/models/client_task.dart';
 import '../../ui/calee_design.dart';
 import '../calendar/calendar_utils.dart';
@@ -194,11 +193,11 @@ class _TodayPageState extends State<TodayPage> {
       _buildCalendarSection(overview),
       const SizedBox(height: CaleeSpacing.sectionSpacing),
       _buildTasksSection(overview),
-      if (_hasChoreService) ...[  
+      if (_hasChoreService) ...[
         const SizedBox(height: CaleeSpacing.sectionSpacing),
         _buildChoresSection(overview),
       ],
-      if (_hasMealsService) ...[  
+      if (_hasMealsService) ...[
         const SizedBox(height: CaleeSpacing.sectionSpacing),
         _buildMealsSection(overview),
       ],
