@@ -92,6 +92,13 @@ void main() {
       expect(groups['later']!.first.id, 'c1');
     });
 
+    test('recurring future with no scheduled date → todoToday', () {
+      final chore = _chore(section: 'future', recurrence: 'FREQ=DAILY');
+      final groups = groupChoresBySection([chore], _monday);
+      expect(groups['todoToday'], isNotNull);
+      expect(groups['todoToday']!.first.id, 'c1');
+    });
+
     test('future chore scheduled today → todoToday', () {
       final chore = _chore(
         section: 'future',

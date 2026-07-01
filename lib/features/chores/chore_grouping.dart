@@ -50,7 +50,10 @@ String _futureSubsection(
   required DateTime endOfWeekDate,
 }) {
   final dateStr = chore.scheduledDate ?? chore.scheduledAt;
-  if (dateStr == null || dateStr.trim().isEmpty) return 'later';
+  if (dateStr == null || dateStr.trim().isEmpty) {
+    // A recurring chore with no explicit start date begins today.
+    return chore.isRecurring ? 'todoToday' : 'later';
+  }
 
   final parsed = DateTime.tryParse(dateStr)?.toLocal();
   if (parsed == null) return 'later';
