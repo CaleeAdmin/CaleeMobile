@@ -114,7 +114,7 @@ class ChoreRow extends StatelessWidget {
       subtitle: subtitle.isNotEmpty ? subtitle : null,
       trailing: effectiveTrailing,
       titleStyle: titleStyle,
-      onTap: onRowTap ?? onToggleCompletion,
+      onTap: onRowTap,
     );
   }
 }
