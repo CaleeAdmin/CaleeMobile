@@ -468,8 +468,8 @@ void main() {
       await tester.pump();
 
       externalCalendar.injectGoogleIntent();
-      await tester.pump();
-      await tester.pumpAndSettle();
+      await tester.pump(); // drives the 401 error through the async chain
+      await tester.pump(); // shows snackbar (post-frame callback fires)
 
       // Must NOT open GoogleCalendarSelectionPage on a non-transient error.
       expect(find.byType(GoogleCalendarSelectionPage), findsNothing);
