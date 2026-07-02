@@ -1539,6 +1539,12 @@ class CaleeHubClient {
   }
 
   bool _isTransientTransportError(Object error) {
+    // _executeRequest wraps SocketException/HandshakeException/TimeoutException
+    // into CaleeHubException(statusCode: 0), so check that first.
+    if (error is CaleeHubException) {
+      return error.statusCode == 0 &&
+          (error.code == 'NETWORK_ERROR' || error.code == 'TIMEOUT');
+    }
     if (error is HttpException) {
       return error.message.contains(
         'Connection closed before full header was received',
