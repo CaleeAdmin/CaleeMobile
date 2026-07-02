@@ -14,15 +14,7 @@ const _kMealTypeLabels = {
   'dinner': 'Dinner',
 };
 
-const _kWeekdayShort = [
-  'Mon',
-  'Tue',
-  'Wed',
-  'Thu',
-  'Fri',
-  'Sat',
-  'Sun',
-];
+const _kWeekdayShort = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 const _kMonths = [
   'Jan',
@@ -145,15 +137,13 @@ class _MealsPageState extends State<MealsPage> {
         ),
         Expanded(
           child: GestureDetector(
-            onTap:
-                _controller.isCurrentWeek ? null : _controller.goToCurrentWeek,
+            onTap: _controller.isCurrentWeek
+                ? null
+                : _controller.goToCurrentWeek,
             child: Column(
               children: [
                 Text(
-                  _weekRangeLabel(
-                    _controller.weekStart,
-                    _controller.weekEnd,
-                  ),
+                  _weekRangeLabel(_controller.weekStart, _controller.weekEnd),
                   textAlign: TextAlign.center,
                   style: const TextStyle(
                     fontSize: 15,
@@ -164,10 +154,7 @@ class _MealsPageState extends State<MealsPage> {
                 if (!_controller.isCurrentWeek)
                   const Text(
                     'Tap to go to current week',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: CaleeColors.primary,
-                    ),
+                    style: TextStyle(fontSize: 11, color: CaleeColors.primary),
                   ),
               ],
             ),
@@ -248,11 +235,8 @@ class _MealsPageState extends State<MealsPage> {
                   size: 20,
                   color: CaleeColors.textTertiary,
                 ),
-          onTap: () => _openSheet(
-            date: dateStr,
-            mealType: mealType,
-            meal: meal,
-          ),
+          onTap: () =>
+              _openSheet(date: dateStr, mealType: mealType, meal: meal),
         );
       }).toList(),
     );
@@ -411,8 +395,19 @@ class _MealFormSheetState extends State<MealFormSheet> {
     final d = int.tryParse(parts[2]) ?? 0;
     final m = int.tryParse(parts[1]) ?? 0;
     final months = [
-      '', 'January', 'February', 'March', 'April', 'May', 'June',
-      'July', 'August', 'September', 'October', 'November', 'December',
+      '',
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December',
     ];
     final month = m >= 1 && m <= 12 ? months[m] : '';
     return '$d $month ${parts[0]}';
@@ -505,8 +500,7 @@ class _MealFormSheetState extends State<MealFormSheet> {
   @override
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
-    final mealTypeLabel =
-        _kMealTypeLabels[widget.mealType] ?? widget.mealType;
+    final mealTypeLabel = _kMealTypeLabels[widget.mealType] ?? widget.mealType;
     final title = _isEditing ? 'Edit $mealTypeLabel' : 'Add $mealTypeLabel';
 
     return SafeArea(
