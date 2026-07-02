@@ -314,8 +314,8 @@ void main() {
     });
 
     testWidgets(
-      'external-calendar-connected deep link refreshes bootstrap before opening '
-      'GoogleCalendarSelectionPage',
+      'external-calendar-connected deep link opens GoogleCalendarSelectionPage '
+      'for the connection matching connectionId',
       (tester) async {
         final conn1 = _makeConnection(id: 'conn1');
         final conn2 = _makeConnection(id: 'conn2');
@@ -345,12 +345,11 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        expect(session.refreshBootstrapCallCount, 1);
-        expect(session.refreshBootstrapCompleted, isTrue);
+        // No extra refreshBootstrap call — lifecycle resume handles that.
+        expect(session.refreshBootstrapCallCount, 0);
         expect(find.byType(GoogleCalendarSelectionPage), findsOneWidget);
 
-        // The selection page fetches calendars for the correct connection,
-        // proving navigation happened after refresh completed.
+        // The selection page fetches calendars for the correct connection.
         expect(hubClient.lastCalledConnectionId, 'conn2');
       },
     );
