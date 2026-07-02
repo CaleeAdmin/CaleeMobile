@@ -115,6 +115,24 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
     ];
   }
 
+  @override
+  void didUpdateWidget(CaleeHomePage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final newIndex = widget.initialSelectedIndex;
+    if (newIndex != oldWidget.initialSelectedIndex && newIndex != 0) {
+      final clamped = newIndex.clamp(0, _tabs.length - 1);
+      setState(() {
+        _selectedIndex = clamped;
+        if (clamped == _calendarTabIndex) {
+          _calendarRefreshGeneration++;
+        }
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) widget.onInitialTabConsumed?.call();
+      });
+    }
+  }
+
   List<Widget> _buildPages() {
     return [
       TodayPage(
