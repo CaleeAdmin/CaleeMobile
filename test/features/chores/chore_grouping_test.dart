@@ -195,10 +195,7 @@ void main() {
     // completedToday override ─────────────────────────────────────────────────
 
     test('completedToday=true overrides todoToday section → doneToday', () {
-      final chore = _chore(
-        section: 'todoToday',
-        completedToday: true,
-      );
+      final chore = _chore(section: 'todoToday', completedToday: true);
       final groups = groupChoresBySection([chore], _monday);
 
       expect(groups['doneToday'], contains(chore));

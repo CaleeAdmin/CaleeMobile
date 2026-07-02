@@ -50,10 +50,7 @@ class MealsController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      mealList = await repository.loadWeek(
-        from: weekStartStr,
-        to: weekEndStr,
-      );
+      mealList = await repository.loadWeek(from: weekStartStr, to: weekEndStr);
       error = null;
     } catch (e) {
       error = e;
@@ -87,9 +84,9 @@ class MealsController extends ChangeNotifier {
   }
 
   ClientMeal? mealFor(String date, String mealType) {
-    return mealList?.meals.where(
-      (m) => m.mealDate == date && m.mealType == mealType,
-    ).firstOrNull;
+    return mealList?.meals
+        .where((m) => m.mealDate == date && m.mealType == mealType)
+        .firstOrNull;
   }
 
   Future<void> createMeal({

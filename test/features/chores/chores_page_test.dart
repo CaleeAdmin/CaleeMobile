@@ -326,30 +326,31 @@ void main() {
   });
 
   group('Today section circle tap', () {
-    testWidgets('tapping circle fires onToggleCompletion for incomplete chore', (
-      tester,
-    ) async {
-      var tapCount = 0;
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: CaleeTheme.buildThemeData(),
-          home: Scaffold(
-            body: ChoreRow(
-              chore: _incompleteChore(),
-              calendarName: 'Chores',
-              scheduledLabel: '',
-              isUpdating: false,
-              onToggleCompletion: () => tapCount++,
+    testWidgets(
+      'tapping circle fires onToggleCompletion for incomplete chore',
+      (tester) async {
+        var tapCount = 0;
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: CaleeTheme.buildThemeData(),
+            home: Scaffold(
+              body: ChoreRow(
+                chore: _incompleteChore(),
+                calendarName: 'Chores',
+                scheduledLabel: '',
+                isUpdating: false,
+                onToggleCompletion: () => tapCount++,
+              ),
             ),
           ),
-        ),
-      );
+        );
 
-      await tester.tap(find.byIcon(Icons.radio_button_unchecked));
-      await tester.pump();
+        await tester.tap(find.byIcon(Icons.radio_button_unchecked));
+        await tester.pump();
 
-      expect(tapCount, 1);
-    });
+        expect(tapCount, 1);
+      },
+    );
   });
 
   group('Chore action sheet', () {

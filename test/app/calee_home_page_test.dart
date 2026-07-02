@@ -345,7 +345,11 @@ void main() {
         await tester.pump();
 
         bar = tester.widget<NavigationBar>(find.byType(NavigationBar));
-        expect(bar.selectedIndex, 1, reason: 'didUpdateWidget must select Calendar tab');
+        expect(
+          bar.selectedIndex,
+          1,
+          reason: 'didUpdateWidget must select Calendar tab',
+        );
       },
     );
 

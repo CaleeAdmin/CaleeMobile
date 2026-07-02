@@ -28,9 +28,7 @@ DateTime _mondayOf(DateTime date) =>
 // ── Stubs ─────────────────────────────────────────────────────────────────────
 
 class _StubHub extends CaleeHubClient {
-  _StubHub({List<ClientMeal> meals = const []})
-    : _meals = meals,
-      super();
+  _StubHub({this._meals = const []}) : super();
 
   final List<ClientMeal> _meals;
   bool updateCalled = false;
@@ -149,10 +147,7 @@ void main() {
       );
 
       await tester.pumpWidget(
-        _buildFormSheet(
-          controller: controller,
-          existingMeal: _kExistingMeal,
-        ),
+        _buildFormSheet(controller: controller, existingMeal: _kExistingMeal),
       );
 
       expect(find.text('Spaghetti Bolognese'), findsOneWidget);
@@ -170,10 +165,7 @@ void main() {
       );
 
       await tester.pumpWidget(
-        _buildFormSheet(
-          controller: controller,
-          existingMeal: _kExistingMeal,
-        ),
+        _buildFormSheet(controller: controller, existingMeal: _kExistingMeal),
       );
 
       // Clear the notes field (second TextFormField — title is first).

@@ -44,6 +44,7 @@ class ClientBootstrap {
 
   bool get supportsMealTemplates =>
       capabilities['mealTemplates'] == true || supportsMeals;
+
   /// Server-reported readiness flags. Keys: calendarServiceReady (bool),
   /// problem (String?). Absent on older backends — treat missing as ready.
   final Map<String, dynamic> readiness;

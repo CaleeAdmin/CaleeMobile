@@ -219,10 +219,7 @@ void _bootstrapMealsCapabilityTests() {
 
   group('ClientBootstrap.supportsMealTemplates', () {
     test('returns true when mealTemplates capability is true', () {
-      expect(
-        _bootstrap({'mealTemplates': true}).supportsMealTemplates,
-        isTrue,
-      );
+      expect(_bootstrap({'mealTemplates': true}).supportsMealTemplates, isTrue);
     });
 
     test('returns true when only meals is true (fallback)', () {

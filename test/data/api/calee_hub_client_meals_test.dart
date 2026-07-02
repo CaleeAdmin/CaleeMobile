@@ -33,9 +33,7 @@ void main() {
     await server.close(force: true);
   });
 
-  Future<CaleeHubClient> startServer(
-    Map<String, dynamic> responseBody,
-  ) async {
+  Future<CaleeHubClient> startServer(Map<String, dynamic> responseBody) async {
     server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     server.listen((req) async {
       capturedPaths.add(req.uri.toString());
@@ -152,11 +150,7 @@ void main() {
         'data': {'meal': _kMealJson},
       });
 
-      await client.updateMeal(
-        accessToken: 'tok',
-        mealId: 1,
-        title: 'Pasta',
-      );
+      await client.updateMeal(accessToken: 'tok', mealId: 1, title: 'Pasta');
 
       expect(capturedBodies.single.containsKey('notes'), isFalse);
     });
