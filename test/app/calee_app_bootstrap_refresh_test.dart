@@ -1,8 +1,9 @@
 // Widget tests: verifying refreshBootstrap() is called at key lifecycle points.
 //
 // 1. After display activation succeeds, refreshBootstrap() should be called.
-// 2. After a Google OAuth deep link is received and handled, refreshBootstrap()
-//    should be called.
+// 2. After a Google OAuth deep link is received and handled, the
+//    GoogleCalendarSelectionPage is opened WITHOUT an extra refreshBootstrap()
+//    call (the lifecycle resume already handles that).
 
 import 'package:calee_mobile/app/calee_app.dart';
 import 'package:calee_mobile/data/api/calee_hub_client.dart';
@@ -154,10 +155,28 @@ class _SucceedingActivationController extends DisplayActivationController {
 
 // ── Fake hub client ───────────────────────────────────────────────────────────
 
-/// CaleeHubClient that stubs network calls used in the OAuth test path:
-/// - Returns one active Google connection so refreshBootstrap() is reached.
-/// - Returns an empty calendars list to avoid further network calls.
+const _kActiveGoogleConnection = ExternalCalendarConnection(
+  id: 'conn1',
+  providerKey: 'google_calendar',
+  displayName: 'Google Calendar',
+  connectionStatus: 'active',
+  accessMode: 'read',
+  sourceOfTruthPolicy: 'mirror',
+);
+
+/// CaleeHubClient that stubs network calls used in the OAuth test path.
+///
+/// [connectionsResponses] is a list of responses returned by sequential calls
+/// to [externalCalendarConnections]. Each entry is either a
+/// `List<ExternalCalendarConnection>` (success) or an [Exception] (thrown).
+/// If the call count exceeds the list, the last entry is repeated.
 class _FakeHubClient extends CaleeHubClient {
+  _FakeHubClient({List<Object>? connectionsResponses})
+    : _connectionsResponses =
+          connectionsResponses ?? const [[_kActiveGoogleConnection]];
+
+  final List<Object> _connectionsResponses;
+  int _connectionsCallCount = 0;
   int resetTransportCallCount = 0;
 
   @override
@@ -169,16 +188,12 @@ class _FakeHubClient extends CaleeHubClient {
   Future<List<ExternalCalendarConnection>> externalCalendarConnections({
     required String accessToken,
   }) async {
-    return const [
-      ExternalCalendarConnection(
-        id: 'conn1',
-        providerKey: 'google_calendar',
-        displayName: 'Google Calendar',
-        connectionStatus: 'active',
-        accessMode: 'read',
-        sourceOfTruthPolicy: 'mirror',
-      ),
-    ];
+    final i = _connectionsCallCount++;
+    final response = i < _connectionsResponses.length
+        ? _connectionsResponses[i]
+        : _connectionsResponses.last;
+    if (response is Exception) throw response;
+    return response as List<ExternalCalendarConnection>;
   }
 
   @override
@@ -322,7 +337,7 @@ void main() {
   });
 
   testWidgets(
-    'refreshBootstrap is called after Google OAuth deep link is handled',
+    'Google OAuth deep link opens GoogleCalendarSelectionPage without extra refreshBootstrap',
     (tester) async {
       final session = _TrackingSessionController();
       final externalCalendar = _FakeExternalCalendarConnectedLinkController();
@@ -342,16 +357,135 @@ void main() {
       session.finishRestore(signedIn: true);
       await tester.pump();
 
+      final bootstrapCountAfterRestore = session.refreshBootstrapCallCount;
+
       // Simulate the Google OAuth deep link arriving.
       externalCalendar.injectGoogleIntent();
       await tester.pump();
 
-      // Wait for async handling (connections fetch + bootstrap refresh).
+      // Wait for async handling (connections fetch only — no extra bootstrap).
       await tester.pumpAndSettle();
 
-      expect(session.refreshBootstrapCallCount, 1);
-      expect(session.refreshBootstrapCompleted, isTrue);
+      // Regression: no extra refreshBootstrap() call should happen inside
+      // _openGoogleCalendarSelectionFromDeepLink; the lifecycle resume already
+      // handles it, and duplicating it causes a brief disconnected-state flash.
+      expect(
+        session.refreshBootstrapCallCount,
+        bootstrapCountAfterRestore,
+        reason: 'no extra refreshBootstrap should occur during OAuth return',
+      );
+
+      // GoogleCalendarSelectionPage must still open.
       expect(find.byType(GoogleCalendarSelectionPage), findsOneWidget);
+
+      // Existing signed-in state must be intact.
+      expect(session.isSignedIn, isTrue);
+      expect(session.bootstrap, isNotNull);
+    },
+  );
+
+  testWidgets(
+    'Google OAuth deep link retries on transient NETWORK_ERROR and opens GoogleCalendarSelectionPage',
+    (tester) async {
+      final session = _TrackingSessionController();
+      final externalCalendar = _FakeExternalCalendarConnectedLinkController();
+      // First call throws a transient CaleeHubException; second succeeds.
+      final hub = _FakeHubClient(
+        connectionsResponses: [
+          const CaleeHubException(
+            statusCode: 0,
+            code: 'NETWORK_ERROR',
+            message: 'Check your connection and try again.',
+          ),
+          const [_kActiveGoogleConnection],
+        ],
+      );
+
+      await tester.pumpWidget(
+        CaleeApp.forTesting(
+          testDeps: _makeDeps(
+            session: session,
+            externalCalendar: externalCalendar,
+            hubClient: hub,
+          ),
+        ),
+      );
+
+      session.finishRestore(signedIn: true);
+      await tester.pump();
+
+      externalCalendar.injectGoogleIntent();
+      await tester.pump();
+
+      // pumpAndSettle handles the retry delay and async operations.
+      await tester.pumpAndSettle();
+
+      // GoogleCalendarSelectionPage must open after the retry succeeds.
+      expect(find.byType(GoogleCalendarSelectionPage), findsOneWidget);
+
+      // resetTransport must have been called (once before each attempt).
+      expect(
+        hub.resetTransportCallCount,
+        greaterThanOrEqualTo(2),
+        reason: 'resetTransport called before each connection attempt',
+      );
+
+      // Session state must be intact.
+      expect(session.isSignedIn, isTrue);
+      expect(session.bootstrap, isNotNull);
+    },
+  );
+
+  testWidgets(
+    'Google OAuth deep link does not retry on non-transient error and shows snackbar',
+    (tester) async {
+      final session = _TrackingSessionController();
+      final externalCalendar = _FakeExternalCalendarConnectedLinkController();
+      // 401 is a non-transient error — must not be retried.
+      final hub = _FakeHubClient(
+        connectionsResponses: [
+          const CaleeHubException(
+            statusCode: 401,
+            code: 'UNAUTHORIZED',
+            message: 'Unauthorized',
+          ),
+          // A second entry that must never be reached.
+          const [_kActiveGoogleConnection],
+        ],
+      );
+
+      await tester.pumpWidget(
+        CaleeApp.forTesting(
+          testDeps: _makeDeps(
+            session: session,
+            externalCalendar: externalCalendar,
+            hubClient: hub,
+          ),
+        ),
+      );
+
+      session.finishRestore(signedIn: true);
+      await tester.pump();
+
+      externalCalendar.injectGoogleIntent();
+      await tester.pump(); // drives the 401 error through the async chain
+      await tester.pump(); // shows snackbar (post-frame callback fires)
+
+      // Must NOT open GoogleCalendarSelectionPage on a non-transient error.
+      expect(find.byType(GoogleCalendarSelectionPage), findsNothing);
+
+      // The friendly snackbar must appear.
+      expect(
+        find.text('Could not load Google Calendar connection. Please try again.'),
+        findsOneWidget,
+      );
+
+      // Only one attempt was made (no retries on 401).
+      expect(hub.resetTransportCallCount, 1);
+
+      // Session state must be intact — no sign-out or empty-state navigation.
+      expect(session.isSignedIn, isTrue);
+      expect(session.bootstrap, isNotNull);
     },
   );
 }

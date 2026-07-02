@@ -48,9 +48,7 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
         .where((s) => s.id == 'portal')
         .firstOrNull;
     if (portal != null && portal.isActive && portal.supportsMeals) return true;
-    return widget.bootstrap.services.any(
-      (s) => s.isActive && s.supportsMeals,
-    );
+    return widget.bootstrap.services.any((s) => s.isActive && s.supportsMeals);
   }
 
   bool get _selectedTabOwnsTopBar {
@@ -115,6 +113,24 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
     ];
   }
 
+  @override
+  void didUpdateWidget(CaleeHomePage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final newIndex = widget.initialSelectedIndex;
+    if (newIndex != oldWidget.initialSelectedIndex && newIndex != 0) {
+      final clamped = newIndex.clamp(0, _tabs.length - 1).toInt();
+      setState(() {
+        _selectedIndex = clamped;
+        if (clamped == _calendarTabIndex) {
+          _calendarRefreshGeneration++;
+        }
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) widget.onInitialTabConsumed?.call();
+      });
+    }
+  }
+
   List<Widget> _buildPages() {
     return [
       TodayPage(
@@ -155,10 +171,7 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
           accountId: widget.bootstrap.account.id,
         ),
       if (_hasMealsService)
-        MealsPage(
-          hubClient: widget.hubClient,
-          accessToken: widget.accessToken,
-        ),
+        MealsPage(hubClient: widget.hubClient, accessToken: widget.accessToken),
       SettingsPage(
         hubClient: widget.hubClient,
         accessToken: widget.accessToken,

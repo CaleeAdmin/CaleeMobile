@@ -153,6 +153,36 @@ ClientChore _incompleteChore() => ClientChore(
   approvalState: 'none',
 );
 
+ClientChore _futureChore() {
+  final tomorrow = DateTime.now().add(const Duration(days: 1));
+  final dateStr =
+      '${tomorrow.year}-${tomorrow.month.toString().padLeft(2, '0')}-${tomorrow.day.toString().padLeft(2, '0')}';
+  return ClientChore(
+    id: 'c-future-1',
+    calendarId: 'svc1:chores1',
+    serviceId: 'svc1',
+    serviceName: 'Test Service',
+    title: 'Future chore',
+    scheduledAt: null,
+    scheduledDate: dateStr,
+    description: null,
+    source: '',
+    kind: 'baseChore',
+    choreUid: 'uid-future-1',
+    parentChoreUid: null,
+    completionLogId: null,
+    completedToday: false,
+    section: 'future',
+    recurrence: null,
+    points: 1,
+    metadataPoints: null,
+    assigneePersonId: null,
+    assigneeName: null,
+    assigneeAvatarColor: null,
+    approvalState: 'none',
+  );
+}
+
 ClientChore _completedChore() => ClientChore(
   id: 'c1',
   calendarId: 'svc1:chores1',
@@ -223,31 +253,104 @@ void main() {
     expect(find.textContaining('All chores ('), findsNothing);
   });
 
-  group('Today section circle tap', () {
-    testWidgets('tapping circle fires onToggleCompletion for incomplete chore', (
+  group('Future section circle tap', () {
+    testWidgets('tapping circle on a tomorrow chore fires completion toggle', (
       tester,
     ) async {
       var tapCount = 0;
+      final chore = _futureChore();
       await tester.pumpWidget(
         MaterialApp(
           theme: CaleeTheme.buildThemeData(),
           home: Scaffold(
             body: ChoreRow(
-              chore: _incompleteChore(),
+              chore: chore,
               calendarName: 'Chores',
               scheduledLabel: '',
               isUpdating: false,
               onToggleCompletion: () => tapCount++,
+              onCircleTap: null,
+              onMoreTap: null,
+              onRowTap: null,
             ),
           ),
         ),
       );
 
-      await tester.tap(find.bySemanticsLabel('Mark chore complete'));
+      await tester.tap(find.byIcon(Icons.radio_button_unchecked));
       await tester.pump();
 
       expect(tapCount, 1);
     });
+
+    testWidgets(
+      'tapping circle on tomorrow chore via ChoresPage fires toggle not action sheet',
+      (tester) async {
+        await tester.pumpWidget(_wrapWithChore(_futureChore()));
+        await tester.pumpAndSettle();
+
+        // The circle for the future chore should trigger completion, not open
+        // the action sheet (which would show 'Edit chore').
+        await tester.tap(find.byIcon(Icons.radio_button_unchecked));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Edit chore'), findsNothing);
+      },
+    );
+
+    testWidgets('tapping row body of tomorrow chore opens action sheet', (
+      tester,
+    ) async {
+      await tester.pumpWidget(_wrapWithChore(_futureChore()));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Future chore'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Edit chore'), findsOneWidget);
+    });
+
+    testWidgets(
+      'incomplete future chore action sheet does not show "Mark done"',
+      (tester) async {
+        await tester.pumpWidget(_wrapWithChore(_futureChore()));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('Future chore'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Mark done'), findsNothing);
+        expect(find.text('Mark as not done'), findsNothing);
+      },
+    );
+  });
+
+  group('Today section circle tap', () {
+    testWidgets(
+      'tapping circle fires onToggleCompletion for incomplete chore',
+      (tester) async {
+        var tapCount = 0;
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: CaleeTheme.buildThemeData(),
+            home: Scaffold(
+              body: ChoreRow(
+                chore: _incompleteChore(),
+                calendarName: 'Chores',
+                scheduledLabel: '',
+                isUpdating: false,
+                onToggleCompletion: () => tapCount++,
+              ),
+            ),
+          ),
+        );
+
+        await tester.tap(find.byIcon(Icons.radio_button_unchecked));
+        await tester.pump();
+
+        expect(tapCount, 1);
+      },
+    );
   });
 
   group('Chore action sheet', () {
@@ -255,6 +358,9 @@ void main() {
       'completed chore shows "Mark as not done" and not "Mark done"',
       (tester) async {
         await tester.pumpWidget(_wrapWithChore(_completedChore()));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('Show completed chores'));
         await tester.pumpAndSettle();
 
         await tester.tap(find.byIcon(Icons.more_horiz));

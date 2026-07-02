@@ -309,6 +309,123 @@ void main() {
     });
   });
 
+  group('CaleeHomePage — one-shot tab command via didUpdateWidget', () {
+    setUp(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(
+            const MethodChannel('plugins.it_nomads.com/flutter_secure_storage'),
+            (call) async => <String, String>{},
+          );
+    });
+
+    tearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(
+            const MethodChannel('plugins.it_nomads.com/flutter_secure_storage'),
+            null,
+          );
+    });
+
+    testWidgets(
+      'changing initialSelectedIndex to Calendar tab after mount selects Calendar tab',
+      (tester) async {
+        await tester.pumpWidget(
+          _buildHome(bootstrap: _noChoresBootstrap(), initialSelectedIndex: 0),
+        );
+        await tester.pump();
+
+        var bar = tester.widget<NavigationBar>(find.byType(NavigationBar));
+        expect(bar.selectedIndex, 0, reason: 'starts on Today tab');
+
+        // Re-pump with a new initialSelectedIndex — simulates CaleeApp setting
+        // _initialHomeTab after Google OAuth return.
+        await tester.pumpWidget(
+          _buildHome(bootstrap: _noChoresBootstrap(), initialSelectedIndex: 1),
+        );
+        await tester.pump();
+
+        bar = tester.widget<NavigationBar>(find.byType(NavigationBar));
+        expect(
+          bar.selectedIndex,
+          1,
+          reason: 'didUpdateWidget must select Calendar tab',
+        );
+      },
+    );
+
+    testWidgets(
+      'CalendarPage receives incremented refreshGeneration after one-shot Calendar command',
+      (tester) async {
+        final hub = _StubHubClient();
+
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: CaleeTheme.buildThemeData(),
+            home: CaleeHomePage(
+              hubClient: hub,
+              accessToken: 'tok',
+              bootstrap: _noChoresBootstrap(),
+              onSignOut: () {},
+              initialSelectedIndex: 0,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final loadCountBefore = hub.calendarLoadCount;
+
+        // Trigger the one-shot command by changing initialSelectedIndex to Calendar.
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: CaleeTheme.buildThemeData(),
+            home: CaleeHomePage(
+              hubClient: hub,
+              accessToken: 'tok',
+              bootstrap: _noChoresBootstrap(),
+              onSignOut: () {},
+              initialSelectedIndex: 1,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(
+          hub.calendarLoadCount,
+          greaterThan(loadCountBefore),
+          reason: 'CalendarPage must reload when refreshGeneration increments',
+        );
+      },
+    );
+
+    testWidgets(
+      'onInitialTabConsumed is called after one-shot tab command via didUpdateWidget',
+      (tester) async {
+        var consumedCount = 0;
+
+        await tester.pumpWidget(
+          _buildHome(
+            bootstrap: _noChoresBootstrap(),
+            initialSelectedIndex: 0,
+            onInitialTabConsumed: () => consumedCount++,
+          ),
+        );
+        await tester.pump();
+        expect(consumedCount, 0, reason: 'not called for index 0 at mount');
+
+        await tester.pumpWidget(
+          _buildHome(
+            bootstrap: _noChoresBootstrap(),
+            initialSelectedIndex: 1,
+            onInitialTabConsumed: () => consumedCount++,
+          ),
+        );
+        await tester.pump();
+
+        expect(consumedCount, 1, reason: 'called once after one-shot command');
+      },
+    );
+  });
+
   group('CaleeHomePage — FAB hero tag uniqueness (static check)', () {
     test('all three FAB hero tags are unique strings', () {
       const tags = [

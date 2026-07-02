@@ -405,9 +405,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
     );
 
     try {
-      final connections = await _hubClient.externalCalendarConnections(
-        accessToken: _sessionController.accessToken!,
-      );
+      final connections = await _loadConnectionsAfterOAuth();
 
       if (!mounted) {
         _openingGoogleCalendarSelection = false;
@@ -449,7 +447,6 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
         'found connection id=${connection.id}',
       );
       final resolvedConnection = connection;
-      await _sessionController.refreshBootstrap();
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _openingGoogleCalendarSelection = false;
         if (!mounted) return;
@@ -496,6 +493,50 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
         'Could not load Google Calendar connection. Please try again.',
       );
     }
+  }
+
+  /// Loads external calendar connections after an OAuth return, with a
+  /// transport reset before the first attempt and up to 3 attempts total on
+  /// transient transport failures (e.g. stale HttpClient after returning from
+  /// Chrome).
+  Future<List<ExternalCalendarConnection>> _loadConnectionsAfterOAuth() async {
+    const maxAttempts = 3;
+    final delays = [
+      Duration(milliseconds: 300),
+      Duration(milliseconds: 800),
+    ];
+
+    for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+      debugPrint(
+        '[CaleeApp] _loadConnectionsAfterOAuth: '
+        'attempt $attempt/$maxAttempts, resetting transport',
+      );
+      _hubClient.resetTransport();
+      try {
+        return await _hubClient.externalCalendarConnections(
+          accessToken: _sessionController.accessToken!,
+        );
+      } catch (error) {
+        final transient = _isTransientPostOAuthError(error);
+        debugPrint(
+          '[CaleeApp] _loadConnectionsAfterOAuth: '
+          'attempt $attempt failed '
+          '(transient=$transient, error=$error)',
+        );
+        if (!transient || attempt == maxAttempts) rethrow;
+        await Future<void>.delayed(delays[attempt - 1]);
+      }
+    }
+    // Unreachable: the loop either returns or rethrows.
+    throw StateError('unreachable');
+  }
+
+  bool _isTransientPostOAuthError(Object error) {
+    if (error is CaleeHubException) {
+      return error.statusCode == 0 &&
+          (error.code == 'NETWORK_ERROR' || error.code == 'TIMEOUT');
+    }
+    return false;
   }
 
   void _openDisplaySetupConfirmation(DisplaySetupIntent intent) {
