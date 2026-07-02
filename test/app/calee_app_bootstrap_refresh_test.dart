@@ -51,12 +51,12 @@ ClientBootstrap _stubBootstrap() => const ClientBootstrap(
 /// directly.
 class _FakeSessionController extends SessionController {
   _FakeSessionController()
-    : super(
-        repository: AuthRepository(
-          hubClient: CaleeHubClient(),
-          sessionStore: SessionStore(),
-        ),
-      );
+      : super(
+          repository: AuthRepository(
+            hubClient: CaleeHubClient(),
+            sessionStore: SessionStore(),
+          ),
+        );
 
   @override
   Future<void> restoreSession() async {}
@@ -142,7 +142,7 @@ class _FakeExternalCalendarConnectedLinkController
 /// A DisplayActivationController that always succeeds without a network call.
 class _SucceedingActivationController extends DisplayActivationController {
   _SucceedingActivationController()
-    : super(repository: DisplaySetupRepository(hubClient: CaleeHubClient()));
+      : super(repository: DisplaySetupRepository(hubClient: CaleeHubClient()));
 
   @override
   Future<bool> activate({
@@ -172,8 +172,8 @@ const _kActiveGoogleConnection = ExternalCalendarConnection(
 /// If the call count exceeds the list, the last entry is repeated.
 class _FakeHubClient extends CaleeHubClient {
   _FakeHubClient({List<Object>? connectionsResponses})
-    : _connectionsResponses =
-          connectionsResponses ?? const [[_kActiveGoogleConnection]];
+      : _connectionsResponses =
+            connectionsResponses ?? const [[_kActiveGoogleConnection]];
 
   final List<Object> _connectionsResponses;
   int _connectionsCallCount = 0;
