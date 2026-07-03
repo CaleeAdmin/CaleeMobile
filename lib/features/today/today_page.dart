@@ -16,6 +16,7 @@ class TodayPage extends StatefulWidget {
     required this.accessToken,
     required this.services,
     required this.households,
+    required this.isFamilyUxContext,
     this.onNavigateToCalendar,
     this.onNavigateToTasks,
     this.onNavigateToChores,
@@ -27,6 +28,7 @@ class TodayPage extends StatefulWidget {
   final String accessToken;
   final List<ClientService> services;
   final List<ClientContext> households;
+  final bool isFamilyUxContext;
   final VoidCallback? onNavigateToCalendar;
   final VoidCallback? onNavigateToTasks;
   final VoidCallback? onNavigateToChores;
@@ -44,9 +46,12 @@ class _TodayPageState extends State<TodayPage> {
   TodayOverview? _overview;
   Object? _fatalError;
 
-  bool get _hasChoreService => widget.services.any((s) => s.supportsChores);
+  bool get _hasChoreService =>
+      widget.isFamilyUxContext &&
+      widget.services.any((s) => s.isActive && s.supportsChores);
 
   bool get _hasMealsService {
+    if (!widget.isFamilyUxContext) return false;
     final portal = widget.services.where((s) => s.id == 'portal').firstOrNull;
     if (portal != null && portal.isActive && portal.supportsMeals) return true;
     return widget.services.any((s) => s.isActive && s.supportsMeals);
@@ -60,6 +65,7 @@ class _TodayPageState extends State<TodayPage> {
       accessToken: widget.accessToken,
       services: widget.services,
       households: widget.households,
+      isFamilyUxContext: widget.isFamilyUxContext,
     );
     _load();
   }

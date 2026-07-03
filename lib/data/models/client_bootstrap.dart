@@ -45,6 +45,18 @@ class ClientBootstrap {
   bool get supportsMealTemplates =>
       capabilities['mealTemplates'] == true || supportsMeals;
 
+  bool get hasActiveHouseholdContext =>
+      contexts.households.any((c) => c.status == 'active' || c.status.isEmpty);
+
+  bool get hasActiveOrganisationContext => contexts.organisations.any(
+    (c) => c.status == 'active' || c.status.isEmpty,
+  );
+
+  // UX-only: hide family modules (Chores, Meals) for organisation/workspace users.
+  // Do not treat organisation context users as family by default.
+  bool get isFamilyUxContext =>
+      hasActiveHouseholdContext && !hasActiveOrganisationContext;
+
   /// Server-reported readiness flags. Keys: calendarServiceReady (bool),
   /// problem (String?). Absent on older backends — treat missing as ready.
   final Map<String, dynamic> readiness;
