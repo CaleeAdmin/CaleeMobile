@@ -21,17 +21,21 @@ class TodayRepository {
     required this.accessToken,
     required this.services,
     required this.households,
+    required this.isFamilyUxContext,
   });
 
   final CaleeHubClient hubClient;
   final String accessToken;
   final List<ClientService> services;
   final List<ClientContext> households;
+  final bool isFamilyUxContext;
 
-  bool get _hasChoreService => services.any((s) => s.supportsChores);
+  bool get _hasChoreService =>
+      isFamilyUxContext && services.any((s) => s.isActive && s.supportsChores);
 
   // Prefer service id "portal"; fall back to first active service with meals.
   bool get _hasMealsService {
+    if (!isFamilyUxContext) return false;
     final portal = services.where((s) => s.id == 'portal').firstOrNull;
     if (portal != null && portal.isActive && portal.supportsMeals) return true;
     return services.any((s) => s.isActive && s.supportsMeals);

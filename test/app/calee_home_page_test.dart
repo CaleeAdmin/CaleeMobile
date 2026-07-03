@@ -81,13 +81,61 @@ ClientBootstrap _choresBootstrap() => ClientBootstrap(
       baseUrl: 'http://localhost',
       launchUrl: 'http://localhost',
       serviceType: 'nextcloud',
-      accessStatus: 'ok',
+      accessStatus: 'active',
       calendarCredentialStatus: 'connected',
       source: 'test',
       capabilities: {'calendar': true, 'tasks': true, 'chores': true},
     ),
   ],
-  contexts: const ClientContexts(households: [], organisations: []),
+  contexts: const ClientContexts(
+    households: [
+      ClientContext(
+        id: 'hh1',
+        type: 'household',
+        name: 'Test Family',
+        role: 'admin',
+        status: 'active',
+      ),
+    ],
+    organisations: [],
+  ),
+  availableContexts: const [],
+  capabilities: const {},
+);
+
+ClientBootstrap _businessBootstrap() => ClientBootstrap(
+  account: const ClientAccount(
+    id: 'u2',
+    displayName: 'Work User',
+    primaryEmail: 'work@example.com',
+    timeZone: 'Australia/Perth',
+    status: 'active',
+  ),
+  services: const [
+    ClientService(
+      id: 'svc2',
+      displayName: 'Work Service',
+      baseUrl: 'http://localhost',
+      launchUrl: 'http://localhost',
+      serviceType: 'nextcloud',
+      accessStatus: 'active',
+      calendarCredentialStatus: 'connected',
+      source: 'test',
+      capabilities: {'calendar': true, 'tasks': true, 'chores': true, 'meals': true},
+    ),
+  ],
+  contexts: const ClientContexts(
+    households: [],
+    organisations: [
+      ClientContext(
+        id: 'org1',
+        type: 'organisation',
+        name: 'Acme Corp',
+        role: 'member',
+        status: 'active',
+      ),
+    ],
+  ),
   availableContexts: const [],
   capabilities: const {},
 );
@@ -424,6 +472,62 @@ void main() {
         expect(consumedCount, 1, reason: 'called once after one-shot command');
       },
     );
+  });
+
+  group('CaleeHomePage — family UX context visibility', () {
+    testWidgets('Chores tab hidden for business/workspace user even with chores service', (
+      tester,
+    ) async {
+      await tester.pumpWidget(_buildHome(bootstrap: _businessBootstrap()));
+      await tester.pump();
+
+      final bar = find.byType(NavigationBar);
+      final destinations = find.descendant(
+        of: bar,
+        matching: find.byType(NavigationDestination),
+      );
+      final labels = tester
+          .widgetList<NavigationDestination>(destinations)
+          .map((d) => d.label)
+          .toList();
+      expect(labels.contains('Chores'), isFalse);
+    });
+
+    testWidgets('Meals tab hidden for business/workspace user even with meals service', (
+      tester,
+    ) async {
+      await tester.pumpWidget(_buildHome(bootstrap: _businessBootstrap()));
+      await tester.pump();
+
+      final bar = find.byType(NavigationBar);
+      final destinations = find.descendant(
+        of: bar,
+        matching: find.byType(NavigationDestination),
+      );
+      final labels = tester
+          .widgetList<NavigationDestination>(destinations)
+          .map((d) => d.label)
+          .toList();
+      expect(labels.contains('Meals'), isFalse);
+    });
+
+    testWidgets('Chores tab appears for family user with chores service', (
+      tester,
+    ) async {
+      await tester.pumpWidget(_buildHome(bootstrap: _choresBootstrap()));
+      await tester.pump();
+
+      final bar = find.byType(NavigationBar);
+      final destinations = find.descendant(
+        of: bar,
+        matching: find.byType(NavigationDestination),
+      );
+      final labels = tester
+          .widgetList<NavigationDestination>(destinations)
+          .map((d) => d.label)
+          .toList();
+      expect(labels.contains('Chores'), isTrue);
+    });
   });
 
   group('CaleeHomePage — FAB hero tag uniqueness (static check)', () {
