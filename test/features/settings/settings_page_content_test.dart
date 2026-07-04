@@ -41,13 +41,38 @@ ClientBootstrap _bootstrap() => ClientBootstrap(
   capabilities: const {},
 );
 
-Widget _wrap() => MaterialApp(
+ClientBootstrap _businessBootstrap() => ClientBootstrap(
+  account: const ClientAccount(
+    id: 'u2',
+    displayName: 'Work User',
+    primaryEmail: 'work@example.com',
+    timeZone: 'Australia/Perth',
+    status: 'active',
+  ),
+  services: const [],
+  contexts: const ClientContexts(
+    households: [],
+    organisations: [
+      ClientContext(
+        id: 'org1',
+        type: 'organisation',
+        name: 'Acme Corp',
+        role: 'member',
+        status: 'active',
+      ),
+    ],
+  ),
+  availableContexts: const [],
+  capabilities: const {},
+);
+
+Widget _wrap({ClientBootstrap? bootstrap}) => MaterialApp(
   theme: CaleeTheme.buildThemeData(),
   home: Scaffold(
     body: SettingsPage(
       hubClient: _StubHubClient(),
       accessToken: 'tok',
-      bootstrap: _bootstrap(),
+      bootstrap: bootstrap ?? _bootstrap(),
       onSignOut: () {},
     ),
   ),
@@ -139,5 +164,25 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Where is your calendar?'), findsOneWidget);
+  });
+
+  group('People row — business/workspace visibility', () {
+    testWidgets('Settings shows "People" row for household/default user', (
+      tester,
+    ) async {
+      await tester.pumpWidget(_wrap());
+      await tester.pumpAndSettle();
+
+      expect(find.text('People'), findsOneWidget);
+    });
+
+    testWidgets('Settings hides "People" row for business/workspace user', (
+      tester,
+    ) async {
+      await tester.pumpWidget(_wrap(bootstrap: _businessBootstrap()));
+      await tester.pumpAndSettle();
+
+      expect(find.text('People'), findsNothing);
+    });
   });
 }
