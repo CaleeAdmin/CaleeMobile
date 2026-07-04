@@ -392,11 +392,18 @@ class _ShoppingPageState extends State<ShoppingPage> {
             : () => _controller.toggleChecked(item.id);
 
         return CaleeListRow(
-          leading: CaleeCheckCircle(
-            isChecked: item.checked,
-            isLoading: isPending,
-            onTap: onToggle,
-            size: 28,
+          leading: Semantics(
+            label: item.checked
+                ? 'Mark ${item.name} as not bought'
+                : 'Mark ${item.name} as bought',
+            button: true,
+            excludeSemantics: true,
+            child: CaleeCheckCircle(
+              isChecked: item.checked,
+              isLoading: isPending,
+              onTap: onToggle,
+              size: 28,
+            ),
           ),
           title: item.name,
           subtitle: _itemSubtitle(item),
