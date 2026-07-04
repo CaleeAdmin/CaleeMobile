@@ -11,6 +11,8 @@ class CaleePreferences {
   static const _defaultCalendarIdKey = 'calee_pref_default_calendar_id';
   static const _defaultTaskListIdKey = 'calee_pref_default_task_list_id';
 
+  static const _calendarRemindersEnabledKey =
+      'calee_pref_calendar_reminders_enabled';
   static const _migrationDoneKey = 'calee_pref_migrated_to_shared_prefs';
 
   // ── Load all ─────────────────────────────────────────────────────────────
@@ -59,6 +61,26 @@ class CaleePreferences {
       await prefs.remove(_defaultTaskListIdKey);
     } else {
       await prefs.setString(_defaultTaskListIdKey, taskListId);
+    }
+  }
+
+  // ── Calendar reminders ────────────────────────────────────────────────────
+
+  Future<bool> loadCalendarRemindersEnabled() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getBool(_calendarRemindersEnabledKey) ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> saveCalendarRemindersEnabled(bool enabled) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_calendarRemindersEnabledKey, enabled);
+    } catch (_) {
+      // Best-effort.
     }
   }
 

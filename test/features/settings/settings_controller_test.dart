@@ -14,6 +14,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 class _StubPreferences extends CaleePreferences {
   StoredPreferences _stored = const StoredPreferences();
+  bool _remindersEnabled = false;
 
   void seed(StoredPreferences value) => _stored = value;
 
@@ -58,6 +59,14 @@ class _StubPreferences extends CaleePreferences {
       defaultCalendarId: _stored.defaultCalendarId,
       defaultTaskListId: calendarId,
     );
+  }
+
+  @override
+  Future<bool> loadCalendarRemindersEnabled() async => _remindersEnabled;
+
+  @override
+  Future<void> saveCalendarRemindersEnabled(bool enabled) async {
+    _remindersEnabled = enabled;
   }
 }
 
