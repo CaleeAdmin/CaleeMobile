@@ -470,24 +470,27 @@ class _SettingsPageState extends State<SettingsPage> {
                 );
               },
             ),
-            CaleeListRow(
-              title: 'People',
-              subtitle: isOpeningFamily
-                  ? 'Preparing people…'
-                  : 'Manage people for tasks and chores',
-              leading: isOpeningFamily
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(
-                      Icons.group_outlined,
-                      size: 20,
-                      color: CaleeColors.primary,
-                    ),
-              onTap: isOpeningFamily ? null : _openFamilyMembers,
-            ),
+            // UX-only: hide People (household/family member management) for
+            // organisation/workspace users, matching Chores/Meals gating.
+            if (!_controller.bootstrap.hasActiveOrganisationContext)
+              CaleeListRow(
+                title: 'People',
+                subtitle: isOpeningFamily
+                    ? 'Preparing people…'
+                    : 'Manage people for tasks and chores',
+                leading: isOpeningFamily
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(
+                        Icons.group_outlined,
+                        size: 20,
+                        color: CaleeColors.primary,
+                      ),
+                onTap: isOpeningFamily ? null : _openFamilyMembers,
+              ),
           ],
         ),
 
