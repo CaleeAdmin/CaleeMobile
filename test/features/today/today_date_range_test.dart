@@ -75,13 +75,17 @@ ClientService _calendarService() => const ClientService(
   capabilities: {'calendar': true, 'tasks': true},
 );
 
-TodayRepository _repo(CaleeHubClient client, {List<ClientService>? services}) =>
-    TodayRepository(
-      hubClient: client,
-      accessToken: 'token',
-      services: services ?? [_calendarService()],
-      households: const [],
-    );
+TodayRepository _repo(
+  CaleeHubClient client, {
+  List<ClientService>? services,
+  bool isFamilyUxContext = false,
+}) => TodayRepository(
+  hubClient: client,
+  accessToken: 'token',
+  services: services ?? [_calendarService()],
+  households: const [],
+  isFamilyUxContext: isFamilyUxContext,
+);
 
 ClientTask _task({required String id, required String dueAt}) => ClientTask(
   id: id,
@@ -110,6 +114,8 @@ ClientChore _chore({required String id, required String section}) =>
       kind: 'baseChore',
       choreUid: id,
       parentChoreUid: null,
+      baseChoreId: null,
+      occurrenceDate: null,
       completionLogId: null,
       completedToday: false,
       section: section,
@@ -153,7 +159,11 @@ void main() {
   group('TodayRepository — chore date range', () {
     test('requests chores from current year Jan 1 to Dec 31', () async {
       final client = _CapturingClient();
-      final repo = _repo(client, services: [_choreService()]);
+      final repo = _repo(
+        client,
+        services: [_choreService()],
+        isFamilyUxContext: true,
+      );
       await repo.loadToday();
 
       final year = DateTime.now().year;
@@ -164,7 +174,11 @@ void main() {
     test('overdue chore (section=overdue) appears in overdueChores', () async {
       final client = _CapturingClient()
         ..choresToReturn = [_chore(id: 'c1', section: 'overdue')];
-      final repo = _repo(client, services: [_choreService()]);
+      final repo = _repo(
+        client,
+        services: [_choreService()],
+        isFamilyUxContext: true,
+      );
       final overview = await repo.loadToday();
 
       expect(overview.overdueChores.length, 1);
@@ -189,7 +203,11 @@ void main() {
 
       // Override tasks to fail
       final failingClient = _FailTasksClient(client);
-      final repo = _repo(failingClient, services: [_choreService()]);
+      final repo = _repo(
+        failingClient,
+        services: [_choreService()],
+        isFamilyUxContext: true,
+      );
       final overview = await repo.loadToday();
 
       expect(overview.tasksError, isNotNull);

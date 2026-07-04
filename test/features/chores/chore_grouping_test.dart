@@ -17,6 +17,10 @@ ClientChore _chore({
   String title = 'Test chore',
   String kind = 'baseChore',
   bool completedToday = false,
+  String? choreUid,
+  String? parentChoreUid,
+  String? baseChoreId,
+  String? occurrenceDate,
 }) {
   return ClientChore(
     id: id,
@@ -29,8 +33,10 @@ ClientChore _chore({
     description: null,
     source: '',
     kind: kind,
-    choreUid: id,
-    parentChoreUid: null,
+    choreUid: choreUid ?? id,
+    parentChoreUid: parentChoreUid,
+    baseChoreId: baseChoreId,
+    occurrenceDate: occurrenceDate,
     completionLogId: null,
     completedToday: completedToday,
     section: section,
@@ -65,6 +71,66 @@ void main() {
 
       expect(chore.completionActionId, 'chore-1');
       expect(chore.canToggleCompletion, isTrue);
+    });
+
+    test('completionLog done today can still be toggled (undone)', () {
+      final chore = _chore(
+        id: 'log-1',
+        kind: 'completionLog',
+        choreUid: 'uid-1',
+        section: 'doneToday',
+        completedToday: true,
+      );
+
+      expect(chore.canToggleCompletion, isTrue);
+    });
+
+    test('completionLog in history cannot be toggled', () {
+      final chore = _chore(
+        id: 'log-1',
+        kind: 'completionLog',
+        choreUid: 'uid-1',
+        section: 'history',
+      );
+
+      expect(chore.canToggleCompletion, isFalse);
+    });
+
+    test('completionActionId prefers baseChoreId for a virtual occurrence '
+        'row over the (non-CalDAV) occurrence id', () {
+      final chore = _chore(
+        id: 'portal:abc123:2026-07-05',
+        choreUid: 'abc123',
+        baseChoreId: 'portal:abc123',
+        occurrenceDate: '2026-07-05',
+      );
+
+      expect(chore.completionActionId, 'portal:abc123');
+      expect(chore.effectiveOccurrenceDate, '2026-07-05');
+    });
+
+    test('completionActionId falls back to id for a baseChore row without '
+        'baseChoreId (pre-expansion payload shape)', () {
+      final chore = _chore(id: 'portal:abc123', choreUid: 'abc123');
+
+      expect(chore.completionActionId, 'portal:abc123');
+    });
+
+    test('effectiveOccurrenceDate falls back through occurrenceDate, '
+        'scheduledDate, scheduledAt, and strips any time-of-day suffix', () {
+      expect(
+        _chore(occurrenceDate: '2026-07-05').effectiveOccurrenceDate,
+        '2026-07-05',
+      );
+      expect(
+        _chore(scheduledDate: '2026-07-06').effectiveOccurrenceDate,
+        '2026-07-06',
+      );
+      expect(
+        _chore(scheduledAt: '2026-07-07T10:00:00Z').effectiveOccurrenceDate,
+        '2026-07-07',
+      );
+      expect(_chore().effectiveOccurrenceDate, isNull);
     });
   });
 
@@ -228,6 +294,231 @@ void main() {
       expect(groups['todoToday'], contains(chore));
       expect(groups.containsKey('doneToday'), isFalse);
     });
+
+    // choreUid dedup between a baseChore row and its completionLog ─────────
+
+    test('baseChore is suppressed from todoToday when a same-choreUid '
+        'completionLog is done today', () {
+      final base = _chore(
+        id: 'base-1',
+        choreUid: 'uid-1',
+        section: 'future',
+        recurrence: 'FREQ=DAILY',
+      );
+      final log = _chore(
+        id: 'log-1',
+        kind: 'completionLog',
+        choreUid: 'uid-1',
+        section: 'doneToday',
+        completedToday: true,
+      );
+
+      final groups = groupChoresBySection([base, log], _monday);
+
+      expect(groups['doneToday'], [log]);
+      expect(groups.containsKey('todoToday'), isFalse);
+    });
+
+    test('baseChore is suppressed from overdue when a same-choreUid '
+        'completionLog shares its occurrence date', () {
+      final yesterday = _monday.subtract(const Duration(days: 1));
+      final overdueDate =
+          '${yesterday.year}-${yesterday.month.toString().padLeft(2, '0')}-${yesterday.day.toString().padLeft(2, '0')}';
+      final base = _chore(
+        id: 'base-1',
+        choreUid: 'uid-1',
+        section: 'future',
+        scheduledDate: overdueDate,
+      );
+      final log = _chore(
+        id: 'log-1',
+        kind: 'completionLog',
+        choreUid: 'uid-1',
+        section: 'doneToday',
+        completedToday: true,
+        scheduledDate: overdueDate,
+      );
+
+      final groups = groupChoresBySection([base, log], _monday);
+
+      expect(groups['doneToday'], [log]);
+      expect(groups.containsKey('overdue'), isFalse);
+    });
+
+    test('baseChore is NOT suppressed from overdue by a same-choreUid '
+        'completionLog for a different occurrence date — matching must be '
+        'uid AND date, not uid alone', () {
+      final yesterday = _monday.subtract(const Duration(days: 1));
+      final overdueDate =
+          '${yesterday.year}-${yesterday.month.toString().padLeft(2, '0')}-${yesterday.day.toString().padLeft(2, '0')}';
+      final base = _chore(
+        id: 'base-1',
+        choreUid: 'uid-1',
+        section: 'future',
+        scheduledDate: overdueDate,
+      );
+      // Done today, but for a different date than the overdue row above.
+      final log = _chore(
+        id: 'log-1',
+        kind: 'completionLog',
+        choreUid: 'uid-1',
+        section: 'doneToday',
+        completedToday: true,
+        scheduledDate: '2026-06-01', // _monday itself
+      );
+
+      final groups = groupChoresBySection([base, log], _monday);
+
+      expect(groups['doneToday'], [log]);
+      expect(groups['overdue'], [base]);
+    });
+
+    test('completionLog matched via parentChoreUid also suppresses the '
+        "matching baseChore's row", () {
+      final base = _chore(
+        id: 'base-1',
+        choreUid: 'uid-1',
+        section: 'future',
+        recurrence: 'FREQ=DAILY',
+      );
+      final log = ClientChore(
+        id: 'log-1',
+        calendarId: 'cal1',
+        serviceId: 'portal',
+        serviceName: 'Portal',
+        title: 'Test chore',
+        scheduledAt: null,
+        scheduledDate: null,
+        description: null,
+        source: '',
+        kind: 'completionLog',
+        choreUid: null,
+        parentChoreUid: 'uid-1',
+        baseChoreId: null,
+        occurrenceDate: null,
+        completionLogId: 'log-1',
+        completedToday: true,
+        section: 'doneToday',
+        recurrence: null,
+        points: 1,
+        metadataPoints: null,
+        assigneePersonId: null,
+        assigneeName: null,
+        assigneeAvatarColor: null,
+        approvalState: 'none',
+      );
+
+      final groups = groupChoresBySection([base, log], _monday);
+
+      expect(groups['doneToday'], [log]);
+      expect(groups.containsKey('todoToday'), isFalse);
+    });
+
+    test('baseChore with a distinct future scheduledDate is not suppressed by '
+        "today's completionLog for the same choreUid", () {
+      final nextWeek = _monday.add(const Duration(days: 7));
+      final nextWeekDate =
+          '${nextWeek.year}-${nextWeek.month.toString().padLeft(2, '0')}-${nextWeek.day.toString().padLeft(2, '0')}';
+      final base = _chore(
+        id: 'base-1',
+        choreUid: 'uid-1',
+        section: 'future',
+        scheduledDate: nextWeekDate,
+        recurrence: 'FREQ=WEEKLY',
+      );
+      final log = _chore(
+        id: 'log-1',
+        kind: 'completionLog',
+        choreUid: 'uid-1',
+        section: 'doneToday',
+        completedToday: true,
+      );
+
+      final groups = groupChoresBySection([base, log], _monday);
+
+      expect(groups['doneToday'], [log]);
+      expect(groups['later'], [base]);
+    });
+
+    test('two active occurrence rows with the same choreUid on different '
+        'dates both remain visible (today + tomorrow, not collapsed into '
+        'one row)', () {
+      final today = _chore(
+        id: 'portal:abc123:2026-07-04',
+        choreUid: 'abc123',
+        baseChoreId: 'portal:abc123',
+        occurrenceDate: '2026-07-04',
+        section: 'todoToday',
+        recurrence: 'FREQ=DAILY',
+      );
+      final tomorrow = _chore(
+        id: 'portal:abc123:2026-07-05',
+        choreUid: 'abc123',
+        baseChoreId: 'portal:abc123',
+        occurrenceDate: '2026-07-05',
+        section: 'future',
+        recurrence: 'FREQ=DAILY',
+      );
+
+      final groups = groupChoresBySection([
+        today,
+        tomorrow,
+      ], DateTime(2026, 7, 4));
+
+      expect(groups['todoToday'], contains(today));
+      expect(groups['tomorrow'], contains(tomorrow));
+    });
+
+    test('a completion log for today does not hide a different-dated active '
+        'occurrence of the same recurring chore (tomorrow stays visible '
+        'after completing today)', () {
+      final tomorrowActive = _chore(
+        id: 'portal:abc123:2026-07-05',
+        choreUid: 'abc123',
+        baseChoreId: 'portal:abc123',
+        occurrenceDate: '2026-07-05',
+        section: 'future',
+        recurrence: 'FREQ=DAILY',
+      );
+      final todayLog = _chore(
+        id: 'log-1',
+        kind: 'completionLog',
+        choreUid: 'abc123',
+        section: 'doneToday',
+        completedToday: true,
+        scheduledDate: '2026-07-04',
+      );
+
+      final groups = groupChoresBySection([
+        tomorrowActive,
+        todayLog,
+      ], DateTime(2026, 7, 4));
+
+      expect(groups['doneToday'], [todayLog]);
+      expect(groups['tomorrow'], [tomorrowActive]);
+    });
+
+    test('two different recurring chores due today do not cross-suppress '
+        'each other', () {
+      final baseA = _chore(
+        id: 'a',
+        choreUid: 'uid-a',
+        section: 'future',
+        recurrence: 'FREQ=DAILY',
+      );
+      final logB = _chore(
+        id: 'b-log',
+        kind: 'completionLog',
+        choreUid: 'uid-b',
+        section: 'doneToday',
+        completedToday: true,
+      );
+
+      final groups = groupChoresBySection([baseA, logB], _monday);
+
+      expect(groups['todoToday'], [baseA]);
+      expect(groups['doneToday'], [logB]);
+    });
   });
 
   // ── compareChores ────────────────────────────────────────────────────────
@@ -319,14 +610,14 @@ void main() {
       expect(parts, ['Mia', 'Chores']);
     });
 
-    test('active unassigned chore shows "Unassigned"', () {
+    test('active unassigned chore shows "For everyone"', () {
       final chore = _chore(points: 1);
       final parts = choreSubtitleParts(
         chore: chore,
         calendarName: 'Chores',
         scheduledLabel: '',
       );
-      expect(parts.first, 'Unassigned');
+      expect(parts.first, 'For everyone');
     });
 
     test('active chore without recurrence omits repeat label and pts', () {
@@ -423,19 +714,19 @@ void main() {
         expect(parts, contains('Kids chores'));
         // Repeat label must not appear for a completed chore row
         expect(parts, isNot(contains('Daily')));
-        // 'Unassigned' must not appear when assignee is set
-        expect(parts, isNot(contains('Unassigned')));
+        // 'For everyone' must not appear when assignee is set
+        expect(parts, isNot(contains('For everyone')));
       },
     );
   });
 
-  // ── points badge pluralisation ───────────────────────────────────────────
+  // ── stars badge pluralisation ────────────────────────────────────────────
 
-  String ptLabel(int points) => '$points ${points == 1 ? 'pt' : 'pts'}';
+  String ptLabel(int points) => '$points ${points == 1 ? 'star' : 'stars'}';
 
-  group('points badge label pluralisation', () {
-    test('1 point → "1 pt"', () => expect(ptLabel(1), '1 pt'));
-    test('2 points → "2 pts"', () => expect(ptLabel(2), '2 pts'));
-    test('100 points → "100 pts"', () => expect(ptLabel(100), '100 pts'));
+  group('stars badge label pluralisation', () {
+    test('1 star → "1 star"', () => expect(ptLabel(1), '1 star'));
+    test('2 stars → "2 stars"', () => expect(ptLabel(2), '2 stars'));
+    test('100 stars → "100 stars"', () => expect(ptLabel(100), '100 stars'));
   });
 }

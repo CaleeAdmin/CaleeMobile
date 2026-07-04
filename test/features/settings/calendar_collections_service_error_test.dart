@@ -57,6 +57,7 @@ Widget _wrap(_StubHubClient client) => MaterialApp(
     accessToken: 'tok',
     services: [_calendarService()],
     accountId: 'acct1',
+    isFamilyUxContext: true,
   ),
 );
 

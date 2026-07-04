@@ -141,6 +141,8 @@ ClientChore _incompleteChore() => ClientChore(
   kind: 'baseChore',
   choreUid: 'uid-1',
   parentChoreUid: null,
+  baseChoreId: null,
+  occurrenceDate: null,
   completionLogId: null,
   completedToday: false,
   section: 'todoToday',
@@ -170,6 +172,8 @@ ClientChore _futureChore() {
     kind: 'baseChore',
     choreUid: 'uid-future-1',
     parentChoreUid: null,
+    baseChoreId: null,
+    occurrenceDate: null,
     completionLogId: null,
     completedToday: false,
     section: 'future',
@@ -196,10 +200,39 @@ ClientChore _completedChore() => ClientChore(
   kind: 'baseChore',
   choreUid: 'uid-1',
   parentChoreUid: null,
+  baseChoreId: null,
+  occurrenceDate: null,
   completionLogId: null,
   completedToday: true,
   section: 'todoToday',
   recurrence: null,
+  points: 1,
+  metadataPoints: null,
+  assigneePersonId: null,
+  assigneeName: null,
+  assigneeAvatarColor: null,
+  approvalState: 'none',
+);
+
+ClientChore _completedLogChore() => ClientChore(
+  id: 'log-1',
+  calendarId: 'svc1:chores1',
+  serviceId: 'svc1',
+  serviceName: 'Test Service',
+  title: 'Wash dishes',
+  scheduledAt: null,
+  scheduledDate: null,
+  description: null,
+  source: '',
+  kind: 'completionLog',
+  choreUid: null,
+  parentChoreUid: 'uid-1',
+  baseChoreId: null,
+  occurrenceDate: null,
+  completionLogId: 'log-1',
+  completedToday: true,
+  section: 'doneToday',
+  recurrence: 'FREQ=DAILY',
   points: 1,
   metadataPoints: null,
   assigneePersonId: null,
@@ -284,17 +317,17 @@ void main() {
     });
 
     testWidgets(
-      'tapping circle on tomorrow chore via ChoresPage fires toggle not action sheet',
+      'tapping circle on tomorrow chore via ChoresPage opens action sheet, not completion',
       (tester) async {
         await tester.pumpWidget(_wrapWithChore(_futureChore()));
         await tester.pumpAndSettle();
 
-        // The circle for the future chore should trigger completion, not open
-        // the action sheet (which would show 'Edit chore').
+        // Future chores must not be completable from the check-circle. Tapping
+        // it should only open the actions sheet (shown here by 'Edit chore').
         await tester.tap(find.byIcon(Icons.radio_button_unchecked));
         await tester.pumpAndSettle();
 
-        expect(find.text('Edit chore'), findsNothing);
+        expect(find.text('Edit chore'), findsOneWidget);
       },
     );
 
@@ -395,5 +428,22 @@ void main() {
       expect(find.text('Delete chore'), findsNothing);
       expect(find.text('Delete permanently'), findsNothing);
     });
+
+    testWidgets(
+      'completionLog done today shows "Mark as not done" but not "Edit chore"',
+      (tester) async {
+        await tester.pumpWidget(_wrapWithChore(_completedLogChore()));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('Show completed chores'));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byIcon(Icons.more_horiz));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Mark as not done'), findsOneWidget);
+        expect(find.text('Edit chore'), findsNothing);
+      },
+    );
   });
 }

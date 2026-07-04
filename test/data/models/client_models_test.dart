@@ -40,6 +40,7 @@ ClientTask _task(String status) => ClientTask(
 
 void main() {
   _capabilityTests();
+  _bootstrapFamilyUxContextTests();
   _bootstrapMealsCapabilityTests();
   _deletedItemsModelTests();
   _clientCalDavAccountTests();
@@ -198,6 +199,215 @@ void _capabilityTests() {
 
     test('returns false when meals capability is false', () {
       expect(_svc({'meals': false}).supportsMeals, isFalse);
+    });
+  });
+}
+
+ClientBootstrap _bootstrapWithContexts({
+  List<ClientContext> households = const [],
+  List<ClientContext> organisations = const [],
+  List<ClientService> services = const [],
+  String? experienceMode,
+}) => ClientBootstrap(
+  account: const ClientAccount(
+    id: '',
+    displayName: null,
+    primaryEmail: null,
+    timeZone: null,
+    status: null,
+  ),
+  services: services,
+  contexts: ClientContexts(
+    households: households,
+    organisations: organisations,
+  ),
+  availableContexts: const [],
+  capabilities: const {},
+  experienceMode: experienceMode,
+);
+
+ClientService _activeService(String id) => ClientService(
+  id: id,
+  displayName: id,
+  baseUrl: '',
+  launchUrl: '',
+  serviceType: '',
+  accessStatus: 'active',
+  calendarCredentialStatus: 'unsupported',
+  source: '',
+  capabilities: const {},
+);
+
+const _activeHousehold = ClientContext(
+  id: 'hh1',
+  type: 'household',
+  name: 'Family',
+  role: 'admin',
+  status: 'active',
+);
+
+const _activeOrg = ClientContext(
+  id: 'org1',
+  type: 'organisation',
+  name: 'Corp',
+  role: 'member',
+  status: 'active',
+);
+
+void _bootstrapFamilyUxContextTests() {
+  group('ClientBootstrap.hasActiveHouseholdContext', () {
+    test('returns true when household status is active', () {
+      final b = _bootstrapWithContexts(households: [_activeHousehold]);
+      expect(b.hasActiveHouseholdContext, isTrue);
+    });
+
+    test('returns true when household status is empty string', () {
+      const emptyStatusHousehold = ClientContext(
+        id: 'hh2',
+        type: 'household',
+        name: 'Family',
+        role: 'member',
+        status: '',
+      );
+      final b = _bootstrapWithContexts(households: [emptyStatusHousehold]);
+      expect(b.hasActiveHouseholdContext, isTrue);
+    });
+
+    test('returns false when no households', () {
+      final b = _bootstrapWithContexts();
+      expect(b.hasActiveHouseholdContext, isFalse);
+    });
+  });
+
+  group('ClientBootstrap.hasActiveOrganisationContext', () {
+    test('returns true when organisation status is active', () {
+      final b = _bootstrapWithContexts(organisations: [_activeOrg]);
+      expect(b.hasActiveOrganisationContext, isTrue);
+    });
+
+    test('returns false when no organisations', () {
+      final b = _bootstrapWithContexts();
+      expect(b.hasActiveOrganisationContext, isFalse);
+    });
+  });
+
+  group('ClientBootstrap.isFamilyUxContext', () {
+    test('returns true for household-only context', () {
+      final b = _bootstrapWithContexts(households: [_activeHousehold]);
+      expect(b.isFamilyUxContext, isTrue);
+    });
+
+    test('returns false when no household context', () {
+      final b = _bootstrapWithContexts();
+      expect(b.isFamilyUxContext, isFalse);
+    });
+
+    test('returns false for organisation-only context (business user)', () {
+      final b = _bootstrapWithContexts(organisations: [_activeOrg]);
+      expect(b.isFamilyUxContext, isFalse);
+    });
+
+    test('returns false when both household and organisation present', () {
+      // Mixed context: do not treat as family by default.
+      final b = _bootstrapWithContexts(
+        households: [_activeHousehold],
+        organisations: [_activeOrg],
+      );
+      expect(b.isFamilyUxContext, isFalse);
+    });
+
+    test('backend experience.mode "family" overrides organisation context', () {
+      final b = _bootstrapWithContexts(
+        organisations: [_activeOrg],
+        experienceMode: 'family',
+      );
+      expect(b.isFamilyUxContext, isTrue);
+    });
+
+    test('backend experience.mode "business" overrides household context', () {
+      final b = _bootstrapWithContexts(
+        households: [_activeHousehold],
+        experienceMode: 'business',
+      );
+      expect(b.isFamilyUxContext, isFalse);
+    });
+
+    test('backend experience.mode "custom" overrides household context', () {
+      final b = _bootstrapWithContexts(
+        households: [_activeHousehold],
+        experienceMode: 'custom',
+      );
+      expect(b.isFamilyUxContext, isFalse);
+    });
+
+    test(
+      'falls back to connected business service when experience.mode is absent',
+      () {
+        // Matches Calee/Android: an account with a connected business service
+        // and no organisation context (e.g. no admin API call was ever made to
+        // create one) must still be treated as non-family.
+        final b = _bootstrapWithContexts(
+          households: [_activeHousehold],
+          services: [_activeService('business')],
+        );
+        expect(b.isFamilyUxContext, isFalse);
+      },
+    );
+
+    test(
+      'falls back to connected cewa service when experience.mode is absent',
+      () {
+        final b = _bootstrapWithContexts(
+          households: [_activeHousehold],
+          services: [_activeService('cewa')],
+        );
+        expect(b.isFamilyUxContext, isFalse);
+      },
+    );
+
+    test('ignores an inactive business service in the fallback heuristic', () {
+      final inactiveBusiness = ClientService(
+        id: 'business',
+        displayName: 'business',
+        baseUrl: '',
+        launchUrl: '',
+        serviceType: '',
+        accessStatus: 'inactive',
+        calendarCredentialStatus: 'unsupported',
+        source: '',
+        capabilities: const {},
+      );
+      final b = _bootstrapWithContexts(
+        households: [_activeHousehold],
+        services: [inactiveBusiness],
+      );
+      expect(b.isFamilyUxContext, isTrue);
+    });
+  });
+
+  group('ClientBootstrap.fromJson experience mode', () {
+    test('parses experience.mode from the bootstrap payload', () {
+      final b = ClientBootstrap.fromJson({
+        'account': <String, dynamic>{},
+        'services': <dynamic>[],
+        'contexts': <String, dynamic>{},
+        'availableContexts': <dynamic>[],
+        'capabilities': <String, dynamic>{},
+        'experience': {'mode': 'business'},
+      });
+      expect(b.experienceMode, 'business');
+      expect(b.isFamilyUxContext, isFalse);
+    });
+
+    test('experienceMode is null when the key is absent', () {
+      final b = ClientBootstrap.fromJson({
+        'account': <String, dynamic>{},
+        'services': <dynamic>[],
+        'contexts': <String, dynamic>{},
+        'availableContexts': <dynamic>[],
+        'capabilities': <String, dynamic>{},
+      });
+      expect(b.experienceMode, isNull);
     });
   });
 }

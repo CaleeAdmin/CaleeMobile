@@ -279,7 +279,7 @@ class _CreateChoreSheetState extends State<CreateChoreSheet> {
                 title: 'Create for',
                 children: [
                   _AssigneeRow(
-                    label: 'Unassigned',
+                    label: 'For everyone',
                     selected: _selectedPersonIds.isEmpty,
                     enabled: !_isSubmitting,
                     onTap: () {
@@ -312,7 +312,7 @@ class _CreateChoreSheetState extends State<CreateChoreSheet> {
               CaleeSection(
                 children: [
                   CaleeSectionLabeledTextFormField(
-                    label: 'Points',
+                    label: 'Stars',
                     controller: _pointsController,
                     enabled: !_isSubmitting,
                     keyboardType: TextInputType.number,
@@ -320,7 +320,7 @@ class _CreateChoreSheetState extends State<CreateChoreSheet> {
                     validator: (value) {
                       final points = int.tryParse((value ?? '').trim());
                       if (!isValidChorePoints(points)) {
-                        return 'Enter points from 1 to 100';
+                        return 'Enter stars from 1 to 100';
                       }
                       return null;
                     },

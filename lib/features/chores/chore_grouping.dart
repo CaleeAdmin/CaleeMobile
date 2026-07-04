@@ -21,6 +21,21 @@ Map<String, List<ClientChore>> groupChoresBySection(
       ? todayDate
       : todayDate.add(Duration(days: daysUntilSunday));
 
+  // A recurring chore's persistent baseChore row and its completion-log row
+  // for today share a choreUid/parentChoreUid, but after server-side occurrence
+  // expansion the same choreUid can also legitimately appear as several active
+  // rows on different dates (today, tomorrow, ...). Keying on uid alone would
+  // hide every one of those rows once any single date is completed, so the key
+  // must include the occurrence date: a completion log only ever consumes the
+  // one active row for the same uid *and* date.
+  final doneTodayKeys = <String>{};
+  for (final chore in chores) {
+    if (chore.completedToday || chore.normalizedSection == 'doneToday') {
+      final key = _choreOccurrenceKey(chore);
+      if (key != null) doneTodayKeys.add(key);
+    }
+  }
+
   final grouped = <String, List<ClientChore>>{};
 
   for (final chore in chores) {
@@ -40,6 +55,15 @@ Map<String, List<ClientChore>> groupChoresBySection(
             endOfWeekDate: endOfWeekDate,
           )
         : apiSection;
+
+    if ((uiSection == 'todoToday' || uiSection == 'overdue') &&
+        chore.isBaseChore) {
+      final key = _choreOccurrenceKey(chore);
+      if (key != null && doneTodayKeys.contains(key)) {
+        continue;
+      }
+    }
+
     grouped.putIfAbsent(uiSection, () => []).add(chore);
   }
 
@@ -50,13 +74,31 @@ Map<String, List<ClientChore>> groupChoresBySection(
   return grouped;
 }
 
+/// The uid a chore's completion is tracked under: its own [ClientChore.choreUid]
+/// for a baseChore row, or [ClientChore.parentChoreUid] for a completion-log
+/// row pointing back at its recurring chore. Mirrors [ClientChore.completionActionId].
+String? _choreIdentityUid(ClientChore chore) {
+  final uid = chore.choreUid ?? chore.parentChoreUid;
+  if (uid == null || uid.trim().isEmpty) return null;
+  return uid;
+}
+
+/// Key identifying one specific occurrence of a recurring chore: uid plus the
+/// occurrence date it applies to. A completion log only ever suppresses the
+/// active row sharing both, never every row for the same uid.
+String? _choreOccurrenceKey(ClientChore chore) {
+  final uid = _choreIdentityUid(chore);
+  if (uid == null) return null;
+  return '$uid|${chore.effectiveOccurrenceDate}';
+}
+
 String _futureSubsection(
   ClientChore chore, {
   required DateTime todayDate,
   required DateTime tomorrowDate,
   required DateTime endOfWeekDate,
 }) {
-  final dateStr = chore.scheduledDate ?? chore.scheduledAt;
+  final dateStr = chore.effectiveOccurrenceDate;
   if (dateStr == null || dateStr.trim().isEmpty) {
     // A recurring chore with no explicit start date begins today.
     return chore.isRecurring ? 'todoToday' : 'later';
@@ -88,8 +130,8 @@ int compareChores(ClientChore a, ClientChore b) {
     if (cmp != 0) return cmp;
   }
 
-  final aDate = a.scheduledDate ?? a.scheduledAt ?? '';
-  final bDate = b.scheduledDate ?? b.scheduledAt ?? '';
+  final aDate = a.effectiveOccurrenceDate ?? '';
+  final bDate = b.effectiveOccurrenceDate ?? '';
   final dateCmp = aDate.compareTo(bDate);
   if (dateCmp != 0) return dateCmp;
 
@@ -99,7 +141,7 @@ int compareChores(ClientChore a, ClientChore b) {
 /// Returns subtitle parts for a chore row.
 ///
 /// History / completion-log rows: [scheduled/completed label, calendar name].
-/// Active rows: [assignee or 'Unassigned', pts (if > 0), repeat label (if set), calendar name].
+/// Active rows: [assignee or 'For everyone', pts (if > 0), repeat label (if set), calendar name].
 List<String> choreSubtitleParts({
   required ClientChore chore,
   required String calendarName,
@@ -122,7 +164,7 @@ List<String> choreSubtitleParts({
 
   final assignee = chore.assigneeName?.trim();
   final parts = <String>[
-    assignee != null && assignee.isNotEmpty ? assignee : 'Unassigned',
+    assignee != null && assignee.isNotEmpty ? assignee : 'For everyone',
   ];
 
   final rrule = _rruleLabel(chore.recurrence);

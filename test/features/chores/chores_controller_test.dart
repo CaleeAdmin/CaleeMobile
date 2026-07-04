@@ -10,6 +10,8 @@ import 'package:flutter_test/flutter_test.dart';
 
 // ── Minimal stubs ─────────────────────────────────────────────────────────────
 
+String _isoDate(DateTime value) => value.toIso8601String().split('T').first;
+
 ClientChoreList _emptyChoreList() =>
     ClientChoreList(from: '2026-01-01', to: '2026-12-31', chores: []);
 
@@ -55,31 +57,38 @@ ClientContext _household() => const ClientContext(
   status: 'active',
 );
 
-ClientChore _chore({String id = 'chore-1', String? choreUid = 'uid-1'}) =>
-    ClientChore(
-      id: id,
-      calendarId: 'cal-1',
-      serviceId: 'portal',
-      serviceName: 'Portal',
-      title: 'Chore',
-      scheduledAt: null,
-      scheduledDate: null,
-      description: null,
-      source: '',
-      kind: 'baseChore',
-      choreUid: choreUid,
-      parentChoreUid: null,
-      completionLogId: null,
-      completedToday: false,
-      section: 'todoToday',
-      recurrence: null,
-      points: 1,
-      metadataPoints: null,
-      assigneePersonId: null,
-      assigneeName: null,
-      assigneeAvatarColor: null,
-      approvalState: 'none',
-    );
+ClientChore _chore({
+  String id = 'chore-1',
+  String? choreUid = 'uid-1',
+  String? occurrenceDate,
+  String section = 'todoToday',
+  bool completedToday = false,
+}) => ClientChore(
+  id: id,
+  calendarId: 'cal-1',
+  serviceId: 'portal',
+  serviceName: 'Portal',
+  title: 'Chore',
+  scheduledAt: null,
+  scheduledDate: null,
+  description: null,
+  source: '',
+  kind: 'baseChore',
+  choreUid: choreUid,
+  parentChoreUid: null,
+  baseChoreId: null,
+  occurrenceDate: occurrenceDate,
+  completionLogId: null,
+  completedToday: completedToday,
+  section: section,
+  recurrence: null,
+  points: 1,
+  metadataPoints: null,
+  assigneePersonId: null,
+  assigneeName: null,
+  assigneeAvatarColor: null,
+  approvalState: 'none',
+);
 
 class _CreateTrackingHubClient extends CaleeHubClient {
   _CreateTrackingHubClient({this.failAtomicCreate = false});
@@ -213,6 +222,40 @@ class _UpdateTrackingHubClient extends CaleeHubClient {
       updatedAt: null,
     );
   }
+}
+
+class _CompletionTrackingHubClient extends CaleeHubClient {
+  final completeCalls = <String>[];
+  final undoCalls = <String>[];
+
+  @override
+  Future<void> completeChore({
+    required String accessToken,
+    required String choreId,
+    String? date,
+  }) async {
+    completeCalls.add(date ?? '');
+  }
+
+  @override
+  Future<void> undoChoreCompletion({
+    required String accessToken,
+    required String choreId,
+    String? date,
+  }) async {
+    undoCalls.add(date ?? '');
+  }
+
+  @override
+  Future<ClientCalendarList> calendars({required String accessToken}) =>
+      Future.value(_emptyCalendarList());
+
+  @override
+  Future<ClientChoreList> chores({
+    required String accessToken,
+    required String from,
+    required String to,
+  }) => Future.value(_emptyChoreList());
 }
 
 // A CaleeHubClient that always succeeds with empty data.
@@ -471,6 +514,66 @@ void main() {
 
         expect(client.updateCalls.first['assigneePersonId'], '');
         expect(client.metadataCalls.single['assigneePersonId'], '');
+      },
+    );
+  });
+
+  group('ChoresController.toggleChoreCompletion future-date guard', () {
+    test('today chore calls repository.completeChore', () async {
+      final client = _CompletionTrackingHubClient();
+      final controller = ChoresController(repository: _repositoryWith(client));
+      final today = _isoDate(DateTime.now());
+
+      await controller.toggleChoreCompletion(
+        _chore(occurrenceDate: today, section: 'todoToday'),
+      );
+
+      expect(client.completeCalls, hasLength(1));
+      controller.dispose();
+    });
+
+    test('done today chore can still be undone', () async {
+      final client = _CompletionTrackingHubClient();
+      final controller = ChoresController(repository: _repositoryWith(client));
+      final today = _isoDate(DateTime.now());
+
+      await controller.toggleChoreCompletion(
+        _chore(
+          occurrenceDate: today,
+          section: 'doneToday',
+          completedToday: true,
+        ),
+      );
+
+      expect(client.undoCalls, hasLength(1));
+      expect(client.completeCalls, isEmpty);
+      controller.dispose();
+    });
+
+    test(
+      'tomorrow chore does not call repository.completeChore and surfaces a friendly error',
+      () async {
+        final client = _CompletionTrackingHubClient();
+        final controller = ChoresController(
+          repository: _repositoryWith(client),
+        );
+        final tomorrow = _isoDate(DateTime.now().add(const Duration(days: 1)));
+
+        await expectLater(
+          () => controller.toggleChoreCompletion(
+            _chore(occurrenceDate: tomorrow, section: 'future'),
+          ),
+          throwsA(
+            isA<CaleeHubException>().having(
+              (e) => e.message,
+              'message',
+              'Future chores cannot be completed yet.',
+            ),
+          ),
+        );
+
+        expect(client.completeCalls, isEmpty);
+        controller.dispose();
       },
     );
   });

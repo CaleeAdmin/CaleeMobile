@@ -25,6 +25,7 @@ class MealsController extends ChangeNotifier {
   late DateTime _weekStart;
   bool isLoading = false;
   bool isSaving = false;
+  bool isCopying = false;
   Object? error;
   ClientMealList? mealList;
 
@@ -141,6 +142,36 @@ class MealsController extends ChangeNotifier {
       await load();
     } finally {
       isSaving = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ClientMealCopyWeekResult> copyPreviousWeekToVisibleWeek({
+    required bool overwriteExisting,
+  }) async {
+    final sourceStart = DateTime(
+      _weekStart.year,
+      _weekStart.month,
+      _weekStart.day - 7,
+    );
+    final sourceEnd = DateTime(
+      sourceStart.year,
+      sourceStart.month,
+      sourceStart.day + 6,
+    );
+    isCopying = true;
+    notifyListeners();
+    try {
+      final result = await repository.copyWeek(
+        sourceFrom: _formatDate(sourceStart),
+        sourceTo: _formatDate(sourceEnd),
+        targetFrom: weekStartStr,
+        overwriteExisting: overwriteExisting,
+      );
+      await load();
+      return result;
+    } finally {
+      isCopying = false;
       notifyListeners();
     }
   }

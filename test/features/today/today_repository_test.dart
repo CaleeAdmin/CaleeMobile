@@ -85,13 +85,17 @@ ClientService _calendarService() => const ClientService(
   capabilities: {'calendar': true, 'tasks': true},
 );
 
-TodayRepository _repo(CaleeHubClient client, {List<ClientService>? services}) =>
-    TodayRepository(
-      hubClient: client,
-      accessToken: 'token',
-      services: services ?? [_calendarService()],
-      households: const [],
-    );
+TodayRepository _repo(
+  CaleeHubClient client, {
+  List<ClientService>? services,
+  bool isFamilyUxContext = false,
+}) => TodayRepository(
+  hubClient: client,
+  accessToken: 'token',
+  services: services ?? [_calendarService()],
+  households: const [],
+  isFamilyUxContext: isFamilyUxContext,
+);
 
 ClientTask _task({
   required String id,
@@ -124,6 +128,8 @@ ClientChore _chore({required String id, required String section}) =>
       kind: 'baseChore',
       choreUid: id,
       parentChoreUid: null,
+      baseChoreId: null,
+      occurrenceDate: null,
       completionLogId: null,
       completedToday: false,
       section: section,
@@ -196,23 +202,53 @@ void main() {
       expect(overview.choresError, isNull);
     });
 
-    test('loads chores when chore service present', () async {
-      final client = _StubHubClient(
-        chores: ClientChoreList(
-          from: '',
-          to: '',
-          chores: [
-            _chore(id: '1', section: 'todoToday'),
-            _chore(id: '2', section: 'overdue'),
-          ],
-        ),
-      );
-      final repo = _repo(client, services: [_choreService()]);
-      final overview = await repo.loadToday();
+    test(
+      'loads chores when chore service present and family context',
+      () async {
+        final client = _StubHubClient(
+          chores: ClientChoreList(
+            from: '',
+            to: '',
+            chores: [
+              _chore(id: '1', section: 'todoToday'),
+              _chore(id: '2', section: 'overdue'),
+            ],
+          ),
+        );
+        final repo = _repo(
+          client,
+          services: [_choreService()],
+          isFamilyUxContext: true,
+        );
+        final overview = await repo.loadToday();
 
-      expect(overview.choresDueToday.length, 1);
-      expect(overview.overdueChores.length, 1);
-    });
+        expect(overview.choresDueToday.length, 1);
+        expect(overview.overdueChores.length, 1);
+      },
+    );
+
+    test(
+      'does not load chores even with chore service when not family context',
+      () async {
+        final client = _StubHubClient(
+          chores: ClientChoreList(
+            from: '',
+            to: '',
+            chores: [_chore(id: '1', section: 'todoToday')],
+          ),
+        );
+        // business/workspace: isFamilyUxContext = false
+        final repo = _repo(
+          client,
+          services: [_choreService()],
+          isFamilyUxContext: false,
+        );
+        final overview = await repo.loadToday();
+
+        expect(overview.choresDueToday, isEmpty);
+        expect(overview.choresError, isNull);
+      },
+    );
 
     test('splits tasks into due-today and overdue correctly', () async {
       final now = DateTime.now();

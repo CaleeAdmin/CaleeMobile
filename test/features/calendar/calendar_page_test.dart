@@ -81,6 +81,7 @@ void main() {
             accessToken: 'tok',
             services: const [_service],
             accountId: 'acct1',
+            isFamilyUxContext: true,
           ),
         ),
       );
@@ -100,6 +101,7 @@ void main() {
             accessToken: 'tok',
             services: const [_service],
             accountId: 'acct1',
+            isFamilyUxContext: true,
           ),
         ),
       );
@@ -118,6 +120,7 @@ void main() {
             accessToken: 'tok',
             services: const [_service],
             accountId: 'acct1',
+            isFamilyUxContext: true,
           ),
         ),
       );
@@ -146,6 +149,7 @@ void main() {
                       accessToken: 'tok',
                       services: const [_service],
                       accountId: 'acct1',
+                      isFamilyUxContext: true,
                       refreshGeneration: generation,
                     ),
                   ),

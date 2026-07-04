@@ -97,6 +97,9 @@ class _ChoresPageState extends State<ChoresPage> {
               accessToken: widget.accessToken,
               services: choreServices,
               accountId: widget.accountId,
+              // ChoresPage itself is only ever shown for family-UX accounts
+              // (see CaleeHomePage._hasChoreService), so this is always true.
+              isFamilyUxContext: true,
               initialCreateKind: 'chores',
               autoOpenCreate: true,
             ),
@@ -278,13 +281,15 @@ class _ChoresPageState extends State<ChoresPage> {
       );
     }
 
-    actions.add(
-      CaleeAction(
-        label: 'Edit chore',
-        icon: Icons.edit_outlined,
-        onTap: () => _openEditChoreSheet(chore),
-      ),
-    );
+    if (!chore.isCompletionLog) {
+      actions.add(
+        CaleeAction(
+          label: 'Edit chore',
+          icon: Icons.edit_outlined,
+          onTap: () => _openEditChoreSheet(chore),
+        ),
+      );
+    }
 
     if (!isDone && chore.isRecurring) {
       actions.addAll([
@@ -418,7 +423,7 @@ class _ChoresPageState extends State<ChoresPage> {
       return 'All chores';
     }
     if (filter == 'unassigned') {
-      return 'Unassigned';
+      return 'For everyone';
     }
     if (filter.startsWith('person:')) {
       final personId = filter.substring('person:'.length);
@@ -652,7 +657,6 @@ class _ChoresPageState extends State<ChoresPage> {
           ...sectionChores.map((chore) {
             final onActions =
                 chore.completionActionId.trim().isNotEmpty &&
-                    !chore.isCompletionLog &&
                     chore.normalizedSection != 'history'
                 ? () => _showChoreActions(chore)
                 : null;
@@ -709,7 +713,6 @@ class _ChoresPageState extends State<ChoresPage> {
       children: sectionChores.map((chore) {
         final onActions =
             chore.completionActionId.trim().isNotEmpty &&
-                !chore.isCompletionLog &&
                 chore.normalizedSection != 'history'
             ? () => _showChoreActions(chore)
             : null;
@@ -721,10 +724,10 @@ class _ChoresPageState extends State<ChoresPage> {
           isUpdating: _controller.updatingChoreIds.contains(
             chore.completionActionId,
           ),
-          onToggleCompletion: !chore.canToggleCompletion
+          onToggleCompletion: (!chore.canToggleCompletion || isFutureSection)
               ? null
               : () => _toggleChoreCompletion(chore),
-          onCircleTap: null,
+          onCircleTap: isFutureSection ? onActions : null,
           onMoreTap: onActions,
           onRowTap: isFutureSection ? onActions : null,
         );

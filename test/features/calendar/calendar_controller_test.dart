@@ -1,10 +1,34 @@
-import 'package:flutter_test/flutter_test.dart';
-
 import 'package:calee_mobile/data/api/calee_hub_client.dart';
 import 'package:calee_mobile/data/auth/calee_preferences.dart';
 import 'package:calee_mobile/data/models/client_calendar.dart';
 import 'package:calee_mobile/features/calendar/calendar_controller.dart';
 import 'package:calee_mobile/features/calendar/calendar_repository.dart';
+import 'package:calee_mobile/features/notifications/local_calendar_notification_service.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+// ─── Fakes ────────────────────────────────────────────────────────────────────
+
+class _FakeNotificationService extends LocalCalendarNotificationService {
+  _FakeNotificationService() : super.forTest();
+
+  int rescheduleCallCount = 0;
+  List<List<ClientEvent>> rescheduleArgs = [];
+
+  @override
+  Future<void> initialize() async {}
+
+  @override
+  Future<bool> requestPermissionIfNeeded() async => true;
+
+  @override
+  Future<void> rescheduleUpcomingEvents(List<ClientEvent> events) async {
+    rescheduleCallCount++;
+    rescheduleArgs.add(List.unmodifiable(events));
+  }
+
+  @override
+  Future<void> cancelAllCalendarEventNotifications() async {}
+}
 
 // ─── Stubs ────────────────────────────────────────────────────────────────────
 
@@ -88,6 +112,7 @@ CalendarController _makeController({
   List<ClientEvent>? events,
   bool failCalendars = false,
   StoredPreferences? prefs,
+  LocalCalendarNotificationService? notificationService,
 }) {
   final hub = _StubHubClient(
     calendars: calendars,
@@ -99,7 +124,10 @@ CalendarController _makeController({
     accessToken: 'tok',
     preferences: _StubPrefs(prefs ?? const StoredPreferences()),
   );
-  return CalendarController(repository: repo);
+  return CalendarController(
+    repository: repo,
+    notificationService: notificationService ?? _FakeNotificationService(),
+  );
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -355,6 +383,53 @@ void main() {
       final results = ctrl.searchEvents('event');
 
       expect(results, isEmpty);
+    });
+  });
+
+  // ── Notification integration ─────────────────────────────────────────────────
+
+  group('CalendarController notification integration', () {
+    test('calls rescheduleUpcomingEvents after successful loadMonth', () async {
+      final fake = _FakeNotificationService();
+      final ctrl = _makeController(
+        calendars: [_calendar('cal1')],
+        events: [_event('e1')],
+        notificationService: fake,
+      );
+
+      await ctrl.loadMonth();
+
+      // Wait for the unawaited reschedule to complete.
+      await Future<void>.delayed(Duration.zero);
+
+      expect(fake.rescheduleCallCount, 1);
+    });
+
+    test('does not call reschedule when loadMonth fails', () async {
+      final fake = _FakeNotificationService();
+      final ctrl = _makeController(
+        failCalendars: true,
+        notificationService: fake,
+      );
+
+      await ctrl.loadMonth();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(fake.rescheduleCallCount, 0);
+    });
+
+    test('passes loaded events to rescheduleUpcomingEvents', () async {
+      final fake = _FakeNotificationService();
+      final ctrl = _makeController(
+        calendars: [_calendar('cal1')],
+        events: [_event('e1'), _event('e2')],
+        notificationService: fake,
+      );
+
+      await ctrl.loadMonth();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(fake.rescheduleArgs.first, hasLength(2));
     });
   });
 }
