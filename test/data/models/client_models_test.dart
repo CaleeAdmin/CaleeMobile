@@ -40,6 +40,7 @@ ClientTask _task(String status) => ClientTask(
 
 void main() {
   _capabilityTests();
+  _bootstrapFamilyUxContextTests();
   _bootstrapMealsCapabilityTests();
   _deletedItemsModelTests();
   _clientCalDavAccountTests();
@@ -198,6 +199,106 @@ void _capabilityTests() {
 
     test('returns false when meals capability is false', () {
       expect(_svc({'meals': false}).supportsMeals, isFalse);
+    });
+  });
+}
+
+ClientBootstrap _bootstrapWithContexts({
+  List<ClientContext> households = const [],
+  List<ClientContext> organisations = const [],
+}) => ClientBootstrap(
+  account: const ClientAccount(
+    id: '',
+    displayName: null,
+    primaryEmail: null,
+    timeZone: null,
+    status: null,
+  ),
+  services: const [],
+  contexts: ClientContexts(
+    households: households,
+    organisations: organisations,
+  ),
+  availableContexts: const [],
+  capabilities: const {},
+);
+
+const _activeHousehold = ClientContext(
+  id: 'hh1',
+  type: 'household',
+  name: 'Family',
+  role: 'admin',
+  status: 'active',
+);
+
+const _activeOrg = ClientContext(
+  id: 'org1',
+  type: 'organisation',
+  name: 'Corp',
+  role: 'member',
+  status: 'active',
+);
+
+void _bootstrapFamilyUxContextTests() {
+  group('ClientBootstrap.hasActiveHouseholdContext', () {
+    test('returns true when household status is active', () {
+      final b = _bootstrapWithContexts(households: [_activeHousehold]);
+      expect(b.hasActiveHouseholdContext, isTrue);
+    });
+
+    test('returns true when household status is empty string', () {
+      const emptyStatusHousehold = ClientContext(
+        id: 'hh2',
+        type: 'household',
+        name: 'Family',
+        role: 'member',
+        status: '',
+      );
+      final b = _bootstrapWithContexts(households: [emptyStatusHousehold]);
+      expect(b.hasActiveHouseholdContext, isTrue);
+    });
+
+    test('returns false when no households', () {
+      final b = _bootstrapWithContexts();
+      expect(b.hasActiveHouseholdContext, isFalse);
+    });
+  });
+
+  group('ClientBootstrap.hasActiveOrganisationContext', () {
+    test('returns true when organisation status is active', () {
+      final b = _bootstrapWithContexts(organisations: [_activeOrg]);
+      expect(b.hasActiveOrganisationContext, isTrue);
+    });
+
+    test('returns false when no organisations', () {
+      final b = _bootstrapWithContexts();
+      expect(b.hasActiveOrganisationContext, isFalse);
+    });
+  });
+
+  group('ClientBootstrap.isFamilyUxContext', () {
+    test('returns true for household-only context', () {
+      final b = _bootstrapWithContexts(households: [_activeHousehold]);
+      expect(b.isFamilyUxContext, isTrue);
+    });
+
+    test('returns false when no household context', () {
+      final b = _bootstrapWithContexts();
+      expect(b.isFamilyUxContext, isFalse);
+    });
+
+    test('returns false for organisation-only context (business user)', () {
+      final b = _bootstrapWithContexts(organisations: [_activeOrg]);
+      expect(b.isFamilyUxContext, isFalse);
+    });
+
+    test('returns false when both household and organisation present', () {
+      // Mixed context: do not treat as family by default.
+      final b = _bootstrapWithContexts(
+        households: [_activeHousehold],
+        organisations: [_activeOrg],
+      );
+      expect(b.isFamilyUxContext, isFalse);
     });
   });
 }

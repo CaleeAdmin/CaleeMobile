@@ -173,7 +173,10 @@ const _kActiveGoogleConnection = ExternalCalendarConnection(
 class _FakeHubClient extends CaleeHubClient {
   _FakeHubClient({List<Object>? connectionsResponses})
     : _connectionsResponses =
-          connectionsResponses ?? const [[_kActiveGoogleConnection]];
+          connectionsResponses ??
+          const [
+            [_kActiveGoogleConnection],
+          ];
 
   final List<Object> _connectionsResponses;
   int _connectionsCallCount = 0;
@@ -476,7 +479,9 @@ void main() {
 
       // The friendly snackbar must appear.
       expect(
-        find.text('Could not load Google Calendar connection. Please try again.'),
+        find.text(
+          'Could not load Google Calendar connection. Please try again.',
+        ),
         findsOneWidget,
       );
 

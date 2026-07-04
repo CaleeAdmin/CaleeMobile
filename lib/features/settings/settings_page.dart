@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
@@ -15,6 +17,7 @@ import 'family_setup_page.dart';
 import 'household_people_page.dart';
 import 'recently_deleted_page.dart';
 import 'service_details_page.dart';
+import '../notifications/local_calendar_notification_service.dart';
 import 'settings_controller.dart';
 import 'settings_repository.dart';
 
@@ -163,6 +166,38 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+  Future<void> _toggleCalendarReminders(bool value) async {
+    if (value) {
+      final granted = await LocalCalendarNotificationService.instance
+          .requestPermissionIfNeeded();
+
+      if (!granted) {
+        await _controller.setCalendarRemindersEnabled(false);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Notification permission is needed for calendar reminders.',
+            ),
+          ),
+        );
+        return;
+      }
+
+      await _controller.setCalendarRemindersEnabled(true);
+
+      // Switching to the calendar tab triggers CalendarController.loadMonth(),
+      // which immediately reschedules notifications for the loaded events.
+      widget.onNavigateToCalendar?.call();
+
+      return;
+    }
+
+    await _controller.setCalendarRemindersEnabled(false);
+    await LocalCalendarNotificationService.instance
+        .cancelAllCalendarEventNotifications();
+  }
+
   ClientCalendar? _findById(List<ClientCalendar> list, String id) {
     for (final c in list) {
       if (c.id == id) return c;
@@ -182,6 +217,7 @@ class _SettingsPageState extends State<SettingsPage> {
     final account = _controller.bootstrap.account;
     final calendars = _controller.calendars;
     final preferences = _controller.preferences;
+    final remindersEnabled = _controller.calendarRemindersEnabled;
     final isLoadingPrefs = _controller.isLoadingPreferences;
     final isOpeningFamily = _controller.isOpeningFamily;
 
@@ -309,6 +345,23 @@ class _SettingsPageState extends State<SettingsPage> {
                   ],
                   onChanged: _controller.setDefaultTaskList,
                 ),
+              CaleeListRow(
+                title: 'Calendar reminders',
+                subtitle:
+                    'Remind me 10 minutes before upcoming events on this phone.'
+                    ' Reminders work best when you open Calee regularly.',
+                leading: const Icon(
+                  Icons.notifications_outlined,
+                  size: 20,
+                  color: CaleeColors.primary,
+                ),
+                trailing: Switch(
+                  value: remindersEnabled,
+                  onChanged: isLoadingPrefs
+                      ? null
+                      : (v) => unawaited(_toggleCalendarReminders(v)),
+                ),
+              ),
             ],
           ],
         ),

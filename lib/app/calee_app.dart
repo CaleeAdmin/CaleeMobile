@@ -501,10 +501,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
   /// Chrome).
   Future<List<ExternalCalendarConnection>> _loadConnectionsAfterOAuth() async {
     const maxAttempts = 3;
-    final delays = [
-      Duration(milliseconds: 300),
-      Duration(milliseconds: 800),
-    ];
+    final delays = [Duration(milliseconds: 300), Duration(milliseconds: 800)];
 
     for (var attempt = 1; attempt <= maxAttempts; attempt++) {
       debugPrint(

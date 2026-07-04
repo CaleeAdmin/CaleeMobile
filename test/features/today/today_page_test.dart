@@ -87,7 +87,7 @@ const _choresService = ClientService(
   baseUrl: 'http://localhost',
   launchUrl: 'http://localhost',
   serviceType: 'nextcloud_portal',
-  accessStatus: 'ok',
+  accessStatus: 'active',
   calendarCredentialStatus: 'connected',
   source: 'test',
   capabilities: {'calendar': true, 'tasks': true, 'chores': true},
@@ -96,6 +96,7 @@ const _choresService = ClientService(
 Widget _buildPage({
   required CaleeHubClient hub,
   List<ClientService> services = const [_calendarService],
+  bool isFamilyUxContext = false,
 }) {
   return MaterialApp(
     theme: CaleeTheme.buildThemeData(),
@@ -104,6 +105,7 @@ Widget _buildPage({
       accessToken: 'tok',
       services: services,
       households: const [],
+      isFamilyUxContext: isFamilyUxContext,
     ),
   );
 }
@@ -134,18 +136,23 @@ void main() {
       expect(find.text('No tasks due today'), findsOneWidget);
     });
 
-    testWidgets('shows "No chores due today" when chores service present', (
-      tester,
-    ) async {
-      final hub = _StubHub();
-      await tester.pumpWidget(
-        _buildPage(hub: hub, services: const [_choresService]),
-      );
-      await tester.pump();
-      await tester.pump();
+    testWidgets(
+      'shows "No chores due today" when chores service present and family context',
+      (tester) async {
+        final hub = _StubHub();
+        await tester.pumpWidget(
+          _buildPage(
+            hub: hub,
+            services: const [_choresService],
+            isFamilyUxContext: true,
+          ),
+        );
+        await tester.pump();
+        await tester.pump();
 
-      expect(find.text('No chores due today'), findsOneWidget);
-    });
+        expect(find.text('No chores due today'), findsOneWidget);
+      },
+    );
 
     testWidgets('Chores section absent when no chores service', (tester) async {
       final hub = _StubHub();
@@ -157,6 +164,25 @@ void main() {
 
       expect(find.text('No chores due today'), findsNothing);
     });
+
+    testWidgets(
+      'Chores section absent when chores service present but not family context',
+      (tester) async {
+        final hub = _StubHub();
+        // business/workspace: isFamilyUxContext = false
+        await tester.pumpWidget(
+          _buildPage(
+            hub: hub,
+            services: const [_choresService],
+            isFamilyUxContext: false,
+          ),
+        );
+        await tester.pump();
+        await tester.pump();
+
+        expect(find.text('No chores due today'), findsNothing);
+      },
+    );
   });
 
   group('TodayPage — section error rows', () {
@@ -189,7 +215,11 @@ void main() {
     ) async {
       final hub = _StubHub(failChores: true);
       await tester.pumpWidget(
-        _buildPage(hub: hub, services: const [_choresService]),
+        _buildPage(
+          hub: hub,
+          services: const [_choresService],
+          isFamilyUxContext: true,
+        ),
       );
       await tester.pump();
       await tester.pump();
@@ -201,7 +231,11 @@ void main() {
     testWidgets('all sections error without crashing the page', (tester) async {
       final hub = _StubHub(failEvents: true, failTasks: true, failChores: true);
       await tester.pumpWidget(
-        _buildPage(hub: hub, services: const [_choresService]),
+        _buildPage(
+          hub: hub,
+          services: const [_choresService],
+          isFamilyUxContext: true,
+        ),
       );
       await tester.pump();
       await tester.pump();

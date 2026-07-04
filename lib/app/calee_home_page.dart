@@ -41,9 +41,11 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
   int _calendarRefreshGeneration = 0;
 
   bool get _hasChoreService =>
-      widget.bootstrap.services.any((service) => service.supportsChores);
+      widget.bootstrap.isFamilyUxContext &&
+      widget.bootstrap.services.any((s) => s.isActive && s.supportsChores);
 
   bool get _hasMealsService {
+    if (!widget.bootstrap.isFamilyUxContext) return false;
     final portal = widget.bootstrap.services
         .where((s) => s.id == 'portal')
         .firstOrNull;
@@ -138,6 +140,7 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
         accessToken: widget.accessToken,
         services: widget.bootstrap.services,
         households: widget.bootstrap.contexts.households,
+        isFamilyUxContext: widget.bootstrap.isFamilyUxContext,
         onNavigateToCalendar: () =>
             setState(() => _selectedIndex = _calendarTabIndex),
         onNavigateToTasks: () =>
