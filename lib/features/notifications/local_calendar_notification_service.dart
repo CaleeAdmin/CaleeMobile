@@ -82,13 +82,13 @@ class LocalCalendarNotificationService {
       granted = await androidImpl.requestNotificationsPermission() ?? false;
     }
 
-    final darwinImpl = _plugin
+    final iosImpl = _plugin
         .resolvePlatformSpecificImplementation<
-          DarwinFlutterLocalNotificationsPlugin
+          IOSFlutterLocalNotificationsPlugin
         >();
-    if (darwinImpl != null) {
+    if (iosImpl != null) {
       granted =
-          await darwinImpl.requestPermissions(
+          await iosImpl.requestPermissions(
             alert: true,
             badge: true,
             sound: true,
@@ -155,6 +155,8 @@ class LocalCalendarNotificationService {
         '${event.title} starts at ${_formatTime(c.startLocal)}',
         tz.TZDateTime.from(c.reminderTime, tz.local),
         details,
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime,
         androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
         payload: payload,
       );

@@ -6,6 +6,25 @@ import 'package:calee_mobile/data/models/calendar_service_error.dart';
 import 'package:calee_mobile/data/models/client_calendar.dart';
 import 'package:calee_mobile/features/calendar/calendar_controller.dart';
 import 'package:calee_mobile/features/calendar/calendar_repository.dart';
+import 'package:calee_mobile/features/notifications/local_calendar_notification_service.dart';
+
+// ─── Fakes ────────────────────────────────────────────────────────────────────
+
+class _FakeNotificationService extends LocalCalendarNotificationService {
+  _FakeNotificationService() : super.forTest();
+
+  @override
+  Future<void> initialize() async {}
+
+  @override
+  Future<bool> requestPermissionIfNeeded() async => true;
+
+  @override
+  Future<void> rescheduleUpcomingEvents(List<ClientEvent> events) async {}
+
+  @override
+  Future<void> cancelAllCalendarEventNotifications() async {}
+}
 
 // ─── Stubs ────────────────────────────────────────────────────────────────────
 
@@ -76,7 +95,10 @@ CalendarController _makeController(
     accessToken: 'tok',
     preferences: _StubPrefs(),
   );
-  return CalendarController(repository: repo);
+  return CalendarController(
+    repository: repo,
+    notificationService: _FakeNotificationService(),
+  );
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────

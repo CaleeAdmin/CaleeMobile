@@ -45,6 +45,8 @@ ClientEvent _event(String id, {String startsAt = '2026-07-05T09:00:00'}) =>
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   setUp(() {
     SharedPreferences.setMockInitialValues({
       'calee_pref_migrated_to_shared_prefs': true,
