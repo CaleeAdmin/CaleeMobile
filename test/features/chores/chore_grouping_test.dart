@@ -480,14 +480,14 @@ void main() {
       expect(parts, ['Mia', 'Chores']);
     });
 
-    test('active unassigned chore shows "Unassigned"', () {
+    test('active unassigned chore shows "For everyone"', () {
       final chore = _chore(points: 1);
       final parts = choreSubtitleParts(
         chore: chore,
         calendarName: 'Chores',
         scheduledLabel: '',
       );
-      expect(parts.first, 'Unassigned');
+      expect(parts.first, 'For everyone');
     });
 
     test('active chore without recurrence omits repeat label and pts', () {
@@ -584,8 +584,8 @@ void main() {
         expect(parts, contains('Kids chores'));
         // Repeat label must not appear for a completed chore row
         expect(parts, isNot(contains('Daily')));
-        // 'Unassigned' must not appear when assignee is set
-        expect(parts, isNot(contains('Unassigned')));
+        // 'For everyone' must not appear when assignee is set
+        expect(parts, isNot(contains('For everyone')));
       },
     );
   });
