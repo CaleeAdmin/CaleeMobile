@@ -195,9 +195,9 @@ class _MealsPageState extends State<MealsPage> {
       if (mounted) _onCopyResult(result);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e.toString())),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(e.toString())));
       }
     }
   }
@@ -210,8 +210,7 @@ class _MealsPageState extends State<MealsPage> {
     } else if (result.skippedCount > 0) {
       final n = result.count;
       final s = result.skippedCount;
-      msg =
-          'Copied $n meal${n != 1 ? 's' : ''}. Skipped $s already planned.';
+      msg = 'Copied $n meal${n != 1 ? 's' : ''}. Skipped $s already planned.';
     } else {
       final n = result.count;
       msg = 'Copied $n meal${n != 1 ? 's' : ''}.';
@@ -747,10 +746,7 @@ class _CopyWeekSheetState extends State<_CopyWeekSheet> {
             const SizedBox(height: CaleeSpacing.sm),
             const Text(
               'This copies breakfast, lunch and dinner into the week shown.',
-              style: TextStyle(
-                fontSize: 14,
-                color: CaleeColors.textTertiary,
-              ),
+              style: TextStyle(fontSize: 14, color: CaleeColors.textTertiary),
             ),
             const SizedBox(height: CaleeSpacing.lg),
             FilledButton(

@@ -19,7 +19,15 @@ class LocalCalendarNotificationService {
   @visibleForTesting
   LocalCalendarNotificationService.forTest();
 
-  static final instance = LocalCalendarNotificationService._();
+  static final _defaultInstance = LocalCalendarNotificationService._();
+  static LocalCalendarNotificationService? _testOverride;
+
+  static LocalCalendarNotificationService get instance =>
+      _testOverride ?? _defaultInstance;
+
+  @visibleForTesting
+  static set testOverride(LocalCalendarNotificationService? service) =>
+      _testOverride = service;
 
   final FlutterLocalNotificationsPlugin _plugin =
       FlutterLocalNotificationsPlugin();
@@ -35,8 +43,9 @@ class LocalCalendarNotificationService {
     if (_initialized) return;
     _initialized = true;
 
-    const androidSettings =
-        AndroidInitializationSettings('@mipmap/ic_launcher');
+    const androidSettings = AndroidInitializationSettings(
+      '@mipmap/ic_launcher',
+    );
     const darwinSettings = DarwinInitializationSettings(
       requestAlertPermission: false,
       requestBadgePermission: false,
@@ -50,7 +59,8 @@ class LocalCalendarNotificationService {
 
     await _plugin
         .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>()
+          AndroidFlutterLocalNotificationsPlugin
+        >()
         ?.createNotificationChannel(
           const AndroidNotificationChannel(
             _channelId,
@@ -64,14 +74,18 @@ class LocalCalendarNotificationService {
   Future<bool> requestPermissionIfNeeded() async {
     var granted = false;
 
-    final androidImpl = _plugin.resolvePlatformSpecificImplementation<
-        AndroidFlutterLocalNotificationsPlugin>();
+    final androidImpl = _plugin
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >();
     if (androidImpl != null) {
       granted = await androidImpl.requestNotificationsPermission() ?? false;
     }
 
-    final darwinImpl = _plugin.resolvePlatformSpecificImplementation<
-        DarwinFlutterLocalNotificationsPlugin>();
+    final darwinImpl = _plugin
+        .resolvePlatformSpecificImplementation<
+          DarwinFlutterLocalNotificationsPlugin
+        >();
     if (darwinImpl != null) {
       granted =
           await darwinImpl.requestPermissions(
@@ -92,13 +106,12 @@ class LocalCalendarNotificationService {
       return;
     }
 
-    await requestPermissionIfNeeded();
+    final granted = await requestPermissionIfNeeded();
+    if (!granted) return;
+
     await cancelAllCalendarEventNotifications();
 
-    final candidates = buildNotificationCandidates(
-      events,
-      now: DateTime.now(),
-    );
+    final candidates = buildNotificationCandidates(events, now: DateTime.now());
     final toSchedule = candidates.length > _maxScheduled
         ? candidates.sublist(0, _maxScheduled)
         : candidates;
