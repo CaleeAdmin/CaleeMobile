@@ -739,6 +739,27 @@ class CaleeHubClient {
     return ClientMealTemplateList.fromJson(_data(json));
   }
 
+  Future<ClientMealCopyWeekResult> copyMealWeek({
+    required String accessToken,
+    required String sourceFrom,
+    required String sourceTo,
+    required String targetFrom,
+    String mode = 'skip_existing',
+  }) async {
+    final body = <String, dynamic>{
+      'sourceFrom': sourceFrom,
+      'sourceTo': sourceTo,
+      'targetFrom': targetFrom,
+      'mode': mode,
+    };
+    final json = await _postJson(
+      '/client/v1/meals/copy-week',
+      accessToken: accessToken,
+      body: body,
+    );
+    return ClientMealCopyWeekResult.fromJson(_data(json));
+  }
+
   // ── Events ────────────────────────────────────────────────────────────────
 
   Future<ClientEvent> updateEvent({
