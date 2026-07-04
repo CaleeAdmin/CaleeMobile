@@ -552,8 +552,22 @@ class CaleeHubClient {
   Future<void> undoChoreCompletion({
     required String accessToken,
     required String choreId,
+    String? date,
   }) async {
     final encodedChoreId = Uri.encodeComponent(choreId);
+
+    // Prefer the date-specific endpoint so undo targets the right occurrence
+    // once a chore has more than one active row; fall back to the /today
+    // alias (which only ever undoes today's completion) when no date is
+    // available.
+    if (date != null && date.trim().isNotEmpty) {
+      final query = Uri(queryParameters: {'date': date.trim()}).query;
+      await _deleteJson(
+        '/client/v1/chores/$encodedChoreId/completion?$query',
+        accessToken: accessToken,
+      );
+      return;
+    }
 
     await _deleteJson(
       '/client/v1/chores/$encodedChoreId/completion/today',

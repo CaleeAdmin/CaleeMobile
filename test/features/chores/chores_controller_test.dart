@@ -69,6 +69,8 @@ ClientChore _chore({String id = 'chore-1', String? choreUid = 'uid-1'}) =>
       kind: 'baseChore',
       choreUid: choreUid,
       parentChoreUid: null,
+      baseChoreId: null,
+      occurrenceDate: null,
       completionLogId: null,
       completedToday: false,
       section: 'todoToday',

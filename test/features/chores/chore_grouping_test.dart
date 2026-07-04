@@ -19,6 +19,8 @@ ClientChore _chore({
   bool completedToday = false,
   String? choreUid,
   String? parentChoreUid,
+  String? baseChoreId,
+  String? occurrenceDate,
 }) {
   return ClientChore(
     id: id,
@@ -33,6 +35,8 @@ ClientChore _chore({
     kind: kind,
     choreUid: choreUid ?? id,
     parentChoreUid: parentChoreUid,
+    baseChoreId: baseChoreId,
+    occurrenceDate: occurrenceDate,
     completionLogId: null,
     completedToday: completedToday,
     section: section,
@@ -90,6 +94,43 @@ void main() {
       );
 
       expect(chore.canToggleCompletion, isFalse);
+    });
+
+    test('completionActionId prefers baseChoreId for a virtual occurrence '
+        'row over the (non-CalDAV) occurrence id', () {
+      final chore = _chore(
+        id: 'portal:abc123:2026-07-05',
+        choreUid: 'abc123',
+        baseChoreId: 'portal:abc123',
+        occurrenceDate: '2026-07-05',
+      );
+
+      expect(chore.completionActionId, 'portal:abc123');
+      expect(chore.effectiveOccurrenceDate, '2026-07-05');
+    });
+
+    test('completionActionId falls back to id for a baseChore row without '
+        'baseChoreId (pre-expansion payload shape)', () {
+      final chore = _chore(id: 'portal:abc123', choreUid: 'abc123');
+
+      expect(chore.completionActionId, 'portal:abc123');
+    });
+
+    test('effectiveOccurrenceDate falls back through occurrenceDate, '
+        'scheduledDate, scheduledAt, and strips any time-of-day suffix', () {
+      expect(
+        _chore(occurrenceDate: '2026-07-05').effectiveOccurrenceDate,
+        '2026-07-05',
+      );
+      expect(
+        _chore(scheduledDate: '2026-07-06').effectiveOccurrenceDate,
+        '2026-07-06',
+      );
+      expect(
+        _chore(scheduledAt: '2026-07-07T10:00:00Z').effectiveOccurrenceDate,
+        '2026-07-07',
+      );
+      expect(_chore().effectiveOccurrenceDate, isNull);
     });
   });
 
@@ -279,7 +320,7 @@ void main() {
     });
 
     test('baseChore is suppressed from overdue when a same-choreUid '
-        'completionLog is done today', () {
+        'completionLog shares its occurrence date', () {
       final yesterday = _monday.subtract(const Duration(days: 1));
       final overdueDate =
           '${yesterday.year}-${yesterday.month.toString().padLeft(2, '0')}-${yesterday.day.toString().padLeft(2, '0')}';
@@ -295,12 +336,41 @@ void main() {
         choreUid: 'uid-1',
         section: 'doneToday',
         completedToday: true,
+        scheduledDate: overdueDate,
       );
 
       final groups = groupChoresBySection([base, log], _monday);
 
       expect(groups['doneToday'], [log]);
       expect(groups.containsKey('overdue'), isFalse);
+    });
+
+    test('baseChore is NOT suppressed from overdue by a same-choreUid '
+        'completionLog for a different occurrence date — matching must be '
+        'uid AND date, not uid alone', () {
+      final yesterday = _monday.subtract(const Duration(days: 1));
+      final overdueDate =
+          '${yesterday.year}-${yesterday.month.toString().padLeft(2, '0')}-${yesterday.day.toString().padLeft(2, '0')}';
+      final base = _chore(
+        id: 'base-1',
+        choreUid: 'uid-1',
+        section: 'future',
+        scheduledDate: overdueDate,
+      );
+      // Done today, but for a different date than the overdue row above.
+      final log = _chore(
+        id: 'log-1',
+        kind: 'completionLog',
+        choreUid: 'uid-1',
+        section: 'doneToday',
+        completedToday: true,
+        scheduledDate: '2026-06-01', // _monday itself
+      );
+
+      final groups = groupChoresBySection([base, log], _monday);
+
+      expect(groups['doneToday'], [log]);
+      expect(groups['overdue'], [base]);
     });
 
     test('completionLog matched via parentChoreUid also suppresses the '
@@ -324,6 +394,8 @@ void main() {
         kind: 'completionLog',
         choreUid: null,
         parentChoreUid: 'uid-1',
+        baseChoreId: null,
+        occurrenceDate: null,
         completionLogId: 'log-1',
         completedToday: true,
         section: 'doneToday',
@@ -366,6 +438,64 @@ void main() {
 
       expect(groups['doneToday'], [log]);
       expect(groups['later'], [base]);
+    });
+
+    test('two active occurrence rows with the same choreUid on different '
+        'dates both remain visible (today + tomorrow, not collapsed into '
+        'one row)', () {
+      final today = _chore(
+        id: 'portal:abc123:2026-07-04',
+        choreUid: 'abc123',
+        baseChoreId: 'portal:abc123',
+        occurrenceDate: '2026-07-04',
+        section: 'todoToday',
+        recurrence: 'FREQ=DAILY',
+      );
+      final tomorrow = _chore(
+        id: 'portal:abc123:2026-07-05',
+        choreUid: 'abc123',
+        baseChoreId: 'portal:abc123',
+        occurrenceDate: '2026-07-05',
+        section: 'future',
+        recurrence: 'FREQ=DAILY',
+      );
+
+      final groups = groupChoresBySection([
+        today,
+        tomorrow,
+      ], DateTime(2026, 7, 4));
+
+      expect(groups['todoToday'], contains(today));
+      expect(groups['tomorrow'], contains(tomorrow));
+    });
+
+    test('a completion log for today does not hide a different-dated active '
+        'occurrence of the same recurring chore (tomorrow stays visible '
+        'after completing today)', () {
+      final tomorrowActive = _chore(
+        id: 'portal:abc123:2026-07-05',
+        choreUid: 'abc123',
+        baseChoreId: 'portal:abc123',
+        occurrenceDate: '2026-07-05',
+        section: 'future',
+        recurrence: 'FREQ=DAILY',
+      );
+      final todayLog = _chore(
+        id: 'log-1',
+        kind: 'completionLog',
+        choreUid: 'abc123',
+        section: 'doneToday',
+        completedToday: true,
+        scheduledDate: '2026-07-04',
+      );
+
+      final groups = groupChoresBySection([
+        tomorrowActive,
+        todayLog,
+      ], DateTime(2026, 7, 4));
+
+      expect(groups['doneToday'], [todayLog]);
+      expect(groups['tomorrow'], [tomorrowActive]);
     });
 
     test('two different recurring chores due today do not cross-suppress '

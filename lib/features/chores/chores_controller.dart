@@ -33,8 +33,15 @@ class ChoresController extends ChangeNotifier {
 
     try {
       final today = DateTime.now();
-      final from = _formatChoreDate(DateTime(today.year, 1, 1));
-      final to = _formatChoreDate(DateTime(today.year, 12, 31));
+      final todayDate = DateTime(today.year, today.month, today.day);
+      // The backend expands recurring chores into a per-date occurrence row
+      // within the requested range, so a full-year window is no longer cheap.
+      // 30 days back / 31 days forward matches Calee Android/tablet's window
+      // and comfortably covers Today/Tomorrow/Later this week/Later.
+      final from = _formatChoreDate(
+        todayDate.subtract(const Duration(days: 30)),
+      );
+      final to = _formatChoreDate(todayDate.add(const Duration(days: 31)));
       overview = await repository.loadOverview(from: from, to: to);
       calendarServiceErrors = overview?.calendarServiceErrors ?? [];
       error = null;
@@ -121,9 +128,9 @@ class ChoresController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final scheduledDate = chore.scheduledDate;
-      final date = scheduledDate != null && scheduledDate.trim().isNotEmpty
-          ? scheduledDate.trim()
+      final occurrenceDate = chore.effectiveOccurrenceDate;
+      final date = occurrenceDate != null && occurrenceDate.trim().isNotEmpty
+          ? occurrenceDate.trim()
           : DateTime.now().toIso8601String().split('T').first;
       await repository.skipRecurringChore(chore, date: date);
       await load();
