@@ -215,6 +215,7 @@ Widget _wrapCollections() => MaterialApp(
     accessToken: 'token',
     services: const [],
     accountId: 'acct1',
+    isFamilyUxContext: true,
   ),
 );
 

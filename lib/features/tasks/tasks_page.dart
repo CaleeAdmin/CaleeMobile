@@ -23,6 +23,7 @@ class TasksPage extends StatefulWidget {
     required this.accessToken,
     required this.services,
     required this.accountId,
+    required this.isFamilyUxContext,
     super.key,
   });
 
@@ -30,6 +31,10 @@ class TasksPage extends StatefulWidget {
   final String accessToken;
   final List<ClientService> services;
   final String accountId;
+
+  /// UX-only: hides the Chore lists section (and the "Chore list" create
+  /// option) for business/workspace accounts, matching Chores/Meals gating.
+  final bool isFamilyUxContext;
 
   @override
   State<TasksPage> createState() => _TasksPageState();
@@ -67,6 +72,7 @@ class _TasksPageState extends State<TasksPage> {
               accessToken: widget.accessToken,
               services: widget.services,
               accountId: widget.accountId,
+              isFamilyUxContext: widget.isFamilyUxContext,
               initialCreateKind: 'tasks',
               autoOpenCreate: true,
             ),
