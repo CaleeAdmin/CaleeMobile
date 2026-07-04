@@ -279,7 +279,7 @@ class _CreateChoreSheetState extends State<CreateChoreSheet> {
                 title: 'Create for',
                 children: [
                   _AssigneeRow(
-                    label: 'Unassigned',
+                    label: 'For everyone',
                     selected: _selectedPersonIds.isEmpty,
                     enabled: !_isSubmitting,
                     onTap: () {

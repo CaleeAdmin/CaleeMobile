@@ -274,7 +274,7 @@ class _EditChoreSheetState extends State<EditChoreSheet> {
                     items: [
                       const DropdownMenuItem<String?>(
                         value: null,
-                        child: Text('Unassigned'),
+                        child: Text('For everyone'),
                       ),
                       for (final person in widget.people)
                         DropdownMenuItem<String?>(
