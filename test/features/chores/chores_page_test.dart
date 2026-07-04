@@ -317,17 +317,17 @@ void main() {
     });
 
     testWidgets(
-      'tapping circle on tomorrow chore via ChoresPage fires toggle not action sheet',
+      'tapping circle on tomorrow chore via ChoresPage opens action sheet, not completion',
       (tester) async {
         await tester.pumpWidget(_wrapWithChore(_futureChore()));
         await tester.pumpAndSettle();
 
-        // The circle for the future chore should trigger completion, not open
-        // the action sheet (which would show 'Edit chore').
+        // Future chores must not be completable from the check-circle. Tapping
+        // it should only open the actions sheet (shown here by 'Edit chore').
         await tester.tap(find.byIcon(Icons.radio_button_unchecked));
         await tester.pumpAndSettle();
 
-        expect(find.text('Edit chore'), findsNothing);
+        expect(find.text('Edit chore'), findsOneWidget);
       },
     );
 
