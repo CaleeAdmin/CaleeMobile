@@ -208,6 +208,31 @@ ClientChore _completedChore() => ClientChore(
   approvalState: 'none',
 );
 
+ClientChore _completedLogChore() => ClientChore(
+  id: 'log-1',
+  calendarId: 'svc1:chores1',
+  serviceId: 'svc1',
+  serviceName: 'Test Service',
+  title: 'Wash dishes',
+  scheduledAt: null,
+  scheduledDate: null,
+  description: null,
+  source: '',
+  kind: 'completionLog',
+  choreUid: null,
+  parentChoreUid: 'uid-1',
+  completionLogId: 'log-1',
+  completedToday: true,
+  section: 'doneToday',
+  recurrence: 'FREQ=DAILY',
+  points: 1,
+  metadataPoints: null,
+  assigneePersonId: null,
+  assigneeName: null,
+  assigneeAvatarColor: null,
+  approvalState: 'none',
+);
+
 Widget _wrap() => MaterialApp(
   theme: CaleeTheme.buildThemeData(),
   home: ChoresPage(
@@ -395,5 +420,22 @@ void main() {
       expect(find.text('Delete chore'), findsNothing);
       expect(find.text('Delete permanently'), findsNothing);
     });
+
+    testWidgets(
+      'completionLog done today shows "Mark as not done" but not "Edit chore"',
+      (tester) async {
+        await tester.pumpWidget(_wrapWithChore(_completedLogChore()));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('Show completed chores'));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byIcon(Icons.more_horiz));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Mark as not done'), findsOneWidget);
+        expect(find.text('Edit chore'), findsNothing);
+      },
+    );
   });
 }

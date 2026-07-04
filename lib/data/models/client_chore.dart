@@ -154,7 +154,7 @@ class ClientChore {
 
   bool get canToggleCompletion {
     if (completionActionId.trim().isEmpty) return false;
-    if (isCompletionLog || normalizedSection == 'history') return false;
+    if (normalizedSection == 'history') return false;
     return true;
   }
 
