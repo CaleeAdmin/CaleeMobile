@@ -133,7 +133,7 @@ class _PointsBadge extends StatelessWidget {
         borderRadius: BorderRadius.circular(CaleeRadius.dot),
       ),
       child: Text(
-        '$points ${points == 1 ? 'pt' : 'pts'}',
+        '$points ${points == 1 ? 'star' : 'stars'}',
         style: const TextStyle(
           fontSize: 11,
           color: CaleeColors.primary,

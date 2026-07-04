@@ -590,13 +590,13 @@ void main() {
     );
   });
 
-  // ── points badge pluralisation ───────────────────────────────────────────
+  // ── stars badge pluralisation ────────────────────────────────────────────
 
-  String ptLabel(int points) => '$points ${points == 1 ? 'pt' : 'pts'}';
+  String ptLabel(int points) => '$points ${points == 1 ? 'star' : 'stars'}';
 
-  group('points badge label pluralisation', () {
-    test('1 point → "1 pt"', () => expect(ptLabel(1), '1 pt'));
-    test('2 points → "2 pts"', () => expect(ptLabel(2), '2 pts'));
-    test('100 points → "100 pts"', () => expect(ptLabel(100), '100 pts'));
+  group('stars badge label pluralisation', () {
+    test('1 star → "1 star"', () => expect(ptLabel(1), '1 star'));
+    test('2 stars → "2 stars"', () => expect(ptLabel(2), '2 stars'));
+    test('100 stars → "100 stars"', () => expect(ptLabel(100), '100 stars'));
   });
 }
