@@ -114,6 +114,8 @@ ClientChore _chore({required String id, required String section}) =>
       kind: 'baseChore',
       choreUid: id,
       parentChoreUid: null,
+      baseChoreId: null,
+      occurrenceDate: null,
       completionLogId: null,
       completedToday: false,
       section: section,

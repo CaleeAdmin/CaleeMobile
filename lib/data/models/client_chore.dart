@@ -75,6 +75,8 @@ class ClientChore {
     required this.kind,
     required this.choreUid,
     required this.parentChoreUid,
+    required this.baseChoreId,
+    required this.occurrenceDate,
     required this.completionLogId,
     required this.completedToday,
     required this.section,
@@ -101,6 +103,8 @@ class ClientChore {
       kind: normalizeChoreKind(json['kind'] as String?),
       choreUid: json['choreUid'] as String?,
       parentChoreUid: json['parentChoreUid'] as String?,
+      baseChoreId: json['baseChoreId'] as String?,
+      occurrenceDate: json['occurrenceDate'] as String?,
       completionLogId: json['completionLogId'] as String?,
       completedToday: json['completedToday'] as bool? ?? false,
       section: normalizeChoreSection(json['section'] as String?),
@@ -128,6 +132,8 @@ class ClientChore {
   final String kind;
   final String? choreUid;
   final String? parentChoreUid;
+  final String? baseChoreId;
+  final String? occurrenceDate;
   final String? completionLogId;
   final bool completedToday;
   final String section;
@@ -139,10 +145,23 @@ class ClientChore {
   final String? assigneeAvatarColor;
   final String approvalState;
 
+  /// The occurrence date this row represents, in `YYYY-MM-DD` form: the
+  /// server-provided [occurrenceDate] for expanded recurring rows, falling
+  /// back to [scheduledDate] / [scheduledAt] for rows that predate expansion.
+  String? get effectiveOccurrenceDate {
+    final value = occurrenceDate ?? scheduledDate ?? scheduledAt;
+    if (value == null || value.trim().isEmpty) return null;
+    return value.trim().split('T').first;
+  }
+
+  /// The id that edit/delete/skip/stopRepeating/complete actions must target.
+  /// Virtual occurrence ids (`serviceId:choreUid:date`) are never a valid
+  /// CalDAV component id — actions always target the base chore.
   String get completionActionId {
-    if (isBaseChore && id.trim().isNotEmpty) {
-      return id;
-    }
+    final base = baseChoreId?.trim();
+    if (base != null && base.isNotEmpty) return base;
+
+    if (isBaseChore && id.trim().isNotEmpty) return id;
 
     final uid = choreUid ?? parentChoreUid;
     if (uid == null || uid.trim().isEmpty || serviceId.trim().isEmpty) {

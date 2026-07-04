@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import '../../data/api/calee_hub_client.dart';
 import '../../data/models/calendar_service_error.dart';
 import '../../data/models/client_calendar.dart';
 import '../../data/models/client_chore.dart';
@@ -12,6 +13,18 @@ String _formatChoreDate(DateTime value) {
   final month = value.month.toString().padLeft(2, '0');
   final day = value.day.toString().padLeft(2, '0');
   return '$year-$month-$day';
+}
+
+/// True when [occurrenceDate] (`YYYY-MM-DD`) is strictly after local today.
+bool _isFutureOccurrence(String? occurrenceDate) {
+  if (occurrenceDate == null || occurrenceDate.trim().isEmpty) return false;
+  final parsed = DateTime.tryParse(occurrenceDate.trim());
+  if (parsed == null) return false;
+
+  final today = DateTime.now();
+  final todayDate = DateTime(today.year, today.month, today.day);
+  final occurrence = DateTime(parsed.year, parsed.month, parsed.day);
+  return occurrence.isAfter(todayDate);
 }
 
 class ChoresController extends ChangeNotifier {
@@ -33,8 +46,15 @@ class ChoresController extends ChangeNotifier {
 
     try {
       final today = DateTime.now();
-      final from = _formatChoreDate(DateTime(today.year, 1, 1));
-      final to = _formatChoreDate(DateTime(today.year, 12, 31));
+      final todayDate = DateTime(today.year, today.month, today.day);
+      // The backend expands recurring chores into a per-date occurrence row
+      // within the requested range, so a full-year window is no longer cheap.
+      // 30 days back / 31 days forward matches Calee Android/tablet's window
+      // and comfortably covers Today/Tomorrow/Later this week/Later.
+      final from = _formatChoreDate(
+        todayDate.subtract(const Duration(days: 30)),
+      );
+      final to = _formatChoreDate(todayDate.add(const Duration(days: 31)));
       overview = await repository.loadOverview(from: from, to: to);
       calendarServiceErrors = overview?.calendarServiceErrors ?? [];
       error = null;
@@ -104,6 +124,13 @@ class ChoresController extends ChangeNotifier {
       if (chore.completedToday || chore.normalizedSection == 'doneToday') {
         await repository.undoCompletion(chore);
       } else {
+        if (_isFutureOccurrence(chore.effectiveOccurrenceDate)) {
+          throw const CaleeHubException(
+            statusCode: 0,
+            message: 'Future chores cannot be completed yet.',
+            code: 'FUTURE_COMPLETION_NOT_ALLOWED',
+          );
+        }
         await repository.completeChore(chore);
       }
       await load();
@@ -121,9 +148,9 @@ class ChoresController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final scheduledDate = chore.scheduledDate;
-      final date = scheduledDate != null && scheduledDate.trim().isNotEmpty
-          ? scheduledDate.trim()
+      final occurrenceDate = chore.effectiveOccurrenceDate;
+      final date = occurrenceDate != null && occurrenceDate.trim().isNotEmpty
+          ? occurrenceDate.trim()
           : DateTime.now().toIso8601String().split('T').first;
       await repository.skipRecurringChore(chore, date: date);
       await load();

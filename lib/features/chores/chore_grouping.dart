@@ -22,14 +22,17 @@ Map<String, List<ClientChore>> groupChoresBySection(
       : todayDate.add(Duration(days: daysUntilSunday));
 
   // A recurring chore's persistent baseChore row and its completion-log row
-  // for today share a choreUid/parentChoreUid. Collect the uids that already
-  // have a completion recorded for today so the still-open baseChore row
-  // doesn't also render as due/overdue alongside it.
-  final doneTodayUids = <String>{};
+  // for today share a choreUid/parentChoreUid, but after server-side occurrence
+  // expansion the same choreUid can also legitimately appear as several active
+  // rows on different dates (today, tomorrow, ...). Keying on uid alone would
+  // hide every one of those rows once any single date is completed, so the key
+  // must include the occurrence date: a completion log only ever consumes the
+  // one active row for the same uid *and* date.
+  final doneTodayKeys = <String>{};
   for (final chore in chores) {
     if (chore.completedToday || chore.normalizedSection == 'doneToday') {
-      final uid = _choreIdentityUid(chore);
-      if (uid != null) doneTodayUids.add(uid);
+      final key = _choreOccurrenceKey(chore);
+      if (key != null) doneTodayKeys.add(key);
     }
   }
 
@@ -55,8 +58,8 @@ Map<String, List<ClientChore>> groupChoresBySection(
 
     if ((uiSection == 'todoToday' || uiSection == 'overdue') &&
         chore.isBaseChore) {
-      final uid = _choreIdentityUid(chore);
-      if (uid != null && doneTodayUids.contains(uid)) {
+      final key = _choreOccurrenceKey(chore);
+      if (key != null && doneTodayKeys.contains(key)) {
         continue;
       }
     }
@@ -80,13 +83,22 @@ String? _choreIdentityUid(ClientChore chore) {
   return uid;
 }
 
+/// Key identifying one specific occurrence of a recurring chore: uid plus the
+/// occurrence date it applies to. A completion log only ever suppresses the
+/// active row sharing both, never every row for the same uid.
+String? _choreOccurrenceKey(ClientChore chore) {
+  final uid = _choreIdentityUid(chore);
+  if (uid == null) return null;
+  return '$uid|${chore.effectiveOccurrenceDate}';
+}
+
 String _futureSubsection(
   ClientChore chore, {
   required DateTime todayDate,
   required DateTime tomorrowDate,
   required DateTime endOfWeekDate,
 }) {
-  final dateStr = chore.scheduledDate ?? chore.scheduledAt;
+  final dateStr = chore.effectiveOccurrenceDate;
   if (dateStr == null || dateStr.trim().isEmpty) {
     // A recurring chore with no explicit start date begins today.
     return chore.isRecurring ? 'todoToday' : 'later';
@@ -118,8 +130,8 @@ int compareChores(ClientChore a, ClientChore b) {
     if (cmp != 0) return cmp;
   }
 
-  final aDate = a.scheduledDate ?? a.scheduledAt ?? '';
-  final bDate = b.scheduledDate ?? b.scheduledAt ?? '';
+  final aDate = a.effectiveOccurrenceDate ?? '';
+  final bDate = b.effectiveOccurrenceDate ?? '';
   final dateCmp = aDate.compareTo(bDate);
   if (dateCmp != 0) return dateCmp;
 
