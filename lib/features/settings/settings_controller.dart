@@ -36,8 +36,8 @@ class SettingsController extends ChangeNotifier {
       calendars = overview.calendars;
       error = null;
       try {
-        calendarRemindersEnabled =
-            await repository.loadCalendarRemindersEnabled();
+        calendarRemindersEnabled = await repository
+            .loadCalendarRemindersEnabled();
       } catch (_) {
         // Best-effort; keep default of false.
       }

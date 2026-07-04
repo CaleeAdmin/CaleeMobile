@@ -121,7 +121,12 @@ ClientBootstrap _businessBootstrap() => ClientBootstrap(
       accessStatus: 'active',
       calendarCredentialStatus: 'connected',
       source: 'test',
-      capabilities: {'calendar': true, 'tasks': true, 'chores': true, 'meals': true},
+      capabilities: {
+        'calendar': true,
+        'tasks': true,
+        'chores': true,
+        'meals': true,
+      },
     ),
   ],
   contexts: const ClientContexts(
@@ -475,41 +480,43 @@ void main() {
   });
 
   group('CaleeHomePage — family UX context visibility', () {
-    testWidgets('Chores tab hidden for business/workspace user even with chores service', (
-      tester,
-    ) async {
-      await tester.pumpWidget(_buildHome(bootstrap: _businessBootstrap()));
-      await tester.pump();
+    testWidgets(
+      'Chores tab hidden for business/workspace user even with chores service',
+      (tester) async {
+        await tester.pumpWidget(_buildHome(bootstrap: _businessBootstrap()));
+        await tester.pump();
 
-      final bar = find.byType(NavigationBar);
-      final destinations = find.descendant(
-        of: bar,
-        matching: find.byType(NavigationDestination),
-      );
-      final labels = tester
-          .widgetList<NavigationDestination>(destinations)
-          .map((d) => d.label)
-          .toList();
-      expect(labels.contains('Chores'), isFalse);
-    });
+        final bar = find.byType(NavigationBar);
+        final destinations = find.descendant(
+          of: bar,
+          matching: find.byType(NavigationDestination),
+        );
+        final labels = tester
+            .widgetList<NavigationDestination>(destinations)
+            .map((d) => d.label)
+            .toList();
+        expect(labels.contains('Chores'), isFalse);
+      },
+    );
 
-    testWidgets('Meals tab hidden for business/workspace user even with meals service', (
-      tester,
-    ) async {
-      await tester.pumpWidget(_buildHome(bootstrap: _businessBootstrap()));
-      await tester.pump();
+    testWidgets(
+      'Meals tab hidden for business/workspace user even with meals service',
+      (tester) async {
+        await tester.pumpWidget(_buildHome(bootstrap: _businessBootstrap()));
+        await tester.pump();
 
-      final bar = find.byType(NavigationBar);
-      final destinations = find.descendant(
-        of: bar,
-        matching: find.byType(NavigationDestination),
-      );
-      final labels = tester
-          .widgetList<NavigationDestination>(destinations)
-          .map((d) => d.label)
-          .toList();
-      expect(labels.contains('Meals'), isFalse);
-    });
+        final bar = find.byType(NavigationBar);
+        final destinations = find.descendant(
+          of: bar,
+          matching: find.byType(NavigationDestination),
+        );
+        final labels = tester
+            .widgetList<NavigationDestination>(destinations)
+            .map((d) => d.label)
+            .toList();
+        expect(labels.contains('Meals'), isFalse);
+      },
+    );
 
     testWidgets('Chores tab appears for family user with chores service', (
       tester,

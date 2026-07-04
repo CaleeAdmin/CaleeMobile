@@ -200,20 +200,20 @@ class ClientMealCopyWeekResult {
     final rawMeals = json['copiedMeals'] ?? json['meals'];
     final meals = (rawMeals is List)
         ? rawMeals
-            .whereType<Map<String, dynamic>>()
-            .map(ClientMeal.fromJson)
-            .toList()
+              .whereType<Map<String, dynamic>>()
+              .map(ClientMeal.fromJson)
+              .toList()
         : <ClientMeal>[];
     final count = json['count'] is int
         ? json['count'] as int
         : (json['count'] != null
-            ? int.tryParse(json['count'].toString()) ?? meals.length
-            : meals.length);
+              ? int.tryParse(json['count'].toString()) ?? meals.length
+              : meals.length);
     final skippedCount = json['skippedCount'] is int
         ? json['skippedCount'] as int
         : (json['skippedCount'] != null
-            ? int.tryParse(json['skippedCount'].toString()) ?? 0
-            : 0);
+              ? int.tryParse(json['skippedCount'].toString()) ?? 0
+              : 0);
     return ClientMealCopyWeekResult(
       householdId: json['householdId'] as String? ?? '',
       sourceFrom: json['sourceFrom'] as String? ?? '',

@@ -43,7 +43,12 @@ void main() {
 
     test('skips all-day events', () {
       final events = [
-        _event('e1', startsAt: '2026-07-05', endsAt: '2026-07-06', allDay: true),
+        _event(
+          'e1',
+          startsAt: '2026-07-05',
+          endsAt: '2026-07-06',
+          allDay: true,
+        ),
       ];
 
       final result = buildNotificationCandidates(events, now: _now);
@@ -152,7 +157,10 @@ void main() {
         occurrenceId: 'occ-42',
       );
 
-      expect(notificationIdForEvent(base), isNot(notificationIdForEvent(withOccurrence)));
+      expect(
+        notificationIdForEvent(base),
+        isNot(notificationIdForEvent(withOccurrence)),
+      );
     });
 
     test('different startsAt yields a different id', () {

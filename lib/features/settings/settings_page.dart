@@ -167,13 +167,35 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _toggleCalendarReminders(bool value) async {
-    await _controller.setCalendarRemindersEnabled(value);
     if (value) {
-      await LocalCalendarNotificationService.instance.requestPermissionIfNeeded();
-    } else {
-      await LocalCalendarNotificationService.instance
-          .cancelAllCalendarEventNotifications();
+      final granted = await LocalCalendarNotificationService.instance
+          .requestPermissionIfNeeded();
+
+      if (!granted) {
+        await _controller.setCalendarRemindersEnabled(false);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Notification permission is needed for calendar reminders.',
+            ),
+          ),
+        );
+        return;
+      }
+
+      await _controller.setCalendarRemindersEnabled(true);
+
+      // Switching to the calendar tab triggers CalendarController.loadMonth(),
+      // which immediately reschedules notifications for the loaded events.
+      widget.onNavigateToCalendar?.call();
+
+      return;
     }
+
+    await _controller.setCalendarRemindersEnabled(false);
+    await LocalCalendarNotificationService.instance
+        .cancelAllCalendarEventNotifications();
   }
 
   ClientCalendar? _findById(List<ClientCalendar> list, String id) {
