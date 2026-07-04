@@ -45,4 +45,17 @@ class MealsRepository {
 
   Future<void> deleteMeal(int mealId) =>
       hubClient.deleteMeal(accessToken: accessToken, mealId: mealId);
+
+  Future<ClientMealCopyWeekResult> copyWeek({
+    required String sourceFrom,
+    required String sourceTo,
+    required String targetFrom,
+    bool overwriteExisting = false,
+  }) => hubClient.copyMealWeek(
+    accessToken: accessToken,
+    sourceFrom: sourceFrom,
+    sourceTo: sourceTo,
+    targetFrom: targetFrom,
+    mode: overwriteExisting ? 'overwrite_existing' : 'skip_existing',
+  );
 }
