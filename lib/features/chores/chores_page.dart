@@ -423,7 +423,7 @@ class _ChoresPageState extends State<ChoresPage> {
       return 'All chores';
     }
     if (filter == 'unassigned') {
-      return 'Unassigned';
+      return 'For everyone';
     }
     if (filter.startsWith('person:')) {
       final personId = filter.substring('person:'.length);

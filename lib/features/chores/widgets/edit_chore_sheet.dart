@@ -274,7 +274,7 @@ class _EditChoreSheetState extends State<EditChoreSheet> {
                     items: [
                       const DropdownMenuItem<String?>(
                         value: null,
-                        child: Text('Unassigned'),
+                        child: Text('For everyone'),
                       ),
                       for (final person in widget.people)
                         DropdownMenuItem<String?>(
@@ -289,7 +289,7 @@ class _EditChoreSheetState extends State<EditChoreSheet> {
                     },
                   ),
                   CaleeSectionLabeledTextFormField(
-                    label: 'Points',
+                    label: 'Stars',
                     controller: _pointsController,
                     enabled: !_isSubmitting,
                     keyboardType: TextInputType.number,
@@ -297,7 +297,7 @@ class _EditChoreSheetState extends State<EditChoreSheet> {
                     validator: (value) {
                       final points = int.tryParse((value ?? '').trim());
                       if (!isValidChorePoints(points)) {
-                        return 'Enter points from 1 to 100';
+                        return 'Enter stars from 1 to 100';
                       }
                       return null;
                     },

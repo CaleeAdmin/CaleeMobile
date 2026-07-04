@@ -29,7 +29,7 @@ class ChoreSummaryStrip extends StatelessWidget {
           ),
         if (todoTodayCount > 0) _StripChip(label: '$todoTodayCount today'),
         if (doneTodayCount > 0) _StripChip(label: '$doneTodayCount done'),
-        if (pointsToday > 0) _StripChip(label: '$pointsToday pts'),
+        if (pointsToday > 0) _StripChip(label: '$pointsToday stars'),
       ],
     );
   }

@@ -55,7 +55,7 @@ class ChoreAssigneeFilterChooser extends StatelessWidget {
             ),
             if (hasUnassigned)
               CaleeListRow(
-                title: 'Unassigned',
+                title: 'For everyone',
                 leading: selectedFilter == 'unassigned'
                     ? const Icon(
                         Icons.check,

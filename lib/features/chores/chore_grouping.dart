@@ -129,7 +129,7 @@ int compareChores(ClientChore a, ClientChore b) {
 /// Returns subtitle parts for a chore row.
 ///
 /// History / completion-log rows: [scheduled/completed label, calendar name].
-/// Active rows: [assignee or 'Unassigned', pts (if > 0), repeat label (if set), calendar name].
+/// Active rows: [assignee or 'For everyone', pts (if > 0), repeat label (if set), calendar name].
 List<String> choreSubtitleParts({
   required ClientChore chore,
   required String calendarName,
@@ -152,7 +152,7 @@ List<String> choreSubtitleParts({
 
   final assignee = chore.assigneeName?.trim();
   final parts = <String>[
-    assignee != null && assignee.isNotEmpty ? assignee : 'Unassigned',
+    assignee != null && assignee.isNotEmpty ? assignee : 'For everyone',
   ];
 
   final rrule = _rruleLabel(chore.recurrence);

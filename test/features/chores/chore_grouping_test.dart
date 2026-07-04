@@ -480,14 +480,14 @@ void main() {
       expect(parts, ['Mia', 'Chores']);
     });
 
-    test('active unassigned chore shows "Unassigned"', () {
+    test('active unassigned chore shows "For everyone"', () {
       final chore = _chore(points: 1);
       final parts = choreSubtitleParts(
         chore: chore,
         calendarName: 'Chores',
         scheduledLabel: '',
       );
-      expect(parts.first, 'Unassigned');
+      expect(parts.first, 'For everyone');
     });
 
     test('active chore without recurrence omits repeat label and pts', () {
@@ -584,19 +584,19 @@ void main() {
         expect(parts, contains('Kids chores'));
         // Repeat label must not appear for a completed chore row
         expect(parts, isNot(contains('Daily')));
-        // 'Unassigned' must not appear when assignee is set
-        expect(parts, isNot(contains('Unassigned')));
+        // 'For everyone' must not appear when assignee is set
+        expect(parts, isNot(contains('For everyone')));
       },
     );
   });
 
-  // ── points badge pluralisation ───────────────────────────────────────────
+  // ── stars badge pluralisation ────────────────────────────────────────────
 
-  String ptLabel(int points) => '$points ${points == 1 ? 'pt' : 'pts'}';
+  String ptLabel(int points) => '$points ${points == 1 ? 'star' : 'stars'}';
 
-  group('points badge label pluralisation', () {
-    test('1 point → "1 pt"', () => expect(ptLabel(1), '1 pt'));
-    test('2 points → "2 pts"', () => expect(ptLabel(2), '2 pts'));
-    test('100 points → "100 pts"', () => expect(ptLabel(100), '100 pts'));
+  group('stars badge label pluralisation', () {
+    test('1 star → "1 star"', () => expect(ptLabel(1), '1 star'));
+    test('2 stars → "2 stars"', () => expect(ptLabel(2), '2 stars'));
+    test('100 stars → "100 stars"', () => expect(ptLabel(100), '100 stars'));
   });
 }
