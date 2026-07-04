@@ -620,6 +620,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
             accessToken: _sessionController.accessToken!,
             services: _sessionController.bootstrap!.services,
             accountId: _sessionController.bootstrap!.account.id,
+            isFamilyUxContext: _sessionController.bootstrap!.isFamilyUxContext,
             autoOpenSubscribeForm: true,
             initialSubscriptionUrl: intent.url,
             initialSubscriptionName: intent.title,

@@ -157,6 +157,7 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
         accessToken: widget.accessToken,
         services: widget.bootstrap.services,
         accountId: widget.bootstrap.account.id,
+        isFamilyUxContext: widget.bootstrap.isFamilyUxContext,
         refreshGeneration: _calendarRefreshGeneration,
       ),
       TasksPage(
@@ -164,6 +165,7 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
         accessToken: widget.accessToken,
         services: widget.bootstrap.services,
         accountId: widget.bootstrap.account.id,
+        isFamilyUxContext: widget.bootstrap.isFamilyUxContext,
       ),
       if (_hasChoreService)
         ChoresPage(
