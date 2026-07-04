@@ -1,12 +1,19 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import '../../data/auth/calee_preferences.dart';
 import '../../data/models/calendar_service_error.dart';
 import '../../data/models/client_calendar.dart';
+import '../notifications/local_calendar_notification_service.dart';
 import 'calendar_repository.dart';
 
 class CalendarController extends ChangeNotifier {
-  CalendarController({required this.repository}) {
+  CalendarController({
+    required this.repository,
+    LocalCalendarNotificationService? notificationService,
+  }) : _notificationService =
+           notificationService ?? LocalCalendarNotificationService.instance {
     final now = DateTime.now();
     today = DateTime(now.year, now.month, now.day);
     selectedDay = today;
@@ -18,6 +25,7 @@ class CalendarController extends ChangeNotifier {
   }
 
   final CalendarRepository repository;
+  final LocalCalendarNotificationService _notificationService;
 
   // ── State ─────────────────────────────────────────────────────────────────
 
@@ -50,6 +58,7 @@ class CalendarController extends ChangeNotifier {
       calendars = overview.calendars;
       events = overview.events;
       calendarServiceErrors = overview.serviceErrors;
+      unawaited(_notificationService.rescheduleUpcomingEvents(events));
       hiddenCalendarIds.removeWhere(
         (id) => !calendars.any((cal) => cal.id == id),
       );

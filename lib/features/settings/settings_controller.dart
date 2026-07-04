@@ -18,6 +18,7 @@ class SettingsController extends ChangeNotifier {
   ClientBootstrap bootstrap;
   StoredPreferences preferences = const StoredPreferences();
   List<ClientCalendar> calendars = [];
+  bool calendarRemindersEnabled = false;
   bool isLoadingPreferences = false;
   bool isOpeningFamily = false;
   Object? error;
@@ -34,6 +35,12 @@ class SettingsController extends ChangeNotifier {
       preferences = overview.preferences;
       calendars = overview.calendars;
       error = null;
+      try {
+        calendarRemindersEnabled =
+            await repository.loadCalendarRemindersEnabled();
+      } catch (_) {
+        // Best-effort; keep default of false.
+      }
     } catch (e) {
       error = e;
     } finally {
@@ -76,6 +83,12 @@ class SettingsController extends ChangeNotifier {
       calendar: calendar,
     );
     notifyListeners();
+  }
+
+  Future<void> setCalendarRemindersEnabled(bool value) async {
+    calendarRemindersEnabled = value;
+    notifyListeners();
+    await repository.saveCalendarRemindersEnabled(value);
   }
 
   // ── Family setup ──────────────────────────────────────────────────────────
