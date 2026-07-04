@@ -206,6 +206,8 @@ void _capabilityTests() {
 ClientBootstrap _bootstrapWithContexts({
   List<ClientContext> households = const [],
   List<ClientContext> organisations = const [],
+  List<ClientService> services = const [],
+  String? experienceMode,
 }) => ClientBootstrap(
   account: const ClientAccount(
     id: '',
@@ -214,12 +216,25 @@ ClientBootstrap _bootstrapWithContexts({
     timeZone: null,
     status: null,
   ),
-  services: const [],
+  services: services,
   contexts: ClientContexts(
     households: households,
     organisations: organisations,
   ),
   availableContexts: const [],
+  capabilities: const {},
+  experienceMode: experienceMode,
+);
+
+ClientService _activeService(String id) => ClientService(
+  id: id,
+  displayName: id,
+  baseUrl: '',
+  launchUrl: '',
+  serviceType: '',
+  accessStatus: 'active',
+  calendarCredentialStatus: 'unsupported',
+  source: '',
   capabilities: const {},
 );
 
@@ -299,6 +314,100 @@ void _bootstrapFamilyUxContextTests() {
         organisations: [_activeOrg],
       );
       expect(b.isFamilyUxContext, isFalse);
+    });
+
+    test('backend experience.mode "family" overrides organisation context', () {
+      final b = _bootstrapWithContexts(
+        organisations: [_activeOrg],
+        experienceMode: 'family',
+      );
+      expect(b.isFamilyUxContext, isTrue);
+    });
+
+    test('backend experience.mode "business" overrides household context', () {
+      final b = _bootstrapWithContexts(
+        households: [_activeHousehold],
+        experienceMode: 'business',
+      );
+      expect(b.isFamilyUxContext, isFalse);
+    });
+
+    test('backend experience.mode "custom" overrides household context', () {
+      final b = _bootstrapWithContexts(
+        households: [_activeHousehold],
+        experienceMode: 'custom',
+      );
+      expect(b.isFamilyUxContext, isFalse);
+    });
+
+    test(
+      'falls back to connected business service when experience.mode is absent',
+      () {
+        // Matches Calee/Android: an account with a connected business service
+        // and no organisation context (e.g. no admin API call was ever made to
+        // create one) must still be treated as non-family.
+        final b = _bootstrapWithContexts(
+          households: [_activeHousehold],
+          services: [_activeService('business')],
+        );
+        expect(b.isFamilyUxContext, isFalse);
+      },
+    );
+
+    test(
+      'falls back to connected cewa service when experience.mode is absent',
+      () {
+        final b = _bootstrapWithContexts(
+          households: [_activeHousehold],
+          services: [_activeService('cewa')],
+        );
+        expect(b.isFamilyUxContext, isFalse);
+      },
+    );
+
+    test('ignores an inactive business service in the fallback heuristic', () {
+      final inactiveBusiness = ClientService(
+        id: 'business',
+        displayName: 'business',
+        baseUrl: '',
+        launchUrl: '',
+        serviceType: '',
+        accessStatus: 'inactive',
+        calendarCredentialStatus: 'unsupported',
+        source: '',
+        capabilities: const {},
+      );
+      final b = _bootstrapWithContexts(
+        households: [_activeHousehold],
+        services: [inactiveBusiness],
+      );
+      expect(b.isFamilyUxContext, isTrue);
+    });
+  });
+
+  group('ClientBootstrap.fromJson experience mode', () {
+    test('parses experience.mode from the bootstrap payload', () {
+      final b = ClientBootstrap.fromJson({
+        'account': <String, dynamic>{},
+        'services': <dynamic>[],
+        'contexts': <String, dynamic>{},
+        'availableContexts': <dynamic>[],
+        'capabilities': <String, dynamic>{},
+        'experience': {'mode': 'business'},
+      });
+      expect(b.experienceMode, 'business');
+      expect(b.isFamilyUxContext, isFalse);
+    });
+
+    test('experienceMode is null when the key is absent', () {
+      final b = ClientBootstrap.fromJson({
+        'account': <String, dynamic>{},
+        'services': <dynamic>[],
+        'contexts': <String, dynamic>{},
+        'availableContexts': <dynamic>[],
+        'capabilities': <String, dynamic>{},
+      });
+      expect(b.experienceMode, isNull);
     });
   });
 }
