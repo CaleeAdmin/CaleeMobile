@@ -278,13 +278,15 @@ class _ChoresPageState extends State<ChoresPage> {
       );
     }
 
-    actions.add(
-      CaleeAction(
-        label: 'Edit chore',
-        icon: Icons.edit_outlined,
-        onTap: () => _openEditChoreSheet(chore),
-      ),
-    );
+    if (!chore.isCompletionLog) {
+      actions.add(
+        CaleeAction(
+          label: 'Edit chore',
+          icon: Icons.edit_outlined,
+          onTap: () => _openEditChoreSheet(chore),
+        ),
+      );
+    }
 
     if (!isDone && chore.isRecurring) {
       actions.addAll([
@@ -652,7 +654,6 @@ class _ChoresPageState extends State<ChoresPage> {
           ...sectionChores.map((chore) {
             final onActions =
                 chore.completionActionId.trim().isNotEmpty &&
-                    !chore.isCompletionLog &&
                     chore.normalizedSection != 'history'
                 ? () => _showChoreActions(chore)
                 : null;
@@ -709,7 +710,6 @@ class _ChoresPageState extends State<ChoresPage> {
       children: sectionChores.map((chore) {
         final onActions =
             chore.completionActionId.trim().isNotEmpty &&
-                !chore.isCompletionLog &&
                 chore.normalizedSection != 'history'
             ? () => _showChoreActions(chore)
             : null;

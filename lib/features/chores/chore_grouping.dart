@@ -21,6 +21,18 @@ Map<String, List<ClientChore>> groupChoresBySection(
       ? todayDate
       : todayDate.add(Duration(days: daysUntilSunday));
 
+  // A recurring chore's persistent baseChore row and its completion-log row
+  // for today share a choreUid/parentChoreUid. Collect the uids that already
+  // have a completion recorded for today so the still-open baseChore row
+  // doesn't also render as due/overdue alongside it.
+  final doneTodayUids = <String>{};
+  for (final chore in chores) {
+    if (chore.completedToday || chore.normalizedSection == 'doneToday') {
+      final uid = _choreIdentityUid(chore);
+      if (uid != null) doneTodayUids.add(uid);
+    }
+  }
+
   final grouped = <String, List<ClientChore>>{};
 
   for (final chore in chores) {
@@ -40,6 +52,15 @@ Map<String, List<ClientChore>> groupChoresBySection(
             endOfWeekDate: endOfWeekDate,
           )
         : apiSection;
+
+    if ((uiSection == 'todoToday' || uiSection == 'overdue') &&
+        chore.isBaseChore) {
+      final uid = _choreIdentityUid(chore);
+      if (uid != null && doneTodayUids.contains(uid)) {
+        continue;
+      }
+    }
+
     grouped.putIfAbsent(uiSection, () => []).add(chore);
   }
 
@@ -48,6 +69,15 @@ Map<String, List<ClientChore>> groupChoresBySection(
   }
 
   return grouped;
+}
+
+/// The uid a chore's completion is tracked under: its own [ClientChore.choreUid]
+/// for a baseChore row, or [ClientChore.parentChoreUid] for a completion-log
+/// row pointing back at its recurring chore. Mirrors [ClientChore.completionActionId].
+String? _choreIdentityUid(ClientChore chore) {
+  final uid = chore.choreUid ?? chore.parentChoreUid;
+  if (uid == null || uid.trim().isEmpty) return null;
+  return uid;
 }
 
 String _futureSubsection(
