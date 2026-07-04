@@ -108,6 +108,7 @@ class _MealsPageState extends State<MealsPage> {
         _buildHeader(),
         const SizedBox(height: CaleeSpacing.md),
         _buildWeekSelector(),
+        _buildCopyWeekButton(),
         const SizedBox(height: CaleeSpacing.md),
         _buildMealList(),
         const SizedBox(height: CaleeSpacing.lg),
@@ -167,6 +168,55 @@ class _MealsPageState extends State<MealsPage> {
         ),
       ],
     );
+  }
+
+  Widget _buildCopyWeekButton() {
+    final label = _controller.isCurrentWeek
+        ? 'Copy last week'
+        : 'Copy previous week';
+    final disabled = _controller.isCopying || _controller.isLoading;
+    return Align(
+      alignment: Alignment.centerRight,
+      child: TextButton.icon(
+        onPressed: disabled ? null : _showCopyWeekSheet,
+        icon: const Icon(Icons.content_copy, size: 16),
+        label: Text(label),
+      ),
+    );
+  }
+
+  Future<void> _showCopyWeekSheet() async {
+    final overwrite = await _CopyWeekSheet.show(context: context);
+    if (overwrite == null || !mounted) return;
+    try {
+      final result = await _controller.copyPreviousWeekToVisibleWeek(
+        overwriteExisting: overwrite,
+      );
+      if (mounted) _onCopyResult(result);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.toString())),
+        );
+      }
+    }
+  }
+
+  void _onCopyResult(ClientMealCopyWeekResult result) {
+    if (!mounted) return;
+    final String msg;
+    if (result.count == 0) {
+      msg = 'Nothing to copy.';
+    } else if (result.skippedCount > 0) {
+      final n = result.count;
+      final s = result.skippedCount;
+      msg =
+          'Copied $n meal${n != 1 ? 's' : ''}. Skipped $s already planned.';
+    } else {
+      final n = result.count;
+      msg = 'Copied $n meal${n != 1 ? 's' : ''}.';
+    }
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
   Widget _buildMealList() {
@@ -633,6 +683,91 @@ class _MealFormSheetState extends State<MealFormSheet> {
               ],
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CopyWeekSheet extends StatefulWidget {
+  const _CopyWeekSheet();
+
+  static Future<bool?> show({required BuildContext context}) {
+    return showModalBottomSheet<bool>(
+      context: context,
+      backgroundColor: CaleeColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(CaleeRadius.sheet),
+        ),
+      ),
+      builder: (_) => const _CopyWeekSheet(),
+    );
+  }
+
+  @override
+  State<_CopyWeekSheet> createState() => _CopyWeekSheetState();
+}
+
+class _CopyWeekSheetState extends State<_CopyWeekSheet> {
+  @override
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(
+          CaleeSpacing.md,
+          CaleeSpacing.sm,
+          CaleeSpacing.md,
+          CaleeSpacing.md + bottomInset,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: Container(
+                width: 36,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: CaleeSpacing.md),
+                decoration: BoxDecoration(
+                  color: CaleeColors.separatorOpaque,
+                  borderRadius: BorderRadius.circular(CaleeRadius.dot),
+                ),
+              ),
+            ),
+            const Text(
+              'Copy previous week?',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+                color: CaleeColors.textPrimary,
+              ),
+            ),
+            const SizedBox(height: CaleeSpacing.sm),
+            const Text(
+              'This copies breakfast, lunch and dinner into the week shown.',
+              style: TextStyle(
+                fontSize: 14,
+                color: CaleeColors.textTertiary,
+              ),
+            ),
+            const SizedBox(height: CaleeSpacing.lg),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Copy empty slots'),
+            ),
+            const SizedBox(height: CaleeSpacing.sm),
+            OutlinedButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Replace this week'),
+            ),
+            const SizedBox(height: CaleeSpacing.sm),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
+          ],
         ),
       ),
     );

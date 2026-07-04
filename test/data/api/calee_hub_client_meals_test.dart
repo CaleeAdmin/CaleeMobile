@@ -166,4 +166,85 @@ void main() {
       expect(capturedPaths.single, '/client/v1/meals/42');
     });
   });
+
+  group('CaleeHubClient.copyMealWeek()', () {
+    test('POSTs to /client/v1/meals/copy-week with required fields', () async {
+      final client = await startServer({
+        'data': {
+          'householdId': 'h1',
+          'sourceFrom': '2024-01-08',
+          'targetFrom': '2024-01-15',
+          'mode': 'skip_existing',
+          'mealTypes': ['breakfast', 'lunch', 'dinner'],
+          'copiedMeals': <dynamic>[],
+          'count': 0,
+          'skippedCount': 0,
+        },
+      });
+
+      await client.copyMealWeek(
+        accessToken: 'tok',
+        sourceFrom: '2024-01-08',
+        sourceTo: '2024-01-14',
+        targetFrom: '2024-01-15',
+      );
+
+      expect(capturedMethods.single, 'POST');
+      expect(capturedPaths.single, '/client/v1/meals/copy-week');
+      expect(capturedBodies.single['sourceFrom'], '2024-01-08');
+      expect(capturedBodies.single['sourceTo'], '2024-01-14');
+      expect(capturedBodies.single['targetFrom'], '2024-01-15');
+      expect(capturedBodies.single['mode'], 'skip_existing');
+    });
+
+    test('sends overwrite_existing mode when specified', () async {
+      final client = await startServer({
+        'data': {
+          'householdId': 'h1',
+          'sourceFrom': '2024-01-08',
+          'targetFrom': '2024-01-15',
+          'mode': 'overwrite_existing',
+          'mealTypes': ['breakfast', 'lunch', 'dinner'],
+          'copiedMeals': <dynamic>[],
+          'count': 0,
+          'skippedCount': 0,
+        },
+      });
+
+      await client.copyMealWeek(
+        accessToken: 'tok',
+        sourceFrom: '2024-01-08',
+        sourceTo: '2024-01-14',
+        targetFrom: '2024-01-15',
+        mode: 'overwrite_existing',
+      );
+
+      expect(capturedBodies.single['mode'], 'overwrite_existing');
+    });
+
+    test('parses count and skippedCount from response', () async {
+      final client = await startServer({
+        'data': {
+          'householdId': 'h1',
+          'sourceFrom': '2024-01-08',
+          'targetFrom': '2024-01-15',
+          'mode': 'skip_existing',
+          'mealTypes': ['breakfast', 'lunch', 'dinner'],
+          'copiedMeals': <dynamic>[_kMealJson],
+          'count': 3,
+          'skippedCount': 2,
+        },
+      });
+
+      final result = await client.copyMealWeek(
+        accessToken: 'tok',
+        sourceFrom: '2024-01-08',
+        sourceTo: '2024-01-14',
+        targetFrom: '2024-01-15',
+      );
+
+      expect(result.count, 3);
+      expect(result.skippedCount, 2);
+    });
+  });
 }
