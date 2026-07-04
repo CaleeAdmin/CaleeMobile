@@ -182,3 +182,60 @@ class ClientMealTemplate {
   final bool isFavourite;
   final int usageCount;
 }
+
+class ClientMealCopyWeekResult {
+  const ClientMealCopyWeekResult({
+    required this.householdId,
+    required this.sourceFrom,
+    this.sourceTo,
+    required this.targetFrom,
+    required this.mode,
+    required this.mealTypes,
+    required this.copiedMeals,
+    required this.count,
+    required this.skippedCount,
+  });
+
+  factory ClientMealCopyWeekResult.fromJson(Map<String, dynamic> json) {
+    final rawMeals = json['copiedMeals'] ?? json['meals'];
+    final meals = (rawMeals is List)
+        ? rawMeals
+            .whereType<Map<String, dynamic>>()
+            .map(ClientMeal.fromJson)
+            .toList()
+        : <ClientMeal>[];
+    final count = json['count'] is int
+        ? json['count'] as int
+        : (json['count'] != null
+            ? int.tryParse(json['count'].toString()) ?? meals.length
+            : meals.length);
+    final skippedCount = json['skippedCount'] is int
+        ? json['skippedCount'] as int
+        : (json['skippedCount'] != null
+            ? int.tryParse(json['skippedCount'].toString()) ?? 0
+            : 0);
+    return ClientMealCopyWeekResult(
+      householdId: json['householdId'] as String? ?? '',
+      sourceFrom: json['sourceFrom'] as String? ?? '',
+      sourceTo: json['sourceTo'] as String?,
+      targetFrom: json['targetFrom'] as String? ?? '',
+      mode: json['mode'] as String? ?? 'skip_existing',
+      mealTypes: (json['mealTypes'] as List<dynamic>? ?? const [])
+          .whereType<String>()
+          .toList(),
+      copiedMeals: meals,
+      count: count,
+      skippedCount: skippedCount,
+    );
+  }
+
+  final String householdId;
+  final String sourceFrom;
+  final String? sourceTo;
+  final String targetFrom;
+  final String mode;
+  final List<String> mealTypes;
+  final List<ClientMeal> copiedMeals;
+  final int count;
+  final int skippedCount;
+}
