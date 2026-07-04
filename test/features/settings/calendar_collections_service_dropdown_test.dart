@@ -40,6 +40,7 @@ Widget _wrap(List<ClientService> services) => MaterialApp(
     accessToken: 'tok',
     services: services,
     accountId: 'acct1',
+    isFamilyUxContext: true,
     autoOpenCreate: true,
   ),
 );

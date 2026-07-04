@@ -66,6 +66,7 @@ class CalendarCollectionsPage extends StatefulWidget {
     required this.accessToken,
     required this.services,
     required this.accountId,
+    required this.isFamilyUxContext,
     this.initialCreateKind,
     this.autoOpenCreate = false,
     this.autoOpenSubscribe = false,
@@ -79,6 +80,11 @@ class CalendarCollectionsPage extends StatefulWidget {
   final String accessToken;
   final List<ClientService> services;
   final String accountId;
+
+  /// UX-only: hides the Chore lists section (and the "Chore list" create
+  /// option) for business/workspace accounts, matching Chores/Meals/People
+  /// gating elsewhere in the app.
+  final bool isFamilyUxContext;
   final String? initialCreateKind;
   final bool autoOpenCreate;
   final bool autoOpenSubscribe;
@@ -193,6 +199,11 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
       child: _CollectionFormContent(
         services: services,
         initialPrimaryKind: widget.initialCreateKind ?? 'calendar',
+        availableKinds: [
+          'calendar',
+          'tasks',
+          if (widget.isFamilyUxContext) 'chores',
+        ],
         onSubmit:
             ({
               required String name,
@@ -661,13 +672,17 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
                         calendars: _byKind(calendars, 'tasks'),
                         emptyMessage: 'No task lists yet.',
                       ),
-                      const SizedBox(height: CaleeSpacing.sectionSpacing),
-                      _buildSection(
-                        context,
-                        title: 'Chore lists',
-                        calendars: _byKind(calendars, 'chores'),
-                        emptyMessage: 'No chore lists yet.',
-                      ),
+                      // UX-only: hide Chore lists for business/workspace
+                      // accounts, matching Chores/Meals/People gating.
+                      if (widget.isFamilyUxContext) ...[
+                        const SizedBox(height: CaleeSpacing.sectionSpacing),
+                        _buildSection(
+                          context,
+                          title: 'Chore lists',
+                          calendars: _byKind(calendars, 'chores'),
+                          emptyMessage: 'No chore lists yet.',
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -728,6 +743,7 @@ class _CollectionFormContent extends StatefulWidget {
     this.initialColor,
     this.initialPrimaryKind = 'calendar',
     this.allowKindChange = true,
+    this.availableKinds = const ['calendar', 'tasks', 'chores'],
   });
 
   final List<ClientService> services;
@@ -735,6 +751,7 @@ class _CollectionFormContent extends StatefulWidget {
   final String? initialColor;
   final String initialPrimaryKind;
   final bool allowKindChange;
+  final List<String> availableKinds;
   final Future<void> Function({
     required String name,
     required String primaryKind,
@@ -873,10 +890,9 @@ class _CollectionFormContentState extends State<_CollectionFormContent> {
             DropdownButtonFormField<String>(
               initialValue: _selectedKind,
               decoration: const InputDecoration(labelText: 'Type'),
-              items: const [
-                DropdownMenuItem(value: 'calendar', child: Text('Calendar')),
-                DropdownMenuItem(value: 'tasks', child: Text('Task list')),
-                DropdownMenuItem(value: 'chores', child: Text('Chore list')),
+              items: [
+                for (final kind in widget.availableKinds)
+                  DropdownMenuItem(value: kind, child: Text(_kindLabel(kind))),
               ],
               onChanged: !widget.allowKindChange || _isSubmitting
                   ? null

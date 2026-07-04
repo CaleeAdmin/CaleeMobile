@@ -97,6 +97,9 @@ class _ChoresPageState extends State<ChoresPage> {
               accessToken: widget.accessToken,
               services: choreServices,
               accountId: widget.accountId,
+              // ChoresPage itself is only ever shown for family-UX accounts
+              // (see CaleeHomePage._hasChoreService), so this is always true.
+              isFamilyUxContext: true,
               initialCreateKind: 'chores',
               autoOpenCreate: true,
             ),

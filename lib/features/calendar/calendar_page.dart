@@ -26,6 +26,7 @@ class CalendarPage extends StatefulWidget {
     required this.accessToken,
     required this.services,
     required this.accountId,
+    required this.isFamilyUxContext,
     this.refreshGeneration = 0,
     super.key,
   });
@@ -34,6 +35,10 @@ class CalendarPage extends StatefulWidget {
   final String accessToken;
   final List<ClientService> services;
   final String accountId;
+
+  /// UX-only: hides the Chore lists section (and the "Chore list" create
+  /// option) for business/workspace accounts, matching Chores/Meals gating.
+  final bool isFamilyUxContext;
   // Increment to trigger a refresh of calendars and events from the parent.
   final int refreshGeneration;
 
@@ -95,6 +100,7 @@ class _CalendarPageState extends State<CalendarPage> {
               accessToken: widget.accessToken,
               services: widget.services,
               accountId: widget.accountId,
+              isFamilyUxContext: widget.isFamilyUxContext,
               initialCreateKind: autoOpenCreate ? 'calendar' : null,
               autoOpenCreate: autoOpenCreate,
               autoOpenSubscribe: autoOpenSubscribe,
