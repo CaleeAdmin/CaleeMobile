@@ -6,6 +6,7 @@ class ClientBootstrap {
     required this.availableContexts,
     required this.capabilities,
     this.readiness = const {},
+    this.experienceMode,
   });
 
   factory ClientBootstrap.fromJson(Map<String, dynamic> json) {
@@ -31,6 +32,8 @@ class ClientBootstrap {
       readiness: Map<String, dynamic>.from(
         json['readiness'] as Map<String, dynamic>? ?? const {},
       ),
+      experienceMode:
+          (json['experience'] as Map<String, dynamic>?)?['mode'] as String?,
     );
   }
 
@@ -39,6 +42,10 @@ class ClientBootstrap {
   final ClientContexts contexts;
   final List<ClientContext> availableContexts;
   final Map<String, dynamic> capabilities;
+
+  /// Authoritative `experience.mode` reported by the backend ('family',
+  /// 'business', or 'custom'). Null on older backends that don't send it yet.
+  final String? experienceMode;
 
   bool get supportsMeals => capabilities['meals'] == true;
 
@@ -52,10 +59,25 @@ class ClientBootstrap {
     (c) => c.status == 'active' || c.status.isEmpty,
   );
 
-  // UX-only: hide family modules (Chores, Meals) for organisation/workspace users.
-  // Do not treat organisation context users as family by default.
-  bool get isFamilyUxContext =>
-      hasActiveHouseholdContext && !hasActiveOrganisationContext;
+  bool get _hasBusinessOrCustomService =>
+      services.any((s) => s.isActive && (s.id == 'business' || s.id == 'cewa'));
+
+  // UX-only: hide family modules (Chores, Meals, People) for business/custom
+  // accounts. Prefers the backend's authoritative experience.mode — the same
+  // signal Calee/Android reads — so both apps agree. Falls back to the
+  // previous context/service heuristic when an older backend hasn't
+  // populated experience.mode yet.
+  bool get isFamilyUxContext {
+    switch (experienceMode) {
+      case 'family':
+        return true;
+      case 'business':
+      case 'custom':
+        return false;
+    }
+    if (_hasBusinessOrCustomService) return false;
+    return hasActiveHouseholdContext && !hasActiveOrganisationContext;
+  }
 
   /// Server-reported readiness flags. Keys: calendarServiceReady (bool),
   /// problem (String?). Absent on older backends — treat missing as ready.

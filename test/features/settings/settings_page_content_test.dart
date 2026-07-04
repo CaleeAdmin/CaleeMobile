@@ -36,7 +36,20 @@ ClientBootstrap _bootstrap() => ClientBootstrap(
     status: 'active',
   ),
   services: const [],
-  contexts: const ClientContexts(households: [], organisations: []),
+  // The backend always ensures a default household for every account, so a
+  // realistic household/default-user fixture must include one too.
+  contexts: const ClientContexts(
+    households: [
+      ClientContext(
+        id: 'hh1',
+        type: 'household',
+        name: 'My Family',
+        role: 'admin',
+        status: 'active',
+      ),
+    ],
+    organisations: [],
+  ),
   availableContexts: const [],
   capabilities: const {},
 );

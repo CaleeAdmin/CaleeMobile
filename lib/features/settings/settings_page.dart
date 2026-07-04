@@ -472,7 +472,7 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
             // UX-only: hide People (household/family member management) for
             // organisation/workspace users, matching Chores/Meals gating.
-            if (!_controller.bootstrap.hasActiveOrganisationContext)
+            if (_controller.bootstrap.isFamilyUxContext)
               CaleeListRow(
                 title: 'People',
                 subtitle: isOpeningFamily
