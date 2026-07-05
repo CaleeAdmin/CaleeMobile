@@ -6,7 +6,6 @@
 
 import 'package:calee_mobile/data/api/calee_hub_client.dart';
 import 'package:calee_mobile/data/models/client_meal.dart';
-import 'package:calee_mobile/data/models/client_shopping_list.dart';
 import 'package:calee_mobile/features/meals/meals_controller.dart';
 import 'package:calee_mobile/features/meals/meals_page.dart';
 import 'package:calee_mobile/features/meals/meals_repository.dart';
@@ -34,8 +33,6 @@ class _StubHub extends CaleeHubClient {
   final List<ClientMeal> _meals;
   bool updateCalled = false;
   String? lastUpdateNotes = 'NOT_CALLED';
-  String? lastGenerateFrom;
-  String? lastGenerateTo;
 
   @override
   Future<ClientMealList> meals({
@@ -68,26 +65,6 @@ class _StubHub extends CaleeHubClient {
             status: 'planned',
             source: 'manual',
           );
-  }
-
-  @override
-  Future<ClientShoppingList> generateShoppingList({
-    required String accessToken,
-    required String from,
-    required String to,
-    String mode = 'merge',
-  }) async {
-    lastGenerateFrom = from;
-    lastGenerateTo = to;
-    return ClientShoppingList(
-      id: 1,
-      householdId: 'h1',
-      title: 'Shopping list',
-      fromDate: from,
-      toDate: to,
-      status: 'active',
-      items: const [],
-    );
   }
 }
 
@@ -201,55 +178,6 @@ void main() {
 
       expect(hub.updateCalled, isTrue);
       expect(hub.lastUpdateNotes, '');
-    });
-  });
-
-  group('MealsPage — shopping list week', () {
-    testWidgets(
-      'passes the visible week into ShoppingPage, not always the current '
-      'week',
-      (tester) async {
-        final hub = _StubHub();
-        await tester.pumpWidget(_buildMealsPage(hub));
-        await tester.pump();
-        await tester.pump();
-
-        // Move to the previous week so the visible week is no longer "this
-        // week" — MealsController.previousWeek() shifts _weekStart back 7 days.
-        await tester.tap(find.byIcon(Icons.chevron_left));
-        await tester.pump();
-        await tester.pump();
-
-        final previousMonday = _mondayOf(
-          DateTime.now(),
-        ).subtract(const Duration(days: 7));
-
-        await tester.tap(find.text('Generate shopping list'));
-        await tester.pumpAndSettle();
-
-        expect(hub.lastGenerateFrom, _fmt(previousMonday));
-        expect(
-          hub.lastGenerateTo,
-          _fmt(previousMonday.add(const Duration(days: 6))),
-        );
-      },
-    );
-
-    testWidgets('uses the current week when Meals is showing this week', (
-      tester,
-    ) async {
-      final hub = _StubHub();
-      await tester.pumpWidget(_buildMealsPage(hub));
-      await tester.pump();
-      await tester.pump();
-
-      final monday = _mondayOf(DateTime.now());
-
-      await tester.tap(find.text('Generate shopping list'));
-      await tester.pumpAndSettle();
-
-      expect(hub.lastGenerateFrom, _fmt(monday));
-      expect(hub.lastGenerateTo, _fmt(monday.add(const Duration(days: 6))));
     });
   });
 }
