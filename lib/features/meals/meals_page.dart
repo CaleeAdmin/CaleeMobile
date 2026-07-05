@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../data/api/calee_hub_client.dart';
 import '../../data/models/client_meal.dart';
 import '../../ui/calee_design.dart';
+import '../shopping/shopping_page.dart';
 import 'meals_controller.dart';
 import 'meals_repository.dart';
 
@@ -44,6 +45,11 @@ String _weekRangeLabel(DateTime start, DateTime end) {
   }
   return '${start.day} ${_kMonths[start.month - 1]} – ${end.day} ${_kMonths[end.month - 1]} ${start.year}';
 }
+
+// Dinner gets a more actionable prompt than the other meal types since it's
+// the meal families are most likely to actively plan ahead for.
+String _emptyMealLabel(String mealType) =>
+    mealType == 'dinner' ? 'Plan dinner' : 'Not planned';
 
 class MealsPage extends StatefulWidget {
   const MealsPage({
@@ -108,11 +114,41 @@ class _MealsPageState extends State<MealsPage> {
         _buildHeader(),
         const SizedBox(height: CaleeSpacing.md),
         _buildWeekSelector(),
+        _buildShoppingListButton(),
         _buildCopyWeekButton(),
         const SizedBox(height: CaleeSpacing.md),
         _buildMealList(),
         const SizedBox(height: CaleeSpacing.lg),
       ],
+    );
+  }
+
+  Widget _buildShoppingListButton() {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: TextButton.icon(
+        onPressed: _openShoppingList,
+        icon: const Icon(Icons.shopping_cart_outlined, size: 16),
+        label: const Text('Generate shopping list'),
+      ),
+    );
+  }
+
+  // Shopping lists are a sub-feature of meal planning (see ClientBootstrap
+  // .supportsMeals), so the Shopping page is reached from here rather than
+  // its own bottom-nav tab — Today/Calendar/Tasks/Chores/Meals/Settings
+  // already fill the bar for family households with chores enabled.
+  Future<void> _openShoppingList() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ShoppingPage(
+          hubClient: widget.hubClient,
+          accessToken: widget.accessToken,
+          autoGenerate: true,
+          initialWeekStart: _controller.weekStart,
+          initialWeekEnd: _controller.weekEnd,
+        ),
+      ),
     );
   }
 
@@ -269,7 +305,7 @@ class _MealsPageState extends State<MealsPage> {
             color: CaleeColors.textTertiary,
           ),
           title: _kMealTypeLabels[mealType] ?? mealType,
-          subtitle: meal != null ? meal.title : 'Not planned',
+          subtitle: meal != null ? meal.title : _emptyMealLabel(mealType),
           subtitleStyle: meal != null
               ? subtitleTheme?.copyWith(color: CaleeColors.textPrimary)
               : null,
