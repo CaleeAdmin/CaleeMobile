@@ -15,6 +15,7 @@ import '../models/client_event_draft.dart';
 import '../models/client_meal.dart';
 import '../models/client_person.dart';
 import '../models/client_profile.dart';
+import '../models/client_shopping_list.dart';
 import '../models/client_task.dart';
 import '../models/external_calendar_connection.dart';
 
@@ -772,6 +773,127 @@ class CaleeHubClient {
       body: body,
     );
     return ClientMealCopyWeekResult.fromJson(_data(json));
+  }
+
+  // ── Shopping ─────────────────────────────────────────────────────────────
+
+  Future<List<ClientStarterMealTemplate>> mealStarterTemplates({
+    required String accessToken,
+    String? mealType,
+    String? pack,
+  }) async {
+    final queryParameters = <String, String>{
+      if (mealType != null && mealType.trim().isNotEmpty) 'mealType': mealType,
+      if (pack != null && pack.trim().isNotEmpty) 'pack': pack,
+    };
+    final uri = queryParameters.isEmpty
+        ? Uri(path: '/client/v1/meal-starter-templates')
+        : Uri(
+            path: '/client/v1/meal-starter-templates',
+            queryParameters: queryParameters,
+          );
+    final json = await _getJson(uri.toString(), accessToken: accessToken);
+    final data = _data(json);
+    final list = data['templates'] as List<dynamic>? ?? const [];
+    return list
+        .whereType<Map<String, dynamic>>()
+        .map(ClientStarterMealTemplate.fromJson)
+        .toList();
+  }
+
+  Future<ClientShoppingList> currentShoppingList({
+    required String accessToken,
+    required String from,
+    required String to,
+  }) async {
+    final uri = Uri(
+      path: '/client/v1/shopping-lists/current',
+      queryParameters: {'from': from, 'to': to},
+    );
+    final json = await _getJson(uri.toString(), accessToken: accessToken);
+    return ClientShoppingList.fromJson(
+      _data(json)['shoppingList'] as Map<String, dynamic>,
+    );
+  }
+
+  Future<ClientShoppingList> getShoppingList({
+    required String accessToken,
+    required int listId,
+  }) async {
+    final json = await _getJson(
+      '/client/v1/shopping-lists/$listId',
+      accessToken: accessToken,
+    );
+    return ClientShoppingList.fromJson(
+      _data(json)['shoppingList'] as Map<String, dynamic>,
+    );
+  }
+
+  Future<ClientShoppingList> generateShoppingList({
+    required String accessToken,
+    required String from,
+    required String to,
+    String mode = 'merge',
+  }) async {
+    final json = await _postJson(
+      '/client/v1/shopping-lists/generate',
+      accessToken: accessToken,
+      body: {'from': from, 'to': to, 'mode': mode},
+    );
+    return ClientShoppingList.fromJson(
+      _data(json)['shoppingList'] as Map<String, dynamic>,
+    );
+  }
+
+  Future<ClientShoppingListItem> addShoppingListItem({
+    required String accessToken,
+    required int listId,
+    required String name,
+    String? category,
+  }) async {
+    final body = <String, Object?>{
+      'name': name,
+      if (category != null && category.trim().isNotEmpty)
+        'category': category.trim(),
+    };
+    final json = await _postJson(
+      '/client/v1/shopping-lists/$listId/items',
+      accessToken: accessToken,
+      body: body,
+    );
+    return ClientShoppingListItem.fromJson(
+      _data(json)['item'] as Map<String, dynamic>,
+    );
+  }
+
+  Future<ClientShoppingListItem> updateShoppingListItem({
+    required String accessToken,
+    required int listId,
+    required int itemId,
+    required bool checked,
+  }) async {
+    final json = await _patchJson(
+      '/client/v1/shopping-lists/$listId/items/$itemId',
+      accessToken: accessToken,
+      body: {'checked': checked},
+    );
+    return ClientShoppingListItem.fromJson(
+      _data(json)['item'] as Map<String, dynamic>,
+    );
+  }
+
+  // Note: DELETE returns {"id": <int>, "deleted": true} — the caller already
+  // knows which item it deleted, so (like deleteMeal/deleteTask/deleteChore)
+  // this doesn't need to parse and return that body.
+  Future<void> deleteShoppingListItem({
+    required String accessToken,
+    required int listId,
+    required int itemId,
+  }) async {
+    await _deleteJson(
+      '/client/v1/shopping-lists/$listId/items/$itemId',
+      accessToken: accessToken,
+    );
   }
 
   // ── Events ────────────────────────────────────────────────────────────────
