@@ -12,11 +12,13 @@ class LoginPage extends StatefulWidget {
   const LoginPage({
     required this.authRepository,
     required this.onSignedIn,
+    required this.onCancel,
     super.key,
   });
 
   final AuthRepository authRepository;
   final Future<void> Function(ClientLoginResult result) onSignedIn;
+  final VoidCallback onCancel;
 
   @override
   State<LoginPage> createState() => _LoginPageState();
@@ -76,6 +78,12 @@ class _LoginPageState extends State<LoginPage> {
     final theme = Theme.of(context);
 
     return Scaffold(
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        leading: BackButton(onPressed: widget.onCancel),
+      ),
       body: SafeArea(
         minimum: const EdgeInsets.all(24),
         child: Center(

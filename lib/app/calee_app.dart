@@ -754,6 +754,8 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
       if (_showingDisplaySetupCreateAccount) {
         return CreateAccountPage(
           authRepository: _sessionController.repository,
+          onCancel: () =>
+              setState(() => _showingDisplaySetupCreateAccount = false),
           onAccountCreated: (result) async {
             final hasPendingDisplayIntent =
                 _displaySetupLinkController.pendingIntent != null;
@@ -782,6 +784,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
           _displaySetupLinkController.pendingIntent != null) {
         return LoginPage(
           authRepository: _sessionController.repository,
+          onCancel: () => setState(() => _showingDisplaySetupSignIn = false),
           onSignedIn: (result) async {
             setState(() => _showingDisplaySetupSignIn = false);
             await _sessionController.completeSignIn(result);
@@ -818,6 +821,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
       if (_showingFollowSignIn) {
         return LoginPage(
           authRepository: _sessionController.repository,
+          onCancel: () => setState(() => _showingFollowSignIn = false),
           onSignedIn: (result) async {
             setState(() => _showingFollowSignIn = false);
             await _sessionController.completeSignIn(result);
@@ -881,6 +885,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
       if (_showingSignInFromWelcome) {
         return LoginPage(
           authRepository: _sessionController.repository,
+          onCancel: () => setState(() => _showingSignInFromWelcome = false),
           onSignedIn: (result) async {
             final hasPendingIntent =
                 _followLinkController.pendingIntent != null;
@@ -901,6 +906,8 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
       if (_showingCreateAccountFromWelcome) {
         return CreateAccountPage(
           authRepository: _sessionController.repository,
+          onCancel: () =>
+              setState(() => _showingCreateAccountFromWelcome = false),
           onAccountCreated: (result) async {
             setState(() {
               _showingCreateAccountFromWelcome = false;

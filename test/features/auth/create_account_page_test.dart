@@ -60,6 +60,7 @@ Future<_FakeAuthRepository> _pumpCreateAccountPage(
       home: CreateAccountPage(
         authRepository: repository,
         onAccountCreated: (result) async => onAccountCreated?.call(result),
+        onCancel: () {},
       ),
     ),
   );

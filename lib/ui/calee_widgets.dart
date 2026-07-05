@@ -147,6 +147,7 @@ class CaleeListRow extends StatelessWidget {
     this.titleStyle,
     this.subtitleStyle,
     this.enabled = true,
+    this.titleMaxLines,
     super.key,
   });
 
@@ -158,6 +159,10 @@ class CaleeListRow extends StatelessWidget {
   final TextStyle? titleStyle;
   final TextStyle? subtitleStyle;
   final bool enabled;
+
+  /// When set, truncates [title] to this many lines with an ellipsis.
+  /// Leave null for the default unlimited-wrap behaviour.
+  final int? titleMaxLines;
 
   @override
   Widget build(BuildContext context) {
@@ -183,6 +188,10 @@ class CaleeListRow extends StatelessWidget {
                 children: [
                   Text(
                     title,
+                    maxLines: titleMaxLines,
+                    overflow: titleMaxLines != null
+                        ? TextOverflow.ellipsis
+                        : null,
                     style:
                         titleStyle ??
                         theme.textTheme.bodyLarge?.copyWith(
