@@ -35,6 +35,10 @@ class _StubHub extends CaleeHubClient {
   String? lastAddedName;
   String? lastAddedCategory;
   bool deleteCalled = false;
+  String? lastLoadFrom;
+  String? lastLoadTo;
+  String? lastGenerateFrom;
+  String? lastGenerateTo;
 
   @override
   Future<ClientShoppingList> currentShoppingList({
@@ -43,6 +47,8 @@ class _StubHub extends CaleeHubClient {
     required String to,
   }) async {
     loadCallCount++;
+    lastLoadFrom = from;
+    lastLoadTo = to;
     if (_loadError != null) throw _loadError;
     return _shoppingList!;
   }
@@ -55,6 +61,8 @@ class _StubHub extends CaleeHubClient {
     String mode = 'merge',
   }) async {
     generateCalled = true;
+    lastGenerateFrom = from;
+    lastGenerateTo = to;
     return _shoppingList!;
   }
 
@@ -347,5 +355,54 @@ void main() {
       expect(hub.lastAddedName, 'Eggs');
       expect(find.text('Eggs'), findsOneWidget);
     });
+  });
+
+  group('ShoppingPage — supplied week range', () {
+    testWidgets('loads the supplied week range, not the current week', (
+      tester,
+    ) async {
+      final hub = _StubHub(shoppingList: _list());
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: CaleeTheme.buildThemeData(),
+          home: ShoppingPage(
+            hubClient: hub,
+            accessToken: 'tok',
+            initialWeekStart: DateTime(2024, 1, 1),
+            initialWeekEnd: DateTime(2024, 1, 7),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      expect(hub.lastLoadFrom, '2024-01-01');
+      expect(hub.lastLoadTo, '2024-01-07');
+    });
+
+    testWidgets(
+      'generates from the supplied week range when autoGenerate is set',
+      (tester) async {
+        final hub = _StubHub(shoppingList: _list());
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: CaleeTheme.buildThemeData(),
+            home: ShoppingPage(
+              hubClient: hub,
+              accessToken: 'tok',
+              autoGenerate: true,
+              initialWeekStart: DateTime(2024, 1, 1),
+              initialWeekEnd: DateTime(2024, 1, 7),
+            ),
+          ),
+        );
+        await tester.pump();
+        await tester.pump();
+
+        expect(hub.generateCalled, isTrue);
+        expect(hub.lastGenerateFrom, '2024-01-01');
+        expect(hub.lastGenerateTo, '2024-01-07');
+      },
+    );
   });
 }
