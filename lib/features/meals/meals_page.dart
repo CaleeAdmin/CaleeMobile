@@ -15,7 +15,9 @@ const _kMealTypeLabels = {
   'dinner': 'Dinner',
 };
 
-const _kBreakfastLunchTypes = ['breakfast', 'lunch'];
+const _kMealTypeEmoji = {'breakfast': '🍳', 'lunch': '🥪', 'dinner': '🍽'};
+
+const _kMealTypeOrder = ['breakfast', 'lunch', 'dinner'];
 
 const _kWeekdayShort = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -41,18 +43,12 @@ String _fmt(DateTime d) {
   return '$y-$m-$day';
 }
 
-bool _isSameDay(DateTime a, DateTime b) =>
-    a.year == b.year && a.month == b.month && a.day == b.day;
-
 String _weekRangeLabel(DateTime start, DateTime end) {
   if (start.month == end.month) {
     return '${start.day}–${end.day} ${_kMonths[start.month - 1]} ${start.year}';
   }
   return '${start.day} ${_kMonths[start.month - 1]} – ${end.day} ${_kMonths[end.month - 1]} ${start.year}';
 }
-
-String _dinnerDayLabel(DateTime day) =>
-    '${_kWeekdayShort[day.weekday - 1]} ${day.day} ${_kMonths[day.month - 1]}';
 
 class MealsPage extends StatefulWidget {
   const MealsPage({
@@ -70,7 +66,6 @@ class MealsPage extends StatefulWidget {
 
 class _MealsPageState extends State<MealsPage> {
   late final MealsController _controller;
-  bool _showBreakfastLunch = false;
 
   @override
   void initState() {
@@ -141,28 +136,41 @@ class _MealsPageState extends State<MealsPage> {
       return [_buildError()];
     }
 
+    final days = _weekDays();
     return [
-      _buildDinnersSection(),
+      _buildActionsRow(),
       const SizedBox(height: CaleeSpacing.md),
-      _buildGroceryListButton(),
-      _buildBreakfastLunchToggle(),
-      if (_showBreakfastLunch) ...[
-        const SizedBox(height: CaleeSpacing.md),
-        _buildBreakfastLunchList(),
+      for (var i = 0; i < days.length; i++) ...[
+        if (i > 0) const SizedBox(height: CaleeSpacing.sectionSpacing),
+        _buildDaySection(days[i]),
       ],
-      const SizedBox(height: CaleeSpacing.md),
-      _buildCopyWeekButton(),
     ];
   }
 
-  Widget _buildGroceryListButton() {
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: TextButton.icon(
-        onPressed: _openShoppingList,
-        icon: const Icon(Icons.shopping_cart_outlined, size: 16),
-        label: const Text('Build grocery list'),
-      ),
+  Widget _buildActionsRow() {
+    final copyLabel = _controller.isCurrentWeek
+        ? 'Copy last week'
+        : 'Copy previous week';
+    final copyDisabled = _controller.isCopying || _controller.isLoading;
+
+    return Row(
+      children: [
+        Expanded(
+          child: OutlinedButton.icon(
+            onPressed: _openShoppingList,
+            icon: const Icon(Icons.shopping_cart_outlined, size: 18),
+            label: const Text('Build grocery list'),
+          ),
+        ),
+        const SizedBox(width: CaleeSpacing.sm),
+        Expanded(
+          child: OutlinedButton.icon(
+            onPressed: copyDisabled ? null : _showCopyWeekSheet,
+            icon: const Icon(Icons.content_copy, size: 18),
+            label: Text(copyLabel),
+          ),
+        ),
+      ],
     );
   }
 
@@ -238,21 +246,6 @@ class _MealsPageState extends State<MealsPage> {
     );
   }
 
-  Widget _buildCopyWeekButton() {
-    final label = _controller.isCurrentWeek
-        ? 'Copy last week'
-        : 'Copy previous week';
-    final disabled = _controller.isCopying || _controller.isLoading;
-    return Align(
-      alignment: Alignment.centerRight,
-      child: TextButton.icon(
-        onPressed: disabled ? null : _showCopyWeekSheet,
-        icon: const Icon(Icons.content_copy, size: 16),
-        label: Text(label),
-      ),
-    );
-  }
-
   Future<void> _showCopyWeekSheet() async {
     final overwrite = await _CopyWeekSheet.show(context: context);
     if (overwrite == null || !mounted) return;
@@ -286,7 +279,7 @@ class _MealsPageState extends State<MealsPage> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
-  // ── This week's dinners ─────────────────────────────────────────────────
+  // ── Day sections ─────────────────────────────────────────────────────────
 
   List<DateTime> _weekDays() => List.generate(
     7,
@@ -297,85 +290,68 @@ class _MealsPageState extends State<MealsPage> {
     ),
   );
 
-  Widget _buildDinnersSection() {
-    final days = _weekDays();
-    final dinners = {
-      for (final d in days) _fmt(d): _controller.mealFor(_fmt(d), 'dinner'),
-    };
-    final plannedCount = dinners.values.where((m) => m != null).length;
-    final now = DateTime.now();
-    final todayStr = _fmt(now);
-    final showTonight =
-        _controller.isCurrentWeek && days.any((d) => _isSameDay(d, now));
-
-    final rows = <Widget>[
-      if (showTonight) _buildTonightRow(dinners[todayStr]),
-      _buildPlannedCountRow(plannedCount),
-      for (final day in days) _buildDinnerRow(day, dinners[_fmt(day)]),
-    ];
-
-    return CaleeSection(title: "This week's dinners", children: rows);
-  }
-
-  Widget _buildTonightRow(ClientMeal? tonight) {
-    final text = tonight != null
-        ? 'Tonight: ${mealIconEmoji(title: tonight.title, mealType: 'dinner')} ${tonight.title}'
-        : 'Tonight: Pick dinner';
-    return _infoRow(text);
-  }
-
-  Widget _buildPlannedCountRow(int plannedCount) {
-    final text = plannedCount == 7
-        ? 'All 7 dinners planned'
-        : '$plannedCount of 7 dinners planned';
-    return _infoRow(text);
-  }
-
-  Widget _infoRow(String text) {
-    return CaleeListRow(
-      title: text,
-      titleStyle: const TextStyle(
-        fontSize: 14,
-        color: CaleeColors.textSecondary,
-      ),
-    );
-  }
-
-  Widget _buildDinnerRow(DateTime day, ClientMeal? meal) {
+  Widget _buildDaySection(DateTime day) {
     final dateStr = _fmt(day);
-    final dayLabel = _dinnerDayLabel(day);
-    final leading = SizedBox(
-      width: 88,
-      child: Text(
-        dayLabel,
-        style: const TextStyle(fontSize: 13, color: CaleeColors.textSecondary),
-      ),
-    );
 
+    return CaleeSection(
+      title: _dayTitle(day),
+      children: _kMealTypeOrder
+          .map((mealType) => _buildMealRow(dateStr, mealType))
+          .toList(),
+    );
+  }
+
+  Widget _buildMealRow(String dateStr, String mealType) {
+    final meal = _controller.mealFor(dateStr, mealType);
+    final emoji = _kMealTypeEmoji[mealType] ?? '';
+    final label = _kMealTypeLabels[mealType] ?? mealType;
+
+    final Widget valueText;
     if (meal == null) {
-      return CaleeListRow(
-        leading: leading,
-        title: 'Pick dinner',
-        titleStyle: const TextStyle(
-          fontSize: 15,
-          color: CaleeColors.textSecondary,
-        ),
-        onTap: () => _openPickDinnerSheet(dateStr),
+      valueText = Text(
+        'Add $mealType',
+        style: const TextStyle(fontSize: 15, color: CaleeColors.textSecondary),
+      );
+    } else {
+      final notes = (meal.notes ?? '').trim();
+      final text = notes.isEmpty ? meal.title : '${meal.title} · $notes';
+      valueText = Text(
+        text,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(fontSize: 15, color: CaleeColors.textPrimary),
       );
     }
 
-    final icon = mealIconEmoji(title: meal.title, mealType: 'dinner');
-    final notes = (meal.notes ?? '').trim();
-    final titleText = notes.isEmpty
-        ? '$icon ${meal.title}'
-        : '$icon ${meal.title} · $notes';
-
     return CaleeListRow(
-      leading: leading,
-      title: titleText,
-      titleMaxLines: 1,
-      onTap: () => _openSheet(date: dateStr, mealType: 'dinner', meal: meal),
+      leading: Text(emoji, style: const TextStyle(fontSize: 18)),
+      title: label,
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Flexible(child: valueText),
+          const SizedBox(width: CaleeSpacing.xs),
+          const Icon(
+            Icons.chevron_right,
+            size: 20,
+            color: CaleeColors.textTertiary,
+          ),
+        ],
+      ),
+      onTap: () => _onMealRowTap(dateStr, mealType, meal),
     );
+  }
+
+  void _onMealRowTap(String dateStr, String mealType, ClientMeal? meal) {
+    if (meal != null) {
+      _openSheet(date: dateStr, mealType: mealType, meal: meal);
+      return;
+    }
+    if (mealType == 'dinner') {
+      _openPickDinnerSheet(dateStr);
+    } else {
+      _openSheet(date: dateStr, mealType: mealType, meal: null);
+    }
   }
 
   Future<void> _openPickDinnerSheet(String date) async {
@@ -387,78 +363,6 @@ class _MealsPageState extends State<MealsPage> {
     if (result == 'create_new' && mounted) {
       await _openSheet(date: date, mealType: 'dinner', meal: null);
     }
-  }
-
-  // ── Breakfast & lunch (hidden by default) ───────────────────────────────
-
-  Widget _buildBreakfastLunchToggle() {
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: TextButton.icon(
-        onPressed: () =>
-            setState(() => _showBreakfastLunch = !_showBreakfastLunch),
-        icon: Icon(
-          _showBreakfastLunch ? Icons.expand_less : Icons.expand_more,
-          size: 16,
-        ),
-        label: Text(
-          _showBreakfastLunch
-              ? 'Hide breakfast & lunch'
-              : 'Show breakfast & lunch',
-        ),
-      ),
-    );
-  }
-
-  Widget _buildBreakfastLunchList() {
-    final days = _weekDays();
-    return Column(
-      children: [
-        for (var i = 0; i < days.length; i++) ...[
-          if (i > 0) const SizedBox(height: CaleeSpacing.sectionSpacing),
-          _buildBreakfastLunchDaySection(days[i]),
-        ],
-      ],
-    );
-  }
-
-  Widget _buildBreakfastLunchDaySection(DateTime day) {
-    final dateStr = _fmt(day);
-
-    return CaleeSection(
-      title: _dayTitle(day),
-      children: _kBreakfastLunchTypes.map((mealType) {
-        final meal = _controller.mealFor(dateStr, mealType);
-
-        return CaleeListRow(
-          leading: Icon(
-            _mealTypeIcon(mealType),
-            size: 20,
-            color: CaleeColors.textTertiary,
-          ),
-          title: _kMealTypeLabels[mealType] ?? mealType,
-          subtitle: meal != null ? meal.title : 'Not planned',
-          subtitleStyle: meal != null
-              ? Theme.of(
-                  context,
-                ).textTheme.bodySmall?.copyWith(color: CaleeColors.textPrimary)
-              : null,
-          trailing: meal != null
-              ? const Icon(
-                  Icons.chevron_right,
-                  size: 20,
-                  color: CaleeColors.textTertiary,
-                )
-              : const Icon(
-                  Icons.add,
-                  size: 20,
-                  color: CaleeColors.textTertiary,
-                ),
-          onTap: () =>
-              _openSheet(date: dateStr, mealType: mealType, meal: meal),
-        );
-      }).toList(),
-    );
   }
 
   String _dayTitle(DateTime day) {
@@ -473,17 +377,6 @@ class _MealsPageState extends State<MealsPage> {
     final weekday = _kWeekdayShort[day.weekday - 1];
     final month = _kMonths[day.month - 1];
     return '$weekday, ${day.day} $month';
-  }
-
-  IconData _mealTypeIcon(String mealType) {
-    switch (mealType) {
-      case 'breakfast':
-        return Icons.wb_sunny_outlined;
-      case 'lunch':
-        return Icons.restaurant_outlined;
-      default:
-        return Icons.restaurant_outlined;
-    }
   }
 
   Widget _buildError() {

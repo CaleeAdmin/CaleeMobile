@@ -1,7 +1,8 @@
 // Widget tests for MealsPage, PickDinnerSheet and MealFormSheet.
 //
-// Covers: the dinner-first weekly list (planned dinners with inline notes,
-// "Pick dinner" for empty days, breakfast/lunch hidden until expanded); the
+// Covers: the day-based weekly meal sections (breakfast/lunch/dinner rows
+// per day, with inline notes on planned meals and "Add <meal type>" for
+// empty slots); the compact actions row (grocery list / copy week); the
 // Pick dinner sheet's Family favourites / Quick dinner ideas / Create new
 // meal flows; and the existing MealFormSheet edit/save behaviour.
 
@@ -27,13 +28,13 @@ String _fmt(DateTime d) {
 DateTime _mondayOf(DateTime date) =>
     DateTime(date.year, date.month, date.day - (date.weekday - 1));
 
-/// The dinner-first Meals page is taller than the default 800x600 test
+/// The day-sectioned Meals page is taller than the default 800x600 test
 /// surface, and a plain (non-builder) ListView only lays out slivers near
 /// the viewport — rows below the fold exist in the widget tree but are
 /// "offstage" to finders. Growing the surface keeps everything reachable
 /// without scrolling in every test.
 void _useTallViewport(WidgetTester tester) {
-  tester.view.physicalSize = const Size(800, 4000);
+  tester.view.physicalSize = const Size(800, 6000);
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
@@ -239,8 +240,84 @@ Widget _buildFormSheet({
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
 void main() {
-  group('MealsPage — dinner-first list', () {
-    testWidgets('shows a planned dinner with icon and inline note', (
+  group('MealsPage — day sections', () {
+    testWidgets('shows a Today section with breakfast, lunch and dinner rows', (
+      tester,
+    ) async {
+      _useTallViewport(tester);
+      final hub = _StubHub();
+      await tester.pumpWidget(_buildMealsPage(hub));
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.text('TODAY'), findsOneWidget);
+      expect(find.text('Breakfast'), findsWidgets);
+      expect(find.text('Lunch'), findsWidgets);
+      expect(find.text('Dinner'), findsWidgets);
+      expect(find.text('Add breakfast'), findsWidgets);
+      expect(find.text('Add lunch'), findsWidgets);
+      expect(find.text('Add dinner'), findsWidgets);
+    });
+
+    testWidgets(
+      'shows a planned dinner with title and inline note in its day section',
+      (tester) async {
+        _useTallViewport(tester);
+        final monday = _mondayOf(DateTime.now());
+        final meal = ClientMeal(
+          id: 1,
+          householdId: 'h1',
+          mealDate: _fmt(monday),
+          mealType: 'dinner',
+          title: 'Fried Rice',
+          status: 'planned',
+          source: 'manual',
+          notes: 'extra veggies',
+        );
+
+        final hub = _StubHub(meals: [meal]);
+        await tester.pumpWidget(_buildMealsPage(hub));
+        await tester.pump();
+        await tester.pump();
+
+        expect(find.text('Fried Rice · extra veggies'), findsOneWidget);
+        // The dinner-hero summary rows ("Tonight" / "N of 7 planned") no
+        // longer exist.
+        expect(find.textContaining('dinners planned'), findsNothing);
+        expect(find.textContaining('Tonight'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'does not render the old dinner-hero "This week\'s dinners" heading',
+      (tester) async {
+        _useTallViewport(tester);
+        final hub = _StubHub();
+        await tester.pumpWidget(_buildMealsPage(hub));
+        await tester.pump();
+        await tester.pump();
+
+        expect(find.text("THIS WEEK'S DINNERS"), findsNothing);
+        expect(find.text('Pick dinner'), findsNothing);
+      },
+    );
+
+    testWidgets('tapping a missing breakfast row opens the add meal sheet', (
+      tester,
+    ) async {
+      _useTallViewport(tester);
+      final hub = _StubHub();
+      await tester.pumpWidget(_buildMealsPage(hub));
+      await tester.pump();
+      await tester.pump();
+
+      await tester.tap(find.text('Add breakfast').first);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Add Breakfast'), findsOneWidget);
+    });
+
+    testWidgets('tapping a planned meal row opens the edit meal sheet', (
       tester,
     ) async {
       _useTallViewport(tester);
@@ -253,7 +330,6 @@ void main() {
         title: 'Fried Rice',
         status: 'planned',
         source: 'manual',
-        notes: 'extra veggies',
       );
 
       final hub = _StubHub(meals: [meal]);
@@ -261,67 +337,16 @@ void main() {
       await tester.pump();
       await tester.pump();
 
-      // CaleeSection upper-cases its title.
-      expect(find.text("THIS WEEK'S DINNERS"), findsOneWidget);
-      expect(find.text('🍚 Fried Rice · extra veggies'), findsOneWidget);
-      // 6 remaining days have no dinner planned.
-      expect(find.text('Pick dinner'), findsNWidgets(6));
-      expect(find.text('1 of 7 dinners planned'), findsOneWidget);
+      await tester.tap(find.text('Fried Rice'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Edit Dinner'), findsOneWidget);
     });
-
-    testWidgets('shows "All 7 dinners planned" when every day has one', (
-      tester,
-    ) async {
-      _useTallViewport(tester);
-      final monday = _mondayOf(DateTime.now());
-      final meals = List.generate(
-        7,
-        (i) => ClientMeal(
-          id: i + 1,
-          householdId: 'h1',
-          mealDate: _fmt(DateTime(monday.year, monday.month, monday.day + i)),
-          mealType: 'dinner',
-          title: 'Meal $i',
-          status: 'planned',
-          source: 'manual',
-        ),
-      );
-
-      final hub = _StubHub(meals: meals);
-      await tester.pumpWidget(_buildMealsPage(hub));
-      await tester.pump();
-      await tester.pump();
-
-      expect(find.text('All 7 dinners planned'), findsOneWidget);
-      expect(find.text('Pick dinner'), findsNothing);
-    });
-
-    testWidgets(
-      'breakfast and lunch are hidden until "Show breakfast & lunch" is tapped',
-      (tester) async {
-        _useTallViewport(tester);
-        final hub = _StubHub();
-        await tester.pumpWidget(_buildMealsPage(hub));
-        await tester.pump();
-        await tester.pump();
-
-        expect(find.text('Show breakfast & lunch'), findsOneWidget);
-        expect(find.text('Breakfast'), findsNothing);
-        expect(find.text('Lunch'), findsNothing);
-
-        await tester.tap(find.text('Show breakfast & lunch'));
-        await tester.pump();
-
-        expect(find.text('Hide breakfast & lunch'), findsOneWidget);
-        expect(find.text('Breakfast'), findsWidgets);
-        expect(find.text('Lunch'), findsWidgets);
-      },
-    );
   });
 
   group('MealsPage — Pick dinner sheet', () {
     testWidgets(
-      'tapping "Pick dinner" opens favourites and quick dinner ideas',
+      'tapping "Add dinner" opens favourites and quick dinner ideas',
       (tester) async {
         _useTallViewport(tester);
         final hub = _StubHub(
@@ -334,12 +359,10 @@ void main() {
         await tester.pump();
         await tester.pump();
 
-        await tester.tap(find.text('Pick dinner').first);
+        await tester.tap(find.text('Add dinner').first);
         await tester.pumpAndSettle();
 
-        // The sheet's own title plus the still-mounted "Pick dinner" rows
-        // behind it for the other unplanned days.
-        expect(find.text('Pick dinner'), findsWidgets);
+        expect(find.text('Pick dinner'), findsOneWidget);
         // CaleeSection upper-cases its title.
         expect(find.text('FAMILY FAVOURITES'), findsOneWidget);
         expect(find.text('QUICK DINNER IDEAS'), findsOneWidget);
@@ -362,7 +385,7 @@ void main() {
       await tester.pump();
       await tester.pump();
 
-      await tester.tap(find.text('Pick dinner').first);
+      await tester.tap(find.text('Add dinner').first);
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('Taco Night'));
@@ -380,7 +403,7 @@ void main() {
       await tester.pump();
       await tester.pump();
 
-      await tester.tap(find.text('Pick dinner').first);
+      await tester.tap(find.text('Add dinner').first);
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('Create new meal'));
@@ -432,7 +455,20 @@ void main() {
     });
   });
 
-  group('MealsPage — grocery list navigation', () {
+  group('MealsPage — actions row', () {
+    testWidgets('actions row shows grocery list and copy week buttons', (
+      tester,
+    ) async {
+      _useTallViewport(tester);
+      final hub = _StubHub();
+      await tester.pumpWidget(_buildMealsPage(hub));
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.text('Build grocery list'), findsOneWidget);
+      expect(find.text('Copy last week'), findsOneWidget);
+    });
+
     testWidgets(
       'passes the visible Meals week into ShoppingPage instead of the '
       'current calendar week',
