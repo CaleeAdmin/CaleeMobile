@@ -5,6 +5,7 @@ import '../../data/models/client_bootstrap.dart';
 import '../../data/models/client_calendar.dart';
 import '../../data/models/client_chore.dart';
 import '../../data/models/client_task.dart';
+import '../../shared/meal_icon.dart';
 import '../../ui/calee_design.dart';
 import '../calendar/calendar_utils.dart';
 import 'today_models.dart';
@@ -352,34 +353,26 @@ class _TodayPageState extends State<TodayPage> {
     if (overview.hasMealsError) {
       rows.add(_errorRow('Could not load meals.'));
     } else {
-      for (final mealType in ['breakfast', 'lunch', 'dinner']) {
-        final meal = overview.mealsToday
-            .where((m) => m.mealType == mealType)
-            .firstOrNull;
-        final label = switch (mealType) {
-          'breakfast' => 'Breakfast',
-          'lunch' => 'Lunch',
-          'dinner' => 'Dinner',
-          _ => mealType,
-        };
-        rows.add(
-          CaleeListRow(
-            title: meal?.title ?? 'Not planned',
-            titleStyle: meal == null
-                ? const TextStyle(
-                    fontSize: 15,
-                    color: CaleeColors.textSecondary,
-                  )
-                : null,
-            subtitle: label,
-            leading: const Icon(
-              Icons.restaurant,
-              size: 18,
-              color: CaleeColors.textTertiary,
+      final plannedMeals = [
+        for (final mealType in ['breakfast', 'lunch', 'dinner'])
+          overview.mealsToday.where((m) => m.mealType == mealType).firstOrNull,
+      ].nonNulls.toList();
+
+      if (plannedMeals.isEmpty) {
+        rows.add(_emptyRow('No meals planned today'));
+      } else {
+        for (final meal in plannedMeals) {
+          rows.add(
+            CaleeListRow(
+              title: meal.title,
+              leading: Text(
+                mealIconEmoji(title: meal.title, mealType: meal.mealType),
+                style: const TextStyle(fontSize: 18),
+              ),
+              onTap: widget.onNavigateToMeals,
             ),
-            onTap: widget.onNavigateToMeals,
-          ),
-        );
+          );
+        }
       }
     }
 
