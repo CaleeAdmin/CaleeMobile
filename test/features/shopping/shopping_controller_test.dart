@@ -87,22 +87,19 @@ void main() {
       expect(controller.weekEndStr, '2024-01-07');
     });
 
-    test(
-      'load() requests the supplied range, not the current week',
-      () async {
-        final hub = _StubHub();
-        final controller = _controllerFor(
-          hub,
-          start: DateTime(2024, 1, 1),
-          end: DateTime(2024, 1, 7),
-        );
+    test('load() requests the supplied range, not the current week', () async {
+      final hub = _StubHub();
+      final controller = _controllerFor(
+        hub,
+        start: DateTime(2024, 1, 1),
+        end: DateTime(2024, 1, 7),
+      );
 
-        await controller.load();
+      await controller.load();
 
-        expect(hub.lastLoadFrom, '2024-01-01');
-        expect(hub.lastLoadTo, '2024-01-07');
-      },
-    );
+      expect(hub.lastLoadFrom, '2024-01-01');
+      expect(hub.lastLoadTo, '2024-01-07');
+    });
 
     test(
       'generate() requests the supplied range, not the current week',
@@ -123,23 +120,16 @@ void main() {
   });
 
   group('ShoppingController — default week', () {
-    test(
-      'defaults to the current Monday-to-Sunday week when no range is '
-      'supplied',
-      () {
-        final controller = _controllerFor(_StubHub());
+    test('defaults to the current Monday-to-Sunday week when no range is '
+        'supplied', () {
+      final controller = _controllerFor(_StubHub());
 
-        final now = DateTime.now();
-        final monday = DateTime(
-          now.year,
-          now.month,
-          now.day - (now.weekday - 1),
-        );
-        final sunday = DateTime(monday.year, monday.month, monday.day + 6);
+      final now = DateTime.now();
+      final monday = DateTime(now.year, now.month, now.day - (now.weekday - 1));
+      final sunday = DateTime(monday.year, monday.month, monday.day + 6);
 
-        expect(controller.weekStartStr, _fmt(monday));
-        expect(controller.weekEndStr, _fmt(sunday));
-      },
-    );
+      expect(controller.weekStartStr, _fmt(monday));
+      expect(controller.weekEndStr, _fmt(sunday));
+    });
   });
 }
