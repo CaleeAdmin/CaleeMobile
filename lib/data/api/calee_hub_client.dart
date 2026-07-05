@@ -816,6 +816,19 @@ class CaleeHubClient {
     );
   }
 
+  Future<ClientShoppingList> getShoppingList({
+    required String accessToken,
+    required int listId,
+  }) async {
+    final json = await _getJson(
+      '/client/v1/shopping-lists/$listId',
+      accessToken: accessToken,
+    );
+    return ClientShoppingList.fromJson(
+      _data(json)['shoppingList'] as Map<String, dynamic>,
+    );
+  }
+
   Future<ClientShoppingList> generateShoppingList({
     required String accessToken,
     required String from,

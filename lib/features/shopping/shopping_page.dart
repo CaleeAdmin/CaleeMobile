@@ -6,13 +6,6 @@ import '../../ui/calee_design.dart';
 import 'shopping_controller.dart';
 import 'shopping_repository.dart';
 
-// TODO: support a `calee://shopping-list/{listId}` deep link once this app
-// adopts a custom URL scheme. Today it only handles `https://` universal
-// links via app_links (see GET /client/v1/shopping-lists/{listId}, which
-// this deep link would use to jump straight to a specific list). Until
-// then, this page is reachable purely through in-app navigation from the
-// Meals page.
-
 enum _ShoppingFilter { all, toBuy, bought }
 
 class ShoppingPage extends StatefulWidget {
@@ -20,6 +13,8 @@ class ShoppingPage extends StatefulWidget {
     required this.hubClient,
     required this.accessToken,
     this.autoGenerate = false,
+    this.initialWeekStart,
+    this.initialListId,
     super.key,
   });
 
@@ -30,6 +25,17 @@ class ShoppingPage extends StatefulWidget {
   /// first load instead of just fetching whatever list already exists. Used
   /// by the Meals page's "Generate shopping list" entry point.
   final bool autoGenerate;
+
+  /// The Monday of the meal-plan week to generate or load a shopping list
+  /// for. Passed by the Meals page so the list matches whichever week is
+  /// currently visible there, instead of always defaulting to the current
+  /// week. Ignored when [initialListId] is set.
+  final DateTime? initialWeekStart;
+
+  /// When set, loads this specific shopping list by id instead of a list for
+  /// [initialWeekStart] — used when opening from the tablet's shopping-list
+  /// QR code (see `ShoppingListLinkController`).
+  final int? initialListId;
 
   @override
   State<ShoppingPage> createState() => _ShoppingPageState();
@@ -47,9 +53,13 @@ class _ShoppingPageState extends State<ShoppingPage> {
         hubClient: widget.hubClient,
         accessToken: widget.accessToken,
       ),
+      initialWeekStart: widget.initialWeekStart,
     );
     _controller.addListener(_onControllerChanged);
-    if (widget.autoGenerate) {
+    final listId = widget.initialListId;
+    if (listId != null) {
+      _controller.loadById(listId);
+    } else if (widget.autoGenerate) {
       _controller.generate();
     } else {
       _controller.load();

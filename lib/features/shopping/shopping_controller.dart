@@ -50,8 +50,8 @@ ClientShoppingListItem _withChecked(ClientShoppingListItem item, bool checked) {
 /// `addListener`/`setState`, exactly like [ChangeNotifier]-based controllers
 /// elsewhere (e.g. `MealsController`).
 class ShoppingController extends ChangeNotifier {
-  ShoppingController({required this.repository}) {
-    _weekStart = _mondayOf(DateTime.now());
+  ShoppingController({required this.repository, DateTime? initialWeekStart}) {
+    _weekStart = _mondayOf(initialWeekStart ?? DateTime.now());
   }
 
   final ShoppingRepository repository;
@@ -97,6 +97,27 @@ class ShoppingController extends ChangeNotifier {
       } else {
         error = e;
       }
+    } catch (e) {
+      error = e;
+    } finally {
+      isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  /// Loads a specific list by id, regardless of [_weekStart] — used when
+  /// opening from the shopping-list deep link (see
+  /// `ShoppingListLinkController`), where the tablet's QR code identifies an
+  /// exact list rather than a week.
+  Future<void> loadById(int listId) async {
+    if (isLoading) return;
+    isLoading = true;
+    error = null;
+    notifyListeners();
+
+    try {
+      shoppingList = await repository.loadById(listId: listId);
+      error = null;
     } catch (e) {
       error = e;
     } finally {

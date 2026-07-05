@@ -24,6 +24,10 @@ class _StubHub extends CaleeHubClient {
 
   int loadCallCount = 0;
   bool generateCalled = false;
+  String? lastGenerateFrom;
+  String? lastGenerateTo;
+  bool getByIdCalled = false;
+  int? lastGetByIdListId;
   bool updateCalled = false;
   int? lastUpdatedItemId;
   bool? lastCheckedValue;
@@ -55,6 +59,18 @@ class _StubHub extends CaleeHubClient {
     String mode = 'merge',
   }) async {
     generateCalled = true;
+    lastGenerateFrom = from;
+    lastGenerateTo = to;
+    return _shoppingList!;
+  }
+
+  @override
+  Future<ClientShoppingList> getShoppingList({
+    required String accessToken,
+    required int listId,
+  }) async {
+    getByIdCalled = true;
+    lastGetByIdListId = listId;
     return _shoppingList!;
   }
 
@@ -324,6 +340,57 @@ void main() {
       await tester.pump();
 
       expect(hub.loadCallCount, greaterThan(1));
+    });
+  });
+
+  group('ShoppingPage — initialWeekStart', () {
+    testWidgets('autoGenerate uses the supplied week, not the current week', (
+      tester,
+    ) async {
+      final hub = _StubHub(shoppingList: _list());
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: CaleeTheme.buildThemeData(),
+          home: ShoppingPage(
+            hubClient: hub,
+            accessToken: 'tok',
+            autoGenerate: true,
+            initialWeekStart: DateTime(2024, 1, 17),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      expect(hub.generateCalled, isTrue);
+      expect(hub.lastGenerateFrom, '2024-01-15');
+      expect(hub.lastGenerateTo, '2024-01-21');
+    });
+  });
+
+  group('ShoppingPage — initialListId', () {
+    testWidgets('loads the specific list by id instead of the current week', (
+      tester,
+    ) async {
+      final hub = _StubHub(shoppingList: _list());
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: CaleeTheme.buildThemeData(),
+          home: ShoppingPage(
+            hubClient: hub,
+            accessToken: 'tok',
+            initialListId: 3,
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      expect(hub.getByIdCalled, isTrue);
+      expect(hub.lastGetByIdListId, 3);
+      expect(hub.loadCallCount, 0);
+      expect(hub.generateCalled, isFalse);
+      expect(find.text('Milk'), findsOneWidget);
     });
   });
 

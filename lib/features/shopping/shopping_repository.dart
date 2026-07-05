@@ -27,6 +27,9 @@ class ShoppingRepository {
     mode: mode,
   );
 
+  Future<ClientShoppingList> loadById({required int listId}) =>
+      hubClient.getShoppingList(accessToken: accessToken, listId: listId);
+
   Future<ClientShoppingListItem> updateItemChecked({
     required int listId,
     required int itemId,

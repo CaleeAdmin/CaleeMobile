@@ -149,6 +149,30 @@ void main() {
     });
   });
 
+  group('CaleeHubClient.getShoppingList()', () {
+    test('sends GET to /client/v1/shopping-lists/:listId', () async {
+      final client = await startServer({
+        'data': {'shoppingList': _kShoppingListJson},
+      });
+
+      await client.getShoppingList(accessToken: 'tok', listId: 3);
+
+      expect(capturedMethods.single, 'GET');
+      expect(capturedPaths.single, '/client/v1/shopping-lists/3');
+    });
+
+    test('parses the returned shopping list', () async {
+      final client = await startServer({
+        'data': {'shoppingList': _kShoppingListJson},
+      });
+
+      final list = await client.getShoppingList(accessToken: 'tok', listId: 3);
+
+      expect(list.id, 3);
+      expect(list.householdId, 'hh_abc');
+    });
+  });
+
   group('CaleeHubClient.generateShoppingList()', () {
     test('sends POST to /client/v1/shopping-lists/generate with from/to '
         'and default mode', () async {
