@@ -101,6 +101,20 @@ class _FakeDisplaySetupLinkController extends DisplaySetupLinkController {
   Future<void> init() async {}
 }
 
+Future<void> _enterField(
+  WidgetTester tester,
+  String label,
+  String value,
+) async {
+  final listView = find.byType(ListView);
+  final finder = find.widgetWithText(TextFormField, label);
+  for (var i = 0; i < 10 && finder.evaluate().isEmpty; i++) {
+    await tester.drag(listView, const Offset(0, -300));
+    await tester.pump();
+  }
+  await tester.enterText(finder, value);
+}
+
 void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
@@ -134,19 +148,13 @@ void main() {
       expect(find.text('Create your Calee account'), findsOneWidget);
 
       // Fill in the registration form
-      await tester.enterText(find.byType(TextFormField).at(0), 'Jane');
-      await tester.enterText(find.byType(TextFormField).at(1), 'Smith');
-      await tester.enterText(
-        find.byType(TextFormField).at(2),
-        'jane@example.com',
-      );
-      await tester.enterText(
-        find.byType(TextFormField).at(3),
-        'jane@example.com',
-      );
-      await tester.enterText(find.byType(TextFormField).at(4), 'REDEEM');
-      await tester.enterText(find.byType(TextFormField).at(5), 'password123');
-      await tester.enterText(find.byType(TextFormField).at(6), 'password123');
+      await _enterField(tester, 'First name', 'Jane');
+      await _enterField(tester, 'Last name', 'Smith');
+      await _enterField(tester, 'Email', 'jane@example.com');
+      await _enterField(tester, 'Confirm email', 'jane@example.com');
+      await _enterField(tester, 'Redeem code', 'REDEEM');
+      await _enterField(tester, 'Password', 'password123');
+      await _enterField(tester, 'Confirm password', 'password123');
 
       // Submit
       final createButton = find.widgetWithText(FilledButton, 'Create account');
