@@ -7,6 +7,7 @@ import 'forgot_password_page.dart';
 import 'login_controller.dart';
 
 const _kTermsAndConditionsUrl = 'https://portal.calee.com.au/terms';
+const _kSetupGuideUrl = 'https://hub.calee.com.au/setup/portal';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({
@@ -259,9 +260,34 @@ class _LoginPageState extends State<LoginPage> {
                       //    auto-login. This should use the CaleeMobile account session, not stored
                       //    Nextcloud/app-password credentials from the legacy CaleeSync flow.
                       //
-                      // Do not enable the setup link until the Calee Display auth changeover,
-                      // Hub/Core mobile handoff endpoint, app link/universal link routing, and
-                      // CaleeMobile session exchange are implemented and tested end-to-end.
+                      // Do not enable the full setup-link handoff above until the Calee Display
+                      // auth changeover, Hub/Core mobile handoff endpoint, app link/universal
+                      // link routing, and CaleeMobile session exchange are implemented and
+                      // tested end-to-end.
+                      //
+                      // In the meantime, the button below just opens the Hub's browser setup
+                      // guide — it does not create a session, does not claim setup is complete,
+                      // and does not perform any handoff back into this app.
+                      Center(
+                        child: TextButton(
+                          onPressed: () => _openUrl(_kSetupGuideUrl),
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            minimumSize: const Size(0, 36),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          child: Text(
+                            'New to Calee? Start setup',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.primary,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
                       Center(
                         child: TextButton(
                           onPressed: () => _openUrl(_kTermsAndConditionsUrl),
