@@ -280,7 +280,9 @@ void main() {
         await tester.pump();
         await tester.pump();
 
-        expect(find.text('Fried Rice · extra veggies'), findsOneWidget);
+        // Only the title is shown inline; notes stay inside the edit sheet.
+        expect(find.text('Fried Rice'), findsOneWidget);
+        expect(find.text('Fried Rice · extra veggies'), findsNothing);
         // The dinner-hero summary rows ("Tonight" / "N of 7 planned") no
         // longer exist.
         expect(find.textContaining('dinners planned'), findsNothing);
@@ -455,8 +457,8 @@ void main() {
     });
   });
 
-  group('MealsPage — actions row', () {
-    testWidgets('actions row shows grocery list and copy week buttons', (
+  group('MealsPage — top bar actions', () {
+    testWidgets('top bar shows search, shopping, copy and add icons', (
       tester,
     ) async {
       _useTallViewport(tester);
@@ -465,8 +467,26 @@ void main() {
       await tester.pump();
       await tester.pump();
 
+      expect(find.byTooltip('Search meals'), findsOneWidget);
+      expect(find.byTooltip('Shopping'), findsOneWidget);
+      expect(find.byTooltip('Copy last week'), findsOneWidget);
+      expect(find.byTooltip('Add meal'), findsOneWidget);
+    });
+
+    testWidgets('shopping icon opens an action sheet with grocery options', (
+      tester,
+    ) async {
+      _useTallViewport(tester);
+      final hub = _StubHub();
+      await tester.pumpWidget(_buildMealsPage(hub));
+      await tester.pump();
+      await tester.pump();
+
+      await tester.tap(find.byTooltip('Shopping'));
+      await tester.pumpAndSettle();
+
       expect(find.text('Build grocery list'), findsOneWidget);
-      expect(find.text('Copy last week'), findsOneWidget);
+      expect(find.text('Open shopping list'), findsOneWidget);
     });
 
     testWidgets(
@@ -496,6 +516,8 @@ void main() {
           expectedStart.day + 6,
         );
 
+        await tester.tap(find.byTooltip('Shopping'));
+        await tester.pumpAndSettle();
         await tester.tap(find.text('Build grocery list'));
         await tester.pumpAndSettle();
 
@@ -503,5 +525,20 @@ void main() {
         expect(hub.lastGenerateTo, _fmt(expectedEnd));
       },
     );
+
+    testWidgets('copy icon opens the copy previous week sheet', (
+      tester,
+    ) async {
+      _useTallViewport(tester);
+      final hub = _StubHub();
+      await tester.pumpWidget(_buildMealsPage(hub));
+      await tester.pump();
+      await tester.pump();
+
+      await tester.tap(find.byTooltip('Copy last week'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Copy previous week?'), findsOneWidget);
+    });
   });
 }
