@@ -1133,12 +1133,22 @@ class _ChoreSearchSheetState extends State<_ChoreSearchSheet> {
                       ),
                     ),
                   ),
-                  Text(
-                    'Search chores',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
-                      color: CaleeColors.textPrimary,
-                    ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Search chores',
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w600,
+                            color: CaleeColors.textPrimary,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: () => Navigator.of(context).maybePop(),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: CaleeSpacing.sm),
                   TextField(

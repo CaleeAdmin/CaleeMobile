@@ -8,6 +8,7 @@ import 'package:calee_mobile/data/api/calee_hub_client.dart';
 import 'package:calee_mobile/data/models/client_bootstrap.dart';
 import 'package:calee_mobile/data/models/client_calendar.dart';
 import 'package:calee_mobile/data/models/client_chore.dart';
+import 'package:calee_mobile/data/models/client_meal.dart';
 import 'package:calee_mobile/data/models/client_task.dart';
 import 'package:calee_mobile/features/today/today_page.dart';
 import 'package:calee_mobile/ui/calee_design.dart';
@@ -21,20 +22,25 @@ class _StubHub extends CaleeHubClient {
     this.failEvents = false,
     this.failTasks = false,
     this.failChores = false,
+    this.failMeals = false,
     List<ClientEvent>? events,
     List<ClientTask>? tasks,
     List<ClientChore>? chores,
+    List<ClientMeal>? meals,
   }) : _events = events ?? const [],
        _tasks = tasks ?? const [],
        _chores = chores ?? const [],
+       _meals = meals ?? const [],
        super();
 
   final bool failEvents;
   final bool failTasks;
   final bool failChores;
+  final bool failMeals;
   final List<ClientEvent> _events;
   final List<ClientTask> _tasks;
   final List<ClientChore> _chores;
+  final List<ClientMeal> _meals;
 
   @override
   Future<ClientEventList> events({
@@ -65,6 +71,16 @@ class _StubHub extends CaleeHubClient {
     if (failChores) throw Exception('chores error');
     return ClientChoreList(from: from, to: to, chores: _chores);
   }
+
+  @override
+  Future<ClientMealList> meals({
+    required String accessToken,
+    required String from,
+    required String to,
+  }) async {
+    if (failMeals) throw Exception('meals error');
+    return ClientMealList(householdId: 'h1', from: from, to: to, meals: _meals);
+  }
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -92,6 +108,30 @@ const _choresService = ClientService(
   source: 'test',
   capabilities: {'calendar': true, 'tasks': true, 'chores': true},
 );
+
+const _mealsService = ClientService(
+  id: 'portal',
+  displayName: 'Portal',
+  baseUrl: 'http://localhost',
+  launchUrl: 'http://localhost',
+  serviceType: 'nextcloud_portal',
+  accessStatus: 'active',
+  calendarCredentialStatus: 'connected',
+  source: 'test',
+  capabilities: {'calendar': true, 'meals': true},
+);
+
+/// TodayPage can grow past the default 800x600 test surface once the
+/// Chores/Meals sections are populated. A plain (non-builder) ListView only
+/// lays out slivers near the viewport, so rows below the fold exist in the
+/// widget tree but are "offstage" to finders. Growing the surface keeps
+/// everything reachable without scrolling in every test.
+void _useTallViewport(WidgetTester tester) {
+  tester.view.physicalSize = const Size(800, 2000);
+  tester.view.devicePixelRatio = 1.0;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+}
 
 Widget _buildPage({
   required CaleeHubClient hub,
@@ -279,6 +319,95 @@ void main() {
       await tester.pump();
 
       expect(find.byType(TodayPage), findsOneWidget);
+    });
+  });
+
+  group("TodayPage — Today's Meals card", () {
+    testWidgets('shows "No meals planned today" when nothing is planned', (
+      tester,
+    ) async {
+      _useTallViewport(tester);
+      final hub = _StubHub();
+      await tester.pumpWidget(
+        _buildPage(
+          hub: hub,
+          services: const [_mealsService],
+          isFamilyUxContext: true,
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.text('No meals planned today'), findsOneWidget);
+      expect(find.text('Not planned'), findsNothing);
+      expect(find.byIcon(Icons.add), findsNothing);
+    });
+
+    testWidgets('shows only planned meals in breakfast/lunch/dinner order', (
+      tester,
+    ) async {
+      _useTallViewport(tester);
+      final dinner = ClientMeal(
+        id: 1,
+        householdId: 'h1',
+        mealDate: '2024-01-01',
+        mealType: 'dinner',
+        title: 'ABC',
+        status: 'planned',
+        source: 'manual',
+      );
+      final breakfast = ClientMeal(
+        id: 2,
+        householdId: 'h1',
+        mealDate: '2024-01-01',
+        mealType: 'breakfast',
+        title: 'Cereal',
+        status: 'planned',
+        source: 'manual',
+      );
+
+      final hub = _StubHub(meals: [dinner, breakfast]);
+      await tester.pumpWidget(
+        _buildPage(
+          hub: hub,
+          services: const [_mealsService],
+          isFamilyUxContext: true,
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      // The leading icon and meal title render as separate Text widgets.
+      expect(find.text('🍳'), findsOneWidget);
+      expect(find.text('Cereal'), findsOneWidget);
+      expect(find.text('🍴'), findsOneWidget);
+      expect(find.text('ABC'), findsOneWidget);
+      expect(find.text('Not planned'), findsNothing);
+      expect(find.text('Lunch'), findsNothing);
+
+      // Breakfast row appears above the dinner row.
+      final breakfastY = tester.getTopLeft(find.text('Cereal')).dy;
+      final dinnerY = tester.getTopLeft(find.text('ABC')).dy;
+      expect(breakfastY, lessThan(dinnerY));
+    });
+
+    testWidgets('meals error row renders without crashing the page', (
+      tester,
+    ) async {
+      _useTallViewport(tester);
+      final hub = _StubHub(failMeals: true);
+      await tester.pumpWidget(
+        _buildPage(
+          hub: hub,
+          services: const [_mealsService],
+          isFamilyUxContext: true,
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.byType(TodayPage), findsOneWidget);
+      expect(find.text('Could not load meals.'), findsOneWidget);
     });
   });
 

@@ -45,7 +45,11 @@ Future<_FakeAuthRepository> _pumpLoginPage(WidgetTester tester) async {
   final repository = _FakeAuthRepository();
   await tester.pumpWidget(
     MaterialApp(
-      home: LoginPage(authRepository: repository, onSignedIn: (_) async {}),
+      home: LoginPage(
+        authRepository: repository,
+        onSignedIn: (_) async {},
+        onCancel: () {},
+      ),
     ),
   );
   return repository;

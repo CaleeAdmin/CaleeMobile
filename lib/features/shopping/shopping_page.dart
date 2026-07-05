@@ -28,7 +28,7 @@ class ShoppingPage extends StatefulWidget {
 
   /// When true, generates the shopping list from the current meal plan on
   /// first load instead of just fetching whatever list already exists. Used
-  /// by the Meals page's "Generate shopping list" entry point.
+  /// by the Meals page's "Build grocery list" entry point.
   final bool autoGenerate;
 
   /// Start of the week to load/generate for, taken from the Meals page's
@@ -122,6 +122,11 @@ class _ShoppingPageState extends State<ShoppingPage> {
   @override
   Widget build(BuildContext context) {
     return CaleeScaffold(
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+      ),
       body: SafeArea(
         child: RefreshIndicator(
           onRefresh: _controller.load,
@@ -180,7 +185,7 @@ class _ShoppingPageState extends State<ShoppingPage> {
           child: TextButton.icon(
             onPressed: busy ? null : _generate,
             icon: const Icon(Icons.auto_awesome, size: 16),
-            label: const Text('Generate from meal plan'),
+            label: const Text('Build from meal plan'),
           ),
         ),
         if (hasList)
@@ -316,7 +321,7 @@ class _ShoppingPageState extends State<ShoppingPage> {
           FilledButton.icon(
             onPressed: _controller.isSyncing ? null : _generate,
             icon: const Icon(Icons.auto_awesome),
-            label: const Text('Generate from meal plan'),
+            label: const Text('Build from meal plan'),
           ),
           if (hasList) ...[
             const SizedBox(height: CaleeSpacing.sm),

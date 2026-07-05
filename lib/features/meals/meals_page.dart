@@ -2,18 +2,22 @@ import 'package:flutter/material.dart';
 
 import '../../data/api/calee_hub_client.dart';
 import '../../data/models/client_meal.dart';
+import '../../data/models/client_shopping_list.dart';
+import '../../shared/meal_icon.dart';
 import '../../ui/calee_design.dart';
 import '../shopping/shopping_page.dart';
 import 'meals_controller.dart';
 import 'meals_repository.dart';
-
-const _kMealTypes = ['breakfast', 'lunch', 'dinner'];
 
 const _kMealTypeLabels = {
   'breakfast': 'Breakfast',
   'lunch': 'Lunch',
   'dinner': 'Dinner',
 };
+
+const _kMealTypeEmoji = {'breakfast': '🍳', 'lunch': '🥪', 'dinner': '🍽'};
+
+const _kMealTypeOrder = ['breakfast', 'lunch', 'dinner'];
 
 const _kWeekdayShort = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -45,11 +49,6 @@ String _weekRangeLabel(DateTime start, DateTime end) {
   }
   return '${start.day} ${_kMonths[start.month - 1]} – ${end.day} ${_kMonths[end.month - 1]} ${start.year}';
 }
-
-// Dinner gets a more actionable prompt than the other meal types since it's
-// the meal families are most likely to actively plan ahead for.
-String _emptyMealLabel(String mealType) =>
-    mealType == 'dinner' ? 'Plan dinner' : 'Not planned';
 
 class MealsPage extends StatefulWidget {
   const MealsPage({
@@ -95,10 +94,83 @@ class _MealsPageState extends State<MealsPage> {
   @override
   Widget build(BuildContext context) {
     return CaleeScaffold(
+      appBar: _buildTopBar(),
       body: SafeArea(
         child: RefreshIndicator(
           onRefresh: _controller.load,
           child: _buildBody(),
+        ),
+      ),
+    );
+  }
+
+  PreferredSizeWidget _buildTopBar() {
+    return PreferredSize(
+      preferredSize: const Size.fromHeight(64),
+      child: SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(
+            CaleeSpacing.md,
+            CaleeSpacing.xs,
+            CaleeSpacing.xs,
+            CaleeSpacing.xs,
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              const Expanded(
+                child: Text(
+                  'Meals',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w600,
+                    color: CaleeColors.textPrimary,
+                  ),
+                ),
+              ),
+              IconButton(
+                onPressed: _openSearchSheet,
+                icon: const Icon(Icons.search),
+                iconSize: 22,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                color: CaleeColors.primary,
+                tooltip: 'Search meals',
+              ),
+              IconButton(
+                onPressed: _showShoppingActions,
+                icon: const Icon(Icons.shopping_cart_outlined),
+                iconSize: 22,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                color: CaleeColors.primary,
+                tooltip: 'Shopping',
+              ),
+              IconButton(
+                onPressed: (_controller.isCopying || _controller.isLoading)
+                    ? null
+                    : _showCopyWeekSheet,
+                icon: const Icon(Icons.content_copy),
+                iconSize: 22,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                color: CaleeColors.primary,
+                tooltip: 'Copy last week',
+              ),
+              IconButton(
+                onPressed: _openAddMealSheet,
+                icon: const Icon(Icons.add),
+                iconSize: 22,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                color: CaleeColors.primary,
+                tooltip: 'Add meal',
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -111,27 +183,61 @@ class _MealsPageState extends State<MealsPage> {
         vertical: CaleeSpacing.md,
       ),
       children: [
-        _buildHeader(),
-        const SizedBox(height: CaleeSpacing.md),
         _buildWeekSelector(),
-        _buildShoppingListButton(),
-        _buildCopyWeekButton(),
         const SizedBox(height: CaleeSpacing.md),
-        _buildMealList(),
+        ..._buildContent(),
         const SizedBox(height: CaleeSpacing.lg),
       ],
     );
   }
 
-  Widget _buildShoppingListButton() {
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: TextButton.icon(
-        onPressed: _openShoppingList,
-        icon: const Icon(Icons.shopping_cart_outlined, size: 16),
-        label: const Text('Generate shopping list'),
-      ),
+  List<Widget> _buildContent() {
+    if (_controller.isLoading && _controller.mealList == null) {
+      return [
+        const Center(
+          child: Padding(
+            padding: EdgeInsets.all(CaleeSpacing.xl),
+            child: CircularProgressIndicator(),
+          ),
+        ),
+      ];
+    }
+
+    if (_controller.error != null && _controller.mealList == null) {
+      return [_buildError()];
+    }
+
+    final days = _weekDays();
+    return [
+      for (var i = 0; i < days.length; i++) ...[
+        if (i > 0) const SizedBox(height: CaleeSpacing.sectionSpacing),
+        _buildDaySection(days[i]),
+      ],
+    ];
+  }
+
+  void _showShoppingActions() {
+    CaleeActionSheet.show(
+      context: context,
+      title: 'Shopping',
+      actions: [
+        CaleeAction(
+          label: 'Build grocery list',
+          icon: Icons.shopping_cart_outlined,
+          onTap: _openShoppingList,
+        ),
+        CaleeAction(
+          label: 'Open shopping list',
+          icon: Icons.list_alt_outlined,
+          onTap: _openShoppingList,
+        ),
+      ],
     );
+  }
+
+  void _openAddMealSheet() {
+    final today = DateTime.now();
+    _onMealRowTap(_fmt(today), 'dinner', null);
   }
 
   // Shopping lists are a sub-feature of meal planning (see ClientBootstrap
@@ -152,14 +258,23 @@ class _MealsPageState extends State<MealsPage> {
     );
   }
 
-  Widget _buildHeader() {
-    return const Text(
-      'Meals',
-      style: TextStyle(
-        fontSize: 32,
-        fontWeight: FontWeight.bold,
-        color: CaleeColors.textPrimary,
-        height: 1.1,
+  void _openSearchSheet() {
+    final allMeals = _controller.mealList?.meals ?? const <ClientMeal>[];
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: CaleeColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(CaleeRadius.sheet),
+        ),
+      ),
+      builder: (sheetContext) => _MealSearchSheet(
+        meals: allMeals,
+        onTapMeal: (meal) {
+          Navigator.of(sheetContext).pop();
+          _openSheet(date: meal.mealDate, mealType: meal.mealType, meal: meal);
+        },
       ),
     );
   }
@@ -206,21 +321,6 @@ class _MealsPageState extends State<MealsPage> {
     );
   }
 
-  Widget _buildCopyWeekButton() {
-    final label = _controller.isCurrentWeek
-        ? 'Copy last week'
-        : 'Copy previous week';
-    final disabled = _controller.isCopying || _controller.isLoading;
-    return Align(
-      alignment: Alignment.centerRight,
-      child: TextButton.icon(
-        onPressed: disabled ? null : _showCopyWeekSheet,
-        icon: const Icon(Icons.content_copy, size: 16),
-        label: Text(label),
-      ),
-    );
-  }
-
   Future<void> _showCopyWeekSheet() async {
     final overwrite = await _CopyWeekSheet.show(context: context);
     if (overwrite == null || !mounted) return;
@@ -254,77 +354,88 @@ class _MealsPageState extends State<MealsPage> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
-  Widget _buildMealList() {
-    if (_controller.isLoading && _controller.mealList == null) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(CaleeSpacing.xl),
-          child: CircularProgressIndicator(),
-        ),
-      );
-    }
+  // ── Day sections ─────────────────────────────────────────────────────────
 
-    if (_controller.error != null && _controller.mealList == null) {
-      return _buildError();
-    }
-
-    final days = List.generate(
-      7,
-      (i) => DateTime(
-        _controller.weekStart.year,
-        _controller.weekStart.month,
-        _controller.weekStart.day + i,
-      ),
-    );
-
-    return Column(
-      children: [
-        for (var i = 0; i < days.length; i++) ...[
-          if (i > 0) const SizedBox(height: CaleeSpacing.sectionSpacing),
-          _buildDaySection(days[i]),
-        ],
-      ],
-    );
-  }
+  List<DateTime> _weekDays() => List.generate(
+    7,
+    (i) => DateTime(
+      _controller.weekStart.year,
+      _controller.weekStart.month,
+      _controller.weekStart.day + i,
+    ),
+  );
 
   Widget _buildDaySection(DateTime day) {
     final dateStr = _fmt(day);
-    final count = _plannedCountForDay(dateStr);
-    final subtitleTheme = Theme.of(context).textTheme.bodySmall;
 
     return CaleeSection(
       title: _dayTitle(day),
-      trailing: count > 0 ? '$count planned' : null,
-      children: _kMealTypes.map((mealType) {
-        final meal = _controller.mealFor(dateStr, mealType);
+      children: _kMealTypeOrder
+          .map((mealType) => _buildMealRow(dateStr, mealType))
+          .toList(),
+    );
+  }
 
-        return CaleeListRow(
-          leading: Icon(
-            _mealTypeIcon(mealType),
+  Widget _buildMealRow(String dateStr, String mealType) {
+    final meal = _controller.mealFor(dateStr, mealType);
+    final emoji = _kMealTypeEmoji[mealType] ?? '';
+    final label = _kMealTypeLabels[mealType] ?? mealType;
+
+    final Widget valueText;
+    if (meal == null) {
+      valueText = Text(
+        'Add $mealType',
+        style: const TextStyle(fontSize: 15, color: CaleeColors.textSecondary),
+      );
+    } else {
+      valueText = Text(
+        meal.title,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(fontSize: 15, color: CaleeColors.textPrimary),
+      );
+    }
+
+    return CaleeListRow(
+      leading: Text(emoji, style: const TextStyle(fontSize: 18)),
+      title: label,
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Flexible(child: valueText),
+          const SizedBox(width: CaleeSpacing.xs),
+          const Icon(
+            Icons.chevron_right,
             size: 20,
             color: CaleeColors.textTertiary,
           ),
-          title: _kMealTypeLabels[mealType] ?? mealType,
-          subtitle: meal != null ? meal.title : _emptyMealLabel(mealType),
-          subtitleStyle: meal != null
-              ? subtitleTheme?.copyWith(color: CaleeColors.textPrimary)
-              : null,
-          trailing: meal != null
-              ? const Icon(
-                  Icons.chevron_right,
-                  size: 20,
-                  color: CaleeColors.textTertiary,
-                )
-              : const Icon(
-                  Icons.add,
-                  size: 20,
-                  color: CaleeColors.textTertiary,
-                ),
-          onTap: () =>
-              _openSheet(date: dateStr, mealType: mealType, meal: meal),
-        );
-      }).toList(),
+        ],
+      ),
+      onTap: () => _onMealRowTap(dateStr, mealType, meal),
     );
+  }
+
+  void _onMealRowTap(String dateStr, String mealType, ClientMeal? meal) {
+    if (meal != null) {
+      _openSheet(date: dateStr, mealType: mealType, meal: meal);
+      return;
+    }
+    if (mealType == 'dinner') {
+      _openPickDinnerSheet(dateStr);
+    } else {
+      _openSheet(date: dateStr, mealType: mealType, meal: null);
+    }
+  }
+
+  Future<void> _openPickDinnerSheet(String date) async {
+    final result = await PickDinnerSheet.show(
+      context: context,
+      date: date,
+      controller: _controller,
+    );
+    if (result == 'create_new' && mounted) {
+      await _openSheet(date: date, mealType: 'dinner', meal: null);
+    }
   }
 
   String _dayTitle(DateTime day) {
@@ -339,25 +450,6 @@ class _MealsPageState extends State<MealsPage> {
     final weekday = _kWeekdayShort[day.weekday - 1];
     final month = _kMonths[day.month - 1];
     return '$weekday, ${day.day} $month';
-  }
-
-  int _plannedCountForDay(String dateStr) {
-    return _kMealTypes
-        .where((t) => _controller.mealFor(dateStr, t) != null)
-        .length;
-  }
-
-  IconData _mealTypeIcon(String mealType) {
-    switch (mealType) {
-      case 'breakfast':
-        return Icons.wb_sunny_outlined;
-      case 'lunch':
-        return Icons.restaurant_outlined;
-      case 'dinner':
-        return Icons.restaurant_menu_outlined;
-      default:
-        return Icons.restaurant_outlined;
-    }
   }
 
   Widget _buildError() {
@@ -538,31 +630,14 @@ class _MealFormSheetState extends State<MealFormSheet> {
     final meal = widget.existingMeal;
     if (meal == null) return;
 
-    final confirmed = await showDialog<bool>(
+    final confirmed = await CaleeDestructiveDialog.show(
       context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Delete meal?'),
-        content: Text('Remove "${meal.title}"?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            style: TextButton.styleFrom(
-              foregroundColor: CaleeColors.destructive,
-            ),
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text(
-              'Delete',
-              style: TextStyle(fontWeight: FontWeight.w600),
-            ),
-          ),
-        ],
-      ),
+      title: 'Delete meal?',
+      body: 'Remove "${meal.title}"?',
+      confirmLabel: 'Delete',
     );
 
-    if (confirmed != true) return;
+    if (!confirmed || !mounted) return;
 
     setState(() {
       _isSaving = true;
@@ -724,6 +799,230 @@ class _MealFormSheetState extends State<MealFormSheet> {
   }
 }
 
+// ─────────────────────────────────────────────
+// PickDinnerSheet
+// ─────────────────────────────────────────────
+
+/// Bottom sheet shown when tapping a missing dinner row in the Meals page.
+/// Offers the household's own meal templates ("Family favourites"), starter
+/// templates from the shared library ("Quick dinner ideas"), and a way to
+/// create a brand-new meal from scratch.
+class PickDinnerSheet extends StatefulWidget {
+  const PickDinnerSheet({
+    required this.date,
+    required this.controller,
+    super.key,
+  });
+
+  final String date;
+  final MealsController controller;
+
+  /// Shows the sheet. Resolves to `'create_new'` when the caller should open
+  /// the plain meal-creation form next, or `null` when a template was
+  /// selected (already created) or the sheet was dismissed.
+  static Future<String?> show({
+    required BuildContext context,
+    required String date,
+    required MealsController controller,
+  }) {
+    return CaleeBottomSheet.show<String>(
+      context: context,
+      title: 'Pick dinner',
+      child: PickDinnerSheet(date: date, controller: controller),
+    );
+  }
+
+  @override
+  State<PickDinnerSheet> createState() => _PickDinnerSheetState();
+}
+
+class _PickDinnerOptions {
+  const _PickDinnerOptions({
+    required this.favourites,
+    required this.quickIdeas,
+  });
+
+  final List<ClientMealTemplate> favourites;
+  final List<ClientStarterMealTemplate> quickIdeas;
+}
+
+class _PickDinnerSheetState extends State<PickDinnerSheet> {
+  late Future<_PickDinnerOptions> _future;
+  bool _isCreating = false;
+  Object? _createError;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = _load();
+  }
+
+  Future<_PickDinnerOptions> _load() async {
+    final repository = widget.controller.repository;
+    final results = await Future.wait([
+      repository.mealTemplates(mealType: 'dinner'),
+      repository.mealStarterTemplates(mealType: 'dinner'),
+    ]);
+    return _PickDinnerOptions(
+      favourites: (results[0] as ClientMealTemplateList).templates,
+      quickIdeas: results[1] as List<ClientStarterMealTemplate>,
+    );
+  }
+
+  Future<void> _selectTemplate(String name, String? notes) async {
+    if (_isCreating) return;
+    setState(() {
+      _isCreating = true;
+      _createError = null;
+    });
+
+    try {
+      await widget.controller.createMeal(
+        mealDate: widget.date,
+        mealType: 'dinner',
+        title: name,
+        notes: notes,
+      );
+      if (mounted) Navigator.of(context).pop();
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isCreating = false;
+          _createError = e;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<_PickDinnerOptions>(
+      future: _future,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Padding(
+            padding: EdgeInsets.all(CaleeSpacing.xl),
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+        if (snapshot.hasError) {
+          return _buildLoadError();
+        }
+
+        final options = snapshot.data!;
+        return SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CaleeSection(
+                title: 'Family favourites',
+                children: options.favourites.isEmpty
+                    ? [_mutedRow('No family favourites yet')]
+                    : options.favourites.map(_favouriteRow).toList(),
+              ),
+              const SizedBox(height: CaleeSpacing.md),
+              CaleeSection(
+                title: 'Quick dinner ideas',
+                children: options.quickIdeas.isEmpty
+                    ? [_mutedRow('No quick dinner ideas yet')]
+                    : options.quickIdeas.map(_quickIdeaRow).toList(),
+              ),
+              if (_createError != null) ...[
+                const SizedBox(height: CaleeSpacing.sm),
+                const Text(
+                  'Could not create meal. Try again.',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: CaleeColors.destructive,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ],
+              const SizedBox(height: CaleeSpacing.md),
+              OutlinedButton.icon(
+                onPressed: _isCreating
+                    ? null
+                    : () => Navigator.of(context).pop('create_new'),
+                icon: const Icon(Icons.add),
+                label: const Text('Create new meal'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _favouriteRow(ClientMealTemplate template) {
+    return CaleeListRow(
+      leading: Text(
+        mealIconEmoji(
+          icon: template.icon,
+          title: template.name,
+          mealType: 'dinner',
+        ),
+        style: const TextStyle(fontSize: 18),
+      ),
+      title: template.name,
+      enabled: !_isCreating,
+      onTap: () => _selectTemplate(template.name, template.notes),
+    );
+  }
+
+  Widget _quickIdeaRow(ClientStarterMealTemplate template) {
+    return CaleeListRow(
+      leading: Text(
+        mealIconEmoji(
+          icon: template.icon,
+          title: template.name,
+          mealType: 'dinner',
+        ),
+        style: const TextStyle(fontSize: 18),
+      ),
+      title: template.name,
+      enabled: !_isCreating,
+      onTap: () => _selectTemplate(template.name, template.notes),
+    );
+  }
+
+  Widget _mutedRow(String text) {
+    return CaleeListRow(
+      title: text,
+      titleStyle: const TextStyle(
+        fontSize: 14,
+        color: CaleeColors.textSecondary,
+      ),
+    );
+  }
+
+  Widget _buildLoadError() {
+    return Padding(
+      padding: const EdgeInsets.all(CaleeSpacing.xl),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(
+            Icons.error_outline,
+            size: 36,
+            color: CaleeColors.destructive,
+          ),
+          const SizedBox(height: CaleeSpacing.sm),
+          const Text(
+            'Could not load dinner ideas',
+            style: TextStyle(fontSize: 15, color: CaleeColors.textPrimary),
+          ),
+          const SizedBox(height: CaleeSpacing.sm),
+          TextButton(
+            onPressed: () => setState(() => _future = _load()),
+            child: const Text('Try again'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _CopyWeekSheet extends StatefulWidget {
   const _CopyWeekSheet();
 
@@ -798,6 +1097,189 @@ class _CopyWeekSheetState extends State<_CopyWeekSheet> {
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
               child: const Text('Cancel'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
+// Search support
+// ─────────────────────────────────────────────
+
+class _MealSearchSheet extends StatefulWidget {
+  const _MealSearchSheet({required this.meals, required this.onTapMeal});
+
+  final List<ClientMeal> meals;
+  final ValueChanged<ClientMeal> onTapMeal;
+
+  @override
+  State<_MealSearchSheet> createState() => _MealSearchSheetState();
+}
+
+class _MealSearchSheetState extends State<_MealSearchSheet> {
+  final _controller = TextEditingController();
+  List<ClientMeal> _results = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.addListener(_onQueryChanged);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _onQueryChanged() {
+    final q = _controller.text.trim().toLowerCase();
+    setState(() {
+      _results = q.isEmpty
+          ? []
+          : widget.meals
+                .where(
+                  (meal) =>
+                      meal.title.toLowerCase().contains(q) ||
+                      (meal.notes ?? '').toLowerCase().contains(q),
+                )
+                .toList();
+    });
+  }
+
+  String _resultSubtitle(ClientMeal meal) {
+    final label = _kMealTypeLabels[meal.mealType] ?? meal.mealType;
+    final parts = meal.mealDate.split('-');
+    if (parts.length != 3) return label;
+    return '$label · ${parts[2]}/${parts[1]}/${parts[0]}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+
+    return DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: 0.6,
+      minChildSize: 0.4,
+      maxChildSize: 0.92,
+      builder: (context, scrollController) => Padding(
+        padding: EdgeInsets.only(bottom: bottomInset),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                CaleeSpacing.pagePadding,
+                CaleeSpacing.md,
+                CaleeSpacing.pagePadding,
+                CaleeSpacing.sm,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 36,
+                      height: 4,
+                      margin: const EdgeInsets.only(bottom: CaleeSpacing.md),
+                      decoration: BoxDecoration(
+                        color: CaleeColors.textTertiary.withValues(alpha: 0.4),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Search meals',
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w600,
+                            color: CaleeColors.textPrimary,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: () => Navigator.of(context).maybePop(),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: CaleeSpacing.sm),
+                  TextField(
+                    controller: _controller,
+                    autofocus: true,
+                    textInputAction: TextInputAction.search,
+                    decoration: InputDecoration(
+                      hintText: 'Search by meal title…',
+                      prefixIcon: const Icon(Icons.search_outlined),
+                      suffixIcon: _controller.text.isNotEmpty
+                          ? IconButton(
+                              icon: const Icon(Icons.clear),
+                              onPressed: _controller.clear,
+                            )
+                          : null,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(CaleeRadius.card),
+                        borderSide: BorderSide.none,
+                      ),
+                      filled: true,
+                      fillColor: CaleeColors.groupedBackground,
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: CaleeSpacing.md,
+                        vertical: CaleeSpacing.sm,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: _controller.text.trim().isEmpty
+                  ? Center(
+                      child: Text(
+                        'Type to search',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: CaleeColors.textTertiary,
+                        ),
+                      ),
+                    )
+                  : _results.isEmpty
+                  ? Center(
+                      child: Text(
+                        'No meals found',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: CaleeColors.textTertiary,
+                        ),
+                      ),
+                    )
+                  : ListView.builder(
+                      controller: scrollController,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: CaleeSpacing.pagePadding,
+                        vertical: CaleeSpacing.sm,
+                      ),
+                      itemCount: _results.length,
+                      itemBuilder: (context, index) {
+                        final meal = _results[index];
+                        final emoji = _kMealTypeEmoji[meal.mealType] ?? '';
+                        return CaleeListRow(
+                          leading: Text(
+                            emoji,
+                            style: const TextStyle(fontSize: 18),
+                          ),
+                          title: meal.title,
+                          subtitle: _resultSubtitle(meal),
+                          onTap: () => widget.onTapMeal(meal),
+                        );
+                      },
+                    ),
             ),
           ],
         ),

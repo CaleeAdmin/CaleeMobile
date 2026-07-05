@@ -11,11 +11,13 @@ class CreateAccountPage extends StatefulWidget {
   const CreateAccountPage({
     required this.authRepository,
     required this.onAccountCreated,
+    required this.onCancel,
     super.key,
   });
 
   final AuthRepository authRepository;
   final Future<void> Function(ClientLoginResult result) onAccountCreated;
+  final VoidCallback onCancel;
 
   @override
   State<CreateAccountPage> createState() => _CreateAccountPageState();
@@ -85,6 +87,12 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        leading: BackButton(onPressed: widget.onCancel),
+      ),
       body: SafeArea(
         minimum: const EdgeInsets.all(24),
         child: Center(
