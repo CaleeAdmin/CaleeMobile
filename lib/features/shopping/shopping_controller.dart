@@ -100,8 +100,8 @@ class ShoppingController extends ChangeNotifier {
     } on CaleeHubException catch (e) {
       if (e.statusCode == 404) {
         // No shopping list has been generated for this week yet. That's not
-        // a failure — the page offers its own "Generate from meal plan"
-        // action for this case.
+        // a failure — the page offers its own "Build from meal plan" action
+        // for this case.
         shoppingList = null;
         error = null;
       } else {

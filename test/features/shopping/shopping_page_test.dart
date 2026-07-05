@@ -280,7 +280,7 @@ void main() {
   });
 
   group('ShoppingPage — generate', () {
-    testWidgets('tapping "Generate from meal plan" calls the repository', (
+    testWidgets('tapping "Build from meal plan" calls the repository', (
       tester,
     ) async {
       final hub = _StubHub(shoppingList: _list());
@@ -288,7 +288,7 @@ void main() {
       await tester.pump();
       await tester.pump();
 
-      await tester.tap(find.text('Generate from meal plan'));
+      await tester.tap(find.text('Build from meal plan'));
       await tester.pump();
       await tester.pump();
 

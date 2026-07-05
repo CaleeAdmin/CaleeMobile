@@ -1,5 +1,6 @@
 import '../../data/api/calee_hub_client.dart';
 import '../../data/models/client_meal.dart';
+import '../../data/models/client_shopping_list.dart';
 
 class MealsRepository {
   MealsRepository({required this.hubClient, required this.accessToken});
@@ -12,6 +13,18 @@ class MealsRepository {
 
   Future<ClientMealList> loadToday(String todayStr) =>
       hubClient.meals(accessToken: accessToken, from: todayStr, to: todayStr);
+
+  Future<ClientMealTemplateList> mealTemplates({String? mealType}) =>
+      hubClient.mealTemplates(accessToken: accessToken, mealType: mealType);
+
+  Future<List<ClientStarterMealTemplate>> mealStarterTemplates({
+    String? mealType,
+    String? pack,
+  }) => hubClient.mealStarterTemplates(
+    accessToken: accessToken,
+    mealType: mealType,
+    pack: pack,
+  );
 
   Future<ClientMeal> createMeal({
     required String mealDate,
