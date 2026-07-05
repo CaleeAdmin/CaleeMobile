@@ -34,8 +34,6 @@ import '../features/onboarding/welcome_page.dart';
 import '../features/local_subscriber/local_calendar_subscription_repository.dart';
 import '../features/local_subscriber/local_subscriber_calendar_page.dart';
 import '../features/settings/calendar_collections_page.dart';
-import '../features/shopping/shopping_list_link_controller.dart';
-import '../features/shopping/shopping_page.dart';
 import '../ui/calee_design.dart';
 import 'calee_home_page.dart';
 
@@ -54,7 +52,6 @@ class CaleeAppTestDependencies {
     required this.localSubscriptionRepo,
     this.externalCalendarConnectedLinkController,
     this.deviceProfileDefaultsProvider,
-    this.shoppingListLinkController,
   });
 
   final CaleeHubClient hubClient;
@@ -66,7 +63,6 @@ class CaleeAppTestDependencies {
   final ExternalCalendarConnectedLinkController?
   externalCalendarConnectedLinkController;
   final DeviceProfileDefaultsProvider? deviceProfileDefaultsProvider;
-  final ShoppingListLinkController? shoppingListLinkController;
 }
 
 class CaleeApp extends StatefulWidget {
@@ -93,7 +89,6 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
   _externalCalendarConnectedLinkController;
   late final DisplayActivationController _displayActivationController;
   late final LocalCalendarSubscriptionRepository _localSubscriptionRepo;
-  late final ShoppingListLinkController _shoppingListLinkController;
   final _navigatorKey = GlobalKey<NavigatorState>();
 
   // Set to true when the app goes to background; cleared and transport reset on resume.
@@ -146,8 +141,6 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
           ExternalCalendarConnectedLinkController();
       _displayActivationController = testDeps.displayActivationController;
       _localSubscriptionRepo = testDeps.localSubscriptionRepo;
-      _shoppingListLinkController =
-          testDeps.shoppingListLinkController ?? ShoppingListLinkController();
     } else {
       _hubClient = CaleeHubClient();
       final repository = AuthRepository(
@@ -164,11 +157,9 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
         repository: DisplaySetupRepository(hubClient: _hubClient),
       );
       _localSubscriptionRepo = LocalCalendarSubscriptionRepository();
-      _shoppingListLinkController = ShoppingListLinkController();
       unawaited(_followLinkController.init());
       unawaited(_displaySetupLinkController.init());
       unawaited(_externalCalendarConnectedLinkController.init());
-      unawaited(_shoppingListLinkController.init());
     }
 
     _followLinkController.addListener(_onFollowLinkChanged);
@@ -176,7 +167,6 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
     _externalCalendarConnectedLinkController.addListener(
       _onExternalCalendarConnectedLinkChanged,
     );
-    _shoppingListLinkController.addListener(_onShoppingListLinkChanged);
     _sessionController.addListener(_onSessionChanged);
 
     _sessionController.restoreSession();
@@ -191,12 +181,10 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
     _externalCalendarConnectedLinkController.removeListener(
       _onExternalCalendarConnectedLinkChanged,
     );
-    _shoppingListLinkController.removeListener(_onShoppingListLinkChanged);
     _sessionController.removeListener(_onSessionChanged);
     _followLinkController.dispose();
     _displaySetupLinkController.dispose();
     _externalCalendarConnectedLinkController.dispose();
-    _shoppingListLinkController.dispose();
     _displayActivationController.dispose();
     _sessionController.dispose();
     super.dispose();
@@ -283,14 +271,6 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
       if (!calendarIntent.isError && calendarIntent.isGoogle) {
         unawaited(_openGoogleCalendarSelectionFromDeepLink(calendarIntent));
       }
-      return;
-    }
-
-    // Shopping list deep link intent (e.g. the tablet's QR code).
-    final shoppingListIntent = _shoppingListLinkController.pendingIntent;
-    if (shoppingListIntent != null) {
-      _shoppingListLinkController.clearPending();
-      _openShoppingListFromDeepLink(shoppingListIntent.listId);
       return;
     }
 
@@ -405,19 +385,6 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
 
     _externalCalendarConnectedLinkController.clearPending();
     unawaited(_openGoogleCalendarSelectionFromDeepLink(intent));
-  }
-
-  void _onShoppingListLinkChanged() {
-    final intent = _shoppingListLinkController.pendingIntent;
-    if (intent == null) return;
-
-    if (!_sessionController.isSignedIn) {
-      // Leave pendingIntent in place; _onSessionChanged will process it after restore.
-      return;
-    }
-
-    _shoppingListLinkController.clearPending();
-    _openShoppingListFromDeepLink(intent.listId);
   }
 
   Future<void> _openGoogleCalendarSelectionFromDeepLink(
@@ -637,21 +604,6 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
                 ),
               );
             },
-          ),
-        ),
-      );
-    });
-  }
-
-  void _openShoppingListFromDeepLink(int listId) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      _navigatorKey.currentState?.push(
-        MaterialPageRoute<void>(
-          builder: (_) => ShoppingPage(
-            hubClient: _hubClient,
-            accessToken: _sessionController.accessToken!,
-            initialListId: listId,
           ),
         ),
       );
