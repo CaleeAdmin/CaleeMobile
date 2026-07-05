@@ -6,12 +6,10 @@ import '../../ui/calee_design.dart';
 import 'shopping_controller.dart';
 import 'shopping_repository.dart';
 
-// TODO: support a `calee://shopping-list/{listId}` deep link once this app
-// adopts a custom URL scheme. Today it only handles `https://` universal
-// links via app_links (see GET /client/v1/shopping-lists/{listId}, which
-// this deep link would use to jump straight to a specific list). Until
-// then, this page is reachable purely through in-app navigation from the
-// Meals page.
+// TODO(CaleeAdmin/CaleeMobile#404): support an app/universal link that opens
+// a specific shopping list (GET /client/v1/shopping-lists/{listId} already
+// exists server-side for this). Until then, this page is reachable purely
+// through in-app navigation from the Meals page.
 
 enum _ShoppingFilter { all, toBuy, bought }
 
@@ -20,6 +18,8 @@ class ShoppingPage extends StatefulWidget {
     required this.hubClient,
     required this.accessToken,
     this.autoGenerate = false,
+    this.initialWeekStart,
+    this.initialWeekEnd,
     super.key,
   });
 
@@ -30,6 +30,15 @@ class ShoppingPage extends StatefulWidget {
   /// first load instead of just fetching whatever list already exists. Used
   /// by the Meals page's "Generate shopping list" entry point.
   final bool autoGenerate;
+
+  /// Start of the week to load/generate for, taken from the Meals page's
+  /// currently visible week. Null defaults to the current calendar week.
+  final DateTime? initialWeekStart;
+
+  /// End of the week to load/generate for. Null defaults to
+  /// initialWeekStart + 6 days (or the current calendar week's end, when
+  /// initialWeekStart is also null).
+  final DateTime? initialWeekEnd;
 
   @override
   State<ShoppingPage> createState() => _ShoppingPageState();
@@ -47,6 +56,8 @@ class _ShoppingPageState extends State<ShoppingPage> {
         hubClient: widget.hubClient,
         accessToken: widget.accessToken,
       ),
+      initialWeekStart: widget.initialWeekStart,
+      initialWeekEnd: widget.initialWeekEnd,
     );
     _controller.addListener(_onControllerChanged);
     if (widget.autoGenerate) {

@@ -16,6 +16,9 @@ DateTime _mondayOf(DateTime date) {
   return DateTime(date.year, date.month, date.day - (weekday - 1));
 }
 
+DateTime _addDays(DateTime date, int days) =>
+    DateTime(date.year, date.month, date.day + days);
+
 /// Returns a copy of [item] with [checked] applied. This is a small local
 /// helper (rather than a `copyWith` on the model itself) so the model
 /// classes stay plain DTOs, consistent with the rest of this app's API
@@ -50,13 +53,22 @@ ClientShoppingListItem _withChecked(ClientShoppingListItem item, bool checked) {
 /// `addListener`/`setState`, exactly like [ChangeNotifier]-based controllers
 /// elsewhere (e.g. `MealsController`).
 class ShoppingController extends ChangeNotifier {
-  ShoppingController({required this.repository}) {
-    _weekStart = _mondayOf(DateTime.now());
+  /// initialWeekStart/initialWeekEnd pin the controller to a specific week
+  /// (e.g. the Meals page's currently visible week) instead of defaulting
+  /// to today's calendar week.
+  ShoppingController({
+    required this.repository,
+    DateTime? initialWeekStart,
+    DateTime? initialWeekEnd,
+  }) {
+    _weekStart = _mondayOf(initialWeekStart ?? DateTime.now());
+    _weekEnd = initialWeekEnd ?? _addDays(_weekStart, 6);
   }
 
   final ShoppingRepository repository;
 
   late DateTime _weekStart;
+  late DateTime _weekEnd;
   bool isLoading = false;
   bool isSyncing = false;
   Object? error;
@@ -69,9 +81,7 @@ class ShoppingController extends ChangeNotifier {
 
   String get weekStartStr => _formatDate(_weekStart);
 
-  String get weekEndStr => _formatDate(
-    DateTime(_weekStart.year, _weekStart.month, _weekStart.day + 6),
-  );
+  String get weekEndStr => _formatDate(_weekEnd);
 
   bool isItemPending(int itemId) => _pendingItemIds.contains(itemId);
 

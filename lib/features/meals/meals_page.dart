@@ -145,6 +145,8 @@ class _MealsPageState extends State<MealsPage> {
           hubClient: widget.hubClient,
           accessToken: widget.accessToken,
           autoGenerate: true,
+          initialWeekStart: _controller.weekStart,
+          initialWeekEnd: _controller.weekEnd,
         ),
       ),
     );
