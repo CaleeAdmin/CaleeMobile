@@ -7,11 +7,6 @@ import '../../ui/calee_design.dart';
 import 'shopping_controller.dart';
 import 'shopping_repository.dart';
 
-// TODO(CaleeAdmin/CaleeMobile#404): support an app/universal link that opens
-// a specific shopping list (GET /client/v1/shopping-lists/{listId} already
-// exists server-side for this). Until then, this page is reachable purely
-// through in-app navigation from the Meals page.
-
 enum _ShoppingFilter { all, toBuy, bought }
 
 /// Family-friendly text for [error], falling back to [friendly] instead of

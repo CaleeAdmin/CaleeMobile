@@ -34,6 +34,10 @@ import '../features/onboarding/welcome_page.dart';
 import '../features/local_subscriber/local_calendar_subscription_repository.dart';
 import '../features/local_subscriber/local_subscriber_calendar_page.dart';
 import '../features/settings/calendar_collections_page.dart';
+import '../features/shopping/shopping_link_controller.dart';
+import '../features/shopping/shopping_link_intent.dart';
+import '../features/shopping/shopping_link_landing_page.dart';
+import '../features/shopping/shopping_page.dart';
 import '../ui/calee_design.dart';
 import 'calee_home_page.dart';
 
@@ -51,6 +55,7 @@ class CaleeAppTestDependencies {
     required this.displayActivationController,
     required this.localSubscriptionRepo,
     this.externalCalendarConnectedLinkController,
+    this.shoppingLinkController,
     this.deviceProfileDefaultsProvider,
   });
 
@@ -62,6 +67,7 @@ class CaleeAppTestDependencies {
   final LocalCalendarSubscriptionRepository localSubscriptionRepo;
   final ExternalCalendarConnectedLinkController?
   externalCalendarConnectedLinkController;
+  final ShoppingLinkController? shoppingLinkController;
   final DeviceProfileDefaultsProvider? deviceProfileDefaultsProvider;
 }
 
@@ -87,6 +93,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
   late final DisplaySetupLinkController _displaySetupLinkController;
   late final ExternalCalendarConnectedLinkController
   _externalCalendarConnectedLinkController;
+  late final ShoppingLinkController _shoppingLinkController;
   late final DisplayActivationController _displayActivationController;
   late final LocalCalendarSubscriptionRepository _localSubscriptionRepo;
   final _navigatorKey = GlobalKey<NavigatorState>();
@@ -97,6 +104,11 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
   // Calendar follow state
   bool _showingFollowSignIn = false;
   bool _processingFollowLink = false;
+
+  // Shopping link state (signed-out sign-in/create-account sub-screens,
+  // shown from ShoppingLinkLandingPage).
+  bool _showingShoppingSignIn = false;
+  bool _showingShoppingCreateAccount = false;
 
   // Display setup state
   //
@@ -139,6 +151,8 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
       _externalCalendarConnectedLinkController =
           testDeps.externalCalendarConnectedLinkController ??
           ExternalCalendarConnectedLinkController();
+      _shoppingLinkController =
+          testDeps.shoppingLinkController ?? ShoppingLinkController();
       _displayActivationController = testDeps.displayActivationController;
       _localSubscriptionRepo = testDeps.localSubscriptionRepo;
     } else {
@@ -153,6 +167,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
       _displaySetupLinkController = DisplaySetupLinkController();
       _externalCalendarConnectedLinkController =
           ExternalCalendarConnectedLinkController();
+      _shoppingLinkController = ShoppingLinkController();
       _displayActivationController = DisplayActivationController(
         repository: DisplaySetupRepository(hubClient: _hubClient),
       );
@@ -160,6 +175,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
       unawaited(_followLinkController.init());
       unawaited(_displaySetupLinkController.init());
       unawaited(_externalCalendarConnectedLinkController.init());
+      unawaited(_shoppingLinkController.init());
     }
 
     _followLinkController.addListener(_onFollowLinkChanged);
@@ -167,6 +183,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
     _externalCalendarConnectedLinkController.addListener(
       _onExternalCalendarConnectedLinkChanged,
     );
+    _shoppingLinkController.addListener(_onShoppingLinkChanged);
     _sessionController.addListener(_onSessionChanged);
 
     _sessionController.restoreSession();
@@ -181,10 +198,12 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
     _externalCalendarConnectedLinkController.removeListener(
       _onExternalCalendarConnectedLinkChanged,
     );
+    _shoppingLinkController.removeListener(_onShoppingLinkChanged);
     _sessionController.removeListener(_onSessionChanged);
     _followLinkController.dispose();
     _displaySetupLinkController.dispose();
     _externalCalendarConnectedLinkController.dispose();
+    _shoppingLinkController.dispose();
     _displayActivationController.dispose();
     _sessionController.dispose();
     super.dispose();
@@ -274,6 +293,14 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
       return;
     }
 
+    // Shopping list intent (e.g. from the tablet's "Open on phone" link).
+    final shoppingIntent = _shoppingLinkController.pendingIntent;
+    if (shoppingIntent != null) {
+      _shoppingLinkController.clearPending();
+      _openShoppingListForIntent(shoppingIntent);
+      return;
+    }
+
     // Calendar follow intent.
     final followIntent = _followLinkController.pendingIntent;
     if (followIntent != null) {
@@ -344,6 +371,23 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
       }
     } finally {
       _processingFollowLink = false;
+    }
+  }
+
+  void _onShoppingLinkChanged() {
+    final intent = _shoppingLinkController.pendingIntent;
+    if (intent == null) return;
+
+    if (_sessionController.isSignedIn) {
+      _shoppingLinkController.clearPending();
+      _openShoppingListForIntent(intent);
+    } else {
+      // Reset any stale sub-screen so a fresh link always starts back at
+      // the landing page rather than a leftover sign-in/create-account form.
+      setState(() {
+        _showingShoppingSignIn = false;
+        _showingShoppingCreateAccount = false;
+      });
     }
   }
 
@@ -630,6 +674,22 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
     });
   }
 
+  void _openShoppingListForIntent(ShoppingLinkIntent intent) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _navigatorKey.currentState?.push(
+        MaterialPageRoute<void>(
+          builder: (_) => ShoppingPage(
+            hubClient: _hubClient,
+            accessToken: _sessionController.accessToken!,
+            initialWeekStart: intent.weekStart,
+            autoGenerate: false,
+          ),
+        ),
+      );
+    });
+  }
+
   Future<void> _checkAndShowOnboarding(String accountId) async {
     setState(() {
       _checkingOnboarding = true;
@@ -714,6 +774,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
           _sessionController,
           _followLinkController,
           _displaySetupLinkController,
+          _shoppingLinkController,
         ]),
         builder: (context, _) => _buildHome(),
       ),
@@ -734,6 +795,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
               _sessionController,
               _followLinkController,
               _displaySetupLinkController,
+              _shoppingLinkController,
             ]),
             builder: (context, _) => _buildHome(),
           ),
@@ -866,6 +928,44 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
           onCancel: () {
             _followLinkController.clearPending();
           },
+        );
+      }
+
+      // ── Shopping link flows ───────────────────────────────────────────────────────────────
+
+      // Create account from shopping link landing.
+      if (_showingShoppingCreateAccount) {
+        return CreateAccountPage(
+          authRepository: _sessionController.repository,
+          onCancel: () => setState(() => _showingShoppingCreateAccount = false),
+          onAccountCreated: (result) async {
+            setState(() => _showingShoppingCreateAccount = false);
+            await _sessionController.completeSignIn(result);
+            unawaited(_sessionController.refreshBootstrap());
+          },
+        );
+      }
+
+      // Sign-in from shopping link landing (intent preserved).
+      if (_showingShoppingSignIn) {
+        return LoginPage(
+          authRepository: _sessionController.repository,
+          onCancel: () => setState(() => _showingShoppingSignIn = false),
+          onSignedIn: (result) async {
+            setState(() => _showingShoppingSignIn = false);
+            await _sessionController.completeSignIn(result);
+            unawaited(_sessionController.refreshBootstrap());
+          },
+        );
+      }
+
+      // Pending shopping intent → ask the user to sign in before opening it.
+      if (_shoppingLinkController.pendingIntent != null) {
+        return ShoppingLinkLandingPage(
+          onCreateAccount: () =>
+              setState(() => _showingShoppingCreateAccount = true),
+          onSignIn: () => setState(() => _showingShoppingSignIn = true),
+          onCancel: () => _shoppingLinkController.clearPending(),
         );
       }
 
