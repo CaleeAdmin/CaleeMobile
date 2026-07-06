@@ -99,9 +99,12 @@ class ShoppingController extends ChangeNotifier {
       error = null;
     } on CaleeHubException catch (e) {
       if (e.statusCode == 404) {
-        // No shopping list has been generated for this week yet. That's not
-        // a failure — the page offers its own "Build from meal plan" action
-        // for this case.
+        // Defensive fallback only: in practice the current-list endpoint
+        // never 404s. It gets-or-creates, returning an empty list rather
+        // than erroring when none has been generated yet for this week —
+        // see ShoppingListService::getCurrentShoppingList in calee-hub-meals.
+        // Kept in case that ever changes, so an unexpected 404 still falls
+        // back to the page's normal empty state instead of an error banner.
         shoppingList = null;
         error = null;
       } else {
