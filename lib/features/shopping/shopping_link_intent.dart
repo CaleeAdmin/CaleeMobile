@@ -1,3 +1,6 @@
+// Future: Calee tablet can show a QR to
+// https://hub.calee.com.au/mobile/shopping?weekStart=YYYY-MM-DD after this
+// app-link configuration is verified on device.
 class ShoppingLinkIntent {
   const ShoppingLinkIntent({required this.weekStart, required this.sourceUri});
 
