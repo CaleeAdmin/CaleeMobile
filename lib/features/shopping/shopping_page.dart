@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../data/api/calee_hub_client.dart';
@@ -12,6 +13,15 @@ import 'shopping_repository.dart';
 // through in-app navigation from the Meals page.
 
 enum _ShoppingFilter { all, toBuy, bought }
+
+/// Family-friendly text for [error], falling back to [friendly] instead of
+/// surfacing raw backend messages. In debug builds only, appends
+/// [CaleeHubException.debugSummary] so developers can still see what failed.
+String _friendlyErrorText(Object error, String friendly) {
+  return kDebugMode && error is CaleeHubException
+      ? '$friendly\nDebug: ${error.debugSummary}'
+      : friendly;
+}
 
 class ShoppingPage extends StatefulWidget {
   const ShoppingPage({
@@ -295,7 +305,10 @@ class _ShoppingPageState extends State<ShoppingPage> {
             const SizedBox(width: CaleeSpacing.sm),
             Expanded(
               child: Text(
-                _controller.error.toString(),
+                _friendlyErrorText(
+                  _controller.error!,
+                  'Something went wrong. Please try again.',
+                ),
                 style: const TextStyle(
                   fontSize: 13,
                   color: CaleeColors.destructive,
@@ -498,7 +511,10 @@ class _AddShoppingItemFormState extends State<_AddShoppingItemForm> {
       if (mounted) {
         setState(() {
           _isSaving = false;
-          _saveError = e.toString();
+          _saveError = _friendlyErrorText(
+            e,
+            'Could not add item. Please try again.',
+          );
         });
       }
     }
