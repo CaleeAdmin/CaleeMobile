@@ -18,10 +18,29 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 class _StubHub extends CaleeHubClient {
-  _StubHub({this._templates = const [], this._quickIdeas = const []}) : super();
+  _StubHub({
+    this._templates = const [],
+    this._quickIdeas = const [],
+    Map<int, List<ClientTemplateIngredient>>? ingredientsByTemplateId,
+  }) : _ingredientsByTemplateId = ingredientsByTemplateId ?? {},
+       super();
 
   List<ClientMealTemplate> _templates;
   final List<ClientStarterMealTemplate> _quickIdeas;
+  final Map<int, List<ClientTemplateIngredient>> _ingredientsByTemplateId;
+  int _nextIngredientId = 1000;
+
+  bool addIngredientCalled = false;
+  int? lastAddIngredientTemplateId;
+  String? lastAddIngredientName;
+  String? lastAddIngredientQuantityText;
+  String? lastAddIngredientCategory;
+
+  bool updateIngredientCalled = false;
+  int? lastUpdateIngredientId;
+
+  bool deleteIngredientCalled = false;
+  int? lastDeleteIngredientId;
 
   bool createMealCalled = false;
   String? lastCreateTitle;
@@ -158,6 +177,88 @@ class _StubHub extends CaleeHubClient {
     _templates = [..._templates, created];
     return created;
   }
+
+  @override
+  Future<List<ClientTemplateIngredient>> mealTemplateIngredients({
+    required String accessToken,
+    required int templateId,
+  }) async => _ingredientsByTemplateId[templateId] ?? const [];
+
+  @override
+  Future<ClientTemplateIngredient> addMealTemplateIngredient({
+    required String accessToken,
+    required int templateId,
+    required String name,
+    String? quantityText,
+    String? unit,
+    String? category,
+  }) async {
+    addIngredientCalled = true;
+    lastAddIngredientTemplateId = templateId;
+    lastAddIngredientName = name;
+    lastAddIngredientQuantityText = quantityText;
+    lastAddIngredientCategory = category;
+    final created = ClientTemplateIngredient(
+      id: _nextIngredientId++,
+      templateId: templateId,
+      name: name,
+      normalizedName: name.toLowerCase(),
+      quantityText: quantityText,
+      category: category,
+      optional: false,
+      sortOrder: (_ingredientsByTemplateId[templateId]?.length ?? 0),
+    );
+    _ingredientsByTemplateId[templateId] = [
+      ...?_ingredientsByTemplateId[templateId],
+      created,
+    ];
+    return created;
+  }
+
+  @override
+  Future<ClientTemplateIngredient> updateMealTemplateIngredient({
+    required String accessToken,
+    required int templateId,
+    required int ingredientId,
+    String? name,
+    String? quantityText,
+    String? unit,
+    String? category,
+  }) async {
+    updateIngredientCalled = true;
+    lastUpdateIngredientId = ingredientId;
+    final existing = _ingredientsByTemplateId[templateId]!.firstWhere(
+      (i) => i.id == ingredientId,
+    );
+    final updated = ClientTemplateIngredient(
+      id: existing.id,
+      templateId: existing.templateId,
+      name: name ?? existing.name,
+      normalizedName: (name ?? existing.name).toLowerCase(),
+      quantityText: quantityText ?? existing.quantityText,
+      category: category ?? existing.category,
+      optional: existing.optional,
+      sortOrder: existing.sortOrder,
+    );
+    _ingredientsByTemplateId[templateId] = [
+      for (final i in _ingredientsByTemplateId[templateId]!)
+        i.id == ingredientId ? updated : i,
+    ];
+    return updated;
+  }
+
+  @override
+  Future<void> deleteMealTemplateIngredient({
+    required String accessToken,
+    required int templateId,
+    required int ingredientId,
+  }) async {
+    deleteIngredientCalled = true;
+    lastDeleteIngredientId = ingredientId;
+    _ingredientsByTemplateId[templateId] = _ingredientsByTemplateId[templateId]!
+        .where((i) => i.id != ingredientId)
+        .toList();
+  }
 }
 
 ClientMealTemplate _template({
@@ -181,20 +282,38 @@ ClientMealTemplate _template({
   lastUsedAt: lastUsedAt,
 );
 
-ClientStarterMealTemplate _quickIdea({required int id, required String name}) =>
-    ClientStarterMealTemplate(
-      id: id,
-      slug: name.toLowerCase().replaceAll(' ', '-'),
-      name: name,
-      defaultMealType: 'dinner',
-      kidFriendly: false,
-      freezerFriendly: false,
-      lunchboxFriendly: false,
-      sortOrder: 0,
-      version: 1,
-      active: true,
-      ingredients: const [],
-    );
+ClientStarterMealTemplate _quickIdea({
+  required int id,
+  required String name,
+  List<ClientTemplateIngredient> ingredients = const [],
+}) => ClientStarterMealTemplate(
+  id: id,
+  slug: name.toLowerCase().replaceAll(' ', '-'),
+  name: name,
+  defaultMealType: 'dinner',
+  kidFriendly: false,
+  freezerFriendly: false,
+  lunchboxFriendly: false,
+  sortOrder: 0,
+  version: 1,
+  active: true,
+  ingredients: ingredients,
+);
+
+ClientTemplateIngredient _ingredient({
+  required int id,
+  required String name,
+  String? quantityText,
+  String? category,
+}) => ClientTemplateIngredient(
+  id: id,
+  name: name,
+  normalizedName: name.toLowerCase(),
+  quantityText: quantityText,
+  category: category,
+  optional: false,
+  sortOrder: 0,
+);
 
 MealsController _controllerFor(CaleeHubClient hub) => MealsController(
   repository: MealsRepository(hubClient: hub, accessToken: 'tok'),
@@ -362,6 +481,152 @@ void main() {
     });
   });
 
+  group('ManageSavedMealSheet — ingredients', () {
+    testWidgets('shows an empty state when there are no ingredients yet', (
+      tester,
+    ) async {
+      final hub = _StubHub(
+        templates: [
+          _template(id: 1, name: 'Spaghetti Bolognese', isFavourite: true),
+        ],
+      );
+      await tester.pumpWidget(_buildSavedMealsPage(hub, _controllerFor(hub)));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Spaghetti Bolognese'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('INGREDIENTS'), findsOneWidget);
+      expect(find.text('No ingredients yet'), findsOneWidget);
+    });
+
+    testWidgets('shows ingredient name, quantity and category', (tester) async {
+      final hub = _StubHub(
+        templates: [
+          _template(id: 1, name: 'Spaghetti Bolognese', isFavourite: true),
+        ],
+        ingredientsByTemplateId: {
+          1: [
+            _ingredient(
+              id: 5,
+              name: 'Beef mince',
+              quantityText: '500g',
+              category: 'Meat',
+            ),
+          ],
+        },
+      );
+      await tester.pumpWidget(_buildSavedMealsPage(hub, _controllerFor(hub)));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Spaghetti Bolognese'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Beef mince'), findsOneWidget);
+      expect(find.text('500g · Meat'), findsOneWidget);
+    });
+
+    testWidgets('add ingredient calls the API and shows it in the list', (
+      tester,
+    ) async {
+      final hub = _StubHub(
+        templates: [
+          _template(id: 1, name: 'Spaghetti Bolognese', isFavourite: true),
+        ],
+      );
+      await tester.pumpWidget(_buildSavedMealsPage(hub, _controllerFor(hub)));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Spaghetti Bolognese'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Add ingredient'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Quantity optional'), findsOneWidget);
+      expect(find.text('Category optional'), findsOneWidget);
+
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Ingredient name'),
+        'Rice',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Quantity optional'),
+        '1 cup',
+      );
+      await tester.tap(find.widgetWithText(FilledButton, 'Save').last);
+      await tester.pumpAndSettle();
+
+      expect(hub.addIngredientCalled, isTrue);
+      expect(hub.lastAddIngredientTemplateId, 1);
+      expect(hub.lastAddIngredientName, 'Rice');
+      expect(hub.lastAddIngredientQuantityText, '1 cup');
+      expect(find.text('Rice'), findsOneWidget);
+    });
+
+    testWidgets('editing an ingredient calls updateMealTemplateIngredient', (
+      tester,
+    ) async {
+      final hub = _StubHub(
+        templates: [
+          _template(id: 1, name: 'Spaghetti Bolognese', isFavourite: true),
+        ],
+        ingredientsByTemplateId: {
+          1: [_ingredient(id: 5, name: 'Beef mince', quantityText: '500g')],
+        },
+      );
+      await tester.pumpWidget(_buildSavedMealsPage(hub, _controllerFor(hub)));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Spaghetti Bolognese'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Beef mince'));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+        find.widgetWithText(TextFormField, '500g'),
+        '600g',
+      );
+      await tester.tap(find.widgetWithText(FilledButton, 'Save').last);
+      await tester.pumpAndSettle();
+
+      expect(hub.updateIngredientCalled, isTrue);
+      expect(hub.lastUpdateIngredientId, 5);
+      expect(find.text('600g'), findsOneWidget);
+    });
+
+    testWidgets('deleting an ingredient calls deleteMealTemplateIngredient', (
+      tester,
+    ) async {
+      final hub = _StubHub(
+        templates: [
+          _template(id: 1, name: 'Spaghetti Bolognese', isFavourite: true),
+        ],
+        ingredientsByTemplateId: {
+          1: [_ingredient(id: 5, name: 'Beef mince')],
+        },
+      );
+      await tester.pumpWidget(_buildSavedMealsPage(hub, _controllerFor(hub)));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Spaghetti Bolognese'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Beef mince'), findsOneWidget);
+
+      await tester.tap(find.byIcon(Icons.close).last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(TextButton, 'Delete'));
+      await tester.pumpAndSettle();
+
+      expect(hub.deleteIngredientCalled, isTrue);
+      expect(hub.lastDeleteIngredientId, 5);
+      expect(find.text('Beef mince'), findsNothing);
+      expect(find.text('No ingredients yet'), findsOneWidget);
+    });
+  });
+
   group('QuickDinnerIdeaSheet', () {
     testWidgets('is read-only and adds to the week with starterTemplateId', (
       tester,
@@ -391,6 +656,32 @@ void main() {
       expect(hub.lastCreateTitle, 'Tacos');
       expect(hub.lastCreateStarterTemplateId, 10);
       expect(hub.lastCreateTemplateId, isNull);
+    });
+
+    testWidgets('shows ingredients read-only when the API returns them', (
+      tester,
+    ) async {
+      final hub = _StubHub(
+        quickIdeas: [
+          _quickIdea(
+            id: 10,
+            name: 'Tacos',
+            ingredients: [_ingredient(id: 1, name: 'Taco shells')],
+          ),
+        ],
+      );
+      await tester.pumpWidget(_buildSavedMealsPage(hub, _controllerFor(hub)));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Tacos'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('INGREDIENTS'), findsOneWidget);
+      expect(find.text('Taco shells'), findsOneWidget);
+      // No edit/delete affordances for starter ingredients (only the sheet's
+      // own dismiss button uses this icon).
+      expect(find.byIcon(Icons.close), findsOneWidget);
+      expect(find.text('Add ingredient'), findsNothing);
     });
   });
 
@@ -423,9 +714,7 @@ void main() {
       'saving calls createMealTemplate with name, defaultMealType, notes, isFavourite',
       (tester) async {
         final hub = _StubHub();
-        await tester.pumpWidget(
-          _buildSavedMealsPage(hub, _controllerFor(hub)),
-        );
+        await tester.pumpWidget(_buildSavedMealsPage(hub, _controllerFor(hub)));
         await tester.pumpAndSettle();
 
         await tester.tap(find.byTooltip('Create saved meal'));
@@ -502,9 +791,7 @@ void main() {
             _template(id: 4, name: 'Banana Bread', usageCount: 3),
           ],
         );
-        await tester.pumpWidget(
-          _buildSavedMealsPage(hub, _controllerFor(hub)),
-        );
+        await tester.pumpWidget(_buildSavedMealsPage(hub, _controllerFor(hub)));
         await tester.pumpAndSettle();
 
         final names = tester

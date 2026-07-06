@@ -28,6 +28,18 @@ String? savedMealMetadata(ClientMealTemplate template) {
   return 'Used $n time${n == 1 ? '' : 's'}';
 }
 
+/// Subtitle shown under an ingredient's name: quantity and category (kept
+/// subtle), joined together when both are present.
+String? _ingredientSubtitle(ClientTemplateIngredient ingredient) {
+  final quantity = ingredient.quantityText?.trim();
+  final category = ingredient.category?.trim();
+  final parts = <String>[
+    if (quantity != null && quantity.isNotEmpty) quantity,
+    if (category != null && category.isNotEmpty) category,
+  ];
+  return parts.isEmpty ? null : parts.join(' · ');
+}
+
 /// Full-screen Saved Meals management view, reached from the Meals page top
 /// bar. Lists the household's own saved meals ("Family favourites" and
 /// "Recent meals", both editable) alongside Calee's shared starter ideas
@@ -451,10 +463,7 @@ class _SavedMealsSearchSheetState extends State<_SavedMealsSearchSheet> {
 // ─────────────────────────────────────────────
 
 /// Bottom sheet for editing a household saved meal: rename, notes, favourite
-/// toggle, delete, and adding it to the current week.
-///
-/// Future: manage ingredients for saved meals — [ClientMealTemplate] doesn't
-/// carry ingredient data from the API yet, so there's nothing to edit here.
+/// toggle, ingredients, delete, and adding it to the current week.
 class ManageSavedMealSheet extends StatefulWidget {
   const ManageSavedMealSheet({
     required this.template,
@@ -488,12 +497,89 @@ class _ManageSavedMealSheetState extends State<ManageSavedMealSheet> {
   bool _isSaving = false;
   String? _error;
 
+  List<ClientTemplateIngredient> _ingredients = [];
+  bool _loadingIngredients = true;
+
   @override
   void initState() {
     super.initState();
     _nameController = TextEditingController(text: widget.template.name);
     _notesController = TextEditingController(text: widget.template.notes ?? '');
     _isFavourite = widget.template.isFavourite;
+    _loadIngredients();
+  }
+
+  Future<void> _loadIngredients() async {
+    try {
+      final ingredients = await widget.controller.repository
+          .mealTemplateIngredients(widget.template.id);
+      if (mounted) {
+        setState(() {
+          _ingredients = ingredients;
+          _loadingIngredients = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loadingIngredients = false);
+    }
+  }
+
+  Future<void> _addIngredient() async {
+    final saved = await _ManageIngredientSheet.show(
+      context: context,
+      controller: widget.controller,
+      templateId: widget.template.id,
+    );
+    if (saved != null && mounted) {
+      setState(() => _ingredients = [..._ingredients, saved]);
+    }
+  }
+
+  Future<void> _editIngredient(ClientTemplateIngredient ingredient) async {
+    final saved = await _ManageIngredientSheet.show(
+      context: context,
+      controller: widget.controller,
+      templateId: widget.template.id,
+      ingredient: ingredient,
+    );
+    if (saved != null && mounted) {
+      setState(() {
+        _ingredients = [
+          for (final existing in _ingredients)
+            existing.id == saved.id ? saved : existing,
+        ];
+      });
+    }
+  }
+
+  Future<void> _deleteIngredient(ClientTemplateIngredient ingredient) async {
+    final confirmed = await CaleeDestructiveDialog.show(
+      context: context,
+      title: 'Delete ingredient?',
+      body: 'Remove "${ingredient.name}" from this saved meal?',
+      confirmLabel: 'Delete',
+    );
+    if (!confirmed || !mounted) return;
+
+    try {
+      await widget.controller.repository.deleteMealTemplateIngredient(
+        templateId: widget.template.id,
+        ingredientId: ingredient.id,
+      );
+      if (mounted) {
+        setState(() {
+          _ingredients = _ingredients
+              .where((existing) => existing.id != ingredient.id)
+              .toList();
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not delete ingredient.')),
+        );
+      }
+    }
   }
 
   @override
@@ -622,6 +708,59 @@ class _ManageSavedMealSheetState extends State<ManageSavedMealSheet> {
               ),
             ],
           ),
+          const SizedBox(height: CaleeSpacing.md),
+          CaleeSection(
+            title: 'Ingredients',
+            children: [
+              if (_loadingIngredients)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: CaleeSpacing.md),
+                  child: Center(
+                    child: SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  ),
+                )
+              else if (_ingredients.isEmpty)
+                const CaleeListRow(
+                  title: 'No ingredients yet',
+                  subtitle:
+                      'Add ingredients to build grocery lists from this meal.',
+                )
+              else
+                for (final ingredient in _ingredients)
+                  CaleeListRow(
+                    title: ingredient.name,
+                    subtitle: _ingredientSubtitle(ingredient),
+                    onTap: _isSaving ? null : () => _editIngredient(ingredient),
+                    trailing: IconButton(
+                      icon: const Icon(
+                        Icons.close,
+                        size: 18,
+                        color: CaleeColors.textTertiary,
+                      ),
+                      onPressed: _isSaving
+                          ? null
+                          : () => _deleteIngredient(ingredient),
+                    ),
+                  ),
+              CaleeListRow(
+                title: 'Add ingredient',
+                leading: const Icon(
+                  Icons.add,
+                  color: CaleeColors.primary,
+                  size: 20,
+                ),
+                titleStyle: const TextStyle(
+                  color: CaleeColors.primary,
+                  fontSize: 16,
+                ),
+                onTap: _isSaving ? null : _addIngredient,
+              ),
+            ],
+          ),
           if (_error != null) ...[
             const SizedBox(height: CaleeSpacing.sm),
             Text(
@@ -661,6 +800,176 @@ class _ManageSavedMealSheetState extends State<ManageSavedMealSheet> {
               side: const BorderSide(color: CaleeColors.destructive),
             ),
             child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
+// _ManageIngredientSheet
+// ─────────────────────────────────────────────
+
+/// Bottom sheet for adding or editing a single ingredient on a household
+/// saved meal. Passing [ingredient] edits it in place; omitting it creates a
+/// new one. Pops the saved [ClientTemplateIngredient] on success.
+class _ManageIngredientSheet extends StatefulWidget {
+  const _ManageIngredientSheet({
+    required this.controller,
+    required this.templateId,
+    this.ingredient,
+  });
+
+  final MealsController controller;
+  final int templateId;
+  final ClientTemplateIngredient? ingredient;
+
+  static Future<ClientTemplateIngredient?> show({
+    required BuildContext context,
+    required MealsController controller,
+    required int templateId,
+    ClientTemplateIngredient? ingredient,
+  }) {
+    return CaleeBottomSheet.show<ClientTemplateIngredient?>(
+      context: context,
+      title: ingredient == null ? 'Add ingredient' : 'Edit ingredient',
+      child: _ManageIngredientSheet(
+        controller: controller,
+        templateId: templateId,
+        ingredient: ingredient,
+      ),
+    );
+  }
+
+  @override
+  State<_ManageIngredientSheet> createState() => _ManageIngredientSheetState();
+}
+
+class _ManageIngredientSheetState extends State<_ManageIngredientSheet> {
+  late final TextEditingController _nameController;
+  late final TextEditingController _quantityController;
+  late final TextEditingController _categoryController;
+  bool _isSaving = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController(
+      text: widget.ingredient?.name ?? '',
+    );
+    _quantityController = TextEditingController(
+      text: widget.ingredient?.quantityText ?? '',
+    );
+    _categoryController = TextEditingController(
+      text: widget.ingredient?.category ?? '',
+    );
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _quantityController.dispose();
+    _categoryController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    final name = _nameController.text.trim();
+    if (name.isEmpty) {
+      setState(() => _error = 'Please enter an ingredient name');
+      return;
+    }
+    setState(() {
+      _isSaving = true;
+      _error = null;
+    });
+
+    final quantityText = _quantityController.text.trim();
+    final category = _categoryController.text.trim();
+
+    try {
+      final existing = widget.ingredient;
+      final saved = existing == null
+          ? await widget.controller.repository.addMealTemplateIngredient(
+              templateId: widget.templateId,
+              name: name,
+              quantityText: quantityText.isEmpty ? null : quantityText,
+              category: category.isEmpty ? null : category,
+            )
+          : await widget.controller.repository.updateMealTemplateIngredient(
+              templateId: widget.templateId,
+              ingredientId: existing.id,
+              name: name,
+              quantityText: quantityText.isEmpty ? null : quantityText,
+              category: category.isEmpty ? null : category,
+            );
+      if (mounted) Navigator.of(context).pop(saved);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isSaving = false;
+          _error = 'Could not save ingredient.';
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          CaleeSection(
+            children: [
+              CaleeSectionTextFormField(
+                controller: _nameController,
+                hintText: 'Ingredient name',
+                enabled: !_isSaving,
+                autofocus: widget.ingredient == null,
+                textInputAction: TextInputAction.next,
+              ),
+              CaleeSectionTextFormField(
+                controller: _quantityController,
+                hintText: 'Quantity optional',
+                enabled: !_isSaving,
+                textInputAction: TextInputAction.next,
+              ),
+              CaleeSectionTextFormField(
+                controller: _categoryController,
+                hintText: 'Category optional',
+                enabled: !_isSaving,
+                textInputAction: TextInputAction.done,
+              ),
+            ],
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: CaleeSpacing.sm),
+            Text(
+              _error!,
+              style: const TextStyle(
+                fontSize: 13,
+                color: CaleeColors.destructive,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+          const SizedBox(height: CaleeSpacing.md),
+          FilledButton(
+            onPressed: _isSaving ? null : _save,
+            child: _isSaving
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Text('Save'),
           ),
         ],
       ),
@@ -914,6 +1223,19 @@ class _QuickDinnerIdeaSheetState extends State<QuickDinnerIdeaSheet> {
             ),
           ],
         ),
+        if (widget.template.ingredients.isNotEmpty) ...[
+          const SizedBox(height: CaleeSpacing.md),
+          CaleeSection(
+            title: 'Ingredients',
+            children: [
+              for (final ingredient in widget.template.ingredients)
+                CaleeListRow(
+                  title: ingredient.name,
+                  subtitle: _ingredientSubtitle(ingredient),
+                ),
+            ],
+          ),
+        ],
         const SizedBox(height: CaleeSpacing.sm),
         const Text(
           "Quick dinner ideas come from Calee's starter library and can't be edited.",
