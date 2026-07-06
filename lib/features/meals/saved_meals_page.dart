@@ -86,12 +86,26 @@ class _SavedMealsPageState extends State<SavedMealsPage> {
     final favourites = templates.where((t) => t.isFavourite).toList();
     final recents = templates
         .where((t) => !t.isFavourite && t.usageCount > 0)
-        .take(_kMaxRecentMeals)
         .toList();
+    // The API doesn't guarantee ordering, so sort client-side: most recently
+    // used first, then most used, then alphabetically.
+    recents.sort((a, b) {
+      final aUsed = a.lastUsedAt;
+      final bUsed = b.lastUsedAt;
+      if (aUsed != bUsed) {
+        if (aUsed == null) return 1;
+        if (bUsed == null) return -1;
+        final cmp = bUsed.compareTo(aUsed);
+        if (cmp != 0) return cmp;
+      }
+      final usageCmp = b.usageCount.compareTo(a.usageCount);
+      if (usageCmp != 0) return usageCmp;
+      return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+    });
     return _SavedMealsOptions(
       allSaved: templates,
       favourites: favourites,
-      recents: recents,
+      recents: recents.take(_kMaxRecentMeals).toList(),
       quickIdeas: results[1] as List<ClientStarterMealTemplate>,
     );
   }
@@ -142,6 +156,14 @@ class _SavedMealsPageState extends State<SavedMealsPage> {
     );
   }
 
+  Future<void> _openCreateSheet() async {
+    final created = await CreateSavedMealSheet.show(
+      context: context,
+      controller: widget.controller,
+    );
+    if (created && mounted) _reload();
+  }
+
   @override
   Widget build(BuildContext context) {
     return CaleeScaffold(
@@ -155,6 +177,11 @@ class _SavedMealsPageState extends State<SavedMealsPage> {
             onPressed: _openSearchSheet,
             icon: const Icon(Icons.search),
             tooltip: 'Search saved meals',
+          ),
+          IconButton(
+            onPressed: _openCreateSheet,
+            icon: const Icon(Icons.add),
+            tooltip: 'Create saved meal',
           ),
         ],
       ),
@@ -196,12 +223,21 @@ class _SavedMealsPageState extends State<SavedMealsPage> {
   }
 
   Widget _buildContent(_SavedMealsOptions options) {
+    final noSavedMealsYet =
+        options.favourites.isEmpty && options.recents.isEmpty;
     return ListView(
       padding: const EdgeInsets.symmetric(
         horizontal: CaleeSpacing.pagePadding,
         vertical: CaleeSpacing.md,
       ),
       children: [
+        if (noSavedMealsYet) ...[
+          const Text(
+            'Create saved meals for dinners your family repeats often.',
+            style: TextStyle(fontSize: 14, color: CaleeColors.textSecondary),
+          ),
+          const SizedBox(height: CaleeSpacing.sectionSpacing),
+        ],
         CaleeSection(
           title: 'Family favourites',
           children: options.favourites.isEmpty
@@ -416,6 +452,9 @@ class _SavedMealsSearchSheetState extends State<_SavedMealsSearchSheet> {
 
 /// Bottom sheet for editing a household saved meal: rename, notes, favourite
 /// toggle, delete, and adding it to the current week.
+///
+/// Future: manage ingredients for saved meals — [ClientMealTemplate] doesn't
+/// carry ingredient data from the API yet, so there's nothing to edit here.
 class ManageSavedMealSheet extends StatefulWidget {
   const ManageSavedMealSheet({
     required this.template,
@@ -523,6 +562,8 @@ class _ManageSavedMealSheetState extends State<ManageSavedMealSheet> {
       context: context,
       title: widget.template.name,
       defaultMealType: widget.template.defaultMealType,
+      weekStart: widget.controller.weekStart,
+      weekEnd: widget.controller.weekEnd,
     );
     if (result == null || !mounted) return;
     try {
@@ -628,6 +669,155 @@ class _ManageSavedMealSheetState extends State<ManageSavedMealSheet> {
 }
 
 // ─────────────────────────────────────────────
+// CreateSavedMealSheet
+// ─────────────────────────────────────────────
+
+/// Bottom sheet for creating a brand-new household saved meal.
+class CreateSavedMealSheet extends StatefulWidget {
+  const CreateSavedMealSheet({required this.controller, super.key});
+
+  final MealsController controller;
+
+  /// Returns true if a saved meal was created, false if the sheet was
+  /// dismissed without saving.
+  static Future<bool> show({
+    required BuildContext context,
+    required MealsController controller,
+  }) async {
+    final created = await CaleeBottomSheet.show<bool>(
+      context: context,
+      title: 'Create saved meal',
+      child: CreateSavedMealSheet(controller: controller),
+    );
+    return created ?? false;
+  }
+
+  @override
+  State<CreateSavedMealSheet> createState() => _CreateSavedMealSheetState();
+}
+
+class _CreateSavedMealSheetState extends State<CreateSavedMealSheet> {
+  final _nameController = TextEditingController();
+  final _notesController = TextEditingController();
+  String _mealType = 'dinner';
+  bool _isFavourite = false;
+  bool _isSaving = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _notesController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    final name = _nameController.text.trim();
+    if (name.isEmpty) {
+      setState(() => _error = 'Please enter a name');
+      return;
+    }
+    setState(() {
+      _isSaving = true;
+      _error = null;
+    });
+    try {
+      await widget.controller.repository.createMealTemplate(
+        name: name,
+        defaultMealType: _mealType,
+        notes: _notesController.text.trim(),
+        isFavourite: _isFavourite,
+      );
+      if (mounted) Navigator.of(context).pop(true);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isSaving = false;
+          _error = e.toString();
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          CaleeSection(
+            children: [
+              CaleeSectionTextFormField(
+                controller: _nameController,
+                hintText: 'Meal name',
+                enabled: !_isSaving,
+                textInputAction: TextInputAction.next,
+              ),
+              CaleeSectionDropdownRow<String>(
+                label: 'Meal type',
+                value: _mealType,
+                enabled: !_isSaving,
+                items: _kMealTypeOrder
+                    .map(
+                      (type) => DropdownMenuItem(
+                        value: type,
+                        child: Text(_kMealTypeLabels[type] ?? type),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (value) {
+                  if (value != null) setState(() => _mealType = value);
+                },
+              ),
+              CaleeSectionTextFormField(
+                controller: _notesController,
+                hintText: 'Notes (optional)',
+                enabled: !_isSaving,
+                maxLines: 3,
+                minLines: 1,
+                textInputAction: TextInputAction.done,
+              ),
+              CaleeSectionSwitchRow(
+                label: 'Favourite',
+                value: _isFavourite,
+                enabled: !_isSaving,
+                onChanged: (value) => setState(() => _isFavourite = value),
+              ),
+            ],
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: CaleeSpacing.sm),
+            Text(
+              _error!,
+              style: const TextStyle(
+                fontSize: 13,
+                color: CaleeColors.destructive,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+          const SizedBox(height: CaleeSpacing.md),
+          FilledButton(
+            onPressed: _isSaving ? null : _save,
+            child: _isSaving
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
 // QuickDinnerIdeaSheet
 // ─────────────────────────────────────────────
 
@@ -668,6 +858,8 @@ class _QuickDinnerIdeaSheetState extends State<QuickDinnerIdeaSheet> {
       context: context,
       title: widget.template.name,
       defaultMealType: widget.template.defaultMealType,
+      weekStart: widget.controller.weekStart,
+      weekEnd: widget.controller.weekEnd,
     );
     if (result == null || !mounted) return;
 
@@ -765,16 +957,26 @@ class AddSavedMealToWeekSheet extends StatefulWidget {
   const AddSavedMealToWeekSheet({
     required this.title,
     required this.defaultMealType,
+    required this.weekStart,
+    required this.weekEnd,
     super.key,
   });
 
   final String title;
   final String defaultMealType;
 
+  /// Bounds of the week currently visible on the Meals page, used to default
+  /// the date picker so "Add to this week" lands in the week the user is
+  /// looking at rather than always defaulting to today.
+  final DateTime weekStart;
+  final DateTime weekEnd;
+
   static Future<AddToWeekResult?> show({
     required BuildContext context,
     required String title,
     required String defaultMealType,
+    required DateTime weekStart,
+    required DateTime weekEnd,
   }) {
     return CaleeBottomSheet.show<AddToWeekResult>(
       context: context,
@@ -782,6 +984,8 @@ class AddSavedMealToWeekSheet extends StatefulWidget {
       child: AddSavedMealToWeekSheet(
         title: title,
         defaultMealType: defaultMealType,
+        weekStart: weekStart,
+        weekEnd: weekEnd,
       ),
     );
   }
@@ -798,7 +1002,12 @@ class _AddSavedMealToWeekSheetState extends State<AddSavedMealToWeekSheet> {
   @override
   void initState() {
     super.initState();
-    _date = DateTime.now();
+    final today = DateTime.now();
+    final todayDate = DateTime(today.year, today.month, today.day);
+    final withinVisibleWeek =
+        !todayDate.isBefore(widget.weekStart) &&
+        !todayDate.isAfter(widget.weekEnd);
+    _date = withinVisibleWeek ? todayDate : widget.weekStart;
     _mealType = _kMealTypeOrder.contains(widget.defaultMealType)
         ? widget.defaultMealType
         : 'dinner';

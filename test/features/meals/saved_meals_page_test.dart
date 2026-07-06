@@ -36,6 +36,12 @@ class _StubHub extends CaleeHubClient {
   bool deleteTemplateCalled = false;
   int? lastDeleteTemplateId;
 
+  bool createTemplateCalled = false;
+  String? lastCreateTemplateName;
+  String? lastCreateTemplateDefaultMealType;
+  String? lastCreateTemplateNotes;
+  bool? lastCreateTemplateIsFavourite;
+
   @override
   Future<ClientMealList> meals({
     required String accessToken,
@@ -122,6 +128,36 @@ class _StubHub extends CaleeHubClient {
     lastDeleteTemplateId = templateId;
     _templates = _templates.where((t) => t.id != templateId).toList();
   }
+
+  @override
+  Future<ClientMealTemplate> createMealTemplate({
+    required String accessToken,
+    required String name,
+    required String defaultMealType,
+    String? notes,
+    String? icon,
+    bool? isFavourite,
+  }) async {
+    createTemplateCalled = true;
+    lastCreateTemplateName = name;
+    lastCreateTemplateDefaultMealType = defaultMealType;
+    lastCreateTemplateNotes = notes;
+    lastCreateTemplateIsFavourite = isFavourite;
+    final created = ClientMealTemplate(
+      id: 999,
+      householdId: 'h1',
+      name: name,
+      defaultMealType: defaultMealType,
+      notes: notes,
+      kidFriendly: false,
+      freezerFriendly: false,
+      lunchboxFriendly: false,
+      isFavourite: isFavourite ?? false,
+      usageCount: 0,
+    );
+    _templates = [..._templates, created];
+    return created;
+  }
 }
 
 ClientMealTemplate _template({
@@ -130,6 +166,7 @@ ClientMealTemplate _template({
   bool isFavourite = false,
   int usageCount = 0,
   String? notes,
+  String? lastUsedAt,
 }) => ClientMealTemplate(
   id: id,
   householdId: 'h1',
@@ -141,6 +178,7 @@ ClientMealTemplate _template({
   lunchboxFriendly: false,
   isFavourite: isFavourite,
   usageCount: usageCount,
+  lastUsedAt: lastUsedAt,
 );
 
 ClientStarterMealTemplate _quickIdea({required int id, required String name}) =>
@@ -354,5 +392,145 @@ void main() {
       expect(hub.lastCreateStarterTemplateId, 10);
       expect(hub.lastCreateTemplateId, isNull);
     });
+  });
+
+  group('CreateSavedMealSheet', () {
+    testWidgets('Saved meals page shows a + action', (tester) async {
+      final hub = _StubHub();
+      await tester.pumpWidget(_buildSavedMealsPage(hub, _controllerFor(hub)));
+      await tester.pumpAndSettle();
+
+      expect(find.byTooltip('Create saved meal'), findsOneWidget);
+    });
+
+    testWidgets('+ opens the Create saved meal sheet', (tester) async {
+      final hub = _StubHub();
+      await tester.pumpWidget(_buildSavedMealsPage(hub, _controllerFor(hub)));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Create saved meal'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Create saved meal'), findsOneWidget);
+      expect(find.widgetWithText(TextFormField, 'Meal name'), findsOneWidget);
+
+      // Product principle: never say "template" in the UI.
+      expect(find.textContaining('template', findRichText: true), findsNothing);
+      expect(find.textContaining('Template', findRichText: true), findsNothing);
+    });
+
+    testWidgets(
+      'saving calls createMealTemplate with name, defaultMealType, notes, isFavourite',
+      (tester) async {
+        final hub = _StubHub();
+        await tester.pumpWidget(
+          _buildSavedMealsPage(hub, _controllerFor(hub)),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byTooltip('Create saved meal'));
+        await tester.pumpAndSettle();
+
+        await tester.enterText(
+          find.widgetWithText(TextFormField, 'Meal name'),
+          'Taco Tuesday',
+        );
+        await tester.enterText(
+          find.widgetWithText(TextFormField, 'Notes (optional)'),
+          'Kids love this one',
+        );
+        await tester.tap(find.byType(Switch));
+        await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+        await tester.pumpAndSettle();
+
+        expect(hub.createTemplateCalled, isTrue);
+        expect(hub.lastCreateTemplateName, 'Taco Tuesday');
+        expect(hub.lastCreateTemplateDefaultMealType, 'dinner');
+        expect(hub.lastCreateTemplateNotes, 'Kids love this one');
+        expect(hub.lastCreateTemplateIsFavourite, isTrue);
+      },
+    );
+  });
+
+  group('AddSavedMealToWeekSheet — week-aware defaults', () {
+    testWidgets('defaults to the visible Meals week when today is outside it', (
+      tester,
+    ) async {
+      final hub = _StubHub(
+        templates: [
+          _template(id: 1, name: 'Spaghetti Bolognese', isFavourite: true),
+        ],
+      );
+      final controller = _controllerFor(hub);
+      // Move the visible week two weeks back so "today" is outside it.
+      controller.previousWeek();
+      controller.previousWeek();
+      final expectedDate = controller.weekStartStr;
+
+      await tester.pumpWidget(_buildSavedMealsPage(hub, controller));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Spaghetti Bolognese'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.widgetWithText(OutlinedButton, 'Add to this week'));
+      await tester.pumpAndSettle();
+
+      expect(find.text(expectedDate), findsOneWidget);
+    });
+  });
+
+  group('Recent meals ordering', () {
+    testWidgets(
+      'sorts by lastUsedAt desc, then usageCount desc, then name asc',
+      (tester) async {
+        final hub = _StubHub(
+          templates: [
+            _template(
+              id: 1,
+              name: 'Zucchini Bake',
+              usageCount: 1,
+              lastUsedAt: '2026-06-01T00:00:00Z',
+            ),
+            _template(
+              id: 2,
+              name: 'Beef Stew',
+              usageCount: 5,
+              lastUsedAt: '2026-07-01T00:00:00Z',
+            ),
+            _template(id: 3, name: 'Apple Crumble', usageCount: 3),
+            _template(id: 4, name: 'Banana Bread', usageCount: 3),
+          ],
+        );
+        await tester.pumpWidget(
+          _buildSavedMealsPage(hub, _controllerFor(hub)),
+        );
+        await tester.pumpAndSettle();
+
+        final names = tester
+            .widgetList<Text>(find.byType(Text))
+            .map((t) => t.data)
+            .whereType<String>()
+            .where(
+              (t) => [
+                'Zucchini Bake',
+                'Beef Stew',
+                'Apple Crumble',
+                'Banana Bread',
+              ].contains(t),
+            )
+            .toList();
+
+        // Beef Stew (most recently used) first, then Zucchini Bake (only
+        // other with a lastUsedAt), then the two without lastUsedAt ordered
+        // by usageCount desc (tied, so alphabetical): Apple before Banana.
+        expect(names, [
+          'Beef Stew',
+          'Zucchini Bake',
+          'Apple Crumble',
+          'Banana Bread',
+        ]);
+      },
+    );
   });
 }
