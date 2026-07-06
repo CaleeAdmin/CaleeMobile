@@ -111,6 +111,43 @@ void main() {
 
       expect(capturedBodies.single.containsKey('notes'), isFalse);
     });
+
+    test('includes templateId when creating from a family favourite', () async {
+      final client = await startServer({
+        'data': {'meal': _kMealJson},
+      });
+
+      await client.createMeal(
+        accessToken: 'tok',
+        mealDate: '2024-01-15',
+        mealType: 'dinner',
+        title: 'Pasta',
+        templateId: 7,
+      );
+
+      expect(capturedBodies.single['templateId'], 7);
+      expect(capturedBodies.single.containsKey('starterTemplateId'), isFalse);
+    });
+
+    test(
+      'includes starterTemplateId when creating from a quick dinner idea',
+      () async {
+        final client = await startServer({
+          'data': {'meal': _kMealJson},
+        });
+
+        await client.createMeal(
+          accessToken: 'tok',
+          mealDate: '2024-01-15',
+          mealType: 'dinner',
+          title: 'Pasta',
+          starterTemplateId: 42,
+        );
+
+        expect(capturedBodies.single['starterTemplateId'], 42);
+        expect(capturedBodies.single.containsKey('templateId'), isFalse);
+      },
+    );
   });
 
   group('CaleeHubClient.updateMeal()', () {

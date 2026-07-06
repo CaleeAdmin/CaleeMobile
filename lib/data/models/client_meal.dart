@@ -36,6 +36,7 @@ class ClientMeal {
     this.notes,
     this.assignedPersonId,
     this.templateId,
+    this.starterTemplateId,
     this.recipeId,
     this.linkedEventId,
     this.difficulty,
@@ -66,6 +67,9 @@ class ClientMeal {
       templateId: json['templateId'] is int
           ? json['templateId'] as int
           : int.tryParse(json['templateId']?.toString() ?? ''),
+      starterTemplateId: json['starterTemplateId'] is int
+          ? json['starterTemplateId'] as int
+          : int.tryParse(json['starterTemplateId']?.toString() ?? ''),
       recipeId: json['recipeId'] is int
           ? json['recipeId'] as int
           : int.tryParse(json['recipeId']?.toString() ?? ''),
@@ -95,6 +99,7 @@ class ClientMeal {
   final String status;
   final String source;
   final int? templateId;
+  final int? starterTemplateId;
   final int? recipeId;
   final String? linkedEventId;
   final String? difficulty;
