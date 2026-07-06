@@ -240,23 +240,13 @@ class _MealsPageState extends State<MealsPage> {
     ];
   }
 
-  Future<bool> _hasShoppingList() async {
-    try {
-      await widget.hubClient.currentShoppingList(
-        accessToken: widget.accessToken,
-        from: _controller.weekStartStr,
-        to: _controller.weekEndStr,
-      );
-      return true;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  Future<void> _showShoppingActions() async {
-    final hasList = await _hasShoppingList();
-    if (!mounted) return;
-
+  // There is no non-mutating way to ask the backend "does a shopping list
+  // exist for this week?" — the current-list endpoint gets-or-creates one,
+  // so probing it here just to decide whether to show "Open shopping list"
+  // would create an empty list as a side effect. Always show both actions
+  // instead; ShoppingPage renders a clean empty state when there's nothing
+  // to show yet.
+  void _showShoppingActions() {
     CaleeActionSheet.show(
       context: context,
       title: 'Shopping',
@@ -266,12 +256,11 @@ class _MealsPageState extends State<MealsPage> {
           icon: Icons.shopping_cart_outlined,
           onTap: () => _openShoppingList(autoGenerate: true),
         ),
-        if (hasList)
-          CaleeAction(
-            label: 'Open shopping list',
-            icon: Icons.list_alt_outlined,
-            onTap: () => _openShoppingList(autoGenerate: false),
-          ),
+        CaleeAction(
+          label: 'Open shopping list',
+          icon: Icons.list_alt_outlined,
+          onTap: () => _openShoppingList(autoGenerate: false),
+        ),
       ],
     );
   }

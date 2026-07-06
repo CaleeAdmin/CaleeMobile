@@ -47,14 +47,11 @@ class _StubHub extends CaleeHubClient {
     this._meals = const [],
     this._favourites = const [],
     this._quickIdeas = const [],
-    ClientShoppingList? currentShoppingListResult,
-  }) : _currentShoppingListResult = currentShoppingListResult,
-       super();
+  }) : super();
 
   final List<ClientMeal> _meals;
   final List<ClientMealTemplate> _favourites;
   final List<ClientStarterMealTemplate> _quickIdeas;
-  final ClientShoppingList? _currentShoppingListResult;
 
   bool updateCalled = false;
   String? lastUpdateNotes = 'NOT_CALLED';
@@ -66,6 +63,7 @@ class _StubHub extends CaleeHubClient {
   bool deleteCalled = false;
   String? lastGenerateFrom;
   String? lastGenerateTo;
+  bool currentShoppingListCalled = false;
 
   @override
   Future<ClientMealList> meals({
@@ -110,11 +108,8 @@ class _StubHub extends CaleeHubClient {
     required String from,
     required String to,
   }) async {
-    final list = _currentShoppingListResult;
-    if (list == null) {
-      throw const CaleeHubException(statusCode: 404, message: 'Not found');
-    }
-    return list;
+    currentShoppingListCalled = true;
+    throw const CaleeHubException(statusCode: 404, message: 'Not found');
   }
 
   @override
@@ -524,8 +519,8 @@ void main() {
     });
 
     testWidgets(
-      'shopping icon offers only "Build grocery list" when no list exists '
-      'yet',
+      'shopping icon always offers "Build grocery list" and "Open shopping '
+      'list" without probing whether a list exists',
       (tester) async {
         _useTallViewport(tester);
         final hub = _StubHub();
@@ -537,34 +532,12 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(find.text('Build grocery list'), findsOneWidget);
-        expect(find.text('Open shopping list'), findsNothing);
-      },
-    );
-
-    testWidgets(
-      'shopping icon offers "Open shopping list" once a list exists',
-      (tester) async {
-        _useTallViewport(tester);
-        final hub = _StubHub(
-          currentShoppingListResult: const ClientShoppingList(
-            id: 1,
-            householdId: 'h1',
-            title: 'Shopping list',
-            fromDate: '2024-01-15',
-            toDate: '2024-01-21',
-            status: 'active',
-            items: [],
-          ),
-        );
-        await tester.pumpWidget(_buildMealsPage(hub));
-        await tester.pump();
-        await tester.pump();
-
-        await tester.tap(find.byTooltip('Shopping'));
-        await tester.pumpAndSettle();
-
-        expect(find.text('Build grocery list'), findsOneWidget);
         expect(find.text('Open shopping list'), findsOneWidget);
+        // The only non-mutating way to check "does a list exist" would be
+        // to call currentShoppingList(), which get-or-creates on the
+        // backend — so the sheet must never call it just to decide what to
+        // show.
+        expect(hub.currentShoppingListCalled, isFalse);
       },
     );
 
@@ -605,9 +578,7 @@ void main() {
       },
     );
 
-    testWidgets('copy icon opens the copy previous week sheet', (
-      tester,
-    ) async {
+    testWidgets('copy icon opens the copy previous week sheet', (tester) async {
       _useTallViewport(tester);
       final hub = _StubHub();
       await tester.pumpWidget(_buildMealsPage(hub));
