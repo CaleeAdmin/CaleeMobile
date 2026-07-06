@@ -318,6 +318,149 @@ void main() {
     });
   });
 
+  group('CaleeHubClient.mealTemplateIngredients()', () {
+    test('sends GET to /client/v1/meal-templates/:id/ingredients', () async {
+      final client = await startServer({
+        'data': {
+          'ingredients': [
+            {
+              'id': 1,
+              'templateId': 7,
+              'name': 'Beef mince',
+              'normalizedName': 'beef mince',
+              'quantityText': '500g',
+              'category': 'Meat',
+              'optional': false,
+              'sortOrder': 0,
+            },
+          ],
+        },
+      });
+
+      final result = await client.mealTemplateIngredients(
+        accessToken: 'tok',
+        templateId: 7,
+      );
+
+      expect(capturedMethods.single, 'GET');
+      expect(capturedPaths.single, '/client/v1/meal-templates/7/ingredients');
+      expect(result.single.name, 'Beef mince');
+      expect(result.single.quantityText, '500g');
+      expect(result.single.category, 'Meat');
+    });
+  });
+
+  group('CaleeHubClient.addMealTemplateIngredient()', () {
+    test('sends POST to /client/v1/meal-templates/:id/ingredients', () async {
+      final client = await startServer({
+        'data': {
+          'ingredient': {
+            'id': 1,
+            'templateId': 7,
+            'name': 'Rice',
+            'normalizedName': 'rice',
+            'optional': false,
+            'sortOrder': 0,
+          },
+        },
+      });
+
+      final result = await client.addMealTemplateIngredient(
+        accessToken: 'tok',
+        templateId: 7,
+        name: 'Rice',
+        quantityText: '1 cup',
+      );
+
+      expect(capturedMethods.single, 'POST');
+      expect(capturedPaths.single, '/client/v1/meal-templates/7/ingredients');
+      expect(capturedBodies.single['name'], 'Rice');
+      expect(capturedBodies.single['quantityText'], '1 cup');
+      expect(result.name, 'Rice');
+    });
+  });
+
+  group('CaleeHubClient.updateMealTemplateIngredient()', () {
+    test(
+      'sends PATCH to /client/v1/meal-templates/:id/ingredients/:id',
+      () async {
+        final client = await startServer({
+          'data': {
+            'ingredient': {
+              'id': 1,
+              'templateId': 7,
+              'name': 'Rice',
+              'normalizedName': 'rice',
+              'quantityText': '2 cups',
+              'optional': false,
+              'sortOrder': 0,
+            },
+          },
+        });
+
+        final result = await client.updateMealTemplateIngredient(
+          accessToken: 'tok',
+          templateId: 7,
+          ingredientId: 1,
+          quantityText: '2 cups',
+        );
+
+        expect(capturedMethods.single, 'PATCH');
+        expect(
+          capturedPaths.single,
+          '/client/v1/meal-templates/7/ingredients/1',
+        );
+        expect(capturedBodies.single['quantityText'], '2 cups');
+        expect(result.quantityText, '2 cups');
+      },
+    );
+
+    test('throws when no update fields are provided', () async {
+      final client = await startServer({
+        'data': {
+          'ingredient': {
+            'id': 1,
+            'templateId': 7,
+            'name': 'Rice',
+            'normalizedName': 'rice',
+            'optional': false,
+            'sortOrder': 0,
+          },
+        },
+      });
+
+      expect(
+        () => client.updateMealTemplateIngredient(
+          accessToken: 'tok',
+          templateId: 7,
+          ingredientId: 1,
+        ),
+        throwsA(isA<CaleeHubException>()),
+      );
+    });
+  });
+
+  group('CaleeHubClient.deleteMealTemplateIngredient()', () {
+    test(
+      'sends DELETE to /client/v1/meal-templates/:id/ingredients/:id',
+      () async {
+        final client = await startServer({'data': <String, dynamic>{}});
+
+        await client.deleteMealTemplateIngredient(
+          accessToken: 'tok',
+          templateId: 7,
+          ingredientId: 1,
+        );
+
+        expect(capturedMethods.single, 'DELETE');
+        expect(
+          capturedPaths.single,
+          '/client/v1/meal-templates/7/ingredients/1',
+        );
+      },
+    );
+  });
+
   group('CaleeHubClient.copyMealWeek()', () {
     test('POSTs to /client/v1/meals/copy-week with required fields', () async {
       final client = await startServer({
