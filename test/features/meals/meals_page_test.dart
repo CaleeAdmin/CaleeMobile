@@ -503,19 +503,43 @@ void main() {
   });
 
   group('MealsPage — top bar actions', () {
-    testWidgets('top bar shows search, shopping, copy and add icons', (
+    testWidgets(
+      'top bar shows search, saved meals, shopping, copy and add icons',
+      (tester) async {
+        _useTallViewport(tester);
+        final hub = _StubHub();
+        await tester.pumpWidget(_buildMealsPage(hub));
+        await tester.pump();
+        await tester.pump();
+
+        expect(find.byTooltip('Search meals'), findsOneWidget);
+        expect(find.byTooltip('Saved meals'), findsOneWidget);
+        expect(find.byTooltip('Shopping'), findsOneWidget);
+        expect(find.byTooltip('Copy last week'), findsOneWidget);
+        expect(find.byTooltip('Add meal'), findsOneWidget);
+      },
+    );
+
+    testWidgets('saved meals icon opens the Saved meals screen', (
       tester,
     ) async {
       _useTallViewport(tester);
-      final hub = _StubHub();
+      final hub = _StubHub(
+        favourites: [_favourite(id: 1, name: 'Spaghetti Bolognese')],
+        quickIdeas: [_quickIdea(id: 2, name: 'Tacos')],
+      );
       await tester.pumpWidget(_buildMealsPage(hub));
       await tester.pump();
       await tester.pump();
 
-      expect(find.byTooltip('Search meals'), findsOneWidget);
-      expect(find.byTooltip('Shopping'), findsOneWidget);
-      expect(find.byTooltip('Copy last week'), findsOneWidget);
-      expect(find.byTooltip('Add meal'), findsOneWidget);
+      await tester.tap(find.byTooltip('Saved meals'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Saved meals'), findsOneWidget);
+      expect(find.text('FAMILY FAVOURITES'), findsOneWidget);
+      expect(find.text('Spaghetti Bolognese'), findsWidgets);
+      expect(find.text('QUICK DINNER IDEAS'), findsOneWidget);
+      expect(find.text('Tacos'), findsOneWidget);
     });
 
     testWidgets(

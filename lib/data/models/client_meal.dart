@@ -153,6 +153,7 @@ class ClientMealTemplate {
     required this.usageCount,
     this.icon,
     this.notes,
+    this.lastUsedAt,
   });
 
   factory ClientMealTemplate.fromJson(Map<String, dynamic> json) {
@@ -172,6 +173,7 @@ class ClientMealTemplate {
       usageCount: json['usageCount'] is int
           ? json['usageCount'] as int
           : int.tryParse(json['usageCount']?.toString() ?? '') ?? 0,
+      lastUsedAt: json['lastUsedAt'] as String?,
     );
   }
 
@@ -186,6 +188,7 @@ class ClientMealTemplate {
   final bool lunchboxFriendly;
   final bool isFavourite;
   final int usageCount;
+  final String? lastUsedAt;
 }
 
 class ClientMealCopyWeekResult {

@@ -26,6 +26,37 @@ class MealsRepository {
     pack: pack,
   );
 
+  Future<ClientMealTemplate> createMealTemplate({
+    required String name,
+    required String defaultMealType,
+    String? notes,
+    String? icon,
+    bool? isFavourite,
+  }) => hubClient.createMealTemplate(
+    accessToken: accessToken,
+    name: name,
+    defaultMealType: defaultMealType,
+    notes: notes,
+    icon: icon,
+    isFavourite: isFavourite,
+  );
+
+  Future<ClientMealTemplate> updateMealTemplate({
+    required int templateId,
+    String? name,
+    String? notes,
+    bool? isFavourite,
+  }) => hubClient.updateMealTemplate(
+    accessToken: accessToken,
+    templateId: templateId,
+    name: name,
+    notes: notes,
+    isFavourite: isFavourite,
+  );
+
+  Future<void> deleteMealTemplate(int templateId) => hubClient
+      .deleteMealTemplate(accessToken: accessToken, templateId: templateId);
+
   Future<ClientMeal> createMeal({
     required String mealDate,
     required String mealType,

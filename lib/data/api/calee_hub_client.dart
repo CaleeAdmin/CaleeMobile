@@ -758,6 +758,69 @@ class CaleeHubClient {
     return ClientMealTemplateList.fromJson(_data(json));
   }
 
+  Future<ClientMealTemplate> createMealTemplate({
+    required String accessToken,
+    required String name,
+    required String defaultMealType,
+    String? notes,
+    String? icon,
+    bool? isFavourite,
+  }) async {
+    final body = <String, dynamic>{
+      'name': name,
+      'defaultMealType': defaultMealType,
+      if (notes != null) 'notes': notes,
+      if (icon != null) 'icon': icon,
+      if (isFavourite != null) 'isFavourite': isFavourite,
+    };
+    final json = await _postJson(
+      '/client/v1/meal-templates',
+      accessToken: accessToken,
+      body: body,
+    );
+    return ClientMealTemplate.fromJson(
+      _data(json)['template'] as Map<String, dynamic>,
+    );
+  }
+
+  Future<ClientMealTemplate> updateMealTemplate({
+    required String accessToken,
+    required int templateId,
+    String? name,
+    String? notes,
+    bool? isFavourite,
+  }) async {
+    final body = <String, dynamic>{
+      if (name != null) 'name': name,
+      if (notes != null) 'notes': notes,
+      if (isFavourite != null) 'isFavourite': isFavourite,
+    };
+    if (body.isEmpty) {
+      throw const CaleeHubException(
+        statusCode: 0,
+        message: 'No meal template updates provided',
+      );
+    }
+    final json = await _patchJson(
+      '/client/v1/meal-templates/$templateId',
+      accessToken: accessToken,
+      body: body,
+    );
+    return ClientMealTemplate.fromJson(
+      _data(json)['template'] as Map<String, dynamic>,
+    );
+  }
+
+  Future<void> deleteMealTemplate({
+    required String accessToken,
+    required int templateId,
+  }) async {
+    await _deleteJson(
+      '/client/v1/meal-templates/$templateId',
+      accessToken: accessToken,
+    );
+  }
+
   Future<ClientMealCopyWeekResult> copyMealWeek({
     required String accessToken,
     required String sourceFrom,
