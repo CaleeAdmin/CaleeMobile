@@ -17,6 +17,18 @@ const _kMealJson = <String, dynamic>{
   'source': 'manual',
 };
 
+const _kMealTemplateJson = <String, dynamic>{
+  'id': 7,
+  'householdId': 'h1',
+  'name': 'Spaghetti Bolognese',
+  'defaultMealType': 'dinner',
+  'kidFriendly': true,
+  'freezerFriendly': false,
+  'lunchboxFriendly': false,
+  'isFavourite': true,
+  'usageCount': 4,
+};
+
 void main() {
   late HttpServer server;
   late List<String> capturedPaths;
@@ -201,6 +213,108 @@ void main() {
 
       expect(capturedMethods.single, 'DELETE');
       expect(capturedPaths.single, '/client/v1/meals/42');
+    });
+  });
+
+  group('CaleeHubClient.createMealTemplate()', () {
+    test(
+      'sends POST to /client/v1/meal-templates with required fields',
+      () async {
+        final client = await startServer({
+          'data': {'template': _kMealTemplateJson},
+        });
+
+        final result = await client.createMealTemplate(
+          accessToken: 'tok',
+          name: 'Spaghetti Bolognese',
+          defaultMealType: 'dinner',
+        );
+
+        expect(capturedMethods.single, 'POST');
+        expect(capturedPaths.single, '/client/v1/meal-templates');
+        expect(capturedBodies.single['name'], 'Spaghetti Bolognese');
+        expect(capturedBodies.single['defaultMealType'], 'dinner');
+        expect(result.id, 7);
+        expect(result.isFavourite, isTrue);
+      },
+    );
+
+    test(
+      'includes optional notes, icon and isFavourite when provided',
+      () async {
+        final client = await startServer({
+          'data': {'template': _kMealTemplateJson},
+        });
+
+        await client.createMealTemplate(
+          accessToken: 'tok',
+          name: 'Spaghetti Bolognese',
+          defaultMealType: 'dinner',
+          notes: 'Kids love this one',
+          icon: 'pasta',
+          isFavourite: true,
+        );
+
+        expect(capturedBodies.single['notes'], 'Kids love this one');
+        expect(capturedBodies.single['icon'], 'pasta');
+        expect(capturedBodies.single['isFavourite'], isTrue);
+      },
+    );
+  });
+
+  group('CaleeHubClient.updateMealTemplate()', () {
+    test('sends PATCH to /client/v1/meal-templates/:id', () async {
+      final client = await startServer({
+        'data': {'template': _kMealTemplateJson},
+      });
+
+      await client.updateMealTemplate(
+        accessToken: 'tok',
+        templateId: 7,
+        name: 'Spaghetti Bolognese Updated',
+      );
+
+      expect(capturedMethods.single, 'PATCH');
+      expect(capturedPaths.single, '/client/v1/meal-templates/7');
+      expect(capturedBodies.single['name'], 'Spaghetti Bolognese Updated');
+    });
+
+    test('can toggle isFavourite without changing name or notes', () async {
+      final client = await startServer({
+        'data': {'template': _kMealTemplateJson},
+      });
+
+      await client.updateMealTemplate(
+        accessToken: 'tok',
+        templateId: 7,
+        isFavourite: false,
+      );
+
+      expect(capturedBodies.single['isFavourite'], isFalse);
+      expect(capturedBodies.single.containsKey('name'), isFalse);
+      expect(capturedBodies.single.containsKey('notes'), isFalse);
+    });
+
+    test('throws when no update fields are provided', () async {
+      final client = await startServer({
+        'data': {'template': _kMealTemplateJson},
+      });
+
+      expect(
+        () => client.updateMealTemplate(accessToken: 'tok', templateId: 7),
+        throwsA(isA<CaleeHubException>()),
+      );
+    });
+  });
+
+  group('CaleeHubClient.deleteMealTemplate()', () {
+    test('sends DELETE to /client/v1/meal-templates/:id', () async {
+      final client = await startServer({'data': <String, dynamic>{}});
+
+      await client.deleteMealTemplate(accessToken: 'tok', templateId: 7);
+
+      expect(capturedMethods.single, 'DELETE');
+      expect(capturedPaths.single, '/client/v1/meal-templates/7');
     });
   });
 

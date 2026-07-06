@@ -8,6 +8,7 @@ import '../../ui/calee_design.dart';
 import '../shopping/shopping_page.dart';
 import 'meals_controller.dart';
 import 'meals_repository.dart';
+import 'saved_meals_page.dart';
 
 const _kMealTypeLabels = {
   'breakfast': 'Breakfast',
@@ -165,6 +166,15 @@ class _MealsPageState extends State<MealsPage> {
                 tooltip: 'Search meals',
               ),
               IconButton(
+                onPressed: _openSavedMeals,
+                icon: const Icon(Icons.bookmark_outline),
+                iconSize: 22,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                color: CaleeColors.primary,
+                tooltip: 'Saved meals',
+              ),
+              IconButton(
                 onPressed: _showShoppingActions,
                 icon: const Icon(Icons.shopping_cart_outlined),
                 iconSize: 22,
@@ -267,6 +277,18 @@ class _MealsPageState extends State<MealsPage> {
 
   void _openAddMealSheet() {
     AddMealSheet.show(context: context, controller: _controller);
+  }
+
+  Future<void> _openSavedMeals() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => SavedMealsPage(
+          hubClient: widget.hubClient,
+          accessToken: widget.accessToken,
+          controller: _controller,
+        ),
+      ),
+    );
   }
 
   // Shopping lists are a sub-feature of meal planning (see ClientBootstrap
@@ -1160,6 +1182,21 @@ class _PickDinnerSheetState extends State<PickDinnerSheet> {
         style: const TextStyle(fontSize: 18),
       ),
       title: template.name,
+      subtitle: savedMealMetadata(template),
+      trailing: template.isFavourite
+          ? const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.star, size: 18, color: CaleeColors.primary),
+                SizedBox(width: CaleeSpacing.xs),
+                Icon(
+                  Icons.chevron_right,
+                  size: 20,
+                  color: CaleeColors.textTertiary,
+                ),
+              ],
+            )
+          : null,
       enabled: !_isCreating,
       onTap: () => _selectTemplate(
         template.name,
