@@ -685,12 +685,16 @@ class CaleeHubClient {
     required String mealType,
     required String title,
     String? notes,
+    int? templateId,
+    int? starterTemplateId,
   }) async {
     final body = <String, Object?>{
       'mealDate': mealDate,
       'mealType': mealType,
       'title': title,
       if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
+      if (templateId != null) 'templateId': templateId,
+      if (starterTemplateId != null) 'starterTemplateId': starterTemplateId,
     };
     final json = await _postJson(
       '/client/v1/meals',

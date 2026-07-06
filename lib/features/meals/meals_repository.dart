@@ -31,12 +31,16 @@ class MealsRepository {
     required String mealType,
     required String title,
     String? notes,
+    int? templateId,
+    int? starterTemplateId,
   }) => hubClient.createMeal(
     accessToken: accessToken,
     mealDate: mealDate,
     mealType: mealType,
     title: title,
     notes: notes,
+    templateId: templateId,
+    starterTemplateId: starterTemplateId,
   );
 
   Future<ClientMeal> updateMeal({
