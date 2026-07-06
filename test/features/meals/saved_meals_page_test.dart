@@ -596,6 +596,34 @@ void main() {
       expect(find.text('600g'), findsOneWidget);
     });
 
+    testWidgets('blocks saving an ingredient with a blank name', (
+      tester,
+    ) async {
+      final hub = _StubHub(
+        templates: [
+          _template(id: 1, name: 'Spaghetti Bolognese', isFavourite: true),
+        ],
+      );
+      await tester.pumpWidget(_buildSavedMealsPage(hub, _controllerFor(hub)));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Spaghetti Bolognese'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Add ingredient'));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Ingredient name'),
+        '   ',
+      );
+      await tester.tap(find.widgetWithText(FilledButton, 'Save').last);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Please enter an ingredient name'), findsOneWidget);
+      expect(hub.addIngredientCalled, isFalse);
+    });
+
     testWidgets('deleting an ingredient calls deleteMealTemplateIngredient', (
       tester,
     ) async {

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../data/api/calee_hub_client.dart';
@@ -38,6 +39,15 @@ String? _ingredientSubtitle(ClientTemplateIngredient ingredient) {
     if (category != null && category.isNotEmpty) category,
   ];
   return parts.isEmpty ? null : parts.join(' · ');
+}
+
+/// Family-friendly text for [error], falling back to [friendly] instead of
+/// surfacing raw backend messages. In debug builds only, appends
+/// [CaleeHubException.debugSummary] so developers can still see what failed.
+String _friendlyErrorText(Object error, String friendly) {
+  return kDebugMode && error is CaleeHubException
+      ? '$friendly\nDebug: ${error.debugSummary}'
+      : friendly;
 }
 
 /// Full-screen Saved Meals management view, reached from the Meals page top
@@ -573,10 +583,14 @@ class _ManageSavedMealSheetState extends State<ManageSavedMealSheet> {
               .toList();
         });
       }
-    } catch (_) {
+    } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not delete ingredient.')),
+          SnackBar(
+            content: Text(
+              _friendlyErrorText(e, 'Could not delete ingredient.'),
+            ),
+          ),
         );
       }
     }
@@ -611,7 +625,10 @@ class _ManageSavedMealSheetState extends State<ManageSavedMealSheet> {
       if (mounted) {
         setState(() {
           _isSaving = false;
-          _error = e.toString();
+          _error = _friendlyErrorText(
+            e,
+            'Could not save changes. Please try again.',
+          );
         });
       }
     }
@@ -637,7 +654,10 @@ class _ManageSavedMealSheetState extends State<ManageSavedMealSheet> {
       if (mounted) {
         setState(() {
           _isSaving = false;
-          _error = e.toString();
+          _error = _friendlyErrorText(
+            e,
+            'Could not delete this saved meal. Please try again.',
+          );
         });
       }
     }
@@ -814,6 +834,10 @@ class _ManageSavedMealSheetState extends State<ManageSavedMealSheet> {
 /// Bottom sheet for adding or editing a single ingredient on a household
 /// saved meal. Passing [ingredient] edits it in place; omitting it creates a
 /// new one. Pops the saved [ClientTemplateIngredient] on success.
+///
+// TODO: quantityText is a plain free-text field today (e.g. "500g"). Future:
+// household default serving count, a per-saved-meal serving count, and
+// scaling this quantity relative to servings. Not implemented yet.
 class _ManageIngredientSheet extends StatefulWidget {
   const _ManageIngredientSheet({
     required this.controller,
@@ -910,7 +934,7 @@ class _ManageIngredientSheetState extends State<_ManageIngredientSheet> {
       if (mounted) {
         setState(() {
           _isSaving = false;
-          _error = 'Could not save ingredient.';
+          _error = _friendlyErrorText(e, 'Could not save ingredient.');
         });
       }
     }
@@ -1042,7 +1066,10 @@ class _CreateSavedMealSheetState extends State<CreateSavedMealSheet> {
       if (mounted) {
         setState(() {
           _isSaving = false;
-          _error = e.toString();
+          _error = _friendlyErrorText(
+            e,
+            'Could not create saved meal. Please try again.',
+          );
         });
       }
     }
