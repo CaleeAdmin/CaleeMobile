@@ -109,6 +109,11 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
   // shown from ShoppingLinkLandingPage).
   bool _showingShoppingSignIn = false;
   bool _showingShoppingCreateAccount = false;
+  // Dedup guard so the same shopping intent (e.g. redelivered by the
+  // platform, or observed by more than one listener in the same tick) isn't
+  // pushed onto the navigator twice in quick succession.
+  Uri? _lastOpenedShoppingUri;
+  DateTime? _lastOpenedShoppingAt;
 
   // Display setup state
   //
@@ -175,7 +180,13 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
       unawaited(_followLinkController.init());
       unawaited(_displaySetupLinkController.init());
       unawaited(_externalCalendarConnectedLinkController.init());
-      unawaited(_shoppingLinkController.init());
+      unawaited(
+        _shoppingLinkController.init().then((_) {
+          // Safety net in case init() resolved a pending intent before this
+          // listener was attached below.
+          if (mounted) _maybeOpenPendingShoppingLink();
+        }),
+      );
     }
 
     _followLinkController.addListener(_onFollowLinkChanged);
@@ -294,10 +305,9 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
     }
 
     // Shopping list intent (e.g. from the tablet's "Open on phone" link).
-    final shoppingIntent = _shoppingLinkController.pendingIntent;
-    if (shoppingIntent != null) {
-      _shoppingLinkController.clearPending();
-      _openShoppingListForIntent(shoppingIntent);
+    if (_shoppingLinkController.pendingIntent != null) {
+      debugPrint('[CaleeApp] _onSessionChanged shopping branch called');
+      _maybeOpenPendingShoppingLink();
       return;
     }
 
@@ -375,11 +385,52 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
   }
 
   void _onShoppingLinkChanged() {
+    debugPrint('[CaleeApp] _onShoppingLinkChanged called');
+    _maybeOpenPendingShoppingLink();
+  }
+
+  /// Single entry point for reacting to a pending shopping-link intent,
+  /// called from [_onShoppingLinkChanged], from the shopping branch of
+  /// [_onSessionChanged] (after session restore/sign-in), and as a safety
+  /// net right after [ShoppingLinkController.init] resolves.
+  ///
+  /// - No pending intent: no-op.
+  /// - Session still restoring: no-op; whichever of the above call sites
+  ///   fires next once the session outcome is known will re-evaluate.
+  /// - Signed in: clears the pending intent and pushes [ShoppingPage] after
+  ///   the current frame.
+  /// - Definitely signed out: resets any stale sign-in/create-account
+  ///   sub-screen so the build() method's pending-intent check shows a
+  ///   fresh [ShoppingLinkLandingPage].
+  void _maybeOpenPendingShoppingLink() {
     final intent = _shoppingLinkController.pendingIntent;
+    debugPrint(
+      '[CaleeApp] _maybeOpenPendingShoppingLink: pendingIntent=$intent, '
+      'isSignedIn=${_sessionController.isSignedIn}, '
+      'isRestoringSession=${_sessionController.isRestoringSession}',
+    );
     if (intent == null) return;
 
+    if (_sessionController.isRestoringSession) {
+      // Wait — re-evaluated once restore finishes and notifies listeners.
+      return;
+    }
+
     if (_sessionController.isSignedIn) {
+      final now = DateTime.now();
+      if (_lastOpenedShoppingUri == intent.sourceUri &&
+          _lastOpenedShoppingAt != null &&
+          now.difference(_lastOpenedShoppingAt!) < const Duration(seconds: 5)) {
+        return;
+      }
+      _lastOpenedShoppingUri = intent.sourceUri;
+      _lastOpenedShoppingAt = now;
+
       _shoppingLinkController.clearPending();
+      setState(() {
+        _showingShoppingSignIn = false;
+        _showingShoppingCreateAccount = false;
+      });
       _openShoppingListForIntent(intent);
     } else {
       // Reset any stale sub-screen so a fresh link always starts back at
@@ -675,8 +726,16 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
   }
 
   void _openShoppingListForIntent(ShoppingLinkIntent intent) {
+    debugPrint(
+      '[CaleeApp] _openShoppingListForIntent called: '
+      'weekStart=${intent.weekStart}',
+    );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+      debugPrint(
+        '[CaleeApp] pushing ShoppingPage: '
+        'initialWeekStart=${intent.weekStart}, autoGenerate=false',
+      );
       _navigatorKey.currentState?.push(
         MaterialPageRoute<void>(
           builder: (_) => ShoppingPage(
