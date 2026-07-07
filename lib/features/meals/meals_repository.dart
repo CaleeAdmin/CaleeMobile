@@ -26,17 +26,100 @@ class MealsRepository {
     pack: pack,
   );
 
+  Future<ClientMealTemplate> createMealTemplate({
+    required String name,
+    required String defaultMealType,
+    String? notes,
+    String? icon,
+    bool? isFavourite,
+  }) => hubClient.createMealTemplate(
+    accessToken: accessToken,
+    name: name,
+    defaultMealType: defaultMealType,
+    notes: notes,
+    icon: icon,
+    isFavourite: isFavourite,
+  );
+
+  Future<ClientMealTemplate> updateMealTemplate({
+    required int templateId,
+    String? name,
+    String? notes,
+    bool? isFavourite,
+  }) => hubClient.updateMealTemplate(
+    accessToken: accessToken,
+    templateId: templateId,
+    name: name,
+    notes: notes,
+    isFavourite: isFavourite,
+  );
+
+  Future<void> deleteMealTemplate(int templateId) => hubClient
+      .deleteMealTemplate(accessToken: accessToken, templateId: templateId);
+
+  Future<List<ClientTemplateIngredient>> mealTemplateIngredients(
+    int templateId,
+  ) => hubClient.mealTemplateIngredients(
+    accessToken: accessToken,
+    templateId: templateId,
+  );
+
+  Future<ClientTemplateIngredient> addMealTemplateIngredient({
+    required int templateId,
+    required String name,
+    String? quantityText,
+    String? unit,
+    String? category,
+  }) => hubClient.addMealTemplateIngredient(
+    accessToken: accessToken,
+    templateId: templateId,
+    name: name,
+    quantityText: quantityText,
+    unit: unit,
+    category: category,
+  );
+
+  Future<ClientTemplateIngredient> updateMealTemplateIngredient({
+    required int templateId,
+    required int ingredientId,
+    String? name,
+    String? quantityText,
+    String? unit,
+    String? category,
+  }) => hubClient.updateMealTemplateIngredient(
+    accessToken: accessToken,
+    templateId: templateId,
+    ingredientId: ingredientId,
+    name: name,
+    quantityText: quantityText,
+    unit: unit,
+    category: category,
+  );
+
+  Future<void> deleteMealTemplateIngredient({
+    required int templateId,
+    required int ingredientId,
+  }) => hubClient.deleteMealTemplateIngredient(
+    accessToken: accessToken,
+    templateId: templateId,
+    ingredientId: ingredientId,
+  );
+
   Future<ClientMeal> createMeal({
     required String mealDate,
     required String mealType,
     required String title,
     String? notes,
+    int? templateId,
+    int? starterTemplateId,
   }) => hubClient.createMeal(
     accessToken: accessToken,
     mealDate: mealDate,
     mealType: mealType,
     title: title,
     notes: notes,
+    templateId: templateId,
+    starterTemplateId: starterTemplateId,
   );
 
   Future<ClientMeal> updateMeal({

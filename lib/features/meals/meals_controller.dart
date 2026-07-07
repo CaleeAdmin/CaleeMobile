@@ -95,6 +95,8 @@ class MealsController extends ChangeNotifier {
     required String mealType,
     required String title,
     String? notes,
+    int? templateId,
+    int? starterTemplateId,
   }) async {
     isSaving = true;
     notifyListeners();
@@ -104,6 +106,8 @@ class MealsController extends ChangeNotifier {
         mealType: mealType,
         title: title,
         notes: notes,
+        templateId: templateId,
+        starterTemplateId: starterTemplateId,
       );
       await load();
     } finally {

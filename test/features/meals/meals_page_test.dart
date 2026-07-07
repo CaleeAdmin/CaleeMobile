@@ -58,9 +58,12 @@ class _StubHub extends CaleeHubClient {
   bool createCalled = false;
   String? lastCreateTitle;
   String? lastCreateNotes;
+  int? lastCreateTemplateId;
+  int? lastCreateStarterTemplateId;
   bool deleteCalled = false;
   String? lastGenerateFrom;
   String? lastGenerateTo;
+  bool currentShoppingListCalled = false;
 
   @override
   Future<ClientMealList> meals({
@@ -77,10 +80,14 @@ class _StubHub extends CaleeHubClient {
     required String mealType,
     required String title,
     String? notes,
+    int? templateId,
+    int? starterTemplateId,
   }) async {
     createCalled = true;
     lastCreateTitle = title;
     lastCreateNotes = notes;
+    lastCreateTemplateId = templateId;
+    lastCreateStarterTemplateId = starterTemplateId;
     return ClientMeal(
       id: 99,
       householdId: 'h1',
@@ -90,7 +97,19 @@ class _StubHub extends CaleeHubClient {
       status: 'planned',
       source: 'manual',
       notes: notes,
+      templateId: templateId,
+      starterTemplateId: starterTemplateId,
     );
+  }
+
+  @override
+  Future<ClientShoppingList> currentShoppingList({
+    required String accessToken,
+    required String from,
+    required String to,
+  }) async {
+    currentShoppingListCalled = true;
+    throw const CaleeHubException(statusCode: 404, message: 'Not found');
   }
 
   @override
@@ -396,6 +415,32 @@ void main() {
       expect(hub.createCalled, isTrue);
       expect(hub.lastCreateTitle, 'Taco Night');
       expect(hub.lastCreateNotes, 'mild');
+      // The favourite's identity is attached so the backend can still find
+      // its ingredients when generating a grocery list.
+      expect(hub.lastCreateTemplateId, 1);
+      expect(hub.lastCreateStarterTemplateId, isNull);
+    });
+
+    testWidgets('selecting a quick dinner idea creates the meal with its '
+        'starter template id', (tester) async {
+      _useTallViewport(tester);
+      final hub = _StubHub(
+        quickIdeas: [_quickIdea(id: 5, name: 'Butter Chicken')],
+      );
+      await tester.pumpWidget(_buildMealsPage(hub));
+      await tester.pump();
+      await tester.pump();
+
+      await tester.tap(find.text('Add dinner').first);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Butter Chicken'));
+      await tester.pumpAndSettle();
+
+      expect(hub.createCalled, isTrue);
+      expect(hub.lastCreateTitle, 'Butter Chicken');
+      expect(hub.lastCreateStarterTemplateId, 5);
+      expect(hub.lastCreateTemplateId, isNull);
     });
 
     testWidgets('"Create new meal" opens the plain meal form', (tester) async {
@@ -458,36 +503,67 @@ void main() {
   });
 
   group('MealsPage — top bar actions', () {
-    testWidgets('top bar shows search, shopping, copy and add icons', (
+    testWidgets(
+      'top bar shows search, saved meals, shopping, copy and add icons',
+      (tester) async {
+        _useTallViewport(tester);
+        final hub = _StubHub();
+        await tester.pumpWidget(_buildMealsPage(hub));
+        await tester.pump();
+        await tester.pump();
+
+        expect(find.byTooltip('Search meals'), findsOneWidget);
+        expect(find.byTooltip('Saved meals'), findsOneWidget);
+        expect(find.byTooltip('Shopping'), findsOneWidget);
+        expect(find.byTooltip('Copy last week'), findsOneWidget);
+        expect(find.byTooltip('Add meal'), findsOneWidget);
+      },
+    );
+
+    testWidgets('saved meals icon opens the Saved meals screen', (
       tester,
     ) async {
       _useTallViewport(tester);
-      final hub = _StubHub();
+      final hub = _StubHub(
+        favourites: [_favourite(id: 1, name: 'Spaghetti Bolognese')],
+        quickIdeas: [_quickIdea(id: 2, name: 'Tacos')],
+      );
       await tester.pumpWidget(_buildMealsPage(hub));
       await tester.pump();
       await tester.pump();
 
-      expect(find.byTooltip('Search meals'), findsOneWidget);
-      expect(find.byTooltip('Shopping'), findsOneWidget);
-      expect(find.byTooltip('Copy last week'), findsOneWidget);
-      expect(find.byTooltip('Add meal'), findsOneWidget);
-    });
-
-    testWidgets('shopping icon opens an action sheet with grocery options', (
-      tester,
-    ) async {
-      _useTallViewport(tester);
-      final hub = _StubHub();
-      await tester.pumpWidget(_buildMealsPage(hub));
-      await tester.pump();
-      await tester.pump();
-
-      await tester.tap(find.byTooltip('Shopping'));
+      await tester.tap(find.byTooltip('Saved meals'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Build grocery list'), findsOneWidget);
-      expect(find.text('Open shopping list'), findsOneWidget);
+      expect(find.text('Saved meals'), findsOneWidget);
+      expect(find.text('FAMILY FAVOURITES'), findsOneWidget);
+      expect(find.text('Spaghetti Bolognese'), findsWidgets);
+      expect(find.text('QUICK DINNER IDEAS'), findsOneWidget);
+      expect(find.text('Tacos'), findsOneWidget);
     });
+
+    testWidgets(
+      'shopping icon always offers "Build grocery list" and "Open shopping '
+      'list" without probing whether a list exists',
+      (tester) async {
+        _useTallViewport(tester);
+        final hub = _StubHub();
+        await tester.pumpWidget(_buildMealsPage(hub));
+        await tester.pump();
+        await tester.pump();
+
+        await tester.tap(find.byTooltip('Shopping'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Build grocery list'), findsOneWidget);
+        expect(find.text('Open shopping list'), findsOneWidget);
+        // The only non-mutating way to check "does a list exist" would be
+        // to call currentShoppingList(), which get-or-creates on the
+        // backend — so the sheet must never call it just to decide what to
+        // show.
+        expect(hub.currentShoppingListCalled, isFalse);
+      },
+    );
 
     testWidgets(
       'passes the visible Meals week into ShoppingPage instead of the '
@@ -526,9 +602,7 @@ void main() {
       },
     );
 
-    testWidgets('copy icon opens the copy previous week sheet', (
-      tester,
-    ) async {
+    testWidgets('copy icon opens the copy previous week sheet', (tester) async {
       _useTallViewport(tester);
       final hub = _StubHub();
       await tester.pumpWidget(_buildMealsPage(hub));
@@ -539,6 +613,46 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Copy previous week?'), findsOneWidget);
+    });
+
+    testWidgets(
+      '+ opens the Add meal sheet with date, meal type, title and notes',
+      (tester) async {
+        _useTallViewport(tester);
+        final hub = _StubHub();
+        await tester.pumpWidget(_buildMealsPage(hub));
+        await tester.pump();
+        await tester.pump();
+
+        await tester.tap(find.byTooltip('Add meal'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Add meal'), findsOneWidget);
+        expect(find.text('Meal type'), findsOneWidget);
+        expect(find.text('Meal title'), findsOneWidget);
+        expect(find.text('Notes (optional)'), findsOneWidget);
+      },
+    );
+
+    testWidgets('+ sheet saves a meal via createMeal for the chosen type', (
+      tester,
+    ) async {
+      _useTallViewport(tester);
+      final hub = _StubHub();
+      await tester.pumpWidget(_buildMealsPage(hub));
+      await tester.pump();
+      await tester.pump();
+
+      await tester.tap(find.byTooltip('Add meal'));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byType(TextFormField).first, 'Pancakes');
+      await tester.tap(find.text('Save'));
+      await tester.pump();
+      await tester.pump();
+
+      expect(hub.createCalled, isTrue);
+      expect(hub.lastCreateTitle, 'Pancakes');
     });
   });
 }

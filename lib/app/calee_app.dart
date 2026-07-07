@@ -1,6 +1,7 @@
 // ignore_for_file: prefer_initializing_formals
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 
 import '../data/api/calee_hub_client.dart';
@@ -34,6 +35,10 @@ import '../features/onboarding/welcome_page.dart';
 import '../features/local_subscriber/local_calendar_subscription_repository.dart';
 import '../features/local_subscriber/local_subscriber_calendar_page.dart';
 import '../features/settings/calendar_collections_page.dart';
+import '../features/shopping/shopping_link_controller.dart';
+import '../features/shopping/shopping_link_intent.dart';
+import '../features/shopping/shopping_link_landing_page.dart';
+import '../features/shopping/shopping_page.dart';
 import '../ui/calee_design.dart';
 import 'calee_home_page.dart';
 
@@ -51,6 +56,7 @@ class CaleeAppTestDependencies {
     required this.displayActivationController,
     required this.localSubscriptionRepo,
     this.externalCalendarConnectedLinkController,
+    this.shoppingLinkController,
     this.deviceProfileDefaultsProvider,
   });
 
@@ -62,6 +68,7 @@ class CaleeAppTestDependencies {
   final LocalCalendarSubscriptionRepository localSubscriptionRepo;
   final ExternalCalendarConnectedLinkController?
   externalCalendarConnectedLinkController;
+  final ShoppingLinkController? shoppingLinkController;
   final DeviceProfileDefaultsProvider? deviceProfileDefaultsProvider;
 }
 
@@ -87,6 +94,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
   late final DisplaySetupLinkController _displaySetupLinkController;
   late final ExternalCalendarConnectedLinkController
   _externalCalendarConnectedLinkController;
+  late final ShoppingLinkController _shoppingLinkController;
   late final DisplayActivationController _displayActivationController;
   late final LocalCalendarSubscriptionRepository _localSubscriptionRepo;
   final _navigatorKey = GlobalKey<NavigatorState>();
@@ -97,6 +105,23 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
   // Calendar follow state
   bool _showingFollowSignIn = false;
   bool _processingFollowLink = false;
+
+  // Shopping link state (signed-out sign-in/create-account sub-screens,
+  // shown from ShoppingLinkLandingPage).
+  bool _showingShoppingSignIn = false;
+  bool _showingShoppingCreateAccount = false;
+  // Dedup guard so the same shopping target (e.g. redelivered by the
+  // platform, delivered via both the HTTPS app-link and the calee://
+  // custom scheme, or observed by more than one listener in the same tick)
+  // isn't pushed onto the navigator twice in quick succession. Keyed by
+  // ShoppingLinkIntent.canonicalKey rather than the exact source URI so the
+  // HTTPS and custom-scheme forms of the same weekStart dedup together.
+  String? _lastOpenedShoppingKey;
+  DateTime? _lastOpenedShoppingAt;
+  // True while a confirmed-but-not-yet-pushed ShoppingPage navigation is
+  // being retried (waiting for the navigator to attach) — guards against
+  // scheduling a second, overlapping retry loop for the same intent.
+  bool _shoppingPushInFlight = false;
 
   // Display setup state
   //
@@ -139,6 +164,8 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
       _externalCalendarConnectedLinkController =
           testDeps.externalCalendarConnectedLinkController ??
           ExternalCalendarConnectedLinkController();
+      _shoppingLinkController =
+          testDeps.shoppingLinkController ?? ShoppingLinkController();
       _displayActivationController = testDeps.displayActivationController;
       _localSubscriptionRepo = testDeps.localSubscriptionRepo;
     } else {
@@ -153,6 +180,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
       _displaySetupLinkController = DisplaySetupLinkController();
       _externalCalendarConnectedLinkController =
           ExternalCalendarConnectedLinkController();
+      _shoppingLinkController = ShoppingLinkController();
       _displayActivationController = DisplayActivationController(
         repository: DisplaySetupRepository(hubClient: _hubClient),
       );
@@ -160,6 +188,13 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
       unawaited(_followLinkController.init());
       unawaited(_displaySetupLinkController.init());
       unawaited(_externalCalendarConnectedLinkController.init());
+      unawaited(
+        _shoppingLinkController.init().then((_) {
+          // Safety net in case init() resolved a pending intent before this
+          // listener was attached below.
+          if (mounted) _maybeOpenPendingShoppingLink();
+        }),
+      );
     }
 
     _followLinkController.addListener(_onFollowLinkChanged);
@@ -167,6 +202,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
     _externalCalendarConnectedLinkController.addListener(
       _onExternalCalendarConnectedLinkChanged,
     );
+    _shoppingLinkController.addListener(_onShoppingLinkChanged);
     _sessionController.addListener(_onSessionChanged);
 
     _sessionController.restoreSession();
@@ -181,10 +217,12 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
     _externalCalendarConnectedLinkController.removeListener(
       _onExternalCalendarConnectedLinkChanged,
     );
+    _shoppingLinkController.removeListener(_onShoppingLinkChanged);
     _sessionController.removeListener(_onSessionChanged);
     _followLinkController.dispose();
     _displaySetupLinkController.dispose();
     _externalCalendarConnectedLinkController.dispose();
+    _shoppingLinkController.dispose();
     _displayActivationController.dispose();
     _sessionController.dispose();
     super.dispose();
@@ -274,6 +312,15 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
       return;
     }
 
+    // Shopping list intent (e.g. from the tablet's "Open on phone" link).
+    if (_shoppingLinkController.pendingIntent != null) {
+      if (kDebugMode) {
+        debugPrint('[CaleeApp] _onSessionChanged shopping branch called');
+      }
+      _maybeOpenPendingShoppingLink();
+      return;
+    }
+
     // Calendar follow intent.
     final followIntent = _followLinkController.pendingIntent;
     if (followIntent != null) {
@@ -345,6 +392,76 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
     } finally {
       _processingFollowLink = false;
     }
+  }
+
+  void _onShoppingLinkChanged() {
+    if (kDebugMode) debugPrint('[CaleeApp] _onShoppingLinkChanged called');
+    _maybeOpenPendingShoppingLink();
+  }
+
+  /// Single entry point for reacting to a pending shopping-link intent,
+  /// called from [_onShoppingLinkChanged], from the shopping branch of
+  /// [_onSessionChanged] (after session restore/sign-in), and as a safety
+  /// net right after [ShoppingLinkController.init] resolves.
+  ///
+  /// - No pending intent: no-op.
+  /// - Session still restoring: no-op; whichever of the above call sites
+  ///   fires next once the session outcome is known will re-evaluate.
+  /// - Signed in: hands off to [_openShoppingListForIntent], which only
+  ///   consumes the pending intent once the push is actually confirmed —
+  ///   see that method's doc for why.
+  /// - Definitely signed out: resets any stale sign-in/create-account
+  ///   sub-screen so the build() method's pending-intent check shows a
+  ///   fresh [ShoppingLinkLandingPage].
+  void _maybeOpenPendingShoppingLink() {
+    final intent = _shoppingLinkController.pendingIntent;
+    if (kDebugMode) {
+      debugPrint(
+        '[CaleeApp] _maybeOpenPendingShoppingLink: pendingIntent=$intent, '
+        'isSignedIn=${_sessionController.isSignedIn}, '
+        'isRestoringSession=${_sessionController.isRestoringSession}',
+      );
+    }
+    if (intent == null) return;
+
+    if (_sessionController.isRestoringSession) {
+      // Wait — re-evaluated once restore finishes and notifies listeners.
+      return;
+    }
+
+    if (!_sessionController.isSignedIn) {
+      // Reset any stale sub-screen so a fresh link always starts back at
+      // the landing page rather than a leftover sign-in/create-account form.
+      setState(() {
+        _showingShoppingSignIn = false;
+        _showingShoppingCreateAccount = false;
+      });
+      return;
+    }
+
+    final key = intent.canonicalKey;
+    final now = DateTime.now();
+    if (_lastOpenedShoppingKey == key &&
+        _lastOpenedShoppingAt != null &&
+        now.difference(_lastOpenedShoppingAt!) < const Duration(seconds: 5)) {
+      // Same shopping target (regardless of HTTPS vs. calee:// scheme)
+      // already opened moments ago — discard the redelivery.
+      _shoppingLinkController.clearPending();
+      return;
+    }
+
+    setState(() {
+      _showingShoppingSignIn = false;
+      _showingShoppingCreateAccount = false;
+    });
+
+    if (_shoppingPushInFlight) {
+      // A retry loop for this same intent is already chasing a navigator
+      // attach; don't start a second, overlapping one.
+      return;
+    }
+    _shoppingPushInFlight = true;
+    _openShoppingListForIntent(intent, key);
   }
 
   void _onExternalCalendarConnectedLinkChanged() {
@@ -630,6 +747,59 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
     });
   }
 
+  /// Pushes [ShoppingPage] for [intent], but only *consumes* the pending
+  /// intent (clearing it and recording [key] as opened) once the navigator
+  /// is actually confirmed available and the push is issued.
+  ///
+  /// If `_navigatorKey.currentState` is still null when the post-frame
+  /// callback fires (e.g. a very early cold-start frame before the
+  /// `Navigator` has attached), the pending intent is left untouched and
+  /// this retries on the next frame rather than silently dropping the
+  /// link — clearing the intent before a confirmed push was the root cause
+  /// of the original intermittent failures.
+  void _openShoppingListForIntent(ShoppingLinkIntent intent, String key) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        _shoppingPushInFlight = false;
+        return;
+      }
+      final navigator = _navigatorKey.currentState;
+      if (navigator == null) {
+        if (kDebugMode) {
+          debugPrint(
+            '[CaleeApp] _openShoppingListForIntent: navigator not yet '
+            'attached, retrying next frame',
+          );
+        }
+        WidgetsBinding.instance.scheduleFrame();
+        _openShoppingListForIntent(intent, key);
+        return;
+      }
+
+      _lastOpenedShoppingKey = key;
+      _lastOpenedShoppingAt = DateTime.now();
+      _shoppingLinkController.clearPending();
+      _shoppingPushInFlight = false;
+
+      if (kDebugMode) {
+        debugPrint(
+          '[CaleeApp] pushing ShoppingPage: '
+          'initialWeekStart=${intent.weekStart}, autoGenerate=false',
+        );
+      }
+      navigator.push(
+        MaterialPageRoute<void>(
+          builder: (_) => ShoppingPage(
+            hubClient: _hubClient,
+            accessToken: _sessionController.accessToken!,
+            initialWeekStart: intent.weekStart,
+            autoGenerate: false,
+          ),
+        ),
+      );
+    });
+  }
+
   Future<void> _checkAndShowOnboarding(String accountId) async {
     setState(() {
       _checkingOnboarding = true;
@@ -714,6 +884,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
           _sessionController,
           _followLinkController,
           _displaySetupLinkController,
+          _shoppingLinkController,
         ]),
         builder: (context, _) => _buildHome(),
       ),
@@ -734,6 +905,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
               _sessionController,
               _followLinkController,
               _displaySetupLinkController,
+              _shoppingLinkController,
             ]),
             builder: (context, _) => _buildHome(),
           ),
@@ -866,6 +1038,44 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
           onCancel: () {
             _followLinkController.clearPending();
           },
+        );
+      }
+
+      // ── Shopping link flows ───────────────────────────────────────────────────────────────
+
+      // Create account from shopping link landing.
+      if (_showingShoppingCreateAccount) {
+        return CreateAccountPage(
+          authRepository: _sessionController.repository,
+          onCancel: () => setState(() => _showingShoppingCreateAccount = false),
+          onAccountCreated: (result) async {
+            setState(() => _showingShoppingCreateAccount = false);
+            await _sessionController.completeSignIn(result);
+            unawaited(_sessionController.refreshBootstrap());
+          },
+        );
+      }
+
+      // Sign-in from shopping link landing (intent preserved).
+      if (_showingShoppingSignIn) {
+        return LoginPage(
+          authRepository: _sessionController.repository,
+          onCancel: () => setState(() => _showingShoppingSignIn = false),
+          onSignedIn: (result) async {
+            setState(() => _showingShoppingSignIn = false);
+            await _sessionController.completeSignIn(result);
+            unawaited(_sessionController.refreshBootstrap());
+          },
+        );
+      }
+
+      // Pending shopping intent → ask the user to sign in before opening it.
+      if (_shoppingLinkController.pendingIntent != null) {
+        return ShoppingLinkLandingPage(
+          onCreateAccount: () =>
+              setState(() => _showingShoppingCreateAccount = true),
+          onSignIn: () => setState(() => _showingShoppingSignIn = true),
+          onCancel: () => _shoppingLinkController.clearPending(),
         );
       }
 

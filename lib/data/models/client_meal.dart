@@ -36,6 +36,7 @@ class ClientMeal {
     this.notes,
     this.assignedPersonId,
     this.templateId,
+    this.starterTemplateId,
     this.recipeId,
     this.linkedEventId,
     this.difficulty,
@@ -66,6 +67,9 @@ class ClientMeal {
       templateId: json['templateId'] is int
           ? json['templateId'] as int
           : int.tryParse(json['templateId']?.toString() ?? ''),
+      starterTemplateId: json['starterTemplateId'] is int
+          ? json['starterTemplateId'] as int
+          : int.tryParse(json['starterTemplateId']?.toString() ?? ''),
       recipeId: json['recipeId'] is int
           ? json['recipeId'] as int
           : int.tryParse(json['recipeId']?.toString() ?? ''),
@@ -95,6 +99,7 @@ class ClientMeal {
   final String status;
   final String source;
   final int? templateId;
+  final int? starterTemplateId;
   final int? recipeId;
   final String? linkedEventId;
   final String? difficulty;
@@ -148,6 +153,7 @@ class ClientMealTemplate {
     required this.usageCount,
     this.icon,
     this.notes,
+    this.lastUsedAt,
   });
 
   factory ClientMealTemplate.fromJson(Map<String, dynamic> json) {
@@ -167,6 +173,7 @@ class ClientMealTemplate {
       usageCount: json['usageCount'] is int
           ? json['usageCount'] as int
           : int.tryParse(json['usageCount']?.toString() ?? '') ?? 0,
+      lastUsedAt: json['lastUsedAt'] as String?,
     );
   }
 
@@ -181,6 +188,7 @@ class ClientMealTemplate {
   final bool lunchboxFriendly;
   final bool isFavourite;
   final int usageCount;
+  final String? lastUsedAt;
 }
 
 class ClientMealCopyWeekResult {
