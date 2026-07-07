@@ -519,6 +519,153 @@ void main() {
       expect(groups['todoToday'], [baseA]);
       expect(groups['doneToday'], [logB]);
     });
+
+    // exact-duplicate row collapsing (Today duplication regression) ────────
+
+    test('exact duplicate active rows for the same occurrence collapse into '
+        'one todoToday row', () {
+      final row = _chore(
+        id: 'portal:abc123:2026-06-01',
+        choreUid: 'abc123',
+        baseChoreId: 'portal:abc123',
+        occurrenceDate: '2026-06-01',
+        section: 'todoToday',
+      );
+      final duplicateRow = _chore(
+        id: 'portal:abc123:2026-06-01-dup',
+        choreUid: 'abc123',
+        baseChoreId: 'portal:abc123',
+        occurrenceDate: '2026-06-01',
+        section: 'todoToday',
+      );
+
+      final groups = groupChoresBySection([row, duplicateRow], _monday);
+
+      expect(groups['todoToday'], hasLength(1));
+    });
+
+    test('14 raw rows that are 7 occurrences duplicated once each collapse to '
+        '7 in todoToday', () {
+      final chores = <ClientChore>[
+        for (var i = 0; i < 7; i++) ...[
+          _chore(
+            id: 'portal:chore-$i:2026-06-01',
+            choreUid: 'chore-$i',
+            baseChoreId: 'portal:chore-$i',
+            occurrenceDate: '2026-06-01',
+            section: 'todoToday',
+            title: 'Chore $i',
+          ),
+          _chore(
+            id: 'portal:chore-$i:2026-06-01-dup',
+            choreUid: 'chore-$i',
+            baseChoreId: 'portal:chore-$i',
+            occurrenceDate: '2026-06-01',
+            section: 'todoToday',
+            title: 'Chore $i',
+          ),
+        ],
+      ];
+
+      final groups = groupChoresBySection(chores, _monday);
+
+      expect(groups['todoToday'], hasLength(7));
+    });
+
+    test('two different chores that merely share a title and assignee — '
+        'different baseChoreId — are both kept, not collapsed', () {
+      final a = _chore(
+        id: 'a',
+        choreUid: 'uid-a',
+        baseChoreId: 'portal:uid-a',
+        section: 'todoToday',
+        assigneeName: 'Mia',
+        title: 'Feed the dog',
+      );
+      final b = _chore(
+        id: 'b',
+        choreUid: 'uid-b',
+        baseChoreId: 'portal:uid-b',
+        section: 'todoToday',
+        assigneeName: 'Mia',
+        title: 'Feed the dog',
+      );
+
+      final groups = groupChoresBySection([a, b], _monday);
+
+      expect(groups['todoToday'], hasLength(2));
+    });
+  });
+
+  // ── dedupeChoreOccurrences ───────────────────────────────────────────────
+
+  group('dedupeChoreOccurrences', () {
+    test(
+      'drops exact repeats sharing action id, occurrence date, and kind',
+      () {
+        final row = _chore(
+          id: 'x',
+          baseChoreId: 'portal:abc',
+          occurrenceDate: '2026-06-01',
+        );
+        final repeat = _chore(
+          id: 'x-2',
+          baseChoreId: 'portal:abc',
+          occurrenceDate: '2026-06-01',
+        );
+
+        final result = dedupeChoreOccurrences([row, repeat]);
+
+        expect(result, hasLength(1));
+        expect(result.single.id, 'x');
+      },
+    );
+
+    test('rows with no resolvable action id are never deduped', () {
+      final a = _chore(id: '');
+      final b = _chore(id: '');
+
+      final result = dedupeChoreOccurrences([a, b]);
+
+      expect(result, hasLength(2));
+    });
+
+    test('keeps active rows for the same chore on different dates', () {
+      final today = _chore(
+        id: 'a1',
+        baseChoreId: 'portal:abc',
+        occurrenceDate: '2026-06-01',
+      );
+      final tomorrow = _chore(
+        id: 'a2',
+        baseChoreId: 'portal:abc',
+        occurrenceDate: '2026-06-02',
+      );
+
+      final result = dedupeChoreOccurrences([today, tomorrow]);
+
+      expect(result, hasLength(2));
+    });
+
+    test('keeps a baseChore row and a completionLog row for the same date '
+        '(different kind — handled separately by section suppression)', () {
+      final base = _chore(
+        id: 'base-1',
+        baseChoreId: 'portal:abc',
+        occurrenceDate: '2026-06-01',
+        kind: 'baseChore',
+      );
+      final log = _chore(
+        id: 'log-1',
+        baseChoreId: 'portal:abc',
+        occurrenceDate: '2026-06-01',
+        kind: 'completionLog',
+      );
+
+      final result = dedupeChoreOccurrences([base, log]);
+
+      expect(result, hasLength(2));
+    });
   });
 
   // ── compareChores ────────────────────────────────────────────────────────

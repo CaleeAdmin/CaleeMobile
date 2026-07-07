@@ -60,6 +60,7 @@ ClientContext _household() => const ClientContext(
 ClientChore _chore({
   String id = 'chore-1',
   String? choreUid = 'uid-1',
+  String? baseChoreId,
   String? occurrenceDate,
   String section = 'todoToday',
   bool completedToday = false,
@@ -76,7 +77,7 @@ ClientChore _chore({
   kind: 'baseChore',
   choreUid: choreUid,
   parentChoreUid: null,
-  baseChoreId: null,
+  baseChoreId: baseChoreId,
   occurrenceDate: occurrenceDate,
   completionLogId: null,
   completedToday: completedToday,
@@ -279,6 +280,39 @@ class _SuccessHubClient extends CaleeHubClient {
   }) => Future.value(_emptyPeopleList());
 }
 
+// A CaleeHubClient whose /chores response contains an exact duplicate row
+// (same baseChoreId/choreUid, same occurrence) alongside a distinct chore —
+// reproducing a backend range-expansion duplicate without a live backend.
+class _DuplicateChoresHubClient extends CaleeHubClient {
+  @override
+  Future<ClientCalendarList> calendars({required String accessToken}) =>
+      Future.value(_emptyCalendarList());
+
+  @override
+  Future<ClientChoreList> chores({
+    required String accessToken,
+    required String from,
+    required String to,
+  }) => Future.value(
+    ClientChoreList(
+      from: from,
+      to: to,
+      chores: [
+        _chore(id: 'a1', choreUid: 'uid-a', baseChoreId: 'portal:uid-a'),
+        _chore(id: 'a1-dup', choreUid: 'uid-a', baseChoreId: 'portal:uid-a'),
+        _chore(id: 'b1', choreUid: 'uid-b', baseChoreId: 'portal:uid-b'),
+      ],
+    ),
+  );
+
+  @override
+  Future<ClientPersonList> people({
+    required String accessToken,
+    required String householdId,
+    bool includeArchived = false,
+  }) => Future.value(_emptyPeopleList());
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 ChoresRepository _repositoryWith(CaleeHubClient client) => ChoresRepository(
@@ -361,6 +395,22 @@ void main() {
       expect(controller.isLoading, isFalse);
       expect(controller.error, isNotNull);
       expect(controller.overview, isNull);
+
+      controller.dispose();
+    });
+
+    test('exact duplicate rows returned by the backend are collapsed before '
+        'being stored on overview (Today duplication regression)', () async {
+      final controller = ChoresController(
+        repository: _repositoryWith(_DuplicateChoresHubClient()),
+      );
+
+      await controller.load();
+
+      final chores = controller.overview!.choreList.chores;
+      expect(chores, hasLength(2));
+      expect(chores.map((c) => c.id), containsAll(['a1', 'b1']));
+      expect(chores.map((c) => c.id), isNot(contains('a1-dup')));
 
       controller.dispose();
     });
