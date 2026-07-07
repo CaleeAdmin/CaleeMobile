@@ -121,6 +121,44 @@ void main() {
     });
   });
 
+  group('ShoppingLinkIntent.canonicalKey', () {
+    test('same weekStart dedups across HTTPS and calee:// schemes', () {
+      final https = ShoppingLinkController.parseUri(
+        Uri.parse(
+          'https://hub.calee.com.au/mobile/shopping?weekStart=2026-07-06',
+        ),
+      )!;
+      final custom = ShoppingLinkController.parseUri(
+        Uri.parse('calee://shopping?weekStart=2026-07-06'),
+      )!;
+
+      expect(https.canonicalKey, custom.canonicalKey);
+    });
+
+    test('different weekStart values produce different keys', () {
+      final week1 = ShoppingLinkController.parseUri(
+        Uri.parse('calee://shopping?weekStart=2026-07-06'),
+      )!;
+      final week2 = ShoppingLinkController.parseUri(
+        Uri.parse('calee://shopping?weekStart=2026-07-13'),
+      )!;
+
+      expect(week1.canonicalKey, isNot(week2.canonicalKey));
+    });
+
+    test('missing weekStart resolves to the same "current" key regardless '
+        'of scheme', () {
+      final https = ShoppingLinkController.parseUri(
+        Uri.parse('https://hub.calee.com.au/mobile/shopping'),
+      )!;
+      final custom = ShoppingLinkController.parseUri(
+        Uri.parse('calee://shopping'),
+      )!;
+
+      expect(https.canonicalKey, custom.canonicalKey);
+    });
+  });
+
   group('ShoppingLinkController', () {
     late ShoppingLinkController controller;
 

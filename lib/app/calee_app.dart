@@ -1,6 +1,7 @@
 // ignore_for_file: prefer_initializing_formals
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 
 import '../data/api/calee_hub_client.dart';
@@ -109,11 +110,18 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
   // shown from ShoppingLinkLandingPage).
   bool _showingShoppingSignIn = false;
   bool _showingShoppingCreateAccount = false;
-  // Dedup guard so the same shopping intent (e.g. redelivered by the
-  // platform, or observed by more than one listener in the same tick) isn't
-  // pushed onto the navigator twice in quick succession.
-  Uri? _lastOpenedShoppingUri;
+  // Dedup guard so the same shopping target (e.g. redelivered by the
+  // platform, delivered via both the HTTPS app-link and the calee://
+  // custom scheme, or observed by more than one listener in the same tick)
+  // isn't pushed onto the navigator twice in quick succession. Keyed by
+  // ShoppingLinkIntent.canonicalKey rather than the exact source URI so the
+  // HTTPS and custom-scheme forms of the same weekStart dedup together.
+  String? _lastOpenedShoppingKey;
   DateTime? _lastOpenedShoppingAt;
+  // True while a confirmed-but-not-yet-pushed ShoppingPage navigation is
+  // being retried (waiting for the navigator to attach) — guards against
+  // scheduling a second, overlapping retry loop for the same intent.
+  bool _shoppingPushInFlight = false;
 
   // Display setup state
   //
@@ -306,7 +314,9 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
 
     // Shopping list intent (e.g. from the tablet's "Open on phone" link).
     if (_shoppingLinkController.pendingIntent != null) {
-      debugPrint('[CaleeApp] _onSessionChanged shopping branch called');
+      if (kDebugMode) {
+        debugPrint('[CaleeApp] _onSessionChanged shopping branch called');
+      }
       _maybeOpenPendingShoppingLink();
       return;
     }
@@ -385,7 +395,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
   }
 
   void _onShoppingLinkChanged() {
-    debugPrint('[CaleeApp] _onShoppingLinkChanged called');
+    if (kDebugMode) debugPrint('[CaleeApp] _onShoppingLinkChanged called');
     _maybeOpenPendingShoppingLink();
   }
 
@@ -397,18 +407,21 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
   /// - No pending intent: no-op.
   /// - Session still restoring: no-op; whichever of the above call sites
   ///   fires next once the session outcome is known will re-evaluate.
-  /// - Signed in: clears the pending intent and pushes [ShoppingPage] after
-  ///   the current frame.
+  /// - Signed in: hands off to [_openShoppingListForIntent], which only
+  ///   consumes the pending intent once the push is actually confirmed —
+  ///   see that method's doc for why.
   /// - Definitely signed out: resets any stale sign-in/create-account
   ///   sub-screen so the build() method's pending-intent check shows a
   ///   fresh [ShoppingLinkLandingPage].
   void _maybeOpenPendingShoppingLink() {
     final intent = _shoppingLinkController.pendingIntent;
-    debugPrint(
-      '[CaleeApp] _maybeOpenPendingShoppingLink: pendingIntent=$intent, '
-      'isSignedIn=${_sessionController.isSignedIn}, '
-      'isRestoringSession=${_sessionController.isRestoringSession}',
-    );
+    if (kDebugMode) {
+      debugPrint(
+        '[CaleeApp] _maybeOpenPendingShoppingLink: pendingIntent=$intent, '
+        'isSignedIn=${_sessionController.isSignedIn}, '
+        'isRestoringSession=${_sessionController.isRestoringSession}',
+      );
+    }
     if (intent == null) return;
 
     if (_sessionController.isRestoringSession) {
@@ -416,30 +429,39 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
       return;
     }
 
-    if (_sessionController.isSignedIn) {
-      final now = DateTime.now();
-      if (_lastOpenedShoppingUri == intent.sourceUri &&
-          _lastOpenedShoppingAt != null &&
-          now.difference(_lastOpenedShoppingAt!) < const Duration(seconds: 5)) {
-        return;
-      }
-      _lastOpenedShoppingUri = intent.sourceUri;
-      _lastOpenedShoppingAt = now;
-
-      _shoppingLinkController.clearPending();
-      setState(() {
-        _showingShoppingSignIn = false;
-        _showingShoppingCreateAccount = false;
-      });
-      _openShoppingListForIntent(intent);
-    } else {
+    if (!_sessionController.isSignedIn) {
       // Reset any stale sub-screen so a fresh link always starts back at
       // the landing page rather than a leftover sign-in/create-account form.
       setState(() {
         _showingShoppingSignIn = false;
         _showingShoppingCreateAccount = false;
       });
+      return;
     }
+
+    final key = intent.canonicalKey;
+    final now = DateTime.now();
+    if (_lastOpenedShoppingKey == key &&
+        _lastOpenedShoppingAt != null &&
+        now.difference(_lastOpenedShoppingAt!) < const Duration(seconds: 5)) {
+      // Same shopping target (regardless of HTTPS vs. calee:// scheme)
+      // already opened moments ago — discard the redelivery.
+      _shoppingLinkController.clearPending();
+      return;
+    }
+
+    setState(() {
+      _showingShoppingSignIn = false;
+      _showingShoppingCreateAccount = false;
+    });
+
+    if (_shoppingPushInFlight) {
+      // A retry loop for this same intent is already chasing a navigator
+      // attach; don't start a second, overlapping one.
+      return;
+    }
+    _shoppingPushInFlight = true;
+    _openShoppingListForIntent(intent, key);
   }
 
   void _onExternalCalendarConnectedLinkChanged() {
@@ -725,18 +747,47 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
     });
   }
 
-  void _openShoppingListForIntent(ShoppingLinkIntent intent) {
-    debugPrint(
-      '[CaleeApp] _openShoppingListForIntent called: '
-      'weekStart=${intent.weekStart}',
-    );
+  /// Pushes [ShoppingPage] for [intent], but only *consumes* the pending
+  /// intent (clearing it and recording [key] as opened) once the navigator
+  /// is actually confirmed available and the push is issued.
+  ///
+  /// If `_navigatorKey.currentState` is still null when the post-frame
+  /// callback fires (e.g. a very early cold-start frame before the
+  /// `Navigator` has attached), the pending intent is left untouched and
+  /// this retries on the next frame rather than silently dropping the
+  /// link — clearing the intent before a confirmed push was the root cause
+  /// of the original intermittent failures.
+  void _openShoppingListForIntent(ShoppingLinkIntent intent, String key) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      debugPrint(
-        '[CaleeApp] pushing ShoppingPage: '
-        'initialWeekStart=${intent.weekStart}, autoGenerate=false',
-      );
-      _navigatorKey.currentState?.push(
+      if (!mounted) {
+        _shoppingPushInFlight = false;
+        return;
+      }
+      final navigator = _navigatorKey.currentState;
+      if (navigator == null) {
+        if (kDebugMode) {
+          debugPrint(
+            '[CaleeApp] _openShoppingListForIntent: navigator not yet '
+            'attached, retrying next frame',
+          );
+        }
+        WidgetsBinding.instance.scheduleFrame();
+        _openShoppingListForIntent(intent, key);
+        return;
+      }
+
+      _lastOpenedShoppingKey = key;
+      _lastOpenedShoppingAt = DateTime.now();
+      _shoppingLinkController.clearPending();
+      _shoppingPushInFlight = false;
+
+      if (kDebugMode) {
+        debugPrint(
+          '[CaleeApp] pushing ShoppingPage: '
+          'initialWeekStart=${intent.weekStart}, autoGenerate=false',
+        );
+      }
+      navigator.push(
         MaterialPageRoute<void>(
           builder: (_) => ShoppingPage(
             hubClient: _hubClient,
