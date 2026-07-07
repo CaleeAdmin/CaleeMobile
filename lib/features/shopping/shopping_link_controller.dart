@@ -16,28 +16,39 @@ class ShoppingLinkController extends ChangeNotifier {
   StreamSubscription<Uri>? _linkSubscription;
 
   Future<void> init() async {
+    debugPrint('[ShoppingLinkController] init started');
     try {
       final initialUri = await _appLinks.getInitialLink();
+      debugPrint('[ShoppingLinkController] getInitialLink result: $initialUri');
       if (initialUri != null) {
         _handleUri(initialUri);
       }
-    } catch (_) {
+    } catch (error) {
       // Platform may not provide an initial link — this is expected on some platforms.
+      debugPrint('[ShoppingLinkController] getInitialLink error: $error');
     }
 
     _linkSubscription = _appLinks.uriLinkStream.listen(
-      _handleUri,
-      onError: (_) {},
+      (uri) {
+        debugPrint('[ShoppingLinkController] uriLinkStream event: $uri');
+        _handleUri(uri);
+      },
+      onError: (error) {
+        debugPrint('[ShoppingLinkController] uriLinkStream error: $error');
+      },
     );
   }
 
   void _handleUri(Uri uri) {
     final intent = parseUri(uri);
+    debugPrint('[ShoppingLinkController] parseUri result: $intent');
     if (intent == null) return;
     if (_disposed) return;
 
     pendingIntent = intent;
+    debugPrint('[ShoppingLinkController] pendingIntent set: $intent');
     notifyListeners();
+    debugPrint('[ShoppingLinkController] notifyListeners called');
   }
 
   /// Exposes [_handleUri] for unit tests without needing app_links platform channels.

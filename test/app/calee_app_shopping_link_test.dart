@@ -385,4 +385,123 @@ void main() {
       expect(find.text('Sign in to open your shopping list'), findsNothing);
     },
   );
+
+  testWidgets(
+    'https://hub.calee.com.au/mobile/shopping opens ShoppingPage when '
+    'signed in',
+    (tester) async {
+      final hub = _StubHub();
+      final session = _FakeSessionController();
+      final shoppingLink = _FakeShoppingLinkController();
+
+      await tester.pumpWidget(
+        CaleeApp.forTesting(
+          testDeps: _makeDeps(
+            hub: hub,
+            session: session,
+            shoppingLink: shoppingLink,
+          ),
+        ),
+      );
+
+      session.finishRestore(signedIn: true);
+      await tester.pump();
+
+      shoppingLink.injectIntent(
+        weekStart: DateTime(2026, 7, 6),
+        sourceUri: Uri.parse(
+          'https://hub.calee.com.au/mobile/shopping?weekStart=2026-07-06',
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byType(ShoppingPage), findsOneWidget);
+      expect(hub.lastLoadFrom, '2026-07-06');
+      expect(hub.generateCalled, isFalse);
+    },
+  );
+
+  testWidgets(
+    'warm app already signed in: a second, distinct shopping link opens '
+    'ShoppingPage again',
+    (tester) async {
+      final hub = _StubHub();
+      final session = _FakeSessionController();
+      final shoppingLink = _FakeShoppingLinkController();
+
+      await tester.pumpWidget(
+        CaleeApp.forTesting(
+          testDeps: _makeDeps(
+            hub: hub,
+            session: session,
+            shoppingLink: shoppingLink,
+          ),
+        ),
+      );
+
+      session.finishRestore(signedIn: true);
+      await tester.pump();
+
+      shoppingLink.injectIntent(
+        weekStart: DateTime(2026, 7, 6),
+        sourceUri: Uri.parse('calee://shopping?weekStart=2026-07-06'),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(ShoppingPage), findsOneWidget);
+      expect(hub.lastLoadFrom, '2026-07-06');
+
+      // Simulate a second, distinct deep link arriving while the app is warm
+      // (already running and signed in) — this pushes a second ShoppingPage
+      // on top of the first rather than being ignored.
+      shoppingLink.injectIntent(
+        weekStart: DateTime(2026, 7, 13),
+        sourceUri: Uri.parse('calee://shopping?weekStart=2026-07-13'),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byType(ShoppingPage, skipOffstage: false), findsNWidgets(2));
+      expect(hub.lastLoadFrom, '2026-07-13');
+    },
+  );
+
+  testWidgets(
+    'the same shopping intent redelivered immediately is not pushed twice',
+    (tester) async {
+      final hub = _StubHub();
+      final session = _FakeSessionController();
+      final shoppingLink = _FakeShoppingLinkController();
+
+      await tester.pumpWidget(
+        CaleeApp.forTesting(
+          testDeps: _makeDeps(
+            hub: hub,
+            session: session,
+            shoppingLink: shoppingLink,
+          ),
+        ),
+      );
+
+      session.finishRestore(signedIn: true);
+      await tester.pump();
+
+      final sourceUri = Uri.parse('calee://shopping?weekStart=2026-07-06');
+      shoppingLink.injectIntent(
+        weekStart: DateTime(2026, 7, 6),
+        sourceUri: sourceUri,
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(ShoppingPage), findsOneWidget);
+
+      // Simulate the platform redelivering the exact same link a moment
+      // later (e.g. app_links replaying the initial link on top of a fresh
+      // uriLinkStream event) — this must not push a second ShoppingPage.
+      shoppingLink.injectIntent(
+        weekStart: DateTime(2026, 7, 6),
+        sourceUri: sourceUri,
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byType(ShoppingPage), findsOneWidget);
+    },
+  );
 }
