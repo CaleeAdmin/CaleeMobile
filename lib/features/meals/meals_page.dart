@@ -8,6 +8,7 @@ import '../../ui/calee_design.dart';
 import '../shopping/shopping_page.dart';
 import 'meals_controller.dart';
 import 'meals_repository.dart';
+import 'saved_meals_page.dart';
 
 const _kMealTypeLabels = {
   'breakfast': 'Breakfast',
@@ -41,6 +42,30 @@ String _fmt(DateTime d) {
   final m = d.month.toString().padLeft(2, '0');
   final day = d.day.toString().padLeft(2, '0');
   return '$y-$m-$day';
+}
+
+String _formatDateLabel(String date) {
+  final parts = date.split('-');
+  if (parts.length != 3) return date;
+  final d = int.tryParse(parts[2]) ?? 0;
+  final m = int.tryParse(parts[1]) ?? 0;
+  const months = [
+    '',
+    'January',
+    'February',
+    'March',
+    'April',
+    'May',
+    'June',
+    'July',
+    'August',
+    'September',
+    'October',
+    'November',
+    'December',
+  ];
+  final month = m >= 1 && m <= 12 ? months[m] : '';
+  return '$d $month ${parts[0]}';
 }
 
 String _weekRangeLabel(DateTime start, DateTime end) {
@@ -141,6 +166,15 @@ class _MealsPageState extends State<MealsPage> {
                 tooltip: 'Search meals',
               ),
               IconButton(
+                onPressed: _openSavedMeals,
+                icon: const Icon(Icons.bookmark_outline),
+                iconSize: 22,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                color: CaleeColors.primary,
+                tooltip: 'Saved meals',
+              ),
+              IconButton(
                 onPressed: _showShoppingActions,
                 icon: const Icon(Icons.shopping_cart_outlined),
                 iconSize: 22,
@@ -216,6 +250,12 @@ class _MealsPageState extends State<MealsPage> {
     ];
   }
 
+  // There is no non-mutating way to ask the backend "does a shopping list
+  // exist for this week?" — the current-list endpoint gets-or-creates one,
+  // so probing it here just to decide whether to show "Open shopping list"
+  // would create an empty list as a side effect. Always show both actions
+  // instead; ShoppingPage renders a clean empty state when there's nothing
+  // to show yet.
   void _showShoppingActions() {
     CaleeActionSheet.show(
       context: context,
@@ -224,33 +264,44 @@ class _MealsPageState extends State<MealsPage> {
         CaleeAction(
           label: 'Build grocery list',
           icon: Icons.shopping_cart_outlined,
-          onTap: _openShoppingList,
+          onTap: () => _openShoppingList(autoGenerate: true),
         ),
         CaleeAction(
           label: 'Open shopping list',
           icon: Icons.list_alt_outlined,
-          onTap: _openShoppingList,
+          onTap: () => _openShoppingList(autoGenerate: false),
         ),
       ],
     );
   }
 
   void _openAddMealSheet() {
-    final today = DateTime.now();
-    _onMealRowTap(_fmt(today), 'dinner', null);
+    AddMealSheet.show(context: context, controller: _controller);
+  }
+
+  Future<void> _openSavedMeals() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => SavedMealsPage(
+          hubClient: widget.hubClient,
+          accessToken: widget.accessToken,
+          controller: _controller,
+        ),
+      ),
+    );
   }
 
   // Shopping lists are a sub-feature of meal planning (see ClientBootstrap
   // .supportsMeals), so the Shopping page is reached from here rather than
   // its own bottom-nav tab — Today/Calendar/Tasks/Chores/Meals/Settings
   // already fill the bar for family households with chores enabled.
-  Future<void> _openShoppingList() async {
+  Future<void> _openShoppingList({required bool autoGenerate}) async {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => ShoppingPage(
           hubClient: widget.hubClient,
           accessToken: widget.accessToken,
-          autoGenerate: true,
+          autoGenerate: autoGenerate,
           initialWeekStart: _controller.weekStart,
           initialWeekEnd: _controller.weekEnd,
         ),
@@ -566,30 +617,6 @@ class _MealFormSheetState extends State<MealFormSheet> {
     super.dispose();
   }
 
-  String _formatDateLabel(String date) {
-    final parts = date.split('-');
-    if (parts.length != 3) return date;
-    final d = int.tryParse(parts[2]) ?? 0;
-    final m = int.tryParse(parts[1]) ?? 0;
-    final months = [
-      '',
-      'January',
-      'February',
-      'March',
-      'April',
-      'May',
-      'June',
-      'July',
-      'August',
-      'September',
-      'October',
-      'November',
-      'December',
-    ];
-    final month = m >= 1 && m <= 12 ? months[m] : '';
-    return '$d $month ${parts[0]}';
-  }
-
   Future<void> _save() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
     final title = _titleController.text.trim();
@@ -800,6 +827,189 @@ class _MealFormSheetState extends State<MealFormSheet> {
 }
 
 // ─────────────────────────────────────────────
+// AddMealSheet
+// ─────────────────────────────────────────────
+
+/// Bottom sheet opened from the Meals page top-bar "+" button. Lets the user
+/// pick a date and meal type in addition to the title/notes fields that
+/// [MealFormSheet] already offers, then saves through the same
+/// [MealsController.createMeal] path.
+class AddMealSheet extends StatefulWidget {
+  const AddMealSheet({required this.controller, super.key});
+
+  final MealsController controller;
+
+  static Future<void> show({
+    required BuildContext context,
+    required MealsController controller,
+  }) {
+    return CaleeBottomSheet.show<void>(
+      context: context,
+      title: 'Add meal',
+      child: AddMealSheet(controller: controller),
+    );
+  }
+
+  @override
+  State<AddMealSheet> createState() => _AddMealSheetState();
+}
+
+class _AddMealSheetState extends State<AddMealSheet> {
+  final _formKey = GlobalKey<FormState>();
+  final _titleController = TextEditingController();
+  final _notesController = TextEditingController();
+  late DateTime _date;
+  String _mealType = 'dinner';
+  bool _isSaving = false;
+  String? _saveError;
+
+  @override
+  void initState() {
+    super.initState();
+    _date = DateTime.now();
+  }
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _notesController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _date,
+      firstDate: DateTime(_date.year - 1),
+      lastDate: DateTime(_date.year + 5),
+    );
+    if (picked != null && mounted) {
+      setState(() => _date = picked);
+    }
+  }
+
+  Future<void> _save() async {
+    if (_isSaving || !(_formKey.currentState?.validate() ?? false)) return;
+    final title = _titleController.text.trim();
+    final notes = _notesController.text.trim();
+
+    setState(() {
+      _isSaving = true;
+      _saveError = null;
+    });
+
+    try {
+      await widget.controller.createMeal(
+        mealDate: _fmt(_date),
+        mealType: _mealType,
+        title: title,
+        notes: notes.isEmpty ? null : notes,
+      );
+      if (mounted) Navigator.of(context).pop();
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isSaving = false;
+          _saveError = e.toString();
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Form(
+      key: _formKey,
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            CaleeSection(
+              children: [
+                CaleeSectionPickerRow(
+                  label: 'Date',
+                  value: _formatDateLabel(_fmt(_date)),
+                  onTap: _isSaving ? null : _pickDate,
+                  enabled: !_isSaving,
+                ),
+                CaleeSectionDropdownRow<String>(
+                  label: 'Meal type',
+                  value: _mealType,
+                  enabled: !_isSaving,
+                  items: _kMealTypeOrder
+                      .map(
+                        (type) => DropdownMenuItem(
+                          value: type,
+                          child: Text(_kMealTypeLabels[type] ?? type),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (value) {
+                    if (value != null) setState(() => _mealType = value);
+                  },
+                ),
+              ],
+            ),
+            const SizedBox(height: CaleeSpacing.md),
+            CaleeSection(
+              children: [
+                CaleeSectionTextFormField(
+                  controller: _titleController,
+                  hintText: 'Meal title',
+                  enabled: !_isSaving,
+                  autofocus: true,
+                  textInputAction: TextInputAction.next,
+                  validator: (v) {
+                    if (v == null || v.trim().isEmpty) {
+                      return 'Please enter a meal title';
+                    }
+                    return null;
+                  },
+                ),
+                CaleeSectionTextFormField(
+                  controller: _notesController,
+                  hintText: 'Notes (optional)',
+                  enabled: !_isSaving,
+                  maxLines: 3,
+                  minLines: 1,
+                  textInputAction: TextInputAction.done,
+                ),
+              ],
+            ),
+            if (_saveError != null) ...[
+              const SizedBox(height: CaleeSpacing.sm),
+              Text(
+                _saveError!,
+                style: const TextStyle(
+                  fontSize: 13,
+                  color: CaleeColors.destructive,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+            const SizedBox(height: CaleeSpacing.md),
+            FilledButton(
+              onPressed: _isSaving ? null : _save,
+              child: _isSaving
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Text('Save'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
 // PickDinnerSheet
 // ─────────────────────────────────────────────
 
@@ -869,7 +1079,12 @@ class _PickDinnerSheetState extends State<PickDinnerSheet> {
     );
   }
 
-  Future<void> _selectTemplate(String name, String? notes) async {
+  Future<void> _selectTemplate(
+    String name,
+    String? notes, {
+    int? templateId,
+    int? starterTemplateId,
+  }) async {
     if (_isCreating) return;
     setState(() {
       _isCreating = true;
@@ -882,6 +1097,8 @@ class _PickDinnerSheetState extends State<PickDinnerSheet> {
         mealType: 'dinner',
         title: name,
         notes: notes,
+        templateId: templateId,
+        starterTemplateId: starterTemplateId,
       );
       if (mounted) Navigator.of(context).pop();
     } catch (e) {
@@ -965,8 +1182,27 @@ class _PickDinnerSheetState extends State<PickDinnerSheet> {
         style: const TextStyle(fontSize: 18),
       ),
       title: template.name,
+      subtitle: savedMealMetadata(template),
+      trailing: template.isFavourite
+          ? const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.star, size: 18, color: CaleeColors.primary),
+                SizedBox(width: CaleeSpacing.xs),
+                Icon(
+                  Icons.chevron_right,
+                  size: 20,
+                  color: CaleeColors.textTertiary,
+                ),
+              ],
+            )
+          : null,
       enabled: !_isCreating,
-      onTap: () => _selectTemplate(template.name, template.notes),
+      onTap: () => _selectTemplate(
+        template.name,
+        template.notes,
+        templateId: template.id,
+      ),
     );
   }
 
@@ -982,7 +1218,11 @@ class _PickDinnerSheetState extends State<PickDinnerSheet> {
       ),
       title: template.name,
       enabled: !_isCreating,
-      onTap: () => _selectTemplate(template.name, template.notes),
+      onTap: () => _selectTemplate(
+        template.name,
+        template.notes,
+        starterTemplateId: template.id,
+      ),
     );
   }
 
@@ -1197,7 +1437,7 @@ class _MealSearchSheetState extends State<_MealSearchSheet> {
                     children: [
                       Expanded(
                         child: Text(
-                          'Search meals',
+                          'Search this week',
                           style: theme.textTheme.titleMedium?.copyWith(
                             fontWeight: FontWeight.w600,
                             color: CaleeColors.textPrimary,
@@ -1216,7 +1456,7 @@ class _MealSearchSheetState extends State<_MealSearchSheet> {
                     autofocus: true,
                     textInputAction: TextInputAction.search,
                     decoration: InputDecoration(
-                      hintText: 'Search by meal title…',
+                      hintText: 'Search this week by meal title…',
                       prefixIcon: const Icon(Icons.search_outlined),
                       suffixIcon: _controller.text.isNotEmpty
                           ? IconButton(

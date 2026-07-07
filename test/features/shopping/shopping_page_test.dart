@@ -39,6 +39,7 @@ class _StubHub extends CaleeHubClient {
   String? lastLoadTo;
   String? lastGenerateFrom;
   String? lastGenerateTo;
+  String? lastGenerateMode;
 
   @override
   Future<ClientShoppingList> currentShoppingList({
@@ -63,6 +64,7 @@ class _StubHub extends CaleeHubClient {
     generateCalled = true;
     lastGenerateFrom = from;
     lastGenerateTo = to;
+    lastGenerateMode = mode;
     return _shoppingList!;
   }
 
@@ -277,6 +279,31 @@ void main() {
       final textWidget = tester.widget<Text>(find.text('Milk'));
       expect(textWidget.style?.decoration, isNot(TextDecoration.lineThrough));
     });
+
+    testWidgets(
+      'shows a family-friendly message, not just the raw backend error, '
+      'when toggling fails',
+      (tester) async {
+        final hub = _StubHub(shoppingList: _list())..updateShouldFail = true;
+
+        await tester.pumpWidget(_buildPage(hub));
+        await tester.pump();
+        await tester.pump();
+
+        await tester.tap(find.text('Milk'));
+        await tester.pump();
+        await tester.pump();
+
+        // Never show the bare backend message with no friendly framing.
+        expect(find.text('Server error'), findsNothing);
+        // The friendly message is always present (a debug-only suffix with
+        // CaleeHubException.debugSummary may follow it in debug builds).
+        expect(
+          find.textContaining('Something went wrong. Please try again.'),
+          findsOneWidget,
+        );
+      },
+    );
   });
 
   group('ShoppingPage — generate', () {
@@ -402,6 +429,61 @@ void main() {
         expect(hub.generateCalled, isTrue);
         expect(hub.lastGenerateFrom, '2024-01-01');
         expect(hub.lastGenerateTo, '2024-01-07');
+      },
+    );
+
+    testWidgets(
+      'only loads the existing list, without generating, when autoGenerate '
+      'is left at its default (the "Open shopping list" entry point)',
+      (tester) async {
+        final hub = _StubHub(shoppingList: _list());
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: CaleeTheme.buildThemeData(),
+            home: ShoppingPage(
+              hubClient: hub,
+              accessToken: 'tok',
+              initialWeekStart: DateTime(2024, 1, 1),
+              initialWeekEnd: DateTime(2024, 1, 7),
+            ),
+          ),
+        );
+        await tester.pump();
+        await tester.pump();
+
+        expect(hub.loadCallCount, 1);
+        expect(hub.generateCalled, isFalse);
+      },
+    );
+  });
+
+  group('ShoppingPage — items sourced from a saved meal', () {
+    testWidgets(
+      'displays quantity and category for items generated from a saved '
+      "meal's ingredients",
+      (tester) async {
+        const beefMince = ClientShoppingListItem(
+          id: 42,
+          shoppingListId: 3,
+          householdId: 'h1',
+          sourceType: 'meal_template',
+          sourceTemplateId: 7,
+          name: 'Beef mince',
+          quantityText: '500g',
+          category: 'Meat',
+          checked: false,
+          manuallyAdded: false,
+          manuallyRemoved: false,
+          sortOrder: 0,
+        );
+        final hub = _StubHub(shoppingList: _list(items: [beefMince]));
+        await tester.pumpWidget(_buildPage(hub));
+        await tester.pump();
+        await tester.pump();
+
+        expect(find.text('Beef mince'), findsOneWidget);
+        expect(find.text('500g'), findsOneWidget);
+        expect(find.text('MEAT'), findsOneWidget);
       },
     );
   });

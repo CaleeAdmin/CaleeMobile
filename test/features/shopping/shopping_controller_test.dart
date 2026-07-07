@@ -17,6 +17,7 @@ class _StubHub extends CaleeHubClient {
   String? lastLoadTo;
   String? lastGenerateFrom;
   String? lastGenerateTo;
+  String? lastGenerateMode;
 
   @override
   Future<ClientShoppingList> currentShoppingList({
@@ -38,6 +39,7 @@ class _StubHub extends CaleeHubClient {
   }) async {
     lastGenerateFrom = from;
     lastGenerateTo = to;
+    lastGenerateMode = mode;
     return _list(from: from, to: to);
   }
 }
@@ -117,6 +119,16 @@ void main() {
         expect(hub.lastGenerateTo, '2024-01-07');
       },
     );
+
+    test('generate() defaults to merge mode so manually-added items and '
+        'existing checked state survive a rebuild', () async {
+      final hub = _StubHub();
+      final controller = _controllerFor(hub);
+
+      await controller.generate();
+
+      expect(hub.lastGenerateMode, 'merge');
+    });
   });
 
   group('ShoppingController — default week', () {

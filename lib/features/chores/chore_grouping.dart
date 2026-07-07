@@ -13,6 +13,7 @@ Map<String, List<ClientChore>> groupChoresBySection(
   List<ClientChore> chores,
   DateTime today,
 ) {
+  final deduped = dedupeChoreOccurrences(chores);
   final todayDate = DateTime(today.year, today.month, today.day);
   final tomorrowDate = todayDate.add(const Duration(days: 1));
   // End of week = this Sunday (Mon=1 … Sun=7). If today is Sunday: 0 days away.
@@ -29,7 +30,7 @@ Map<String, List<ClientChore>> groupChoresBySection(
   // must include the occurrence date: a completion log only ever consumes the
   // one active row for the same uid *and* date.
   final doneTodayKeys = <String>{};
-  for (final chore in chores) {
+  for (final chore in deduped) {
     if (chore.completedToday || chore.normalizedSection == 'doneToday') {
       final key = _choreOccurrenceKey(chore);
       if (key != null) doneTodayKeys.add(key);
@@ -38,7 +39,7 @@ Map<String, List<ClientChore>> groupChoresBySection(
 
   final grouped = <String, List<ClientChore>>{};
 
-  for (final chore in chores) {
+  for (final chore in deduped) {
     // completedToday overrides any stale section value. A UTC vs local timezone
     // mismatch can cause the server to assign the wrong section for a chore that
     // was completed today in local time but before UTC midnight.
@@ -72,6 +73,38 @@ Map<String, List<ClientChore>> groupChoresBySection(
   }
 
   return grouped;
+}
+
+/// Removes exact repeats of the same chore occurrence.
+///
+/// For some recurrence/date-range combinations the backend can return more
+/// than one row for what is logically a single occurrence. Rows are only
+/// merged when they share the same [ClientChore.completionActionId] (the
+/// chore's stable identity — prefers [ClientChore.baseChoreId]), the same
+/// [ClientChore.effectiveOccurrenceDate], and the same normalized `kind`.
+/// Matching on identity rather than title/assignee means two distinct chores
+/// that merely happen to share a title and assignee (different baseChoreId)
+/// are never collapsed, and a recurring chore's separate active rows on
+/// different dates (today, tomorrow, ...) are always kept — only a row that
+/// is a genuine repeat of another is dropped.
+List<ClientChore> dedupeChoreOccurrences(List<ClientChore> chores) {
+  final seen = <String>{};
+  final result = <ClientChore>[];
+  for (final chore in chores) {
+    final key = _exactOccurrenceKey(chore);
+    if (key == null || seen.add(key)) {
+      result.add(chore);
+    }
+  }
+  return result;
+}
+
+/// Identity key for [dedupeChoreOccurrences]. Returns null when the chore has
+/// no stable action id to key on, in which case the row is never deduped.
+String? _exactOccurrenceKey(ClientChore chore) {
+  final actionId = chore.completionActionId.trim();
+  if (actionId.isEmpty) return null;
+  return '$actionId|${chore.effectiveOccurrenceDate ?? ''}|${chore.normalizedKind}';
 }
 
 /// The uid a chore's completion is tracked under: its own [ClientChore.choreUid]
