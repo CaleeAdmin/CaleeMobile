@@ -6,6 +6,7 @@ import '../../data/models/client_calendar.dart';
 import '../../data/models/client_chore.dart';
 import '../../data/models/client_chore_metadata.dart';
 import '../../data/models/client_person.dart';
+import 'chore_grouping.dart';
 import 'chores_repository.dart';
 
 String _formatChoreDate(DateTime value) {
@@ -55,7 +56,20 @@ class ChoresController extends ChangeNotifier {
         todayDate.subtract(const Duration(days: 30)),
       );
       final to = _formatChoreDate(todayDate.add(const Duration(days: 31)));
-      overview = await repository.loadOverview(from: from, to: to);
+      final loaded = await repository.loadOverview(from: from, to: to);
+      _logChoreDebugInfo(loaded);
+      overview = ChoresOverview(
+        calendarList: loaded.calendarList,
+        choreList: ClientChoreList(
+          from: loaded.choreList.from,
+          to: loaded.choreList.to,
+          chores: dedupeChoreOccurrences(loaded.choreList.chores),
+        ),
+        people: loaded.people,
+        from: loaded.from,
+        to: loaded.to,
+        calendarServiceErrors: loaded.calendarServiceErrors,
+      );
       calendarServiceErrors = overview?.calendarServiceErrors ?? [];
       error = null;
     } catch (e) {
@@ -64,6 +78,44 @@ class ChoresController extends ChangeNotifier {
     } finally {
       isLoading = false;
       notifyListeners();
+    }
+  }
+
+  /// Logs chore counts right after the API response is parsed, before any
+  /// client-side dedup/grouping runs, so a "Today" row-count mismatch between
+  /// the backend and the rendered UI can be traced to a specific stage.
+  void _logChoreDebugInfo(ChoresOverview loaded) {
+    if (!kDebugMode) return;
+
+    final chores = loaded.choreList.chores;
+    final idCounts = <String, int>{};
+    for (final chore in chores) {
+      idCounts[chore.id] = (idCounts[chore.id] ?? 0) + 1;
+    }
+    final duplicateIds = [
+      for (final entry in idCounts.entries)
+        if (entry.value > 1) '${entry.key} x${entry.value}',
+    ];
+
+    final todayBeforeGrouping = chores
+        .where((c) => c.normalizedSection == 'todoToday')
+        .toList();
+    final todayAfterGrouping =
+        groupChoresBySection(chores, DateTime.now())['todoToday'] ??
+        const <ClientChore>[];
+
+    debugPrint(
+      'ChoresController.load: totalChores=${chores.length} '
+      'uniqueIds=${idCounts.length} duplicateIds=$duplicateIds '
+      'todayBeforeGrouping=${todayBeforeGrouping.length} '
+      'todayAfterGrouping=${todayAfterGrouping.length}',
+    );
+    for (final chore in todayBeforeGrouping) {
+      debugPrint(
+        'ChoresController.load: today row title="${chore.title}" '
+        'baseChoreId=${chore.baseChoreId} choreUid=${chore.choreUid} '
+        'occurrenceDate=${chore.effectiveOccurrenceDate} id=${chore.id}',
+      );
     }
   }
 
