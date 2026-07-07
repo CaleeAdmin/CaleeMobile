@@ -465,6 +465,52 @@ void main() {
   );
 
   testWidgets(
+    'HTTPS link then calee:// scheme for the same week dedup as one target '
+    'and only open ShoppingPage once',
+    (tester) async {
+      final hub = _StubHub();
+      final session = _FakeSessionController();
+      final shoppingLink = _FakeShoppingLinkController();
+
+      await tester.pumpWidget(
+        CaleeApp.forTesting(
+          testDeps: _makeDeps(
+            hub: hub,
+            session: session,
+            shoppingLink: shoppingLink,
+          ),
+        ),
+      );
+
+      session.finishRestore(signedIn: true);
+      await tester.pump();
+
+      // Tablet QR generates the HTTPS app-link first.
+      shoppingLink.injectIntent(
+        weekStart: DateTime(2026, 7, 6),
+        sourceUri: Uri.parse(
+          'https://hub.calee.com.au/mobile/shopping?weekStart=2026-07-06',
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(ShoppingPage), findsOneWidget);
+
+      // The platform (or a duplicate handler) redelivers the same target via
+      // the calee:// custom scheme moments later — same weekStart, different
+      // literal URI. This must dedup to the same canonical target rather
+      // than pushing a second ShoppingPage.
+      shoppingLink.injectIntent(
+        weekStart: DateTime(2026, 7, 6),
+        sourceUri: Uri.parse('calee://shopping?weekStart=2026-07-06'),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byType(ShoppingPage, skipOffstage: false), findsOneWidget);
+      expect(shoppingLink.pendingIntent, isNull);
+    },
+  );
+
+  testWidgets(
     'the same shopping intent redelivered immediately is not pushed twice',
     (tester) async {
       final hub = _StubHub();
