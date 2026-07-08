@@ -71,10 +71,7 @@ void main() {
       () async {
         final client = await startServer({
           'data': {
-            'preferences': {
-              'firstDayOfWeek': 'sunday',
-              'timeFormat': 'system',
-            },
+            'preferences': {'firstDayOfWeek': 'sunday', 'timeFormat': 'system'},
           },
         });
 

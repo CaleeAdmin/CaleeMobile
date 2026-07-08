@@ -73,7 +73,6 @@ class _StubHubClient extends CaleeHubClient {
     this._failEnsure = false,
     ClientPreferences? preferences,
     this.failPreferencesLoad = true,
-    this.failPreferencesPatch = false,
   }) : _calendars = calendars ?? [],
        _bootstrap = bootstrap ?? _emptyBootstrap(),
        _preferences =
@@ -88,7 +87,7 @@ class _StubHubClient extends CaleeHubClient {
   final bool _failEnsure;
   ClientPreferences _preferences;
   bool failPreferencesLoad;
-  bool failPreferencesPatch;
+  bool failPreferencesPatch = false;
 
   final List<Map<String, dynamic>> patchCalls = [];
 
@@ -367,78 +366,62 @@ void main() {
       },
     );
 
-    test(
-      'falls back to local cache when Hub preferences fail, without a '
-      'page error',
-      () async {
-        final prefs = _StubPreferences();
-        prefs.seed(const StoredPreferences(timeFormat: TimeFormatPref.h12));
+    test('falls back to local cache when Hub preferences fail, without a '
+        'page error', () async {
+      final prefs = _StubPreferences();
+      prefs.seed(const StoredPreferences(timeFormat: TimeFormatPref.h12));
 
-        // failPreferencesLoad defaults to true.
-        final hubClient = _StubHubClient();
-        final controller = _makeController(
-          hubClient: hubClient,
-          prefs: prefs,
-        );
+      // failPreferencesLoad defaults to true.
+      final hubClient = _StubHubClient();
+      final controller = _makeController(hubClient: hubClient, prefs: prefs);
 
-        await controller.load();
+      await controller.load();
 
-        expect(controller.preferences.timeFormat, TimeFormatPref.h12);
-        expect(controller.error, isNull);
-      },
-    );
+      expect(controller.preferences.timeFormat, TimeFormatPref.h12);
+      expect(controller.error, isNull);
+    });
 
-    test(
-      'clearing a stale default calendar patches Hub when Hub preferences '
-      'are available',
-      () async {
-        final hubClient = _StubHubClient(
-          failPreferencesLoad: false,
-          preferences: const ClientPreferences(
-            firstDayOfWeek: FirstDayOfWeek.sunday,
-            timeFormat: TimeFormatPref.system,
-            defaultCalendarId: 'gone-cal',
-          ),
-        );
-        final controller = _makeController(
-          hubClient: hubClient,
-          calendars: [_calendar(id: 'other-cal')],
-        );
+    test('clearing a stale default calendar patches Hub when Hub preferences '
+        'are available', () async {
+      final hubClient = _StubHubClient(
+        failPreferencesLoad: false,
+        preferences: const ClientPreferences(
+          firstDayOfWeek: FirstDayOfWeek.sunday,
+          timeFormat: TimeFormatPref.system,
+          defaultCalendarId: 'gone-cal',
+        ),
+        calendars: [_calendar(id: 'other-cal')],
+      );
+      final controller = _makeController(hubClient: hubClient);
 
-        await controller.load();
+      await controller.load();
 
-        expect(controller.preferences.defaultCalendarId, isNull);
-        expect(controller.error, isNull);
-        expect(
-          hubClient.patchCalls.any((c) => c['clearDefaultCalendarId'] == true),
-          isTrue,
-          reason: 'stale default should be patched to Automatic on Hub',
-        );
-      },
-    );
+      expect(controller.preferences.defaultCalendarId, isNull);
+      expect(controller.error, isNull);
+      expect(
+        hubClient.patchCalls.any((c) => c['clearDefaultCalendarId'] == true),
+        isTrue,
+        reason: 'stale default should be patched to Automatic on Hub',
+      );
+    });
 
-    test(
-      'clearing a stale default does not patch Hub when Hub preferences '
-      'are unavailable',
-      () async {
-        final prefs = _StubPreferences();
-        prefs.seed(const StoredPreferences(defaultTaskListId: 'gone-task'));
+    test('clearing a stale default does not patch Hub when Hub preferences '
+        'are unavailable', () async {
+      final prefs = _StubPreferences();
+      prefs.seed(const StoredPreferences(defaultTaskListId: 'gone-task'));
 
-        // failPreferencesLoad defaults to true.
-        final hubClient = _StubHubClient();
-        final controller = _makeController(
-          hubClient: hubClient,
-          prefs: prefs,
-          calendars: [_calendar(id: 'other-task', kind: 'tasks')],
-        );
+      // failPreferencesLoad defaults to true.
+      final hubClient = _StubHubClient(
+        calendars: [_calendar(id: 'other-task', kind: 'tasks')],
+      );
+      final controller = _makeController(hubClient: hubClient, prefs: prefs);
 
-        await controller.load();
+      await controller.load();
 
-        expect(controller.preferences.defaultTaskListId, isNull);
-        expect(controller.error, isNull);
-        expect(hubClient.patchCalls, isEmpty);
-      },
-    );
+      expect(controller.preferences.defaultTaskListId, isNull);
+      expect(controller.error, isNull);
+      expect(hubClient.patchCalls, isEmpty);
+    });
   });
 
   group('SettingsController preference mutations', () {
@@ -485,10 +468,7 @@ void main() {
       () async {
         final prefs = _StubPreferences();
         final hubClient = _StubHubClient();
-        final controller = _makeController(
-          hubClient: hubClient,
-          prefs: prefs,
-        );
+        final controller = _makeController(hubClient: hubClient, prefs: prefs);
         await controller.load();
 
         await controller.setFirstDayOfWeek(FirstDayOfWeek.monday);
@@ -502,33 +482,28 @@ void main() {
       },
     );
 
-    test(
-      'setDefaultCalendar(null) clears the default and patches Hub with '
-      'clearDefaultCalendarId',
-      () async {
-        final cal = _calendar(id: 'cal1');
-        final hubClient = _StubHubClient(
-          failPreferencesLoad: false,
-          preferences: const ClientPreferences(
-            firstDayOfWeek: FirstDayOfWeek.sunday,
-            timeFormat: TimeFormatPref.system,
-            defaultCalendarId: 'cal1',
-          ),
-        );
-        final controller = _makeController(
-          hubClient: hubClient,
-          calendars: [cal],
-        );
-        await controller.load();
-        expect(controller.preferences.defaultCalendarId, 'cal1');
+    test('setDefaultCalendar(null) clears the default and patches Hub with '
+        'clearDefaultCalendarId', () async {
+      final cal = _calendar(id: 'cal1');
+      final hubClient = _StubHubClient(
+        failPreferencesLoad: false,
+        preferences: const ClientPreferences(
+          firstDayOfWeek: FirstDayOfWeek.sunday,
+          timeFormat: TimeFormatPref.system,
+          defaultCalendarId: 'cal1',
+        ),
+        calendars: [cal],
+      );
+      final controller = _makeController(hubClient: hubClient);
+      await controller.load();
+      expect(controller.preferences.defaultCalendarId, 'cal1');
 
-        await controller.setDefaultCalendar(null);
+      await controller.setDefaultCalendar(null);
 
-        expect(controller.preferences.defaultCalendarId, isNull);
-        final clearCall = hubClient.patchCalls.last;
-        expect(clearCall['clearDefaultCalendarId'], isTrue);
-      },
-    );
+      expect(controller.preferences.defaultCalendarId, isNull);
+      final clearCall = hubClient.patchCalls.last;
+      expect(clearCall['clearDefaultCalendarId'], isTrue);
+    });
 
     test(
       'Automatic (null) is the default UI state for a new account',
@@ -541,23 +516,20 @@ void main() {
       },
     );
 
-    test(
-      'a failed PATCH rolls back to the previous value and records a '
-      'non-blocking preferencesSaveError, keeping the page usable',
-      () async {
-        final hubClient = _StubHubClient();
-        final controller = _makeController(hubClient: hubClient);
-        await controller.load();
-        final before = controller.preferences;
+    test('a failed PATCH rolls back to the previous value and records a '
+        'non-blocking preferencesSaveError, keeping the page usable', () async {
+      final hubClient = _StubHubClient();
+      final controller = _makeController(hubClient: hubClient);
+      await controller.load();
+      final before = controller.preferences;
 
-        hubClient.failPreferencesPatch = true;
-        await controller.setTimeFormat(TimeFormatPref.h24);
+      hubClient.failPreferencesPatch = true;
+      await controller.setTimeFormat(TimeFormatPref.h24);
 
-        expect(controller.preferences.timeFormat, before.timeFormat);
-        expect(controller.preferencesSaveError, isNotNull);
-        expect(controller.error, isNull, reason: 'page-level error unaffected');
-      },
-    );
+      expect(controller.preferences.timeFormat, before.timeFormat);
+      expect(controller.preferencesSaveError, isNotNull);
+      expect(controller.error, isNull, reason: 'page-level error unaffected');
+    });
 
     test('calendar reminders remain local only (no Hub calls)', () async {
       final prefs = _StubPreferences();
