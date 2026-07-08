@@ -151,7 +151,6 @@ void main() {
 
       final overview = await repo.loadMonth(
         selectedMonth: DateTime(2026, 6, 1),
-        firstDayOfWeek: FirstDayOfWeek.sunday,
       );
 
       expect(overview.calendars, hasLength(1));
@@ -167,7 +166,6 @@ void main() {
 
       final overview = await repo.loadMonth(
         selectedMonth: DateTime(2026, 6, 1),
-        firstDayOfWeek: FirstDayOfWeek.sunday,
       );
 
       final diff = overview.gridEnd.difference(overview.gridStart).inDays;

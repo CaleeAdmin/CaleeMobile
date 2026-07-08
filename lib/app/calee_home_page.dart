@@ -203,6 +203,13 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
         onDestinationSelected: (index) {
           setState(() {
             _selectedIndex = index;
+            // Calendar keeps its controller alive in the IndexedStack, so a
+            // plain tab switch would otherwise show stale First Day of
+            // Week / Time Format / Default Calendar values after a Settings
+            // change. Force a reload every time the tab becomes selected.
+            if (index == _calendarTabIndex) {
+              _calendarRefreshGeneration++;
+            }
           });
         },
         destinations: _tabs
