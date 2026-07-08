@@ -27,6 +27,21 @@ class _StubHubClient extends CaleeHubClient {
   }
 }
 
+class _FailThenSucceedHubClient extends CaleeHubClient {
+  _FailThenSucceedHubClient() : super(baseUri: Uri.parse('http://localhost'));
+
+  int callCount = 0;
+
+  @override
+  Future<ClientCalendarList> calendars({required String accessToken}) async {
+    callCount++;
+    if (callCount == 1) {
+      throw Exception('network error');
+    }
+    return const ClientCalendarList(calendars: []);
+  }
+}
+
 ClientBootstrap _bootstrap() => ClientBootstrap(
   account: const ClientAccount(
     id: 'u1',
@@ -79,17 +94,18 @@ ClientBootstrap _businessBootstrap() => ClientBootstrap(
   capabilities: const {},
 );
 
-Widget _wrap({ClientBootstrap? bootstrap}) => MaterialApp(
-  theme: CaleeTheme.buildThemeData(),
-  home: Scaffold(
-    body: SettingsPage(
-      hubClient: _StubHubClient(),
-      accessToken: 'tok',
-      bootstrap: bootstrap ?? _bootstrap(),
-      onSignOut: () {},
-    ),
-  ),
-);
+Widget _wrap({ClientBootstrap? bootstrap, CaleeHubClient? hubClient}) =>
+    MaterialApp(
+      theme: CaleeTheme.buildThemeData(),
+      home: Scaffold(
+        body: SettingsPage(
+          hubClient: hubClient ?? _StubHubClient(),
+          accessToken: 'tok',
+          bootstrap: bootstrap ?? _bootstrap(),
+          onSignOut: () {},
+        ),
+      ),
+    );
 
 void main() {
   setUp(() {
@@ -196,6 +212,33 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('People'), findsNothing);
+    });
+  });
+
+  group('Preferences load error', () {
+    testWidgets('shows a retry state instead of silently falling back to '
+        'defaults', (tester) async {
+      await tester.pumpWidget(_wrap(hubClient: _FailThenSucceedHubClient()));
+      await tester.pumpAndSettle();
+
+      expect(find.text("Couldn't load your preferences."), findsOneWidget);
+      expect(find.text('Retry'), findsOneWidget);
+      expect(find.text('First day of week'), findsNothing);
+    });
+
+    testWidgets('tapping Retry reloads and shows preferences on success', (
+      tester,
+    ) async {
+      final hubClient = _FailThenSucceedHubClient();
+      await tester.pumpWidget(_wrap(hubClient: hubClient));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Retry'));
+      await tester.pumpAndSettle();
+
+      expect(hubClient.callCount, 2);
+      expect(find.text("Couldn't load your preferences."), findsNothing);
+      expect(find.text('First day of week'), findsOneWidget);
     });
   });
 }

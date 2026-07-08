@@ -70,7 +70,6 @@ class CalendarRepository {
   // should use server-side cached event occurrences and push delivery.
   Future<CalendarOverview> loadMonth({
     required DateTime selectedMonth,
-    required FirstDayOfWeek firstDayOfWeek,
   }) async {
     StoredPreferences freshPrefs;
     try {

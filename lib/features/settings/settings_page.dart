@@ -220,6 +220,7 @@ class _SettingsPageState extends State<SettingsPage> {
     final remindersEnabled = _controller.calendarRemindersEnabled;
     final isLoadingPrefs = _controller.isLoadingPreferences;
     final isOpeningFamily = _controller.isOpeningFamily;
+    final loadError = _controller.error;
 
     final writableCalendars = calendars
         .where((c) => c.isCalendarKind && !c.readOnly)
@@ -290,6 +291,8 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
                 child: Center(child: CircularProgressIndicator()),
               )
+            else if (loadError != null)
+              _PreferencesLoadError(onRetry: _controller.load)
             else ...[
               CaleeSectionDropdownRow<FirstDayOfWeek>(
                 label: 'First day of week',
@@ -569,6 +572,43 @@ class _ServiceRow extends StatelessWidget {
             )
           : null,
       onTap: onTap,
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
+// _PreferencesLoadError
+// ─────────────────────────────────────────────
+
+class _PreferencesLoadError extends StatelessWidget {
+  const _PreferencesLoadError({required this.onRetry});
+
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: CaleeSpacing.md,
+        vertical: CaleeSpacing.md,
+      ),
+      child: Column(
+        children: [
+          const Icon(
+            Icons.error_outline,
+            size: 28,
+            color: CaleeColors.textTertiary,
+          ),
+          const SizedBox(height: CaleeSpacing.sm),
+          const Text(
+            "Couldn't load your preferences.",
+            textAlign: TextAlign.center,
+            style: TextStyle(color: CaleeColors.textSecondary),
+          ),
+          const SizedBox(height: CaleeSpacing.sm),
+          TextButton(onPressed: onRetry, child: const Text('Retry')),
+        ],
+      ),
     );
   }
 }

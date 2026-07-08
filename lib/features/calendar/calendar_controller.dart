@@ -51,7 +51,6 @@ class CalendarController extends ChangeNotifier {
     try {
       final overview = await repository.loadMonth(
         selectedMonth: selectedMonth,
-        firstDayOfWeek: preferences.firstDayOfWeek,
       );
       preferences = overview.preferences;
       gridStart = overview.gridStart;
