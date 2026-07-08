@@ -23,6 +23,12 @@ class SettingsController extends ChangeNotifier {
   bool isOpeningFamily = false;
   Object? error;
 
+  /// Transient error from the most recent preference save attempt. Unlike
+  /// [error], this never blocks the page: the previous preference value is
+  /// restored and the caller (e.g. SettingsPage) surfaces this as a
+  /// dismissable message such as a SnackBar.
+  Object? preferencesSaveError;
+
   // ── Load / refresh ────────────────────────────────────────────────────────
 
   Future<void> load() async {
@@ -54,35 +60,51 @@ class SettingsController extends ChangeNotifier {
   // ── Preference mutations ──────────────────────────────────────────────────
 
   Future<void> setFirstDayOfWeek(FirstDayOfWeek value) async {
-    preferences = await repository.setFirstDayOfWeek(
-      current: preferences,
-      value: value,
+    await _mutatePreferences(
+      () => repository.setFirstDayOfWeek(current: preferences, value: value),
     );
-    notifyListeners();
   }
 
   Future<void> setTimeFormat(TimeFormatPref value) async {
-    preferences = await repository.setTimeFormat(
-      current: preferences,
-      value: value,
+    await _mutatePreferences(
+      () => repository.setTimeFormat(current: preferences, value: value),
     );
-    notifyListeners();
   }
 
   Future<void> setDefaultCalendar(ClientCalendar? calendar) async {
-    preferences = await repository.setDefaultCalendar(
-      current: preferences,
-      calendar: calendar,
+    await _mutatePreferences(
+      () => repository.setDefaultCalendar(
+        current: preferences,
+        calendar: calendar,
+      ),
     );
-    notifyListeners();
   }
 
   Future<void> setDefaultTaskList(ClientCalendar? calendar) async {
-    preferences = await repository.setDefaultTaskList(
-      current: preferences,
-      calendar: calendar,
+    await _mutatePreferences(
+      () => repository.setDefaultTaskList(
+        current: preferences,
+        calendar: calendar,
+      ),
     );
-    notifyListeners();
+  }
+
+  /// Applies a preference-setter call, rolling back to the previous value and
+  /// recording [preferencesSaveError] (without touching the page-level
+  /// [error]) if the Hub PATCH fails.
+  Future<void> _mutatePreferences(
+    Future<StoredPreferences> Function() mutate,
+  ) async {
+    final previous = preferences;
+    preferencesSaveError = null;
+    try {
+      preferences = await mutate();
+    } catch (e) {
+      preferences = previous;
+      preferencesSaveError = e;
+    } finally {
+      notifyListeners();
+    }
   }
 
   Future<void> setCalendarRemindersEnabled(bool value) async {
