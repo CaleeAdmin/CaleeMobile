@@ -49,9 +49,7 @@ class CalendarController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final overview = await repository.loadMonth(
-        selectedMonth: selectedMonth,
-      );
+      final overview = await repository.loadMonth(selectedMonth: selectedMonth);
       preferences = overview.preferences;
       gridStart = overview.gridStart;
       calendars = overview.calendars;
