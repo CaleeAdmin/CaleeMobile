@@ -89,6 +89,19 @@ void main() {
         expect(service.cancelCount, 0);
       },
     );
+
+    test(
+      'flips the stored reminders preference back to false so Settings '
+      "doesn't keep showing a switch that's actually doing nothing",
+      () async {
+        final service = _ControlledService(permissionGranted: false);
+
+        await service.rescheduleUpcomingEvents([_event('e1')]);
+
+        final prefs = await SharedPreferences.getInstance();
+        expect(prefs.getBool('calee_pref_calendar_reminders_enabled'), isFalse);
+      },
+    );
   });
 
   group('rescheduleUpcomingEvents — permission granted', () {

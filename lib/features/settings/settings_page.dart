@@ -205,6 +205,36 @@ class _SettingsPageState extends State<SettingsPage> {
     return null;
   }
 
+  Future<void> _showSaveErrorIfAny() async {
+    if (!mounted) return;
+    if (_controller.preferencesSaveError == null) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text("Couldn't save your preference. Please try again."),
+      ),
+    );
+  }
+
+  Future<void> _setFirstDayOfWeek(FirstDayOfWeek value) async {
+    await _controller.setFirstDayOfWeek(value);
+    await _showSaveErrorIfAny();
+  }
+
+  Future<void> _setTimeFormat(TimeFormatPref value) async {
+    await _controller.setTimeFormat(value);
+    await _showSaveErrorIfAny();
+  }
+
+  Future<void> _setDefaultCalendar(ClientCalendar? calendar) async {
+    await _controller.setDefaultCalendar(calendar);
+    await _showSaveErrorIfAny();
+  }
+
+  Future<void> _setDefaultTaskList(ClientCalendar? calendar) async {
+    await _controller.setDefaultTaskList(calendar);
+    await _showSaveErrorIfAny();
+  }
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
@@ -220,6 +250,7 @@ class _SettingsPageState extends State<SettingsPage> {
     final remindersEnabled = _controller.calendarRemindersEnabled;
     final isLoadingPrefs = _controller.isLoadingPreferences;
     final isOpeningFamily = _controller.isOpeningFamily;
+    final loadError = _controller.error;
 
     final writableCalendars = calendars
         .where((c) => c.isCalendarKind && !c.readOnly)
@@ -290,6 +321,8 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
                 child: Center(child: CircularProgressIndicator()),
               )
+            else if (loadError != null)
+              _PreferencesLoadError(onRetry: _controller.load)
             else ...[
               CaleeSectionDropdownRow<FirstDayOfWeek>(
                 label: 'First day of week',
@@ -303,7 +336,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     )
                     .toList(),
                 onChanged: (v) {
-                  if (v != null) _controller.setFirstDayOfWeek(v);
+                  if (v != null) unawaited(_setFirstDayOfWeek(v));
                 },
               ),
               CaleeSectionDropdownRow<TimeFormatPref>(
@@ -318,7 +351,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     )
                     .toList(),
                 onChanged: (v) {
-                  if (v != null) _controller.setTimeFormat(v);
+                  if (v != null) unawaited(_setTimeFormat(v));
                 },
               ),
               if (writableCalendars.length >= 2)
@@ -326,24 +359,30 @@ class _SettingsPageState extends State<SettingsPage> {
                   label: 'Default calendar',
                   value: defaultCal,
                   items: [
-                    const DropdownMenuItem(value: null, child: Text('None')),
+                    const DropdownMenuItem(
+                      value: null,
+                      child: Text('Automatic'),
+                    ),
                     ...writableCalendars.map(
                       (c) => DropdownMenuItem(value: c, child: Text(c.name)),
                     ),
                   ],
-                  onChanged: _controller.setDefaultCalendar,
+                  onChanged: (c) => unawaited(_setDefaultCalendar(c)),
                 ),
               if (taskCalendars.length >= 2)
                 CaleeSectionDropdownRow<ClientCalendar?>(
                   label: 'Default task list',
                   value: defaultTask,
                   items: [
-                    const DropdownMenuItem(value: null, child: Text('None')),
+                    const DropdownMenuItem(
+                      value: null,
+                      child: Text('Automatic'),
+                    ),
                     ...taskCalendars.map(
                       (c) => DropdownMenuItem(value: c, child: Text(c.name)),
                     ),
                   ],
-                  onChanged: _controller.setDefaultTaskList,
+                  onChanged: (c) => unawaited(_setDefaultTaskList(c)),
                 ),
               CaleeListRow(
                 title: 'Calendar reminders',
@@ -569,6 +608,43 @@ class _ServiceRow extends StatelessWidget {
             )
           : null,
       onTap: onTap,
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
+// _PreferencesLoadError
+// ─────────────────────────────────────────────
+
+class _PreferencesLoadError extends StatelessWidget {
+  const _PreferencesLoadError({required this.onRetry});
+
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: CaleeSpacing.md,
+        vertical: CaleeSpacing.md,
+      ),
+      child: Column(
+        children: [
+          const Icon(
+            Icons.error_outline,
+            size: 28,
+            color: CaleeColors.textTertiary,
+          ),
+          const SizedBox(height: CaleeSpacing.sm),
+          const Text(
+            "Couldn't load your preferences.",
+            textAlign: TextAlign.center,
+            style: TextStyle(color: CaleeColors.textSecondary),
+          ),
+          const SizedBox(height: CaleeSpacing.sm),
+          TextButton(onPressed: onRetry, child: const Text('Retry')),
+        ],
+      ),
     );
   }
 }

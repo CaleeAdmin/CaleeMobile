@@ -107,7 +107,13 @@ class LocalCalendarNotificationService {
     }
 
     final granted = await requestPermissionIfNeeded();
-    if (!granted) return;
+    if (!granted) {
+      // Permission was revoked at the OS level after the user turned this
+      // on. Keep the stored preference honest so Settings doesn't keep
+      // showing "on" for a feature that's actually silently doing nothing.
+      await CaleePreferences().saveCalendarRemindersEnabled(false);
+      return;
+    }
 
     await cancelAllCalendarEventNotifications();
 

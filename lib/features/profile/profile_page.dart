@@ -356,6 +356,18 @@ class _TimezoneRow extends StatefulWidget {
 class _TimezoneRowState extends State<_TimezoneRow> {
   @override
   Widget build(BuildContext context) {
+    // Include the profile's current timezone as an option even if it isn't
+    // one of the ~30 curated common zones, so a real saved value (e.g. a
+    // less-common IANA zone) never renders as a blank/unselected dropdown.
+    final currentValue = widget.value;
+    final options = [
+      if (currentValue != null &&
+          currentValue.isNotEmpty &&
+          !_kCommonTimezones.contains(currentValue))
+        currentValue,
+      ..._kCommonTimezones,
+    ];
+
     return FormField<String>(
       validator: (_) => widget.validator(),
       builder: (field) {
@@ -364,11 +376,9 @@ class _TimezoneRowState extends State<_TimezoneRow> {
           children: [
             CaleeSectionDropdownRow<String>(
               label: 'Timezone',
-              value: _kCommonTimezones.contains(widget.value)
-                  ? widget.value
-                  : null,
+              value: currentValue,
               enabled: widget.enabled,
-              items: _kCommonTimezones
+              items: options
                   .map((tz) => DropdownMenuItem(value: tz, child: Text(tz)))
                   .toList(),
               onChanged: (v) {

@@ -2,6 +2,7 @@
 
 import 'package:calee_mobile/data/api/calee_hub_client.dart';
 import 'package:calee_mobile/data/models/client_bootstrap.dart';
+import 'package:calee_mobile/data/models/client_preferences.dart';
 import 'package:calee_mobile/data/models/client_profile.dart';
 import 'package:calee_mobile/features/profile/profile_controller.dart';
 import 'package:calee_mobile/features/profile/profile_page.dart';
@@ -76,6 +77,13 @@ class _StubClient extends CaleeHubClient {
   @override
   Future<ClientBootstrap> bootstrap({required String accessToken}) async {
     return ClientBootstrap.fromJson(const {});
+  }
+
+  // Hub preferences are unavailable in these tests; SettingsRepository must
+  // fall back to the local cache without surfacing a page-level error.
+  @override
+  Future<ClientPreferences> preferences({required String accessToken}) async {
+    throw const CaleeHubException(statusCode: 500, message: 'Server error');
   }
 }
 

@@ -11,6 +11,7 @@
 import 'package:calee_mobile/data/api/calee_hub_client.dart';
 import 'package:calee_mobile/data/models/client_bootstrap.dart';
 import 'package:calee_mobile/data/models/client_calendar.dart';
+import 'package:calee_mobile/data/models/client_preferences.dart';
 import 'package:calee_mobile/features/notifications/local_calendar_notification_service.dart';
 import 'package:calee_mobile/features/settings/settings_page.dart';
 import 'package:calee_mobile/ui/calee_theme.dart';
@@ -47,6 +48,13 @@ class _StubHubClient extends CaleeHubClient {
   @override
   Future<ClientCalendarList> calendars({required String accessToken}) async =>
       const ClientCalendarList(calendars: []);
+
+  // Hub preferences are unavailable in these tests; SettingsRepository must
+  // fall back to the local cache without surfacing a page-level error.
+  @override
+  Future<ClientPreferences> preferences({required String accessToken}) async {
+    throw const CaleeHubException(statusCode: 500, message: 'Server error');
+  }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
