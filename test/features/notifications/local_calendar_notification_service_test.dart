@@ -99,10 +99,7 @@ void main() {
         await service.rescheduleUpcomingEvents([_event('e1')]);
 
         final prefs = await SharedPreferences.getInstance();
-        expect(
-          prefs.getBool('calee_pref_calendar_reminders_enabled'),
-          isFalse,
-        );
+        expect(prefs.getBool('calee_pref_calendar_reminders_enabled'), isFalse);
       },
     );
   });
