@@ -205,6 +205,36 @@ class _SettingsPageState extends State<SettingsPage> {
     return null;
   }
 
+  Future<void> _showSaveErrorIfAny() async {
+    if (!mounted) return;
+    if (_controller.preferencesSaveError == null) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text("Couldn't save your preference. Please try again."),
+      ),
+    );
+  }
+
+  Future<void> _setFirstDayOfWeek(FirstDayOfWeek value) async {
+    await _controller.setFirstDayOfWeek(value);
+    await _showSaveErrorIfAny();
+  }
+
+  Future<void> _setTimeFormat(TimeFormatPref value) async {
+    await _controller.setTimeFormat(value);
+    await _showSaveErrorIfAny();
+  }
+
+  Future<void> _setDefaultCalendar(ClientCalendar? calendar) async {
+    await _controller.setDefaultCalendar(calendar);
+    await _showSaveErrorIfAny();
+  }
+
+  Future<void> _setDefaultTaskList(ClientCalendar? calendar) async {
+    await _controller.setDefaultTaskList(calendar);
+    await _showSaveErrorIfAny();
+  }
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
@@ -306,7 +336,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     )
                     .toList(),
                 onChanged: (v) {
-                  if (v != null) _controller.setFirstDayOfWeek(v);
+                  if (v != null) unawaited(_setFirstDayOfWeek(v));
                 },
               ),
               CaleeSectionDropdownRow<TimeFormatPref>(
@@ -321,7 +351,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     )
                     .toList(),
                 onChanged: (v) {
-                  if (v != null) _controller.setTimeFormat(v);
+                  if (v != null) unawaited(_setTimeFormat(v));
                 },
               ),
               if (writableCalendars.length >= 2)
@@ -329,24 +359,30 @@ class _SettingsPageState extends State<SettingsPage> {
                   label: 'Default calendar',
                   value: defaultCal,
                   items: [
-                    const DropdownMenuItem(value: null, child: Text('None')),
+                    const DropdownMenuItem(
+                      value: null,
+                      child: Text('Automatic'),
+                    ),
                     ...writableCalendars.map(
                       (c) => DropdownMenuItem(value: c, child: Text(c.name)),
                     ),
                   ],
-                  onChanged: _controller.setDefaultCalendar,
+                  onChanged: (c) => unawaited(_setDefaultCalendar(c)),
                 ),
               if (taskCalendars.length >= 2)
                 CaleeSectionDropdownRow<ClientCalendar?>(
                   label: 'Default task list',
                   value: defaultTask,
                   items: [
-                    const DropdownMenuItem(value: null, child: Text('None')),
+                    const DropdownMenuItem(
+                      value: null,
+                      child: Text('Automatic'),
+                    ),
                     ...taskCalendars.map(
                       (c) => DropdownMenuItem(value: c, child: Text(c.name)),
                     ),
                   ],
-                  onChanged: _controller.setDefaultTaskList,
+                  onChanged: (c) => unawaited(_setDefaultTaskList(c)),
                 ),
               CaleeListRow(
                 title: 'Calendar reminders',

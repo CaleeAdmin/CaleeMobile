@@ -64,6 +64,33 @@ class CaleePreferences {
     }
   }
 
+  /// Overwrites the local cache with [preferences] in one call, e.g. after a
+  /// successful Hub load or PATCH whose response is the new source of truth.
+  Future<void> saveAll(StoredPreferences preferences) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      _firstDayOfWeekKey,
+      preferences.firstDayOfWeek.storageValue,
+    );
+    await prefs.setString(_timeFormatKey, preferences.timeFormat.storageValue);
+    if (preferences.defaultCalendarId == null) {
+      await prefs.remove(_defaultCalendarIdKey);
+    } else {
+      await prefs.setString(
+        _defaultCalendarIdKey,
+        preferences.defaultCalendarId!,
+      );
+    }
+    if (preferences.defaultTaskListId == null) {
+      await prefs.remove(_defaultTaskListIdKey);
+    } else {
+      await prefs.setString(
+        _defaultTaskListIdKey,
+        preferences.defaultTaskListId!,
+      );
+    }
+  }
+
   // ── Calendar reminders ────────────────────────────────────────────────────
 
   Future<bool> loadCalendarRemindersEnabled() async {
@@ -154,6 +181,30 @@ class StoredPreferences {
   final TimeFormatPref timeFormat;
   final String? defaultCalendarId;
   final String? defaultTaskListId;
+
+  /// Returns a copy with the given fields replaced. Pass [clearDefaultCalendarId]
+  /// or [clearDefaultTaskListId] to explicitly reset those fields to Automatic
+  /// (null), since a plain `defaultCalendarId: null` argument is indistinguishable
+  /// from "leave unchanged" with named parameters.
+  StoredPreferences copyWith({
+    FirstDayOfWeek? firstDayOfWeek,
+    TimeFormatPref? timeFormat,
+    String? defaultCalendarId,
+    bool clearDefaultCalendarId = false,
+    String? defaultTaskListId,
+    bool clearDefaultTaskListId = false,
+  }) {
+    return StoredPreferences(
+      firstDayOfWeek: firstDayOfWeek ?? this.firstDayOfWeek,
+      timeFormat: timeFormat ?? this.timeFormat,
+      defaultCalendarId: clearDefaultCalendarId
+          ? null
+          : (defaultCalendarId ?? this.defaultCalendarId),
+      defaultTaskListId: clearDefaultTaskListId
+          ? null
+          : (defaultTaskListId ?? this.defaultTaskListId),
+    );
+  }
 }
 
 enum FirstDayOfWeek {
