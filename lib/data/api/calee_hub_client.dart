@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 
+import '../auth/calee_preferences.dart';
 import '../models/client_bootstrap.dart';
 import '../models/client_caldav_account.dart';
 import '../models/client_calendar.dart';
@@ -14,6 +15,7 @@ import '../models/client_deleted_items.dart';
 import '../models/client_event_draft.dart';
 import '../models/client_meal.dart';
 import '../models/client_person.dart';
+import '../models/client_preferences.dart';
 import '../models/client_profile.dart';
 import '../models/client_shopping_list.dart';
 import '../models/client_task.dart';
@@ -1502,6 +1504,67 @@ class CaleeHubClient {
       profileJson['warnings'] = warnings.whereType<String>().toList();
     }
     return ClientProfile.fromJson(profileJson);
+  }
+
+  Future<ClientPreferences> preferences({required String accessToken}) async {
+    final json = await _getJson(
+      '/client/v1/preferences',
+      accessToken: accessToken,
+    );
+    final data = _data(json);
+    final preferencesJson = data['preferences'];
+    if (preferencesJson is! Map<String, dynamic>) {
+      throw const CaleeHubException(
+        statusCode: 0,
+        message: 'Could not load your preferences. Please try again.',
+      );
+    }
+    return ClientPreferences.fromJson(preferencesJson);
+  }
+
+  Future<ClientPreferences> updatePreferences({
+    required String accessToken,
+    FirstDayOfWeek? firstDayOfWeek,
+    TimeFormatPref? timeFormat,
+    String? defaultCalendarId,
+    bool clearDefaultCalendarId = false,
+    String? defaultTaskListId,
+    bool clearDefaultTaskListId = false,
+  }) async {
+    final body = <String, dynamic>{
+      if (firstDayOfWeek != null) 'firstDayOfWeek': firstDayOfWeek.storageValue,
+      if (timeFormat != null) 'timeFormat': timeFormat.storageValue,
+      if (clearDefaultCalendarId)
+        'defaultCalendarId': null
+      else if (defaultCalendarId != null)
+        'defaultCalendarId': defaultCalendarId,
+      if (clearDefaultTaskListId)
+        'defaultTaskListId': null
+      else if (defaultTaskListId != null)
+        'defaultTaskListId': defaultTaskListId,
+    };
+
+    if (body.isEmpty) {
+      throw const CaleeHubException(
+        statusCode: 0,
+        message: 'No preference updates provided',
+      );
+    }
+
+    final json = await _patchJson(
+      '/client/v1/preferences',
+      accessToken: accessToken,
+      body: body,
+    );
+    final data = _data(json);
+    final preferencesJson = data['preferences'];
+    if (preferencesJson is! Map<String, dynamic>) {
+      throw const CaleeHubException(
+        statusCode: 0,
+        message: 'Could not load your preferences. Please try again.',
+      );
+    }
+    return ClientPreferences.fromJson(preferencesJson);
   }
 
   // ── External calendar connections ─────────────────────────────────────────────────────
