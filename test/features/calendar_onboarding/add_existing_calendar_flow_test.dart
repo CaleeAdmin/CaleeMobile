@@ -3,6 +3,7 @@
 import 'package:calee_mobile/data/api/calee_hub_client.dart';
 import 'package:calee_mobile/data/models/client_bootstrap.dart';
 import 'package:calee_mobile/data/models/client_calendar.dart';
+import 'package:calee_mobile/data/models/external_calendar_connection.dart';
 import 'package:calee_mobile/features/calendar/widgets/calendar_chooser_sheet.dart';
 import 'package:calee_mobile/features/calendar_onboarding/calendar_onboarding_page.dart';
 import 'package:calee_mobile/features/calendar_onboarding/calendar_source_picker_page.dart';
@@ -46,6 +47,13 @@ class _StubHubClient extends CaleeHubClient {
   Future<ClientCalendarList> calendars({required String accessToken}) async {
     return const ClientCalendarList(calendars: []);
   }
+
+  @override
+  Future<List<ExternalCalendarConnection>> externalCalendarConnections({
+    required String accessToken,
+  }) async {
+    return const [];
+  }
 }
 
 class _StubOAuthHubClient extends CaleeHubClient {
@@ -54,6 +62,13 @@ class _StubOAuthHubClient extends CaleeHubClient {
   @override
   Future<ClientCalendarList> calendars({required String accessToken}) async {
     return const ClientCalendarList(calendars: []);
+  }
+
+  @override
+  Future<List<ExternalCalendarConnection>> externalCalendarConnections({
+    required String accessToken,
+  }) async {
+    return const [];
   }
 
   @override

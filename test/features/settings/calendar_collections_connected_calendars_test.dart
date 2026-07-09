@@ -14,11 +14,14 @@ import 'package:flutter_test/flutter_test.dart';
 // ── Stub ─────────────────────────────────────────────────────────────────────
 
 class _StubHubClient extends CaleeHubClient {
-  _StubHubClient({List<ExternalCalendarConnection>? connections})
-    : _connections = connections ?? [],
-      super(baseUri: Uri.parse('http://localhost'));
+  _StubHubClient({
+    List<ExternalCalendarConnection>? connections,
+    this._externalCalendarsError,
+  }) : _connections = connections ?? [],
+       super(baseUri: Uri.parse('http://localhost'));
 
   List<ExternalCalendarConnection> _connections;
+  final Object Function()? _externalCalendarsError;
   int disconnectCallCount = 0;
   String? lastDisconnectedConnectionId;
 
@@ -39,6 +42,8 @@ class _StubHubClient extends CaleeHubClient {
     required String accessToken,
     required String connectionId,
   }) async {
+    final error = _externalCalendarsError;
+    if (error != null) throw error();
     return const [];
   }
 
@@ -89,7 +94,7 @@ void main() {
     await tester.pumpWidget(_wrap(client));
     await tester.pumpAndSettle();
 
-    expect(find.text('Connected calendars'), findsOneWidget);
+    expect(find.text('CONNECTED CALENDARS'), findsOneWidget);
     expect(find.text('Google Calendar'), findsOneWidget);
   });
 
@@ -162,7 +167,49 @@ void main() {
     await tester.pumpWidget(_wrap(client));
     await tester.pumpAndSettle();
 
-    expect(find.text('Connected calendars'), findsOneWidget);
+    expect(find.text('CONNECTED CALENDARS'), findsOneWidget);
     expect(find.text('No connected calendar accounts'), findsOneWidget);
   });
+
+  testWidgets(
+    'a needs-attention Google connection can still be disconnected when '
+    'loading its calendars fails',
+    (tester) async {
+      final client = _StubHubClient(
+        connections: [_googleConnection(id: 'conn99', active: false)],
+        externalCalendarsError: () => const CaleeHubException(
+          statusCode: 409,
+          message: 'Google connection is no longer active. Please reconnect.',
+          code: 'CONNECTION_NOT_ACTIVE',
+        ),
+      );
+      await tester.pumpWidget(_wrap(client));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Google Calendar'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Google connection is no longer active. Please reconnect.'),
+        findsOneWidget,
+      );
+      expect(find.text('Disconnect Google Calendar'), findsOneWidget);
+
+      await tester.tap(find.text('Disconnect Google Calendar'));
+      await tester.pumpAndSettle();
+
+      // Confirm the destructive dialog.
+      await tester.tap(find.text('Disconnect'));
+      await tester.pumpAndSettle();
+
+      expect(client.disconnectCallCount, 1);
+      expect(client.lastDisconnectedConnectionId, 'conn99');
+
+      // Disconnect pops back to the CalendarCollectionsPage root and the
+      // connected calendars section refreshes to reflect the removal.
+      expect(find.byType(CalendarCollectionsPage), findsOneWidget);
+      expect(find.text('No connected calendar accounts'), findsOneWidget);
+      expect(find.text('Google Calendar'), findsNothing);
+    },
+  );
 }
