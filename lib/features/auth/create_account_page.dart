@@ -283,7 +283,11 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                                   strokeWidth: 2,
                                 ),
                               )
-                            : const Text('Create account'),
+                            : Text(
+                                _controller.isRetryable
+                                    ? 'Retry Setup'
+                                    : 'Create account',
+                              ),
                       ),
                       const SizedBox(height: 32),
                       Center(
