@@ -6,6 +6,37 @@ import '../../../data/api/calee_hub_client.dart';
 import '../../../data/models/external_calendar_connection.dart';
 import '../../../ui/calee_design.dart';
 
+/// Time-boxed guard so the automatic OAuth-return deep link
+/// (`CaleeApp._openGoogleCalendarSelectionFromDeepLink`) and a manual
+/// "I finished in browser" check (`GoogleCalendarGuidePage._checkConnection`)
+/// can't each independently push this page for what is really the same
+/// just-completed connection, if both happen to resolve within moments of
+/// each other. Mirrors the intent-key dedup CaleeApp already uses elsewhere
+/// for redelivered signals.
+class GoogleCalendarSelectionGate {
+  GoogleCalendarSelectionGate._();
+
+  static DateTime? _lastOpenedAt;
+
+  /// Returns true if the caller should proceed to push the selection page.
+  /// Returns false if it was already opened moments ago by another caller.
+  static bool tryOpen() {
+    final now = DateTime.now();
+    final last = _lastOpenedAt;
+    if (last != null && now.difference(last) < const Duration(seconds: 5)) {
+      return false;
+    }
+    _lastOpenedAt = now;
+    return true;
+  }
+
+  /// Clears any recent-open record. Called when a fresh add-calendar flow
+  /// starts, so a stale record from an earlier attempt can't block it.
+  static void reset() {
+    _lastOpenedAt = null;
+  }
+}
+
 class GoogleCalendarSelectionPage extends StatefulWidget {
   const GoogleCalendarSelectionPage({
     required this.hubClient,
