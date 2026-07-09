@@ -325,7 +325,11 @@ class _GoogleCalendarSelectionPageState
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _loadError != null
-          ? _ErrorBody(message: _loadError!, onRetry: _load)
+          ? _ErrorBody(
+              message: _loadError!,
+              onRetry: _load,
+              onDisconnect: _disconnect,
+            )
           : _buildBody(theme),
     );
   }
@@ -534,10 +538,15 @@ class _DetailInfoRow extends StatelessWidget {
 }
 
 class _ErrorBody extends StatelessWidget {
-  const _ErrorBody({required this.message, required this.onRetry});
+  const _ErrorBody({
+    required this.message,
+    required this.onRetry,
+    required this.onDisconnect,
+  });
 
   final String message;
   final VoidCallback onRetry;
+  final VoidCallback onDisconnect;
 
   @override
   Widget build(BuildContext context) {
@@ -557,6 +566,14 @@ class _ErrorBody extends StatelessWidget {
             ),
             const SizedBox(height: CaleeSpacing.md),
             FilledButton(onPressed: onRetry, child: const Text('Try again')),
+            const SizedBox(height: CaleeSpacing.sm),
+            TextButton(
+              onPressed: onDisconnect,
+              style: TextButton.styleFrom(
+                foregroundColor: CaleeColors.destructive,
+              ),
+              child: const Text('Disconnect Google Calendar'),
+            ),
           ],
         ),
       ),

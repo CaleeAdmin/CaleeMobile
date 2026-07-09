@@ -5,6 +5,7 @@ import 'package:calee_mobile/data/api/calee_hub_client.dart';
 import 'package:calee_mobile/data/models/calendar_service_error.dart';
 import 'package:calee_mobile/data/models/client_bootstrap.dart';
 import 'package:calee_mobile/data/models/client_calendar.dart';
+import 'package:calee_mobile/data/models/external_calendar_connection.dart';
 import 'package:calee_mobile/features/calendar/widgets/calendar_error_state.dart';
 import 'package:calee_mobile/features/settings/calendar_collections_page.dart';
 import 'package:calee_mobile/ui/calee_theme.dart';
@@ -20,6 +21,13 @@ class _StubHubClient extends CaleeHubClient {
   @override
   Future<ClientCalendarList> calendars({required String accessToken}) =>
       calendarsResult();
+
+  @override
+  Future<List<ExternalCalendarConnection>> externalCalendarConnections({
+    required String accessToken,
+  }) async {
+    return const [];
+  }
 }
 
 ClientService _calendarService() => ClientService(
