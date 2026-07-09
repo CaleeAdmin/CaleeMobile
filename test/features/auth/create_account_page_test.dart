@@ -248,8 +248,13 @@ void main() {
     );
     expect(find.widgetWithText(FilledButton, 'Retry Setup'), findsOneWidget);
     // Form fields must be kept after a retryable failure so the user can
-    // just tap Retry rather than re-typing everything.
-    expect(find.text('Jane'), findsOneWidget);
+    // just tap Retry rather than re-typing everything. Checked directly on
+    // the controller (rather than find.text) since the field's label text
+    // ("First name") and its current value live in the same widget subtree.
+    final firstNameField = tester.widget<TextFormField>(
+      find.widgetWithText(TextFormField, 'First name'),
+    );
+    expect(firstNameField.controller?.text, 'Jane');
   });
 
   testWidgets('ONBOARDING_SUPPORT_REQUIRED shows the support message', (
