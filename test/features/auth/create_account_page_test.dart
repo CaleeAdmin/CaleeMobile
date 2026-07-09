@@ -248,14 +248,18 @@ void main() {
     );
     expect(find.widgetWithText(FilledButton, 'Retry Setup'), findsOneWidget);
     // Form fields must be kept after a retryable failure so the user can
-    // just tap Retry rather than re-typing everything. Located by type +
-    // tree position (First name is the first TextFormField), not by text
-    // content — a filled field's floating label is not reliably matched by
-    // find.text()/find.widgetWithText() once it has a value.
-    final firstNameField = tester.widget<TextFormField>(
-      find.byType(TextFormField).first,
+    // just tap Retry rather than re-typing everything. Checked by scanning
+    // every TextFormField's controller for the entered first-name value —
+    // deliberately independent of tree position/order (which does not
+    // match declaration order for this page) and of label text (a filled
+    // field's floating label is not reliably matched by find.text()).
+    final allFields = tester.widgetList<TextFormField>(
+      find.byType(TextFormField),
     );
-    expect(firstNameField.controller?.text, 'Jane');
+    final firstNameRetained = allFields.any(
+      (field) => field.controller?.text == 'Jane',
+    );
+    expect(firstNameRetained, isTrue);
   });
 
   testWidgets('ONBOARDING_SUPPORT_REQUIRED shows the support message', (
