@@ -155,6 +155,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    GoogleCalendarSelectionGate.reset();
     final testDeps = widget._testDeps;
     if (testDeps != null) {
       _hubClient = testDeps.hubClient;
@@ -563,7 +564,23 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
         '[CaleeApp] external-calendar-connected: '
         'found connection id=${connection.id}',
       );
+      if (!GoogleCalendarSelectionGate.tryOpen()) {
+        debugPrint(
+          '[CaleeApp] external-calendar-connected: selection page already '
+          'opened elsewhere; skipping duplicate navigation',
+        );
+        _openingGoogleCalendarSelection = false;
+        return;
+      }
       final resolvedConnection = connection;
+      await CaleePreferences().saveCalendarOnboardingStatus(
+        _sessionController.bootstrap!.account.id,
+        CalendarOnboardingStatus.dismissedForever,
+      );
+      if (!mounted) {
+        _openingGoogleCalendarSelection = false;
+        return;
+      }
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _openingGoogleCalendarSelection = false;
         if (!mounted) return;

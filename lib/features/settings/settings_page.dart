@@ -9,7 +9,7 @@ import '../../data/models/client_bootstrap.dart';
 import '../../data/models/client_calendar.dart';
 import '../../ui/calee_theme.dart';
 import '../../ui/calee_widgets.dart';
-import '../calendar_onboarding/calendar_onboarding_page.dart';
+import '../calendar_onboarding/calendar_source_picker_page.dart';
 import '../display_setup/connect_display_page.dart';
 import '../profile/profile_page.dart';
 import 'calendar_collections_page.dart';
@@ -447,13 +447,15 @@ class _SettingsPageState extends State<SettingsPage> {
               onTap: () {
                 Navigator.of(context).push(
                   MaterialPageRoute<void>(
-                    builder: (_) => CalendarOnboardingPage(
+                    settings: const RouteSettings(
+                      name: CalendarSourcePickerPage.routeName,
+                    ),
+                    builder: (_) => CalendarSourcePickerPage(
                       hubClient: widget.hubClient,
                       accessToken: widget.accessToken,
                       services: _controller.bootstrap.services,
                       accountId: _controller.bootstrap.account.id,
-                      isManual: true,
-                      onDismissed: () => Navigator.of(context).pop(),
+                      onDone: () => Navigator.of(context).pop(),
                       onViewCalendar: () {
                         Navigator.of(
                           context,
