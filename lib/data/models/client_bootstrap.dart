@@ -294,6 +294,7 @@ class ClientLoginResult {
     required this.expiresIn,
     required this.refreshExpiresIn,
     required this.bootstrap,
+    this.onboardingSessionId,
   });
 
   factory ClientLoginResult.fromJson(Map<String, dynamic> json) {
@@ -306,6 +307,7 @@ class ClientLoginResult {
       bootstrap: ClientBootstrap.fromJson(
         json['bootstrap'] as Map<String, dynamic>? ?? const {},
       ),
+      onboardingSessionId: json['onboardingSessionId'] as String?,
     );
   }
 
@@ -315,6 +317,10 @@ class ClientLoginResult {
   final int expiresIn;
   final int refreshExpiresIn;
   final ClientBootstrap bootstrap;
+  // Present on /client/v1/auth/register responses; absent on login. Kept
+  // only for support/observability — it is not required for the client to
+  // function and is not sent back to the server by CaleeMobile in this slice.
+  final String? onboardingSessionId;
 }
 
 class ClientRefreshResult {
