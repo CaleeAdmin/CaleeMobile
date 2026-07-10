@@ -561,4 +561,171 @@ void main() {
       expect(find.text('Connect this Calee display?'), findsOneWidget);
     },
   );
+
+  // ── Route-lifecycle cleanup (implicit dismissal) ────────────────────────────
+
+  /// Opens the signed-in confirmation route for [token] and settles until
+  /// exactly one confirmation page is visible.
+  Future<void> openConfirmation(
+    WidgetTester tester,
+    _FakeSessionController session,
+    _FakeDisplaySetupLinkController displaySetup,
+    String token,
+  ) async {
+    displaySetup.injectIntent(token);
+    await tester.pump();
+    session.finishRestore(signedIn: true);
+    await tester.pump();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('Connect this Calee display?'), findsOneWidget);
+  }
+
+  testWidgets('system Back clears the pending intent and closes the page', (
+    tester,
+  ) async {
+    final session = _FakeSessionController();
+    final displaySetup = _FakeDisplaySetupLinkController();
+
+    await tester.pumpWidget(
+      CaleeApp.forTesting(
+        testDeps: _makeDeps(session: session, displaySetup: displaySetup),
+      ),
+    );
+
+    await openConfirmation(tester, session, displaySetup, _validToken);
+
+    // Simulate Android system Back / Navigator.maybePop with no result.
+    await tester.binding.handlePopRoute();
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+
+    expect(find.text('Connect this Calee display?'), findsNothing);
+    expect(displaySetup.pendingIntent, isNull);
+  });
+
+  testWidgets(
+    'session notification after system Back does not reopen the page',
+    (tester) async {
+      final session = _FakeSessionController();
+      final displaySetup = _FakeDisplaySetupLinkController();
+
+      await tester.pumpWidget(
+        CaleeApp.forTesting(
+          testDeps: _makeDeps(session: session, displaySetup: displaySetup),
+        ),
+      );
+
+      await openConfirmation(tester, session, displaySetup, _validToken);
+
+      await tester.binding.handlePopRoute();
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+
+      expect(find.text('Connect this Calee display?'), findsNothing);
+      expect(displaySetup.pendingIntent, isNull);
+
+      // A later session notification (bootstrap refresh, etc.) must not
+      // resurrect the confirmation page.
+      session.pokeListeners();
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+
+      expect(find.text('Connect this Calee display?'), findsNothing);
+    },
+  );
+
+  testWidgets('Cancel button uses the same route-result cleanup path', (
+    tester,
+  ) async {
+    final session = _FakeSessionController();
+    final displaySetup = _FakeDisplaySetupLinkController();
+
+    await tester.pumpWidget(
+      CaleeApp.forTesting(
+        testDeps: _makeDeps(session: session, displaySetup: displaySetup),
+      ),
+    );
+
+    await openConfirmation(tester, session, displaySetup, _validToken);
+
+    await tester.tap(find.text('Cancel'));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+
+    expect(find.text('Connect this Calee display?'), findsNothing);
+    expect(displaySetup.pendingIntent, isNull);
+
+    session.pokeListeners();
+    await tester.pump();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.text('Connect this Calee display?'), findsNothing);
+  });
+
+  testWidgets(
+    '"Use a different account" preserves the token and shows the landing page',
+    (tester) async {
+      final session = _FakeSessionController();
+      final displaySetup = _FakeDisplaySetupLinkController();
+
+      await tester.pumpWidget(
+        CaleeApp.forTesting(
+          testDeps: _makeDeps(session: session, displaySetup: displaySetup),
+        ),
+      );
+
+      await openConfirmation(tester, session, displaySetup, _validToken);
+
+      await tester.tap(find.text('Use a different account'));
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+
+      expect(displaySetup.pendingIntent, isNotNull);
+      expect(displaySetup.pendingIntent!.token, _validToken);
+      expect(find.text('Connect this display to Calee'), findsOneWidget);
+      expect(find.text('Connect this Calee display?'), findsNothing);
+    },
+  );
+
+  testWidgets('old-route Back cleanup does not clear a newer pending token', (
+    tester,
+  ) async {
+    final session = _FakeSessionController();
+    final displaySetup = _FakeDisplaySetupLinkController();
+
+    await tester.pumpWidget(
+      CaleeApp.forTesting(
+        testDeps: _makeDeps(session: session, displaySetup: displaySetup),
+      ),
+    );
+
+    // Route A opens for token A.
+    await openConfirmation(tester, session, displaySetup, _validToken);
+
+    // Token B becomes pending while route A is still open.
+    displaySetup.pendingIntent = DisplaySetupIntent(
+      token: _otherToken,
+      sourceUri: Uri.parse('calee://native-login/$_otherToken'),
+    );
+
+    // Route A closes through system Back — its cleanup must not touch B.
+    await tester.binding.handlePopRoute();
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+
+    // Token B survives route A's teardown…
+    expect(displaySetup.pendingIntent, isNotNull);
+    expect(displaySetup.pendingIntent!.token, _otherToken);
+
+    // …and can open its own confirmation route normally.
+    displaySetup.notifyListeners();
+    await tester.pump();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.text('Connect this Calee display?'), findsOneWidget);
+  });
 }
