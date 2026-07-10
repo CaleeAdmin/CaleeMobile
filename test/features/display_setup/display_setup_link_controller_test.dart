@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:calee_mobile/features/display_setup/display_setup_intent.dart';
 import 'package:calee_mobile/features/display_setup/display_setup_link_controller.dart';
 
 const _validToken = 'AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-AB';
+const _otherToken = 'ZzYyXxWwVvUuTtSsRrQqPpOoNnMmLlKkJj012345';
 const _shortToken = 'abc123';
 
 void main() {
@@ -369,9 +372,172 @@ void main() {
       expect(controller.pendingIntent!.token, _validToken);
     });
   });
+
+  group('DisplaySetupLinkController.init lifecycle (fake link source)', () {
+    late _FakeLinkSource source;
+    late DisplaySetupLinkController controller;
+    late int notifications;
+
+    setUp(() {
+      source = _FakeLinkSource();
+      notifications = 0;
+    });
+
+    tearDown(() {
+      controller.dispose();
+    });
+
+    test('initial link delivered via getInitialLink populates pendingIntent '
+        'and notifies exactly once', () async {
+      source.initialLink = Uri.parse(
+        'https://hub.calee.com.au/native-login/$_validToken',
+      );
+      controller = DisplaySetupLinkController(linkSource: source);
+      controller.addListener(() => notifications++);
+
+      await controller.init();
+
+      expect(controller.pendingIntent, isNotNull);
+      expect(controller.pendingIntent!.token, _validToken);
+      expect(notifications, 1);
+    });
+
+    test('a link that only arrives later via uriLinkStream populates '
+        'pendingIntent', () async {
+      controller = DisplaySetupLinkController(linkSource: source);
+      controller.addListener(() => notifications++);
+
+      await controller.init();
+      expect(controller.pendingIntent, isNull);
+
+      source.emit(Uri.parse('calee://native-login/$_validToken'));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(controller.pendingIntent, isNotNull);
+      expect(controller.pendingIntent!.token, _validToken);
+      expect(notifications, 1);
+    });
+
+    test('a stream link arriving while getInitialLink is still pending is not '
+        'lost', () async {
+      final initialLinkCompleter = Completer<Uri?>();
+      source.initialLinkCompleter = initialLinkCompleter;
+      controller = DisplaySetupLinkController(linkSource: source);
+      controller.addListener(() => notifications++);
+
+      final initFuture = controller.init();
+      // getInitialLink has not resolved yet — the stream listener must
+      // already be attached, so this is not dropped.
+      source.emit(
+        Uri.parse('https://hub.calee.com.au/native-login/$_validToken'),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      expect(controller.pendingIntent, isNotNull);
+      expect(controller.pendingIntent!.token, _validToken);
+
+      initialLinkCompleter.complete(null);
+      await initFuture;
+
+      expect(controller.pendingIntent!.token, _validToken);
+      expect(notifications, 1);
+    });
+
+    test(
+      'the same token from both the stream and getInitialLink notifies once',
+      () async {
+        final uri = Uri.parse(
+          'https://hub.calee.com.au/native-login/$_validToken',
+        );
+        final initialLinkCompleter = Completer<Uri?>();
+        source.initialLinkCompleter = initialLinkCompleter;
+        controller = DisplaySetupLinkController(linkSource: source);
+        controller.addListener(() => notifications++);
+
+        final initFuture = controller.init();
+        source.emit(uri);
+        await Future<void>.delayed(Duration.zero);
+        initialLinkCompleter.complete(uri);
+        await initFuture;
+
+        expect(notifications, 1);
+        expect(controller.pendingIntent!.token, _validToken);
+      },
+    );
+
+    test('HTTPS getInitialLink and calee:// stream link for the same tablet '
+        'token dedup together', () async {
+      final httpsUri = Uri.parse(
+        'https://hub.calee.com.au/native-login/$_validToken',
+      );
+      final caleeUri = Uri.parse('calee://native-login/$_validToken');
+      final initialLinkCompleter = Completer<Uri?>();
+      source.initialLinkCompleter = initialLinkCompleter;
+      controller = DisplaySetupLinkController(linkSource: source);
+      controller.addListener(() => notifications++);
+
+      final initFuture = controller.init();
+      source.emit(caleeUri);
+      await Future<void>.delayed(Duration.zero);
+      initialLinkCompleter.complete(httpsUri);
+      await initFuture;
+
+      expect(notifications, 1);
+      expect(controller.pendingIntent!.token, _validToken);
+    });
+
+    test('a genuinely different token delivered later is accepted', () async {
+      source.initialLink = Uri.parse(
+        'https://hub.calee.com.au/native-login/$_validToken',
+      );
+      controller = DisplaySetupLinkController(linkSource: source);
+      controller.addListener(() => notifications++);
+
+      await controller.init();
+      expect(controller.pendingIntent!.token, _validToken);
+
+      source.emit(Uri.parse('calee://native-login/$_otherToken'));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(notifications, 2);
+      expect(controller.pendingIntent!.token, _otherToken);
+    });
+
+    test('init is idempotent — a second call does not attach a second '
+        'stream subscription', () async {
+      controller = DisplaySetupLinkController(linkSource: source);
+
+      await controller.init();
+      await controller.init();
+
+      controller.addListener(() => notifications++);
+      source.emit(Uri.parse('calee://native-login/$_validToken'));
+      await Future<void>.delayed(Duration.zero);
+
+      // A duplicate subscription would deliver the same event twice and
+      // double-count the notification.
+      expect(notifications, 1);
+    });
+  });
+
+  test('events after disposal are ignored safely', () async {
+    final source = _FakeLinkSource();
+    final controller = DisplaySetupLinkController(linkSource: source);
+    await controller.init();
+    controller.dispose();
+
+    source.emit(
+      Uri.parse('https://hub.calee.com.au/native-login/$_validToken'),
+    );
+    await Future<void>.delayed(Duration.zero);
+
+    // No exception from notifying a disposed ChangeNotifier, and no
+    // pendingIntent set from the post-disposal event.
+    expect(controller.pendingIntent, isNull);
+  });
 }
 
-// ─── Test helper ──────────────────────────────────────────────────────────────
+// ─── Test helpers ─────────────────────────────────────────────────────────────
 
 class _ManualController extends DisplaySetupLinkController {
   void injectUri(Uri uri) {
@@ -381,4 +547,26 @@ class _ManualController extends DisplaySetupLinkController {
     pendingError = null;
     notifyListeners();
   }
+}
+
+/// Fake [DisplaySetupLinkSource] that lets tests control exactly when
+/// [getInitialLink] resolves and emit arbitrary URIs on [uriLinkStream],
+/// without touching platform channels.
+class _FakeLinkSource implements DisplaySetupLinkSource {
+  Uri? initialLink;
+  Completer<Uri?>? initialLinkCompleter;
+
+  final _streamController = StreamController<Uri>.broadcast();
+
+  @override
+  Future<Uri?> getInitialLink() {
+    final completer = initialLinkCompleter;
+    if (completer != null) return completer.future;
+    return Future.value(initialLink);
+  }
+
+  @override
+  Stream<Uri> get uriLinkStream => _streamController.stream;
+
+  void emit(Uri uri) => _streamController.add(uri);
 }

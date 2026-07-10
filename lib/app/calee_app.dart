@@ -201,18 +201,10 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
         repository: DisplaySetupRepository(hubClient: _hubClient),
       );
       _localSubscriptionRepo = LocalCalendarSubscriptionRepository();
-      unawaited(_followLinkController.init());
-      unawaited(_displaySetupLinkController.init());
-      unawaited(_externalCalendarConnectedLinkController.init());
-      unawaited(
-        _shoppingLinkController.init().then((_) {
-          // Safety net in case init() resolved a pending intent before this
-          // listener was attached below.
-          if (mounted) _maybeOpenPendingShoppingLink();
-        }),
-      );
     }
 
+    // Listeners must be attached before any controller's init() can deliver
+    // an intent, so a notification fired mid-init is never missed.
     _followLinkController.addListener(_onFollowLinkChanged);
     _displaySetupLinkController.addListener(_onDisplaySetupLinkChanged);
     _externalCalendarConnectedLinkController.addListener(
@@ -220,6 +212,31 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
     );
     _shoppingLinkController.addListener(_onShoppingLinkChanged);
     _sessionController.addListener(_onSessionChanged);
+
+    // DisplaySetupLinkController.init() is idempotent and, in tests, always
+    // backed by a fake (see CaleeAppTestDependencies), so it's called
+    // unconditionally — this lets tests exercise the same post-init safety
+    // net production relies on.
+    unawaited(
+      _displaySetupLinkController.init().then((_) {
+        // Safety net in case init() resolved a pending intent before this
+        // listener was attached above (or before the session/navigator
+        // state needed to act on it was ready).
+        if (mounted) _onDisplaySetupLinkChanged();
+      }),
+    );
+
+    if (testDeps == null) {
+      unawaited(_followLinkController.init());
+      unawaited(_externalCalendarConnectedLinkController.init());
+      unawaited(
+        _shoppingLinkController.init().then((_) {
+          // Safety net in case init() resolved a pending intent before this
+          // listener was attached above.
+          if (mounted) _maybeOpenPendingShoppingLink();
+        }),
+      );
+    }
 
     _sessionController.restoreSession();
     unawaited(_loadLocalSubscriptions());
@@ -1030,29 +1047,25 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
         ]),
         builder: (context, _) => _buildHome(),
       ),
-      onUnknownRoute: (settings) {
-        final intent = DisplaySetupLinkController.parseDisplaySetupRouteName(
-          settings.name,
-        );
-        if (intent != null) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (!mounted) return;
-            _displaySetupLinkController.handleDisplaySetupIntent(intent);
-          });
-        }
-        return MaterialPageRoute<void>(
-          settings: const RouteSettings(name: '/'),
-          builder: (_) => AnimatedBuilder(
-            animation: Listenable.merge([
-              _sessionController,
-              _followLinkController,
-              _displaySetupLinkController,
-              _shoppingLinkController,
-            ]),
-            builder: (context, _) => _buildHome(),
-          ),
-        );
-      },
+      // app_links is the sole ingress path for deep links (including
+      // native-login display-setup links) now that Flutter's built-in deep
+      // link handling is disabled — see FlutterDeepLinkingEnabled/
+      // flutter_deeplinking_enabled in the platform manifests. This fallback
+      // only prevents a crash if Flutter's navigator is ever asked to
+      // resolve an unrecognised route name; it must not independently parse
+      // or accept display-setup links.
+      onUnknownRoute: (settings) => MaterialPageRoute<void>(
+        settings: const RouteSettings(name: '/'),
+        builder: (_) => AnimatedBuilder(
+          animation: Listenable.merge([
+            _sessionController,
+            _followLinkController,
+            _displaySetupLinkController,
+            _shoppingLinkController,
+          ]),
+          builder: (context, _) => _buildHome(),
+        ),
+      ),
     );
   }
 
