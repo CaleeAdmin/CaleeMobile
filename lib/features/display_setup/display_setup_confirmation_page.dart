@@ -12,6 +12,7 @@ class DisplaySetupConfirmationPage extends StatefulWidget {
     required this.accessToken,
     required this.onActivated,
     required this.onUseDifferentAccount,
+    this.onCancel,
     super.key,
   });
 
@@ -21,6 +22,12 @@ class DisplaySetupConfirmationPage extends StatefulWidget {
   final String accessToken;
   final FutureOr<void> Function() onActivated;
   final VoidCallback onUseDifferentAccount;
+
+  /// Called when the user taps Cancel. The owner is expected to close this
+  /// route *and* clear the matching pending display intent so a later
+  /// notification cannot re-open the page. Falls back to a plain
+  /// [Navigator.pop] when not provided.
+  final VoidCallback? onCancel;
 
   @override
   State<DisplaySetupConfirmationPage> createState() =>
@@ -103,7 +110,8 @@ class _DisplaySetupConfirmationPageState
                     TextButton(
                       onPressed: isLoading
                           ? null
-                          : () => Navigator.of(context).pop(),
+                          : (widget.onCancel ??
+                                () => Navigator.of(context).pop()),
                       child: const Text('Cancel'),
                     ),
                   ],

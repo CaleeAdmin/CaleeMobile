@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:calee_mobile/features/display_setup/display_setup_intent.dart';
 import 'package:calee_mobile/features/display_setup/display_setup_link_controller.dart';
 
 const _validToken = 'AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-AB';
@@ -287,6 +288,85 @@ void main() {
       );
 
       expect(controller.pendingIntent!.token, token2);
+    });
+  });
+
+  group('DisplaySetupLinkController token dedup', () {
+    // Both _handleUri and handleDisplaySetupIntent funnel through the same
+    // internal accept method, so driving handleDisplaySetupIntent with
+    // intents parsed from real URIs exercises the shared dedup logic.
+    const tokenB = 'ZzYyXxWwVvUuTtSsRrQqPpOoNnMmLlKkJj012345';
+
+    DisplaySetupIntent httpsIntent(String token) =>
+        DisplaySetupLinkController.parseDisplaySetupUri(
+          Uri.parse('https://hub.calee.com.au/native-login/$token'),
+        )!;
+
+    DisplaySetupIntent caleeIntent(String token) =>
+        DisplaySetupLinkController.parseDisplaySetupUri(
+          Uri.parse('calee://native-login/$token'),
+        )!;
+
+    late DateTime now;
+    late DisplaySetupLinkController controller;
+    late int notifications;
+
+    setUp(() {
+      now = DateTime(2026, 1, 1, 12);
+      controller = DisplaySetupLinkController(clock: () => now);
+      notifications = 0;
+      controller.addListener(() => notifications++);
+    });
+
+    tearDown(() {
+      controller.dispose();
+    });
+
+    test('same token delivered twice inside the window notifies once', () {
+      controller.handleDisplaySetupIntent(httpsIntent(_validToken));
+      now = now.add(const Duration(seconds: 1));
+      controller.handleDisplaySetupIntent(httpsIntent(_validToken));
+
+      expect(notifications, 1);
+      expect(controller.pendingIntent!.token, _validToken);
+    });
+
+    test('HTTPS and calee:// forms of the same token dedup together', () {
+      controller.handleDisplaySetupIntent(httpsIntent(_validToken));
+      controller.handleDisplaySetupIntent(caleeIntent(_validToken));
+
+      expect(notifications, 1);
+      expect(controller.pendingIntent!.token, _validToken);
+    });
+
+    test('a different token is not suppressed', () {
+      controller.handleDisplaySetupIntent(httpsIntent(_validToken));
+      controller.handleDisplaySetupIntent(httpsIntent(tokenB));
+
+      expect(notifications, 2);
+      expect(controller.pendingIntent!.token, tokenB);
+    });
+
+    test('same token accepted again after the dedup window elapses', () {
+      controller.handleDisplaySetupIntent(httpsIntent(_validToken));
+      now = now.add(
+        DisplaySetupLinkController.dedupWindow +
+            const Duration(milliseconds: 1),
+      );
+      controller.handleDisplaySetupIntent(httpsIntent(_validToken));
+
+      expect(notifications, 2);
+      expect(controller.pendingIntent!.token, _validToken);
+    });
+
+    test('same token accepted again after clearPending', () {
+      controller.handleDisplaySetupIntent(httpsIntent(_validToken));
+      controller.clearPending();
+      controller.handleDisplaySetupIntent(httpsIntent(_validToken));
+
+      // Delivery, clearPending, and re-delivery each notify.
+      expect(notifications, 3);
+      expect(controller.pendingIntent!.token, _validToken);
     });
   });
 }
