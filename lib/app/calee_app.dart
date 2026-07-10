@@ -748,51 +748,81 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
       }
 
       _displayConfirmationPushInFlight = false;
+      // Capture the account details now: the route's builder can re-run while
+      // the page animates out (e.g. after "Use a different account" signs out
+      // and clears accessToken), so reading _sessionController state inside the
+      // builder would force-unwrap a stale/null value and crash.
+      final accessToken = _sessionController.accessToken!;
+      final accountEmail =
+          _sessionController.bootstrap?.account.primaryEmail ?? '';
       unawaited(
         navigator
             .push(
-              MaterialPageRoute<void>(
+              MaterialPageRoute<DisplaySetupConfirmationResult>(
                 builder: (_) => DisplaySetupConfirmationPage(
                   token: intent.token,
-                  accountEmail:
-                      _sessionController.bootstrap?.account.primaryEmail ?? '',
+                  accountEmail: accountEmail,
                   activationController: _displayActivationController,
-                  accessToken: _sessionController.accessToken!,
-                  onActivated: () async {
-                    _displaySetupLinkController.clearPending();
-                    await _sessionController.refreshBootstrap();
-                    if (!mounted) return;
-                    _navigatorKey.currentState?.pop();
-                    _openDisplayActivationSuccess();
-                  },
-                  onUseDifferentAccount: () {
-                    // Keep the pending tablet token: after sign-out the
-                    // landing page picks it up so another account can
-                    // finish activating this display.
-                    _displaySetupFromLoggedOut = true;
-                    _displaySetupThroughLandingPage = false;
-                    _navigatorKey.currentState?.pop();
-                    unawaited(_sessionController.signOut());
-                  },
-                  onCancel: () {
-                    // Pop first, then clear: clearPending notifies the link
-                    // listener, which must observe pendingIntent == null so
-                    // a later session notification cannot re-open the page.
-                    _navigatorKey.currentState?.pop();
-                    _displaySetupLinkController.clearPending();
-                  },
+                  accessToken: accessToken,
                 ),
               ),
             )
-            .then((_) {
-              // Route closed (cancel, activation, or account switch):
-              // release the token guard — but never a newer token's guard.
-              if (_activeDisplayConfirmationToken == intent.token) {
-                _activeDisplayConfirmationToken = null;
-              }
-            }),
+            .then(
+              (result) => _onDisplaySetupConfirmationClosed(intent, result),
+            ),
       );
     });
+  }
+
+  /// Single authoritative cleanup path for a confirmation route closing,
+  /// whether through an explicit button (typed result) or an implicit
+  /// dismissal — Android system Back, [Navigator.maybePop], the iOS
+  /// interactive back gesture, or any other pop with no result (`null`),
+  /// all of which are treated as a cancellation.
+  ///
+  /// Cleanup is token-scoped so an older route closing can never disturb a
+  /// newer pending intent: a token B that replaced token A while route A was
+  /// still open must survive route A's teardown and be processed normally.
+  Future<void> _onDisplaySetupConfirmationClosed(
+    DisplaySetupIntent intent,
+    DisplaySetupConfirmationResult? result,
+  ) async {
+    // Release the navigation guard — but only if it still belongs to this
+    // route's token; a newer token may already own it.
+    if (_activeDisplayConfirmationToken == intent.token) {
+      _activeDisplayConfirmationToken = null;
+    }
+
+    // Null == implicit dismissal (system Back / maybePop / iOS swipe-back).
+    final effective = result ?? DisplaySetupConfirmationResult.cancelled;
+
+    switch (effective) {
+      case DisplaySetupConfirmationResult.cancelled:
+        // Clear the pending intent so a later session/link notification
+        // cannot re-open the page — but only when it still matches this
+        // route's token. If a newer token became pending while this route
+        // was open, leave it untouched so it can be processed normally.
+        final pending = _displaySetupLinkController.pendingIntent;
+        if (pending != null && pending.token == intent.token) {
+          _displaySetupLinkController.clearPending();
+        }
+      case DisplaySetupConfirmationResult.useDifferentAccount:
+        // Keep the pending tablet token: after sign-out the landing page
+        // picks it up so another account can finish activating this display.
+        _displaySetupFromLoggedOut = true;
+        _displaySetupThroughLandingPage = false;
+        unawaited(_sessionController.signOut());
+      case DisplaySetupConfirmationResult.activated:
+        // The activation path consumes the matching token here. Do not clear
+        // a newer intent that may have arrived meanwhile.
+        final pending = _displaySetupLinkController.pendingIntent;
+        if (pending != null && pending.token == intent.token) {
+          _displaySetupLinkController.clearPending();
+        }
+        await _sessionController.refreshBootstrap();
+        if (!mounted) return;
+        _openDisplayActivationSuccess();
+    }
   }
 
   Future<void> _activateDisplayAndShowSuccess(String token) async {
