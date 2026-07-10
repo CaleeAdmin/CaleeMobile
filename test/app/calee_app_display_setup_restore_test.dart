@@ -99,6 +99,27 @@ class _FakeDisplaySetupLinkController extends DisplaySetupLinkController {
   }
 }
 
+/// DisplaySetupLinkController whose [init] leaves a pending intent set
+/// directly (without calling notifyListeners), simulating the real
+/// controller resolving getInitialLink with a link already present before
+/// CaleeApp's listener could react to a notification. Used to verify
+/// CaleeApp's post-init safety net (which re-evaluates pendingIntent once
+/// init() completes) still opens the confirmation route.
+class _PendingIntentOnInitDisplaySetupLinkController
+    extends DisplaySetupLinkController {
+  _PendingIntentOnInitDisplaySetupLinkController(this._token);
+
+  final String _token;
+
+  @override
+  Future<void> init() async {
+    pendingIntent = DisplaySetupIntent(
+      token: _token,
+      sourceUri: Uri.parse('calee://native-login/$_token'),
+    );
+  }
+}
+
 /// CalendarFollowLinkController whose [init] is a no-op.
 class _FakeFollowLinkController extends CalendarFollowLinkController {
   @override
@@ -140,7 +161,7 @@ ClientBootstrap _stubBootstrap() => const ClientBootstrap(
 
 CaleeAppTestDependencies _makeDeps({
   _FakeSessionController? session,
-  _FakeDisplaySetupLinkController? displaySetup,
+  DisplaySetupLinkController? displaySetup,
   DisplayActivationController? displayActivationController,
 }) {
   final hub = CaleeHubClient();
@@ -301,7 +322,10 @@ void main() {
       await tester.pump();
       await tester.pump();
 
-      expect(find.text('Connect this Calee display?'), findsOneWidget);
+      expect(
+        find.text('Connect this Calee display?', skipOffstage: false),
+        findsOneWidget,
+      );
 
       await tester.tap(find.text('Connect display'));
       await tester.pump();
@@ -398,7 +422,10 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
 
-      expect(find.text('Connect this Calee display?'), findsOneWidget);
+      expect(
+        find.text('Connect this Calee display?', skipOffstage: false),
+        findsOneWidget,
+      );
     },
   );
 
@@ -425,7 +452,10 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
 
-      expect(find.text('Connect this Calee display?'), findsOneWidget);
+      expect(
+        find.text('Connect this Calee display?', skipOffstage: false),
+        findsOneWidget,
+      );
     },
   );
 
@@ -452,7 +482,10 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
 
-      expect(find.text('Connect this Calee display?'), findsOneWidget);
+      expect(
+        find.text('Connect this Calee display?', skipOffstage: false),
+        findsOneWidget,
+      );
     },
   );
 
@@ -474,13 +507,19 @@ void main() {
     await tester.pump();
     await tester.pump();
 
-    expect(find.text('Connect this Calee display?'), findsOneWidget);
+    expect(
+      find.text('Connect this Calee display?', skipOffstage: false),
+      findsOneWidget,
+    );
 
     await tester.tap(find.text('Cancel'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
 
-    expect(find.text('Connect this Calee display?'), findsNothing);
+    expect(
+      find.text('Connect this Calee display?', skipOffstage: false),
+      findsNothing,
+    );
     expect(displaySetup.pendingIntent, isNull);
 
     // A later session notification (e.g. bootstrap refresh) must not
@@ -490,7 +529,10 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
 
-    expect(find.text('Connect this Calee display?'), findsNothing);
+    expect(
+      find.text('Connect this Calee display?', skipOffstage: false),
+      findsNothing,
+    );
   });
 
   testWidgets(
@@ -512,7 +554,10 @@ void main() {
       await tester.pump();
       await tester.pump();
 
-      expect(find.text('Connect this Calee display?'), findsOneWidget);
+      expect(
+        find.text('Connect this Calee display?', skipOffstage: false),
+        findsOneWidget,
+      );
 
       await tester.tap(find.text('Use a different account'));
       await tester.pump();
@@ -523,7 +568,10 @@ void main() {
       expect(displaySetup.pendingIntent!.token, _validToken);
       // …and the signed-out display landing page is shown.
       expect(find.text('Connect this display to Calee'), findsOneWidget);
-      expect(find.text('Connect this Calee display?'), findsNothing);
+      expect(
+        find.text('Connect this Calee display?', skipOffstage: false),
+        findsNothing,
+      );
     },
   );
 
@@ -546,19 +594,28 @@ void main() {
       await tester.pump();
       await tester.pump();
 
-      expect(find.text('Connect this Calee display?'), findsOneWidget);
+      expect(
+        find.text('Connect this Calee display?', skipOffstage: false),
+        findsOneWidget,
+      );
 
       await tester.tap(find.text('Cancel'));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
-      expect(find.text('Connect this Calee display?'), findsNothing);
+      expect(
+        find.text('Connect this Calee display?', skipOffstage: false),
+        findsNothing,
+      );
 
       displaySetup.injectIntent(_otherToken);
       await tester.pump();
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
 
-      expect(find.text('Connect this Calee display?'), findsOneWidget);
+      expect(
+        find.text('Connect this Calee display?', skipOffstage: false),
+        findsOneWidget,
+      );
     },
   );
 
@@ -578,7 +635,10 @@ void main() {
     await tester.pump();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
-    expect(find.text('Connect this Calee display?'), findsOneWidget);
+    expect(
+      find.text('Connect this Calee display?', skipOffstage: false),
+      findsOneWidget,
+    );
   }
 
   testWidgets('system Back clears the pending intent and closes the page', (
@@ -600,7 +660,10 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
 
-    expect(find.text('Connect this Calee display?'), findsNothing);
+    expect(
+      find.text('Connect this Calee display?', skipOffstage: false),
+      findsNothing,
+    );
     expect(displaySetup.pendingIntent, isNull);
   });
 
@@ -622,7 +685,10 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(seconds: 1));
 
-      expect(find.text('Connect this Calee display?'), findsNothing);
+      expect(
+        find.text('Connect this Calee display?', skipOffstage: false),
+        findsNothing,
+      );
       expect(displaySetup.pendingIntent, isNull);
 
       // A later session notification (bootstrap refresh, etc.) must not
@@ -632,7 +698,10 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
 
-      expect(find.text('Connect this Calee display?'), findsNothing);
+      expect(
+        find.text('Connect this Calee display?', skipOffstage: false),
+        findsNothing,
+      );
     },
   );
 
@@ -654,7 +723,10 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
 
-    expect(find.text('Connect this Calee display?'), findsNothing);
+    expect(
+      find.text('Connect this Calee display?', skipOffstage: false),
+      findsNothing,
+    );
     expect(displaySetup.pendingIntent, isNull);
 
     session.pokeListeners();
@@ -662,7 +734,10 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
 
-    expect(find.text('Connect this Calee display?'), findsNothing);
+    expect(
+      find.text('Connect this Calee display?', skipOffstage: false),
+      findsNothing,
+    );
   });
 
   testWidgets(
@@ -686,7 +761,10 @@ void main() {
       expect(displaySetup.pendingIntent, isNotNull);
       expect(displaySetup.pendingIntent!.token, _validToken);
       expect(find.text('Connect this display to Calee'), findsOneWidget);
-      expect(find.text('Connect this Calee display?'), findsNothing);
+      expect(
+        find.text('Connect this Calee display?', skipOffstage: false),
+        findsNothing,
+      );
     },
   );
 
@@ -726,6 +804,43 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
 
-    expect(find.text('Connect this Calee display?'), findsOneWidget);
+    expect(
+      find.text('Connect this Calee display?', skipOffstage: false),
+      findsOneWidget,
+    );
   });
+
+  // ── Post-init safety net ────────────────────────────────────────────────────
+
+  testWidgets(
+    'CaleeApp post-init safety net opens exactly one confirmation route when '
+    'init() already left a pending intent before notifying',
+    (tester) async {
+      final session = _FakeSessionController()
+        ..accessToken = 'test_access_token'
+        ..bootstrap = _stubBootstrap()
+        ..isRestoringSession = false;
+      final displaySetup = _PendingIntentOnInitDisplaySetupLinkController(
+        _validToken,
+      );
+
+      await tester.pumpWidget(
+        CaleeApp.forTesting(
+          testDeps: _makeDeps(session: session, displaySetup: displaySetup),
+        ),
+      );
+
+      // initState's addListener happened before init() was called, but this
+      // fake's init() sets pendingIntent without calling notifyListeners —
+      // only CaleeApp's post-init `.then()` safety net re-evaluates it.
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+
+      expect(
+        find.text('Connect this Calee display?', skipOffstage: false),
+        findsOneWidget,
+      );
+    },
+  );
 }
