@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../data/api/calee_hub_client.dart';
+import '../../../data/auth/calee_preferences.dart';
 import '../../../data/models/client_bootstrap.dart';
 import '../../../ui/calee_design.dart';
+import '../calendar_onboarding_status.dart';
 import 'generic_calendar_link_page.dart';
 import 'google_calendar_selection_page.dart';
 
@@ -41,6 +43,12 @@ class _GoogleCalendarGuidePageState extends State<GoogleCalendarGuidePage> {
   bool _isStarting = false;
   bool _isCheckingConnection = false;
   String? _errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    GoogleCalendarSelectionGate.reset();
+  }
 
   Future<void> _startOAuth() async {
     setState(() {
@@ -102,6 +110,19 @@ class _GoogleCalendarGuidePageState extends State<GoogleCalendarGuidePage> {
         debugPrint(
           '[GoogleCalendarGuide] active Google connection found: id=${connection.id}',
         );
+        if (!GoogleCalendarSelectionGate.tryOpen()) {
+          debugPrint(
+            '[GoogleCalendarGuide] selection page already opened elsewhere; '
+            'skipping duplicate navigation',
+          );
+          setState(() => _isCheckingConnection = false);
+          return;
+        }
+        await CaleePreferences().saveCalendarOnboardingStatus(
+          widget.accountId,
+          CalendarOnboardingStatus.dismissedForever,
+        );
+        if (!mounted) return;
         Navigator.of(context).push(
           MaterialPageRoute<void>(
             builder: (_) => GoogleCalendarSelectionPage(

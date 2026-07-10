@@ -6,6 +6,37 @@ import '../../../data/api/calee_hub_client.dart';
 import '../../../data/models/external_calendar_connection.dart';
 import '../../../ui/calee_design.dart';
 
+/// Time-boxed guard so the automatic OAuth-return deep link
+/// (`CaleeApp._openGoogleCalendarSelectionFromDeepLink`) and a manual
+/// "I finished in browser" check (`GoogleCalendarGuidePage._checkConnection`)
+/// can't each independently push this page for what is really the same
+/// just-completed connection, if both happen to resolve within moments of
+/// each other. Mirrors the intent-key dedup CaleeApp already uses elsewhere
+/// for redelivered signals.
+class GoogleCalendarSelectionGate {
+  GoogleCalendarSelectionGate._();
+
+  static DateTime? _lastOpenedAt;
+
+  /// Returns true if the caller should proceed to push the selection page.
+  /// Returns false if it was already opened moments ago by another caller.
+  static bool tryOpen() {
+    final now = DateTime.now();
+    final last = _lastOpenedAt;
+    if (last != null && now.difference(last) < const Duration(seconds: 5)) {
+      return false;
+    }
+    _lastOpenedAt = now;
+    return true;
+  }
+
+  /// Clears any recent-open record. Called when a fresh add-calendar flow
+  /// starts, so a stale record from an earlier attempt can't block it.
+  static void reset() {
+    _lastOpenedAt = null;
+  }
+}
+
 class GoogleCalendarSelectionPage extends StatefulWidget {
   const GoogleCalendarSelectionPage({
     required this.hubClient,
@@ -294,7 +325,11 @@ class _GoogleCalendarSelectionPageState
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _loadError != null
-          ? _ErrorBody(message: _loadError!, onRetry: _load)
+          ? _ErrorBody(
+              message: _loadError!,
+              onRetry: _load,
+              onDisconnect: _disconnect,
+            )
           : _buildBody(theme),
     );
   }
@@ -503,10 +538,15 @@ class _DetailInfoRow extends StatelessWidget {
 }
 
 class _ErrorBody extends StatelessWidget {
-  const _ErrorBody({required this.message, required this.onRetry});
+  const _ErrorBody({
+    required this.message,
+    required this.onRetry,
+    required this.onDisconnect,
+  });
 
   final String message;
   final VoidCallback onRetry;
+  final VoidCallback onDisconnect;
 
   @override
   Widget build(BuildContext context) {
@@ -526,6 +566,14 @@ class _ErrorBody extends StatelessWidget {
             ),
             const SizedBox(height: CaleeSpacing.md),
             FilledButton(onPressed: onRetry, child: const Text('Try again')),
+            const SizedBox(height: CaleeSpacing.sm),
+            TextButton(
+              onPressed: onDisconnect,
+              style: TextButton.styleFrom(
+                foregroundColor: CaleeColors.destructive,
+              ),
+              child: const Text('Disconnect Google Calendar'),
+            ),
           ],
         ),
       ),

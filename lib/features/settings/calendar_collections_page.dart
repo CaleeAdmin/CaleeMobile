@@ -4,9 +4,11 @@ import '../../data/api/calee_hub_client.dart';
 import '../../data/models/calendar_service_error.dart';
 import '../../data/models/client_bootstrap.dart';
 import '../../data/models/client_calendar.dart';
+import '../../data/models/external_calendar_connection.dart';
 import '../../ui/calee_design.dart';
 import '../calendar/widgets/calendar_error_state.dart';
 import '../calendar_onboarding/calendar_source_picker_page.dart';
+import '../calendar_onboarding/provider_guides/google_calendar_selection_page.dart';
 
 // ─── File-level helpers ───────────────────────────────────────────────────────
 
@@ -102,6 +104,7 @@ class CalendarCollectionsPage extends StatefulWidget {
 
 class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
   late Future<ClientCalendarList> _future;
+  late Future<List<ExternalCalendarConnection>> _connectionsFuture;
   final Set<String> _updatingCalendarIds = {};
 
   List<ClientService> get _calendarServices {
@@ -118,6 +121,7 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
   void initState() {
     super.initState();
     _future = _loadCalendars();
+    _connectionsFuture = _loadConnections();
 
     if (widget.autoOpenCreate ||
         widget.autoOpenSubscribe ||
@@ -137,10 +141,136 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
     return widget.hubClient.calendars(accessToken: widget.accessToken);
   }
 
+  Future<List<ExternalCalendarConnection>> _loadConnections() {
+    return widget.hubClient.externalCalendarConnections(
+      accessToken: widget.accessToken,
+    );
+  }
+
   void _reload() {
     setState(() {
       _future = _loadCalendars();
+      _connectionsFuture = _loadConnections();
     });
+  }
+
+  // ── Connected calendars ──────────────────────────────────────────────────
+
+  /// Picks the connection to surface for management: prefers an active
+  /// Google connection, but falls back to a non-revoked one that needs
+  /// attention so the user can still find their way to disconnect it.
+  ExternalCalendarConnection? _primaryGoogleConnection(
+    List<ExternalCalendarConnection> connections,
+  ) {
+    final google = connections
+        .where((c) => c.isGoogle && c.revokedAt == null)
+        .toList();
+    if (google.isEmpty) return null;
+    return google.firstWhere((c) => c.isActive, orElse: () => google.first);
+  }
+
+  Future<void> _openGoogleCalendarManagement(
+    ExternalCalendarConnection connection,
+  ) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        settings: const RouteSettings(name: 'google_calendar_management'),
+        builder: (_) => GoogleCalendarSelectionPage(
+          hubClient: widget.hubClient,
+          accessToken: widget.accessToken,
+          connection: connection,
+          onViewCalendar: () =>
+              Navigator.of(context).popUntil((route) => route.isFirst),
+          onDone: () => Navigator.of(context).pop(),
+        ),
+      ),
+    );
+    if (mounted) _reload();
+  }
+
+  Widget _buildGoogleConnectionRow(ExternalCalendarConnection connection) {
+    final needsAttention = !connection.isActive;
+    final email = connection.externalAccountEmail?.trim();
+    final subtitle = needsAttention
+        ? 'Needs attention'
+        : (email != null && email.isNotEmpty ? email : 'Connected');
+
+    return CaleeListRow(
+      title: 'Google Calendar',
+      subtitle: subtitle,
+      leading: Icon(
+        Icons.event_outlined,
+        size: 20,
+        color: needsAttention ? CaleeColors.dotOrange : CaleeColors.primary,
+      ),
+      trailing: needsAttention
+          ? const Icon(
+              Icons.warning_amber_rounded,
+              size: 16,
+              color: CaleeColors.dotOrange,
+            )
+          : null,
+      onTap: () => _openGoogleCalendarManagement(connection),
+    );
+  }
+
+  Widget _buildConnectedCalendarsSection() {
+    return FutureBuilder<List<ExternalCalendarConnection>>(
+      future: _connectionsFuture,
+      builder: (context, snapshot) {
+        Widget child;
+
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            !snapshot.hasData &&
+            !snapshot.hasError) {
+          child = const Padding(
+            padding: EdgeInsets.symmetric(
+              horizontal: CaleeSpacing.md,
+              vertical: CaleeSpacing.sm + 4,
+            ),
+            child: SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+          );
+        } else if (snapshot.hasError) {
+          child = Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: CaleeSpacing.md,
+              vertical: CaleeSpacing.sm + 4,
+            ),
+            child: Text(
+              'Unable to load connected calendars.',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: CaleeColors.textSecondary,
+              ),
+            ),
+          );
+        } else {
+          final connections =
+              snapshot.data ?? const <ExternalCalendarConnection>[];
+          final google = _primaryGoogleConnection(connections);
+
+          child = google == null
+              ? Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: CaleeSpacing.md,
+                    vertical: CaleeSpacing.sm + 4,
+                  ),
+                  child: Text(
+                    'No connected calendar accounts',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: CaleeColors.textSecondary,
+                    ),
+                  ),
+                )
+              : _buildGoogleConnectionRow(google);
+        }
+
+        return CaleeSection(title: 'Connected calendars', children: [child]);
+      },
+    );
   }
 
   // ── Create / subscribe ───────────────────────────────────────────────────
@@ -659,6 +789,8 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
                       96,
                     ),
                     children: [
+                      _buildConnectedCalendarsSection(),
+                      const SizedBox(height: CaleeSpacing.sectionSpacing),
                       _buildSection(
                         context,
                         title: 'Calendars',

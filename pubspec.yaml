@@ -2,7 +2,7 @@ name: calee_mobile
 description: "Mobile calendars, tasks, people, and display management for Calee."
 publish_to: 'none'
 
-version: 0.0.21+21
+version: 0.0.22+22
 
 environment:
   sdk: ^3.12.0
@@ -10,7 +10,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  app_links: ^6.3.0
+  app_links: ^7.2.1
   flutter_secure_storage: ^9.2.4
   flutter_image_compress: ^2.4.0
   image_picker: ^1.1.2
