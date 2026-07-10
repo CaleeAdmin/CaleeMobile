@@ -26,6 +26,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 // ── Token ─────────────────────────────────────────────────────────────────────
 
 const _validToken = 'AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-AB';
+const _otherToken = 'ZzYyXxWwVvUuTtSsRrQqPpOoNnMmLlKkJj012345';
 
 // ── Fake controllers ──────────────────────────────────────────────────────────
 
@@ -67,6 +68,19 @@ class _FakeSessionController extends SessionController {
       await completer.future;
     }
     bootstrap = _stubBootstrap();
+    notifyListeners();
+  }
+
+  /// Re-emits a session notification without changing state — simulates a
+  /// bootstrap refresh (or similar) firing while an intent is pending.
+  void pokeListeners() => notifyListeners();
+
+  /// Avoids FlutterSecureStorage platform-channel calls in widget tests.
+  @override
+  Future<void> signOut() async {
+    accessToken = null;
+    refreshToken = null;
+    bootstrap = null;
     notifyListeners();
   }
 }
@@ -358,6 +372,193 @@ void main() {
       // Intent must still be pending after tapping sign-in.
       expect(displaySetup.pendingIntent, isNotNull);
       expect(displaySetup.pendingIntent!.token, _validToken);
+    },
+  );
+
+  // ── Duplicate confirmation-page guards ──────────────────────────────────────
+
+  testWidgets(
+    'intent during restore + restore finishes signed in → exactly one confirmation page',
+    (tester) async {
+      final session = _FakeSessionController();
+      final displaySetup = _FakeDisplaySetupLinkController();
+
+      await tester.pumpWidget(
+        CaleeApp.forTesting(
+          testDeps: _makeDeps(session: session, displaySetup: displaySetup),
+        ),
+      );
+
+      // Intent arrives while session restore is still running.
+      displaySetup.injectIntent(_validToken);
+      await tester.pump();
+
+      session.finishRestore(signedIn: true);
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+
+      expect(find.text('Connect this Calee display?'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'same intent delivered twice in quick succession → exactly one confirmation page',
+    (tester) async {
+      final session = _FakeSessionController();
+      final displaySetup = _FakeDisplaySetupLinkController();
+
+      await tester.pumpWidget(
+        CaleeApp.forTesting(
+          testDeps: _makeDeps(session: session, displaySetup: displaySetup),
+        ),
+      );
+
+      session.finishRestore(signedIn: true);
+      await tester.pump();
+
+      // injectIntent bypasses the controller's dedup window, so this
+      // exercises the app-level navigation guard on its own.
+      displaySetup.injectIntent(_validToken);
+      displaySetup.injectIntent(_validToken);
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+
+      expect(find.text('Connect this Calee display?'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'link controller and session controller notify for the same token → one page',
+    (tester) async {
+      final session = _FakeSessionController();
+      final displaySetup = _FakeDisplaySetupLinkController();
+
+      await tester.pumpWidget(
+        CaleeApp.forTesting(
+          testDeps: _makeDeps(session: session, displaySetup: displaySetup),
+        ),
+      );
+
+      session.finishRestore(signedIn: true);
+      await tester.pump();
+
+      // The link controller notifies, then the session controller notifies
+      // for the same still-pending token before the scheduled push runs.
+      displaySetup.injectIntent(_validToken);
+      session.pokeListeners();
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+
+      expect(find.text('Connect this Calee display?'), findsOneWidget);
+    },
+  );
+
+  testWidgets('Cancel closes the page, clears the intent, and later session '
+      'notifications do not reopen it', (tester) async {
+    final session = _FakeSessionController();
+    final displaySetup = _FakeDisplaySetupLinkController();
+
+    await tester.pumpWidget(
+      CaleeApp.forTesting(
+        testDeps: _makeDeps(session: session, displaySetup: displaySetup),
+      ),
+    );
+
+    displaySetup.injectIntent(_validToken);
+    await tester.pump();
+    session.finishRestore(signedIn: true);
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('Connect this Calee display?'), findsOneWidget);
+
+    await tester.tap(find.text('Cancel'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.text('Connect this Calee display?'), findsNothing);
+    expect(displaySetup.pendingIntent, isNull);
+
+    // A later session notification (e.g. bootstrap refresh) must not
+    // resurrect the confirmation page.
+    session.pokeListeners();
+    await tester.pump();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.text('Connect this Calee display?'), findsNothing);
+  });
+
+  testWidgets(
+    '"Use a different account" keeps the pending token for the signed-out flow',
+    (tester) async {
+      final session = _FakeSessionController();
+      final displaySetup = _FakeDisplaySetupLinkController();
+
+      await tester.pumpWidget(
+        CaleeApp.forTesting(
+          testDeps: _makeDeps(session: session, displaySetup: displaySetup),
+        ),
+      );
+
+      displaySetup.injectIntent(_validToken);
+      await tester.pump();
+      session.finishRestore(signedIn: true);
+      await tester.pump();
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.text('Connect this Calee display?'), findsOneWidget);
+
+      await tester.tap(find.text('Use a different account'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+
+      // The tablet token survives the sign-out…
+      expect(displaySetup.pendingIntent, isNotNull);
+      expect(displaySetup.pendingIntent!.token, _validToken);
+      // …and the signed-out display landing page is shown.
+      expect(find.text('Connect this display to Calee'), findsOneWidget);
+      expect(find.text('Connect this Calee display?'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'a different token after the first route closed is processed normally',
+    (tester) async {
+      final session = _FakeSessionController();
+      final displaySetup = _FakeDisplaySetupLinkController();
+
+      await tester.pumpWidget(
+        CaleeApp.forTesting(
+          testDeps: _makeDeps(session: session, displaySetup: displaySetup),
+        ),
+      );
+
+      displaySetup.injectIntent(_validToken);
+      await tester.pump();
+      session.finishRestore(signedIn: true);
+      await tester.pump();
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.text('Connect this Calee display?'), findsOneWidget);
+
+      await tester.tap(find.text('Cancel'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.text('Connect this Calee display?'), findsNothing);
+
+      displaySetup.injectIntent(_otherToken);
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+
+      expect(find.text('Connect this Calee display?'), findsOneWidget);
     },
   );
 }

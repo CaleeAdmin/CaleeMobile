@@ -134,6 +134,21 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
   bool _showingDisplaySetupCreateAccount = false;
   bool _showingDisplaySetupSignIn = false;
   bool _justRegistered = false;
+  // Guards for the signed-in display confirmation route. The same pending
+  // intent is observed by both _onDisplaySetupLinkChanged and
+  // _onSessionChanged (a QR link landing around session restore makes both
+  // fire close together), and it stays pending while the confirmation page
+  // is shown — so without these guards any later session notification
+  // pushes a second identical page.
+  //
+  // _displayConfirmationPushInFlight: a post-frame push has been scheduled
+  // but not yet issued. Set *before* scheduling, so two notifications in the
+  // same frame cannot both schedule a callback.
+  // _activeDisplayConfirmationToken: token whose confirmation route is
+  // currently scheduled or sitting on the navigator; released when that
+  // route pops.
+  bool _displayConfirmationPushInFlight = false;
+  String? _activeDisplayConfirmationToken;
 
   // Welcome screen state (first-run signed-out, no pending intent)
   bool _showingSignInFromWelcome = false;
@@ -274,7 +289,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
         } else {
           // Intent arrived during session restore (or after sign-in from
           // default login page): treat as state 3 and show confirmation.
-          _openDisplaySetupConfirmation(displayIntent);
+          _maybeOpenDisplaySetupConfirmation(displayIntent);
         }
         return;
       } else if (!_sessionController.isRestoringSession) {
@@ -352,7 +367,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
     if (_sessionController.isSignedIn) {
       // State 3: already signed in — push confirmation page.
       _displaySetupFromLoggedOut = false;
-      _openDisplaySetupConfirmation(intent);
+      _maybeOpenDisplaySetupConfirmation(intent);
     } else if (!_sessionController.isRestoringSession) {
       // State 2: definitely not signed in — show landing page.
       setState(() => _displaySetupFromLoggedOut = true);
@@ -670,32 +685,112 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
     return false;
   }
 
-  void _openDisplaySetupConfirmation(DisplaySetupIntent intent) {
+  /// Single entry point for opening the signed-in display confirmation page,
+  /// used by both [_onDisplaySetupLinkChanged] and [_onSessionChanged].
+  ///
+  /// Those listeners can fire for the same pending intent within one frame
+  /// (link delivered while session restore finishes), and the intent stays
+  /// pending while the page is shown, so every navigation goes through the
+  /// guards here: at most one confirmation route may exist per token.
+  void _maybeOpenDisplaySetupConfirmation(DisplaySetupIntent intent) {
+    if (_activeDisplayConfirmationToken == intent.token) {
+      // A confirmation route (or scheduled push) for this token already
+      // exists — collapse the duplicate notification.
+      return;
+    }
+    if (_displayConfirmationPushInFlight) {
+      // A push for another token is mid-flight; its post-frame callback
+      // re-reads pendingIntent and re-dispatches here, so a newer token
+      // is picked up rather than lost.
+      return;
+    }
+    // Claim the guards before scheduling the callback so a second
+    // notification arriving in the same frame cannot schedule another one.
+    _displayConfirmationPushInFlight = true;
+    _activeDisplayConfirmationToken = intent.token;
+    _pushDisplaySetupConfirmation(intent);
+  }
+
+  void _pushDisplaySetupConfirmation(DisplaySetupIntent intent) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      _navigatorKey.currentState?.push(
-        MaterialPageRoute<void>(
-          builder: (_) => DisplaySetupConfirmationPage(
-            token: intent.token,
-            accountEmail:
-                _sessionController.bootstrap?.account.primaryEmail ?? '',
-            activationController: _displayActivationController,
-            accessToken: _sessionController.accessToken!,
-            onActivated: () async {
-              _displaySetupLinkController.clearPending();
-              await _sessionController.refreshBootstrap();
-              if (!mounted) return;
-              Navigator.of(_navigatorKey.currentContext!).pop();
-              _openDisplayActivationSuccess();
-            },
-            onUseDifferentAccount: () {
-              _displaySetupFromLoggedOut = true;
-              _displaySetupThroughLandingPage = false;
-              Navigator.of(_navigatorKey.currentContext!).pop();
-              unawaited(_sessionController.signOut());
-            },
-          ),
-        ),
+      if (!mounted) {
+        _displayConfirmationPushInFlight = false;
+        return;
+      }
+      // Re-validate: the intent may have been cancelled, consumed, or
+      // replaced — and the session may have changed — between scheduling
+      // and this frame firing.
+      final pending = _displaySetupLinkController.pendingIntent;
+      if (!_sessionController.isSignedIn ||
+          pending == null ||
+          pending.token != intent.token) {
+        _displayConfirmationPushInFlight = false;
+        if (_activeDisplayConfirmationToken == intent.token) {
+          _activeDisplayConfirmationToken = null;
+        }
+        if (_sessionController.isSignedIn &&
+            pending != null &&
+            pending.token != intent.token) {
+          // A different token replaced this one before the frame fired —
+          // process it instead of dropping it.
+          _maybeOpenDisplaySetupConfirmation(pending);
+        }
+        return;
+      }
+      final navigator = _navigatorKey.currentState;
+      if (navigator == null) {
+        // Very early cold-start frame before the Navigator attached — keep
+        // the guards claimed and retry next frame (mirrors the shopping-link
+        // retry) rather than dropping the link.
+        WidgetsBinding.instance.scheduleFrame();
+        _pushDisplaySetupConfirmation(intent);
+        return;
+      }
+
+      _displayConfirmationPushInFlight = false;
+      unawaited(
+        navigator
+            .push(
+              MaterialPageRoute<void>(
+                builder: (_) => DisplaySetupConfirmationPage(
+                  token: intent.token,
+                  accountEmail:
+                      _sessionController.bootstrap?.account.primaryEmail ?? '',
+                  activationController: _displayActivationController,
+                  accessToken: _sessionController.accessToken!,
+                  onActivated: () async {
+                    _displaySetupLinkController.clearPending();
+                    await _sessionController.refreshBootstrap();
+                    if (!mounted) return;
+                    _navigatorKey.currentState?.pop();
+                    _openDisplayActivationSuccess();
+                  },
+                  onUseDifferentAccount: () {
+                    // Keep the pending tablet token: after sign-out the
+                    // landing page picks it up so another account can
+                    // finish activating this display.
+                    _displaySetupFromLoggedOut = true;
+                    _displaySetupThroughLandingPage = false;
+                    _navigatorKey.currentState?.pop();
+                    unawaited(_sessionController.signOut());
+                  },
+                  onCancel: () {
+                    // Pop first, then clear: clearPending notifies the link
+                    // listener, which must observe pendingIntent == null so
+                    // a later session notification cannot re-open the page.
+                    _navigatorKey.currentState?.pop();
+                    _displaySetupLinkController.clearPending();
+                  },
+                ),
+              ),
+            )
+            .then((_) {
+              // Route closed (cancel, activation, or account switch):
+              // release the token guard — but never a newer token's guard.
+              if (_activeDisplayConfirmationToken == intent.token) {
+                _activeDisplayConfirmationToken = null;
+              }
+            }),
       );
     });
   }

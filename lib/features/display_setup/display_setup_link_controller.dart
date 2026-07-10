@@ -8,9 +8,27 @@ import 'display_setup_intent.dart';
 const _tokenPattern = r'^[A-Za-z0-9_\-]{32,256}$';
 
 class DisplaySetupLinkController extends ChangeNotifier {
-  DisplaySetupLinkController();
+  DisplaySetupLinkController({DateTime Function()? clock})
+    : _clock = clock ?? DateTime.now;
 
   final _appLinks = AppLinks();
+
+  /// Clock used for the redelivery dedup window. Injectable so tests can
+  /// advance time without waiting out the real window.
+  final DateTime Function() _clock;
+
+  /// How long a just-accepted token suppresses redeliveries of itself.
+  ///
+  /// The same tablet token can arrive more than once in quick succession:
+  /// [AppLinks.getInitialLink] and [AppLinks.uriLinkStream] may both report
+  /// a cold-start link, the HTTPS and calee:// forms of the same QR code
+  /// carry the same token, and the Flutter route fallback
+  /// ([handleDisplaySetupIntent]) can parse the same route again.
+  @visibleForTesting
+  static const dedupWindow = Duration(seconds: 5);
+
+  String? _lastAcceptedToken;
+  DateTime? _lastAcceptedAt;
 
   DisplaySetupIntent? pendingIntent;
   String? pendingError;
@@ -37,7 +55,30 @@ class DisplaySetupLinkController extends ChangeNotifier {
   void _handleUri(Uri uri) {
     final intent = parseDisplaySetupUri(uri);
     if (intent == null) return;
+    _acceptIntent(intent);
+  }
+
+  /// Single entry point for every incoming intent (initial link, link
+  /// stream, and Flutter route fallback) so all sources share identical
+  /// dedup logic.
+  ///
+  /// Dedup is keyed by token — not by source URI — because the HTTPS and
+  /// calee:// links for one QR code carry the same tablet token. A different
+  /// token is never suppressed, and the same token becomes acceptable again
+  /// once [dedupWindow] elapses or the flow completes/cancels (via
+  /// [clearPending], which resets the window).
+  void _acceptIntent(DisplaySetupIntent intent) {
     if (_disposed) return;
+
+    final now = _clock();
+    final lastAt = _lastAcceptedAt;
+    if (intent.token == _lastAcceptedToken &&
+        lastAt != null &&
+        now.difference(lastAt) < dedupWindow) {
+      return;
+    }
+    _lastAcceptedToken = intent.token;
+    _lastAcceptedAt = now;
 
     pendingIntent = intent;
     pendingError = null;
@@ -91,14 +132,16 @@ class DisplaySetupLinkController extends ChangeNotifier {
   }
 
   void handleDisplaySetupIntent(DisplaySetupIntent intent) {
-    pendingIntent = intent;
-    pendingError = null;
-    notifyListeners();
+    _acceptIntent(intent);
   }
 
   void clearPending() {
     pendingIntent = null;
     pendingError = null;
+    // The flow completed or was cancelled — reset the dedup window so the
+    // same tablet link can be scanned again straight away.
+    _lastAcceptedToken = null;
+    _lastAcceptedAt = null;
     notifyListeners();
   }
 
