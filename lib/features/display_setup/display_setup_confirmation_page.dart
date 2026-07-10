@@ -1,8 +1,19 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 
 import 'display_activation_controller.dart';
+
+/// The way a [DisplaySetupConfirmationPage] route finished.
+///
+/// The route is pushed as a `MaterialPageRoute<DisplaySetupConfirmationResult>`
+/// and every explicit button pops with one of these values. When the route
+/// future completes with `null` — Android system Back, [Navigator.maybePop],
+/// the iOS interactive back gesture, or any other pop not initiated by a
+/// button — the owner treats it as an implicit [cancelled].
+enum DisplaySetupConfirmationResult {
+  cancelled,
+  useDifferentAccount,
+  activated,
+}
 
 class DisplaySetupConfirmationPage extends StatefulWidget {
   const DisplaySetupConfirmationPage({
@@ -10,8 +21,6 @@ class DisplaySetupConfirmationPage extends StatefulWidget {
     required this.accountEmail,
     required this.activationController,
     required this.accessToken,
-    required this.onActivated,
-    required this.onUseDifferentAccount,
     super.key,
   });
 
@@ -19,8 +28,6 @@ class DisplaySetupConfirmationPage extends StatefulWidget {
   final String accountEmail;
   final DisplayActivationController activationController;
   final String accessToken;
-  final FutureOr<void> Function() onActivated;
-  final VoidCallback onUseDifferentAccount;
 
   @override
   State<DisplaySetupConfirmationPage> createState() =>
@@ -35,7 +42,7 @@ class _DisplaySetupConfirmationPageState
       token: widget.token,
     );
     if (success && mounted) {
-      await widget.onActivated();
+      Navigator.of(context).pop(DisplaySetupConfirmationResult.activated);
     }
   }
 
@@ -96,14 +103,19 @@ class _DisplaySetupConfirmationPageState
                     OutlinedButton(
                       onPressed: isLoading
                           ? null
-                          : widget.onUseDifferentAccount,
+                          : () => Navigator.of(context).pop(
+                              DisplaySetupConfirmationResult
+                                  .useDifferentAccount,
+                            ),
                       child: const Text('Use a different account'),
                     ),
                     const SizedBox(height: 12),
                     TextButton(
                       onPressed: isLoading
                           ? null
-                          : () => Navigator.of(context).pop(),
+                          : () => Navigator.of(
+                              context,
+                            ).pop(DisplaySetupConfirmationResult.cancelled),
                       child: const Text('Cancel'),
                     ),
                   ],

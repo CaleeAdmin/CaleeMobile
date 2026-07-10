@@ -134,6 +134,21 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
   bool _showingDisplaySetupCreateAccount = false;
   bool _showingDisplaySetupSignIn = false;
   bool _justRegistered = false;
+  // Guards for the signed-in display confirmation route. The same pending
+  // intent is observed by both _onDisplaySetupLinkChanged and
+  // _onSessionChanged (a QR link landing around session restore makes both
+  // fire close together), and it stays pending while the confirmation page
+  // is shown — so without these guards any later session notification
+  // pushes a second identical page.
+  //
+  // _displayConfirmationPushInFlight: a post-frame push has been scheduled
+  // but not yet issued. Set *before* scheduling, so two notifications in the
+  // same frame cannot both schedule a callback.
+  // _activeDisplayConfirmationToken: token whose confirmation route is
+  // currently scheduled or sitting on the navigator; released when that
+  // route pops.
+  bool _displayConfirmationPushInFlight = false;
+  String? _activeDisplayConfirmationToken;
 
   // Welcome screen state (first-run signed-out, no pending intent)
   bool _showingSignInFromWelcome = false;
@@ -186,18 +201,10 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
         repository: DisplaySetupRepository(hubClient: _hubClient),
       );
       _localSubscriptionRepo = LocalCalendarSubscriptionRepository();
-      unawaited(_followLinkController.init());
-      unawaited(_displaySetupLinkController.init());
-      unawaited(_externalCalendarConnectedLinkController.init());
-      unawaited(
-        _shoppingLinkController.init().then((_) {
-          // Safety net in case init() resolved a pending intent before this
-          // listener was attached below.
-          if (mounted) _maybeOpenPendingShoppingLink();
-        }),
-      );
     }
 
+    // Listeners must be attached before any controller's init() can deliver
+    // an intent, so a notification fired mid-init is never missed.
     _followLinkController.addListener(_onFollowLinkChanged);
     _displaySetupLinkController.addListener(_onDisplaySetupLinkChanged);
     _externalCalendarConnectedLinkController.addListener(
@@ -205,6 +212,31 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
     );
     _shoppingLinkController.addListener(_onShoppingLinkChanged);
     _sessionController.addListener(_onSessionChanged);
+
+    // DisplaySetupLinkController.init() is idempotent and, in tests, always
+    // backed by a fake (see CaleeAppTestDependencies), so it's called
+    // unconditionally — this lets tests exercise the same post-init safety
+    // net production relies on.
+    unawaited(
+      _displaySetupLinkController.init().then((_) {
+        // Safety net in case init() resolved a pending intent before this
+        // listener was attached above (or before the session/navigator
+        // state needed to act on it was ready).
+        if (mounted) _onDisplaySetupLinkChanged();
+      }),
+    );
+
+    if (testDeps == null) {
+      unawaited(_followLinkController.init());
+      unawaited(_externalCalendarConnectedLinkController.init());
+      unawaited(
+        _shoppingLinkController.init().then((_) {
+          // Safety net in case init() resolved a pending intent before this
+          // listener was attached above.
+          if (mounted) _maybeOpenPendingShoppingLink();
+        }),
+      );
+    }
 
     _sessionController.restoreSession();
     unawaited(_loadLocalSubscriptions());
@@ -274,7 +306,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
         } else {
           // Intent arrived during session restore (or after sign-in from
           // default login page): treat as state 3 and show confirmation.
-          _openDisplaySetupConfirmation(displayIntent);
+          _maybeOpenDisplaySetupConfirmation(displayIntent);
         }
         return;
       } else if (!_sessionController.isRestoringSession) {
@@ -352,7 +384,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
     if (_sessionController.isSignedIn) {
       // State 3: already signed in — push confirmation page.
       _displaySetupFromLoggedOut = false;
-      _openDisplaySetupConfirmation(intent);
+      _maybeOpenDisplaySetupConfirmation(intent);
     } else if (!_sessionController.isRestoringSession) {
       // State 2: definitely not signed in — show landing page.
       setState(() => _displaySetupFromLoggedOut = true);
@@ -670,34 +702,144 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
     return false;
   }
 
-  void _openDisplaySetupConfirmation(DisplaySetupIntent intent) {
+  /// Single entry point for opening the signed-in display confirmation page,
+  /// used by both [_onDisplaySetupLinkChanged] and [_onSessionChanged].
+  ///
+  /// Those listeners can fire for the same pending intent within one frame
+  /// (link delivered while session restore finishes), and the intent stays
+  /// pending while the page is shown, so every navigation goes through the
+  /// guards here: at most one confirmation route may exist per token.
+  void _maybeOpenDisplaySetupConfirmation(DisplaySetupIntent intent) {
+    if (_activeDisplayConfirmationToken == intent.token) {
+      // A confirmation route (or scheduled push) for this token already
+      // exists — collapse the duplicate notification.
+      return;
+    }
+    if (_displayConfirmationPushInFlight) {
+      // A push for another token is mid-flight; its post-frame callback
+      // re-reads pendingIntent and re-dispatches here, so a newer token
+      // is picked up rather than lost.
+      return;
+    }
+    // Claim the guards before scheduling the callback so a second
+    // notification arriving in the same frame cannot schedule another one.
+    _displayConfirmationPushInFlight = true;
+    _activeDisplayConfirmationToken = intent.token;
+    _pushDisplaySetupConfirmation(intent);
+  }
+
+  void _pushDisplaySetupConfirmation(DisplaySetupIntent intent) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      _navigatorKey.currentState?.push(
-        MaterialPageRoute<void>(
-          builder: (_) => DisplaySetupConfirmationPage(
-            token: intent.token,
-            accountEmail:
-                _sessionController.bootstrap?.account.primaryEmail ?? '',
-            activationController: _displayActivationController,
-            accessToken: _sessionController.accessToken!,
-            onActivated: () async {
-              _displaySetupLinkController.clearPending();
-              await _sessionController.refreshBootstrap();
-              if (!mounted) return;
-              Navigator.of(_navigatorKey.currentContext!).pop();
-              _openDisplayActivationSuccess();
-            },
-            onUseDifferentAccount: () {
-              _displaySetupFromLoggedOut = true;
-              _displaySetupThroughLandingPage = false;
-              Navigator.of(_navigatorKey.currentContext!).pop();
-              unawaited(_sessionController.signOut());
-            },
-          ),
-        ),
+      if (!mounted) {
+        _displayConfirmationPushInFlight = false;
+        return;
+      }
+      // Re-validate: the intent may have been cancelled, consumed, or
+      // replaced — and the session may have changed — between scheduling
+      // and this frame firing.
+      final pending = _displaySetupLinkController.pendingIntent;
+      if (!_sessionController.isSignedIn ||
+          pending == null ||
+          pending.token != intent.token) {
+        _displayConfirmationPushInFlight = false;
+        if (_activeDisplayConfirmationToken == intent.token) {
+          _activeDisplayConfirmationToken = null;
+        }
+        if (_sessionController.isSignedIn &&
+            pending != null &&
+            pending.token != intent.token) {
+          // A different token replaced this one before the frame fired —
+          // process it instead of dropping it.
+          _maybeOpenDisplaySetupConfirmation(pending);
+        }
+        return;
+      }
+      final navigator = _navigatorKey.currentState;
+      if (navigator == null) {
+        // Very early cold-start frame before the Navigator attached — keep
+        // the guards claimed and retry next frame (mirrors the shopping-link
+        // retry) rather than dropping the link.
+        WidgetsBinding.instance.scheduleFrame();
+        _pushDisplaySetupConfirmation(intent);
+        return;
+      }
+
+      _displayConfirmationPushInFlight = false;
+      // Capture the account details now: the route's builder can re-run while
+      // the page animates out (e.g. after "Use a different account" signs out
+      // and clears accessToken), so reading _sessionController state inside the
+      // builder would force-unwrap a stale/null value and crash.
+      final accessToken = _sessionController.accessToken!;
+      final accountEmail =
+          _sessionController.bootstrap?.account.primaryEmail ?? '';
+      unawaited(
+        navigator
+            .push(
+              MaterialPageRoute<DisplaySetupConfirmationResult>(
+                builder: (_) => DisplaySetupConfirmationPage(
+                  token: intent.token,
+                  accountEmail: accountEmail,
+                  activationController: _displayActivationController,
+                  accessToken: accessToken,
+                ),
+              ),
+            )
+            .then(
+              (result) => _onDisplaySetupConfirmationClosed(intent, result),
+            ),
       );
     });
+  }
+
+  /// Single authoritative cleanup path for a confirmation route closing,
+  /// whether through an explicit button (typed result) or an implicit
+  /// dismissal — Android system Back, [Navigator.maybePop], the iOS
+  /// interactive back gesture, or any other pop with no result (`null`),
+  /// all of which are treated as a cancellation.
+  ///
+  /// Cleanup is token-scoped so an older route closing can never disturb a
+  /// newer pending intent: a token B that replaced token A while route A was
+  /// still open must survive route A's teardown and be processed normally.
+  Future<void> _onDisplaySetupConfirmationClosed(
+    DisplaySetupIntent intent,
+    DisplaySetupConfirmationResult? result,
+  ) async {
+    // Release the navigation guard — but only if it still belongs to this
+    // route's token; a newer token may already own it.
+    if (_activeDisplayConfirmationToken == intent.token) {
+      _activeDisplayConfirmationToken = null;
+    }
+
+    // Null == implicit dismissal (system Back / maybePop / iOS swipe-back).
+    final effective = result ?? DisplaySetupConfirmationResult.cancelled;
+
+    switch (effective) {
+      case DisplaySetupConfirmationResult.cancelled:
+        // Clear the pending intent so a later session/link notification
+        // cannot re-open the page — but only when it still matches this
+        // route's token. If a newer token became pending while this route
+        // was open, leave it untouched so it can be processed normally.
+        final pending = _displaySetupLinkController.pendingIntent;
+        if (pending != null && pending.token == intent.token) {
+          _displaySetupLinkController.clearPending();
+        }
+      case DisplaySetupConfirmationResult.useDifferentAccount:
+        // Keep the pending tablet token: after sign-out the landing page
+        // picks it up so another account can finish activating this display.
+        _displaySetupFromLoggedOut = true;
+        _displaySetupThroughLandingPage = false;
+        unawaited(_sessionController.signOut());
+      case DisplaySetupConfirmationResult.activated:
+        // The activation path consumes the matching token here. Do not clear
+        // a newer intent that may have arrived meanwhile.
+        final pending = _displaySetupLinkController.pendingIntent;
+        if (pending != null && pending.token == intent.token) {
+          _displaySetupLinkController.clearPending();
+        }
+        await _sessionController.refreshBootstrap();
+        if (!mounted) return;
+        _openDisplayActivationSuccess();
+    }
   }
 
   Future<void> _activateDisplayAndShowSuccess(String token) async {
@@ -905,29 +1047,25 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
         ]),
         builder: (context, _) => _buildHome(),
       ),
-      onUnknownRoute: (settings) {
-        final intent = DisplaySetupLinkController.parseDisplaySetupRouteName(
-          settings.name,
-        );
-        if (intent != null) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (!mounted) return;
-            _displaySetupLinkController.handleDisplaySetupIntent(intent);
-          });
-        }
-        return MaterialPageRoute<void>(
-          settings: const RouteSettings(name: '/'),
-          builder: (_) => AnimatedBuilder(
-            animation: Listenable.merge([
-              _sessionController,
-              _followLinkController,
-              _displaySetupLinkController,
-              _shoppingLinkController,
-            ]),
-            builder: (context, _) => _buildHome(),
-          ),
-        );
-      },
+      // app_links is the sole ingress path for deep links (including
+      // native-login display-setup links) now that Flutter's built-in deep
+      // link handling is disabled — see FlutterDeepLinkingEnabled/
+      // flutter_deeplinking_enabled in the platform manifests. This fallback
+      // only prevents a crash if Flutter's navigator is ever asked to
+      // resolve an unrecognised route name; it must not independently parse
+      // or accept display-setup links.
+      onUnknownRoute: (settings) => MaterialPageRoute<void>(
+        settings: const RouteSettings(name: '/'),
+        builder: (_) => AnimatedBuilder(
+          animation: Listenable.merge([
+            _sessionController,
+            _followLinkController,
+            _displaySetupLinkController,
+            _shoppingLinkController,
+          ]),
+          builder: (context, _) => _buildHome(),
+        ),
+      ),
     );
   }
 
