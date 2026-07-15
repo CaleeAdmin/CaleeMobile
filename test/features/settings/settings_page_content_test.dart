@@ -189,20 +189,17 @@ void main() {
       },
     );
 
-    testWidgets(
-      'shows "Calendar app setup needed" when access is active but '
-      'calendar credential is missing',
-      (tester) async {
-        final service = serviceWith(
-          accessStatus: 'active',
-          calendarCredentialStatus: 'missing',
-        );
-        await tester.pumpWidget(_wrap(bootstrap: bootstrapWith(service)));
-        await tester.pumpAndSettle();
+    testWidgets('shows "Calendar app setup needed" when access is active but '
+        'calendar credential is missing', (tester) async {
+      final service = serviceWith(
+        accessStatus: 'active',
+        calendarCredentialStatus: 'missing',
+      );
+      await tester.pumpWidget(_wrap(bootstrap: bootstrapWith(service)));
+      await tester.pumpAndSettle();
 
-        expect(find.text('Calendar app setup needed'), findsOneWidget);
-      },
-    );
+      expect(find.text('Calendar app setup needed'), findsOneWidget);
+    });
 
     testWidgets(
       'shows "Connected" when access is active and calendar credential is '

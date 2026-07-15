@@ -68,9 +68,7 @@ void main() {
     },
   );
 
-  testWidgets('hides Calendar App Status row when unsupported', (
-    tester,
-  ) async {
+  testWidgets('hides Calendar App Status row when unsupported', (tester) async {
     final service = _serviceWith(
       accessStatus: 'active',
       calendarCredentialStatus: 'unsupported',
