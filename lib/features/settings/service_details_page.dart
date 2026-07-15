@@ -43,8 +43,26 @@ class ServiceDetailsPage extends StatelessWidget {
     );
   }
 
+  String? _calendarAppStatusLabel() {
+    switch (service.calendarCredentialStatus) {
+      case 'connected':
+        return 'Connected';
+      case 'missing':
+        return 'Setup needed';
+      case 'unsupported':
+        return null;
+      default:
+        final raw = service.calendarCredentialStatus;
+        if (raw.isEmpty) return null;
+        return raw[0].toUpperCase() + raw.substring(1);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final calendarAppStatusLabel = _calendarAppStatusLabel();
+    final calendarCredentialMissing = service.hasMissingCalendarCredential;
+
     return CaleeScaffold(
       appBar: AppBar(title: const Text('Service Details')),
       body: ListView(
@@ -85,8 +103,24 @@ class ServiceDetailsPage extends StatelessWidget {
           CaleeSection(
             title: 'Calendar',
             children: [
+              if (service.supportsCalendarCredential &&
+                  calendarAppStatusLabel != null)
+                CaleeListRow(
+                  title: 'Calendar App Status',
+                  trailing: Text(
+                    calendarAppStatusLabel,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      color: CaleeColors.textSecondary,
+                    ),
+                  ),
+                ),
               CaleeListRow(
                 title: 'Calendar App Setup',
+                subtitle: calendarCredentialMissing
+                    ? 'Set up the calendar app connection so this service '
+                          'can use calendar features.'
+                    : null,
                 enabled: service.supportsCalendarCredential,
                 onTap: service.supportsCalendarCredential
                     ? () => _openCalendarSetup(context)
