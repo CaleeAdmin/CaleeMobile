@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../data/api/calee_hub_client.dart';
 import '../../data/models/calendar_service_error.dart';
+import '../../data/models/calendar_subscription_validation.dart';
 import '../../data/models/client_bootstrap.dart';
 import '../../data/models/client_calendar.dart';
 import '../../data/models/external_calendar_connection.dart';
@@ -381,6 +382,19 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
         services: services,
         initialName: widget.initialSubscriptionName,
         initialUrl: widget.initialSubscriptionUrl,
+        onCheck:
+            ({
+              required String name,
+              required String url,
+              required ClientService service,
+            }) {
+              return widget.hubClient.validateCalendarSubscription(
+                accessToken: widget.accessToken,
+                serviceId: service.id,
+                name: name,
+                url: url,
+              );
+            },
         onSubmit:
             ({
               required String name,
@@ -1104,6 +1118,7 @@ class _CollectionFormContentState extends State<_CollectionFormContent> {
 class _SubscriptionFormContent extends StatefulWidget {
   const _SubscriptionFormContent({
     required this.services,
+    required this.onCheck,
     required this.onSubmit,
     this.initialName,
     this.initialUrl,
@@ -1112,6 +1127,15 @@ class _SubscriptionFormContent extends StatefulWidget {
   final List<ClientService> services;
   final String? initialName;
   final String? initialUrl;
+
+  /// Asks the backend to fetch and validate the link. Never called with a
+  /// null service — the caller resolves/guards service selection first.
+  final Future<CalendarSubscriptionValidationResult> Function({
+    required String name,
+    required String url,
+    required ClientService service,
+  })
+  onCheck;
   final Future<void> Function({
     required String name,
     required String url,
@@ -1145,6 +1169,15 @@ class _SubscriptionFormContentState extends State<_SubscriptionFormContent> {
 
   ClientService? _selectedService;
   bool _isSubmitting = false;
+  bool _isChecking = false;
+  String? _checkError;
+  CalendarSubscriptionValidationResult? _validationResult;
+
+  // Snapshot of what the last check (successful or not) was run against, so
+  // an edit to name/url/service can invalidate a now-stale check result.
+  String? _checkedName;
+  String? _checkedUrl;
+  String? _checkedServiceId;
 
   @override
   void initState() {
@@ -1153,10 +1186,14 @@ class _SubscriptionFormContentState extends State<_SubscriptionFormContent> {
     _urlController = TextEditingController(text: widget.initialUrl ?? '');
     _selectedService = widget.services.isEmpty ? null : widget.services.first;
     _colorController.addListener(() => setState(() {}));
+    _nameController.addListener(_clearStaleCheck);
+    _urlController.addListener(_clearStaleCheck);
   }
 
   @override
   void dispose() {
+    _nameController.removeListener(_clearStaleCheck);
+    _urlController.removeListener(_clearStaleCheck);
     _nameController.dispose();
     _urlController.dispose();
     _colorController.dispose();
@@ -1179,15 +1216,93 @@ class _SubscriptionFormContentState extends State<_SubscriptionFormContent> {
         (scheme == 'https' || scheme == 'http' || scheme == 'webcal');
   }
 
+  /// True once a check has run (result or error) but the form no longer
+  /// matches the name/url/service it was checked against.
+  bool get _hasStaleCheck {
+    if (_validationResult == null && _checkError == null) return false;
+    return _nameController.text != _checkedName ||
+        _urlController.text != _checkedUrl ||
+        _selectedService?.id != _checkedServiceId;
+  }
+
+  void _clearStaleCheck() {
+    if (!_hasStaleCheck) return;
+    setState(() {
+      _validationResult = null;
+      _checkError = null;
+    });
+  }
+
+  Future<void> _checkCalendar() async {
+    if (_isChecking || _isSubmitting) return;
+    if (!_formKey.currentState!.validate()) return;
+
+    final service = _selectedService;
+    if (service == null) {
+      setState(() => _checkError = 'Choose a service');
+      return;
+    }
+
+    final name = _nameController.text.trim();
+    final url = _urlController.text.trim();
+
+    setState(() {
+      _isChecking = true;
+      _checkError = null;
+      _validationResult = null;
+    });
+
+    try {
+      final result = await widget.onCheck(
+        name: name,
+        url: url,
+        service: service,
+      );
+      if (!mounted) return;
+      setState(() {
+        _isChecking = false;
+        _checkedName = name;
+        _checkedUrl = url;
+        _checkedServiceId = service.id;
+        if (result.valid) {
+          _validationResult = result;
+          _checkError = null;
+        } else {
+          _validationResult = null;
+          final message = result.message?.trim();
+          _checkError = (message != null && message.isNotEmpty)
+              ? message
+              : 'This does not look like a calendar subscription link.';
+        }
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _isChecking = false;
+        _validationResult = null;
+        _checkError = error is CaleeHubException
+            ? error.message
+            : 'Unable to check this calendar link. Please try again.';
+      });
+    }
+  }
+
   Future<void> _submit() async {
-    if (_isSubmitting || !_formKey.currentState!.validate()) return;
+    final validation = _validationResult;
+    if (_isSubmitting ||
+        _isChecking ||
+        validation == null ||
+        !validation.valid) {
+      return;
+    }
+    if (!_formKey.currentState!.validate()) return;
 
     setState(() => _isSubmitting = true);
 
     try {
       await widget.onSubmit(
         name: _nameController.text.trim(),
-        url: _urlController.text.trim(),
+        url: validation.normalizedUrl ?? _urlController.text.trim(),
         color: _colorController.text.trim().isEmpty
             ? null
             : _colorController.text.trim(),
@@ -1213,6 +1328,8 @@ class _SubscriptionFormContentState extends State<_SubscriptionFormContent> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final busy = _isChecking || _isSubmitting;
+    final isValidated = _validationResult?.valid == true;
 
     return Form(
       key: _formKey,
@@ -1232,9 +1349,15 @@ class _SubscriptionFormContentState extends State<_SubscriptionFormContent> {
                       child: Text(service.displayName),
                     ),
                 ],
-                onChanged: _isSubmitting
+                onChanged: busy
                     ? null
-                    : (service) => setState(() => _selectedService = service),
+                    : (service) => setState(() {
+                        _selectedService = service;
+                        if (_hasStaleCheck) {
+                          _validationResult = null;
+                          _checkError = null;
+                        }
+                      }),
                 validator: (service) =>
                     service == null ? 'Choose a service' : null,
               ),
@@ -1242,7 +1365,7 @@ class _SubscriptionFormContentState extends State<_SubscriptionFormContent> {
             ],
             TextFormField(
               controller: _nameController,
-              enabled: !_isSubmitting,
+              enabled: !busy,
               autofocus: true,
               textCapitalization: TextCapitalization.words,
               decoration: const InputDecoration(
@@ -1259,7 +1382,7 @@ class _SubscriptionFormContentState extends State<_SubscriptionFormContent> {
             const SizedBox(height: CaleeSpacing.sm + 4),
             TextFormField(
               controller: _urlController,
-              enabled: !_isSubmitting,
+              enabled: !busy,
               keyboardType: TextInputType.url,
               autocorrect: false,
               decoration: const InputDecoration(
@@ -1306,7 +1429,7 @@ class _SubscriptionFormContentState extends State<_SubscriptionFormContent> {
             const SizedBox(height: CaleeSpacing.sm + 4),
             TextFormField(
               controller: _colorController,
-              enabled: !_isSubmitting,
+              enabled: !busy,
               decoration: const InputDecoration(
                 labelText: 'Custom color',
                 hintText: '#007AFF',
@@ -1322,18 +1445,137 @@ class _SubscriptionFormContentState extends State<_SubscriptionFormContent> {
               },
             ),
             const SizedBox(height: CaleeSpacing.md),
+            if (_checkError != null) ...[
+              _CalendarCheckErrorBanner(message: _checkError!),
+              const SizedBox(height: CaleeSpacing.sm + 4),
+            ],
+            if (isValidated) ...[
+              _CalendarCheckPreviewCard(preview: _validationResult!.preview),
+              const SizedBox(height: CaleeSpacing.sm + 4),
+            ],
             FilledButton(
-              onPressed: _isSubmitting ? null : _submit,
-              child: _isSubmitting
+              onPressed: busy ? null : (isValidated ? _submit : _checkCalendar),
+              child: busy
                   ? const SizedBox(
                       width: 18,
                       height: 18,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : const Text('Add to Calee'),
+                  : Text(isValidated ? 'Add to Calee' : 'Check calendar'),
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ─── _CalendarCheckErrorBanner ────────────────────────────────────────────────
+
+class _CalendarCheckErrorBanner extends StatelessWidget {
+  const _CalendarCheckErrorBanner({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Container(
+      padding: const EdgeInsets.all(CaleeSpacing.sm + 4),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.errorContainer,
+        borderRadius: BorderRadius.circular(CaleeRadius.card),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            Icons.warning_amber_rounded,
+            size: 20,
+            color: theme.colorScheme.error,
+          ),
+          const SizedBox(width: CaleeSpacing.sm),
+          Expanded(
+            child: Text(
+              message,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onErrorContainer,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── _CalendarCheckPreviewCard ────────────────────────────────────────────────
+
+class _CalendarCheckPreviewCard extends StatelessWidget {
+  const _CalendarCheckPreviewCard({required this.preview});
+
+  final CalendarSubscriptionPreview? preview;
+
+  String _providerLabel(String? provider) {
+    switch (provider) {
+      case 'icloud':
+        return 'iCloud';
+      case 'google':
+        return 'Google';
+      case 'ics':
+        return 'ICS';
+      default:
+        return '';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final providerLabel = _providerLabel(preview?.provider);
+    final eventCount = preview?.eventCount;
+
+    return Container(
+      padding: const EdgeInsets.all(CaleeSpacing.sm + 4),
+      decoration: BoxDecoration(
+        color: CaleeColors.primary.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(CaleeRadius.card),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.check_circle, size: 20, color: CaleeColors.primary),
+          const SizedBox(width: CaleeSpacing.sm),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Calendar found',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: CaleeColors.textPrimary,
+                  ),
+                ),
+                if (providerLabel.isNotEmpty)
+                  Text(
+                    'Provider: $providerLabel',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: CaleeColors.textSecondary,
+                    ),
+                  ),
+                if (eventCount != null)
+                  Text(
+                    'Events found: $eventCount',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: CaleeColors.textSecondary,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
