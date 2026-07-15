@@ -1213,7 +1213,7 @@ class _SubscriptionFormContentState extends State<_SubscriptionFormContent> {
 
     return parsed != null &&
         parsed.host.trim().isNotEmpty &&
-        (scheme == 'https' || scheme == 'http' || scheme == 'webcal');
+        (scheme == 'https' || scheme == 'webcal');
   }
 
   /// True once a check has run (result or error) but the form no longer
@@ -1393,7 +1393,7 @@ class _SubscriptionFormContentState extends State<_SubscriptionFormContent> {
                 final url = (value ?? '').trim();
                 if (url.isEmpty) return 'Enter a calendar link';
                 if (!_isAllowedSubscriptionUrl(url)) {
-                  return 'This does not look like a calendar link. Paste a link that starts with http, https, or webcal.';
+                  return 'This does not look like a calendar link. Paste a calendar link that starts with https:// or webcal://.';
                 }
                 return null;
               },

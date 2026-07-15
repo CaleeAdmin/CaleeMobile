@@ -186,12 +186,33 @@ void main() {
 
     expect(
       find.text(
-        'This does not look like a calendar link. Paste a link that starts with http, https, or webcal.',
+        'This does not look like a calendar link. Paste a calendar link that starts with https:// or webcal://.',
       ),
       findsOneWidget,
     );
     expect(client.checkCallCount, 0);
   });
+
+  testWidgets(
+    '1b. a plain http:// link is blocked locally too — the backend requires https after normalization',
+    (tester) async {
+      final client = _StubHubClient();
+      await tester.pumpWidget(_wrap(client, autoOpenSubscribe: true));
+      await tester.pumpAndSettle();
+
+      await _fillNameAndUrl(tester, url: 'http://example.com/calendar.ics');
+      await tester.tap(find.text('Check calendar'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text(
+          'This does not look like a calendar link. Paste a calendar link that starts with https:// or webcal://.',
+        ),
+        findsOneWidget,
+      );
+      expect(client.checkCallCount, 0);
+    },
+  );
 
   testWidgets('2. HTML-response validation shows inline error and does not save', (
     tester,
