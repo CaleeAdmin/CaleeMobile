@@ -586,11 +586,18 @@ class _ServiceRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final accessNeedsAttention = !{
+      'connected',
+      'active',
+      'healthy',
+    }.contains(service.accessStatus);
     final hasMissing = service.hasMissingCalendarCredential;
-    final needsAttention =
-        hasMissing ||
-        !{'connected', 'active', 'healthy'}.contains(service.accessStatus);
-    final subtitle = needsAttention ? 'Needs attention' : 'Connected';
+    final needsAttention = hasMissing || accessNeedsAttention;
+    final subtitle = accessNeedsAttention
+        ? 'Service access needs attention'
+        : hasMissing
+        ? 'Calendar app setup needed'
+        : 'Connected';
 
     return CaleeListRow(
       title: service.displayName,
