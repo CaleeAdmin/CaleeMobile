@@ -65,7 +65,6 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
   // Tab index helpers (computed after _tabs is built)
   int get _calendarTabIndex => _tabs.indexWhere((t) => t.title == 'Calendar');
   int get _tasksTabIndex => _tabs.indexWhere((t) => t.title == 'Tasks');
-  int get _choresTabIndex => _tabs.indexWhere((t) => t.title == 'Chores');
   int get _mealsTabIndex => _tabs.indexWhere((t) => t.title == 'Meals');
 
   @override
@@ -145,9 +144,6 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
             setState(() => _selectedIndex = _calendarTabIndex),
         onNavigateToTasks: () =>
             setState(() => _selectedIndex = _tasksTabIndex),
-        onNavigateToChores: _hasChoreService
-            ? () => setState(() => _selectedIndex = _choresTabIndex)
-            : null,
         onNavigateToMeals: _hasMealsService
             ? () => setState(() => _selectedIndex = _mealsTabIndex)
             : null,

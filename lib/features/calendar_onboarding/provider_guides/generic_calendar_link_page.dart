@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../data/api/calee_hub_client.dart';
 import '../../../data/auth/calee_preferences.dart';
+import '../../../data/models/calendar_subscription_validation.dart';
 import '../../../data/models/client_bootstrap.dart';
 import '../../../ui/calee_design.dart';
 import '../calendar_added_success_page.dart';
@@ -30,7 +31,7 @@ class GenericCalendarLinkPage extends StatefulWidget {
     this.successDelayText =
         'After you add it, events may take a few minutes to appear on your Calee display.',
     this.validationErrorText =
-        'This does not look like a calendar link. Paste a link that starts with http, https, or webcal.',
+        'This does not look like a calendar link. Paste a calendar link that starts with https:// or webcal://.',
     super.key,
   });
 
@@ -80,6 +81,16 @@ class _GenericCalendarLinkPageState extends State<GenericCalendarLinkPage> {
   List<ClientService> _freshServices = const [];
   String? _bootstrapProblem;
 
+  bool _isChecking = false;
+  String? _checkError;
+  CalendarSubscriptionValidationResult? _validationResult;
+
+  // Snapshot of what the last check (successful or not) was run against, so
+  // an edit to name/url/service can invalidate a now-stale check result.
+  String? _checkedName;
+  String? _checkedUrl;
+  String? _checkedServiceId;
+
   List<ClientService> get _calendarServices => _freshServices
       .where(
         (s) =>
@@ -93,6 +104,8 @@ class _GenericCalendarLinkPageState extends State<GenericCalendarLinkPage> {
   void initState() {
     super.initState();
     _colorController.addListener(() => setState(() {}));
+    _nameController.addListener(_clearStaleCheck);
+    _urlController.addListener(_clearStaleCheck);
     _refreshBootstrap();
   }
 
@@ -125,6 +138,8 @@ class _GenericCalendarLinkPageState extends State<GenericCalendarLinkPage> {
 
   @override
   void dispose() {
+    _nameController.removeListener(_clearStaleCheck);
+    _urlController.removeListener(_clearStaleCheck);
     _nameController.dispose();
     _urlController.dispose();
     _colorController.dispose();
@@ -138,7 +153,7 @@ class _GenericCalendarLinkPageState extends State<GenericCalendarLinkPage> {
     final scheme = parsed?.scheme.toLowerCase() ?? '';
     return parsed != null &&
         parsed.host.trim().isNotEmpty &&
-        (scheme == 'https' || scheme == 'http' || scheme == 'webcal');
+        (scheme == 'https' || scheme == 'webcal');
   }
 
   bool _isPaletteColorSelected(String hex) =>
@@ -166,8 +181,88 @@ class _GenericCalendarLinkPageState extends State<GenericCalendarLinkPage> {
     return 'No calendar service access found. Please sign out and sign in again.';
   }
 
+  /// True once a check has run (result or error) but the form no longer
+  /// matches the name/url/service it was checked against.
+  bool get _hasStaleCheck {
+    if (_validationResult == null && _checkError == null) return false;
+    return _nameController.text != _checkedName ||
+        _urlController.text != _checkedUrl ||
+        _selectedService?.id != _checkedServiceId;
+  }
+
+  void _clearStaleCheck() {
+    if (!_hasStaleCheck) return;
+    setState(() {
+      _validationResult = null;
+      _checkError = null;
+    });
+  }
+
+  Future<void> _checkCalendar() async {
+    if (_isChecking || _isSubmitting) return;
+    if (!_formKey.currentState!.validate()) return;
+
+    final service = _selectedService;
+    if (service == null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_noServiceMessage())));
+      return;
+    }
+
+    final name = _nameController.text.trim();
+    final url = _urlController.text.trim();
+
+    setState(() {
+      _isChecking = true;
+      _checkError = null;
+      _validationResult = null;
+    });
+
+    try {
+      final result = await widget.hubClient.validateCalendarSubscription(
+        accessToken: widget.accessToken,
+        serviceId: service.id,
+        name: name,
+        url: url,
+      );
+      if (!mounted) return;
+      setState(() {
+        _isChecking = false;
+        _checkedName = name;
+        _checkedUrl = url;
+        _checkedServiceId = service.id;
+        if (result.valid) {
+          _validationResult = result;
+          _checkError = null;
+        } else {
+          _validationResult = null;
+          final message = result.message?.trim();
+          _checkError = (message != null && message.isNotEmpty)
+              ? message
+              : 'This does not look like a calendar subscription link.';
+        }
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _isChecking = false;
+        _validationResult = null;
+        _checkError =
+            'Calee could not check this calendar link. Please try again.';
+      });
+    }
+  }
+
   Future<void> _submit() async {
-    if (_isSubmitting || !_formKey.currentState!.validate()) return;
+    final validation = _validationResult;
+    if (_isSubmitting ||
+        _isChecking ||
+        validation == null ||
+        !validation.valid) {
+      return;
+    }
+    if (!_formKey.currentState!.validate()) return;
 
     final service = _selectedService;
     if (service == null) {
@@ -184,7 +279,7 @@ class _GenericCalendarLinkPageState extends State<GenericCalendarLinkPage> {
         accessToken: widget.accessToken,
         serviceId: service.id,
         name: _nameController.text.trim(),
-        url: _urlController.text.trim(),
+        url: validation.normalizedUrl ?? _urlController.text.trim(),
         color: _colorController.text.trim().isEmpty
             ? null
             : _colorController.text.trim(),
@@ -221,6 +316,8 @@ class _GenericCalendarLinkPageState extends State<GenericCalendarLinkPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final services = _calendarServices;
+    final busy = _isChecking || _isSubmitting;
+    final isValidated = _validationResult?.valid == true;
 
     if (_isLoadingBootstrap) {
       return CaleeScaffold(
@@ -281,16 +378,22 @@ class _GenericCalendarLinkPageState extends State<GenericCalendarLinkPage> {
                     for (final s in services)
                       DropdownMenuItem(value: s, child: Text(s.displayName)),
                   ],
-                  onChanged: _isSubmitting
+                  onChanged: busy
                       ? null
-                      : (s) => setState(() => _selectedService = s),
+                      : (s) => setState(() {
+                          _selectedService = s;
+                          if (_hasStaleCheck) {
+                            _validationResult = null;
+                            _checkError = null;
+                          }
+                        }),
                   validator: (s) => s == null ? 'Choose a service' : null,
                 ),
                 const SizedBox(height: CaleeSpacing.sm + 4),
               ],
               TextFormField(
                 controller: _nameController,
-                enabled: !_isSubmitting,
+                enabled: !busy,
                 autofocus: true,
                 textCapitalization: TextCapitalization.words,
                 decoration: InputDecoration(
@@ -307,7 +410,7 @@ class _GenericCalendarLinkPageState extends State<GenericCalendarLinkPage> {
               const SizedBox(height: CaleeSpacing.sm + 4),
               TextFormField(
                 controller: _urlController,
-                enabled: !_isSubmitting,
+                enabled: !busy,
                 keyboardType: TextInputType.url,
                 autocorrect: false,
                 decoration: InputDecoration(
@@ -371,7 +474,7 @@ class _GenericCalendarLinkPageState extends State<GenericCalendarLinkPage> {
                 const SizedBox(height: CaleeSpacing.sm + 4),
                 TextFormField(
                   controller: _colorController,
-                  enabled: !_isSubmitting,
+                  enabled: !busy,
                   decoration: const InputDecoration(
                     labelText: 'Custom color',
                     hintText: '#007AFF',
@@ -388,15 +491,31 @@ class _GenericCalendarLinkPageState extends State<GenericCalendarLinkPage> {
                 ),
                 const SizedBox(height: CaleeSpacing.md),
               ],
+              if (_checkError != null) ...[
+                _CalendarCheckErrorBanner(message: _checkError!),
+                const SizedBox(height: CaleeSpacing.sm + 4),
+              ],
+              if (isValidated) ...[
+                _CalendarCheckPreviewCard(preview: _validationResult!.preview),
+                const SizedBox(height: CaleeSpacing.sm + 4),
+              ],
               FilledButton(
-                onPressed: _isSubmitting ? null : _submit,
+                onPressed: busy
+                    ? null
+                    : (isValidated ? _submit : _checkCalendar),
                 child: _isSubmitting
                     ? const SizedBox(
                         width: 18,
                         height: 18,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : Text(widget.submitButtonText),
+                    : Text(
+                        _isChecking
+                            ? 'Checking calendar…'
+                            : (isValidated
+                                  ? widget.submitButtonText
+                                  : 'Check calendar'),
+                      ),
               ),
             ],
           ),
@@ -441,6 +560,117 @@ class _ColorDot extends StatelessWidget {
         child: isSelected
             ? const Icon(Icons.check, size: 16, color: Colors.white)
             : null,
+      ),
+    );
+  }
+}
+
+// ─── _CalendarCheckErrorBanner ────────────────────────────────────────────────
+
+class _CalendarCheckErrorBanner extends StatelessWidget {
+  const _CalendarCheckErrorBanner({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Container(
+      padding: const EdgeInsets.all(CaleeSpacing.sm + 4),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.errorContainer,
+        borderRadius: BorderRadius.circular(CaleeRadius.card),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            Icons.warning_amber_rounded,
+            size: 20,
+            color: theme.colorScheme.error,
+          ),
+          const SizedBox(width: CaleeSpacing.sm),
+          Expanded(
+            child: Text(
+              message,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onErrorContainer,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── _CalendarCheckPreviewCard ────────────────────────────────────────────────
+
+class _CalendarCheckPreviewCard extends StatelessWidget {
+  const _CalendarCheckPreviewCard({required this.preview});
+
+  final CalendarSubscriptionPreview? preview;
+
+  String _providerLabel(String? provider) {
+    switch (provider) {
+      case 'icloud':
+        return 'iCloud';
+      case 'google':
+        return 'Google';
+      case 'ics':
+        return 'ICS';
+      default:
+        return '';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final providerLabel = _providerLabel(preview?.provider);
+    final eventCount = preview?.eventCount;
+
+    return Container(
+      padding: const EdgeInsets.all(CaleeSpacing.sm + 4),
+      decoration: BoxDecoration(
+        color: CaleeColors.primary.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(CaleeRadius.card),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.check_circle, size: 20, color: CaleeColors.primary),
+          const SizedBox(width: CaleeSpacing.sm),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Calendar found',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: CaleeColors.textPrimary,
+                  ),
+                ),
+                if (providerLabel.isNotEmpty)
+                  Text(
+                    'Provider: $providerLabel',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: CaleeColors.textSecondary,
+                    ),
+                  ),
+                if (eventCount != null)
+                  Text(
+                    'Events found: $eventCount',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: CaleeColors.textSecondary,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

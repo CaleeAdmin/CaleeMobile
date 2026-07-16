@@ -144,6 +144,79 @@ void main() {
         );
   });
 
+  group('Connected services — warning subtitle', () {
+    ClientService serviceWith({
+      required String accessStatus,
+      required String calendarCredentialStatus,
+    }) => ClientService(
+      id: 'business',
+      displayName: 'Calee Business',
+      baseUrl: 'https://business.example.com',
+      launchUrl: 'https://business.example.com',
+      serviceType: 'nextcloud_portal',
+      accessStatus: accessStatus,
+      calendarCredentialStatus: calendarCredentialStatus,
+      source: 'portal',
+      capabilities: const {},
+    );
+
+    ClientBootstrap bootstrapWith(ClientService service) => ClientBootstrap(
+      account: const ClientAccount(
+        id: 'u1',
+        displayName: 'Test User',
+        primaryEmail: 'test@example.com',
+        timeZone: 'Australia/Perth',
+        status: 'active',
+      ),
+      services: [service],
+      contexts: const ClientContexts(households: [], organisations: []),
+      availableContexts: const [],
+      capabilities: const {},
+    );
+
+    testWidgets(
+      'shows "Service access needs attention" when access status is not '
+      'connected/active/healthy',
+      (tester) async {
+        final service = serviceWith(
+          accessStatus: 'pending',
+          calendarCredentialStatus: 'connected',
+        );
+        await tester.pumpWidget(_wrap(bootstrap: bootstrapWith(service)));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Service access needs attention'), findsOneWidget);
+      },
+    );
+
+    testWidgets('shows "Calendar app setup needed" when access is active but '
+        'calendar credential is missing', (tester) async {
+      final service = serviceWith(
+        accessStatus: 'active',
+        calendarCredentialStatus: 'missing',
+      );
+      await tester.pumpWidget(_wrap(bootstrap: bootstrapWith(service)));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Calendar app setup needed'), findsOneWidget);
+    });
+
+    testWidgets(
+      'shows "Connected" when access is active and calendar credential is '
+      'connected',
+      (tester) async {
+        final service = serviceWith(
+          accessStatus: 'active',
+          calendarCredentialStatus: 'connected',
+        );
+        await tester.pumpWidget(_wrap(bootstrap: bootstrapWith(service)));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Connected'), findsOneWidget);
+      },
+    );
+  });
+
   testWidgets('Settings shows "Calendars and lists" row', (tester) async {
     await tester.pumpWidget(_wrap());
     await tester.pumpAndSettle();
