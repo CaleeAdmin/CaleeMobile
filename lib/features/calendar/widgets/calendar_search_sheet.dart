@@ -131,6 +131,7 @@ class _CalendarSearchSheetState extends State<CalendarSearchSheet> {
                     itemBuilder: (_, i) {
                       final event = _results[i];
                       return CalendarAgendaEventRow(
+                        key: ValueKey(event.id),
                         event: event,
                         color: widget.eventColor(event),
                         calendarName: widget.calendarNameForEvent(event),

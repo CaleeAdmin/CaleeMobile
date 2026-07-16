@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 
 import '../auth/calee_preferences.dart';
+import '../models/calendar_subscription_validation.dart';
 import '../models/client_bootstrap.dart';
 import '../models/client_caldav_account.dart';
 import '../models/client_calendar.dart';
@@ -300,6 +301,26 @@ class CaleeHubClient {
     return ClientCalendar.fromJson(
       _data(json)['calendar'] as Map<String, dynamic>,
     );
+  }
+
+  /// Checks a calendar link before saving it. The backend fetches and
+  /// validates the feed itself (redirects, size limits, ICS parsing);
+  /// CaleeMobile never fetches or parses the ICS body directly. On success,
+  /// save using [CalendarSubscriptionValidationResult.normalizedUrl] rather
+  /// than the URL the user originally typed.
+  Future<CalendarSubscriptionValidationResult> validateCalendarSubscription({
+    required String accessToken,
+    required String serviceId,
+    required String name,
+    required String url,
+  }) async {
+    final json = await _postJson(
+      '/client/v1/calendar-subscriptions/validate',
+      accessToken: accessToken,
+      body: <String, Object?>{'serviceId': serviceId, 'name': name, 'url': url},
+    );
+
+    return CalendarSubscriptionValidationResult.fromJson(_data(json));
   }
 
   Future<ClientCalendar> updateCalendar({
