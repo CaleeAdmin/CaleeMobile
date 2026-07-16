@@ -147,6 +147,7 @@ class _CreateTaskFormState extends State<CreateTaskForm> {
             CaleeSection(
               children: [
                 CaleeSectionTextFormField(
+                  key: const Key('task_title_field'),
                   controller: _titleController,
                   enabled: !_isSubmitting,
                   autofocus: true,
@@ -215,6 +216,7 @@ class _CreateTaskFormState extends State<CreateTaskForm> {
             CaleeSection(
               children: [
                 CaleeSectionTextFormField(
+                  key: const Key('task_description_field'),
                   controller: _descriptionController,
                   enabled: !_isSubmitting,
                   hintText: 'Notes',
@@ -226,6 +228,7 @@ class _CreateTaskFormState extends State<CreateTaskForm> {
             const SizedBox(height: CaleeSpacing.md),
 
             FilledButton(
+              key: const Key('task_create_submit_button'),
               onPressed: _isSubmitting ? null : _submit,
               child: _isSubmitting
                   ? const SizedBox(
