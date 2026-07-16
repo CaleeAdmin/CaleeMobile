@@ -328,17 +328,12 @@ class CaleeAction {
     required this.onTap,
     this.icon,
     this.isDestructive = false,
-    this.testId,
   });
 
   final String label;
   final VoidCallback onTap;
   final IconData? icon;
   final bool isDestructive;
-
-  /// Optional stable identifier for test automation, applied as the
-  /// rendered row's [Key]. Does not affect behaviour or appearance.
-  final String? testId;
 }
 
 /// Calee-style action sheet. Shows a list of [CaleeAction]s in a modal bottom
@@ -447,7 +442,6 @@ class _ActionRow extends StatelessWidget {
         : CaleeColors.textPrimary;
 
     return InkWell(
-      key: action.testId != null ? Key(action.testId!) : null,
       onTap: () {
         Navigator.of(context).pop();
         action.onTap();
@@ -711,18 +705,12 @@ class CaleeSectionSwitchRow extends StatelessWidget {
     required this.value,
     required this.onChanged,
     this.enabled = true,
-    this.switchKey,
   });
 
   final String label;
   final bool value;
   final ValueChanged<bool>? onChanged;
   final bool enabled;
-
-  /// Optional stable identifier for test automation, applied directly to
-  /// the inner [Switch] (the row itself has no tap target of its own).
-  /// Does not affect behaviour or appearance.
-  final Key? switchKey;
 
   @override
   Widget build(BuildContext context) {
@@ -743,11 +731,7 @@ class CaleeSectionSwitchRow extends StatelessWidget {
             ),
           ),
           const Spacer(),
-          Switch(
-            key: switchKey,
-            value: value,
-            onChanged: enabled ? onChanged : null,
-          ),
+          Switch(value: value, onChanged: enabled ? onChanged : null),
         ],
       ),
     );
