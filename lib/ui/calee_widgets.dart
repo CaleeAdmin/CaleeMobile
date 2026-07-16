@@ -328,12 +328,21 @@ class CaleeAction {
     required this.onTap,
     this.icon,
     this.isDestructive = false,
+    this.testId,
   });
 
   final String label;
   final VoidCallback onTap;
   final IconData? icon;
   final bool isDestructive;
+
+  /// Optional stable identifier for UI test automation, applied as this
+  /// action's row's [Key] in the rendered [CaleeActionSheet]. Every
+  /// edit/delete/skip/etc. flow across Calendar, Tasks and Chores routes
+  /// through [CaleeAction], so this is the single place to make those
+  /// action-sheet-driven flows reliably tappable by test id instead of
+  /// label text.
+  final String? testId;
 }
 
 /// Calee-style action sheet. Shows a list of [CaleeAction]s in a modal bottom
@@ -392,7 +401,12 @@ class CaleeActionSheet extends StatelessWidget {
                   ],
                   for (int i = 0; i < actions.length; i++) ...[
                     if (i > 0) const Divider(),
-                    _ActionRow(actions[i]),
+                    _ActionRow(
+                      actions[i],
+                      key: actions[i].testId != null
+                          ? Key(actions[i].testId!)
+                          : null,
+                    ),
                   ],
                 ],
               ),
@@ -430,7 +444,7 @@ class CaleeActionSheet extends StatelessWidget {
 }
 
 class _ActionRow extends StatelessWidget {
-  const _ActionRow(this.action);
+  const _ActionRow(this.action, {super.key});
 
   final CaleeAction action;
 
@@ -705,12 +719,19 @@ class CaleeSectionSwitchRow extends StatelessWidget {
     required this.value,
     required this.onChanged,
     this.enabled = true,
+    this.switchKey,
   });
 
   final String label;
   final bool value;
   final ValueChanged<bool>? onChanged;
   final bool enabled;
+
+  /// Applied directly to the inner [Switch], not this row -- the row has
+  /// no wrapping InkWell/GestureDetector (only the Switch itself is
+  /// tappable), so a key on the row widget would not be reliably
+  /// tap-targetable by UI test automation.
+  final Key? switchKey;
 
   @override
   Widget build(BuildContext context) {
@@ -731,7 +752,11 @@ class CaleeSectionSwitchRow extends StatelessWidget {
             ),
           ),
           const Spacer(),
-          Switch(value: value, onChanged: enabled ? onChanged : null),
+          Switch(
+            key: switchKey,
+            value: value,
+            onChanged: enabled ? onChanged : null,
+          ),
         ],
       ),
     );

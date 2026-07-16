@@ -295,6 +295,7 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
             ),
             CaleeListRow(
+              key: const Key('settings_profile_row'),
               title: 'Personal profile',
               subtitle: 'Name, timezone, and postcode',
               leading: const Icon(
@@ -558,6 +559,7 @@ class _SettingsPageState extends State<SettingsPage> {
         CaleeSection(
           children: [
             CaleeListRow(
+              key: const Key('settings_sign_out_row'),
               title: 'Sign out',
               titleStyle: Theme.of(
                 context,

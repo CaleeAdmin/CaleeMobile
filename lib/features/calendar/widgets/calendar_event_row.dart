@@ -31,6 +31,7 @@ class CalendarAgendaEventRow extends StatelessWidget {
     ].join(' · ');
 
     return InkWell(
+      key: ValueKey(event.id),
       onTap: onTap,
       child: Padding(
         padding: const EdgeInsets.symmetric(

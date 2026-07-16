@@ -272,6 +272,7 @@ class ReadOnlyCalendarView extends StatelessWidget {
         CaleeSpacing.xs,
       ),
       child: SegmentedButton<CalendarDisplayViewMode>(
+        key: const Key('calendar_view_switcher'),
         segments: const [
           ButtonSegment(
             value: CalendarDisplayViewMode.month,

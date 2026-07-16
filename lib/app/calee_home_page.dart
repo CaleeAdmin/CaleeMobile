@@ -199,6 +199,7 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
           : AppBar(title: Text(_tabs[_selectedIndex].title)),
       body: IndexedStack(index: _selectedIndex, children: _buildPages()),
       bottomNavigationBar: NavigationBar(
+        key: const Key('home_nav_bar'),
         selectedIndex: _selectedIndex,
         onDestinationSelected: (index) {
           setState(() {
@@ -215,6 +216,7 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
         destinations: _tabs
             .map(
               (tab) => NavigationDestination(
+                key: ValueKey('home_nav_tab_${tab.title}'),
                 icon: Icon(tab.icon),
                 selectedIcon: Icon(tab.selectedIcon),
                 label: tab.title,

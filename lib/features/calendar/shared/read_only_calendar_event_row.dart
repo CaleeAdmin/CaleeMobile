@@ -43,7 +43,14 @@ class ReadOnlyCalendarEventRow extends StatelessWidget {
       if ((event.location ?? '').trim().isNotEmpty) event.location!.trim(),
     ].join(' · ');
 
+    // Keyed here (not on the outer InkWell below) so the same key covers
+    // both the tappable (onTap != null) and plain (onTap == null) return
+    // paths from a single point of truth -- Padding doesn't change the
+    // InkWell's hit-test bounds, so this is reliably tap-targetable
+    // either way. Covers all 3 render call sites in read_only_calendar_view.dart
+    // (all-day list, timed list, month-agenda flattened list).
     Widget inner = Padding(
+      key: ValueKey(event.id),
       padding: const EdgeInsets.symmetric(
         horizontal: CaleeSpacing.md,
         vertical: 10,
