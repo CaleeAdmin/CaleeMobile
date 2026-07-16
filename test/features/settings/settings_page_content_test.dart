@@ -174,6 +174,24 @@ void main() {
       capabilities: const {},
     );
 
+    // The "Connected services" section renders near the bottom of the
+    // Settings list, below the default 800x600 test surface's fold.
+    // ListView's sliver machinery only mounts children within the
+    // viewport + cache extent -- even for a plain (non-.builder) ListView
+    // -- so find.text() finds nothing there without either scrolling or
+    // (as here) a tall enough surface to fit the whole page at once.
+    Future<void> pumpSettingsWith(
+      WidgetTester tester,
+      ClientBootstrap bootstrap,
+    ) async {
+      tester.view.physicalSize = const Size(800, 3000);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(_wrap(bootstrap: bootstrap));
+      await tester.pumpAndSettle();
+    }
+
     testWidgets(
       'shows "Service access needs attention" when access status is not '
       'connected/active/healthy',
@@ -182,8 +200,7 @@ void main() {
           accessStatus: 'pending',
           calendarCredentialStatus: 'connected',
         );
-        await tester.pumpWidget(_wrap(bootstrap: bootstrapWith(service)));
-        await tester.pumpAndSettle();
+        await pumpSettingsWith(tester, bootstrapWith(service));
 
         expect(find.text('Service access needs attention'), findsOneWidget);
       },
@@ -195,8 +212,7 @@ void main() {
         accessStatus: 'active',
         calendarCredentialStatus: 'missing',
       );
-      await tester.pumpWidget(_wrap(bootstrap: bootstrapWith(service)));
-      await tester.pumpAndSettle();
+      await pumpSettingsWith(tester, bootstrapWith(service));
 
       expect(find.text('Calendar app setup needed'), findsOneWidget);
     });
@@ -209,8 +225,7 @@ void main() {
           accessStatus: 'active',
           calendarCredentialStatus: 'connected',
         );
-        await tester.pumpWidget(_wrap(bootstrap: bootstrapWith(service)));
-        await tester.pumpAndSettle();
+        await pumpSettingsWith(tester, bootstrapWith(service));
 
         expect(find.text('Connected'), findsOneWidget);
       },
