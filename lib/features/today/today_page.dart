@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../../data/api/calee_hub_client.dart';
 import '../../data/models/client_bootstrap.dart';
 import '../../data/models/client_calendar.dart';
-import '../../data/models/client_chore.dart';
 import '../../data/models/client_task.dart';
 import '../../shared/meal_icon.dart';
 import '../../ui/calee_design.dart';
@@ -20,7 +19,6 @@ class TodayPage extends StatefulWidget {
     required this.isFamilyUxContext,
     this.onNavigateToCalendar,
     this.onNavigateToTasks,
-    this.onNavigateToChores,
     this.onNavigateToMeals,
     super.key,
   });
@@ -32,7 +30,6 @@ class TodayPage extends StatefulWidget {
   final bool isFamilyUxContext;
   final VoidCallback? onNavigateToCalendar;
   final VoidCallback? onNavigateToTasks;
-  final VoidCallback? onNavigateToChores;
   final VoidCallback? onNavigateToMeals;
 
   @override
@@ -46,10 +43,6 @@ class _TodayPageState extends State<TodayPage> {
   bool _hasLoadedOnce = false;
   TodayOverview? _overview;
   Object? _fatalError;
-
-  bool get _hasChoreService =>
-      widget.isFamilyUxContext &&
-      widget.services.any((s) => s.isActive && s.supportsChores);
 
   bool get _hasMealsService {
     if (!widget.isFamilyUxContext) return false;
@@ -199,16 +192,10 @@ class _TodayPageState extends State<TodayPage> {
       _buildCalendarSection(overview),
       const SizedBox(height: CaleeSpacing.sectionSpacing),
       _buildTasksSection(overview),
-      if (_hasChoreService) ...[
-        const SizedBox(height: CaleeSpacing.sectionSpacing),
-        _buildChoresSection(overview),
-      ],
       if (_hasMealsService) ...[
         const SizedBox(height: CaleeSpacing.sectionSpacing),
         _buildMealsSection(overview),
       ],
-      const SizedBox(height: CaleeSpacing.sectionSpacing),
-      _buildCaleeDisplaySection(),
     ];
   }
 
@@ -297,54 +284,6 @@ class _TodayPageState extends State<TodayPage> {
     );
   }
 
-  // ── Chores section ───────────────────────────────────────────────────────────────
-
-  Widget _buildChoresSection(TodayOverview overview) {
-    final hasItems =
-        overview.overdueChores.isNotEmpty || overview.choresDueToday.isNotEmpty;
-    final rows = <Widget>[];
-    String? trailing;
-
-    if (overview.hasChoresError) {
-      rows.add(_errorRow('Could not load chores.'));
-    } else if (!hasItems) {
-      rows.add(_emptyRow('No chores due today'));
-    } else {
-      final parts = <String>[];
-      if (overview.choresDueToday.isNotEmpty) {
-        parts.add('${overview.choresDueToday.length} today');
-      }
-      if (overview.overdueChores.isNotEmpty) {
-        parts.add('${overview.overdueChores.length} overdue');
-      }
-      trailing = parts.join(', ');
-      for (final c in overview.overdueChores.take(5)) {
-        rows.add(_buildChoreRow(c, overdue: true));
-      }
-      for (final c in overview.choresDueToday.take(5)) {
-        rows.add(_buildChoreRow(c, overdue: false));
-      }
-    }
-
-    return CaleeSection(title: 'Chores', trailing: trailing, children: rows);
-  }
-
-  Widget _buildChoreRow(ClientChore chore, {required bool overdue}) {
-    return CaleeListRow(
-      title: chore.title,
-      subtitle: overdue ? 'Overdue' : 'Due today',
-      subtitleStyle: overdue
-          ? const TextStyle(fontSize: 12, color: CaleeColors.destructive)
-          : null,
-      leading: Icon(
-        Icons.check_circle_outline,
-        size: 18,
-        color: overdue ? CaleeColors.destructive : CaleeColors.textTertiary,
-      ),
-      onTap: widget.onNavigateToChores,
-    );
-  }
-
   // ── Meals section ────────────────────────────────────────────────────────────────
 
   Widget _buildMealsSection(TodayOverview overview) {
@@ -377,16 +316,6 @@ class _TodayPageState extends State<TodayPage> {
     }
 
     return CaleeSection(title: "Today's Meals", children: rows);
-  }
-
-  // ── Calee Display section ───────────────────────────────────────────────────────
-
-  // TODO(displays): Replace this placeholder once display linking is implemented.
-  Widget _buildCaleeDisplaySection() {
-    return CaleeSection(
-      title: 'Calee Display',
-      children: [_emptyRow('Display status and setup are coming soon.')],
-    );
   }
 
   // ── Fatal error ───────────────────────────────────────────────────────────────
