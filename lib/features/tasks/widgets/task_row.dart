@@ -53,7 +53,6 @@ class TaskRow extends StatelessWidget {
           width: 28,
           height: 28,
           child: IconButton(
-            key: ValueKey('task_more_${task.id}'),
             padding: EdgeInsets.zero,
             icon: const Icon(
               Icons.more_horiz,
@@ -67,14 +66,12 @@ class TaskRow extends StatelessWidget {
                 CaleeAction(
                   label: 'Edit',
                   icon: Icons.edit_outlined,
-                  testId: 'task_action_edit',
                   onTap: onEdit,
                 ),
                 CaleeAction(
                   label: 'Delete',
                   icon: Icons.delete_outline,
                   isDestructive: true,
-                  testId: 'task_action_delete',
                   onTap: onDelete,
                 ),
               ],
@@ -98,7 +95,6 @@ class TaskRow extends StatelessWidget {
           ? const TextStyle(color: CaleeColors.textTertiary)
           : null,
       leading: CaleeCheckCircle(
-        key: ValueKey('task_toggle_${task.id}'),
         isChecked: task.isCompleted,
         onTap: onToggle,
         isLoading: isUpdating,

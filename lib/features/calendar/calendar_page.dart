@@ -228,7 +228,6 @@ class _CalendarPageState extends State<CalendarPage> {
         CaleeAction(
           label: event.recurring ? 'Edit…' : 'Edit Event',
           icon: Icons.edit_outlined,
-          testId: 'calendar_event_action_edit',
           onTap: () async {
             final editScope = await _chooseEditScope(event);
             if (editScope == null || !mounted) return;
@@ -243,7 +242,6 @@ class _CalendarPageState extends State<CalendarPage> {
           label: event.recurring ? 'Delete…' : 'Delete Event',
           icon: Icons.delete_outline,
           isDestructive: true,
-          testId: 'calendar_event_action_delete',
           onTap: () => _confirmDeleteEvent(event),
         ),
       ],
@@ -523,7 +521,6 @@ class _CalendarPageState extends State<CalendarPage> {
           use24h: use24h,
           actionWidgets: [
             IconButton(
-              key: const Key('calendar_search_button'),
               onPressed: _openSearchSheet,
               icon: const Icon(Icons.search),
               iconSize: 22,
@@ -536,7 +533,6 @@ class _CalendarPageState extends State<CalendarPage> {
               tooltip: 'Search events',
             ),
             IconButton(
-              key: const Key('calendar_filter_button'),
               onPressed: _openCalendarChooser,
               icon: const Icon(Icons.tune),
               iconSize: 22,
@@ -549,7 +545,6 @@ class _CalendarPageState extends State<CalendarPage> {
               tooltip: 'Calendars',
             ),
             IconButton(
-              key: const Key('calendar_add_event_button'),
               onPressed: _openCreateEventSheet,
               icon: const Icon(Icons.add),
               iconSize: 22,

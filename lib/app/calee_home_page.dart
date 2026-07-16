@@ -65,6 +65,7 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
   // Tab index helpers (computed after _tabs is built)
   int get _calendarTabIndex => _tabs.indexWhere((t) => t.title == 'Calendar');
   int get _tasksTabIndex => _tabs.indexWhere((t) => t.title == 'Tasks');
+  int get _choresTabIndex => _tabs.indexWhere((t) => t.title == 'Chores');
   int get _mealsTabIndex => _tabs.indexWhere((t) => t.title == 'Meals');
 
   @override
@@ -144,6 +145,9 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
             setState(() => _selectedIndex = _calendarTabIndex),
         onNavigateToTasks: () =>
             setState(() => _selectedIndex = _tasksTabIndex),
+        onNavigateToChores: _hasChoreService
+            ? () => setState(() => _selectedIndex = _choresTabIndex)
+            : null,
         onNavigateToMeals: _hasMealsService
             ? () => setState(() => _selectedIndex = _mealsTabIndex)
             : null,
@@ -195,7 +199,6 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
           : AppBar(title: Text(_tabs[_selectedIndex].title)),
       body: IndexedStack(index: _selectedIndex, children: _buildPages()),
       bottomNavigationBar: NavigationBar(
-        key: const Key('home_nav_bar'),
         selectedIndex: _selectedIndex,
         onDestinationSelected: (index) {
           setState(() {
@@ -212,7 +215,6 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
         destinations: _tabs
             .map(
               (tab) => NavigationDestination(
-                key: ValueKey('home_nav_tab_${tab.title}'),
                 icon: Icon(tab.icon),
                 selectedIcon: Icon(tab.selectedIcon),
                 label: tab.title,

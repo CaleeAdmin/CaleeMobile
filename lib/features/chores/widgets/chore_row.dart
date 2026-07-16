@@ -59,7 +59,6 @@ class ChoreRow extends StatelessWidget {
         button: true,
         excludeSemantics: true,
         child: CaleeCheckCircle(
-          key: ValueKey('chore_toggle_${chore.id}'),
           isChecked: isDone,
           onTap: effectiveCircleTap,
           isLoading: isUpdating,
@@ -81,7 +80,6 @@ class ChoreRow extends StatelessWidget {
               width: 28,
               height: 28,
               child: IconButton(
-                key: ValueKey('chore_more_${chore.id}'),
                 padding: EdgeInsets.zero,
                 icon: const Icon(Icons.more_horiz, size: 18),
                 color: CaleeColors.textTertiary,

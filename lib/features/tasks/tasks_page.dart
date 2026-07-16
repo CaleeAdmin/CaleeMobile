@@ -428,7 +428,6 @@ class _TasksPageState extends State<TasksPage> {
                 ),
               // Add icon
               IconButton(
-                key: const Key('task_create_button'),
                 onPressed: taskCalendars.isEmpty
                     ? _openCollectionCreateShortcut
                     : (_controller.isCreatingTask

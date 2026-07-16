@@ -739,7 +739,6 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
                         children: [
                           // Title field
                           CaleeSectionTextFormField(
-                            key: const Key('event_title_field'),
                             controller: _titleController,
                             enabled: !_isLocked,
                             autofocus: true,
@@ -778,7 +777,6 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
                       CaleeSection(
                         children: [
                           CaleeSectionSwitchRow(
-                            switchKey: const Key('event_all_day_switch'),
                             label: 'All day',
                             value: _allDay,
                             enabled: !_isLocked,
@@ -842,13 +840,11 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
                       CaleeSection(
                         children: [
                           CaleeSectionTextFormField(
-                            key: const Key('event_location_field'),
                             controller: _locationController,
                             enabled: !_isLocked,
                             hintText: 'Location',
                           ),
                           CaleeSectionTextFormField(
-                            key: const Key('event_description_field'),
                             controller: _descriptionController,
                             enabled: !_isLocked,
                             hintText: 'Notes',
@@ -860,7 +856,6 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
                       // ── Submit ────────────────────────────────────────────
                       const SizedBox(height: CaleeSpacing.lg),
                       FilledButton(
-                        key: const Key('event_submit_button'),
                         onPressed: _isLocked ? null : _submit,
                         child: _isSubmitting
                             ? const SizedBox(

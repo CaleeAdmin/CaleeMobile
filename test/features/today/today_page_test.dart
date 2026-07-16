@@ -7,6 +7,7 @@
 import 'package:calee_mobile/data/api/calee_hub_client.dart';
 import 'package:calee_mobile/data/models/client_bootstrap.dart';
 import 'package:calee_mobile/data/models/client_calendar.dart';
+import 'package:calee_mobile/data/models/client_chore.dart';
 import 'package:calee_mobile/data/models/client_meal.dart';
 import 'package:calee_mobile/data/models/client_task.dart';
 import 'package:calee_mobile/features/today/today_page.dart';
@@ -20,20 +21,25 @@ class _StubHub extends CaleeHubClient {
   _StubHub({
     this.failEvents = false,
     this.failTasks = false,
+    this.failChores = false,
     this.failMeals = false,
     List<ClientEvent>? events,
     List<ClientTask>? tasks,
+    List<ClientChore>? chores,
     List<ClientMeal>? meals,
   }) : _events = events ?? const [],
        _tasks = tasks ?? const [],
+       _chores = chores ?? const [],
        _meals = meals ?? const [],
        super();
 
   final bool failEvents;
   final bool failTasks;
+  final bool failChores;
   final bool failMeals;
   final List<ClientEvent> _events;
   final List<ClientTask> _tasks;
+  final List<ClientChore> _chores;
   final List<ClientMeal> _meals;
 
   @override
@@ -54,6 +60,16 @@ class _StubHub extends CaleeHubClient {
   }) async {
     if (failTasks) throw Exception('tasks error');
     return ClientTaskList(from: from, to: to, tasks: _tasks);
+  }
+
+  @override
+  Future<ClientChoreList> chores({
+    required String accessToken,
+    required String from,
+    required String to,
+  }) async {
+    if (failChores) throw Exception('chores error');
+    return ClientChoreList(from: from, to: to, chores: _chores);
   }
 
   @override
@@ -81,6 +97,18 @@ const _calendarService = ClientService(
   capabilities: {'calendar': true, 'tasks': true, 'chores': false},
 );
 
+const _choresService = ClientService(
+  id: 'svc2',
+  displayName: 'Portal',
+  baseUrl: 'http://localhost',
+  launchUrl: 'http://localhost',
+  serviceType: 'nextcloud_portal',
+  accessStatus: 'active',
+  calendarCredentialStatus: 'connected',
+  source: 'test',
+  capabilities: {'calendar': true, 'tasks': true, 'chores': true},
+);
+
 const _mealsService = ClientService(
   id: 'portal',
   displayName: 'Portal',
@@ -94,7 +122,7 @@ const _mealsService = ClientService(
 );
 
 /// TodayPage can grow past the default 800x600 test surface once the
-/// Meals section is populated. A plain (non-builder) ListView only
+/// Chores/Meals sections are populated. A plain (non-builder) ListView only
 /// lays out slivers near the viewport, so rows below the fold exist in the
 /// widget tree but are "offstage" to finders. Growing the surface keeps
 /// everything reachable without scrolling in every test.
@@ -147,6 +175,54 @@ void main() {
 
       expect(find.text('No tasks due today'), findsOneWidget);
     });
+
+    testWidgets(
+      'shows "No chores due today" when chores service present and family context',
+      (tester) async {
+        final hub = _StubHub();
+        await tester.pumpWidget(
+          _buildPage(
+            hub: hub,
+            services: const [_choresService],
+            isFamilyUxContext: true,
+          ),
+        );
+        await tester.pump();
+        await tester.pump();
+
+        expect(find.text('No chores due today'), findsOneWidget);
+      },
+    );
+
+    testWidgets('Chores section absent when no chores service', (tester) async {
+      final hub = _StubHub();
+      await tester.pumpWidget(
+        _buildPage(hub: hub, services: const [_calendarService]),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.text('No chores due today'), findsNothing);
+    });
+
+    testWidgets(
+      'Chores section absent when chores service present but not family context',
+      (tester) async {
+        final hub = _StubHub();
+        // business/workspace: isFamilyUxContext = false
+        await tester.pumpWidget(
+          _buildPage(
+            hub: hub,
+            services: const [_choresService],
+            isFamilyUxContext: false,
+          ),
+        );
+        await tester.pump();
+        await tester.pump();
+
+        expect(find.text('No chores due today'), findsNothing);
+      },
+    );
   });
 
   group('TodayPage — section error rows', () {
@@ -174,9 +250,33 @@ void main() {
       expect(find.text('Could not load tasks.'), findsOneWidget);
     });
 
+    testWidgets('chores error row renders without crashing the page', (
+      tester,
+    ) async {
+      final hub = _StubHub(failChores: true);
+      await tester.pumpWidget(
+        _buildPage(
+          hub: hub,
+          services: const [_choresService],
+          isFamilyUxContext: true,
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.byType(TodayPage), findsOneWidget);
+      expect(find.text('Could not load chores.'), findsOneWidget);
+    });
+
     testWidgets('all sections error without crashing the page', (tester) async {
-      final hub = _StubHub(failEvents: true, failTasks: true);
-      await tester.pumpWidget(_buildPage(hub: hub));
+      final hub = _StubHub(failEvents: true, failTasks: true, failChores: true);
+      await tester.pumpWidget(
+        _buildPage(
+          hub: hub,
+          services: const [_choresService],
+          isFamilyUxContext: true,
+        ),
+      );
       await tester.pump();
       await tester.pump();
 
@@ -308,6 +408,20 @@ void main() {
 
       expect(find.byType(TodayPage), findsOneWidget);
       expect(find.text('Could not load meals.'), findsOneWidget);
+    });
+  });
+
+  group('TodayPage — Calee Display section', () {
+    testWidgets('displays coming-soon placeholder section', (tester) async {
+      final hub = _StubHub();
+      await tester.pumpWidget(_buildPage(hub: hub));
+      await tester.pump();
+      await tester.pump();
+
+      expect(
+        find.text('Display status and setup are coming soon.'),
+        findsOneWidget,
+      );
     });
   });
 }
