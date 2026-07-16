@@ -692,6 +692,7 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
     }
 
     return CaleeListRow(
+      key: ValueKey('collection_row_${calendar.id}'),
       title: calendar.name,
       subtitle: subtitleParts.isEmpty ? null : subtitleParts.join(' · '),
       leading: CaleeColorDot(color: dotColor, size: 12),
@@ -859,6 +860,7 @@ class _CollectionMenuButton extends StatelessWidget {
             CaleeAction(
               label: 'Rename',
               icon: Icons.edit_outlined,
+              testId: 'collection_action_edit',
               onTap: onEdit!,
             ),
           if (onDelete != null)
@@ -866,6 +868,7 @@ class _CollectionMenuButton extends StatelessWidget {
               label: 'Delete',
               icon: Icons.delete_outline,
               isDestructive: true,
+              testId: 'collection_action_delete',
               onTap: onDelete!,
             ),
         ],
@@ -1364,6 +1367,7 @@ class _SubscriptionFormContentState extends State<_SubscriptionFormContent> {
               const SizedBox(height: CaleeSpacing.sm + 4),
             ],
             TextFormField(
+              key: const Key('calendar_link_name_field'),
               controller: _nameController,
               enabled: !busy,
               autofocus: true,
@@ -1381,6 +1385,7 @@ class _SubscriptionFormContentState extends State<_SubscriptionFormContent> {
             ),
             const SizedBox(height: CaleeSpacing.sm + 4),
             TextFormField(
+              key: const Key('calendar_link_url_field'),
               controller: _urlController,
               enabled: !busy,
               keyboardType: TextInputType.url,
@@ -1454,6 +1459,7 @@ class _SubscriptionFormContentState extends State<_SubscriptionFormContent> {
               const SizedBox(height: CaleeSpacing.sm + 4),
             ],
             FilledButton(
+              key: const Key('calendar_link_check_button'),
               onPressed: busy ? null : (isValidated ? _submit : _checkCalendar),
               child: busy
                   ? const SizedBox(
@@ -1482,6 +1488,7 @@ class _CalendarCheckErrorBanner extends StatelessWidget {
     final theme = Theme.of(context);
 
     return Container(
+      key: const Key('calendar_link_check_error'),
       padding: const EdgeInsets.all(CaleeSpacing.sm + 4),
       decoration: BoxDecoration(
         color: theme.colorScheme.errorContainer,
@@ -1537,6 +1544,7 @@ class _CalendarCheckPreviewCard extends StatelessWidget {
     final eventCount = preview?.eventCount;
 
     return Container(
+      key: const Key('calendar_link_check_preview'),
       padding: const EdgeInsets.all(CaleeSpacing.sm + 4),
       decoration: BoxDecoration(
         color: CaleeColors.primary.withValues(alpha: 0.08),

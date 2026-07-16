@@ -107,6 +107,19 @@ ClientBootstrap _businessBootstrap() => ClientBootstrap(
   capabilities: const {},
 );
 
+/// The Connected services section renders below the fold of the default
+/// 800x600 test surface (it's after Account/Preferences/Manage), and a
+/// plain (non-builder) ListView only lays out slivers near the viewport, so
+/// rows below the fold exist in the widget tree but are offstage to
+/// finders. Growing the surface keeps everything reachable without
+/// scrolling in every test.
+void _useTallViewport(WidgetTester tester) {
+  tester.view.physicalSize = const Size(800, 2000);
+  tester.view.devicePixelRatio = 1.0;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+}
+
 Widget _wrap({ClientBootstrap? bootstrap, CaleeHubClient? hubClient}) =>
     MaterialApp(
       theme: CaleeTheme.buildThemeData(),
@@ -178,6 +191,7 @@ void main() {
       'shows "Service access needs attention" when access status is not '
       'connected/active/healthy',
       (tester) async {
+        _useTallViewport(tester);
         final service = serviceWith(
           accessStatus: 'pending',
           calendarCredentialStatus: 'connected',
@@ -191,6 +205,7 @@ void main() {
 
     testWidgets('shows "Calendar app setup needed" when access is active but '
         'calendar credential is missing', (tester) async {
+      _useTallViewport(tester);
       final service = serviceWith(
         accessStatus: 'active',
         calendarCredentialStatus: 'missing',
@@ -205,6 +220,7 @@ void main() {
       'shows "Connected" when access is active and calendar credential is '
       'connected',
       (tester) async {
+        _useTallViewport(tester);
         final service = serviceWith(
           accessStatus: 'active',
           calendarCredentialStatus: 'connected',

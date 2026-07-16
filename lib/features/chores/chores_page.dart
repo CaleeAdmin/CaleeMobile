@@ -286,6 +286,7 @@ class _ChoresPageState extends State<ChoresPage> {
         CaleeAction(
           label: 'Edit chore',
           icon: Icons.edit_outlined,
+          testId: 'chore_action_edit',
           onTap: () => _openEditChoreSheet(chore),
         ),
       );
@@ -296,12 +297,14 @@ class _ChoresPageState extends State<ChoresPage> {
         CaleeAction(
           label: 'Skip this occurrence',
           icon: Icons.event_busy_outlined,
+          testId: 'chore_action_skip',
           onTap: () => _skipChore(chore),
         ),
         CaleeAction(
           label: 'Stop repeating',
           icon: Icons.repeat_one_outlined,
           isDestructive: true,
+          testId: 'chore_action_stop_repeating',
           onTap: () => _stopRepeatingChore(chore),
         ),
       ]);

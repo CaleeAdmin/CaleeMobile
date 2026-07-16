@@ -263,6 +263,7 @@ class _CalendarChooserSheetState extends State<CalendarChooserSheet> {
           },
         ),
         CaleeListRow(
+          key: const Key('calendar_chooser_subscribe_from_link'),
           title: 'Add calendar link',
           leading: const Icon(
             Icons.link_outlined,
