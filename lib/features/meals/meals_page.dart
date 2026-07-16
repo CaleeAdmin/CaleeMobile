@@ -119,6 +119,7 @@ class _MealsPageState extends State<MealsPage> {
   @override
   Widget build(BuildContext context) {
     return CaleeScaffold(
+      key: const Key('meals_plan_root'),
       appBar: _buildTopBar(),
       body: SafeArea(
         child: RefreshIndicator(
@@ -195,6 +196,7 @@ class _MealsPageState extends State<MealsPage> {
                 tooltip: 'Copy last week',
               ),
               IconButton(
+                key: const Key('meals_add_button'),
                 onPressed: _openAddMealSheet,
                 icon: const Icon(Icons.add),
                 iconSize: 22,
@@ -334,6 +336,7 @@ class _MealsPageState extends State<MealsPage> {
     return Row(
       children: [
         IconButton(
+          key: const Key('meals_week_previous'),
           icon: const Icon(Icons.chevron_left),
           color: CaleeColors.primary,
           onPressed: _controller.isLoading ? null : _controller.previousWeek,
@@ -364,6 +367,7 @@ class _MealsPageState extends State<MealsPage> {
           ),
         ),
         IconButton(
+          key: const Key('meals_week_next'),
           icon: const Icon(Icons.chevron_right),
           color: CaleeColors.primary,
           onPressed: _controller.isLoading ? null : _controller.nextWeek,
@@ -448,6 +452,7 @@ class _MealsPageState extends State<MealsPage> {
     }
 
     return CaleeListRow(
+      key: ValueKey('meal_row_${dateStr}_$mealType'),
       leading: Text(emoji, style: const TextStyle(fontSize: 18)),
       title: label,
       trailing: Row(
@@ -762,6 +767,7 @@ class _MealFormSheetState extends State<MealFormSheet> {
               CaleeSection(
                 children: [
                   CaleeSectionTextFormField(
+                    key: const Key('meal_title_field'),
                     controller: _titleController,
                     hintText: 'Meal title',
                     autofocus: !_isEditing,
@@ -795,6 +801,7 @@ class _MealFormSheetState extends State<MealFormSheet> {
               ],
               const SizedBox(height: CaleeSpacing.md),
               FilledButton(
+                key: const Key('meal_save_button'),
                 onPressed: _isSaving ? null : _save,
                 child: _isSaving
                     ? const SizedBox(
@@ -810,6 +817,7 @@ class _MealFormSheetState extends State<MealFormSheet> {
               if (_isEditing) ...[
                 const SizedBox(height: CaleeSpacing.sm),
                 OutlinedButton(
+                  key: const Key('meal_delete_button'),
                   onPressed: _isSaving ? null : _delete,
                   style: OutlinedButton.styleFrom(
                     foregroundColor: CaleeColors.destructive,
@@ -955,6 +963,7 @@ class _AddMealSheetState extends State<AddMealSheet> {
             CaleeSection(
               children: [
                 CaleeSectionTextFormField(
+                  key: const Key('meal_title_field'),
                   controller: _titleController,
                   hintText: 'Meal title',
                   enabled: !_isSaving,
@@ -990,6 +999,7 @@ class _AddMealSheetState extends State<AddMealSheet> {
             ],
             const SizedBox(height: CaleeSpacing.md),
             FilledButton(
+              key: const Key('meal_save_button'),
               onPressed: _isSaving ? null : _save,
               child: _isSaving
                   ? const SizedBox(
