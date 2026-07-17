@@ -295,6 +295,7 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
             ),
             CaleeListRow(
+              key: const Key('settings_profile_row'),
               title: 'Personal profile',
               subtitle: 'Name, timezone, and postcode',
               leading: const Icon(
@@ -325,6 +326,7 @@ class _SettingsPageState extends State<SettingsPage> {
               _PreferencesLoadError(onRetry: _controller.load)
             else ...[
               CaleeSectionDropdownRow<FirstDayOfWeek>(
+                key: const Key('settings_first_day_of_week_row'),
                 label: 'First day of week',
                 value: preferences.firstDayOfWeek,
                 items: FirstDayOfWeek.values
@@ -340,6 +342,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 },
               ),
               CaleeSectionDropdownRow<TimeFormatPref>(
+                key: const Key('settings_time_format_row'),
                 label: 'Time format',
                 value: preferences.timeFormat,
                 items: TimeFormatPref.values
@@ -356,6 +359,7 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
               if (writableCalendars.length >= 2)
                 CaleeSectionDropdownRow<ClientCalendar?>(
+                  key: const Key('settings_default_calendar_row'),
                   label: 'Default calendar',
                   value: defaultCal,
                   items: [
@@ -371,6 +375,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
               if (taskCalendars.length >= 2)
                 CaleeSectionDropdownRow<ClientCalendar?>(
+                  key: const Key('settings_default_task_list_row'),
                   label: 'Default task list',
                   value: defaultTask,
                   items: [
@@ -395,6 +400,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   color: CaleeColors.primary,
                 ),
                 trailing: Switch(
+                  key: const Key('settings_calendar_reminders_switch'),
                   value: remindersEnabled,
                   onChanged: isLoadingPrefs
                       ? null
@@ -558,6 +564,7 @@ class _SettingsPageState extends State<SettingsPage> {
         CaleeSection(
           children: [
             CaleeListRow(
+              key: const Key('settings_sign_out_row'),
               title: 'Sign out',
               titleStyle: Theme.of(
                 context,

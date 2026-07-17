@@ -277,6 +277,7 @@ class _MainView extends StatelessWidget {
           ],
           const SizedBox(height: CaleeSpacing.sectionSpacing),
           FilledButton(
+            key: const Key('google_calendar_connect_button'),
             onPressed: isStarting ? null : onConnect,
             child: isStarting
                 ? const SizedBox(

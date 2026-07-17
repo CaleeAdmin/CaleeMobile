@@ -120,6 +120,20 @@ Widget _wrap({ClientBootstrap? bootstrap, CaleeHubClient? hubClient}) =>
       ),
     );
 
+// The "Connected services" section renders below the Account/Preferences/
+// Manage sections in SettingsPage's ListView. The default 800x600 test
+// surface never lays those rows out via the sliver list's cache extent, so
+// find.text() finds nothing there even though the widget exists. Widen the
+// surface instead of simulating a scroll gesture.
+Future<void> _pumpTall(WidgetTester tester, Widget widget) async {
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+  tester.view.physicalSize = const Size(800, 2400);
+  tester.view.devicePixelRatio = 1.0;
+  await tester.pumpWidget(widget);
+  await tester.pumpAndSettle();
+}
+
 void main() {
   setUp(() {
     // Mark the secure-storage → shared-prefs migration as already done so
@@ -182,8 +196,7 @@ void main() {
           accessStatus: 'pending',
           calendarCredentialStatus: 'connected',
         );
-        await tester.pumpWidget(_wrap(bootstrap: bootstrapWith(service)));
-        await tester.pumpAndSettle();
+        await _pumpTall(tester, _wrap(bootstrap: bootstrapWith(service)));
 
         expect(find.text('Service access needs attention'), findsOneWidget);
       },
@@ -195,8 +208,7 @@ void main() {
         accessStatus: 'active',
         calendarCredentialStatus: 'missing',
       );
-      await tester.pumpWidget(_wrap(bootstrap: bootstrapWith(service)));
-      await tester.pumpAndSettle();
+      await _pumpTall(tester, _wrap(bootstrap: bootstrapWith(service)));
 
       expect(find.text('Calendar app setup needed'), findsOneWidget);
     });
@@ -209,8 +221,7 @@ void main() {
           accessStatus: 'active',
           calendarCredentialStatus: 'connected',
         );
-        await tester.pumpWidget(_wrap(bootstrap: bootstrapWith(service)));
-        await tester.pumpAndSettle();
+        await _pumpTall(tester, _wrap(bootstrap: bootstrapWith(service)));
 
         expect(find.text('Connected'), findsOneWidget);
       },
