@@ -45,6 +45,23 @@ import 'package:flutter/foundation.dart';
 ///  * carries a query (`?...`) or fragment (`#...`);
 ///  * carries a path beyond `/` -- a backend base URL only.
 ///
+/// ## Port policy
+///
+/// A hostname match alone is not enough: an `https` backend must resolve to
+/// the *canonical* endpoint, so it may not carry an arbitrary explicit port.
+///
+///  * an `https` endpoint must use the standard port. The scheme-default
+///    `:443` is canonicalized away (Dart normalizes it), so
+///    `https://hub.calee.com.au:443` is treated as the plain production
+///    endpoint; any *other* explicit port (`:444`, `:9443`, ...) is off
+///    policy and rejected even when the host matches an approved host;
+///  * an approved non-production `https` endpoint is therefore an approved
+///    *host + standard-port* combination, never a host on a novel port;
+///  * a local debug `http` hub may still listen on a configurable port
+///    (`http://192.168.1.10:8080`), because a LAN dev hub cannot be
+///    enumerated in an allow-list and `http` can never reach the `https`
+///    production hub anyway.
+///
 /// Any rejected override falls back to [productionBaseUrl], so a typo (or an
 /// injected value) in a release build can never silently redirect the app.
 ///
@@ -71,13 +88,20 @@ class CaleeEnvironment {
   /// of these over `https`; a production release may point at none of them.
   /// This is the optional allowed-host list: even with
   /// `CALEE_REGRESSION=true`, an arbitrary HTTPS host is not accepted -- only
-  /// a known Calee-owned regression/staging backend.
+  /// a known Calee-owned regression/staging backend. An approved host is only
+  /// approved on the standard `https` port (see the port policy above): a
+  /// listed host on a novel port is not an approved endpoint.
   static const Set<String> allowedNonProductionHosts = <String>{
     productionHost,
     'hub-dev.calee.com.au',
     'hub-staging.calee.com.au',
     'hub-uat.calee.com.au',
   };
+
+  /// The standard `https` port. An `https` backend must resolve to this port;
+  /// the scheme-default is canonicalized to it, and any other explicit port is
+  /// rejected as an off-policy endpoint.
+  static const int _standardHttpsPort = 443;
 
   /// Build-time backend override. Empty (the default) means "use production".
   /// A compile-time constant, so it is baked into the build and resolved
@@ -160,7 +184,8 @@ class CaleeEnvironment {
   /// Applied in order:
   ///  1. structural safety (host present; no user info, query, fragment, or
   ///     non-root path) -- enforced in *every* mode;
-  ///  2. scheme (`https` always; `http` only when [allowInsecure]);
+  ///  2. scheme + port (`https` always, and only on the standard port `443`;
+  ///     `http` only when [allowInsecure], on any configurable port);
   ///  3. host policy (the production host is always acceptable; any other
   ///     host requires [allowNonProduction], and a non-production `https`
   ///     host must additionally be in [allowedNonProductionHosts]).
@@ -173,11 +198,21 @@ class CaleeEnvironment {
       return false;
     }
     if (uri.scheme == 'https') {
-      // acceptable scheme
+      // An https backend must resolve to the canonical port. Dart normalizes
+      // the scheme-default away, so `uri.port` is 443 for both an implicit
+      // port and an explicit `:443` -- that case is canonicalized and
+      // accepted. Any other explicit port (`:444`, `:9443`, ...) is a
+      // distinct, off-policy endpoint and is rejected even when the host
+      // matches an approved host.
+      if (uri.port != _standardHttpsPort) {
+        return false;
+      }
     } else if (uri.scheme == 'http') {
       if (!allowInsecure) {
         return false;
       }
+      // A local/LAN debug hub may listen on any configurable port; no port
+      // restriction is applied to a permitted plain-http backend.
     } else {
       return false;
     }

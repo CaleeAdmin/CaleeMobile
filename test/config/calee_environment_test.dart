@@ -350,6 +350,189 @@ void main() {
     });
   });
 
+  group('backend port policy — adversarial cases', () {
+    // Each case is exercised against the resolved URI *and* describeSource, in
+    // the mode where its behaviour is most telling. A hostname match alone must
+    // never be enough to accept an arbitrary explicit port.
+
+    test('explicit :443 on the production host is canonicalized', () {
+      // Dart normalizes the scheme-default port away, so an explicit :443 is
+      // the plain production endpoint. Policy: canonicalize (accept), do not
+      // treat it as a distinct off-policy endpoint.
+      const raw = 'https://hub.calee.com.au:443';
+      expect(_resolveProduction(raw), CaleeEnvironment.productionUri);
+      expect(_resolveRegression(raw), CaleeEnvironment.productionUri);
+      expect(_resolveDebug(raw), CaleeEnvironment.productionUri);
+      // Because it resolves to the canonical production endpoint, its source is
+      // reported as the safe default, not a rejected override.
+      expect(
+        CaleeEnvironment.describeSource(raw, allowNonProduction: false),
+        'default',
+      );
+      expect(
+        CaleeEnvironment.isAcceptableBackend(
+          Uri.parse(raw),
+          allowInsecure: false,
+          allowNonProduction: false,
+        ),
+        isTrue,
+      );
+    });
+
+    test('a non-standard port on the production host is rejected', () {
+      // The hostname matches, but :444 is a different, off-policy endpoint. It
+      // must be rejected in every mode and fall back to production.
+      const raw = 'https://hub.calee.com.au:444';
+      expect(_resolveProduction(raw), CaleeEnvironment.productionUri);
+      expect(_resolveRegression(raw), CaleeEnvironment.productionUri);
+      expect(_resolveDebug(raw), CaleeEnvironment.productionUri);
+      expect(
+        CaleeEnvironment.describeSource(raw, allowNonProduction: false),
+        'override_rejected',
+      );
+      expect(
+        CaleeEnvironment.describeSource(raw, allowNonProduction: true),
+        'override_rejected',
+      );
+      expect(
+        CaleeEnvironment.isAcceptableBackend(
+          Uri.parse(raw),
+          allowInsecure: true,
+          allowNonProduction: true,
+        ),
+        isFalse,
+      );
+    });
+
+    test('explicit :443 on an approved non-prod host is canonicalized', () {
+      // An approved host on the standard port is the approved endpoint; the
+      // explicit :443 canonicalizes to the plain host.
+      const raw = 'https://hub-dev.calee.com.au:443';
+      expect(
+        _resolveRegression(raw),
+        Uri.parse('https://hub-dev.calee.com.au'),
+      );
+      expect(
+        CaleeEnvironment.describeSource(
+          raw,
+          allowInsecure: false,
+          allowNonProduction: true,
+        ),
+        'override',
+      );
+      // In a production build a non-production host is rejected regardless.
+      expect(_resolveProduction(raw), CaleeEnvironment.productionUri);
+      expect(
+        CaleeEnvironment.describeSource(raw, allowNonProduction: false),
+        'override_rejected',
+      );
+    });
+
+    test('a non-standard port on an approved non-prod host is rejected', () {
+      // hub-dev is approved, but only on the standard port. :9443 is not an
+      // approved host+port combination.
+      const raw = 'https://hub-dev.calee.com.au:9443';
+      expect(_resolveRegression(raw), CaleeEnvironment.productionUri);
+      expect(_resolveDebug(raw), CaleeEnvironment.productionUri);
+      expect(_resolveProduction(raw), CaleeEnvironment.productionUri);
+      expect(
+        CaleeEnvironment.describeSource(raw, allowNonProduction: true),
+        'override_rejected',
+      );
+      expect(
+        CaleeEnvironment.isAcceptableBackend(
+          Uri.parse(raw),
+          allowInsecure: false,
+          allowNonProduction: true,
+        ),
+        isFalse,
+      );
+    });
+
+    test('a trailing-dot production host is rejected', () {
+      // `hub.calee.com.au.` is a distinct host string from the canonical
+      // production host and is never an approved endpoint.
+      const raw = 'https://hub.calee.com.au./';
+      expect(_resolveProduction(raw), CaleeEnvironment.productionUri);
+      expect(_resolveRegression(raw), CaleeEnvironment.productionUri);
+      expect(_resolveDebug(raw), CaleeEnvironment.productionUri);
+      expect(
+        CaleeEnvironment.describeSource(raw, allowNonProduction: true),
+        'override_rejected',
+      );
+      expect(
+        CaleeEnvironment.isAcceptableBackend(
+          Uri.parse(raw),
+          allowInsecure: false,
+          allowNonProduction: false,
+        ),
+        isFalse,
+      );
+    });
+
+    test('the upper-case production host is canonicalized', () {
+      // Host comparison is case-insensitive; an upper-case host resolves to the
+      // canonical production endpoint.
+      const raw = 'https://HUB.CALEE.COM.AU';
+      expect(_resolveProduction(raw), CaleeEnvironment.productionUri);
+      expect(
+        CaleeEnvironment.describeSource(raw, allowNonProduction: false),
+        'default',
+      );
+      expect(
+        CaleeEnvironment.isAcceptableBackend(
+          Uri.parse(raw),
+          allowInsecure: false,
+          allowNonProduction: false,
+        ),
+        isTrue,
+      );
+    });
+
+    test('a production host smuggled into user info is rejected', () {
+      // The real host here is evil.example; the production host is only the
+      // user-info component. Credentials/user-info are always rejected.
+      const raw = 'https://hub.calee.com.au@evil.example';
+      expect(_resolveProduction(raw), CaleeEnvironment.productionUri);
+      expect(_resolveRegression(raw), CaleeEnvironment.productionUri);
+      expect(_resolveDebug(raw), CaleeEnvironment.productionUri);
+      expect(
+        CaleeEnvironment.describeSource(raw, allowNonProduction: true),
+        'override_rejected',
+      );
+      // The diagnostic line for the resolved (safe) backend never leaks the
+      // smuggled user-info token.
+      final line = CaleeEnvironment.diagnosticLine();
+      expect(line.contains('evil.example'), isFalse);
+      expect(line.contains('@'), isFalse);
+    });
+
+    test('a look-alike suffix host is rejected', () {
+      // hub.calee.com.au.attacker.example is a different host, not production.
+      const raw = 'https://hub.calee.com.au.attacker.example';
+      expect(_resolveProduction(raw), CaleeEnvironment.productionUri);
+      expect(_resolveRegression(raw), CaleeEnvironment.productionUri);
+      expect(_resolveDebug(raw), CaleeEnvironment.productionUri);
+      expect(
+        CaleeEnvironment.describeSource(raw, allowNonProduction: true),
+        'override_rejected',
+      );
+    });
+
+    test('a local debug http backend keeps its configurable port', () {
+      // The port restriction applies only to https; a permitted plain-http
+      // dev hub may use any port.
+      expect(
+        _resolveDebug('http://192.168.1.10:8080'),
+        Uri.parse('http://192.168.1.10:8080'),
+      );
+      expect(
+        _resolveDebug('http://localhost:5001'),
+        Uri.parse('http://localhost:5001'),
+      );
+    });
+  });
+
   group('diagnostics', () {
     test('the default build resolves to production and stays production', () {
       // A plain `flutter test` run supplies no --dart-define, so the compiled
