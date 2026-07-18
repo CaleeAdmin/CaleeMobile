@@ -1,0 +1,82 @@
+name: Trigger selector contract
+
+# Cross-repository trigger (Workstream 1.4): after a successful push to an
+# integration branch (dev/stage/main), fire CaleeMobile-Regression's selector
+# contract against THIS exact CaleeMobile commit, so a selector break is caught
+# immediately rather than only on the daily schedule or the next
+# CaleeMobile-Regression change.
+#
+# This does not touch the product build/test gate (flutter-ci.yml) at all.
+#
+# REQUIRED SECRET (not configured by this workflow -- see
+# CaleeMobile-Regression/docs/CI_CROSS_REPO_TRIGGER.md): `REGRESSION_DISPATCH_TOKEN`,
+# a token with `actions:write`/`contents:read` (repository_dispatch) on
+# CaleeAdmin/CaleeMobile-Regression -- a fine-grained PAT or a GitHub App
+# installation token. When the secret is absent this workflow SKIPS cleanly
+# (never a red X and never a fabricated success); the scheduled + manual runs in
+# CaleeMobile-Regression are the documented fallback.
+on:
+  push:
+    branches:
+      - dev
+      - stage
+      - main
+
+jobs:
+  dispatch-preflight:
+    name: Check whether REGRESSION_DISPATCH_TOKEN is configured
+    runs-on: ubuntu-latest
+    # `secrets` cannot be referenced in a job-level `if:`; resolve the token's
+    # presence in a step env and expose it as an output (same pattern
+    # CaleeMobile-Regression uses for CALEEMOBILE_CHECKOUT_TOKEN).
+    outputs:
+      has_token: ${{ steps.check.outputs.has_token }}
+    steps:
+      - id: check
+        env:
+          TOKEN_SET: ${{ secrets.REGRESSION_DISPATCH_TOKEN != '' }}
+        run: echo "has_token=$TOKEN_SET" >> "$GITHUB_OUTPUT"
+
+  dispatch:
+    name: Dispatch CaleeMobile-Regression selector contract
+    needs: dispatch-preflight
+    if: ${{ needs.dispatch-preflight.outputs.has_token == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve the pushed identity to verify
+        id: identity
+        run: |
+          sha="${GITHUB_SHA}"
+          version="$(grep -E '^version:' pubspec.yaml | head -1 | awk '{print $2}')"
+          {
+            echo "sha=$sha"
+            echo "version=$version"
+          } >> "$GITHUB_OUTPUT"
+          echo "Dispatching selector contract for ${GITHUB_REF_NAME}@$sha (version $version)"
+
+      - name: Fire repository_dispatch to CaleeMobile-Regression
+        env:
+          TOKEN: ${{ secrets.REGRESSION_DISPATCH_TOKEN }}
+          SHA: ${{ steps.identity.outputs.sha }}
+          VERSION: ${{ steps.identity.outputs.version }}
+        run: |
+          # Pin the regression run to THIS exact commit (ref=SHA) and pass the
+          # expected SHA/version so the regression run FAILS if it somehow tests
+          # a different build. A non-2xx response fails this job loudly.
+          payload=$(printf '{"event_type":"caleemobile-push","client_payload":{"ref":"%s","expected_sha":"%s","expected_version":"%s"}}' \
+            "$SHA" "$SHA" "$VERSION")
+          http_code=$(curl -sS -o /tmp/dispatch_resp.txt -w "%{http_code}" -X POST \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/CaleeAdmin/CaleeMobile-Regression/dispatches \
+            -d "$payload")
+          echo "repository_dispatch HTTP $http_code"
+          if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
+            echo "Dispatch failed:" >&2
+            cat /tmp/dispatch_resp.txt >&2
+            exit 1
+          fi
+          echo "Dispatched caleemobile-push to CaleeMobile-Regression."
