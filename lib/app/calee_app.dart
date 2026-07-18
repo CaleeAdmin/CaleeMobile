@@ -107,10 +107,12 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
   // Set to true when the app goes to background; cleared and transport reset on resume.
   bool _transportMayBeStale = false;
 
-  // Guards the once-per-signed-in-session reminder refresh so a restored or
-  // freshly signed-in session schedules reminders exactly once; reset on
-  // sign-out so the next session refreshes again.
-  bool _remindersRefreshedForSession = false;
+  // Account whose reminder session is currently active in the coordinator, or
+  // null while signed out. Drives the once-per-signed-in-session reminder
+  // refresh (a restored or freshly signed-in session schedules reminders
+  // exactly once) and detects the sign-in → sign-out and account-switch
+  // transitions that begin/end the coordinator's reminder session.
+  String? _reminderSessionAccountId;
 
   // Calendar follow state
   bool _showingFollowSignIn = false;
@@ -298,17 +300,49 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
     }
   }
 
-  /// Fires a routine reminder refresh once per signed-in session (covers both
-  /// session restore and a fresh sign-in). Never runs while signed out.
+  /// Drives the coordinator's reminder session across sign-in/out transitions:
+  /// begins a session (and fires a once-per-session refresh) when a signed-in
+  /// session appears, and ends it — invalidating in-flight work and running
+  /// targeted cleanup of the signed-out account's reminders — when it goes away.
+  /// Never runs reminder work while signed out.
   void _onSessionChangedForReminders() {
     if (_sessionController.isRestoringSession) return;
+
     if (!_sessionController.isSignedIn) {
-      _remindersRefreshedForSession = false;
+      final endedAccountId = _reminderSessionAccountId;
+      _reminderSessionAccountId = null;
+      if (endedAccountId != null) {
+        // Signed-in → signed-out (explicit sign-out or unauthorized automatic
+        // sign-out): invalidate all in-flight/queued reminder work and clean up
+        // the previous account's reminders. Never blocks or fails sign-out.
+        _fireReminderSignOutCleanup();
+      }
       return;
     }
-    if (_remindersRefreshedForSession) return;
-    _remindersRefreshedForSession = true;
+
+    final accountId = _sessionController.bootstrap?.account.id ?? '';
+    if (_reminderSessionAccountId == accountId) return;
+
+    // A new signed-in session (restore, fresh sign-in, or account switch).
+    // Begin a fresh reminder session so the coordinator owns account-scoped
+    // reminder identity, then fire the once-per-session refresh.
+    _reminderSessionAccountId = accountId;
+    _reminderCoordinator.beginSession(accountId: accountId);
     _fireReminderRefresh(CalendarReminderRefreshReason.sessionRestored);
+  }
+
+  /// Invalidates and cleans up reminders for the signed-out account without ever
+  /// blocking sign-out, using a network-free targeted cleanup (never
+  /// `cancelAll()`). Failures are swallowed: sign-out must always complete.
+  void _fireReminderSignOutCleanup() {
+    unawaited(() async {
+      try {
+        await _reminderCoordinator.endSession();
+      } catch (_) {
+        // Sign-out reminder cleanup is best-effort and must never crash the app
+        // or block sign-out.
+      }
+    }());
   }
 
   /// Requests an upcoming-reminder refresh without ever blocking startup or

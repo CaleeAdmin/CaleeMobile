@@ -39,6 +39,11 @@ class CaleePreferences {
       'calee_pref_calendar_reminders_enabled';
   static const _calendarReminderManifestKey =
       'calee_pref_calendar_reminder_manifest';
+  // Diagnostic slot preserving the most recent corrupt manifest value so a
+  // later build/support can inspect it. Only IDs and digests are ever written
+  // to the manifest, so this never captures private event content.
+  static const _calendarReminderManifestCorruptKey =
+      'calee_pref_calendar_reminder_manifest_corrupt';
   static const _migrationDoneKey = 'calee_pref_migrated_to_shared_prefs';
 
   // ── Load all ─────────────────────────────────────────────────────────────
@@ -143,18 +148,74 @@ class CaleePreferences {
   // device so reconciliation can cancel only IDs it owns, never touching
   // notifications belonging to other Calee features.
 
-  Future<CalendarReminderManifest> loadCalendarReminderManifest() async {
+  /// Loads the manifest and classifies how it was obtained.
+  ///
+  /// Reads are conservative: nothing stored is reported as
+  /// [CalendarReminderManifestLoadStatus.absent], a valid current-schema value
+  /// as [CalendarReminderManifestLoadStatus.loaded], legacy/partially-malformed
+  /// but recoverable data as [CalendarReminderManifestLoadStatus.recovered],
+  /// and genuinely unparseable data (bad JSON, or an unrecoverable shape) as
+  /// [CalendarReminderManifestLoadStatus.corrupt] — never silently collapsed to
+  /// an empty manifest. On corrupt data the raw value is preserved under a
+  /// diagnostic key and the primary value is left untouched, so ownership is
+  /// not discarded and callers can retry.
+  Future<CalendarReminderManifestLoadResult>
+  loadCalendarReminderManifestResult() async {
+    final SharedPreferences prefs;
+    final String? raw;
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString(_calendarReminderManifestKey);
-      if (raw == null || raw.isEmpty) return CalendarReminderManifest.empty;
-      final decoded = jsonDecode(raw);
-      if (decoded is! Map<String, dynamic>) {
-        return CalendarReminderManifest.empty;
-      }
-      return CalendarReminderManifest.fromJson(decoded);
+      prefs = await SharedPreferences.getInstance();
+      raw = prefs.getString(_calendarReminderManifestKey);
     } catch (_) {
-      return CalendarReminderManifest.empty;
+      // Storage itself is unavailable; ownership is unknown, so report corrupt
+      // rather than fabricating an empty manifest that could be overwritten.
+      return const CalendarReminderManifestLoadResult(
+        manifest: CalendarReminderManifest.empty,
+        status: CalendarReminderManifestLoadStatus.corrupt,
+      );
+    }
+
+    if (raw == null || raw.isEmpty) {
+      return const CalendarReminderManifestLoadResult(
+        manifest: CalendarReminderManifest.empty,
+        status: CalendarReminderManifestLoadStatus.absent,
+      );
+    }
+
+    Object? decoded;
+    try {
+      decoded = jsonDecode(raw);
+    } catch (_) {
+      // Unparseable JSON: preserve the raw value for diagnostics and report
+      // corrupt without touching the primary key.
+      await _preserveCorruptManifest(prefs, raw);
+      return const CalendarReminderManifestLoadResult(
+        manifest: CalendarReminderManifest.empty,
+        status: CalendarReminderManifestLoadStatus.corrupt,
+      );
+    }
+
+    final result = CalendarReminderManifest.parse(decoded);
+    if (result.isCorrupt) {
+      await _preserveCorruptManifest(prefs, raw);
+    }
+    return result;
+  }
+
+  /// Loads just the manifest, discarding the load status. Kept for callers that
+  /// only need the owned IDs; prefer [loadCalendarReminderManifestResult] where
+  /// corrupt data must be handled conservatively.
+  Future<CalendarReminderManifest> loadCalendarReminderManifest() async =>
+      (await loadCalendarReminderManifestResult()).manifest;
+
+  Future<void> _preserveCorruptManifest(
+    SharedPreferences prefs,
+    String raw,
+  ) async {
+    try {
+      await prefs.setString(_calendarReminderManifestCorruptKey, raw);
+    } catch (_) {
+      // Best-effort diagnostics; never block on this.
     }
   }
 

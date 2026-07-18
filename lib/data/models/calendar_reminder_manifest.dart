@@ -1,6 +1,6 @@
 /// A single calendar-reminder notification this app has scheduled on the
 /// device, together with a privacy-safe fingerprint of the schedule that
-/// produced it.
+/// produced it and a privacy-safe key identifying the account that owns it.
 ///
 /// The [fingerprint] is a deterministic, non-reversible digest of every input
 /// that affects the scheduled notification (trigger instant, rendered body
@@ -10,10 +10,16 @@
 /// edit. A `null` fingerprint means the ID is owned but its schedule digest is
 /// unknown (a legacy manifest entry), so it must be re-scheduled once while it
 /// is still desired.
+///
+/// The [ownerKey] is a deterministic, non-reversible digest of the account that
+/// scheduled the notification (never the raw account ID). A `null` owner means
+/// the entry predates account-aware ownership (a legacy v1/v2 entry) and so must
+/// not be assumed to belong to the current account.
 class CalendarReminderManifestEntry {
   const CalendarReminderManifestEntry({
     required this.notificationId,
     required this.fingerprint,
+    this.ownerKey,
   });
 
   /// The device notification ID this app owns.
@@ -23,45 +29,138 @@ class CalendarReminderManifestEntry {
   /// notification, or `null` when unknown (legacy/recovered entry).
   final String? fingerprint;
 
-  CalendarReminderManifestEntry copyWith({String? fingerprint}) =>
-      CalendarReminderManifestEntry(
-        notificationId: notificationId,
-        fingerprint: fingerprint ?? this.fingerprint,
-      );
+  /// Deterministic, privacy-safe digest of the owning account, or `null` when
+  /// unknown (legacy entry, or an untrusted future-schema value).
+  final String? ownerKey;
+
+  /// Largest notification ID we accept — the non-negative signed 31-bit range,
+  /// matching the IDs produced by `notificationIdForEvent`.
+  static const int maxNotificationId = 0x7FFFFFFF;
+
+  /// Upper bound on a persisted digest string, so a malformed manifest cannot
+  /// force us to hold an unbounded value in memory.
+  static const int _maxDigestLength = 128;
+
+  /// Returns a copy with the given fields replaced. Pass [clearFingerprint] or
+  /// [clearOwnerKey] to explicitly reset a nullable field to `null`, since a
+  /// plain `fingerprint: null` argument is indistinguishable from "leave
+  /// unchanged" with named parameters.
+  CalendarReminderManifestEntry copyWith({
+    int? notificationId,
+    String? fingerprint,
+    bool clearFingerprint = false,
+    String? ownerKey,
+    bool clearOwnerKey = false,
+  }) => CalendarReminderManifestEntry(
+    notificationId: notificationId ?? this.notificationId,
+    fingerprint: clearFingerprint ? null : (fingerprint ?? this.fingerprint),
+    ownerKey: clearOwnerKey ? null : (ownerKey ?? this.ownerKey),
+  );
 
   Map<String, dynamic> toJson() => {
     'id': notificationId,
     if (fingerprint != null) 'fp': fingerprint,
+    if (ownerKey != null) 'owner': ownerKey,
   };
 
-  /// Parses a single entry map, returning `null` if it has no usable integer
-  /// ID (so a malformed entry never invents a bogus ownership record).
+  /// Parses a single entry map, returning `null` if it has no usable, in-range
+  /// integer ID (so a malformed entry never invents a bogus ownership record).
+  ///
+  /// [trustFingerprint]/[trustOwner] gate whether the persisted digest values
+  /// are retained: an unknown future schema recovers IDs but must not trust its
+  /// fingerprints or (unless explicitly known compatible) its owner keys.
   static CalendarReminderManifestEntry? tryFromJson(
-    Map<dynamic, dynamic> json,
-  ) {
-    final rawId = json['id'];
-    final id = rawId is int ? rawId : (rawId is num ? rawId.toInt() : null);
+    Map<dynamic, dynamic> json, {
+    bool trustFingerprint = true,
+    bool trustOwner = true,
+  }) {
+    final id = _asValidId(json['id']);
     if (id == null) return null;
-    final rawFp = json['fp'];
     return CalendarReminderManifestEntry(
       notificationId: id,
-      fingerprint: rawFp is String ? rawFp : null,
+      fingerprint: trustFingerprint ? _asBoundedString(json['fp']) : null,
+      ownerKey: trustOwner ? _asBoundedString(json['owner']) : null,
     );
+  }
+
+  /// Validates a raw JSON value as a non-negative 31-bit notification ID.
+  /// Rejects non-numbers, non-integers, negatives, and out-of-range values so a
+  /// malformed field can never become a bogus (or platform-invalid) ID.
+  static int? _asValidId(Object? raw) {
+    final int value;
+    if (raw is int) {
+      value = raw;
+    } else if (raw is double && raw.isFinite && raw == raw.truncateToDouble()) {
+      value = raw.toInt();
+    } else {
+      return null;
+    }
+    if (value < 0 || value > maxNotificationId) return null;
+    return value;
+  }
+
+  /// Returns [raw] as a bounded non-empty string, or `null` for anything else.
+  static String? _asBoundedString(Object? raw) {
+    if (raw is! String) return null;
+    if (raw.isEmpty || raw.length > _maxDigestLength) return null;
+    return raw;
   }
 
   @override
   bool operator ==(Object other) =>
       other is CalendarReminderManifestEntry &&
       other.notificationId == notificationId &&
-      other.fingerprint == fingerprint;
+      other.fingerprint == fingerprint &&
+      other.ownerKey == ownerKey;
 
   @override
-  int get hashCode => Object.hash(notificationId, fingerprint);
+  int get hashCode => Object.hash(notificationId, fingerprint, ownerKey);
 
   @override
   String toString() =>
       'CalendarReminderManifestEntry(id: $notificationId, '
-      'fp: ${fingerprint == null ? 'null' : 'set'})';
+      'fp: ${fingerprint == null ? 'null' : 'set'}, '
+      'owner: ${ownerKey == null ? 'null' : 'set'})';
+}
+
+/// How a persisted calendar reminder manifest was loaded/parsed.
+enum CalendarReminderManifestLoadStatus {
+  /// A valid current-schema manifest was parsed cleanly.
+  loaded,
+
+  /// Legacy or partially-malformed but recoverable data: valid ownership IDs
+  /// were preserved, and any untrusted fingerprints/owner keys were dropped.
+  recovered,
+
+  /// No stored value was present: an empty, valid manifest.
+  absent,
+
+  /// The stored value was unparseable, or an unrecoverable top-level shape.
+  /// Ownership is unknown, so the stored value must NOT be overwritten and no
+  /// notifications may be scheduled or cancelled off it.
+  corrupt,
+}
+
+/// Structured, log-safe result of loading the calendar reminder manifest.
+///
+/// Carries the parsed [manifest] plus the [status] describing how it was
+/// obtained, so reconciliation can behave conservatively on [corrupt] data
+/// instead of silently treating it as an empty manifest.
+class CalendarReminderManifestLoadResult {
+  const CalendarReminderManifestLoadResult({
+    required this.manifest,
+    required this.status,
+  });
+
+  final CalendarReminderManifest manifest;
+  final CalendarReminderManifestLoadStatus status;
+
+  bool get isCorrupt => status == CalendarReminderManifestLoadStatus.corrupt;
+
+  @override
+  String toString() =>
+      'CalendarReminderManifestLoadResult(status: ${status.name}, '
+      'ids: ${manifest.scheduledIds.length})';
 }
 
 /// A record of the calendar reminder notifications this app has scheduled on
@@ -74,15 +173,21 @@ class CalendarReminderManifestEntry {
 ///
 /// ## Versions
 /// * **v1 (legacy):** `{ "version": 1, "ids": [int, ...] }` — ID-only, no
-///   fingerprints. Read for backward compatibility and migrated to v2 on the
-///   next successful reconciliation.
-/// * **v2 (current):** `{ "version": 2, "entries": [{ "id": int, "fp": str? }] }`
-///   — versioned entries carrying a schedule fingerprint.
+///   fingerprints or owners. Read for backward compatibility and migrated on
+///   the next successful reconciliation.
+/// * **v2 (legacy):** `{ "version": 2, "entries": [{ "id": int, "fp": str? }] }`
+///   — versioned entries carrying a schedule fingerprint but no owner.
+/// * **v3 (current):**
+///   `{ "version": 3, "entries": [{ "id": int, "fp": str?, "owner": str? }] }`
+///   — entries also carry a privacy-safe owner key so reminders can be isolated
+///   per account on a shared device.
 ///
-/// Reads are deliberately conservative: a legacy manifest is migrated (never
-/// treated as empty), and an unknown/newer manifest recovers any parseable IDs
-/// rather than orphaning notifications a future build owned. Only genuinely
-/// unparseable data collapses to [empty].
+/// Reads are deliberately conservative: legacy manifests are migrated (never
+/// treated as empty), an unknown/newer manifest recovers any parseable IDs
+/// (dropping untrusted fingerprints and owner keys) rather than orphaning
+/// notifications a future build owned, and genuinely unparseable data is
+/// reported as [CalendarReminderManifestLoadStatus.corrupt] rather than
+/// collapsing to [empty] — so ownership is never silently discarded.
 class CalendarReminderManifest {
   const CalendarReminderManifest({
     required this.version,
@@ -90,8 +195,12 @@ class CalendarReminderManifest {
     this.lastReconciledAt,
   });
 
-  /// Current manifest schema version (versioned entries with fingerprints).
-  static const int currentVersion = 2;
+  /// Current manifest schema version (entries with fingerprints and owners).
+  static const int currentVersion = 3;
+
+  /// The v2 schema version (fingerprinted entries, no owner), still read for
+  /// migration.
+  static const int legacyFingerprintVersion = 2;
 
   /// The legacy ID-only schema version, still read for migration.
   static const int legacyIdOnlyVersion = 1;
@@ -124,8 +233,8 @@ class CalendarReminderManifest {
     return null;
   }
 
-  /// Builds a v2 manifest from bare IDs (fingerprints unknown). Handy for
-  /// seeding and for representing a freshly migrated legacy manifest.
+  /// Builds a manifest from bare IDs (fingerprints and owners unknown). Handy
+  /// for seeding and for representing a freshly migrated legacy manifest.
   factory CalendarReminderManifest.fromIds(
     List<int> ids, {
     DateTime? lastReconciledAt,
@@ -145,55 +254,132 @@ class CalendarReminderManifest {
       'lastReconciledAt': lastReconciledAt!.toIso8601String(),
   };
 
-  factory CalendarReminderManifest.fromJson(Map<String, dynamic> json) {
-    final version = json['version'] as int? ?? 0;
-    final lastReconciledAt = _parseDate(json['lastReconciledAt']);
+  /// Parses a decoded JSON value into a structured [load result].
+  ///
+  /// [decoded] is the value returned by `jsonDecode` (or `null` when nothing was
+  /// stored). Never throws: malformed fields are rejected individually and a
+  /// genuinely unrecoverable value is reported as
+  /// [CalendarReminderManifestLoadStatus.corrupt].
+  static CalendarReminderManifestLoadResult parse(Object? decoded) {
+    if (decoded == null) {
+      return const CalendarReminderManifestLoadResult(
+        manifest: empty,
+        status: CalendarReminderManifestLoadStatus.absent,
+      );
+    }
+    if (decoded is! Map) {
+      // A non-object top-level value cannot carry ownership.
+      return const CalendarReminderManifestLoadResult(
+        manifest: empty,
+        status: CalendarReminderManifestLoadStatus.corrupt,
+      );
+    }
 
-    // Current schema: versioned entries with fingerprints.
+    final version = _asInt(decoded['version']);
+    final lastReconciledAt = _parseDate(decoded['lastReconciledAt']);
+    final entriesRaw = decoded['entries'];
+    final idsRaw = decoded['ids'];
+    final hasShape = entriesRaw is List || idsRaw is List;
+
+    // Current schema: entries carry trusted fingerprints and owner keys.
     if (version == currentVersion) {
-      return CalendarReminderManifest(
-        version: currentVersion,
-        entries: _parseEntries(json['entries']),
-        lastReconciledAt: lastReconciledAt,
+      if (entriesRaw is! List) {
+        // Our own writer always emits an `entries` list (even when empty), so a
+        // current-version value without one is malformed, not a valid empty
+        // manifest — do not overwrite it.
+        return const CalendarReminderManifestLoadResult(
+          manifest: empty,
+          status: CalendarReminderManifestLoadStatus.corrupt,
+        );
+      }
+      final entries = _dedupe(
+        _parseEntries(entriesRaw, trustFingerprint: true, trustOwner: true),
+      );
+      return CalendarReminderManifestLoadResult(
+        manifest: CalendarReminderManifest(
+          version: currentVersion,
+          entries: entries,
+          lastReconciledAt: lastReconciledAt,
+        ),
+        status: CalendarReminderManifestLoadStatus.loaded,
       );
     }
 
-    // Legacy v1 ID-only schema. Preserve ownership of every ID; fingerprints
-    // are unknown, so each still-desired entry is re-scheduled once (to gain a
-    // fingerprint) on the next reconciliation. Never treated as empty.
+    // Legacy v2: fingerprints are trusted; owners are absent (null).
+    if (version == legacyFingerprintVersion) {
+      final entries = _dedupe(
+        _parseEntries(entriesRaw, trustFingerprint: true, trustOwner: false),
+      );
+      return _recoveredOr(entries, lastReconciledAt, hadShape: hasShape);
+    }
+
+    // Legacy v1 ID-only schema.
     if (version == legacyIdOnlyVersion) {
-      return CalendarReminderManifest(
-        version: currentVersion,
-        entries: _parseLegacyIds(json['ids']),
-        lastReconciledAt: lastReconciledAt,
-      );
+      final entries = _dedupe(_parseLegacyIds(idsRaw));
+      return _recoveredOr(entries, lastReconciledAt, hadShape: hasShape);
     }
 
-    // Unknown/newer version. Fail conservatively: recover any IDs we can still
-    // parse (from either schema) so we never orphan notifications a newer build
-    // scheduled, but drop fingerprints we cannot trust.
-    final recovered = <CalendarReminderManifestEntry>[
-      ..._parseEntries(json['entries']).map((e) => e.copyWith()),
-      ..._parseLegacyIds(json['ids']),
-    ];
-    final seen = <int>{};
-    final deduped = <CalendarReminderManifestEntry>[];
-    for (final entry in recovered) {
-      if (seen.add(entry.notificationId)) deduped.add(entry);
+    // Unknown/newer version, or a version we could not parse to an integer.
+    // Recover any IDs we can, but never trust future-schema fingerprints, and
+    // treat owner keys conservatively (drop them) so an entry from an unknown
+    // future account is not assumed to belong to the current one.
+    final recovered = _dedupe(<CalendarReminderManifestEntry>[
+      if (entriesRaw is List)
+        ..._parseEntries(
+          entriesRaw,
+          trustFingerprint: false,
+          trustOwner: false,
+        ),
+      ..._parseLegacyIds(idsRaw),
+    ]);
+    return _recoveredOr(recovered, lastReconciledAt, hadShape: hasShape);
+  }
+
+  /// Backwards-compatible convenience: parses a JSON map and returns just the
+  /// manifest (discarding the load status). Prefer [parse] where the status
+  /// matters (e.g. conservative handling of corrupt data).
+  factory CalendarReminderManifest.fromJson(Map<String, dynamic> json) =>
+      parse(json).manifest;
+
+  /// Wraps recovered [entries] as [recovered], unless the value had no
+  /// list-shaped ownership fields at all — in which case it is unrecoverable
+  /// ([corrupt]) rather than a normal empty manifest, so we never overwrite a
+  /// value whose real ownership we could not read.
+  static CalendarReminderManifestLoadResult _recoveredOr(
+    List<CalendarReminderManifestEntry> entries,
+    DateTime? lastReconciledAt, {
+    required bool hadShape,
+  }) {
+    if (!hadShape) {
+      return const CalendarReminderManifestLoadResult(
+        manifest: empty,
+        status: CalendarReminderManifestLoadStatus.corrupt,
+      );
     }
-    return CalendarReminderManifest(
-      version: currentVersion,
-      entries: deduped,
-      lastReconciledAt: lastReconciledAt,
+    return CalendarReminderManifestLoadResult(
+      manifest: CalendarReminderManifest(
+        version: currentVersion,
+        entries: entries,
+        lastReconciledAt: lastReconciledAt,
+      ),
+      status: CalendarReminderManifestLoadStatus.recovered,
     );
   }
 
-  static List<CalendarReminderManifestEntry> _parseEntries(Object? raw) {
+  static List<CalendarReminderManifestEntry> _parseEntries(
+    Object? raw, {
+    required bool trustFingerprint,
+    required bool trustOwner,
+  }) {
     if (raw is! List) return const <CalendarReminderManifestEntry>[];
     final result = <CalendarReminderManifestEntry>[];
     for (final item in raw) {
       if (item is Map) {
-        final entry = CalendarReminderManifestEntry.tryFromJson(item);
+        final entry = CalendarReminderManifestEntry.tryFromJson(
+          item,
+          trustFingerprint: trustFingerprint,
+          trustOwner: trustOwner,
+        );
         if (entry != null) result.add(entry);
       }
     }
@@ -202,10 +388,40 @@ class CalendarReminderManifest {
 
   static List<CalendarReminderManifestEntry> _parseLegacyIds(Object? raw) {
     if (raw is! List) return const <CalendarReminderManifestEntry>[];
-    return [
-      for (final id in raw.whereType<int>())
-        CalendarReminderManifestEntry(notificationId: id, fingerprint: null),
-    ];
+    final result = <CalendarReminderManifestEntry>[];
+    for (final id in raw) {
+      final valid = CalendarReminderManifestEntry._asValidId(id);
+      if (valid != null) {
+        result.add(
+          CalendarReminderManifestEntry(
+            notificationId: valid,
+            fingerprint: null,
+          ),
+        );
+      }
+    }
+    return result;
+  }
+
+  /// Deduplicates entries by notification ID, keeping the first occurrence.
+  static List<CalendarReminderManifestEntry> _dedupe(
+    List<CalendarReminderManifestEntry> entries,
+  ) {
+    final seen = <int>{};
+    final result = <CalendarReminderManifestEntry>[];
+    for (final entry in entries) {
+      if (seen.add(entry.notificationId)) result.add(entry);
+    }
+    return result;
+  }
+
+  static int? _asInt(Object? raw) {
+    if (raw is int) return raw;
+    if (raw is double && raw.isFinite && raw == raw.truncateToDouble()) {
+      return raw.toInt();
+    }
+    if (raw is String) return int.tryParse(raw);
+    return null;
   }
 
   static DateTime? _parseDate(Object? raw) =>
