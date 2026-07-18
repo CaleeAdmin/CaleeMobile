@@ -1,5 +1,9 @@
+import 'dart:convert';
+
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import '../models/calendar_reminder_manifest.dart';
 
 /// Lightweight local user preferences stored in SharedPreferences.
 /// One-time migration from FlutterSecureStorage is performed on first load.
@@ -13,6 +17,8 @@ class CaleePreferences {
 
   static const _calendarRemindersEnabledKey =
       'calee_pref_calendar_reminders_enabled';
+  static const _calendarReminderManifestKey =
+      'calee_pref_calendar_reminder_manifest';
   static const _migrationDoneKey = 'calee_pref_migrated_to_shared_prefs';
 
   // ── Load all ─────────────────────────────────────────────────────────────
@@ -106,6 +112,50 @@ class CaleePreferences {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(_calendarRemindersEnabledKey, enabled);
+    } catch (_) {
+      // Best-effort.
+    }
+  }
+
+  // ── Calendar reminder manifest ────────────────────────────────────────────
+  //
+  // Tracks the notification IDs calendar reminders have scheduled on the
+  // device so reconciliation can cancel only IDs it owns, never touching
+  // notifications belonging to other Calee features.
+
+  Future<CalendarReminderManifest> loadCalendarReminderManifest() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_calendarReminderManifestKey);
+      if (raw == null || raw.isEmpty) return CalendarReminderManifest.empty;
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map<String, dynamic>) {
+        return CalendarReminderManifest.empty;
+      }
+      return CalendarReminderManifest.fromJson(decoded);
+    } catch (_) {
+      return CalendarReminderManifest.empty;
+    }
+  }
+
+  Future<void> saveCalendarReminderManifest(
+    CalendarReminderManifest manifest,
+  ) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        _calendarReminderManifestKey,
+        jsonEncode(manifest.toJson()),
+      );
+    } catch (_) {
+      // Best-effort; a failed manifest write must not crash reconciliation.
+    }
+  }
+
+  Future<void> clearCalendarReminderManifest() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_calendarReminderManifestKey);
     } catch (_) {
       // Best-effort.
     }
