@@ -1,0 +1,41 @@
+name: Promote-to-main guard
+
+# Fails a pull request that is TITLED as a promotion to `main` but whose actual
+# base branch is `dev` (or another non-`main` integration branch). This is the
+# PR #473 class of mistake: a "Promote ... to main" PR whose base was `dev`, so
+# the change never reached `main`.
+#
+# For this guard to evaluate a PR, this workflow file must exist on that PR's
+# BASE branch (GitHub runs `pull_request` workflows from the base branch), so it
+# lives on `dev`. A promotion PR that correctly targets `main` passes.
+#
+# The PR title + base ref are passed to the checker via ENV (never interpolated
+# into a shell command), so a crafted PR title cannot inject shell.
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  promote-to-main-guard:
+    name: Reject promote-to-main PRs mis-targeted at an integration branch
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Regression coverage for the detection logic runs BEFORE the live check,
+      # so a broken guard fails loudly instead of silently passing everything.
+      - name: Guard self-test
+        run: python3 .github/scripts/promote_guard.py selftest
+
+      - name: Evaluate this PR's title vs. base branch
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: python3 .github/scripts/promote_guard.py evaluate
