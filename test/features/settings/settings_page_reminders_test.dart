@@ -36,8 +36,13 @@ class _FakeNotificationService extends LocalCalendarNotificationService {
   Future<bool> requestPermissionIfNeeded() async => permissionGranted;
 
   @override
-  Future<void> disableCalendarReminders() async {
+  Future<CalendarReminderDisableResult> disableCalendarReminders() async {
     disableCount++;
+    return const CalendarReminderDisableResult(
+      cancelledCount: 0,
+      failedCount: 0,
+      manifestPersisted: true,
+    );
   }
 }
 

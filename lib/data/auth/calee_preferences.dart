@@ -5,6 +5,26 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/calendar_reminder_manifest.dart';
 
+/// Thrown when the calendar reminder manifest cannot be persisted or cleared.
+///
+/// Manifest persistence is part of the reconciliation transaction, so its
+/// failures must be observable (not silently swallowed). Deliberately carries
+/// only the [operation] and an optional underlying [cause] — never manifest
+/// contents — so it stays safe to log.
+class CalendarReminderManifestStorageException implements Exception {
+  const CalendarReminderManifestStorageException(this.operation, [this.cause]);
+
+  /// The failed operation: `'save'` or `'clear'`.
+  final String operation;
+
+  /// The underlying error, if any.
+  final Object? cause;
+
+  @override
+  String toString() =>
+      'CalendarReminderManifestStorageException(operation: $operation)';
+}
+
 /// Lightweight local user preferences stored in SharedPreferences.
 /// One-time migration from FlutterSecureStorage is performed on first load.
 class CaleePreferences {
@@ -138,26 +158,45 @@ class CaleePreferences {
     }
   }
 
+  /// Persists the calendar reminder manifest.
+  ///
+  /// Manifest persistence is part of the reconciliation transaction, not
+  /// inconsequential best-effort storage: a newly scheduled notification that
+  /// cannot be recorded here would become an untracked notification. Failures
+  /// are therefore surfaced as a [CalendarReminderManifestStorageException]
+  /// rather than swallowed, so callers can roll back or report.
   Future<void> saveCalendarReminderManifest(
     CalendarReminderManifest manifest,
   ) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(
+      final ok = await prefs.setString(
         _calendarReminderManifestKey,
         jsonEncode(manifest.toJson()),
       );
-    } catch (_) {
-      // Best-effort; a failed manifest write must not crash reconciliation.
+      if (!ok) {
+        throw const CalendarReminderManifestStorageException('save');
+      }
+    } on CalendarReminderManifestStorageException {
+      rethrow;
+    } catch (e) {
+      throw CalendarReminderManifestStorageException('save', e);
     }
   }
 
+  /// Clears the calendar reminder manifest. Like [saveCalendarReminderManifest],
+  /// failures are surfaced (not swallowed) so cleanup can be retried. A `false`
+  /// return from [SharedPreferences.remove] is not treated as an error — it does
+  /// not indicate a failed write, only that there may have been nothing to
+  /// remove — but a thrown storage error propagates.
   Future<void> clearCalendarReminderManifest() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(_calendarReminderManifestKey);
-    } catch (_) {
-      // Best-effort.
+    } on CalendarReminderManifestStorageException {
+      rethrow;
+    } catch (e) {
+      throw CalendarReminderManifestStorageException('clear', e);
     }
   }
 

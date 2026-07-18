@@ -79,10 +79,66 @@ List<CalendarNotificationCandidate> buildNotificationCandidates(
 /// [ClientEvent.startsAt], so each occurrence gets a stable, distinct ID.
 int notificationIdForEvent(ClientEvent event) {
   final key = '${event.id}|${event.occurrenceId ?? ''}|${event.startsAt}';
-  var hash = 0x811c9dc5;
-  for (final codeUnit in key.codeUnits) {
+  return _fnv1a32(key, _fnvOffsetBasis) & 0x7FFFFFFF;
+}
+
+/// A deterministic, privacy-safe fingerprint of everything that affects the
+/// notification a [candidate] would schedule.
+///
+/// The manifest stores only this digest — never the raw title, location,
+/// description, calendar URL, or any credential — so schedule-relevant changes
+/// (e.g. a title-only edit that keeps the same [notificationIdForEvent]) can be
+/// detected and the existing notification replaced, without persisting private
+/// event content. The digest is stable across app launches for the same
+/// schedule because it is built from absolute instants and server-stable
+/// identity strings, not runtime object identity or `hashCode`.
+///
+/// Inputs (all of which change the scheduled notification):
+/// * the notification ID;
+/// * the reminder trigger instant;
+/// * the rendered body inputs (event title and local start instant);
+/// * the payload identity fields (event/occurrence/calendar);
+/// * the event start value.
+String scheduleFingerprint(CalendarNotificationCandidate candidate) {
+  final event = candidate.event;
+  // Absolute instants (UTC microseconds) keep the digest independent of how
+  // local time happens to be formatted for display.
+  final trigger = candidate.reminderTime.toUtc().microsecondsSinceEpoch;
+  final start = candidate.startLocal.toUtc().microsecondsSinceEpoch;
+  final canonical = [
+    'v2',
+    'id=${candidate.notificationId}',
+    'trigger=$trigger',
+    'start=$start',
+    'eid=${event.id}',
+    'oid=${event.occurrenceId ?? ''}',
+    'cid=${event.calendarId}',
+    'sa=${event.startsAt}',
+    'title=${event.title}',
+  ].join('');
+
+  // Two independent 32-bit FNV-1a passes concatenated into a 64-bit hex digest:
+  // a collision would have to occur in both passes at once (~1/2^64), while
+  // avoiding negative-integer / web-int hazards of a single 64-bit pass.
+  final a = _fnv1a32(canonical, _fnvOffsetBasis);
+  final b = _fnv1a32(canonical, _fnvAltOffsetBasis);
+  return a.toRadixString(16).padLeft(8, '0') +
+      b.toRadixString(16).padLeft(8, '0');
+}
+
+// Standard 32-bit FNV-1a offset basis, and a second, distinct basis used to
+// widen the fingerprint to 64 effective bits.
+const int _fnvOffsetBasis = 0x811c9dc5;
+const int _fnvAltOffsetBasis = 0x7a3c59b1;
+const int _fnvPrime = 0x01000193;
+
+/// 32-bit FNV-1a over [input]'s UTF-16 code units, seeded with [offsetBasis].
+/// Deterministic and reversibility-free — suitable for a persisted fingerprint.
+int _fnv1a32(String input, int offsetBasis) {
+  var hash = offsetBasis;
+  for (final codeUnit in input.codeUnits) {
     hash ^= codeUnit;
-    hash = (hash * 0x01000193) & 0xFFFFFFFF;
+    hash = (hash * _fnvPrime) & 0xFFFFFFFF;
   }
-  return hash & 0x7FFFFFFF;
+  return hash;
 }

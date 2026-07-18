@@ -10,12 +10,13 @@ ClientEvent _event(
   String endsAt = '2026-07-05T10:00:00',
   bool allDay = false,
   String? occurrenceId,
+  String? title,
 }) => ClientEvent(
   id: id,
   calendarId: 'cal1',
   serviceId: 'svc',
   serviceName: 'Test',
-  title: 'Event $id',
+  title: title ?? 'Event $id',
   startsAt: startsAt,
   endsAt: endsAt,
   allDay: allDay,
@@ -267,6 +268,52 @@ void main() {
       final id = notificationIdForEvent(event);
       expect(id, isNonNegative);
       expect(id, lessThanOrEqualTo(0x7FFFFFFF));
+    });
+  });
+
+  group('scheduleFingerprint', () {
+    CalendarNotificationCandidate candidate(ClientEvent e) =>
+        buildNotificationCandidates([e], now: _now).single;
+
+    test(
+      'is identical across separate but field-equal event model instances',
+      () {
+        final a = candidate(_event('e1', startsAt: '2026-07-05T09:00:00'));
+        final b = candidate(_event('e1', startsAt: '2026-07-05T09:00:00'));
+        expect(scheduleFingerprint(a), scheduleFingerprint(b));
+      },
+    );
+
+    test('changes when only the title changes (same notification ID)', () {
+      final original = candidate(_event('e1', title: 'Original'));
+      final renamed = candidate(_event('e1', title: 'Renamed'));
+      expect(
+        original.notificationId,
+        renamed.notificationId,
+        reason: 'the ID is identity-based and unchanged by a title edit',
+      );
+      expect(
+        scheduleFingerprint(original),
+        isNot(scheduleFingerprint(renamed)),
+      );
+    });
+
+    test('changes when the start time changes', () {
+      final a = candidate(_event('e1', startsAt: '2026-07-05T09:00:00'));
+      final b = candidate(_event('e1', startsAt: '2026-07-05T10:00:00'));
+      expect(scheduleFingerprint(a), isNot(scheduleFingerprint(b)));
+    });
+
+    test('is a fixed-width hex digest that does not embed the raw title', () {
+      final fp = scheduleFingerprint(
+        candidate(_event('e1', title: 'Secret dinner plans')),
+      );
+      expect(fp, matches(RegExp(r'^[0-9a-f]{16}$')));
+      expect(
+        fp.toLowerCase().contains('secret'),
+        isFalse,
+        reason: 'the digest must not carry raw private event content',
+      );
     });
   });
 }
