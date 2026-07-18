@@ -4,6 +4,7 @@ import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz_local;
 
 import 'app/calee_app.dart';
+import 'config/calee_environment.dart';
 import 'features/notifications/local_calendar_notification_service.dart';
 
 Future<void> _configureLocalTimezone() async {
@@ -18,6 +19,10 @@ Future<void> _configureLocalTimezone() async {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // In debug/regression builds this prints the resolved backend on a single
+  // stable line the regression framework reads back; a no-op in a production
+  // release. See CaleeEnvironment.
+  CaleeEnvironment.logDiagnostics();
   await _configureLocalTimezone();
   await LocalCalendarNotificationService.instance.initialize();
   runApp(const CaleeApp());

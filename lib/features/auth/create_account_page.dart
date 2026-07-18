@@ -91,7 +91,10 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
         backgroundColor: Colors.transparent,
         elevation: 0,
         scrolledUnderElevation: 0,
-        leading: BackButton(onPressed: widget.onCancel),
+        leading: BackButton(
+          key: const Key('create_account_cancel_button'),
+          onPressed: widget.onCancel,
+        ),
       ),
       body: SafeArea(
         minimum: const EdgeInsets.all(24),
@@ -119,6 +122,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                       ),
                       const SizedBox(height: 32),
                       TextFormField(
+                        key: const Key('create_account_first_name_field'),
                         controller: _firstNameController,
                         textInputAction: TextInputAction.next,
                         autofillHints: const [AutofillHints.givenName],
@@ -135,6 +139,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                       ),
                       const SizedBox(height: 16),
                       TextFormField(
+                        key: const Key('create_account_last_name_field'),
                         controller: _lastNameController,
                         textInputAction: TextInputAction.next,
                         autofillHints: const [AutofillHints.familyName],
@@ -151,6 +156,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                       ),
                       const SizedBox(height: 16),
                       TextFormField(
+                        key: const Key('create_account_email_field'),
                         controller: _emailController,
                         keyboardType: TextInputType.emailAddress,
                         textInputAction: TextInputAction.next,
@@ -174,6 +180,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                       ),
                       const SizedBox(height: 16),
                       TextFormField(
+                        key: const Key('create_account_confirm_email_field'),
                         controller: _confirmEmailController,
                         keyboardType: TextInputType.emailAddress,
                         textInputAction: TextInputAction.next,
@@ -198,6 +205,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                       ),
                       const SizedBox(height: 16),
                       TextFormField(
+                        key: const Key('create_account_redeem_code_field'),
                         controller: _redeemCodeController,
                         textInputAction: TextInputAction.next,
                         decoration: const InputDecoration(
@@ -213,6 +221,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                       ),
                       const SizedBox(height: 16),
                       TextFormField(
+                        key: const Key('create_account_password_field'),
                         controller: _passwordController,
                         obscureText: _obscurePassword,
                         textInputAction: TextInputAction.next,
@@ -247,6 +256,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                       ),
                       const SizedBox(height: 16),
                       TextFormField(
+                        key: const Key('create_account_confirm_password_field'),
                         controller: _confirmPasswordController,
                         obscureText: _obscurePassword,
                         textInputAction: TextInputAction.done,
@@ -270,11 +280,13 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                         const SizedBox(height: 8),
                         Text(
                           errorMessage,
+                          key: const Key('create_account_error_message'),
                           style: TextStyle(color: theme.colorScheme.error),
                         ),
                       ],
                       const SizedBox(height: 24),
                       FilledButton(
+                        key: const Key('create_account_submit_button'),
                         onPressed: isLoading ? null : _register,
                         child: isLoading
                             ? const SizedBox.square(

@@ -82,7 +82,10 @@ class _LoginPageState extends State<LoginPage> {
         backgroundColor: Colors.transparent,
         elevation: 0,
         scrolledUnderElevation: 0,
-        leading: BackButton(onPressed: widget.onCancel),
+        leading: BackButton(
+          key: const Key('login_cancel_button'),
+          onPressed: widget.onCancel,
+        ),
       ),
       body: SafeArea(
         minimum: const EdgeInsets.all(24),
@@ -121,6 +124,7 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                       const SizedBox(height: 32),
                       TextFormField(
+                        key: const Key('login_email_field'),
                         controller: _emailController,
                         keyboardType: TextInputType.emailAddress,
                         textInputAction: TextInputAction.next,
@@ -138,6 +142,7 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                       const SizedBox(height: 16),
                       TextFormField(
+                        key: const Key('login_password_field'),
                         controller: _passwordController,
                         obscureText: _obscurePassword,
                         textInputAction: TextInputAction.done,
@@ -147,6 +152,7 @@ class _LoginPageState extends State<LoginPage> {
                           labelText: 'Password',
                           border: const OutlineInputBorder(),
                           suffixIcon: IconButton(
+                            key: const Key('login_toggle_password_visibility'),
                             icon: Icon(
                               _obscurePassword
                                   ? Icons.visibility_outlined
@@ -194,11 +200,13 @@ class _LoginPageState extends State<LoginPage> {
                         const SizedBox(height: 8),
                         Text(
                           errorMessage,
+                          key: const Key('login_error_message'),
                           style: TextStyle(color: theme.colorScheme.error),
                         ),
                       ],
                       const SizedBox(height: 24),
                       FilledButton(
+                        key: const Key('login_submit_button'),
                         onPressed: isLoading ? null : _signIn,
                         child: isLoading
                             ? const SizedBox.square(

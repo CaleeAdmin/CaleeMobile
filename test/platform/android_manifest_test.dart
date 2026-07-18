@@ -52,6 +52,46 @@ void main() {
     );
   });
 
+  test('has the calee://follow custom-scheme intent filter', () {
+    // The web "Open in Calee app" button force-opens the app via
+    // calee://follow?t=<token> when a browser does not hand the HTTPS
+    // App Link to the app. Guard the fallback's exact filter shape.
+    expect(
+      RegExp(
+        r'<intent-filter>\s*'
+        r'<action android:name="android\.intent\.action\.VIEW" />\s*'
+        r'<category android:name="android\.intent\.category\.DEFAULT" />\s*'
+        r'<category android:name="android\.intent\.category\.BROWSABLE" />\s*'
+        r'<data\s*'
+        r'android:scheme="calee"\s*'
+        r'android:host="follow" />\s*'
+        r'</intent-filter>',
+      ).hasMatch(manifest),
+      isTrue,
+      reason: 'Missing calee://follow custom-scheme intent filter',
+    );
+  });
+
+  test('the calee://follow intent filter is not an autoVerify App Link', () {
+    // calee:// is a custom scheme, so it can never pass Android App
+    // Links domain verification. autoVerify="true" here would break
+    // the handoff; the fallback must stay a plain deep link.
+    expect(
+      RegExp(
+        r'<intent-filter android:autoVerify="true">\s*'
+        r'<action android:name="android\.intent\.action\.VIEW" />\s*'
+        r'<category android:name="android\.intent\.category\.DEFAULT" />\s*'
+        r'<category android:name="android\.intent\.category\.BROWSABLE" />\s*'
+        r'<data\s*'
+        r'android:scheme="calee"\s*'
+        r'android:host="follow" />\s*'
+        r'</intent-filter>',
+      ).hasMatch(manifest),
+      isFalse,
+      reason: 'calee://follow must not use android:autoVerify',
+    );
+  });
+
   test('still has the hub.calee.com.au/native-login intent filter', () {
     expect(
       RegExp(

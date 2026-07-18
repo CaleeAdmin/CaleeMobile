@@ -1,8 +1,33 @@
 name: Flutter CI
 
+# Runs the required format/analyze/test gate for every change headed for an
+# integration branch. `dev` is the day-to-day integration branch, so every
+# normal CaleeMobile pull request (which targets `dev`) now receives this same
+# check; `stage` and `main` keep it for the promotion path.
+#
+# Branch-protection note for administrators: the required status check to
+# enforce on `dev` (and `stage`/`main`) is the job name below,
+#   "Format, Analyze & Test"
+# reported under this "Flutter CI" workflow. Add it under
+# Settings -> Branches -> Branch protection rules -> Require status checks to
+# pass before merging, for each of `dev`, `stage`, and `main`, so no pull
+# request can merge into an integration branch without a green run.
 on:
   pull_request:
-    branches: ['stage', 'main']
+    branches:
+      - dev
+      - stage
+      - main
+  # A push trigger on the protected integration branches gives post-merge
+  # (and direct-push) coverage on the same three branches, so a merge that
+  # somehow lands unformatted or failing code is still caught on the branch.
+  push:
+    branches:
+      - dev
+      - stage
+      - main
+  # Allow the gate to be started on demand from the Actions tab (any branch).
+  workflow_dispatch:
 
 jobs:
   analyze-and-test:
