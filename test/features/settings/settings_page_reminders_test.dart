@@ -12,6 +12,7 @@ import 'package:calee_mobile/data/api/calee_hub_client.dart';
 import 'package:calee_mobile/data/models/client_bootstrap.dart';
 import 'package:calee_mobile/data/models/client_calendar.dart';
 import 'package:calee_mobile/data/models/client_preferences.dart';
+import 'package:calee_mobile/features/notifications/calendar_reminder_coordinator.dart';
 import 'package:calee_mobile/features/notifications/local_calendar_notification_service.dart';
 import 'package:calee_mobile/features/settings/settings_page.dart';
 import 'package:calee_mobile/ui/calee_theme.dart';
@@ -26,7 +27,7 @@ class _FakeNotificationService extends LocalCalendarNotificationService {
   _FakeNotificationService({required this.permissionGranted}) : super.forTest();
 
   final bool permissionGranted;
-  int cancelCount = 0;
+  int disableCount = 0;
 
   @override
   Future<void> initialize() async {}
@@ -35,8 +36,30 @@ class _FakeNotificationService extends LocalCalendarNotificationService {
   Future<bool> requestPermissionIfNeeded() async => permissionGranted;
 
   @override
-  Future<void> cancelAllCalendarEventNotifications() async {
-    cancelCount++;
+  Future<void> disableCalendarReminders() async {
+    disableCount++;
+  }
+}
+
+// ── Recording coordinator ─────────────────────────────────────────────────────
+
+class _RecordingCoordinator extends CalendarReminderCoordinator {
+  _RecordingCoordinator() : super(hubClient: _StubHubClient());
+
+  final List<CalendarReminderRefreshReason> reasons = [];
+
+  @override
+  Future<CalendarReminderRefreshResult> refresh({
+    required String? accessToken,
+    required CalendarReminderRefreshReason reason,
+    bool force = false,
+  }) async {
+    reasons.add(reason);
+    return CalendarReminderRefreshResult(
+      reason: reason,
+      status: CalendarReminderRefreshStatus.reconciled,
+      completedAt: DateTime(2026),
+    );
   }
 }
 
@@ -76,6 +99,7 @@ ClientBootstrap _bootstrap() => ClientBootstrap(
 Widget _wrap({
   required bool permissionGranted,
   VoidCallback? onNavigateToCalendar,
+  CalendarReminderCoordinator? coordinator,
 }) {
   LocalCalendarNotificationService.testOverride = _FakeNotificationService(
     permissionGranted: permissionGranted,
@@ -88,6 +112,7 @@ Widget _wrap({
         accessToken: 'tok',
         bootstrap: _bootstrap(),
         onSignOut: () {},
+        reminderCoordinator: coordinator,
         onNavigateToCalendar: onNavigateToCalendar,
       ),
     ),
@@ -136,6 +161,24 @@ void main() {
       final sw = tester.widget<Switch>(find.byType(Switch));
       expect(sw.value, isTrue, reason: 'reminders toggle should be on');
       expect(navigated, isTrue, reason: 'calendar tab callback should fire');
+    },
+  );
+
+  testWidgets(
+    'enabling reminders forces a remindersEnabled coordinator refresh',
+    (tester) async {
+      final coordinator = _RecordingCoordinator();
+      await tester.pumpWidget(
+        _wrap(permissionGranted: true, coordinator: coordinator),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byType(Switch));
+      await tester.pumpAndSettle();
+
+      expect(coordinator.reasons, [
+        CalendarReminderRefreshReason.remindersEnabled,
+      ]);
     },
   );
 

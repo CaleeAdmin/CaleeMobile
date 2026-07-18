@@ -5,15 +5,14 @@ import 'package:flutter/foundation.dart';
 import '../../data/auth/calee_preferences.dart';
 import '../../data/models/calendar_service_error.dart';
 import '../../data/models/client_calendar.dart';
-import '../notifications/local_calendar_notification_service.dart';
+import '../notifications/calendar_reminder_coordinator.dart';
 import 'calendar_repository.dart';
 
 class CalendarController extends ChangeNotifier {
   CalendarController({
     required this.repository,
-    LocalCalendarNotificationService? notificationService,
-  }) : _notificationService =
-           notificationService ?? LocalCalendarNotificationService.instance {
+    this.onRequestReminderRefresh,
+  }) {
     final now = DateTime.now();
     today = DateTime(now.year, now.month, now.day);
     selectedDay = today;
@@ -25,7 +24,15 @@ class CalendarController extends ChangeNotifier {
   }
 
   final CalendarRepository repository;
-  final LocalCalendarNotificationService _notificationService;
+
+  /// Invoked to request an independent upcoming-reminder refresh after an
+  /// explicit change (event CRUD) or a manual calendar refresh. Deliberately
+  /// NOT called from [loadMonth]: month navigation must never reschedule or
+  /// cancel device reminders. The callback owns error handling; failures here
+  /// are swallowed so a reminder refresh can never make a succeeded event
+  /// operation look failed.
+  final Future<void> Function(CalendarReminderRefreshReason reason)?
+  onRequestReminderRefresh;
 
   // ── State ─────────────────────────────────────────────────────────────────
 
@@ -55,7 +62,10 @@ class CalendarController extends ChangeNotifier {
       calendars = overview.calendars;
       events = overview.events;
       calendarServiceErrors = overview.serviceErrors;
-      unawaited(_notificationService.rescheduleUpcomingEvents(events));
+      // NOTE: loadMonth intentionally does not touch device reminders. Reminder
+      // scheduling is owned by CalendarReminderCoordinator and driven by an
+      // independent upcoming-event window, so navigating months never cancels
+      // or rebuilds reminders. See onRequestReminderRefresh.
       hiddenCalendarIds.removeWhere(
         (id) => !calendars.any((cal) => cal.id == id),
       );
@@ -69,7 +79,23 @@ class CalendarController extends ChangeNotifier {
     }
   }
 
-  Future<void> refresh() => loadMonth();
+  /// A user-initiated calendar refresh. Unlike month navigation, this also
+  /// requests a (throttled) reminder refresh once the data reload succeeds.
+  Future<void> refresh() async {
+    await loadMonth();
+    if (error == null) {
+      _requestReminderRefresh(CalendarReminderRefreshReason.manualRefresh);
+    }
+  }
+
+  /// Fire-and-forget request for an upcoming-reminder refresh. Never throws
+  /// into the caller: a reminder refresh failure must not turn a successful
+  /// event operation into a failed one.
+  void _requestReminderRefresh(CalendarReminderRefreshReason reason) {
+    final callback = onRequestReminderRefresh;
+    if (callback == null) return;
+    unawaited(Future<void>.sync(() => callback(reason)).catchError((_) {}));
+  }
 
   // ── Navigation ────────────────────────────────────────────────────────────
 
@@ -173,6 +199,7 @@ class CalendarController extends ChangeNotifier {
       recurrence: recurrence,
     );
     await loadMonth();
+    _requestReminderRefresh(CalendarReminderRefreshReason.eventCreated);
   }
 
   Future<void> updateEvent({
@@ -198,6 +225,7 @@ class CalendarController extends ChangeNotifier {
       editScope: editScope,
     );
     await loadMonth();
+    _requestReminderRefresh(CalendarReminderRefreshReason.eventUpdated);
   }
 
   Future<void> deleteEvent({
@@ -206,6 +234,7 @@ class CalendarController extends ChangeNotifier {
   }) async {
     await repository.deleteEvent(event: event, deleteScope: deleteScope);
     await loadMonth();
+    _requestReminderRefresh(CalendarReminderRefreshReason.eventDeleted);
   }
 
   // ── Queries ───────────────────────────────────────────────────────────────

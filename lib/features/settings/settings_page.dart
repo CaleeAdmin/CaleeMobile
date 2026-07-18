@@ -17,6 +17,7 @@ import 'family_setup_page.dart';
 import 'household_people_page.dart';
 import 'recently_deleted_page.dart';
 import 'service_details_page.dart';
+import '../notifications/calendar_reminder_coordinator.dart';
 import '../notifications/local_calendar_notification_service.dart';
 import 'settings_controller.dart';
 import 'settings_repository.dart';
@@ -28,6 +29,7 @@ class SettingsPage extends StatefulWidget {
     required this.bootstrap,
     required this.onSignOut,
     this.onBootstrapRefreshed,
+    this.reminderCoordinator,
     this.onNavigateToCalendar,
     super.key,
   });
@@ -37,6 +39,12 @@ class SettingsPage extends StatefulWidget {
   final ClientBootstrap bootstrap;
   final VoidCallback onSignOut;
   final void Function(ClientBootstrap)? onBootstrapRefreshed;
+
+  /// App-level reminder coordinator. Used to force an independent
+  /// upcoming-reminder refresh when the user enables reminders. Null in
+  /// contexts (e.g. some tests) that do not exercise reminders.
+  final CalendarReminderCoordinator? reminderCoordinator;
+
   // Called after manual onboarding "View calendar" to switch the home tab.
   final VoidCallback? onNavigateToCalendar;
 
@@ -186,16 +194,29 @@ class _SettingsPageState extends State<SettingsPage> {
 
       await _controller.setCalendarRemindersEnabled(true);
 
-      // Switching to the calendar tab triggers CalendarController.loadMonth(),
-      // which immediately reschedules notifications for the loaded events.
+      // Reminders are scheduled from an independent 30-day upcoming-event
+      // window, not the visible calendar month, so force a reconcile now.
+      final coordinator = widget.reminderCoordinator;
+      if (coordinator != null) {
+        unawaited(
+          coordinator.refresh(
+            accessToken: widget.accessToken,
+            reason: CalendarReminderRefreshReason.remindersEnabled,
+          ),
+        );
+      }
+
+      // Show the calendar so the user sees the feature they just enabled.
       widget.onNavigateToCalendar?.call();
 
       return;
     }
 
     await _controller.setCalendarRemindersEnabled(false);
-    await LocalCalendarNotificationService.instance
-        .cancelAllCalendarEventNotifications();
+    // Cancel only the calendar reminder IDs Calee owns (via the manifest) and
+    // clear that manifest — never a global cancelAll() that would also drop
+    // notifications belonging to other Calee features.
+    await LocalCalendarNotificationService.instance.disableCalendarReminders();
   }
 
   ClientCalendar? _findById(List<ClientCalendar> list, String id) {

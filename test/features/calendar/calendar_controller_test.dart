@@ -3,32 +3,8 @@ import 'package:calee_mobile/data/auth/calee_preferences.dart';
 import 'package:calee_mobile/data/models/client_calendar.dart';
 import 'package:calee_mobile/features/calendar/calendar_controller.dart';
 import 'package:calee_mobile/features/calendar/calendar_repository.dart';
-import 'package:calee_mobile/features/notifications/local_calendar_notification_service.dart';
+import 'package:calee_mobile/features/notifications/calendar_reminder_coordinator.dart';
 import 'package:flutter_test/flutter_test.dart';
-
-// ─── Fakes ────────────────────────────────────────────────────────────────────
-
-class _FakeNotificationService extends LocalCalendarNotificationService {
-  _FakeNotificationService() : super.forTest();
-
-  int rescheduleCallCount = 0;
-  List<List<ClientEvent>> rescheduleArgs = [];
-
-  @override
-  Future<void> initialize() async {}
-
-  @override
-  Future<bool> requestPermissionIfNeeded() async => true;
-
-  @override
-  Future<void> rescheduleUpcomingEvents(List<ClientEvent> events) async {
-    rescheduleCallCount++;
-    rescheduleArgs.add(List.unmodifiable(events));
-  }
-
-  @override
-  Future<void> cancelAllCalendarEventNotifications() async {}
-}
 
 // ─── Stubs ────────────────────────────────────────────────────────────────────
 
@@ -67,7 +43,56 @@ class _StubHubClient extends CaleeHubClient {
   }) async {
     return ClientEventList(from: from, to: to, events: _events);
   }
+
+  @override
+  Future<ClientEvent> createEvent({
+    required String accessToken,
+    required String serviceId,
+    required String calendarId,
+    required String title,
+    required String startsAt,
+    required String endsAt,
+    required bool allDay,
+    String? location,
+    String? description,
+    String? recurrence,
+  }) async => _stubEvent(title);
+
+  @override
+  Future<ClientEvent> updateEvent({
+    required String accessToken,
+    required String eventId,
+    required String title,
+    String? startsAt,
+    String? endsAt,
+    bool? allDay,
+    String? location,
+    String? description,
+    String? recurrence,
+    bool includeRecurrence = false,
+    String? scope,
+  }) async => _stubEvent(title);
+
+  @override
+  Future<void> deleteEvent({
+    required String accessToken,
+    required String eventId,
+    String? scope,
+  }) async {}
 }
+
+ClientEvent _stubEvent(String title) => ClientEvent(
+  id: 'new',
+  calendarId: 'cal1',
+  serviceId: 'svc',
+  serviceName: 'Test',
+  title: title,
+  startsAt: '2026-06-15T09:00:00',
+  endsAt: '2026-06-15T10:00:00',
+  allDay: false,
+  recurring: false,
+  source: 'test',
+);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -112,7 +137,8 @@ CalendarController _makeController({
   List<ClientEvent>? events,
   bool failCalendars = false,
   StoredPreferences? prefs,
-  LocalCalendarNotificationService? notificationService,
+  Future<void> Function(CalendarReminderRefreshReason reason)?
+  onRequestReminderRefresh,
 }) {
   final hub = _StubHubClient(
     calendars: calendars,
@@ -126,7 +152,7 @@ CalendarController _makeController({
   );
   return CalendarController(
     repository: repo,
-    notificationService: notificationService ?? _FakeNotificationService(),
+    onRequestReminderRefresh: onRequestReminderRefresh,
   );
 }
 
@@ -384,50 +410,156 @@ void main() {
     });
   });
 
-  // ── Notification integration ─────────────────────────────────────────────────
+  // ── Reminder-refresh integration ─────────────────────────────────────────────
+  //
+  // Month navigation (loadMonth) must NEVER touch device reminders; only
+  // explicit changes (CRUD) and manual refreshes request a reminder refresh.
 
-  group('CalendarController notification integration', () {
-    test('calls rescheduleUpcomingEvents after successful loadMonth', () async {
-      final fake = _FakeNotificationService();
+  group('CalendarController reminder-refresh triggers', () {
+    test('loadMonth does not request a reminder refresh', () async {
+      final reasons = <CalendarReminderRefreshReason>[];
       final ctrl = _makeController(
         calendars: [_calendar('cal1')],
         events: [_event('e1')],
-        notificationService: fake,
-      );
-
-      await ctrl.loadMonth();
-
-      // Wait for the unawaited reschedule to complete.
-      await Future<void>.delayed(Duration.zero);
-
-      expect(fake.rescheduleCallCount, 1);
-    });
-
-    test('does not call reschedule when loadMonth fails', () async {
-      final fake = _FakeNotificationService();
-      final ctrl = _makeController(
-        failCalendars: true,
-        notificationService: fake,
+        onRequestReminderRefresh: (r) async => reasons.add(r),
       );
 
       await ctrl.loadMonth();
       await Future<void>.delayed(Duration.zero);
 
-      expect(fake.rescheduleCallCount, 0);
+      expect(reasons, isEmpty);
     });
 
-    test('passes loaded events to rescheduleUpcomingEvents', () async {
-      final fake = _FakeNotificationService();
+    test('month navigation does not request a reminder refresh', () async {
+      final reasons = <CalendarReminderRefreshReason>[];
       final ctrl = _makeController(
         calendars: [_calendar('cal1')],
-        events: [_event('e1'), _event('e2')],
-        notificationService: fake,
+        events: [_event('e1')],
+        onRequestReminderRefresh: (r) async => reasons.add(r),
       );
-
       await ctrl.loadMonth();
+      reasons.clear();
+
+      ctrl.selectedMonth = DateTime(2026, 6, 1);
+      ctrl.nextMonth();
+      await Future<void>.delayed(Duration.zero);
+      ctrl.previousMonth();
+      await Future<void>.delayed(Duration.zero);
+      ctrl.goToToday();
       await Future<void>.delayed(Duration.zero);
 
-      expect(fake.rescheduleArgs.first, hasLength(2));
+      expect(
+        reasons,
+        isEmpty,
+        reason: 'navigating months must not reconcile reminders',
+      );
     });
+
+    test('createEvent requests an eventCreated refresh', () async {
+      final reasons = <CalendarReminderRefreshReason>[];
+      final ctrl = _makeController(
+        calendars: [_calendar('cal1')],
+        onRequestReminderRefresh: (r) async => reasons.add(r),
+      );
+
+      await ctrl.createEvent(
+        calendar: _calendar('cal1'),
+        title: 'New',
+        startsAt: DateTime(2026, 6, 15, 9),
+        endsAt: DateTime(2026, 6, 15, 10),
+        allDay: false,
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      expect(reasons, [CalendarReminderRefreshReason.eventCreated]);
+    });
+
+    test('updateEvent requests an eventUpdated refresh', () async {
+      final reasons = <CalendarReminderRefreshReason>[];
+      final ctrl = _makeController(
+        calendars: [_calendar('cal1')],
+        onRequestReminderRefresh: (r) async => reasons.add(r),
+      );
+
+      await ctrl.updateEvent(
+        event: _event('e1'),
+        title: 'Edited',
+        startsAt: DateTime(2026, 6, 15, 11),
+        endsAt: DateTime(2026, 6, 15, 12),
+        allDay: false,
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      expect(reasons, [CalendarReminderRefreshReason.eventUpdated]);
+    });
+
+    test('deleteEvent requests an eventDeleted refresh', () async {
+      final reasons = <CalendarReminderRefreshReason>[];
+      final ctrl = _makeController(
+        calendars: [_calendar('cal1')],
+        onRequestReminderRefresh: (r) async => reasons.add(r),
+      );
+
+      await ctrl.deleteEvent(event: _event('e1'));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(reasons, [CalendarReminderRefreshReason.eventDeleted]);
+    });
+
+    test(
+      'refresh() requests a manualRefresh after a successful reload',
+      () async {
+        final reasons = <CalendarReminderRefreshReason>[];
+        final ctrl = _makeController(
+          calendars: [_calendar('cal1')],
+          onRequestReminderRefresh: (r) async => reasons.add(r),
+        );
+
+        await ctrl.refresh();
+        await Future<void>.delayed(Duration.zero);
+
+        expect(reasons, [CalendarReminderRefreshReason.manualRefresh]);
+      },
+    );
+
+    test(
+      'refresh() does not request a reminder refresh when the reload fails',
+      () async {
+        final reasons = <CalendarReminderRefreshReason>[];
+        final ctrl = _makeController(
+          failCalendars: true,
+          onRequestReminderRefresh: (r) async => reasons.add(r),
+        );
+
+        await ctrl.refresh();
+        await Future<void>.delayed(Duration.zero);
+
+        expect(reasons, isEmpty);
+      },
+    );
+
+    test(
+      'a reminder-refresh failure does not turn a successful CRUD op into a failure',
+      () async {
+        final ctrl = _makeController(
+          calendars: [_calendar('cal1')],
+          onRequestReminderRefresh: (r) async =>
+              throw Exception('reminder refresh boom'),
+        );
+
+        // The create itself succeeds even though the reminder refresh throws.
+        await expectLater(
+          ctrl.createEvent(
+            calendar: _calendar('cal1'),
+            title: 'New',
+            startsAt: DateTime(2026, 6, 15, 9),
+            endsAt: DateTime(2026, 6, 15, 10),
+            allDay: false,
+          ),
+          completes,
+        );
+        await Future<void>.delayed(Duration.zero);
+      },
+    );
   });
 }

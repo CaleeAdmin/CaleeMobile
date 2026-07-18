@@ -32,6 +32,7 @@ import '../features/display_setup/display_setup_landing_page.dart';
 import '../features/display_setup/display_setup_repository.dart';
 import '../features/display_setup/display_setup_link_controller.dart';
 import '../features/local_subscriber/local_calendar_subscription.dart';
+import '../features/notifications/calendar_reminder_coordinator.dart';
 import '../features/onboarding/welcome_page.dart';
 import '../features/local_subscriber/local_calendar_subscription_repository.dart';
 import '../features/local_subscriber/local_subscriber_calendar_page.dart';
@@ -59,6 +60,7 @@ class CaleeAppTestDependencies {
     this.externalCalendarConnectedLinkController,
     this.shoppingLinkController,
     this.deviceProfileDefaultsProvider,
+    this.reminderCoordinator,
   });
 
   final CaleeHubClient hubClient;
@@ -71,6 +73,7 @@ class CaleeAppTestDependencies {
   externalCalendarConnectedLinkController;
   final ShoppingLinkController? shoppingLinkController;
   final DeviceProfileDefaultsProvider? deviceProfileDefaultsProvider;
+  final CalendarReminderCoordinator? reminderCoordinator;
 }
 
 class CaleeApp extends StatefulWidget {
@@ -98,10 +101,16 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
   late final ShoppingLinkController _shoppingLinkController;
   late final DisplayActivationController _displayActivationController;
   late final LocalCalendarSubscriptionRepository _localSubscriptionRepo;
+  late final CalendarReminderCoordinator _reminderCoordinator;
   final _navigatorKey = GlobalKey<NavigatorState>();
 
   // Set to true when the app goes to background; cleared and transport reset on resume.
   bool _transportMayBeStale = false;
+
+  // Guards the once-per-signed-in-session reminder refresh so a restored or
+  // freshly signed-in session schedules reminders exactly once; reset on
+  // sign-out so the next session refreshes again.
+  bool _remindersRefreshedForSession = false;
 
   // Calendar follow state
   bool _showingFollowSignIn = false;
@@ -204,6 +213,12 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
       _localSubscriptionRepo = LocalCalendarSubscriptionRepository();
     }
 
+    // App-level reminder coordinator: schedules device reminders from an
+    // independent 30-day upcoming-event window, never from the visible month.
+    _reminderCoordinator =
+        testDeps?.reminderCoordinator ??
+        CalendarReminderCoordinator(hubClient: _hubClient);
+
     // Listeners must be attached before any controller's init() can deliver
     // an intent, so a notification fired mid-init is never missed.
     _followLinkController.addListener(_onFollowLinkChanged);
@@ -213,6 +228,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
     );
     _shoppingLinkController.addListener(_onShoppingLinkChanged);
     _sessionController.addListener(_onSessionChanged);
+    _sessionController.addListener(_onSessionChangedForReminders);
 
     // DisplaySetupLinkController.init() is idempotent and, in tests, always
     // backed by a fake (see CaleeAppTestDependencies), so it's called
@@ -253,6 +269,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
     );
     _shoppingLinkController.removeListener(_onShoppingLinkChanged);
     _sessionController.removeListener(_onSessionChanged);
+    _sessionController.removeListener(_onSessionChangedForReminders);
     _followLinkController.dispose();
     _displaySetupLinkController.dispose();
     _externalCalendarConnectedLinkController.dispose();
@@ -274,8 +291,38 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
       _hubClient.resetTransport();
       if (_sessionController.isSignedIn) {
         unawaited(_sessionController.refreshBootstrap());
+        // Reconcile reminders against the independent 30-day window on resume
+        // (throttled) — an event may have changed while backgrounded.
+        _fireReminderRefresh(CalendarReminderRefreshReason.appResumed);
       }
     }
+  }
+
+  /// Fires a routine reminder refresh once per signed-in session (covers both
+  /// session restore and a fresh sign-in). Never runs while signed out.
+  void _onSessionChangedForReminders() {
+    if (_sessionController.isRestoringSession) return;
+    if (!_sessionController.isSignedIn) {
+      _remindersRefreshedForSession = false;
+      return;
+    }
+    if (_remindersRefreshedForSession) return;
+    _remindersRefreshedForSession = true;
+    _fireReminderRefresh(CalendarReminderRefreshReason.sessionRestored);
+  }
+
+  /// Requests an upcoming-reminder refresh without ever blocking startup or
+  /// navigation, and without surfacing failures. No-op while signed out.
+  void _fireReminderRefresh(CalendarReminderRefreshReason reason) {
+    final token = _sessionController.accessToken;
+    if (token == null || !_sessionController.isSignedIn) return;
+    unawaited(() async {
+      try {
+        await _reminderCoordinator.refresh(accessToken: token, reason: reason);
+      } catch (_) {
+        // Reminder scheduling is best-effort and must never crash the app.
+      }
+    }());
   }
 
   Future<void> _loadLocalSubscriptions() async {
@@ -1339,6 +1386,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
       bootstrap: _sessionController.bootstrap!,
       onSignOut: () => _sessionController.signOut(),
       onBootstrapRefreshed: _sessionController.updateBootstrap,
+      reminderCoordinator: _reminderCoordinator,
       initialSelectedIndex: _initialHomeTab ?? 0,
       onInitialTabConsumed: _initialHomeTab != null
           ? () => setState(() => _initialHomeTab = null)
