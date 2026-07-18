@@ -150,4 +150,228 @@ void main() {
       expect(restored.scheduledIds, isEmpty);
     });
   });
+
+  group('CalendarReminderManifestEntry — owner + copyWith', () {
+    test('round-trips an owner key through JSON', () {
+      const entry = CalendarReminderManifestEntry(
+        notificationId: 5,
+        fingerprint: 'fp',
+        ownerKey: 'ownerA',
+      );
+      final restored = CalendarReminderManifestEntry.tryFromJson(
+        entry.toJson(),
+      );
+      expect(restored!.notificationId, 5);
+      expect(restored.fingerprint, 'fp');
+      expect(restored.ownerKey, 'ownerA');
+    });
+
+    test('omits the owner key from JSON when null', () {
+      const entry = CalendarReminderManifestEntry(
+        notificationId: 5,
+        fingerprint: 'fp',
+      );
+      expect(entry.toJson().containsKey('owner'), isFalse);
+      expect(
+        CalendarReminderManifestEntry.tryFromJson(entry.toJson())!.ownerKey,
+        isNull,
+      );
+    });
+
+    test('copyWith can explicitly clear the fingerprint and owner', () {
+      const entry = CalendarReminderManifestEntry(
+        notificationId: 5,
+        fingerprint: 'fp',
+        ownerKey: 'ownerA',
+      );
+      final clearedFp = entry.copyWith(clearFingerprint: true);
+      expect(clearedFp.fingerprint, isNull);
+      expect(clearedFp.ownerKey, 'ownerA', reason: 'owner untouched');
+
+      final clearedOwner = entry.copyWith(clearOwnerKey: true);
+      expect(clearedOwner.ownerKey, isNull);
+      expect(clearedOwner.fingerprint, 'fp', reason: 'fingerprint untouched');
+
+      final replaced = entry.copyWith(fingerprint: 'fp2', ownerKey: 'ownerB');
+      expect(replaced.fingerprint, 'fp2');
+      expect(replaced.ownerKey, 'ownerB');
+    });
+  });
+
+  group('CalendarReminderManifest — v3 schema and migration', () {
+    test('round-trips v3 entries with owners through JSON', () {
+      final manifest = CalendarReminderManifest(
+        version: CalendarReminderManifest.currentVersion,
+        entries: const [
+          CalendarReminderManifestEntry(
+            notificationId: 1,
+            fingerprint: 'aa',
+            ownerKey: 'ownerA',
+          ),
+        ],
+      );
+      final restored = CalendarReminderManifest.parse(manifest.toJson());
+      expect(restored.status, CalendarReminderManifestLoadStatus.loaded);
+      expect(restored.manifest.entryFor(1)!.ownerKey, 'ownerA');
+      expect(manifest.toJson()['version'], 3);
+    });
+
+    test('v1 migration yields null fingerprint and null owner', () {
+      final result = CalendarReminderManifest.parse({
+        'version': 1,
+        'ids': [1, 2],
+      });
+      expect(result.status, CalendarReminderManifestLoadStatus.recovered);
+      for (final entry in result.manifest.entries) {
+        expect(entry.fingerprint, isNull);
+        expect(entry.ownerKey, isNull);
+      }
+    });
+
+    test('v2 migration keeps fingerprints but has null owners', () {
+      final result = CalendarReminderManifest.parse({
+        'version': 2,
+        'entries': [
+          {'id': 1, 'fp': 'aa'},
+        ],
+      });
+      expect(result.status, CalendarReminderManifestLoadStatus.recovered);
+      expect(result.manifest.entryFor(1)!.fingerprint, 'aa');
+      expect(
+        result.manifest.entryFor(1)!.ownerKey,
+        isNull,
+        reason: 'a v2 entry carries no owner and must not be assumed current',
+      );
+    });
+  });
+
+  group('CalendarReminderManifest.parse — status classification', () {
+    test('absent when the decoded value is null', () {
+      final result = CalendarReminderManifest.parse(null);
+      expect(result.status, CalendarReminderManifestLoadStatus.absent);
+      expect(result.manifest.isEmpty, isTrue);
+    });
+
+    test('corrupt when the top-level value is not an object', () {
+      expect(
+        CalendarReminderManifest.parse('a string').status,
+        CalendarReminderManifestLoadStatus.corrupt,
+      );
+      expect(
+        CalendarReminderManifest.parse([1, 2, 3]).status,
+        CalendarReminderManifestLoadStatus.corrupt,
+      );
+    });
+
+    test('loaded for a valid (even empty) current-schema manifest', () {
+      expect(
+        CalendarReminderManifest.parse({'version': 3, 'entries': []}).status,
+        CalendarReminderManifestLoadStatus.loaded,
+      );
+    });
+
+    test('corrupt when a current-version value has no entries list', () {
+      // Our writer always emits an entries list; its absence means malformed.
+      final result = CalendarReminderManifest.parse({
+        'version': 3,
+        'entries': 'garbage',
+      });
+      expect(result.status, CalendarReminderManifestLoadStatus.corrupt);
+    });
+
+    test('recovered preserves valid IDs from partially malformed data', () {
+      final result = CalendarReminderManifest.parse({
+        'version': 2,
+        'entries': [
+          {'id': 10, 'fp': 'a'},
+          {'fp': 'no-id'},
+          'garbage',
+          {'id': 11},
+        ],
+      });
+      expect(result.status, CalendarReminderManifestLoadStatus.recovered);
+      expect(result.manifest.scheduledIds, [10, 11]);
+    });
+  });
+
+  group('CalendarReminderManifest.parse — safe field parsing', () {
+    test('a string version does not crash and recovers IDs', () {
+      final result = CalendarReminderManifest.parse({
+        'version': 'not-a-number',
+        'ids': [1, 2],
+      });
+      expect(result.manifest.scheduledIds, [1, 2]);
+    });
+
+    test('a floating-point version does not crash', () {
+      // 3.0 coerces to the current version; a non-whole float is unknown.
+      expect(
+        CalendarReminderManifest.parse({'version': 3.0, 'entries': []}).status,
+        CalendarReminderManifestLoadStatus.loaded,
+      );
+      expect(
+        () => CalendarReminderManifest.parse({
+          'version': 3.5,
+          'ids': [1],
+        }),
+        returnsNormally,
+      );
+    });
+
+    test('negative and out-of-range IDs are rejected', () {
+      final result = CalendarReminderManifest.parse({
+        'version': 3,
+        'entries': [
+          {'id': -1},
+          {'id': 0x80000000},
+          {'id': 42},
+        ],
+      });
+      expect(result.manifest.scheduledIds, [42]);
+    });
+
+    test('a malformed entry does not invent an ID', () {
+      final result = CalendarReminderManifest.parse({
+        'version': 3,
+        'entries': [
+          {'fp': 'x', 'owner': 'y'},
+          {'id': 'nope'},
+        ],
+      });
+      expect(result.manifest.scheduledIds, isEmpty);
+    });
+
+    test('duplicate IDs are deduplicated deterministically', () {
+      final result = CalendarReminderManifest.parse({
+        'version': 3,
+        'entries': [
+          {'id': 7, 'fp': 'first'},
+          {'id': 7, 'fp': 'second'},
+        ],
+      });
+      expect(result.manifest.scheduledIds, [7]);
+      expect(result.manifest.entryFor(7)!.fingerprint, 'first');
+    });
+
+    test('unknown-version fingerprints and owners are cleared', () {
+      final result = CalendarReminderManifest.parse({
+        'version': 999,
+        'entries': [
+          {'id': 5, 'fp': 'future-fp', 'owner': 'future-owner'},
+        ],
+      });
+      expect(result.status, CalendarReminderManifestLoadStatus.recovered);
+      final entry = result.manifest.entryFor(5)!;
+      expect(
+        entry.fingerprint,
+        isNull,
+        reason: 'future fingerprints untrusted',
+      );
+      expect(
+        entry.ownerKey,
+        isNull,
+        reason: 'future owners treated as unknown',
+      );
+    });
+  });
 }

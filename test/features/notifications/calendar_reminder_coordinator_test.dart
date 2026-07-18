@@ -9,6 +9,7 @@ import 'package:calee_mobile/data/api/calee_hub_client.dart';
 import 'package:calee_mobile/data/auth/calee_preferences.dart';
 import 'package:calee_mobile/data/models/calendar_reminder_manifest.dart';
 import 'package:calee_mobile/data/models/client_calendar.dart';
+import 'package:calee_mobile/features/notifications/calendar_notification_candidates.dart';
 import 'package:calee_mobile/features/notifications/calendar_reminder_coordinator.dart';
 import 'package:calee_mobile/features/notifications/local_calendar_notification_service.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -117,18 +118,32 @@ class _FakeNotifs extends LocalCalendarNotificationService {
 
   final bool permission;
   int reconcileCount = 0;
+  int disableCount = 0;
   final List<List<ClientEvent>> reconcileArgs = [];
+  final List<String?> reconcileOwnerKeys = [];
 
   @override
   Future<bool> requestPermissionIfNeeded() async => permission;
 
   @override
+  Future<CalendarReminderDisableResult> disableCalendarReminders() async {
+    disableCount++;
+    return const CalendarReminderDisableResult(
+      cancelledCount: 0,
+      failedCount: 0,
+      manifestPersisted: true,
+    );
+  }
+
+  @override
   Future<CalendarReconciliationResult> reconcileCalendarReminders(
     List<ClientEvent> events, {
     DateTime? now,
+    String? ownerKey,
   }) async {
     reconcileCount++;
     reconcileArgs.add(events);
+    reconcileOwnerKeys.add(ownerKey);
     return CalendarReconciliationResult(
       eventsFetched: events.length,
       eligibleCandidates: events.length,
@@ -172,6 +187,7 @@ class _CleanupSpyNotifs extends LocalCalendarNotificationService {
   Future<CalendarReconciliationResult> reconcileCalendarReminders(
     List<ClientEvent> events, {
     DateTime? now,
+    String? ownerKey,
   }) async {
     reconcileCount++;
     return CalendarReconciliationResult(
@@ -768,6 +784,171 @@ void main() {
         );
       },
     );
+  });
+
+  group('session invalidation (Defect 1)', () {
+    test('sign-out during a blocked fetch prevents reconciliation', () async {
+      final hub = _GatedHub();
+      final notifs = _FakeNotifs();
+      final coord = _make(hub: hub, notifs: notifs);
+      coord.beginSession(accountId: 'acct-A');
+
+      final f1 = coord.refresh(
+        accessToken: 'tok',
+        reason: CalendarReminderRefreshReason.sessionRestored,
+      );
+      await hub.reached(0);
+
+      // Sign out while the fetch is still blocked.
+      final cleanup = coord.endSession();
+
+      hub.release(0);
+      final r1 = await f1;
+      await cleanup;
+
+      expect(
+        r1.status,
+        CalendarReminderRefreshStatus.skippedSessionInvalidated,
+      );
+      expect(
+        notifs.reconcileCount,
+        0,
+        reason: 'the stale fetch must never reconcile after sign-out',
+      );
+    });
+
+    test('sign-out cancels a queued forced follow-up; the caller gets '
+        'skippedSessionInvalidated and no pending completer remains', () async {
+      final hub = _GatedHub();
+      final notifs = _FakeNotifs();
+      final coord = _make(hub: hub, notifs: notifs);
+      coord.beginSession(accountId: 'acct-A');
+
+      final f1 = coord.refresh(
+        accessToken: 'tok',
+        reason: CalendarReminderRefreshReason.appResumed,
+      );
+      await hub.reached(0);
+      final f2 = coord.refresh(
+        accessToken: 'tok',
+        reason: CalendarReminderRefreshReason.eventCreated,
+      );
+      expect(coord.hasPendingForcedRefresh, isTrue);
+
+      await coord.endSession();
+      expect(
+        coord.hasPendingForcedRefresh,
+        isFalse,
+        reason: 'the queued follow-up is dropped on sign-out',
+      );
+
+      final r2 = await f2;
+      expect(
+        r2.status,
+        CalendarReminderRefreshStatus.skippedSessionInvalidated,
+      );
+
+      hub.release(0);
+      final r1 = await f1;
+      expect(
+        r1.status,
+        CalendarReminderRefreshStatus.skippedSessionInvalidated,
+      );
+      expect(
+        hub.eventsCallCount,
+        1,
+        reason: 'the invalidated follow-up never fetched',
+      );
+      expect(notifs.reconcileCount, 0);
+    });
+
+    test(
+      'beginning account B while account A is fetching prevents A from writing',
+      () async {
+        final hub = _GatedHub();
+        final notifs = _FakeNotifs();
+        final coord = _make(hub: hub, notifs: notifs);
+        coord.beginSession(accountId: 'acct-A');
+
+        final fA = coord.refresh(
+          accessToken: 'tokA',
+          reason: CalendarReminderRefreshReason.sessionRestored,
+        );
+        await hub.reached(0);
+
+        // Account switch: account B begins while A's fetch is in flight.
+        coord.beginSession(accountId: 'acct-B');
+
+        hub.release(0);
+        final rA = await fA;
+
+        expect(
+          rA.status,
+          CalendarReminderRefreshStatus.skippedSessionInvalidated,
+        );
+        expect(
+          notifs.reconcileCount,
+          0,
+          reason: 'account A must not reconcile/write after account B begins',
+        );
+      },
+    );
+
+    test('sign-out cleanup runs targeted disable and never fetches', () async {
+      final hub = _GatedHub();
+      final notifs = _CleanupSpyNotifs();
+      final coord = _make(hub: hub, notifs: notifs);
+      coord.beginSession(accountId: 'acct-A');
+
+      final result = await coord.endSession();
+
+      expect(notifs.disableCount, 1, reason: 'targeted cleanup ran');
+      expect(notifs.reconcileCount, 0);
+      expect(hub.eventsCallCount, 0, reason: 'sign-out cleanup never fetches');
+      expect(result.isFullyClean, isTrue);
+    });
+
+    test('sign-out completes even when cleanup reports partial', () async {
+      final notifs = _CleanupSpyNotifs(
+        disableResult: const CalendarReminderDisableResult(
+          cancelledCount: 1,
+          failedCount: 1,
+          manifestPersisted: true,
+        ),
+      );
+      final coord = _make(hub: _FakeHub(), notifs: notifs);
+      coord.beginSession(accountId: 'acct-A');
+
+      final result = await coord.endSession();
+
+      expect(result.hasFailures, isTrue);
+      expect(result.isFullyClean, isFalse);
+      expect(notifs.disableCount, 1);
+    });
+
+    test('the coordinator passes the account owner key to reconcile', () async {
+      final hub = _FakeHub(eventsToReturn: [_event('e1')]);
+      final notifs = _FakeNotifs();
+      final coord = _make(hub: hub, notifs: notifs);
+      coord.beginSession(accountId: 'acct-A');
+
+      await coord.refresh(
+        accessToken: 'tok',
+        reason: CalendarReminderRefreshReason.sessionRestored,
+      );
+
+      expect(notifs.reconcileOwnerKeys.single, reminderOwnerKey('acct-A'));
+    });
+
+    test('beginSession and endSession each advance the session generation', () {
+      final coord = _make(hub: _FakeHub(), notifs: _FakeNotifs());
+      final g0 = coord.sessionGeneration;
+      coord.beginSession(accountId: 'A');
+      final g1 = coord.sessionGeneration;
+      expect(g1, greaterThan(g0));
+      coord.endSession();
+      expect(coord.sessionGeneration, greaterThan(g1));
+    });
   });
 }
 

@@ -29,6 +29,8 @@ class CalendarReconciliationResult {
     required this.completedAt,
     this.updatedCount = 0,
     this.manifestPersisted = true,
+    this.manifestCorrupt = false,
+    this.rollback,
   });
 
   final int eventsFetched;
@@ -55,12 +57,27 @@ class CalendarReconciliationResult {
   /// callers must treat the pass as not fully successful.
   final bool manifestPersisted;
 
+  /// Whether the stored manifest was unreadable/corrupt, so ownership is
+  /// unknown. When true nothing was scheduled or cancelled and the stored value
+  /// was left intact for a later retry — never silently overwritten.
+  final bool manifestCorrupt;
+
+  /// Present only when the final manifest save failed and a rollback ran;
+  /// describes how completely the newly-scheduled IDs were undone/recovered.
+  final CalendarReminderRollbackResult? rollback;
+
   final DateTime completedAt;
 
-  bool get hasFailures => failedCount > 0;
+  bool get hasFailures =>
+      failedCount > 0 || !manifestPersisted || manifestCorrupt;
 
-  /// True only when every operation succeeded and the manifest was persisted.
-  bool get isFullySuccessful => failedCount == 0 && manifestPersisted;
+  /// True only when every operation succeeded, the manifest was persisted, the
+  /// stored value was not corrupt, and any rollback/recovery fully succeeded.
+  bool get isFullySuccessful =>
+      failedCount == 0 &&
+      manifestPersisted &&
+      !manifestCorrupt &&
+      (rollback?.isFullySuccessful ?? true);
 
   @override
   String toString() =>
@@ -68,7 +85,52 @@ class CalendarReconciliationResult {
       'eligible: $eligibleCandidates, scheduled: $scheduledCount, '
       'updated: $updatedCount, cancelled: $cancelledCount, '
       'unchanged: $unchangedCount, failed: $failedCount, '
-      'manifestPersisted: $manifestPersisted)';
+      'manifestPersisted: $manifestPersisted, '
+      'manifestCorrupt: $manifestCorrupt'
+      '${rollback != null ? ', $rollback' : ''})';
+}
+
+/// Structured, log-safe outcome of rolling back after a failed final manifest
+/// save during reconciliation.
+///
+/// Because the save failed, the previous manifest is still on disk untouched, so
+/// previously-owned IDs remain tracked. The only IDs now on the device but not
+/// owned by that manifest are the newly-scheduled ones; this result records how
+/// completely they were cancelled and, if a cancel failed, whether a one-shot
+/// recovery write re-established tracking of the still-scheduled IDs.
+class CalendarReminderRollbackResult {
+  const CalendarReminderRollbackResult({
+    this.rollbackCancelledCount = 0,
+    this.rollbackFailedCount = 0,
+    this.recoveryWriteAttempted = false,
+    this.recoveryManifestPersisted = false,
+  });
+
+  /// Newly-scheduled IDs successfully cancelled (rolled back).
+  final int rollbackCancelledCount;
+
+  /// Newly-scheduled IDs whose rollback cancellation failed and which are
+  /// therefore still on the device.
+  final int rollbackFailedCount;
+
+  /// Whether a one-shot recovery manifest write was attempted (only when at
+  /// least one rollback cancel failed, leaving an untracked scheduled ID).
+  final bool recoveryWriteAttempted;
+
+  /// Whether that recovery write persisted successfully.
+  final bool recoveryManifestPersisted;
+
+  /// True when the rollback fully undid the new IDs, or when the recovery write
+  /// re-tracked every ID that could not be cancelled.
+  bool get isFullySuccessful =>
+      rollbackFailedCount == 0 ||
+      (recoveryWriteAttempted && recoveryManifestPersisted);
+
+  @override
+  String toString() =>
+      'CalendarReminderRollbackResult(cancelled: $rollbackCancelledCount, '
+      'failed: $rollbackFailedCount, recoveryAttempted: $recoveryWriteAttempted, '
+      'recoveryPersisted: $recoveryManifestPersisted)';
 }
 
 /// Structured, log-safe outcome of a targeted calendar-reminder cleanup
@@ -91,7 +153,10 @@ class CalendarReminderDisableResult {
   /// were cancelled, or rewritten to retain the failed IDs).
   final bool manifestPersisted;
 
-  bool get hasFailures => failedCount > 0;
+  /// A cleanup has failures when a cancellation failed *or* the resulting
+  /// manifest state could not be persisted — a persistence failure means the
+  /// cleanup did not fully complete and must be retried, so it is not success.
+  bool get hasFailures => failedCount > 0 || !manifestPersisted;
 
   /// True only when nothing was left owned and the manifest state persisted.
   bool get isFullyClean => failedCount == 0 && manifestPersisted;
@@ -265,17 +330,26 @@ class LocalCalendarNotificationService {
   ///   * **stale** — previously owned, no longer desired: cancelled individually.
   ///
   /// Operation order:
-  ///   1. Load and validate the existing manifest.
-  ///   2. Build the desired entries (with fingerprints).
+  ///   1. Load and validate the existing manifest (bail conservatively if it is
+  ///      corrupt — ownership is unknown, so nothing is scheduled or cancelled).
+  ///   2. Build the desired entries (with fingerprints), scoped to [ownerKey].
   ///   3. Schedule new and changed entries.
-  ///   4. Cancel stale entries individually.
+  ///   4. Cancel stale entries individually (including entries owned by another
+  ///      account, which are never treated as unchanged for [ownerKey]).
   ///   5. Persist a manifest reflecting what is actually scheduled — a
   ///      notification that failed to schedule is never recorded as scheduled.
   ///      If persistence fails, roll back newly-scheduled IDs (see
   ///      [_rollbackAfterSaveFailure]) so nothing becomes untracked.
+  ///
+  /// [ownerKey] is the privacy-safe key of the signed-in account these reminders
+  /// belong to. Entries whose owner does not match are targeted for cleanup and
+  /// re-scheduled under the current owner, so a shared device never interprets
+  /// one account's reminders as another's. A `null` [ownerKey] is the
+  /// account-agnostic path (legacy data and account-independent tests).
   Future<CalendarReconciliationResult> reconcileCalendarReminders(
     List<ClientEvent> events, {
     DateTime? now,
+    String? ownerKey,
   }) async {
     final at = now ?? DateTime.now();
 
@@ -283,10 +357,30 @@ class LocalCalendarNotificationService {
       events,
       now: at,
       maxCandidates: _maxScheduled,
+      ownerKey: ownerKey,
     );
 
     final prefs = preferences;
-    final previous = await prefs.loadCalendarReminderManifest();
+    final loadResult = await prefs.loadCalendarReminderManifestResult();
+    if (loadResult.isCorrupt) {
+      // Ownership is unknown. Do not schedule or cancel anything, and do not
+      // overwrite the stored value — report corruption so the caller can retry
+      // or diagnose. Never a global cancel.
+      _debugLog('reconcile skipped: manifest corrupt');
+      return CalendarReconciliationResult(
+        eventsFetched: events.length,
+        eligibleCandidates: candidates.length,
+        scheduledCount: 0,
+        updatedCount: 0,
+        cancelledCount: 0,
+        unchangedCount: 0,
+        failedCount: 0,
+        manifestPersisted: false,
+        manifestCorrupt: true,
+        completedAt: at,
+      );
+    }
+    final previous = loadResult.manifest;
     final previousById = <int, CalendarReminderManifestEntry>{
       for (final entry in previous.entries) entry.notificationId: entry,
     };
@@ -318,33 +412,51 @@ class LocalCalendarNotificationService {
       for (final e in desiredById.entries) e.key: scheduleFingerprint(e.value),
     };
 
-    final previousIds = previousById.keys.toSet();
     final desiredIds = desiredById.keys.toSet();
 
-    final staleIds = previousIds.difference(desiredIds);
-    final newIds = desiredIds.difference(previousIds);
-    final commonIds = desiredIds.intersection(previousIds);
-
-    // Split shared IDs into unchanged (fingerprint matches) and changed
-    // (fingerprint missing — e.g. a migrated legacy entry — or different).
+    // Classify every previously-owned ID and every desired ID, treating owner
+    // mismatch as "not the current account's" so a foreign or legacy entry is
+    // never classified as unchanged. Owner-scoped IDs make a cross-account
+    // collision astronomically unlikely, but the owner check makes it explicit.
+    final staleIds = <int>{};
+    final newIds = <int>{};
     final changedIds = <int>{};
     final unchangedIds = <int>{};
-    for (final id in commonIds) {
-      final prevFp = previousById[id]!.fingerprint;
-      if (prevFp != null && prevFp == desiredFingerprint[id]) {
-        unchangedIds.add(id);
+
+    for (final id in previousById.keys) {
+      if (!desiredIds.contains(id)) staleIds.add(id);
+    }
+    for (final id in desiredIds) {
+      final prev = previousById[id];
+      if (prev == null || prev.ownerKey != ownerKey) {
+        // Not owned by the current account (new, foreign, or legacy) — schedule
+        // fresh under the current owner. A same-ID foreign entry is re-scheduled
+        // in place (which replaces the platform notification), so it is not also
+        // added to [staleIds].
+        if (prev == null) {
+          newIds.add(id);
+        } else {
+          changedIds.add(id);
+        }
       } else {
-        changedIds.add(id);
+        final prevFp = prev.fingerprint;
+        if (prevFp != null && prevFp == desiredFingerprint[id]) {
+          unchangedIds.add(id);
+        } else {
+          changedIds.add(id);
+        }
       }
     }
 
     // Entries believed to be on the device after this pass, each carrying the
-    // fingerprint of the content actually scheduled for that ID.
+    // fingerprint of the content actually scheduled for that ID and the current
+    // owner key.
     final keptEntries = <int, CalendarReminderManifestEntry>{};
     for (final id in unchangedIds) {
       keptEntries[id] = CalendarReminderManifestEntry(
         notificationId: id,
         fingerprint: desiredFingerprint[id],
+        ownerKey: ownerKey,
       );
     }
 
@@ -366,6 +478,7 @@ class LocalCalendarNotificationService {
         keptEntries[id] = CalendarReminderManifestEntry(
           notificationId: id,
           fingerprint: desiredFingerprint[id],
+          ownerKey: ownerKey,
         );
       } else {
         failed++;
@@ -381,11 +494,12 @@ class LocalCalendarNotificationService {
         keptEntries[id] = CalendarReminderManifestEntry(
           notificationId: id,
           fingerprint: desiredFingerprint[id],
+          ownerKey: ownerKey,
         );
       } else {
-        // Replacement failed: the previous (stale-content) notification is
-        // still on the device and still owned. Keep the PREVIOUS fingerprint so
-        // it is retried next pass.
+        // Replacement failed: the previous notification is still on the device
+        // and still owned. Keep the PREVIOUS entry (fingerprint and owner) so it
+        // is retried next pass.
         failed++;
         keptEntries[id] = previousById[id]!;
       }
@@ -414,16 +528,18 @@ class LocalCalendarNotificationService {
     );
 
     var manifestPersisted = true;
+    CalendarReminderRollbackResult? rollback;
     try {
       await prefs.saveCalendarReminderManifest(finalManifest);
     } catch (e) {
       manifestPersisted = false;
       _debugLog('manifest persist failed (${_errorCategory(e)})');
-      await _rollbackAfterSaveFailure(
+      rollback = await _rollbackAfterSaveFailure(
         prefs: prefs,
         previous: previous,
         newlyScheduledIds: newlyScheduledIds,
         desiredFingerprint: desiredFingerprint,
+        ownerKey: ownerKey,
       );
     }
 
@@ -436,13 +552,15 @@ class LocalCalendarNotificationService {
       unchangedCount: unchangedIds.length,
       failedCount: failed,
       manifestPersisted: manifestPersisted,
+      rollback: rollback,
       completedAt: at,
     );
     _debugLog('reconcile complete: $result');
     return result;
   }
 
-  /// Recovers from a failed final manifest write.
+  /// Recovers from a failed final manifest write, returning a structured
+  /// [CalendarReminderRollbackResult] describing how completely it recovered.
   ///
   /// Because the write failed, the previous manifest is still on disk untouched
   /// — previously-owned changed and stale IDs remain tracked and retryable. The
@@ -451,24 +569,31 @@ class LocalCalendarNotificationService {
   /// cancel also fails, that ID is genuinely still scheduled and untracked, so
   /// a single recovery manifest write (previous entries plus the still-owned
   /// IDs) is attempted rather than silently discarding the condition.
-  Future<void> _rollbackAfterSaveFailure({
+  Future<CalendarReminderRollbackResult> _rollbackAfterSaveFailure({
     required CaleePreferences prefs,
     required CalendarReminderManifest previous,
     required Set<int> newlyScheduledIds,
     required Map<int, String> desiredFingerprint,
+    required String? ownerKey,
   }) async {
-    if (newlyScheduledIds.isEmpty) return;
+    if (newlyScheduledIds.isEmpty) {
+      return const CalendarReminderRollbackResult();
+    }
 
+    var rolledBack = 0;
     final failedRollback = <int>[];
     for (final id in newlyScheduledIds) {
       try {
         await cancelNotification(id);
+        rolledBack++;
       } catch (e) {
         failedRollback.add(id);
         _debugLog('rollback cancel failed for id=$id (${_errorCategory(e)})');
       }
     }
-    if (failedRollback.isEmpty) return;
+    if (failedRollback.isEmpty) {
+      return CalendarReminderRollbackResult(rollbackCancelledCount: rolledBack);
+    }
 
     // Some newly-scheduled IDs are still on the device but untracked. Attempt
     // ONE recovery write re-establishing tracking: previous entries plus the
@@ -480,8 +605,10 @@ class LocalCalendarNotificationService {
       recoveryById[id] = CalendarReminderManifestEntry(
         notificationId: id,
         fingerprint: desiredFingerprint[id],
+        ownerKey: ownerKey,
       );
     }
+    var recoveryPersisted = false;
     try {
       await prefs.saveCalendarReminderManifest(
         CalendarReminderManifest(
@@ -490,9 +617,16 @@ class LocalCalendarNotificationService {
           lastReconciledAt: previous.lastReconciledAt,
         ),
       );
+      recoveryPersisted = true;
     } catch (e) {
       _debugLog('recovery manifest write failed (${_errorCategory(e)})');
     }
+    return CalendarReminderRollbackResult(
+      rollbackCancelledCount: rolledBack,
+      rollbackFailedCount: failedRollback.length,
+      recoveryWriteAttempted: true,
+      recoveryManifestPersisted: recoveryPersisted,
+    );
   }
 
   /// Targeted cleanup of the calendar reminders this app scheduled.
@@ -505,7 +639,19 @@ class LocalCalendarNotificationService {
   /// swallowed.
   Future<CalendarReminderDisableResult> disableCalendarReminders() async {
     final prefs = preferences;
-    final manifest = await prefs.loadCalendarReminderManifest();
+    final loadResult = await prefs.loadCalendarReminderManifestResult();
+    if (loadResult.isCorrupt) {
+      // Ownership is unknown, so we cannot safely target IDs and must never fall
+      // back to a global cancel. Leave the stored value intact and report the
+      // cleanup as not complete so it is retried once the manifest is readable.
+      _debugLog('disable skipped: manifest corrupt');
+      return const CalendarReminderDisableResult(
+        cancelledCount: 0,
+        failedCount: 0,
+        manifestPersisted: false,
+      );
+    }
+    final manifest = loadResult.manifest;
 
     var cancelled = 0;
     final retained = <CalendarReminderManifestEntry>[];

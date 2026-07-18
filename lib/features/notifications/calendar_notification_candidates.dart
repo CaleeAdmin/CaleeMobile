@@ -6,12 +6,19 @@ class CalendarNotificationCandidate {
     required this.reminderTime,
     required this.startLocal,
     required this.notificationId,
+    this.ownerKey,
   });
 
   final ClientEvent event;
   final DateTime reminderTime;
   final DateTime startLocal;
   final int notificationId;
+
+  /// Privacy-safe digest of the account this candidate's notification belongs
+  /// to, or `null` for the account-agnostic (legacy/test) path. Folded into the
+  /// notification ID and schedule fingerprint so identical events under
+  /// different accounts never collide.
+  final String? ownerKey;
 }
 
 /// Default number of days to look ahead when selecting reminder candidates.
@@ -40,6 +47,7 @@ List<CalendarNotificationCandidate> buildNotificationCandidates(
   Duration reminderOffset = const Duration(minutes: 10),
   Duration horizon = kCalendarReminderHorizon,
   int? maxCandidates,
+  String? ownerKey,
 }) {
   final cutoff = now.add(horizon);
   final result = <CalendarNotificationCandidate>[];
@@ -59,7 +67,8 @@ List<CalendarNotificationCandidate> buildNotificationCandidates(
         event: event,
         reminderTime: reminderTime,
         startLocal: startLocal,
-        notificationId: notificationIdForEvent(event),
+        notificationId: notificationIdForEvent(event, ownerKey: ownerKey),
+        ownerKey: ownerKey,
       ),
     );
   }
@@ -73,13 +82,33 @@ List<CalendarNotificationCandidate> buildNotificationCandidates(
   return result;
 }
 
-/// Derives a stable 31-bit notification ID from an event's identity fields.
+/// Derives a stable 31-bit notification ID from an event's identity fields,
+/// scoped to the owning account.
 ///
 /// Recurring occurrences differ by [ClientEvent.occurrenceId] and/or
-/// [ClientEvent.startsAt], so each occurrence gets a stable, distinct ID.
-int notificationIdForEvent(ClientEvent event) {
-  final key = '${event.id}|${event.occurrenceId ?? ''}|${event.startsAt}';
+/// [ClientEvent.startsAt], so each occurrence gets a stable, distinct ID. When
+/// [ownerKey] is provided it is folded into the input so identical events under
+/// two different accounts produce different IDs — preventing one account's
+/// reminders from being interpreted as another's on a shared device. A `null`
+/// [ownerKey] preserves the historical account-agnostic ID (used by legacy
+/// data and account-independent tests).
+int notificationIdForEvent(ClientEvent event, {String? ownerKey}) {
+  final identity = '${event.id}|${event.occurrenceId ?? ''}|${event.startsAt}';
+  final key = ownerKey == null ? identity : '$ownerKey|$identity';
   return _fnv1a32(key, _fnvOffsetBasis) & 0x7FFFFFFF;
+}
+
+/// Derives a deterministic, privacy-safe owner key from a raw [accountId].
+///
+/// The key is a non-reversible digest — the raw account ID is never persisted in
+/// the manifest or folded verbatim into a notification ID. Stable across app
+/// launches for the same account, and distinct across accounts.
+String reminderOwnerKey(String accountId) {
+  final canonical = 'owner-v3|$accountId';
+  final a = _fnv1a32(canonical, _fnvOffsetBasis);
+  final b = _fnv1a32(canonical, _fnvAltOffsetBasis);
+  return a.toRadixString(16).padLeft(8, '0') +
+      b.toRadixString(16).padLeft(8, '0');
 }
 
 /// A deterministic, privacy-safe fingerprint of everything that affects the
@@ -94,6 +123,7 @@ int notificationIdForEvent(ClientEvent event) {
 /// identity strings, not runtime object identity or `hashCode`.
 ///
 /// Inputs (all of which change the scheduled notification):
+/// * the owning account key;
 /// * the notification ID;
 /// * the reminder trigger instant;
 /// * the rendered body inputs (event title and local start instant);
@@ -106,7 +136,8 @@ String scheduleFingerprint(CalendarNotificationCandidate candidate) {
   final trigger = candidate.reminderTime.toUtc().microsecondsSinceEpoch;
   final start = candidate.startLocal.toUtc().microsecondsSinceEpoch;
   final canonical = [
-    'v2',
+    'v3',
+    'owner=${candidate.ownerKey ?? ''}',
     'id=${candidate.notificationId}',
     'trigger=$trigger',
     'start=$start',

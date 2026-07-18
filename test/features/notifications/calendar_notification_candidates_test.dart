@@ -316,4 +316,85 @@ void main() {
       );
     });
   });
+
+  group('reminderOwnerKey', () {
+    test('is deterministic and distinct across accounts', () {
+      expect(reminderOwnerKey('acct-A'), reminderOwnerKey('acct-A'));
+      expect(reminderOwnerKey('acct-A'), isNot(reminderOwnerKey('acct-B')));
+    });
+
+    test(
+      'is a fixed-width hex digest that does not embed the raw account ID',
+      () {
+        final key = reminderOwnerKey('super-secret-account-id');
+        expect(key, matches(RegExp(r'^[0-9a-f]{16}$')));
+        expect(key.contains('secret'), isFalse);
+      },
+    );
+  });
+
+  group('account isolation — notification identity', () {
+    test(
+      'identical events under two accounts get different notification IDs',
+      () {
+        final event = _event('e1', startsAt: '2026-07-05T09:00:00');
+        final keyA = reminderOwnerKey('acct-A');
+        final keyB = reminderOwnerKey('acct-B');
+
+        final idA = notificationIdForEvent(event, ownerKey: keyA);
+        final idB = notificationIdForEvent(event, ownerKey: keyB);
+
+        expect(idA, isNot(idB));
+        // Still stable per account and within the valid 31-bit range.
+        expect(idA, notificationIdForEvent(event, ownerKey: keyA));
+        expect(idA, isNonNegative);
+        expect(idA, lessThanOrEqualTo(0x7FFFFFFF));
+      },
+    );
+
+    test('a null owner preserves the historical account-agnostic ID', () {
+      final event = _event('e1', startsAt: '2026-07-05T09:00:00');
+      expect(
+        notificationIdForEvent(event),
+        notificationIdForEvent(event, ownerKey: null),
+      );
+    });
+
+    test('identical events under two accounts get different fingerprints', () {
+      final event = _event('e1', startsAt: '2026-07-05T09:00:00');
+      final keyA = reminderOwnerKey('acct-A');
+      final keyB = reminderOwnerKey('acct-B');
+
+      final candA = buildNotificationCandidates(
+        [event],
+        now: _now,
+        ownerKey: keyA,
+      ).single;
+      final candB = buildNotificationCandidates(
+        [event],
+        now: _now,
+        ownerKey: keyB,
+      ).single;
+
+      expect(scheduleFingerprint(candA), isNot(scheduleFingerprint(candB)));
+    });
+
+    test(
+      'buildNotificationCandidates threads the owner into ID and candidate',
+      () {
+        final event = _event('e1', startsAt: '2026-07-05T09:00:00');
+        final keyA = reminderOwnerKey('acct-A');
+        final cand = buildNotificationCandidates(
+          [event],
+          now: _now,
+          ownerKey: keyA,
+        ).single;
+        expect(cand.ownerKey, keyA);
+        expect(
+          cand.notificationId,
+          notificationIdForEvent(event, ownerKey: keyA),
+        );
+      },
+    );
+  });
 }
