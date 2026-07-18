@@ -110,7 +110,7 @@ class _RecordingCoordinator extends CalendarReminderCoordinator {
   int endSessionCount = 0;
 
   @override
-  int beginSession({required String accountId}) {
+  CalendarReminderSessionStart beginSession({required String accountId}) {
     begunAccounts.add(accountId);
     return super.beginSession(accountId: accountId);
   }

@@ -786,6 +786,65 @@ void main() {
     );
   });
 
+  group('owner key derivation + empty account (P3/P6)', () {
+    test('beginSession with an empty account ID is skipped: no session begun, '
+        'no owner key derived', () {
+      final coord = _make(hub: _FakeHub(), notifs: _FakeNotifs());
+      final gen0 = coord.sessionGeneration;
+      final result = coord.beginSession(accountId: '');
+      expect(result, CalendarReminderSessionStart.skippedEmptyAccount);
+      expect(
+        coord.sessionGeneration,
+        gen0,
+        reason: 'an empty account must not begin a session',
+      );
+    });
+
+    test('a real account begins a session and reconciliation uses a v4 '
+        'cryptographic owner key', () async {
+      final notifs = _FakeNotifs();
+      final coord = _make(hub: _FakeHub(), notifs: notifs);
+      expect(
+        coord.beginSession(accountId: 'acct-A'),
+        CalendarReminderSessionStart.started,
+      );
+      await coord.refresh(
+        accessToken: 'tok',
+        reason: CalendarReminderRefreshReason.sessionRestored,
+      );
+      expect(notifs.reconcileOwnerKeys, hasLength(1));
+      expect(
+        notifs.reconcileOwnerKeys.single,
+        matches(RegExp(r'^v4:[0-9a-f]{64}$')),
+      );
+    });
+
+    test(
+      'different accounts derive different owner keys for reconciliation',
+      () async {
+        final notifs = _FakeNotifs();
+        final coord = _make(hub: _FakeHub(), notifs: notifs);
+        coord.beginSession(accountId: 'acct-A');
+        await coord.refresh(
+          accessToken: 'tok',
+          reason: CalendarReminderRefreshReason.eventCreated,
+        );
+        coord.beginSession(accountId: 'acct-B');
+        await coord.refresh(
+          accessToken: 'tok',
+          reason: CalendarReminderRefreshReason.eventCreated,
+        );
+        expect(notifs.reconcileOwnerKeys, hasLength(2));
+        expect(
+          notifs.reconcileOwnerKeys[0],
+          isNot(notifs.reconcileOwnerKeys[1]),
+          reason:
+              'account A and account B must own reminders under distinct keys',
+        );
+      },
+    );
+  });
+
   group('session invalidation (Defect 1)', () {
     test('sign-out during a blocked fetch prevents reconciliation', () async {
       final hub = _GatedHub();

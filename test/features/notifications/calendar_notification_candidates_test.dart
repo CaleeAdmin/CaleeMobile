@@ -317,20 +317,59 @@ void main() {
     });
   });
 
-  group('reminderOwnerKey', () {
+  group('reminderOwnerKey (v4 cryptographic)', () {
     test('is deterministic and distinct across accounts', () {
       expect(reminderOwnerKey('acct-A'), reminderOwnerKey('acct-A'));
       expect(reminderOwnerKey('acct-A'), isNot(reminderOwnerKey('acct-B')));
     });
 
-    test(
-      'is a fixed-width hex digest that does not embed the raw account ID',
-      () {
-        final key = reminderOwnerKey('super-secret-account-id');
-        expect(key, matches(RegExp(r'^[0-9a-f]{16}$')));
-        expect(key.contains('secret'), isFalse);
-      },
-    );
+    test('is a v4-tagged 256-bit SHA-256 token that does not embed the raw '
+        'account ID', () {
+      final key = reminderOwnerKey('super-secret-account-id');
+      expect(key, matches(RegExp(r'^v4:[0-9a-f]{64}$')));
+      expect(isV4OwnerKey(key), isTrue);
+      expect(key.contains('secret'), isFalse);
+    });
+
+    test('matches fixed SHA-256 test vectors (cross-launch determinism)', () {
+      // Vectors are v4: + SHA-256("calee-calendar-reminder-owner-v4 " + id).
+      // Any change to the namespace/algorithm would break these on purpose.
+      expect(
+        reminderOwnerKey('acct-A'),
+        'v4:e10075055104256cc75353a67d70dc0a7c0627c7e6a220dfee7e6054acefe9b0',
+      );
+      expect(
+        reminderOwnerKey('acct-B'),
+        'v4:2d77198c8652f0d3b23fdeb64fbb23969169d877e5f02aeb1c97cdbab8a70246',
+      );
+      expect(
+        reminderOwnerKey('super-secret-account-id'),
+        'v4:cc9f65ba397e52e61a6fba8d769d2c0261039cebc049fa896d2da64220cf3630',
+      );
+    });
+
+    test('rejects an empty account ID (no owner key from an empty string)', () {
+      expect(() => reminderOwnerKey(''), throwsArgumentError);
+    });
+
+    test('isV4OwnerKey rejects legacy/foreign owner-key formats', () {
+      // A legacy two-pass 32-bit FNV key was 16 hex chars, no scheme tag.
+      expect(isV4OwnerKey('0123456789abcdef'), isFalse);
+      expect(isV4OwnerKey('ownerA'), isFalse);
+      expect(isV4OwnerKey('v4:xyz'), isFalse);
+      expect(isV4OwnerKey('v4:${'a' * 63}'), isFalse); // one char short
+    });
+
+    test('different accounts with identical event IDs and times still get '
+        'different notification identities', () {
+      final event = _event('same-id', startsAt: '2026-07-05T09:00:00');
+      final keyA = reminderOwnerKey('acct-A');
+      final keyB = reminderOwnerKey('acct-B');
+      expect(
+        notificationIdForEvent(event, ownerKey: keyA),
+        isNot(notificationIdForEvent(event, ownerKey: keyB)),
+      );
+    });
   });
 
   group('account isolation — notification identity', () {

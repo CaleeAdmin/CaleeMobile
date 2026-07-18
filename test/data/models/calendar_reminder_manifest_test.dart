@@ -1,6 +1,11 @@
 import 'package:calee_mobile/data/models/calendar_reminder_manifest.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+// Well-formed current-scheme (v4) owner tokens: the `v4:` tag + 64 hex chars.
+// Used wherever the parser must retain/compare an owner in the current schema.
+final String _ownerA = 'v4:${'a' * 64}';
+final String _ownerB = 'v4:${'b' * 64}';
+
 void main() {
   group('CalendarReminderManifestEntry', () {
     test('round-trips with a fingerprint', () {
@@ -198,22 +203,53 @@ void main() {
     });
   });
 
-  group('CalendarReminderManifest — v3 schema and migration', () {
-    test('round-trips v3 entries with owners through JSON', () {
+  group('CalendarReminderManifest — v4 schema and migration', () {
+    test('round-trips v4 entries with cryptographic owners through JSON', () {
       final manifest = CalendarReminderManifest(
         version: CalendarReminderManifest.currentVersion,
-        entries: const [
+        entries: [
           CalendarReminderManifestEntry(
             notificationId: 1,
             fingerprint: 'aa',
-            ownerKey: 'ownerA',
+            ownerKey: _ownerA,
           ),
         ],
       );
       final restored = CalendarReminderManifest.parse(manifest.toJson());
       expect(restored.status, CalendarReminderManifestLoadStatus.loaded);
-      expect(restored.manifest.entryFor(1)!.ownerKey, 'ownerA');
-      expect(manifest.toJson()['version'], 3);
+      expect(restored.manifest.entryFor(1)!.ownerKey, _ownerA);
+      expect(manifest.toJson()['version'], 4);
+    });
+
+    test('v3 legacy migration drops FNV owner keys (re-owned), keeps fp', () {
+      // A v3 entry carried a non-cryptographic FNV owner key (16 hex). On load
+      // it must be dropped (never interpreted as a v4 key) so the entry is
+      // re-owned by the current account on the next reconciliation.
+      final result = CalendarReminderManifest.parse({
+        'version': 3,
+        'entries': [
+          {'id': 1, 'fp': 'aa', 'owner': '0123456789abcdef'},
+        ],
+      });
+      expect(result.status, CalendarReminderManifestLoadStatus.recovered);
+      expect(result.manifest.entryFor(1)!.fingerprint, 'aa');
+      expect(
+        result.manifest.entryFor(1)!.ownerKey,
+        isNull,
+        reason: 'a legacy FNV owner is never interpreted as a v4 owner key',
+      );
+    });
+
+    test('a present-but-non-v4 owner in the current schema is dropped '
+        '(recovered), never trusted', () {
+      final result = CalendarReminderManifest.parse({
+        'version': CalendarReminderManifest.currentVersion,
+        'entries': [
+          {'id': 1, 'fp': 'aa', 'owner': 'ownerA'}, // wrong algorithm/format
+        ],
+      });
+      expect(result.status, CalendarReminderManifestLoadStatus.recovered);
+      expect(result.manifest.entryFor(1)!.ownerKey, isNull);
     });
 
     test('v1 migration yields null fingerprint and null owner', () {
@@ -265,7 +301,10 @@ void main() {
 
     test('loaded for a valid (even empty) current-schema manifest', () {
       expect(
-        CalendarReminderManifest.parse({'version': 3, 'entries': []}).status,
+        CalendarReminderManifest.parse({
+          'version': CalendarReminderManifest.currentVersion,
+          'entries': [],
+        }).status,
         CalendarReminderManifestLoadStatus.loaded,
       );
     });
@@ -273,7 +312,7 @@ void main() {
     test('corrupt when a current-version value has no entries list', () {
       // Our writer always emits an entries list; its absence means malformed.
       final result = CalendarReminderManifest.parse({
-        'version': 3,
+        'version': CalendarReminderManifest.currentVersion,
         'entries': 'garbage',
       });
       expect(result.status, CalendarReminderManifestLoadStatus.corrupt);
@@ -306,7 +345,7 @@ void main() {
     test('a floating-point version does not crash', () {
       // 3.0 coerces to the current version; a non-whole float is unknown.
       expect(
-        CalendarReminderManifest.parse({'version': 3.0, 'entries': []}).status,
+        CalendarReminderManifest.parse({'version': 4.0, 'entries': []}).status,
         CalendarReminderManifestLoadStatus.loaded,
       );
       expect(
@@ -320,7 +359,7 @@ void main() {
 
     test('negative and out-of-range IDs are rejected', () {
       final result = CalendarReminderManifest.parse({
-        'version': 3,
+        'version': CalendarReminderManifest.currentVersion,
         'entries': [
           {'id': -1},
           {'id': 0x80000000},
@@ -332,7 +371,7 @@ void main() {
 
     test('a malformed entry does not invent an ID', () {
       final result = CalendarReminderManifest.parse({
-        'version': 3,
+        'version': CalendarReminderManifest.currentVersion,
         'entries': [
           {'fp': 'x', 'owner': 'y'},
           {'id': 'nope'},
@@ -346,7 +385,7 @@ void main() {
       // Priority 4: an ambiguous ownership record must not be silently resolved
       // by keeping the first entry and dropping a conflicting duplicate.
       final result = CalendarReminderManifest.parse({
-        'version': 3,
+        'version': CalendarReminderManifest.currentVersion,
         'entries': [
           {'id': 7, 'fp': 'first'},
           {'id': 7, 'fp': 'second'},
@@ -360,10 +399,10 @@ void main() {
       'current-schema duplicate IDs with conflicting owners are corrupt',
       () {
         final result = CalendarReminderManifest.parse({
-          'version': 3,
+          'version': CalendarReminderManifest.currentVersion,
           'entries': [
-            {'id': 7, 'fp': 'same', 'owner': 'ownerA'},
-            {'id': 7, 'fp': 'same', 'owner': 'ownerB'},
+            {'id': 7, 'fp': 'same', 'owner': _ownerA},
+            {'id': 7, 'fp': 'same', 'owner': _ownerB},
           ],
         });
         expect(result.status, CalendarReminderManifestLoadStatus.corrupt);
@@ -374,10 +413,10 @@ void main() {
       // Identical duplicates carry no ownership conflict, so they are collapsed
       // — but that is a repair, so the load is `recovered`, never `loaded`.
       final result = CalendarReminderManifest.parse({
-        'version': 3,
+        'version': CalendarReminderManifest.currentVersion,
         'entries': [
-          {'id': 7, 'fp': 'same', 'owner': 'ownerA'},
-          {'id': 7, 'fp': 'same', 'owner': 'ownerA'},
+          {'id': 7, 'fp': 'same', 'owner': _ownerA},
+          {'id': 7, 'fp': 'same', 'owner': _ownerA},
         ],
       });
       expect(result.status, CalendarReminderManifestLoadStatus.recovered);
@@ -414,7 +453,7 @@ void main() {
         'empty current-schema entries is a valid loaded (empty) manifest',
         () {
           final result = CalendarReminderManifest.parse({
-            'version': 3,
+            'version': CalendarReminderManifest.currentVersion,
             'entries': <dynamic>[],
           });
           expect(result.status, CalendarReminderManifestLoadStatus.loaded);
@@ -424,10 +463,10 @@ void main() {
 
       test('all-valid current-schema entries load fully', () {
         final result = CalendarReminderManifest.parse({
-          'version': 3,
+          'version': CalendarReminderManifest.currentVersion,
           'entries': [
-            {'id': 1, 'fp': 'a', 'owner': 'ownerA'},
-            {'id': 2, 'fp': 'b', 'owner': 'ownerA'},
+            {'id': 1, 'fp': 'a', 'owner': _ownerA},
+            {'id': 2, 'fp': 'b', 'owner': _ownerA},
           ],
         });
         expect(result.status, CalendarReminderManifestLoadStatus.loaded);
@@ -437,9 +476,9 @@ void main() {
       test('a mix of valid and malformed current-schema entries is RECOVERED, '
           'not reported as fully loaded', () {
         final result = CalendarReminderManifest.parse({
-          'version': 3,
+          'version': CalendarReminderManifest.currentVersion,
           'entries': [
-            {'id': 1, 'fp': 'a', 'owner': 'ownerA'},
+            {'id': 1, 'fp': 'a', 'owner': _ownerA},
             {'fp': 'no-id'}, // dropped: no usable ID
             'garbage', // dropped: not a map
             {'id': 2},
@@ -457,7 +496,7 @@ void main() {
         'a non-empty current-schema list with zero valid entries is CORRUPT',
         () {
           final result = CalendarReminderManifest.parse({
-            'version': 3,
+            'version': CalendarReminderManifest.currentVersion,
             'entries': [
               {'fp': 'x', 'owner': 'y'}, // no id
               {'id': 'nope'}, // bad id
@@ -479,7 +518,7 @@ void main() {
         () {
           final oversized = 'z' * 200; // exceeds the persisted-digest bound
           final result = CalendarReminderManifest.parse({
-            'version': 3,
+            'version': CalendarReminderManifest.currentVersion,
             'entries': [
               {'id': 1, 'fp': 'a', 'owner': oversized},
             ],
@@ -500,15 +539,15 @@ void main() {
         'an oversized/malformed fingerprint is dropped and reported recovered',
         () {
           final result = CalendarReminderManifest.parse({
-            'version': 3,
+            'version': CalendarReminderManifest.currentVersion,
             'entries': [
-              {'id': 1, 'fp': 'y' * 200, 'owner': 'ownerA'},
+              {'id': 1, 'fp': 'y' * 200, 'owner': _ownerA},
             ],
           });
           expect(result.status, CalendarReminderManifestLoadStatus.recovered);
           final entry = result.manifest.entryFor(1)!;
           expect(entry.fingerprint, isNull);
-          expect(entry.ownerKey, 'ownerA');
+          expect(entry.ownerKey, _ownerA);
         },
       );
     },
