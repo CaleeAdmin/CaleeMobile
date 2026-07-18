@@ -1,30 +1,43 @@
 import 'package:flutter/material.dart';
 
 abstract final class CaleeColors {
-  // Scaffold / page backgrounds
-  static const scaffoldBackground = Color(0xFFF2F2F7);
-  static const groupedBackground = Color(0xFFF2F2F7);
+  // Neutral application backgrounds. Family-specific warm surfaces can be
+  // introduced later without changing the shared Calee brand colour.
+  static const scaffoldBackground = Color(0xFFF3F7F6);
+  static const groupedBackground = Color(0xFFF3F7F6);
 
-  // Surface (cards, sheets)
+  // Surfaces (cards, sheets, selected rows)
   static const surface = Colors.white;
+  static const surfaceSubtle = Color(0xFFF0F7F5);
 
-  // Primary brand
-  static const primary = Color(0xFF3A7D44);
-  static const primaryLight = Color(0xFF5A9A5F);
+  // Shared Calee brand
+  static const primary = Color(0xFF1F6F66);
+  static const primaryDark = Color(0xFF195B55);
+  static const primaryDeep = Color(0xFF163F3B);
+  static const primaryLight = Color(0xFF4F9188);
+  static const primarySoft = Color(0xFFDDEFEA);
+
+  // Warm secondary accent for family, onboarding, and premium highlights.
+  // It must not replace the primary colour on core controls.
+  static const secondary = Color(0xFFA35F2A);
+  static const secondarySoft = Color(0xFFF4E4D5);
 
   // Text
-  static const textPrimary = Color(0xFF1C1C1E);
-  static const textSecondary = Color(0xFF6C6C70);
-  static const textTertiary = Color(0xFFAEAEB2);
+  static const textPrimary = Color(0xFF163330);
+  static const textSecondary = Color(0xFF4F625F);
+  static const textTertiary = Color(0xFF7D8E8A);
 
   // Separator / divider
-  static const separator = Color(0xFFE5E5EA);
-  static const separatorOpaque = Color(0xFFC6C6C8);
+  static const separator = Color(0xFFD5E1DE);
+  static const separatorOpaque = Color(0xFFB7C8C4);
 
-  // Destructive
-  static const destructive = Color(0xFFFF3B30);
+  // Semantic states. These remain independent from brand and calendar colours.
+  static const success = Color(0xFF2E7D5A);
+  static const warning = Color(0xFFA86300);
+  static const information = Color(0xFF2F80ED);
+  static const destructive = Color(0xFFC23B32);
 
-  // Calendar-style palette for collection dots
+  // Calendar collection colours are functional data colours, not brand tokens.
   static const dotRed = Color(0xFFFF3B30);
   static const dotOrange = Color(0xFFFF9500);
   static const dotYellow = Color(0xFFFFCC00);
@@ -69,6 +82,21 @@ abstract final class CaleeTheme {
       seedColor: CaleeColors.primary,
       brightness: Brightness.light,
       surface: CaleeColors.surface,
+    ).copyWith(
+      primary: CaleeColors.primary,
+      onPrimary: Colors.white,
+      primaryContainer: CaleeColors.primarySoft,
+      onPrimaryContainer: CaleeColors.primaryDeep,
+      secondary: CaleeColors.secondary,
+      onSecondary: Colors.white,
+      secondaryContainer: CaleeColors.secondarySoft,
+      onSecondaryContainer: CaleeColors.textPrimary,
+      error: CaleeColors.destructive,
+      onError: Colors.white,
+      surface: CaleeColors.surface,
+      onSurface: CaleeColors.textPrimary,
+      outline: CaleeColors.separatorOpaque,
+      outlineVariant: CaleeColors.separator,
     );
 
     return ThemeData(
@@ -102,7 +130,7 @@ abstract final class CaleeTheme {
       ),
       navigationBarTheme: NavigationBarThemeData(
         backgroundColor: CaleeColors.surface,
-        indicatorColor: CaleeColors.primary.withAlpha(CaleeAlpha.pct10),
+        indicatorColor: CaleeColors.primarySoft,
         labelTextStyle: WidgetStateProperty.all(
           const TextStyle(fontSize: 11, fontWeight: FontWeight.w500),
         ),
@@ -111,6 +139,11 @@ abstract final class CaleeTheme {
         color: CaleeColors.separator,
         thickness: 0.5,
         space: 0,
+      ),
+      textSelectionTheme: const TextSelectionThemeData(
+        cursorColor: CaleeColors.primary,
+        selectionColor: CaleeColors.primarySoft,
+        selectionHandleColor: CaleeColors.primary,
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
@@ -126,6 +159,17 @@ abstract final class CaleeTheme {
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(CaleeRadius.button),
           borderSide: const BorderSide(color: CaleeColors.primary, width: 1.5),
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(CaleeRadius.button),
+          borderSide: const BorderSide(color: CaleeColors.destructive),
+        ),
+        focusedErrorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(CaleeRadius.button),
+          borderSide: const BorderSide(
+            color: CaleeColors.destructive,
+            width: 1.5,
+          ),
         ),
         contentPadding: const EdgeInsets.symmetric(
           horizontal: CaleeSpacing.md,
@@ -145,7 +189,7 @@ abstract final class CaleeTheme {
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           foregroundColor: CaleeColors.primary,
-          side: const BorderSide(color: CaleeColors.separator),
+          side: const BorderSide(color: CaleeColors.separatorOpaque),
           minimumSize: const Size.fromHeight(44),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(CaleeRadius.button),
