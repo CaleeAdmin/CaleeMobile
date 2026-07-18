@@ -4,6 +4,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 
+import '../config/calee_environment.dart';
 import '../data/api/calee_hub_client.dart';
 import '../data/auth/calee_preferences.dart';
 import '../data/auth/session_store.dart';
@@ -185,7 +186,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
       _displayActivationController = testDeps.displayActivationController;
       _localSubscriptionRepo = testDeps.localSubscriptionRepo;
     } else {
-      _hubClient = CaleeHubClient();
+      _hubClient = CaleeHubClient(baseUri: CaleeEnvironment.apiBaseUri);
       final repository = AuthRepository(
         hubClient: _hubClient,
         sessionStore: SessionStore(),

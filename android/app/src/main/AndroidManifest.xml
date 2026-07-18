@@ -77,6 +77,19 @@
                     android:host="shopping" />
             </intent-filter>
 
+            <!-- Explicit custom-scheme fallback for the calendar-follow handoff.
+                 Lets the web "Open in Calee app" button force-open the app via
+                 calee://follow?t=<signed-token> when the HTTPS App Link is not
+                 intercepted by the browser. Not an App Link, so no autoVerify. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="calee"
+                    android:host="follow" />
+            </intent-filter>
+
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />

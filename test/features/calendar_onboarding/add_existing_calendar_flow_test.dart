@@ -326,7 +326,7 @@ void main() {
     );
     expect(find.text('Calendar name'), findsOneWidget);
     expect(find.text('Calendar link'), findsOneWidget);
-    expect(find.text('Add to Calee'), findsOneWidget);
+    expect(find.text('Check calendar'), findsOneWidget);
   });
 
   testWidgets('generic link explains no connected calendar service readiness', (
@@ -354,7 +354,7 @@ void main() {
       find.widgetWithText(TextFormField, 'Calendar link'),
       'https://example.com/calendar.ics',
     );
-    await tester.tap(find.text('Add to Calee'));
+    await tester.tap(find.text('Check calendar'));
     await tester.pumpAndSettle();
 
     expect(
@@ -387,7 +387,7 @@ void main() {
       find.widgetWithText(TextFormField, 'Calendar link'),
       'https://example.com/calendar.ics',
     );
-    await tester.tap(find.text('Add to Calee'));
+    await tester.tap(find.text('Check calendar'));
     await tester.pumpAndSettle();
 
     expect(

@@ -120,6 +120,20 @@ Widget _wrap({ClientBootstrap? bootstrap, CaleeHubClient? hubClient}) =>
       ),
     );
 
+// The "Connected services" section renders below the Account/Preferences/
+// Manage sections in SettingsPage's ListView. The default 800x600 test
+// surface never lays those rows out via the sliver list's cache extent, so
+// find.text() finds nothing there even though the widget exists. Widen the
+// surface instead of simulating a scroll gesture.
+Future<void> _pumpTall(WidgetTester tester, Widget widget) async {
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+  tester.view.physicalSize = const Size(800, 2400);
+  tester.view.devicePixelRatio = 1.0;
+  await tester.pumpWidget(widget);
+  await tester.pumpAndSettle();
+}
+
 void main() {
   setUp(() {
     // Mark the secure-storage → shared-prefs migration as already done so
@@ -142,6 +156,76 @@ void main() {
           const MethodChannel('plugins.it_nomads.com/flutter_secure_storage'),
           null,
         );
+  });
+
+  group('Connected services — warning subtitle', () {
+    ClientService serviceWith({
+      required String accessStatus,
+      required String calendarCredentialStatus,
+    }) => ClientService(
+      id: 'business',
+      displayName: 'Calee Business',
+      baseUrl: 'https://business.example.com',
+      launchUrl: 'https://business.example.com',
+      serviceType: 'nextcloud_portal',
+      accessStatus: accessStatus,
+      calendarCredentialStatus: calendarCredentialStatus,
+      source: 'portal',
+      capabilities: const {},
+    );
+
+    ClientBootstrap bootstrapWith(ClientService service) => ClientBootstrap(
+      account: const ClientAccount(
+        id: 'u1',
+        displayName: 'Test User',
+        primaryEmail: 'test@example.com',
+        timeZone: 'Australia/Perth',
+        status: 'active',
+      ),
+      services: [service],
+      contexts: const ClientContexts(households: [], organisations: []),
+      availableContexts: const [],
+      capabilities: const {},
+    );
+
+    testWidgets(
+      'shows "Service access needs attention" when access status is not '
+      'connected/active/healthy',
+      (tester) async {
+        final service = serviceWith(
+          accessStatus: 'pending',
+          calendarCredentialStatus: 'connected',
+        );
+        await _pumpTall(tester, _wrap(bootstrap: bootstrapWith(service)));
+
+        expect(find.text('Service access needs attention'), findsOneWidget);
+      },
+    );
+
+    testWidgets('shows "Calendar app setup needed" when access is active but '
+        'calendar credential is missing', (tester) async {
+      final service = serviceWith(
+        accessStatus: 'active',
+        calendarCredentialStatus: 'missing',
+      );
+      await _pumpTall(tester, _wrap(bootstrap: bootstrapWith(service)));
+
+      expect(find.text('Calendar app setup needed'), findsOneWidget);
+    });
+
+    testWidgets(
+      'shows "Connected" when access is active and calendar credential is '
+      'connected',
+      (tester) async {
+        final service = serviceWith(
+          accessStatus: 'active',
+          calendarCredentialStatus: 'connected',
+        );
+        await _pumpTall(tester, _wrap(bootstrap: bootstrapWith(service)));
+
+        expect(find.text('Connected'), findsOneWidget);
+      },
+    );
   });
 
   testWidgets('Settings shows "Calendars and lists" row', (tester) async {
