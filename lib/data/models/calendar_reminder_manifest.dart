@@ -2,19 +2,20 @@
 /// device, together with a privacy-safe fingerprint of the schedule that
 /// produced it and a privacy-safe key identifying the account that owns it.
 ///
-/// The [fingerprint] is a deterministic, non-reversible digest of every input
+/// The [fingerprint] is a deterministic, one-way SHA-256 digest of every input
 /// that affects the scheduled notification (trigger instant, rendered body
 /// inputs, payload identity fields, event start). It lets reconciliation detect
 /// that a notification whose numeric [notificationId] is unchanged nevertheless
 /// needs to be re-scheduled because its *content* changed — e.g. a title-only
 /// edit. A `null` fingerprint means the ID is owned but its schedule digest is
-/// unknown (a legacy manifest entry), so it must be re-scheduled once while it
-/// is still desired.
+/// unknown (a legacy manifest entry, or a value that failed the SHA-256 format
+/// check), so it must be re-scheduled once while it is still desired.
 ///
-/// The [ownerKey] is a deterministic, non-reversible digest of the account that
+/// The [ownerKey] is a deterministic, one-way SHA-256 digest of the account that
 /// scheduled the notification (never the raw account ID). A `null` owner means
-/// the entry predates account-aware ownership (a legacy v1/v2 entry) and so must
-/// not be assumed to belong to the current account.
+/// the entry predates account-aware ownership (a legacy v1/v2 entry), used a
+/// retired digest algorithm (v3 FNV), or carried a value that failed the SHA-256
+/// format check — so it must not be assumed to belong to the current account.
 class CalendarReminderManifestEntry {
   const CalendarReminderManifestEntry({
     required this.notificationId,
@@ -26,19 +27,22 @@ class CalendarReminderManifestEntry {
   final int notificationId;
 
   /// Deterministic, privacy-safe digest of the schedule that produced the
-  /// notification, or `null` when unknown (legacy/recovered entry).
+  /// notification, or `null` when unknown (legacy/recovered/untrusted entry).
   final String? fingerprint;
 
   /// Deterministic, privacy-safe digest of the owning account, or `null` when
-  /// unknown (legacy entry, or an untrusted future-schema value).
+  /// unknown (legacy entry, or an untrusted/malformed value).
   final String? ownerKey;
 
   /// Largest notification ID we accept — the non-negative signed 31-bit range,
   /// matching the IDs produced by `notificationIdForEvent`.
   static const int maxNotificationId = 0x7FFFFFFF;
 
-  /// Upper bound on a persisted digest string, so a malformed manifest cannot
-  /// force us to hold an unbounded value in memory.
+  /// Exact length of a trusted SHA-256 digest rendered as lowercase hexadecimal.
+  static const int _sha256HexLength = 64;
+
+  /// Upper bound on a persisted (legacy/untrusted) digest string, so a malformed
+  /// manifest cannot force us to hold an unbounded value in memory.
   static const int _maxDigestLength = 128;
 
   /// Returns a copy with the given fields replaced. Pass [clearFingerprint] or
@@ -67,19 +71,28 @@ class CalendarReminderManifestEntry {
   /// integer ID (so a malformed entry never invents a bogus ownership record).
   ///
   /// [trustFingerprint]/[trustOwner] gate whether the persisted digest values
-  /// are retained: an unknown future schema recovers IDs but must not trust its
-  /// fingerprints or (unless explicitly known compatible) its owner keys.
+  /// are retained at all: a legacy or unknown schema recovers IDs but must not
+  /// trust its (retired-algorithm or foreign) fingerprints/owner keys.
+  ///
+  /// [requireHexDigest] additionally gates the *format*: for the current v4
+  /// schema, a fingerprint/owner is trusted only when it is a lowercase-hex
+  /// SHA-256 digest of the required length; anything else is dropped to `null`.
   static CalendarReminderManifestEntry? tryFromJson(
     Map<dynamic, dynamic> json, {
     bool trustFingerprint = true,
     bool trustOwner = true,
+    bool requireHexDigest = false,
   }) {
     final id = _asValidId(json['id']);
     if (id == null) return null;
     return CalendarReminderManifestEntry(
       notificationId: id,
-      fingerprint: trustFingerprint ? _asBoundedString(json['fp']) : null,
-      ownerKey: trustOwner ? _asBoundedString(json['owner']) : null,
+      fingerprint: trustFingerprint
+          ? _asDigest(json['fp'], requireHex: requireHexDigest)
+          : null,
+      ownerKey: trustOwner
+          ? _asDigest(json['owner'], requireHex: requireHexDigest)
+          : null,
     );
   }
 
@@ -99,11 +112,27 @@ class CalendarReminderManifestEntry {
     return value;
   }
 
-  /// Returns [raw] as a bounded non-empty string, or `null` for anything else.
-  static String? _asBoundedString(Object? raw) {
+  /// Returns [raw] as a trusted digest string, or `null`. When [requireHex] is
+  /// true (current schema) only a lowercase-hex SHA-256 digest of the exact
+  /// required length is accepted; otherwise (legacy/untrusted contexts) any
+  /// bounded non-empty string is accepted for retention as an opaque value.
+  static String? _asDigest(Object? raw, {required bool requireHex}) {
     if (raw is! String) return null;
+    if (requireHex) return _isSha256Hex(raw) ? raw : null;
     if (raw.isEmpty || raw.length > _maxDigestLength) return null;
     return raw;
+  }
+
+  /// Whether [value] is a lowercase-hexadecimal SHA-256 digest (64 chars).
+  static bool _isSha256Hex(String value) {
+    if (value.length != _sha256HexLength) return false;
+    for (var i = 0; i < value.length; i++) {
+      final c = value.codeUnitAt(i);
+      final isDigit = c >= 0x30 && c <= 0x39; // 0-9
+      final isLowerHex = c >= 0x61 && c <= 0x66; // a-f
+      if (!isDigit && !isLowerHex) return false;
+    }
+    return true;
   }
 
   @override
@@ -125,19 +154,22 @@ class CalendarReminderManifestEntry {
 
 /// How a persisted calendar reminder manifest was loaded/parsed.
 enum CalendarReminderManifestLoadStatus {
-  /// A valid current-schema manifest was parsed cleanly.
+  /// A valid current-schema manifest was parsed cleanly (including a valid,
+  /// empty entries list).
   loaded,
 
   /// Legacy or partially-malformed but recoverable data: valid ownership IDs
-  /// were preserved, and any untrusted fingerprints/owner keys were dropped.
+  /// were preserved, and any untrusted/duplicate fingerprints/owner keys were
+  /// dropped or collapsed.
   recovered,
 
   /// No stored value was present: an empty, valid manifest.
   absent,
 
-  /// The stored value was unparseable, or an unrecoverable top-level shape.
-  /// Ownership is unknown, so the stored value must NOT be overwritten and no
-  /// notifications may be scheduled or cancelled off it.
+  /// The stored value was unparseable, an unrecoverable top-level shape, or a
+  /// current-schema entries list whose every record was invalid. Ownership is
+  /// unknown, so the stored value must NOT be overwritten and no notifications
+  /// may be scheduled or cancelled off it.
   corrupt,
 }
 
@@ -173,21 +205,25 @@ class CalendarReminderManifestLoadResult {
 ///
 /// ## Versions
 /// * **v1 (legacy):** `{ "version": 1, "ids": [int, ...] }` — ID-only, no
-///   fingerprints or owners. Read for backward compatibility and migrated on
-///   the next successful reconciliation.
+///   fingerprints or owners.
 /// * **v2 (legacy):** `{ "version": 2, "entries": [{ "id": int, "fp": str? }] }`
-///   — versioned entries carrying a schedule fingerprint but no owner.
-/// * **v3 (current):**
+///   — FNV schedule fingerprints, no owner.
+/// * **v3 (legacy):**
 ///   `{ "version": 3, "entries": [{ "id": int, "fp": str?, "owner": str? }] }`
-///   — entries also carry a privacy-safe owner key so reminders can be isolated
-///   per account on a shared device.
+///   — FNV fingerprints and FNV owner keys.
+/// * **v4 (current):** same shape as v3, but fingerprints and owner keys are
+///   one-way SHA-256 digests (lowercase hex, 64 chars). SHA-256 replaces the
+///   retired FNV digests, so v2/v3 digests are treated as untrusted legacy
+///   values on read.
 ///
-/// Reads are deliberately conservative: legacy manifests are migrated (never
-/// treated as empty), an unknown/newer manifest recovers any parseable IDs
-/// (dropping untrusted fingerprints and owner keys) rather than orphaning
-/// notifications a future build owned, and genuinely unparseable data is
-/// reported as [CalendarReminderManifestLoadStatus.corrupt] rather than
-/// collapsing to [empty] — so ownership is never silently discarded.
+/// Reads are deliberately conservative: legacy manifests (v1/v2/v3) are migrated
+/// by retaining their IDs but dropping their untrusted fingerprints/owner keys
+/// (never treated as empty); an unknown/newer manifest recovers any parseable
+/// IDs the same way rather than orphaning notifications a future build owned;
+/// and genuinely unrecoverable data — bad JSON, an unreadable top-level shape,
+/// or a current-schema entries list whose every record is invalid — is reported
+/// as [CalendarReminderManifestLoadStatus.corrupt] rather than collapsing to
+/// [empty], so ownership is never silently discarded.
 class CalendarReminderManifest {
   const CalendarReminderManifest({
     required this.version,
@@ -195,11 +231,14 @@ class CalendarReminderManifest {
     this.lastReconciledAt,
   });
 
-  /// Current manifest schema version (entries with fingerprints and owners).
-  static const int currentVersion = 3;
+  /// Current manifest schema version: SHA-256 fingerprints and owner keys.
+  static const int currentVersion = 4;
 
-  /// The v2 schema version (fingerprinted entries, no owner), still read for
-  /// migration.
+  /// The v3 schema version (FNV fingerprints and owner keys), read for migration
+  /// but no longer trusted for its digest values.
+  static const int legacyFnvOwnerVersion = 3;
+
+  /// The v2 schema version (FNV fingerprints, no owner), read for migration.
   static const int legacyFingerprintVersion = 2;
 
   /// The legacy ID-only schema version, still read for migration.
@@ -281,48 +320,17 @@ class CalendarReminderManifest {
     final idsRaw = decoded['ids'];
     final hasShape = entriesRaw is List || idsRaw is List;
 
-    // Current schema: entries carry trusted fingerprints and owner keys.
+    // Current schema (v4): strengthened validation. Trust SHA-256 fingerprints
+    // and owner keys only when they match the required lowercase-hex format.
     if (version == currentVersion) {
-      if (entriesRaw is! List) {
-        // Our own writer always emits an `entries` list (even when empty), so a
-        // current-version value without one is malformed, not a valid empty
-        // manifest — do not overwrite it.
-        return const CalendarReminderManifestLoadResult(
-          manifest: empty,
-          status: CalendarReminderManifestLoadStatus.corrupt,
-        );
-      }
-      final entries = _dedupe(
-        _parseEntries(entriesRaw, trustFingerprint: true, trustOwner: true),
-      );
-      return CalendarReminderManifestLoadResult(
-        manifest: CalendarReminderManifest(
-          version: currentVersion,
-          entries: entries,
-          lastReconciledAt: lastReconciledAt,
-        ),
-        status: CalendarReminderManifestLoadStatus.loaded,
-      );
+      return _parseCurrent(entriesRaw, lastReconciledAt);
     }
 
-    // Legacy v2: fingerprints are trusted; owners are absent (null).
-    if (version == legacyFingerprintVersion) {
-      final entries = _dedupe(
-        _parseEntries(entriesRaw, trustFingerprint: true, trustOwner: false),
-      );
-      return _recoveredOr(entries, lastReconciledAt, hadShape: hasShape);
-    }
-
-    // Legacy v1 ID-only schema.
-    if (version == legacyIdOnlyVersion) {
-      final entries = _dedupe(_parseLegacyIds(idsRaw));
-      return _recoveredOr(entries, lastReconciledAt, hadShape: hasShape);
-    }
-
-    // Unknown/newer version, or a version we could not parse to an integer.
-    // Recover any IDs we can, but never trust future-schema fingerprints, and
-    // treat owner keys conservatively (drop them) so an entry from an unknown
-    // future account is not assumed to belong to the current one.
+    // Any non-current version — legacy v1/v2/v3 or an unknown/newer schema.
+    // Retain any parseable IDs but never trust their fingerprints or owner keys:
+    // v2/v3 digests use the retired FNV algorithm, and an unknown future schema
+    // is not ours to trust. Legacy IDs are then cleaned and replaced with
+    // current-account entries on the next reconciliation.
     final recovered = _dedupe(<CalendarReminderManifestEntry>[
       if (entriesRaw is List)
         ..._parseEntries(
@@ -340,6 +348,72 @@ class CalendarReminderManifest {
   /// matters (e.g. conservative handling of corrupt data).
   factory CalendarReminderManifest.fromJson(Map<String, dynamic> json) =>
       parse(json).manifest;
+
+  /// Parses and classifies a current-schema (v4) manifest per the strengthened
+  /// validation rules:
+  /// * a missing/non-list `entries` field → [corrupt];
+  /// * an empty list → [loaded] (valid empty manifest);
+  /// * a non-empty list whose every record is invalid → [corrupt];
+  /// * a list with some invalid records, or duplicate IDs → [recovered];
+  /// * an otherwise-clean list → [loaded].
+  static CalendarReminderManifestLoadResult _parseCurrent(
+    Object? entriesRaw,
+    DateTime? lastReconciledAt,
+  ) {
+    if (entriesRaw is! List) {
+      // Our own writer always emits an `entries` list (even when empty), so a
+      // current-version value without one is malformed, not a valid empty
+      // manifest — do not overwrite it.
+      return const CalendarReminderManifestLoadResult(
+        manifest: empty,
+        status: CalendarReminderManifestLoadStatus.corrupt,
+      );
+    }
+    if (entriesRaw.isEmpty) {
+      return CalendarReminderManifestLoadResult(
+        manifest: CalendarReminderManifest(
+          version: currentVersion,
+          entries: const <CalendarReminderManifestEntry>[],
+          lastReconciledAt: lastReconciledAt,
+        ),
+        status: CalendarReminderManifestLoadStatus.loaded,
+      );
+    }
+
+    final parsed = _parseEntries(
+      entriesRaw,
+      trustFingerprint: true,
+      trustOwner: true,
+      requireHexDigest: true,
+    );
+    final deduped = _dedupe(parsed);
+
+    if (deduped.isEmpty) {
+      // A non-empty list none of whose records were usable is corrupt, not a
+      // clean empty manifest — filtered malformed data must never look loaded.
+      return const CalendarReminderManifestLoadResult(
+        manifest: empty,
+        status: CalendarReminderManifestLoadStatus.corrupt,
+      );
+    }
+
+    // Some raw records had no valid ID (dropped), or duplicate IDs were
+    // collapsed → the data was recovered, not cleanly loaded.
+    final droppedInvalid = parsed.length < entriesRaw.length;
+    final hadDuplicates = deduped.length < parsed.length;
+    final status = (droppedInvalid || hadDuplicates)
+        ? CalendarReminderManifestLoadStatus.recovered
+        : CalendarReminderManifestLoadStatus.loaded;
+
+    return CalendarReminderManifestLoadResult(
+      manifest: CalendarReminderManifest(
+        version: currentVersion,
+        entries: deduped,
+        lastReconciledAt: lastReconciledAt,
+      ),
+      status: status,
+    );
+  }
 
   /// Wraps recovered [entries] as [recovered], unless the value had no
   /// list-shaped ownership fields at all — in which case it is unrecoverable
@@ -370,6 +444,7 @@ class CalendarReminderManifest {
     Object? raw, {
     required bool trustFingerprint,
     required bool trustOwner,
+    bool requireHexDigest = false,
   }) {
     if (raw is! List) return const <CalendarReminderManifestEntry>[];
     final result = <CalendarReminderManifestEntry>[];
@@ -379,6 +454,7 @@ class CalendarReminderManifest {
           item,
           trustFingerprint: trustFingerprint,
           trustOwner: trustOwner,
+          requireHexDigest: requireHexDigest,
         );
         if (entry != null) result.add(entry);
       }

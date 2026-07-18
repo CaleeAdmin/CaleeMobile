@@ -121,13 +121,18 @@ class _FakeNotifs extends LocalCalendarNotificationService {
   int disableCount = 0;
   final List<List<ClientEvent>> reconcileArgs = [];
   final List<String?> reconcileOwnerKeys = [];
+  final List<String> disableOwnerKeys = [];
 
   @override
   Future<bool> requestPermissionIfNeeded() async => permission;
 
   @override
-  Future<CalendarReminderDisableResult> disableCalendarReminders() async {
+  Future<CalendarReminderDisableResult> disableCalendarReminders({
+    required String ownerKey,
+    bool includeLegacyOwnerless = false,
+  }) async {
     disableCount++;
+    disableOwnerKeys.add(ownerKey);
     return const CalendarReminderDisableResult(
       cancelledCount: 0,
       failedCount: 0,
@@ -140,10 +145,11 @@ class _FakeNotifs extends LocalCalendarNotificationService {
     List<ClientEvent> events, {
     DateTime? now,
     String? ownerKey,
+    CalendarReminderOperationContext? context,
   }) async {
     reconcileCount++;
     reconcileArgs.add(events);
-    reconcileOwnerKeys.add(ownerKey);
+    reconcileOwnerKeys.add(context?.ownerKey ?? ownerKey);
     return CalendarReconciliationResult(
       eventsFetched: events.length,
       eligibleCandidates: events.length,
@@ -173,13 +179,20 @@ class _CleanupSpyNotifs extends LocalCalendarNotificationService {
   final CalendarReminderDisableResult disableResult;
   int disableCount = 0;
   int reconcileCount = 0;
+  final List<String> disableOwnerKeys = [];
+  final List<bool> disableIncludeLegacy = [];
 
   @override
   Future<bool> requestPermissionIfNeeded() async => permission;
 
   @override
-  Future<CalendarReminderDisableResult> disableCalendarReminders() async {
+  Future<CalendarReminderDisableResult> disableCalendarReminders({
+    required String ownerKey,
+    bool includeLegacyOwnerless = false,
+  }) async {
     disableCount++;
+    disableOwnerKeys.add(ownerKey);
+    disableIncludeLegacy.add(includeLegacyOwnerless);
     return disableResult;
   }
 
@@ -188,6 +201,7 @@ class _CleanupSpyNotifs extends LocalCalendarNotificationService {
     List<ClientEvent> events, {
     DateTime? now,
     String? ownerKey,
+    CalendarReminderOperationContext? context,
   }) async {
     reconcileCount++;
     return CalendarReconciliationResult(
@@ -730,6 +744,33 @@ void main() {
     );
 
     test(
+      'a corrupt manifest while disabled reports corrupt and cleans nothing',
+      () async {
+        SharedPreferences.setMockInitialValues({
+          'calee_pref_migrated_to_shared_prefs': true,
+          'calee_pref_calendar_reminders_enabled': false,
+          'calee_pref_calendar_reminder_manifest': '{not valid json',
+        });
+        final hub = _FakeHub();
+        final notifs = _CleanupSpyNotifs();
+        final coord = _make(hub: hub, notifs: notifs);
+
+        final result = await coord.refresh(
+          accessToken: 'tok',
+          reason: CalendarReminderRefreshReason.appResumed,
+        );
+
+        expect(result.status, CalendarReminderRefreshStatus.manifestCorrupt);
+        expect(hub.eventsCallCount, 0);
+        expect(
+          notifs.disableCount,
+          0,
+          reason: 'ownership is unknown, so nothing is cleaned',
+        );
+      },
+    );
+
+    test(
       'a partial cleanup while disabled reports the partial status',
       () async {
         SharedPreferences.setMockInitialValues({
@@ -949,6 +990,184 @@ void main() {
       coord.endSession();
       expect(coord.sessionGeneration, greaterThan(g1));
     });
+  });
+
+  group('cross-generation refresh handling (Requirement 1)', () {
+    // Both accounts are enabled via their account-scoped keys so each performs
+    // its own fetch (the legacy-global migration would otherwise leave B off).
+    void seedEnabled() {
+      SharedPreferences.setMockInitialValues({
+        'calee_pref_migrated_to_shared_prefs': true,
+        'calee_pref_calendar_reminders_enabled_${reminderOwnerKey('acct-A')}':
+            true,
+        'calee_pref_calendar_reminders_enabled_${reminderOwnerKey('acct-B')}':
+            true,
+      });
+    }
+
+    test('account B routine refresh does not join account A active future and '
+        'runs its own fetch after A is invalidated', () async {
+      seedEnabled();
+      final hub = _GatedHub();
+      final notifs = _FakeNotifs();
+      final coord = _make(hub: hub, notifs: notifs);
+
+      // 1. Account A begins a blocked routine refresh.
+      coord.beginSession(accountId: 'acct-A');
+      final fA = coord.refresh(
+        accessToken: 'tokA',
+        reason: CalendarReminderRefreshReason.sessionRestored,
+      );
+      await hub.reached(0);
+      expect(hub.eventsCallCount, 1);
+
+      // 2. Account B begins.
+      coord.beginSession(accountId: 'acct-B');
+
+      // 3. Account B requests a routine refresh — must not join A's future.
+      final fB = coord.refresh(
+        accessToken: 'tokB',
+        reason: CalendarReminderRefreshReason.sessionRestored,
+      );
+
+      // 4. Account A finishes as invalidated.
+      hub.release(0);
+      final rA = await fA;
+      expect(
+        rA.status,
+        CalendarReminderRefreshStatus.skippedSessionInvalidated,
+      );
+
+      // 5. Account B performs its own fetch.
+      await hub.reached(1);
+      hub.release(1);
+      final rB = await fB;
+
+      // 6. Two network calls occur.
+      expect(hub.eventsCallCount, 2);
+      expect(hub.tokens, ['tokA', 'tokB']);
+
+      // 7. Account B receives its own reconciliation result.
+      expect(rB.status, CalendarReminderRefreshStatus.reconciled);
+      expect(identical(rA, rB), isFalse);
+      expect(notifs.reconcileCount, 1, reason: 'only B reconciled');
+      expect(notifs.reconcileOwnerKeys, [reminderOwnerKey('acct-B')]);
+    });
+
+    test(
+      'an old operation finishing cannot clear a newer active refresh',
+      () async {
+        seedEnabled();
+        final hub = _GatedHub();
+        final notifs = _FakeNotifs();
+        final coord = _make(hub: hub, notifs: notifs);
+
+        coord.beginSession(accountId: 'acct-A');
+        final fA = coord.refresh(
+          accessToken: 'tokA',
+          reason: CalendarReminderRefreshReason.sessionRestored,
+        );
+        await hub.reached(0);
+
+        // Account B begins and queues its refresh behind A.
+        coord.beginSession(accountId: 'acct-B');
+        final fB = coord.refresh(
+          accessToken: 'tokB',
+          reason: CalendarReminderRefreshReason.sessionRestored,
+        );
+
+        // A finishes (invalidated) → B starts and becomes the active refresh.
+        hub.release(0);
+        await fA;
+        await hub.reached(1);
+
+        // While B is the active (blocked) refresh, it must still be running: A's
+        // finally block must not have cleared B's active reference.
+        expect(coord.isRefreshing, isTrue);
+
+        hub.release(1);
+        final rB = await fB;
+        expect(rB.status, CalendarReminderRefreshStatus.reconciled);
+        expect(coord.isRefreshing, isFalse);
+      },
+    );
+
+    test('forced requests coalesce only within the same generation', () async {
+      seedEnabled();
+      final hub = _GatedHub();
+      final notifs = _FakeNotifs();
+      final coord = _make(hub: hub, notifs: notifs);
+
+      coord.beginSession(accountId: 'acct-A');
+      final fA = coord.refresh(
+        accessToken: 'tokA',
+        reason: CalendarReminderRefreshReason.appResumed,
+      );
+      await hub.reached(0);
+
+      // A forced request within A's generation queues a follow-up.
+      final fForcedA = coord.refresh(
+        accessToken: 'tokA2',
+        reason: CalendarReminderRefreshReason.eventCreated,
+      );
+      expect(coord.hasPendingForcedRefresh, isTrue);
+
+      // Account B begins — the A-generation follow-up must be invalidated, not
+      // coalesced into B's work.
+      coord.beginSession(accountId: 'acct-B');
+      final rForcedA = await fForcedA;
+      expect(
+        rForcedA.status,
+        CalendarReminderRefreshStatus.skippedSessionInvalidated,
+      );
+      expect(coord.hasPendingForcedRefresh, isFalse);
+
+      // B queues its own refresh behind A's still-running fetch.
+      final fB = coord.refresh(
+        accessToken: 'tokB',
+        reason: CalendarReminderRefreshReason.sessionRestored,
+      );
+
+      hub.release(0);
+      final rA = await fA;
+      expect(
+        rA.status,
+        CalendarReminderRefreshStatus.skippedSessionInvalidated,
+      );
+
+      await hub.reached(1);
+      hub.release(1);
+      final rB = await fB;
+      expect(rB.status, CalendarReminderRefreshStatus.reconciled);
+      expect(notifs.reconcileOwnerKeys, [reminderOwnerKey('acct-B')]);
+    });
+
+    test(
+      'transitionSession invalidates the old session and cleans the previous '
+      'owner before beginning the new one',
+      () async {
+        seedEnabled();
+        final hub = _GatedHub();
+        final notifs = _CleanupSpyNotifs();
+        final coord = _make(hub: hub, notifs: notifs);
+
+        // Signed out → signed in A.
+        await coord.transitionSession(
+          previousAccountId: null,
+          nextAccountId: 'acct-A',
+        );
+        expect(notifs.disableCount, 0, reason: 'no previous owner to clean');
+
+        // A → B: cleans A, begins B.
+        await coord.transitionSession(
+          previousAccountId: 'acct-A',
+          nextAccountId: 'acct-B',
+        );
+        expect(notifs.disableCount, 1, reason: 'previous owner A was cleaned');
+        expect(notifs.disableOwnerKeys.single, reminderOwnerKey('acct-A'));
+        expect(coord.ownerKey, reminderOwnerKey('acct-B'));
+      },
+    );
   });
 }
 

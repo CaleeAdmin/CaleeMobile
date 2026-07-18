@@ -4,6 +4,7 @@
 // Uses forTest() subclassing to control plugin operations (schedule / cancel /
 // initialize) without hitting flutter_local_notifications platform channels.
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:calee_mobile/data/auth/calee_preferences.dart';
@@ -165,6 +166,10 @@ ClientEvent _event(
 
 // 2026-07-04T12:00 → the 2026-07-05T09:00 events are eligible (30-day horizon).
 final _now = DateTime(2026, 7, 4, 12, 0, 0);
+
+// A privacy-safe owner key for cleanup tests. The legacy manifests these tests
+// seed carry no owner, so cleanup is exercised with includeLegacyOwnerless.
+final _testOwner = reminderOwnerKey('acct-test');
 
 /// A v2 manifest with correct fingerprints for [events] at [now] — i.e. what
 /// the service would persist after successfully scheduling them.
@@ -673,7 +678,10 @@ void main() {
       });
 
       final service = _RecordingService();
-      final result = await service.disableCalendarReminders();
+      final result = await service.disableCalendarReminders(
+        ownerKey: _testOwner,
+        includeLegacyOwnerless: true,
+      );
 
       expect(service.cancelled, [11, 22, 33]);
       expect(result.cancelledCount, 3);
@@ -687,7 +695,10 @@ void main() {
 
     test('cancels nothing when the manifest is empty', () async {
       final service = _RecordingService();
-      final result = await service.disableCalendarReminders();
+      final result = await service.disableCalendarReminders(
+        ownerKey: _testOwner,
+        includeLegacyOwnerless: true,
+      );
       expect(service.cancelled, isEmpty);
       expect(result.cancelledCount, 0);
       expect(result.isFullyClean, isTrue);
@@ -702,7 +713,10 @@ void main() {
         failCancelIds: {22},
       );
 
-      final result = await service.disableCalendarReminders();
+      final result = await service.disableCalendarReminders(
+        ownerKey: _testOwner,
+        includeLegacyOwnerless: true,
+      );
 
       expect(result.cancelledCount, 2);
       expect(result.failedCount, 1);
@@ -724,7 +738,10 @@ void main() {
       );
       final service = _RecordingService(prefsOverride: prefs);
 
-      final result = await service.disableCalendarReminders();
+      final result = await service.disableCalendarReminders(
+        ownerKey: _testOwner,
+        includeLegacyOwnerless: true,
+      );
 
       expect(result.cancelledCount, 1);
       expect(result.failedCount, 0);
@@ -740,7 +757,10 @@ void main() {
       );
       final service = _RecordingService(prefsOverride: prefs);
 
-      final result = await service.disableCalendarReminders();
+      final result = await service.disableCalendarReminders(
+        ownerKey: _testOwner,
+        includeLegacyOwnerless: true,
+      );
 
       expect(result.cancelledCount, 1);
       expect(
@@ -761,7 +781,10 @@ void main() {
         failCancelIds: {22},
       );
 
-      final result = await service.disableCalendarReminders();
+      final result = await service.disableCalendarReminders(
+        ownerKey: _testOwner,
+        includeLegacyOwnerless: true,
+      );
 
       expect(result.cancelledCount, 1);
       expect(result.failedCount, 1);
@@ -1012,7 +1035,10 @@ void main() {
         );
         final service = _RecordingService(prefsOverride: prefs);
 
-        final result = await service.disableCalendarReminders();
+        final result = await service.disableCalendarReminders(
+          ownerKey: _testOwner,
+          includeLegacyOwnerless: true,
+        );
 
         expect(result.cancelledCount, 1);
         expect(result.manifestPersisted, isTrue);
@@ -1030,7 +1056,10 @@ void main() {
         );
         final service = _RecordingService(prefsOverride: prefs);
 
-        final result = await service.disableCalendarReminders();
+        final result = await service.disableCalendarReminders(
+          ownerKey: _testOwner,
+          includeLegacyOwnerless: true,
+        );
 
         expect(result.cancelledCount, 1);
         expect(result.failedCount, 0);
@@ -1050,7 +1079,10 @@ void main() {
         final prefs = _InMemoryPreferences(corruptOnLoad: true);
         final service = _RecordingService(prefsOverride: prefs);
 
-        final result = await service.disableCalendarReminders();
+        final result = await service.disableCalendarReminders(
+          ownerKey: _testOwner,
+          includeLegacyOwnerless: true,
+        );
 
         expect(service.cancelled, isEmpty);
         expect(result.manifestPersisted, isFalse);
@@ -1170,4 +1202,520 @@ void main() {
       },
     );
   });
+
+  group('disableCalendarReminders — owner-scoped (Requirement 4)', () {
+    final ownerA = reminderOwnerKey('acct-A');
+    final ownerB = reminderOwnerKey('acct-B');
+
+    CalendarReminderManifestEntry owned(int id, String owner) =>
+        CalendarReminderManifestEntry(
+          notificationId: id,
+          fingerprint: null,
+          ownerKey: owner,
+        );
+
+    test(
+      'cancels only the given owner entries; other owners are preserved',
+      () async {
+        final prefs = _InMemoryPreferences(
+          initial: CalendarReminderManifest(
+            version: CalendarReminderManifest.currentVersion,
+            entries: [owned(1, ownerA), owned(2, ownerB), owned(3, ownerA)],
+          ),
+        );
+        final service = _RecordingService(prefsOverride: prefs);
+
+        final result = await service.disableCalendarReminders(ownerKey: ownerA);
+
+        expect(service.cancelled, [1, 3]);
+        expect(result.cancelledCount, 2);
+        final stored = await prefs.loadCalendarReminderManifest();
+        expect(stored.scheduledIds, [
+          2,
+        ], reason: 'the other account is preserved');
+        expect(stored.entryFor(2)!.ownerKey, ownerB);
+      },
+    );
+
+    test('a failed cancellation stays owned by the same account', () async {
+      final prefs = _InMemoryPreferences(
+        initial: CalendarReminderManifest(
+          version: CalendarReminderManifest.currentVersion,
+          entries: [owned(1, ownerA), owned(2, ownerB)],
+        ),
+      );
+      final service = _RecordingService(
+        prefsOverride: prefs,
+        failCancelIds: {1},
+      );
+
+      final result = await service.disableCalendarReminders(ownerKey: ownerA);
+
+      expect(result.failedCount, 1);
+      final stored = await prefs.loadCalendarReminderManifest();
+      expect(stored.scheduledIds, containsAll(<int>[1, 2]));
+      expect(stored.entryFor(1)!.ownerKey, ownerA);
+      expect(stored.entryFor(2)!.ownerKey, ownerB);
+    });
+
+    test(
+      'ownerless legacy entries are cleaned only with includeLegacyOwnerless',
+      () async {
+        final prefs = _InMemoryPreferences(
+          initial: CalendarReminderManifest(
+            version: CalendarReminderManifest.currentVersion,
+            entries: [
+              const CalendarReminderManifestEntry(
+                notificationId: 9,
+                fingerprint: null,
+              ),
+              owned(1, ownerA),
+            ],
+          ),
+        );
+        final service = _RecordingService(prefsOverride: prefs);
+
+        // Without the flag the ownerless entry is preserved.
+        await service.disableCalendarReminders(ownerKey: ownerA);
+        expect(service.cancelled, [1]);
+        var stored = await prefs.loadCalendarReminderManifest();
+        expect(stored.scheduledIds, [9]);
+
+        // With the flag the ownerless entry is cancelled too.
+        service.cancelled.clear();
+        await service.disableCalendarReminders(
+          ownerKey: ownerA,
+          includeLegacyOwnerless: true,
+        );
+        expect(service.cancelled, [9]);
+        stored = await prefs.loadCalendarReminderManifest();
+        expect(stored.scheduledIds, isEmpty);
+      },
+    );
+
+    test(
+      'never clears the whole manifest while foreign entries remain',
+      () async {
+        final prefs = _InMemoryPreferences(
+          initial: CalendarReminderManifest(
+            version: CalendarReminderManifest.currentVersion,
+            entries: [owned(1, ownerA), owned(2, ownerB)],
+          ),
+        );
+        final service = _RecordingService(prefsOverride: prefs);
+
+        await service.disableCalendarReminders(ownerKey: ownerA);
+
+        expect(
+          prefs.clearCount,
+          0,
+          reason: 'a save keeps the foreign entry, never a clear',
+        );
+        final stored = await prefs.loadCalendarReminderManifest();
+        expect(stored.scheduledIds, [2]);
+      },
+    );
+
+    test(
+      'a corrupt manifest causes no cancellation and is left intact',
+      () async {
+        final prefs = _InMemoryPreferences(corruptOnLoad: true);
+        final service = _RecordingService(prefsOverride: prefs);
+
+        final result = await service.disableCalendarReminders(ownerKey: ownerA);
+
+        expect(service.cancelled, isEmpty);
+        expect(result.manifestPersisted, isFalse);
+        expect(prefs.saveCount, 0);
+        expect(prefs.clearCount, 0);
+      },
+    );
+  });
+
+  group('reconcileCalendarReminders — ID collision resolution (Requirement 9)', () {
+    test('two forced-collision candidates are both scheduled with distinct IDs '
+        'that stay stable across passes', () async {
+      final prefs = _InMemoryPreferences();
+      final service = _RecordingService(prefsOverride: prefs);
+      // Force both events to the same base id 777; probe p resolves to 777 + p.
+      service.debugNotificationIdOverride = (c, probe) => 777 + probe;
+
+      final e1 = _event('e1', startsAt: '2026-07-05T09:00:00');
+      final e2 = _event('e2', startsAt: '2026-07-06T09:00:00');
+
+      final result = await service.reconcileCalendarReminders([
+        e1,
+        e2,
+      ], now: _now);
+
+      expect(
+        service.scheduled,
+        [777, 778],
+        reason: 'both candidates survive with distinct IDs (no map overwrite)',
+      );
+      expect(result.scheduledCount, 2);
+      expect(result.collisionsResolved, 1);
+      expect(result.idAllocationFailures, 0);
+      final stored = await prefs.loadCalendarReminderManifest();
+      expect(stored.scheduledIds, [777, 778]);
+
+      // Re-run: IDs are stable, nothing rescheduled, no duplicate created.
+      service.scheduled.clear();
+      final second = await service.reconcileCalendarReminders([
+        e1,
+        e2,
+      ], now: _now);
+      expect(second.unchangedCount, 2);
+      expect(second.scheduledCount, 0);
+      expect(service.scheduled, isEmpty);
+    });
+
+    test('an exhausted probe limit is reported, not silently dropped', () async {
+      final prefs = _InMemoryPreferences();
+      final service = _RecordingService(prefsOverride: prefs);
+      // Every probe returns the same ID, so the second event can never allocate.
+      service.debugNotificationIdOverride = (c, probe) => 555;
+
+      final e1 = _event('e1', startsAt: '2026-07-05T09:00:00');
+      final e2 = _event('e2', startsAt: '2026-07-06T09:00:00');
+
+      final result = await service.reconcileCalendarReminders([
+        e1,
+        e2,
+      ], now: _now);
+
+      expect(service.scheduled, [555]);
+      expect(result.idAllocationFailures, 1);
+      expect(result.hasFailures, isTrue);
+      expect(result.isFullySuccessful, isFalse);
+    });
+  });
+
+  group('reconcileCalendarReminders — mid-pass invalidation (Requirement 3)', () {
+    final owner = reminderOwnerKey('acct-A');
+
+    CalendarReminderOperationContext ctx(bool Function() isCurrent) =>
+        CalendarReminderOperationContext(
+          generation: 1,
+          ownerKey: owner,
+          isCurrent: isCurrent,
+        );
+
+    test('invalidation before the first mutation schedules nothing and writes '
+        'no manifest', () async {
+      final prefs = _InMemoryPreferences();
+      final service = _RecordingService(prefsOverride: prefs);
+
+      final result = await service.reconcileCalendarReminders(
+        [_event('e1')],
+        now: _now,
+        ownerKey: owner,
+        context: ctx(() => false),
+      );
+
+      expect(result.sessionInvalidated, isTrue);
+      expect(service.scheduled, isEmpty);
+      expect(service.cancelled, isEmpty);
+      expect(prefs.saveCount, 0, reason: 'no stale-session manifest write');
+    });
+
+    test('invalidation after one schedule rolls back new IDs and writes no '
+        'manifest', () async {
+      final prefs = _InMemoryPreferences();
+      final service = _RecordingService(prefsOverride: prefs);
+      final e1 = _event('e1', startsAt: '2026-07-05T09:00:00');
+      final e2 = _event('e2', startsAt: '2026-07-06T09:00:00');
+
+      final result = await service.reconcileCalendarReminders(
+        [e1, e2],
+        now: _now,
+        ownerKey: owner,
+        context: ctx(() => service.scheduled.isEmpty),
+      );
+
+      expect(result.sessionInvalidated, isTrue);
+      expect(result.manifestPersisted, isFalse);
+      expect(prefs.saveCount, 0);
+      expect(service.scheduled, hasLength(1));
+      expect(
+        service.cancelled,
+        service.scheduled,
+        reason: 'the one scheduled ID was rolled back',
+      );
+    });
+
+    test('invalidation during stale cancellation writes no manifest and '
+        'preserves the previous one', () async {
+      const staleId = 909;
+      final prefs = _InMemoryPreferences(
+        initial: CalendarReminderManifest.fromIds([staleId]),
+      );
+      final service = _RecordingService(prefsOverride: prefs);
+
+      final result = await service.reconcileCalendarReminders(
+        const [],
+        now: _now,
+        ownerKey: owner,
+        context: ctx(() => service.cancelled.isEmpty),
+      );
+
+      expect(result.sessionInvalidated, isTrue);
+      expect(prefs.saveCount, 0);
+      final stored = await prefs.loadCalendarReminderManifest();
+      expect(
+        stored.scheduledIds,
+        [staleId],
+        reason: 'the previous manifest is left intact for the new session',
+      );
+    });
+
+    test(
+      'invalidation immediately before persistence writes no manifest',
+      () async {
+        final e1 = _event('e1');
+        // Seed the manifest so e1 is unchanged for [owner]: no schedule/cancel, so
+        // only the init checks and the before-persist check run.
+        final cand = buildNotificationCandidates(
+          [e1],
+          now: _now,
+          ownerKey: owner,
+        ).single;
+        final prefs = _InMemoryPreferences(
+          initial: CalendarReminderManifest(
+            version: CalendarReminderManifest.currentVersion,
+            entries: [
+              CalendarReminderManifestEntry(
+                notificationId: cand.notificationId,
+                fingerprint: scheduleFingerprint(cand),
+                ownerKey: owner,
+              ),
+            ],
+          ),
+        );
+        final service = _RecordingService(prefsOverride: prefs);
+        var calls = 0;
+
+        final result = await service.reconcileCalendarReminders(
+          [e1],
+          now: _now,
+          ownerKey: owner,
+          // Pass the before-init and after-init checks, fail the before-persist one.
+          context: ctx(() {
+            calls++;
+            return calls < 3;
+          }),
+        );
+
+        expect(result.sessionInvalidated, isTrue);
+        expect(service.scheduled, isEmpty);
+        expect(service.cancelled, isEmpty);
+        expect(
+          prefs.saveCount,
+          0,
+          reason: 'the stale final manifest is never written',
+        );
+      },
+    );
+
+    test(
+      'invalidation during save-failure rollback skips the recovery write',
+      () async {
+        final e1 = _event('e1', startsAt: '2026-07-05T09:00:00');
+        final id = notificationIdForEvent(e1, ownerKey: owner);
+        var current = true;
+        final prefs = _FlipThenThrowPreferences(
+          initial: CalendarReminderManifest.empty,
+          onSave: () => current = false,
+        );
+        // The rollback cancel of the new id fails, which would normally force a
+        // recovery write — but the session is now invalid, so it must be skipped.
+        final service = _RecordingService(
+          prefsOverride: prefs,
+          failCancelIds: {id},
+        );
+
+        final result = await service.reconcileCalendarReminders(
+          [e1],
+          now: _now,
+          ownerKey: owner,
+          context: ctx(() => current),
+        );
+
+        expect(result.manifestPersisted, isFalse);
+        expect(result.rollback, isNotNull);
+        expect(result.rollback!.rollbackFailedCount, 1);
+        expect(
+          result.rollback!.recoveryWriteAttempted,
+          isFalse,
+          reason: 'a stale session must not write a recovery manifest',
+        );
+        expect(
+          prefs.saveCount,
+          1,
+          reason: 'only the failed final save was attempted',
+        );
+      },
+    );
+  });
+
+  group('serialized mutations (Requirement 2)', () {
+    test(
+      'a failed serialized operation does not poison later operations',
+      () async {
+        final service = _RecordingService();
+        var secondRan = false;
+
+        final f1 = service.runSerialized<int>(() async {
+          throw Exception('boom');
+        });
+        final f2 = service.runSerialized<int>(() async {
+          secondRan = true;
+          return 42;
+        });
+
+        await expectLater(f1, throwsA(isA<Exception>()));
+        expect(await f2, 42);
+        expect(secondRan, isTrue);
+      },
+    );
+
+    test(
+      'serialized operations run in submission order, one at a time',
+      () async {
+        final service = _RecordingService();
+        final order = <int>[];
+        final gate = Completer<void>();
+
+        final f1 = service.runSerialized<void>(() async {
+          await gate.future;
+          order.add(1);
+        });
+        final f2 = service.runSerialized<void>(() async {
+          order.add(2);
+        });
+
+        await pumpEventQueue();
+        expect(order, isEmpty, reason: 'the second op waits for the first');
+
+        gate.complete();
+        await Future.wait([f1, f2]);
+        expect(order, [1, 2]);
+      },
+    );
+
+    test(
+      'reconcile and cleanup never interleave their platform mutations',
+      () async {
+        final ownerA = reminderOwnerKey('acct-A');
+        final prefs = _InMemoryPreferences();
+        final service = _SerialService(prefsOverride: prefs);
+        service.scheduleGate = Completer<void>();
+
+        // Reconcile schedules a new id (blocked mid-schedule at the gate).
+        final fReconcile = service.reconcileCalendarReminders(
+          [_event('e1')],
+          now: _now,
+          ownerKey: ownerA,
+        );
+        await pumpEventQueue();
+        expect(service.log, [
+          'schedule-start',
+        ], reason: 'reconcile holds the lock, blocked mid-schedule');
+
+        // Submit cleanup of the same owner concurrently — it must queue.
+        final fDisable = service.disableCalendarReminders(
+          ownerKey: ownerA,
+          includeLegacyOwnerless: true,
+        );
+        await pumpEventQueue();
+        expect(
+          service.log.where((e) => e.startsWith('cancel')),
+          isEmpty,
+          reason: 'cleanup waits until reconcile releases the serial lock',
+        );
+
+        // Release reconcile → it finishes, then cleanup runs.
+        service.scheduleGate!.complete();
+        await fReconcile;
+        await fDisable;
+
+        final scheduleEnd = service.log.indexOf('schedule-end');
+        final firstCancel = service.log.indexWhere(
+          (e) => e.startsWith('cancel'),
+        );
+        expect(scheduleEnd, isNonNegative);
+        expect(
+          firstCancel,
+          greaterThan(scheduleEnd),
+          reason:
+              'every reconcile mutation completes before any cleanup mutation',
+        );
+      },
+    );
+  });
+}
+
+/// A service whose schedule/cancel operations append to an observable [log] and
+/// whose scheduling can be gated, so serialization ordering can be checked.
+class _SerialService extends LocalCalendarNotificationService {
+  _SerialService({this.prefsOverride}) : super.forTest();
+
+  final CaleePreferences? prefsOverride;
+  final List<String> log = [];
+  Completer<void>? scheduleGate;
+
+  @override
+  CaleePreferences get preferences => prefsOverride ?? super.preferences;
+
+  @override
+  Future<bool> ensureInitialized() async => true;
+
+  @override
+  Future<bool> scheduleReminder(CalendarNotificationCandidate c) async {
+    log.add('schedule-start');
+    final gate = scheduleGate;
+    if (gate != null) await gate.future;
+    log.add('schedule-end');
+    return true;
+  }
+
+  @override
+  Future<void> cancelNotification(int id) async {
+    log.add('cancel:$id');
+  }
+}
+
+/// Preferences whose manifest save flips a caller-provided flag and then throws,
+/// so the save-failure rollback path can be exercised while the session is being
+/// invalidated mid-save.
+class _FlipThenThrowPreferences extends CaleePreferences {
+  _FlipThenThrowPreferences({required this.initial, required this.onSave});
+
+  final CalendarReminderManifest initial;
+  final void Function() onSave;
+  int saveCount = 0;
+
+  @override
+  Future<CalendarReminderManifestLoadResult>
+  loadCalendarReminderManifestResult() async =>
+      CalendarReminderManifestLoadResult(
+        manifest: initial,
+        status: CalendarReminderManifestLoadStatus.loaded,
+      );
+
+  @override
+  Future<CalendarReminderManifest> loadCalendarReminderManifest() async =>
+      initial;
+
+  @override
+  Future<void> saveCalendarReminderManifest(
+    CalendarReminderManifest manifest,
+  ) async {
+    saveCount++;
+    onSave();
+    throw const CalendarReminderManifestStorageException('save');
+  }
+
+  @override
+  Future<void> clearCalendarReminderManifest() async {}
 }

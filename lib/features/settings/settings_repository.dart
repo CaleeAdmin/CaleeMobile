@@ -162,11 +162,16 @@ class SettingsRepository {
     return prefs;
   }
 
-  Future<bool> loadCalendarRemindersEnabled() =>
-      _caleePrefs.loadCalendarRemindersEnabled();
+  Future<bool> loadCalendarRemindersEnabled({required String ownerKey}) =>
+      _caleePrefs.loadCalendarRemindersEnabled(ownerKey: ownerKey);
 
-  Future<void> saveCalendarRemindersEnabled(bool enabled) =>
-      _caleePrefs.saveCalendarRemindersEnabled(enabled);
+  Future<void> saveCalendarRemindersEnabled({
+    required String ownerKey,
+    required bool enabled,
+  }) => _caleePrefs.saveCalendarRemindersEnabled(
+    ownerKey: ownerKey,
+    enabled: enabled,
+  );
 
   Future<ClientBootstrap> ensureDefaultFamilyAndRefreshBootstrap() async {
     await hubClient.ensureDefaultFamily(accessToken: accessToken);

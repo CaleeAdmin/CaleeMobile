@@ -11,6 +11,11 @@ dependencies:
   flutter:
     sdk: flutter
   app_links: ^7.2.1
+  # SHA-256 for privacy-safe, non-reversible reminder owner keys, schedule
+  # fingerprints, and notification-identity digests. Already present transitively
+  # (via flutter_test/others) at 3.0.7; pinned here as a direct dependency so the
+  # reminder code can depend on it explicitly without upgrading unrelated packages.
+  crypto: ^3.0.0
   flutter_secure_storage: ^9.2.4
   flutter_image_compress: ^2.4.0
   image_picker: ^1.1.2

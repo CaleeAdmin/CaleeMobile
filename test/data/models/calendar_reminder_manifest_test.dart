@@ -1,6 +1,13 @@
 import 'package:calee_mobile/data/models/calendar_reminder_manifest.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+// 64-char lowercase-hex, SHA-256-shaped digests used for v4 (current-schema)
+// fixtures. v4 trusts a fingerprint/owner only when it matches this format.
+final _fp1 = 'a1' * 32;
+final _fp2 = 'b2' * 32;
+final _owner1 = 'c3' * 32;
+final _owner2 = 'd4' * 32;
+
 void main() {
   group('CalendarReminderManifestEntry', () {
     test('round-trips with a fingerprint', () {
@@ -37,13 +44,16 @@ void main() {
     });
   });
 
-  group('CalendarReminderManifest — current (v2) schema', () {
+  group('CalendarReminderManifest — current (v4) schema', () {
     test('round-trips entries through JSON', () {
       final manifest = CalendarReminderManifest(
         version: CalendarReminderManifest.currentVersion,
-        entries: const [
-          CalendarReminderManifestEntry(notificationId: 1, fingerprint: 'aa'),
-          CalendarReminderManifestEntry(notificationId: 2, fingerprint: null),
+        entries: [
+          CalendarReminderManifestEntry(notificationId: 1, fingerprint: _fp1),
+          const CalendarReminderManifestEntry(
+            notificationId: 2,
+            fingerprint: null,
+          ),
         ],
         lastReconciledAt: DateTime.utc(2026, 7, 4, 12),
       );
@@ -52,7 +62,7 @@ void main() {
 
       expect(restored.version, CalendarReminderManifest.currentVersion);
       expect(restored.scheduledIds, [1, 2]);
-      expect(restored.entryFor(1)!.fingerprint, 'aa');
+      expect(restored.entryFor(1)!.fingerprint, _fp1);
       expect(restored.entryFor(2)!.fingerprint, isNull);
       expect(restored.lastReconciledAt, DateTime.utc(2026, 7, 4, 12));
     });
@@ -198,22 +208,23 @@ void main() {
     });
   });
 
-  group('CalendarReminderManifest — v3 schema and migration', () {
-    test('round-trips v3 entries with owners through JSON', () {
+  group('CalendarReminderManifest — v4 schema and legacy migration', () {
+    test('round-trips v4 entries with SHA-256 owners through JSON', () {
       final manifest = CalendarReminderManifest(
         version: CalendarReminderManifest.currentVersion,
-        entries: const [
+        entries: [
           CalendarReminderManifestEntry(
             notificationId: 1,
-            fingerprint: 'aa',
-            ownerKey: 'ownerA',
+            fingerprint: _fp1,
+            ownerKey: _owner1,
           ),
         ],
       );
       final restored = CalendarReminderManifest.parse(manifest.toJson());
       expect(restored.status, CalendarReminderManifestLoadStatus.loaded);
-      expect(restored.manifest.entryFor(1)!.ownerKey, 'ownerA');
-      expect(manifest.toJson()['version'], 3);
+      expect(restored.manifest.entryFor(1)!.ownerKey, _owner1);
+      expect(restored.manifest.entryFor(1)!.fingerprint, _fp1);
+      expect(manifest.toJson()['version'], 4);
     });
 
     test('v1 migration yields null fingerprint and null owner', () {
@@ -228,7 +239,8 @@ void main() {
       }
     });
 
-    test('v2 migration keeps fingerprints but has null owners', () {
+    test('v2 migration retains IDs but drops the now-untrusted FNV '
+        'fingerprints', () {
       final result = CalendarReminderManifest.parse({
         'version': 2,
         'entries': [
@@ -236,11 +248,34 @@ void main() {
         ],
       });
       expect(result.status, CalendarReminderManifestLoadStatus.recovered);
-      expect(result.manifest.entryFor(1)!.fingerprint, 'aa');
+      expect(result.manifest.scheduledIds, [1]);
+      expect(
+        result.manifest.entryFor(1)!.fingerprint,
+        isNull,
+        reason: 'a v2 (FNV) fingerprint is not trusted as a v4 SHA-256 digest',
+      );
+      expect(result.manifest.entryFor(1)!.ownerKey, isNull);
+    });
+
+    test('v3 migration retains IDs but drops the now-untrusted FNV owner and '
+        'fingerprint', () {
+      final result = CalendarReminderManifest.parse({
+        'version': 3,
+        'entries': [
+          {'id': 1, 'fp': 'fnv-fp', 'owner': 'fnv-owner'},
+        ],
+      });
+      expect(result.status, CalendarReminderManifestLoadStatus.recovered);
+      expect(result.manifest.scheduledIds, [1]);
+      expect(
+        result.manifest.entryFor(1)!.fingerprint,
+        isNull,
+        reason: 'v3 FNV fingerprints are not trusted as v4 values',
+      );
       expect(
         result.manifest.entryFor(1)!.ownerKey,
         isNull,
-        reason: 'a v2 entry carries no owner and must not be assumed current',
+        reason: 'v3 FNV owner keys are not trusted as v4 values',
       );
     });
   });
@@ -265,7 +300,7 @@ void main() {
 
     test('loaded for a valid (even empty) current-schema manifest', () {
       expect(
-        CalendarReminderManifest.parse({'version': 3, 'entries': []}).status,
+        CalendarReminderManifest.parse({'version': 4, 'entries': []}).status,
         CalendarReminderManifestLoadStatus.loaded,
       );
     });
@@ -273,7 +308,7 @@ void main() {
     test('corrupt when a current-version value has no entries list', () {
       // Our writer always emits an entries list; its absence means malformed.
       final result = CalendarReminderManifest.parse({
-        'version': 3,
+        'version': 4,
         'entries': 'garbage',
       });
       expect(result.status, CalendarReminderManifestLoadStatus.corrupt);
@@ -304,23 +339,23 @@ void main() {
     });
 
     test('a floating-point version does not crash', () {
-      // 3.0 coerces to the current version; a non-whole float is unknown.
+      // 4.0 coerces to the current version; a non-whole float is unknown.
       expect(
-        CalendarReminderManifest.parse({'version': 3.0, 'entries': []}).status,
+        CalendarReminderManifest.parse({'version': 4.0, 'entries': []}).status,
         CalendarReminderManifestLoadStatus.loaded,
       );
       expect(
         () => CalendarReminderManifest.parse({
-          'version': 3.5,
+          'version': 4.5,
           'ids': [1],
         }),
         returnsNormally,
       );
     });
 
-    test('negative and out-of-range IDs are rejected', () {
+    test('negative and out-of-range IDs are rejected (v4)', () {
       final result = CalendarReminderManifest.parse({
-        'version': 3,
+        'version': 4,
         'entries': [
           {'id': -1},
           {'id': 0x80000000},
@@ -328,29 +363,88 @@ void main() {
         ],
       });
       expect(result.manifest.scheduledIds, [42]);
+      // Some records were dropped, so it is recovered rather than cleanly
+      // loaded.
+      expect(result.status, CalendarReminderManifestLoadStatus.recovered);
     });
 
-    test('a malformed entry does not invent an ID', () {
+    test('a v4 list whose every entry is invalid is corrupt, not empty', () {
       final result = CalendarReminderManifest.parse({
-        'version': 3,
+        'version': 4,
         'entries': [
-          {'fp': 'x', 'owner': 'y'},
+          {'fp': _fp1, 'owner': _owner1},
           {'id': 'nope'},
         ],
       });
       expect(result.manifest.scheduledIds, isEmpty);
+      expect(
+        result.status,
+        CalendarReminderManifestLoadStatus.corrupt,
+        reason: 'filtered malformed data must never look like a clean manifest',
+      );
     });
 
-    test('duplicate IDs are deduplicated deterministically', () {
+    test(
+      'duplicate IDs are deduplicated deterministically (v4, recovered)',
+      () {
+        final result = CalendarReminderManifest.parse({
+          'version': 4,
+          'entries': [
+            {'id': 7, 'fp': _fp1},
+            {'id': 7, 'fp': _fp2},
+          ],
+        });
+        expect(result.manifest.scheduledIds, [7]);
+        expect(
+          result.manifest.entryFor(7)!.fingerprint,
+          _fp1,
+          reason: 'the first occurrence wins',
+        );
+        expect(result.status, CalendarReminderManifestLoadStatus.recovered);
+      },
+    );
+
+    test('a v4 entry with a non-hex fingerprint/owner drops those digests', () {
       final result = CalendarReminderManifest.parse({
-        'version': 3,
+        'version': 4,
         'entries': [
-          {'id': 7, 'fp': 'first'},
-          {'id': 7, 'fp': 'second'},
+          {'id': 5, 'fp': 'not-hex', 'owner': 'ALSO-NOT-HEX'},
         ],
       });
-      expect(result.manifest.scheduledIds, [7]);
-      expect(result.manifest.entryFor(7)!.fingerprint, 'first');
+      final entry = result.manifest.entryFor(5)!;
+      expect(entry.notificationId, 5);
+      expect(
+        entry.fingerprint,
+        isNull,
+        reason: 'a non-SHA-256-format fingerprint is not trusted',
+      );
+      expect(entry.ownerKey, isNull);
+    });
+
+    test('a v4 list with valid and invalid entries is recovered', () {
+      final result = CalendarReminderManifest.parse({
+        'version': 4,
+        'entries': [
+          {'id': 10, 'fp': _fp1, 'owner': _owner1},
+          'garbage',
+          {'id': 11},
+        ],
+      });
+      expect(result.status, CalendarReminderManifestLoadStatus.recovered);
+      expect(result.manifest.scheduledIds, [10, 11]);
+      expect(result.manifest.entryFor(10)!.ownerKey, _owner1);
+    });
+
+    test('a clean v4 list is loaded, not recovered', () {
+      final result = CalendarReminderManifest.parse({
+        'version': 4,
+        'entries': [
+          {'id': 10, 'fp': _fp1, 'owner': _owner1},
+          {'id': 11, 'fp': _fp2, 'owner': _owner2},
+        ],
+      });
+      expect(result.status, CalendarReminderManifestLoadStatus.loaded);
+      expect(result.manifest.scheduledIds, [10, 11]);
     });
 
     test('unknown-version fingerprints and owners are cleared', () {

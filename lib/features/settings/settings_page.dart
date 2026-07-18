@@ -17,6 +17,7 @@ import 'family_setup_page.dart';
 import 'household_people_page.dart';
 import 'recently_deleted_page.dart';
 import 'service_details_page.dart';
+import '../notifications/calendar_notification_candidates.dart';
 import '../notifications/calendar_reminder_coordinator.dart';
 import '../notifications/local_calendar_notification_service.dart';
 import 'settings_controller.dart';
@@ -213,10 +214,13 @@ class _SettingsPageState extends State<SettingsPage> {
     }
 
     await _controller.setCalendarRemindersEnabled(false);
-    // Cancel only the calendar reminder IDs Calee owns (via the manifest) and
-    // clear that manifest — never a global cancelAll() that would also drop
-    // notifications belonging to other Calee features.
-    await LocalCalendarNotificationService.instance.disableCalendarReminders();
+    // Cancel only the calendar reminder IDs Calee owns for THIS account (via the
+    // manifest) — never a global cancelAll() that would also drop notifications
+    // belonging to other Calee features or other accounts on this device.
+    await LocalCalendarNotificationService.instance.disableCalendarReminders(
+      ownerKey: reminderOwnerKey(widget.bootstrap.account.id),
+      includeLegacyOwnerless: true,
+    );
   }
 
   ClientCalendar? _findById(List<ClientCalendar> list, String id) {

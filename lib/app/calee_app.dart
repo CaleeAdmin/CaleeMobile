@@ -321,14 +321,37 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
     }
 
     final accountId = _sessionController.bootstrap?.account.id ?? '';
-    if (_reminderSessionAccountId == accountId) return;
+    final previousAccountId = _reminderSessionAccountId;
+    if (previousAccountId == accountId) return;
 
     // A new signed-in session (restore, fresh sign-in, or account switch).
-    // Begin a fresh reminder session so the coordinator owns account-scoped
-    // reminder identity, then fire the once-per-session refresh.
+    // Transition the coordinator's reminder session — invalidating any old-
+    // session work and cleaning the previous owner through the serialized
+    // mutation queue before beginning the new generation — then fire the
+    // once-per-session refresh for the new account.
     _reminderSessionAccountId = accountId;
-    _reminderCoordinator.beginSession(accountId: accountId);
+    _fireReminderTransition(
+      previousAccountId: previousAccountId,
+      nextAccountId: accountId,
+    );
     _fireReminderRefresh(CalendarReminderRefreshReason.sessionRestored);
+  }
+
+  /// Transitions the coordinator's reminder session to [nextAccountId] without
+  /// ever blocking the UI. [CalendarReminderCoordinator.transitionSession]
+  /// begins the new session synchronously (so the refresh fired next belongs to
+  /// the new account); only the previous owner's cleanup is async and
+  /// best-effort. Failures are swallowed: a session transition must never crash
+  /// the app or block navigation.
+  void _fireReminderTransition({
+    required String? previousAccountId,
+    required String nextAccountId,
+  }) {
+    final cleanup = _reminderCoordinator.transitionSession(
+      previousAccountId: previousAccountId,
+      nextAccountId: nextAccountId,
+    );
+    unawaited(cleanup.catchError((Object _) {}));
   }
 
   /// Invalidates and cleans up reminders for the signed-out account without ever
