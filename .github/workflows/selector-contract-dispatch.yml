@@ -1,0 +1,286 @@
+name: Trigger selector contract
+
+# Cross-repository trigger (Workstream 1.4 / Priority 2): after a successful push
+# to an integration branch (dev/stage/main), fire CaleeMobile-Regression's
+# selector contract against THIS exact CaleeMobile commit, so a selector break is
+# caught immediately rather than only on the daily schedule or the next
+# CaleeMobile-Regression change.
+#
+# This does not touch the product build/test gate (flutter-ci.yml) at all.
+#
+# ENDPOINT / PERMISSION (Priority 2):
+#   POST /repos/CaleeAdmin/CaleeMobile-Regression/actions/workflows/ci.yml/dispatches
+#   body: {"ref":"main","inputs":{caleemobile_ref, expected_sha, expected_version, correlation_id}}
+# This is the *workflow_dispatch* endpoint, which requires a token with
+# **Actions: write** on CaleeMobile-Regression -- exactly the permission
+# REGRESSION_DISPATCH_TOKEN is documented to carry. (The older
+# `POST /repos/.../dispatches` repository_dispatch endpoint required
+# **Contents: write**, which that token does NOT have -- that mismatch is the bug
+# this workflow fixes. The receiver's ci.yml supports workflow_dispatch directly.)
+#
+# REQUIRED SECRET (not configured by this workflow -- see
+# CaleeMobile-Regression/docs/CI_CROSS_REPO_TRIGGER.md): `REGRESSION_DISPATCH_TOKEN`,
+# a fine-grained PAT (Actions: Read and write on CaleeAdmin/CaleeMobile-Regression)
+# or a GitHub App installation token with the equivalent `actions:write`. When the
+# secret is absent this workflow SKIPS cleanly (never a red X and never a
+# fabricated success); the scheduled + manual runs in CaleeMobile-Regression are
+# the documented fallback.
+#
+# RESOLVING THE RECEIVER RUN (Priority 3): the dispatch response body is parsed
+# DIRECTLY for the created run's id/url (.github/scripts/dispatch_receiver.py,
+# whose authoritative unit-tested source is
+# CaleeMobile-Regression/ui/dispatch_receiver.py). Correlation-id polling is used
+# only as a fallback when the response carries no run ID. The resolved run is
+# validated to belong to CaleeMobile-Regression, waited to completion, and its
+# `selector-contract` job is REQUIRED to pass before the resulting
+# selector-contract-result artifact's id + digest are recorded in the summary.
+#
+# BRANCH COVERAGE (Priority 2/3): for a push to a given branch to fire this
+# trigger, THIS workflow file must EXIST on that branch. A workflow living only
+# on `dev` cannot fire on a later independent push to `main`. The trigger lists
+# every integration branch this file should live on; `stage` is listed so that,
+# IF a stage branch is ever created and this file is present there, pushes to it
+# also fire. As of this change no `stage` branch exists in CaleeMobile (only
+# `dev` and `main`), so stage coverage is not claimed until such a branch and
+# this file on it exist.
+on:
+  push:
+    branches:
+      - dev
+      - stage
+      - main
+
+# The receiver workflow + ref to dispatch. Pinned to the receiver's default
+# branch so the run uses main's ci.yml definition.
+env:
+  RECEIVER_REPO: CaleeAdmin/CaleeMobile-Regression
+  RECEIVER_WORKFLOW: ci.yml
+  RECEIVER_REF: main
+
+jobs:
+  dispatch-preflight:
+    name: Check whether REGRESSION_DISPATCH_TOKEN is configured
+    runs-on: ubuntu-latest
+    # `secrets` cannot be referenced in a job-level `if:`; resolve the token's
+    # presence in a step env and expose it as an output (same pattern
+    # CaleeMobile-Regression uses for CALEEMOBILE_CHECKOUT_TOKEN).
+    outputs:
+      has_token: ${{ steps.check.outputs.has_token }}
+    steps:
+      - id: check
+        env:
+          TOKEN_SET: ${{ secrets.REGRESSION_DISPATCH_TOKEN != '' }}
+        run: echo "has_token=$TOKEN_SET" >> "$GITHUB_OUTPUT"
+
+  dispatch:
+    name: Dispatch CaleeMobile-Regression selector contract (workflow_dispatch)
+    needs: dispatch-preflight
+    if: ${{ needs.dispatch-preflight.outputs.has_token == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve the pushed identity to verify
+        id: identity
+        run: |
+          sha="${GITHUB_SHA}"
+          version="$(grep -E '^version:' pubspec.yaml | head -1 | awk '{print $2}')"
+          # A unique correlation id ties the dispatched receiver run back to THIS
+          # push, so its run ID can be captured below (workflow_dispatch returns
+          # 204 with no run ID). The receiver echoes it into its run name.
+          corr="cm-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          {
+            echo "sha=$sha"
+            echo "version=$version"
+            echo "correlation_id=$corr"
+          } >> "$GITHUB_OUTPUT"
+          echo "Dispatching selector contract for ${GITHUB_REF_NAME}@$sha (version $version, corr $corr)"
+
+      - name: Fire workflow_dispatch to CaleeMobile-Regression
+        id: fire
+        env:
+          TOKEN: ${{ secrets.REGRESSION_DISPATCH_TOKEN }}
+          SHA: ${{ steps.identity.outputs.sha }}
+          VERSION: ${{ steps.identity.outputs.version }}
+          CORR: ${{ steps.identity.outputs.correlation_id }}
+        run: |
+          set -euo pipefail
+          # Pin the regression run to THIS exact commit (caleemobile_ref=SHA) and
+          # pass the expected SHA/version so the run FAILS if it somehow tests a
+          # different build. A non-2xx response fails this job loudly.
+          payload=$(jq -n \
+            --arg ref "$RECEIVER_REF" \
+            --arg cmref "$SHA" \
+            --arg sha "$SHA" \
+            --arg version "$VERSION" \
+            --arg corr "$CORR" \
+            '{ref:$ref, inputs:{caleemobile_ref:$cmref, expected_sha:$sha, expected_version:$version, correlation_id:$corr}}')
+          # Capture the response BODY and the HTTP code. GitHub's current
+          # workflow-dispatch endpoint may return the created run's id/urls in
+          # the body; an older/empty (204) body is handled by the correlation
+          # fallback below (Priority 3).
+          http_code=$(curl -sS -o /tmp/dispatch_resp.json -w "%{http_code}" -X POST \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${RECEIVER_REPO}/actions/workflows/${RECEIVER_WORKFLOW}/dispatches" \
+            -d "$payload")
+          echo "workflow_dispatch HTTP $http_code"
+          if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
+            echo "Dispatch failed:" >&2
+            cat /tmp/dispatch_resp.json >&2
+            exit 1
+          fi
+          echo "Dispatched ci.yml to ${RECEIVER_REPO} (corr $CORR)."
+
+      - name: Resolve the receiver run ID (parse response, else correlation poll)
+        id: resolve_run
+        env:
+          TOKEN: ${{ secrets.REGRESSION_DISPATCH_TOKEN }}
+          CORR: ${{ steps.identity.outputs.correlation_id }}
+        run: |
+          set -euo pipefail
+          HELPER="$GITHUB_WORKSPACE/.github/scripts/dispatch_receiver.py"
+          # 1. Parse the dispatch response body DIRECTLY (Priority 3).
+          eval "$(python3 "$HELPER" parse-response --input /tmp/dispatch_resp.json)"
+          if [ -n "${run_id:-}" ]; then
+            echo "Run ID parsed directly from the dispatch response: $run_id (source=$source)"
+          else
+            # 2. Fallback ONLY when the response carried no run ID: match the
+            #    correlation id the receiver echoes into its run name.
+            echo "No run ID in the dispatch response; falling back to correlation polling."
+            run_id=""; run_url=""; html_url=""; source=""
+            for _ in $(seq 1 12); do
+              sleep 5
+              curl -sS \
+                -H "Authorization: Bearer $TOKEN" \
+                -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/repos/${RECEIVER_REPO}/actions/workflows/${RECEIVER_WORKFLOW}/runs?event=workflow_dispatch&per_page=30" \
+                -o /tmp/dispatch_runs.json
+              eval "$(python3 "$HELPER" select-run --input /tmp/dispatch_runs.json --correlation "$CORR")"
+              if [ -n "${run_id:-}" ]; then break; fi
+            done
+          fi
+          # 3. Fail when NEITHER direct parsing nor bounded correlation polling
+          #    resolved a run (Priority 3: never a silent success).
+          if [ -z "${run_id:-}" ]; then
+            echo "Could not resolve the dispatched receiver run ID by response parsing or correlation polling." >&2
+            exit 1
+          fi
+          {
+            echo "run_id=$run_id"
+            echo "run_url=${run_url:-}"
+            echo "html_url=${html_url:-}"
+            echo "source=${source:-}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Validate the run belongs to CaleeMobile-Regression
+        env:
+          TOKEN: ${{ secrets.REGRESSION_DISPATCH_TOKEN }}
+          RUN_ID: ${{ steps.resolve_run.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          curl -sS \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${RECEIVER_REPO}/actions/runs/${RUN_ID}" \
+            -o /tmp/dispatch_run.json
+          full_name=$(jq -r '.repository.full_name // ""' /tmp/dispatch_run.json)
+          echo "Resolved run ${RUN_ID} belongs to: ${full_name:-<unknown>}"
+          if [ "$full_name" != "$RECEIVER_REPO" ]; then
+            echo "Resolved run does not belong to ${RECEIVER_REPO} (got '${full_name}')." >&2
+            exit 1
+          fi
+
+      - name: Wait for the receiver run to complete
+        id: wait
+        env:
+          TOKEN: ${{ secrets.REGRESSION_DISPATCH_TOKEN }}
+          RUN_ID: ${{ steps.resolve_run.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          status=""; conclusion=""
+          # Bounded wait (~10 min) for the receiver run to finish.
+          for _ in $(seq 1 60); do
+            curl -sS \
+              -H "Authorization: Bearer $TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${RECEIVER_REPO}/actions/runs/${RUN_ID}" \
+              -o /tmp/dispatch_run.json
+            status=$(jq -r '.status // ""' /tmp/dispatch_run.json)
+            conclusion=$(jq -r '.conclusion // ""' /tmp/dispatch_run.json)
+            echo "Receiver run ${RUN_ID}: status=$status conclusion=$conclusion"
+            if [ "$status" = "completed" ]; then break; fi
+            sleep 10
+          done
+          if [ "$status" != "completed" ]; then
+            echo "Receiver run ${RUN_ID} did not complete within the wait window." >&2
+            exit 1
+          fi
+          echo "conclusion=$conclusion" >> "$GITHUB_OUTPUT"
+
+      - name: Require the receiver selector-contract job to pass
+        env:
+          TOKEN: ${{ secrets.REGRESSION_DISPATCH_TOKEN }}
+          RUN_ID: ${{ steps.resolve_run.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          HELPER="$GITHUB_WORKSPACE/.github/scripts/dispatch_receiver.py"
+          curl -sS \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${RECEIVER_REPO}/actions/runs/${RUN_ID}/jobs?per_page=50" \
+            -o /tmp/dispatch_jobs.json
+          # Exit non-zero unless the selector-contract job concluded 'success'.
+          if ! python3 "$HELPER" check-selector-job --input /tmp/dispatch_jobs.json; then
+            echo "Receiver selector-contract job did not pass." >&2
+            exit 1
+          fi
+
+      - name: Identify the selector-contract-result artifact (id + digest)
+        id: artifact
+        env:
+          TOKEN: ${{ secrets.REGRESSION_DISPATCH_TOKEN }}
+          RUN_ID: ${{ steps.resolve_run.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          HELPER="$GITHUB_WORKSPACE/.github/scripts/dispatch_receiver.py"
+          curl -sS \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${RECEIVER_REPO}/actions/runs/${RUN_ID}/artifacts" \
+            -o /tmp/dispatch_artifacts.json
+          if eval "$(python3 "$HELPER" find-artifact --input /tmp/dispatch_artifacts.json)"; then
+            echo "Selector artifact: id=$artifact_id digest=${artifact_digest:-<none>}"
+            {
+              echo "artifact_id=${artifact_id:-}"
+              echo "artifact_digest=${artifact_digest:-}"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "Receiver run produced no selector-contract-result artifact." >&2
+            exit 1
+          fi
+
+      - name: Record the cross-repo dispatch result in the job summary
+        if: ${{ always() }}
+        env:
+          SHA: ${{ steps.identity.outputs.sha }}
+          VERSION: ${{ steps.identity.outputs.version }}
+          CORR: ${{ steps.identity.outputs.correlation_id }}
+          RUN_ID: ${{ steps.resolve_run.outputs.run_id }}
+          RUN_HTML: ${{ steps.resolve_run.outputs.html_url }}
+          SOURCE: ${{ steps.resolve_run.outputs.source }}
+          CONCLUSION: ${{ steps.wait.outputs.conclusion }}
+          ARTIFACT_ID: ${{ steps.artifact.outputs.artifact_id }}
+          ARTIFACT_DIGEST: ${{ steps.artifact.outputs.artifact_digest }}
+        run: |
+          {
+            echo "### Cross-repo selector-contract dispatch"
+            echo "- Endpoint: \`POST /repos/${RECEIVER_REPO}/actions/workflows/${RECEIVER_WORKFLOW}/dispatches\` (Actions: write)"
+            echo "- CaleeMobile commit: \`$SHA\` (version \`$VERSION\`)"
+            echo "- Correlation: \`$CORR\`"
+            echo "- Receiver run ID: \`${RUN_ID:-<unresolved>}\` (resolved via ${SOURCE:-n/a})"
+            echo "- Receiver run: ${RUN_HTML:-<n/a>}"
+            echo "- Receiver conclusion: \`${CONCLUSION:-<unknown>}\`"
+            echo "- Selector artifact: id \`${ARTIFACT_ID:-<none>}\`, digest \`${ARTIFACT_DIGEST:-<none>}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
