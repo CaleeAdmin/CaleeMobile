@@ -80,24 +80,25 @@ abstract final class CaleeTheme {
     // Start from a seed for the derived tones, then explicitly override the
     // important roles so widgets render the approved Calee values rather than
     // uncontrolled generated tones (which can drift toward unrelated hues).
-    final colorScheme = ColorScheme.fromSeed(
-      seedColor: CaleeColors.primary,
-      brightness: Brightness.light,
-    ).copyWith(
-      primary: CaleeColors.primary,
-      onPrimary: CaleeColors.textInverse,
-      primaryContainer: CaleeColors.primarySoft,
-      onPrimaryContainer: CaleeColors.primaryDeep,
-      secondary: CaleeColors.primaryDark,
-      onSecondary: CaleeColors.textInverse,
-      surface: CaleeColors.surface,
-      onSurface: CaleeColors.textPrimary,
-      surfaceContainerHighest: CaleeColors.surfaceSoft,
-      error: CaleeColors.danger,
-      onError: CaleeColors.textInverse,
-      outline: CaleeColors.separatorOpaque,
-      outlineVariant: CaleeColors.separator,
-    );
+    final colorScheme =
+        ColorScheme.fromSeed(
+          seedColor: CaleeColors.primary,
+          brightness: Brightness.light,
+        ).copyWith(
+          primary: CaleeColors.primary,
+          onPrimary: CaleeColors.textInverse,
+          primaryContainer: CaleeColors.primarySoft,
+          onPrimaryContainer: CaleeColors.primaryDeep,
+          secondary: CaleeColors.primaryDark,
+          onSecondary: CaleeColors.textInverse,
+          surface: CaleeColors.surface,
+          onSurface: CaleeColors.textPrimary,
+          surfaceContainerHighest: CaleeColors.surfaceSoft,
+          error: CaleeColors.danger,
+          onError: CaleeColors.textInverse,
+          outline: CaleeColors.separatorOpaque,
+          outlineVariant: CaleeColors.separator,
+        );
 
     return ThemeData(
       useMaterial3: true,
