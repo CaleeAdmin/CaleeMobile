@@ -473,7 +473,7 @@ class _CalendarRow extends StatelessWidget {
                   Text(
                     'Synced',
                     style: theme.textTheme.bodySmall?.copyWith(
-                      color: Colors.green,
+                      color: CaleeColors.success,
                     ),
                   ),
               ],
