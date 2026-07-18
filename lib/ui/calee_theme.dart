@@ -1,30 +1,42 @@
 import 'package:flutter/material.dart';
 
 abstract final class CaleeColors {
-  // Scaffold / page backgrounds
-  static const scaffoldBackground = Color(0xFFF2F2F7);
-  static const groupedBackground = Color(0xFFF2F2F7);
+  // Scaffold / page backgrounds (cool business neutral)
+  static const scaffoldBackground = Color(0xFFF3F7F6);
+  static const groupedBackground = Color(0xFFF3F7F6);
 
   // Surface (cards, sheets)
   static const surface = Colors.white;
+  static const surfaceSoft = Color(0xFFF8FBFA);
 
-  // Primary brand
-  static const primary = Color(0xFF3A7D44);
-  static const primaryLight = Color(0xFF5A9A5F);
+  // Primary brand (Calee teal)
+  static const primary = Color(0xFF1F6F66);
+  static const primaryDark = Color(0xFF195B55);
+  static const primaryDeep = Color(0xFF163F3B);
+  static const primarySoft = Color(0xFFDDEFEA);
+  static const primarySubtle = Color(0xFFF0F7F5);
 
   // Text
-  static const textPrimary = Color(0xFF1C1C1E);
-  static const textSecondary = Color(0xFF6C6C70);
-  static const textTertiary = Color(0xFFAEAEB2);
+  static const textPrimary = Color(0xFF163330);
+  static const textSecondary = Color(0xFF4F625F);
+  static const textTertiary = Color(0xFF667874);
+  static const textInverse = Color(0xFFFFFFFF);
 
-  // Separator / divider
-  static const separator = Color(0xFFE5E5EA);
-  static const separatorOpaque = Color(0xFFC6C6C8);
+  // Separator / divider / border
+  static const separator = Color(0xFFD5E1DE);
+  static const separatorOpaque = Color(0xFFB7C8C4);
 
-  // Destructive
-  static const destructive = Color(0xFFFF3B30);
+  // Semantic status
+  static const success = Color(0xFF2F7D4A);
+  static const warning = Color(0xFFA96316);
+  static const danger = Color(0xFFC44235);
+  static const info = Color(0xFF2368B4);
 
-  // Calendar-style palette for collection dots
+  // Backwards-compatible alias for error/destructive actions.
+  // New code should use [danger].
+  static const destructive = danger;
+
+  // Calendar-style palette for collection dots (independent of brand — unchanged)
   static const dotRed = Color(0xFFFF3B30);
   static const dotOrange = Color(0xFFFF9500);
   static const dotYellow = Color(0xFFFFCC00);
@@ -65,10 +77,26 @@ abstract final class CaleeAlpha {
 
 abstract final class CaleeTheme {
   static ThemeData buildThemeData() {
+    // Start from a seed for the derived tones, then explicitly override the
+    // important roles so widgets render the approved Calee values rather than
+    // uncontrolled generated tones (which can drift toward unrelated hues).
     final colorScheme = ColorScheme.fromSeed(
       seedColor: CaleeColors.primary,
       brightness: Brightness.light,
+    ).copyWith(
+      primary: CaleeColors.primary,
+      onPrimary: CaleeColors.textInverse,
+      primaryContainer: CaleeColors.primarySoft,
+      onPrimaryContainer: CaleeColors.primaryDeep,
+      secondary: CaleeColors.primaryDark,
+      onSecondary: CaleeColors.textInverse,
       surface: CaleeColors.surface,
+      onSurface: CaleeColors.textPrimary,
+      surfaceContainerHighest: CaleeColors.surfaceSoft,
+      error: CaleeColors.danger,
+      onError: CaleeColors.textInverse,
+      outline: CaleeColors.separatorOpaque,
+      outlineVariant: CaleeColors.separator,
     );
 
     return ThemeData(
