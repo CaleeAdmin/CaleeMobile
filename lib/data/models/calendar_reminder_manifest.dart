@@ -281,7 +281,11 @@ class CalendarReminderManifest {
     final idsRaw = decoded['ids'];
     final hasShape = entriesRaw is List || idsRaw is List;
 
-    // Current schema: entries carry trusted fingerprints and owner keys.
+    // Current schema: entries carry trusted fingerprints and owner keys, and are
+    // held to a stricter standard than a legacy migration (Priority 4). A
+    // corrupt or ownership-ambiguous current-schema value must NEVER collapse to
+    // a trusted empty manifest that would then be overwritten as if no reminders
+    // were owned.
     if (version == currentVersion) {
       if (entriesRaw is! List) {
         // Our own writer always emits an `entries` list (even when empty), so a
@@ -292,16 +296,43 @@ class CalendarReminderManifest {
           status: CalendarReminderManifestLoadStatus.corrupt,
         );
       }
-      final entries = _dedupe(
-        _parseEntries(entriesRaw, trustFingerprint: true, trustOwner: true),
+      final (parsed, parseDegraded) = _parseEntriesConservative(
+        entriesRaw,
+        trustFingerprint: true,
+        trustOwner: true,
       );
+      // A non-empty entries list that yields zero usable entries means real
+      // ownership data was present but unreadable — corrupt, never a valid empty
+      // manifest (Priority 4: non-empty list, zero valid entries -> corrupt).
+      if (entriesRaw.isNotEmpty && parsed.isEmpty) {
+        return const CalendarReminderManifestLoadResult(
+          manifest: empty,
+          status: CalendarReminderManifestLoadStatus.corrupt,
+        );
+      }
+      final (deduped, hadConflict, hadDuplicate) = _dedupeConflictAware(parsed);
+      // Duplicate IDs with conflicting fingerprints/owners are ambiguous
+      // ownership — corrupt, never silently first-entry-wins (Priority 4).
+      if (hadConflict) {
+        return const CalendarReminderManifestLoadResult(
+          manifest: empty,
+          status: CalendarReminderManifestLoadStatus.corrupt,
+        );
+      }
+      // Any dropped entry/field, or a collapsed (non-conflicting) duplicate, is
+      // a partial recovery — report `recovered`, never a silent `loaded` that
+      // would hide that ownership data was lost/repaired (Priority 4: a mixture
+      // of valid and malformed entries is not reported as fully loaded).
+      final degraded = parseDegraded || hadDuplicate;
       return CalendarReminderManifestLoadResult(
         manifest: CalendarReminderManifest(
           version: currentVersion,
-          entries: entries,
+          entries: deduped,
           lastReconciledAt: lastReconciledAt,
         ),
-        status: CalendarReminderManifestLoadStatus.loaded,
+        status: degraded
+            ? CalendarReminderManifestLoadStatus.recovered
+            : CalendarReminderManifestLoadStatus.loaded,
       );
     }
 
@@ -384,6 +415,81 @@ class CalendarReminderManifest {
       }
     }
     return result;
+  }
+
+  /// Parses current-schema entries, tracking whether anything had to be dropped
+  /// — a non-map item, an item with no usable ID, or a present-but-invalid
+  /// fingerprint/owner field. Returns the recovered entries and that flag so the
+  /// caller can distinguish a clean [loaded] from a partial [recovered]
+  /// (Priority 4: a mix of valid and malformed entries is never reported as
+  /// fully loaded).
+  static (List<CalendarReminderManifestEntry>, bool) _parseEntriesConservative(
+    List<dynamic> raw, {
+    required bool trustFingerprint,
+    required bool trustOwner,
+  }) {
+    final result = <CalendarReminderManifestEntry>[];
+    var degraded = false;
+    for (final item in raw) {
+      if (item is! Map) {
+        degraded = true;
+        continue;
+      }
+      final entry = CalendarReminderManifestEntry.tryFromJson(
+        item,
+        trustFingerprint: trustFingerprint,
+        trustOwner: trustOwner,
+      );
+      if (entry == null) {
+        degraded = true;
+        continue;
+      }
+      // A present-but-unusable fingerprint/owner (e.g. oversized/malformed) was
+      // dropped to null by tryFromJson. That is a recovery, not a clean load —
+      // and, crucially, an oversized/malformed digest must not SILENTLY become a
+      // trusted null value (Priority 4): the `recovered` status is the signal.
+      if (_fieldDropped(item['fp'], entry.fingerprint) ||
+          _fieldDropped(item['owner'], entry.ownerKey)) {
+        degraded = true;
+      }
+      result.add(entry);
+    }
+    return (result, degraded);
+  }
+
+  /// True when a raw field was present (non-null) but did not survive parsing
+  /// (became null) — i.e. it was malformed/oversized and dropped.
+  static bool _fieldDropped(Object? raw, String? parsed) =>
+      raw != null && parsed == null;
+
+  /// Deduplicates by notification ID for the current schema, distinguishing a
+  /// genuine ownership conflict from a harmless exact duplicate. Returns
+  /// (entries, hadConflict, hadDuplicate): a conflict is a repeated ID whose
+  /// fingerprint OR owner differs (ambiguous ownership -> the caller treats the
+  /// whole manifest as corrupt, never first-entry-wins); an exact duplicate
+  /// (identical fingerprint AND owner) is collapsed and flagged so the load is
+  /// reported as [recovered].
+  static (List<CalendarReminderManifestEntry>, bool, bool) _dedupeConflictAware(
+    List<CalendarReminderManifestEntry> entries,
+  ) {
+    final byId = <int, CalendarReminderManifestEntry>{};
+    final result = <CalendarReminderManifestEntry>[];
+    var hadConflict = false;
+    var hadDuplicate = false;
+    for (final entry in entries) {
+      final existing = byId[entry.notificationId];
+      if (existing == null) {
+        byId[entry.notificationId] = entry;
+        result.add(entry);
+        continue;
+      }
+      hadDuplicate = true;
+      if (existing.fingerprint != entry.fingerprint ||
+          existing.ownerKey != entry.ownerKey) {
+        hadConflict = true;
+      }
+    }
+    return (result, hadConflict, hadDuplicate);
   }
 
   static List<CalendarReminderManifestEntry> _parseLegacyIds(Object? raw) {

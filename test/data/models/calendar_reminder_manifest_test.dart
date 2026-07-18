@@ -341,7 +341,10 @@ void main() {
       expect(result.manifest.scheduledIds, isEmpty);
     });
 
-    test('duplicate IDs are deduplicated deterministically', () {
+    test('current-schema duplicate IDs with conflicting fingerprints are '
+        'corrupt (not first-entry-wins)', () {
+      // Priority 4: an ambiguous ownership record must not be silently resolved
+      // by keeping the first entry and dropping a conflicting duplicate.
       final result = CalendarReminderManifest.parse({
         'version': 3,
         'entries': [
@@ -349,8 +352,37 @@ void main() {
           {'id': 7, 'fp': 'second'},
         ],
       });
+      expect(result.status, CalendarReminderManifestLoadStatus.corrupt);
+      expect(result.manifest.isEmpty, isTrue);
+    });
+
+    test(
+      'current-schema duplicate IDs with conflicting owners are corrupt',
+      () {
+        final result = CalendarReminderManifest.parse({
+          'version': 3,
+          'entries': [
+            {'id': 7, 'fp': 'same', 'owner': 'ownerA'},
+            {'id': 7, 'fp': 'same', 'owner': 'ownerB'},
+          ],
+        });
+        expect(result.status, CalendarReminderManifestLoadStatus.corrupt);
+      },
+    );
+
+    test('current-schema exact-duplicate IDs collapse and report recovered', () {
+      // Identical duplicates carry no ownership conflict, so they are collapsed
+      // — but that is a repair, so the load is `recovered`, never `loaded`.
+      final result = CalendarReminderManifest.parse({
+        'version': 3,
+        'entries': [
+          {'id': 7, 'fp': 'same', 'owner': 'ownerA'},
+          {'id': 7, 'fp': 'same', 'owner': 'ownerA'},
+        ],
+      });
+      expect(result.status, CalendarReminderManifestLoadStatus.recovered);
       expect(result.manifest.scheduledIds, [7]);
-      expect(result.manifest.entryFor(7)!.fingerprint, 'first');
+      expect(result.manifest.entryFor(7)!.fingerprint, 'same');
     });
 
     test('unknown-version fingerprints and owners are cleared', () {
@@ -374,4 +406,111 @@ void main() {
       );
     });
   });
+
+  group(
+    'CalendarReminderManifest.parse — current-schema conservatism (P4)',
+    () {
+      test(
+        'empty current-schema entries is a valid loaded (empty) manifest',
+        () {
+          final result = CalendarReminderManifest.parse({
+            'version': 3,
+            'entries': <dynamic>[],
+          });
+          expect(result.status, CalendarReminderManifestLoadStatus.loaded);
+          expect(result.manifest.isEmpty, isTrue);
+        },
+      );
+
+      test('all-valid current-schema entries load fully', () {
+        final result = CalendarReminderManifest.parse({
+          'version': 3,
+          'entries': [
+            {'id': 1, 'fp': 'a', 'owner': 'ownerA'},
+            {'id': 2, 'fp': 'b', 'owner': 'ownerA'},
+          ],
+        });
+        expect(result.status, CalendarReminderManifestLoadStatus.loaded);
+        expect(result.manifest.scheduledIds, [1, 2]);
+      });
+
+      test('a mix of valid and malformed current-schema entries is RECOVERED, '
+          'not reported as fully loaded', () {
+        final result = CalendarReminderManifest.parse({
+          'version': 3,
+          'entries': [
+            {'id': 1, 'fp': 'a', 'owner': 'ownerA'},
+            {'fp': 'no-id'}, // dropped: no usable ID
+            'garbage', // dropped: not a map
+            {'id': 2},
+          ],
+        });
+        expect(
+          result.status,
+          CalendarReminderManifestLoadStatus.recovered,
+          reason: 'dropped entries must not be hidden behind a loaded status',
+        );
+        expect(result.manifest.scheduledIds, [1, 2]);
+      });
+
+      test(
+        'a non-empty current-schema list with zero valid entries is CORRUPT',
+        () {
+          final result = CalendarReminderManifest.parse({
+            'version': 3,
+            'entries': [
+              {'fp': 'x', 'owner': 'y'}, // no id
+              {'id': 'nope'}, // bad id
+            ],
+          });
+          expect(result.status, CalendarReminderManifestLoadStatus.corrupt);
+          expect(
+            result.manifest.isEmpty,
+            isTrue,
+            reason:
+                'a corrupt manifest is never used as a trusted empty record',
+          );
+        },
+      );
+
+      test(
+        'an oversized/malformed owner digest is dropped to null and reported '
+        'as recovered (never a silent trusted null owner)',
+        () {
+          final oversized = 'z' * 200; // exceeds the persisted-digest bound
+          final result = CalendarReminderManifest.parse({
+            'version': 3,
+            'entries': [
+              {'id': 1, 'fp': 'a', 'owner': oversized},
+            ],
+          });
+          expect(result.status, CalendarReminderManifestLoadStatus.recovered);
+          final entry = result.manifest.entryFor(1)!;
+          expect(entry.fingerprint, 'a');
+          expect(
+            entry.ownerKey,
+            isNull,
+            reason:
+                'a malformed owner is dropped; recovered status is the signal',
+          );
+        },
+      );
+
+      test(
+        'an oversized/malformed fingerprint is dropped and reported recovered',
+        () {
+          final result = CalendarReminderManifest.parse({
+            'version': 3,
+            'entries': [
+              {'id': 1, 'fp': 'y' * 200, 'owner': 'ownerA'},
+            ],
+          });
+          expect(result.status, CalendarReminderManifestLoadStatus.recovered);
+          final entry = result.manifest.entryFor(1)!;
+          expect(entry.fingerprint, isNull);
+          expect(entry.ownerKey, 'ownerA');
+        },
+      );
+    },
+  );
 }
