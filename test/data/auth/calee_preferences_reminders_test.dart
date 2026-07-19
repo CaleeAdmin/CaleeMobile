@@ -1,6 +1,8 @@
 // Tests for the account-scoped calendar-reminder-enabled preference and its
 // one-time legacy-global migration.
 
+import 'dart:convert';
+
 import 'package:calee_mobile/data/auth/calee_preferences.dart';
 import 'package:calee_mobile/features/notifications/calendar_notification_candidates.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -153,23 +155,39 @@ void main() {
       );
     });
 
-    test('the migration marker stores only the owner key, no raw ID', () async {
-      const rawId = 'raw-account-42';
-      final owner = reminderOwnerKey(rawId);
-      final prefs = CaleePreferences();
-      await prefs.loadCalendarRemindersEnabled(ownerKey: owner);
+    test(
+      'the migrated record records the claiming owner key, no raw ID',
+      () async {
+        const rawId = 'raw-account-42';
+        final owner = reminderOwnerKey(rawId);
+        final prefs = CaleePreferences();
+        await prefs.loadCalendarRemindersEnabled(ownerKey: owner);
 
-      final sp = await SharedPreferences.getInstance();
-      final marker = sp.getString(
-        'calee_pref_calendar_reminders_enabled_migrated',
-      );
-      expect(
-        marker,
-        owner,
-        reason: 'the marker records the claiming owner key',
-      );
-      expect(marker, isNot(contains(rawId)));
-    });
+        final sp = await SharedPreferences.getInstance();
+        final raw = sp.getString('calee_pref_calendar_reminder_settings_v2');
+        expect(raw, isNotNull, reason: 'the migration commits the v2 record');
+        final record = CalendarReminderPreferenceRecord.fromJson(
+          jsonDecode(raw!),
+        );
+        expect(record, isNotNull);
+        expect(
+          record!.legacyClaimConsumed,
+          isTrue,
+          reason: 'the claim is consumed by the migrating account',
+        );
+        expect(
+          record.legacyClaimOwner,
+          owner,
+          reason: 'the record records the claiming owner key',
+        );
+        // No raw account ID may appear anywhere in storage.
+        for (final key in sp.getKeys()) {
+          expect(key, isNot(contains(rawId)));
+          final value = sp.get(key);
+          if (value is String) expect(value, isNot(contains(rawId)));
+        }
+      },
+    );
 
     test(
       'the account-agnostic (null owner) path reads the legacy value',

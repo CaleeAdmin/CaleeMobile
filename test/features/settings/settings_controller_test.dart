@@ -61,10 +61,23 @@ class _StubPreferences extends CaleePreferences {
   /// failure) instead of persisting.
   Object? saveError;
 
+  /// When set, [loadCalendarRemindersEnabledResult] returns it (so tests can
+  /// drive absent/unavailable). Defaults to a `loaded` result of
+  /// [_remindersEnabled].
+  CalendarReminderPreferenceLoadResult? loadResultOverride;
+
   @override
   Future<bool> loadCalendarRemindersEnabled({String? ownerKey}) async {
     loadOwnerKeys.add(ownerKey);
     return _remindersEnabled;
+  }
+
+  @override
+  Future<CalendarReminderPreferenceLoadResult>
+  loadCalendarRemindersEnabledResult({String? ownerKey}) async {
+    loadOwnerKeys.add(ownerKey);
+    return loadResultOverride ??
+        CalendarReminderPreferenceLoadResult.loaded(_remindersEnabled);
   }
 
   @override
@@ -654,6 +667,84 @@ void main() {
       );
       expect(controller.preferencesSaveError, isNotNull);
       expect(controller.calendarRemindersEnabled, isFalse);
+    });
+  });
+
+  group('reminder preference unavailable state (Fix 7)', () {
+    test('an unavailable initial load does not present a trustworthy off '
+        'value; the switch is disabled', () async {
+      final prefs = _StubPreferences()
+        ..loadResultOverride =
+            const CalendarReminderPreferenceLoadResult.unavailable('io');
+      final controller = _makeController(prefs: prefs);
+
+      await controller.load();
+
+      expect(controller.reminderPreferenceUnavailable, isTrue);
+      expect(
+        controller.isReminderSwitchEnabled,
+        isFalse,
+        reason: 'no trustworthy value has ever loaded',
+      );
+      expect(controller.error, isNull, reason: 'not a full-page error');
+    });
+
+    test('an unavailable refresh preserves a previously loaded true value and '
+        'keeps the switch enabled', () async {
+      final prefs = _StubPreferences()
+        ..loadResultOverride =
+            const CalendarReminderPreferenceLoadResult.loaded(true);
+      final controller = _makeController(prefs: prefs);
+      await controller.load();
+      expect(controller.calendarRemindersEnabled, isTrue);
+
+      // A later refresh cannot read the value.
+      prefs.loadResultOverride =
+          const CalendarReminderPreferenceLoadResult.unavailable('io');
+      await controller.refresh();
+
+      expect(
+        controller.calendarRemindersEnabled,
+        isTrue,
+        reason: 'the previously loaded true value is preserved',
+      );
+      expect(controller.reminderPreferenceUnavailable, isTrue);
+      expect(
+        controller.isReminderSwitchEnabled,
+        isTrue,
+        reason: 'a trustworthy value exists, so the switch stays usable',
+      );
+    });
+
+    test('a retry after unavailable restores availability', () async {
+      final prefs = _StubPreferences()
+        ..loadResultOverride =
+            const CalendarReminderPreferenceLoadResult.unavailable('io');
+      final controller = _makeController(prefs: prefs);
+      await controller.load();
+      expect(controller.reminderPreferenceUnavailable, isTrue);
+
+      prefs.loadResultOverride =
+          const CalendarReminderPreferenceLoadResult.loaded(true);
+      await controller.refresh();
+
+      expect(controller.reminderPreferenceUnavailable, isFalse);
+      expect(controller.calendarRemindersEnabled, isTrue);
+      expect(controller.isReminderSwitchEnabled, isTrue);
+    });
+
+    test('an absent load presents the product default off and enables the '
+        'switch', () async {
+      final prefs = _StubPreferences()
+        ..loadResultOverride =
+            const CalendarReminderPreferenceLoadResult.absent();
+      final controller = _makeController(prefs: prefs);
+
+      await controller.load();
+
+      expect(controller.calendarRemindersEnabled, isFalse);
+      expect(controller.reminderPreferenceUnavailable, isFalse);
+      expect(controller.isReminderSwitchEnabled, isTrue);
     });
   });
 
