@@ -445,8 +445,8 @@ class _SettingsPageState extends State<SettingsPage> {
               CaleeListRow(
                 title: 'Calendar reminders',
                 subtitle:
-                    'Remind me 10 minutes before upcoming events on this phone.'
-                    ' Reminders work best when you open Calee regularly.',
+                    'Remind me around 10 minutes before upcoming events on this'
+                    ' phone. Reminders work best when you open Calee regularly.',
                 leading: const Icon(
                   Icons.notifications_outlined,
                   size: 20,

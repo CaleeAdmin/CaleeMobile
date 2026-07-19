@@ -750,6 +750,21 @@ class CalendarReminderCoordinator {
           error: '$e',
         );
       }
+      // The preference save is asynchronous: a sign-out or account switch can
+      // occur while it is queued. Re-check the captured generation and owner
+      // before running any targeted cleanup. If the session is no longer
+      // current, do not launch a stale-refresh cleanup — the outgoing owner's
+      // reminders are the responsibility of endSession()/account-transition
+      // cleanup, and the incoming account must never be cleaned by this stale
+      // refresh. Surface the structured save outcome for diagnostics.
+      if (!_isCurrentSession(generation, owner)) {
+        return CalendarReminderRefreshResult(
+          reason: reason,
+          status: CalendarReminderRefreshStatus.skippedSessionInvalidated,
+          completedAt: _now(),
+          preferenceSaveFailed: preferenceSaveFailed,
+        );
+      }
       // Previously scheduled reminders would otherwise become unmanaged if the
       // user later re-grants permission via system settings. Cancel the ones
       // this account owns (targeted, never a global cancelAll) and keep any that

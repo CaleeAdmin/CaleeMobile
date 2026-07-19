@@ -278,6 +278,43 @@ class _BlockingLoadPrefs extends CaleePreferences {
   }
 }
 
+/// Preferences stub whose `saveCalendarRemindersEnabled` blocks until released,
+/// so a sign-out / account switch can be injected while the permission-denied
+/// preference write is still queued (Fix: stale permission-denied cleanup race).
+class _BlockingSavePrefs extends CaleePreferences {
+  _BlockingSavePrefs(this._loadResult, {this.saveError});
+
+  final CalendarReminderPreferenceLoadResult _loadResult;
+  final Object? saveError;
+  final Completer<void> _reached = Completer<void>();
+  final Completer<void> _gate = Completer<void>();
+  int loadCount = 0;
+  int saveCount = 0;
+
+  Future<void> get reachedSave => _reached.future;
+  void releaseSave() {
+    if (!_gate.isCompleted) _gate.complete();
+  }
+
+  @override
+  Future<CalendarReminderPreferenceLoadResult>
+  loadCalendarRemindersEnabledResult({String? ownerKey}) async {
+    loadCount++;
+    return _loadResult;
+  }
+
+  @override
+  Future<void> saveCalendarRemindersEnabled({
+    String? ownerKey,
+    required bool enabled,
+  }) async {
+    saveCount++;
+    if (!_reached.isCompleted) _reached.complete();
+    await _gate.future;
+    if (saveError != null) throw saveError!;
+  }
+}
+
 /// Notification service whose permission request blocks until released, so a
 /// session change can be injected while the permission dialog is resolving.
 class _BlockingPermissionNotifs extends LocalCalendarNotificationService {
@@ -1526,6 +1563,124 @@ void main() {
 
       expect(result.status, CalendarReminderRefreshStatus.permissionDenied);
       expect(result.preferenceSaveFailed, isFalse);
+      expect(notifs.disableCount, 1);
+    });
+  });
+
+  group('permission-denied save/session race (Fix 6)', () {
+    test('sign-out while the denied preference save is blocked → invalidated, '
+        'no extra cleanup from the stale refresh', () async {
+      final hub = _FakeHub();
+      final notifs = _CleanupSpyNotifs(permission: false);
+      final prefs = _BlockingSavePrefs(
+        const CalendarReminderPreferenceLoadResult.loaded(true),
+      );
+      final coord = _make(hub: hub, notifs: notifs, prefs: prefs);
+
+      final future = coord.refresh(
+        accessToken: 'tok',
+        reason: CalendarReminderRefreshReason.remindersEnabled,
+      );
+      await prefs.reachedSave;
+
+      // Sign out while the save is still queued. endSession runs its own
+      // owner-scoped cleanup (disableCount becomes 1).
+      final signOut = coord.endSession();
+      prefs.releaseSave();
+      final result = await future;
+      await signOut;
+
+      expect(
+        result.status,
+        CalendarReminderRefreshStatus.skippedSessionInvalidated,
+      );
+      // Exactly one cleanup — endSession's — and none from the stale refresh.
+      expect(notifs.disableCount, 1);
+      expect(notifs.disableOwnerKeys.single, reminderOwnerKey('acct-A'));
+      expect(hub.eventsCallCount, 0);
+    });
+
+    test('account switch while the save is blocked → no incoming-account '
+        'cleanup', () async {
+      final hub = _FakeHub();
+      final notifs = _CleanupSpyNotifs(permission: false);
+      final prefs = _BlockingSavePrefs(
+        const CalendarReminderPreferenceLoadResult.loaded(true),
+      );
+      final coord = _make(hub: hub, notifs: notifs, prefs: prefs);
+
+      final future = coord.refresh(
+        accessToken: 'tok',
+        reason: CalendarReminderRefreshReason.remindersEnabled,
+      );
+      await prefs.reachedSave;
+
+      // Switch A → B while the save is queued.
+      await coord.transitionSession(
+        previousAccountId: 'acct-A',
+        nextAccountId: 'acct-B',
+      );
+      prefs.releaseSave();
+      final result = await future;
+
+      expect(
+        result.status,
+        CalendarReminderRefreshStatus.skippedSessionInvalidated,
+      );
+      // Only the outgoing owner A was cleaned; the incoming account B never is.
+      expect(notifs.disableOwnerKeys, [reminderOwnerKey('acct-A')]);
+      expect(
+        notifs.disableOwnerKeys,
+        isNot(contains(reminderOwnerKey('acct-B'))),
+      );
+    });
+
+    test('save failure plus session invalidation preserves the save outcome '
+        'and skips cleanup', () async {
+      final hub = _FakeHub();
+      final notifs = _CleanupSpyNotifs(permission: false);
+      final prefs = _BlockingSavePrefs(
+        const CalendarReminderPreferenceLoadResult.loaded(true),
+        saveError: const CalendarReminderPreferenceStorageException('save'),
+      );
+      final coord = _make(hub: hub, notifs: notifs, prefs: prefs);
+
+      final future = coord.refresh(
+        accessToken: 'tok',
+        reason: CalendarReminderRefreshReason.remindersEnabled,
+      );
+      await prefs.reachedSave;
+      final signOut = coord.endSession();
+      prefs.releaseSave();
+      final result = await future;
+      await signOut;
+
+      expect(
+        result.status,
+        CalendarReminderRefreshStatus.skippedSessionInvalidated,
+      );
+      expect(result.preferenceSaveFailed, isTrue);
+      // Stale refresh launched no cleanup; only endSession's ran.
+      expect(notifs.disableCount, 1);
+    });
+
+    test('normal sign-out cleanup still runs when there is no race', () async {
+      final hub = _FakeHub();
+      final notifs = _CleanupSpyNotifs(permission: false);
+      final coord = _make(
+        hub: hub,
+        notifs: notifs,
+        prefs: _StubPrefs(
+          const CalendarReminderPreferenceLoadResult.loaded(true),
+        ),
+      );
+
+      // No race: the permission-denied refresh completes and cleans up once.
+      final result = await coord.refresh(
+        accessToken: 'tok',
+        reason: CalendarReminderRefreshReason.remindersEnabled,
+      );
+      expect(result.status, CalendarReminderRefreshStatus.permissionDenied);
       expect(notifs.disableCount, 1);
     });
   });

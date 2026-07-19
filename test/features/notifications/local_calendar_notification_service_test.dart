@@ -12,6 +12,7 @@ import 'package:calee_mobile/data/models/calendar_reminder_manifest.dart';
 import 'package:calee_mobile/data/models/client_calendar.dart';
 import 'package:calee_mobile/features/notifications/calendar_notification_candidates.dart';
 import 'package:calee_mobile/features/notifications/local_calendar_notification_service.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -64,11 +65,15 @@ class _FlakyInitService extends LocalCalendarNotificationService {
   bool failFirst = true;
 
   @override
-  Future<void> performPluginInitialization() async {
+  Future<LocalNotificationInitializationResult>
+  performPluginInitialization() async {
     attempts++;
     if (failFirst && attempts == 1) {
       throw Exception('simulated init failure');
     }
+    return const LocalNotificationInitializationResult(
+      status: LocalNotificationInitializationStatus.initialized,
+    );
   }
 }
 
@@ -79,6 +84,94 @@ class _UninitializedService extends LocalCalendarNotificationService {
   @override
   Future<bool> ensureInitialized() async => false;
 }
+
+/// Drives [performPluginInitialization] through its real orchestration while
+/// controlling every low-level seam (plugin result, platform, Android impl,
+/// channel creation) so each initialization outcome can be exercised without
+/// platform channels.
+class _ConfigurableInitService extends LocalCalendarNotificationService {
+  _ConfigurableInitService({
+    this.pluginResult = true,
+    this.android = true,
+    this.androidImplPresent = true,
+    this.channelThrows = false,
+    this.pluginThrows = false,
+  }) : super.forTest();
+
+  bool? pluginResult;
+  bool android;
+  bool androidImplPresent;
+  bool channelThrows;
+  bool pluginThrows;
+  int pluginCalls = 0;
+  int channelCalls = 0;
+
+  @override
+  Future<bool?> initializePlugin(InitializationSettings settings) async {
+    pluginCalls++;
+    if (pluginThrows) throw Exception('simulated plugin init throw');
+    return pluginResult;
+  }
+
+  @override
+  bool get isAndroidPlatform => android;
+
+  @override
+  Object? resolveAndroidImplementation() => androidImplPresent ? _marker : null;
+
+  static final Object _marker = Object();
+
+  @override
+  Future<void> createAndroidChannel(Object androidImpl) async {
+    channelCalls++;
+    if (channelThrows) throw Exception('simulated channel failure');
+  }
+}
+
+/// Controls pending platform requests and the manifest so [collectDiagnostics]
+/// can be exercised without platform channels.
+class _DiagnosticsService extends LocalCalendarNotificationService {
+  _DiagnosticsService({
+    required this.pending,
+    this.prefsOverride,
+    this.pendingThrows = false,
+  }) : super.forTest();
+
+  final List<PendingNotificationRequest> pending;
+  final CaleePreferences? prefsOverride;
+  final bool pendingThrows;
+
+  @override
+  CaleePreferences get preferences => prefsOverride ?? super.preferences;
+
+  @override
+  Future<bool> ensureInitialized() async => true;
+
+  @override
+  Future<List<PendingNotificationRequest>> pendingNotificationRequests() async {
+    if (pendingThrows) throw Exception('simulated pending query failure');
+    return pending;
+  }
+}
+
+/// A Calee calendar-reminder pending request whose payload embeds event data
+/// (so diagnostics privacy can be verified).
+PendingNotificationRequest _caleePending(
+  int id, {
+  String title = 'Secret title',
+  String eventId = 'evt-secret',
+}) => PendingNotificationRequest(
+  id,
+  title,
+  'body-secret',
+  jsonEncode({
+    'type': 'calendar_event_reminder',
+    'eventId': eventId,
+    'occurrenceId': 'occ-secret',
+    'calendarId': 'cal-secret',
+    'startsAt': '2030-01-01T00:00:00Z',
+  }),
+);
 
 /// In-memory [CaleePreferences] so manifest persistence can be observed and its
 /// failures simulated without SharedPreferences.
@@ -831,6 +924,226 @@ void main() {
         await expectLater(service.ensureInitialized(), completion(isFalse));
       },
     );
+  });
+
+  group('initialize — structured result (Defect 3)', () {
+    test('plugin returns true → initialized, service usable', () async {
+      final service = _ConfigurableInitService(pluginResult: true);
+      final result = await service.initialize();
+      expect(result.status, LocalNotificationInitializationStatus.initialized);
+      expect(result.isInitialized, isTrue);
+      expect(service.debugInitialized, isTrue);
+      expect(service.channelCalls, 1, reason: 'channel created after init');
+    });
+
+    test('plugin returns false → not initialized', () async {
+      final service = _ConfigurableInitService(pluginResult: false);
+      final result = await service.initialize();
+      expect(
+        result.status,
+        LocalNotificationInitializationStatus.pluginRejected,
+      );
+      expect(service.debugInitialized, isFalse);
+      expect(service.channelCalls, 0, reason: 'no channel on rejected init');
+    });
+
+    test('plugin returns null → not initialized', () async {
+      final service = _ConfigurableInitService(pluginResult: null);
+      final result = await service.initialize();
+      expect(
+        result.status,
+        LocalNotificationInitializationStatus.pluginResultMissing,
+      );
+      expect(service.debugInitialized, isFalse);
+    });
+
+    test('Android implementation missing → not initialized', () async {
+      final service = _ConfigurableInitService(
+        pluginResult: true,
+        android: true,
+        androidImplPresent: false,
+      );
+      final result = await service.initialize();
+      expect(
+        result.status,
+        LocalNotificationInitializationStatus.platformImplementationMissing,
+      );
+      expect(service.debugInitialized, isFalse);
+    });
+
+    test('channel creation failure → not initialized', () async {
+      final service = _ConfigurableInitService(
+        pluginResult: true,
+        channelThrows: true,
+      );
+      final result = await service.initialize();
+      expect(
+        result.status,
+        LocalNotificationInitializationStatus.channelCreationFailed,
+      );
+      expect(result.errorCategory, isNotNull);
+      expect(service.debugInitialized, isFalse);
+    });
+
+    test('exception during plugin init → not initialized', () async {
+      final service = _ConfigurableInitService(pluginThrows: true);
+      final result = await service.initialize();
+      expect(result.status, LocalNotificationInitializationStatus.exception);
+      expect(service.debugInitialized, isFalse);
+    });
+
+    test('non-Android platform skips channel creation', () async {
+      final service = _ConfigurableInitService(
+        pluginResult: true,
+        android: false,
+      );
+      final result = await service.initialize();
+      expect(result.isInitialized, isTrue);
+      expect(service.channelCalls, 0);
+    });
+
+    test('retry succeeds after each failure type', () async {
+      for (final configure in <void Function(_ConfigurableInitService)>[
+        (s) => s.pluginResult = false,
+        (s) => s.pluginResult = null,
+        (s) => s.androidImplPresent = false,
+        (s) => s.channelThrows = true,
+        (s) => s.pluginThrows = true,
+      ]) {
+        final service = _ConfigurableInitService();
+        configure(service);
+        final failed = await service.initialize();
+        expect(failed.isInitialized, isFalse);
+        expect(service.debugInitialized, isFalse);
+
+        // Fix the fault and retry: the failed attempt must not poison it.
+        service
+          ..pluginResult = true
+          ..androidImplPresent = true
+          ..channelThrows = false
+          ..pluginThrows = false;
+        final ok = await service.initialize();
+        expect(ok.isInitialized, isTrue);
+        expect(service.debugInitialized, isTrue);
+      }
+    });
+
+    test('concurrent callers share one in-flight attempt', () async {
+      final service = _ConfigurableInitService(pluginResult: true);
+      await Future.wait([
+        service.initialize(),
+        service.initialize(),
+        service.initialize(),
+      ]);
+      expect(service.pluginCalls, 1);
+      expect(service.debugInitialized, isTrue);
+    });
+
+    test('lastInitializationResult carries no sensitive data', () async {
+      final service = _ConfigurableInitService(channelThrows: true);
+      await service.initialize();
+      final text = service.lastInitializationResult.toString();
+      // Only status/category, never content.
+      expect(text, contains('channelCreationFailed'));
+      expect(text, isNot(contains('@')));
+    });
+  });
+
+  group('collectDiagnostics — pending vs manifest (Defect 8)', () {
+    test('counts only Calee reminders and agrees with manifest', () async {
+      final prefs = _InMemoryPreferences(
+        initial: CalendarReminderManifest.fromIds([1, 2]),
+      );
+      final service = _DiagnosticsService(
+        prefsOverride: prefs,
+        pending: [
+          _caleePending(1),
+          _caleePending(2),
+          // A non-Calee notification the diagnostics must ignore.
+          PendingNotificationRequest(
+            999,
+            't',
+            'b',
+            jsonEncode({'type': 'other'}),
+          ),
+        ],
+      );
+
+      final d = await service.collectDiagnostics();
+      expect(d.initialized, isTrue);
+      expect(d.pendingPlatformCount, 2);
+      expect(d.trackedManifestCount, 2);
+      expect(d.trackedButNotPendingCount, 0);
+      expect(d.pendingButUntrackedCalendarCount, 0);
+      expect(d.scheduleMode, 'inexactAllowWhileIdle');
+    });
+
+    test('detects manifest-claims-but-not-pending', () async {
+      final prefs = _InMemoryPreferences(
+        initial: CalendarReminderManifest.fromIds([1, 2, 3]),
+      );
+      final service = _DiagnosticsService(
+        prefsOverride: prefs,
+        pending: [_caleePending(1)],
+      );
+      final d = await service.collectDiagnostics();
+      expect(d.pendingPlatformCount, 1);
+      expect(d.trackedManifestCount, 3);
+      expect(d.trackedButNotPendingCount, 2);
+      expect(d.pendingButUntrackedCalendarCount, 0);
+    });
+
+    test('detects pending-but-untracked', () async {
+      final prefs = _InMemoryPreferences(
+        initial: CalendarReminderManifest.fromIds([1]),
+      );
+      final service = _DiagnosticsService(
+        prefsOverride: prefs,
+        pending: [_caleePending(1), _caleePending(2)],
+      );
+      final d = await service.collectDiagnostics();
+      expect(d.pendingButUntrackedCalendarCount, 1);
+    });
+
+    test('a pending-query failure is non-destructive and reported', () async {
+      final prefs = _InMemoryPreferences(
+        initial: CalendarReminderManifest.fromIds([1]),
+      );
+      final service = _DiagnosticsService(
+        prefsOverride: prefs,
+        pending: const [],
+        pendingThrows: true,
+      );
+      final d = await service.collectDiagnostics();
+      expect(d.errorCategory, isNotNull);
+      // Nothing was cancelled or written.
+      expect(prefs.saveCount, 0);
+      expect(prefs.clearCount, 0);
+    });
+
+    test('diagnostic output contains no event or account data', () async {
+      final prefs = _InMemoryPreferences(
+        initial: CalendarReminderManifest.fromIds([1]),
+      );
+      final service = _DiagnosticsService(
+        prefsOverride: prefs,
+        pending: [
+          _caleePending(1, title: 'Dentist at 3pm', eventId: 'evt-12345'),
+        ],
+      );
+      final d = await service.collectDiagnostics();
+      final text = d.toString();
+      for (final leak in [
+        'Dentist',
+        'evt-12345',
+        'occ-secret',
+        'cal-secret',
+        'body-secret',
+        '2030-01-01',
+      ]) {
+        expect(text, isNot(contains(leak)), reason: 'leaked $leak');
+      }
+    });
   });
 
   group('reconcileCalendarReminders — account isolation (Defect 2)', () {
