@@ -122,6 +122,7 @@ class ClientCalendar {
     this.sourceName,
     this.sourceColor,
     this.appearanceMode = 'source_metadata',
+    this.hasServerAppearanceContract = true,
     this.capabilities = const CalendarCapabilities(
       canEditAppearance: true,
       canEditEvents: false,
@@ -192,6 +193,9 @@ class ClientCalendar {
       appearanceMode: json.containsKey('appearanceMode')
           ? (json['appearanceMode'] as String? ?? fallbackAppearanceMode)
           : fallbackAppearanceMode,
+      hasServerAppearanceContract:
+          json.containsKey('capabilities') &&
+          rawCapabilities is Map<String, dynamic>,
       capabilities: capabilities,
     );
   }
@@ -236,6 +240,18 @@ class ClientCalendar {
   /// either parsed from the backend or, for an old backend that predates
   /// this field, computed via [CalendarCapabilities.fallback].
   final CalendarCapabilities capabilities;
+
+  /// Whether [capabilities] genuinely came from the backend (the
+  /// `capabilities` key was present in the payload) rather than from
+  /// [CalendarCapabilities.fallback]. The `/appearance` endpoint only exists
+  /// on backends that emit capabilities, so appearance editing must route
+  /// through the legacy `updateCalendar()` source-metadata endpoint when
+  /// this is false — a fallback-writable calendar has
+  /// `canEditAppearance == true` but an old backend would 404 the new
+  /// route. Defaults to true for direct construction (tests/fixtures model
+  /// a current backend); [ClientCalendar.fromJson] always sets it from the
+  /// payload.
+  final bool hasServerAppearanceContract;
 
   bool get isCalendarKind => primaryKind == 'calendar';
   bool get isTaskKind => primaryKind == 'tasks';

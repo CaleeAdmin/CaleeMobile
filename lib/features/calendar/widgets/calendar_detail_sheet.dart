@@ -56,6 +56,7 @@ class _CalendarDetailSheetState extends State<CalendarDetailSheet> {
     super.initState();
     _nameController = TextEditingController(text: widget.calendar.name);
     _colorController = TextEditingController(text: widget.calendar.color ?? '');
+    _nameController.addListener(() => setState(() {}));
     _colorController.addListener(() => setState(() {}));
   }
 
@@ -94,18 +95,43 @@ class _CalendarDetailSheetState extends State<CalendarDetailSheet> {
     return parseCalendarHexColor(hex) ?? widget.color;
   }
 
+  /// The fields the user actually changed relative to the calendar's
+  /// current effective appearance, or null for a no-op edit. Only changed
+  /// fields may be sent — an unchanged field sent anyway would become a
+  /// permanent local override on the backend.
+  CalendarAppearancePatch? get _pendingAppearancePatch =>
+      buildCalendarAppearancePatch(
+        originalName: widget.calendar.name,
+        originalColor: widget.calendar.color,
+        nextName: _nameController.text,
+        nextColor: _colorController.text,
+      );
+
   Future<void> _submitEdit() async {
     if (_isSubmitting || !_formKey.currentState!.validate()) return;
+    final patch = _pendingAppearancePatch;
+    if (patch == null) return;
     setState(() => _isSubmitting = true);
     try {
-      await widget.hubClient.updateCalendarAppearance(
-        accessToken: widget.accessToken,
-        calendarId: widget.calendar.id,
-        name: _nameController.text.trim(),
-        color: _colorController.text.trim().isEmpty
-            ? null
-            : _colorController.text.trim(),
-      );
+      if (widget.calendar.hasServerAppearanceContract) {
+        await widget.hubClient.updateCalendarAppearance(
+          accessToken: widget.accessToken,
+          calendarId: widget.calendar.id,
+          name: patch.name,
+          color: patch.color,
+        );
+      } else {
+        // Old backend: /appearance doesn't exist yet. A calendar is only
+        // editable here without the server contract via the conservative
+        // fallback (writable, non-subscription), whose appearance lives in
+        // the source metadata — the legacy endpoint handles exactly that.
+        await widget.hubClient.updateCalendar(
+          accessToken: widget.accessToken,
+          calendarId: widget.calendar.id,
+          name: patch.name,
+          color: patch.color,
+        );
+      }
       if (mounted) widget.onMutated('Calendar updated.');
     } catch (error) {
       if (mounted) {
@@ -454,7 +480,11 @@ class _CalendarDetailSheetState extends State<CalendarDetailSheet> {
             const SizedBox(height: CaleeSpacing.md),
 
             FilledButton(
-              onPressed: _isSubmitting ? null : _submitEdit,
+              // Disabled for a no-op edit: with nothing changed there is
+              // nothing to send (the endpoint requires at least one field).
+              onPressed: _isSubmitting || _pendingAppearancePatch == null
+                  ? null
+                  : _submitEdit,
               child: _isSubmitting
                   ? const SizedBox(
                       width: 18,
