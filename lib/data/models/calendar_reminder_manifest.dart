@@ -177,10 +177,17 @@ class CalendarReminderManifestLoadResult {
 ///   the next successful reconciliation.
 /// * **v2 (legacy):** `{ "version": 2, "entries": [{ "id": int, "fp": str? }] }`
 ///   — versioned entries carrying a schedule fingerprint but no owner.
-/// * **v3 (current):**
+/// * **v3 (legacy):**
 ///   `{ "version": 3, "entries": [{ "id": int, "fp": str?, "owner": str? }] }`
-///   — entries also carry a privacy-safe owner key so reminders can be isolated
-///   per account on a shared device.
+///   — entries carried a privacy-safe owner key, but derived with a
+///   non-cryptographic FNV hash. On load the legacy owners are dropped (never
+///   interpreted as v4 keys) and the entries are re-owned by the current account.
+/// * **v4 (current):**
+///   `{ "version": 4, "entries": [{ "id": int, "fp": str?, "owner": "v4:<hex>"? }] }`
+///   — owner keys are cryptographic (`v4:` + SHA-256; see `reminderOwnerKey`).
+///   The `v4:` tag is explicit algorithm/version metadata, so the scheme is never
+///   inferred from string length; a present-but-not-v4 owner is dropped as a
+///   recovery rather than trusted.
 ///
 /// Reads are deliberately conservative: legacy manifests are migrated (never
 /// treated as empty), an unknown/newer manifest recovers any parseable IDs
@@ -195,8 +202,15 @@ class CalendarReminderManifest {
     this.lastReconciledAt,
   });
 
-  /// Current manifest schema version (entries with fingerprints and owners).
-  static const int currentVersion = 3;
+  /// Current manifest schema version: entries carry fingerprints and v4
+  /// (cryptographic, `v4:`-tagged SHA-256) owner keys.
+  static const int currentVersion = 4;
+
+  /// The v3 schema version: entries carried legacy FNV owner keys, which are NOT
+  /// v4 cryptographic owner keys. Still read for migration, but its owner keys
+  /// are dropped on load (never interpreted as v4) so the entries are re-owned by
+  /// the current account through a normal reconciliation.
+  static const int legacyOwnerVersion = 3;
 
   /// The v2 schema version (fingerprinted entries, no owner), still read for
   /// migration.
@@ -336,6 +350,18 @@ class CalendarReminderManifest {
       );
     }
 
+    // Legacy v3: entries carried FNV owner keys, which are NOT v4 cryptographic
+    // owner keys. Trust the (unchanged-format) fingerprints, but DROP the legacy
+    // owners so they can never be interpreted as current-scheme owners — the
+    // entries are re-owned by the current account on the next reconciliation (a
+    // controlled migration, never a silent reinterpretation).
+    if (version == legacyOwnerVersion) {
+      final entries = _dedupe(
+        _parseEntries(entriesRaw, trustFingerprint: true, trustOwner: false),
+      );
+      return _recoveredOr(entries, lastReconciledAt, hadShape: hasShape);
+    }
+
     // Legacy v2: fingerprints are trusted; owners are absent (null).
     if (version == legacyFingerprintVersion) {
       final entries = _dedupe(
@@ -444,6 +470,16 @@ class CalendarReminderManifest {
         degraded = true;
         continue;
       }
+      var kept = entry;
+      // Owner-key encoding/algorithm validation (Priority 4 case 6): a
+      // current-schema owner must be a well-formed v4 token. A present-but-invalid
+      // owner (wrong algorithm/version, corrupt encoding) is dropped as a
+      // recovery — never trusted as a current-scheme owner, and never silently
+      // kept as a bogus value.
+      if (kept.ownerKey != null && !_isValidCurrentOwnerKey(kept.ownerKey!)) {
+        kept = kept.copyWith(clearOwnerKey: true);
+        degraded = true;
+      }
       // A present-but-unusable fingerprint/owner (e.g. oversized/malformed) was
       // dropped to null by tryFromJson. That is a recovery, not a clean load —
       // and, crucially, an oversized/malformed digest must not SILENTLY become a
@@ -452,7 +488,7 @@ class CalendarReminderManifest {
           _fieldDropped(item['owner'], entry.ownerKey)) {
         degraded = true;
       }
-      result.add(entry);
+      result.add(kept);
     }
     return (result, degraded);
   }
@@ -461,6 +497,17 @@ class CalendarReminderManifest {
   /// (became null) — i.e. it was malformed/oversized and dropped.
   static bool _fieldDropped(Object? raw, String? parsed) =>
       raw != null && parsed == null;
+
+  /// Matches a well-formed current-scheme (v4) owner key: the `v4:` algorithm/
+  /// version tag, then a 64-char lowercase-hex SHA-256 digest. Kept in sync with
+  /// `reminderOwnerKey` in calendar_notification_candidates.dart (validated by
+  /// algorithm/version, not by length alone). Defined here to keep the data-model
+  /// layer free of a dependency on the features layer.
+  static final RegExp _currentOwnerKeyPattern = RegExp(r'^v4:[0-9a-f]{64}$');
+
+  /// Whether [value] is a well-formed current-scheme (v4) owner key.
+  static bool _isValidCurrentOwnerKey(String value) =>
+      _currentOwnerKeyPattern.hasMatch(value);
 
   /// Deduplicates by notification ID for the current schema, distinguishing a
   /// genuine ownership conflict from a harmless exact duplicate. Returns

@@ -320,14 +320,27 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
       return;
     }
 
-    final accountId = _sessionController.bootstrap?.account.id ?? '';
+    final accountId = _sessionController.bootstrap?.account.id;
+    if (accountId == null || accountId.isEmpty) {
+      // Signed in but the account bootstrap is not yet available: do NOT begin a
+      // reminder session with an empty account ID — an empty account must never
+      // own reminders, and no owner key is derived from an empty string. Leave
+      // the tracked session ID null so a later session change (when bootstrap
+      // arrives) begins the session — the refresh retries then.
+      return;
+    }
     if (_reminderSessionAccountId == accountId) return;
 
-    // A new signed-in session (restore, fresh sign-in, or account switch).
+    // A new signed-in session (restore, fresh sign-in, or account switch). An
+    // account-ID change here is a real switch, never mistaken for a same-account
+    // refresh, because the guard above returns early when the ID is unchanged.
     // Begin a fresh reminder session so the coordinator owns account-scoped
     // reminder identity, then fire the once-per-session refresh.
+    final started = _reminderCoordinator.beginSession(accountId: accountId);
+    if (started == CalendarReminderSessionStart.skippedEmptyAccount) {
+      return; // defensive: never record an un-begun session
+    }
     _reminderSessionAccountId = accountId;
-    _reminderCoordinator.beginSession(accountId: accountId);
     _fireReminderRefresh(CalendarReminderRefreshReason.sessionRestored);
   }
 

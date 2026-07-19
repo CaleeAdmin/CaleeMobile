@@ -9,6 +9,18 @@ import '../../data/models/client_calendar.dart';
 import 'calendar_notification_candidates.dart';
 import 'local_calendar_notification_service.dart';
 
+/// The outcome of attempting to begin a reminder session.
+enum CalendarReminderSessionStart {
+  /// A session was begun for a non-empty stable account ID.
+  started,
+
+  /// No session was begun because the account ID was empty — e.g. signed in but
+  /// the account bootstrap is not yet available. No owner key is derived from an
+  /// empty string; a later [CalendarReminderCoordinator.beginSession] with a real
+  /// account ID starts the session (the caller retries when bootstrap arrives).
+  skippedEmptyAccount,
+}
+
 /// Why a reminder refresh was requested. Reasons are explicit rather than
 /// unrelated booleans, and they decide whether a refresh may be throttled
 /// (routine lifecycle events) or must force reconciliation (explicit changes).
@@ -241,16 +253,26 @@ class CalendarReminderCoordinator {
 
   /// Begins a reminder session for [accountId].
   ///
-  /// Records a privacy-safe owner key derived from the account ID (never the raw
-  /// ID) and opens a new session generation, invalidating any in-flight or
-  /// queued work from a previous session so it can neither reconcile nor write
-  /// the manifest. Returns the new generation for diagnostics/tests.
-  int beginSession({required String accountId}) {
+  /// A reminder session REQUIRES a non-empty stable account ID: an empty ID
+  /// (e.g. signed in but the account bootstrap is not yet available) never begins
+  /// a session and never derives an owner key from an empty string. In that case
+  /// nothing changes (the previous session, if any, is left intact) and
+  /// [CalendarReminderSessionStart.skippedEmptyAccount] is returned so the caller
+  /// can retry once bootstrap becomes available.
+  ///
+  /// Otherwise records a privacy-safe cryptographic owner key derived from the
+  /// account ID (never the raw ID) and opens a new session generation,
+  /// invalidating any in-flight or queued work from a previous session so it can
+  /// neither reconcile nor write the manifest.
+  CalendarReminderSessionStart beginSession({required String accountId}) {
+    if (accountId.isEmpty) {
+      return CalendarReminderSessionStart.skippedEmptyAccount;
+    }
     _invalidatePendingForced();
     _sessionGeneration++;
     _ownerKey = reminderOwnerKey(accountId);
     _lastRefreshAt = null;
-    return _sessionGeneration;
+    return CalendarReminderSessionStart.started;
   }
 
   /// Ends the current reminder session (sign-out or unauthorized sign-out).

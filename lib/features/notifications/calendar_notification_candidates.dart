@@ -1,3 +1,7 @@
+import 'dart:convert';
+
+import 'package:crypto/crypto.dart';
+
 import '../../data/models/client_calendar.dart';
 
 class CalendarNotificationCandidate {
@@ -98,18 +102,58 @@ int notificationIdForEvent(ClientEvent event, {String? ownerKey}) {
   return _fnv1a32(key, _fnvOffsetBasis) & 0x7FFFFFFF;
 }
 
-/// Derives a deterministic, privacy-safe owner key from a raw [accountId].
+/// Owner-key scheme tag (algorithm + version). Embedded in the key itself so the
+/// algorithm is explicit metadata, never inferred from the string length.
+const String kReminderOwnerKeyScheme = 'v4';
+
+/// Domain-separated namespace for the v4 owner-key derivation. The trailing NUL
+/// separates the fixed namespace from the variable account ID so no two
+/// (namespace, id) pairs can collide by concatenation.
+const String _ownerKeyV4Namespace = 'calee-calendar-reminder-owner-v4\u0000';
+
+/// Matches a v4 owner-key token: the scheme tag, a colon, then the 64-char
+/// lowercase-hex SHA-256 digest. Used to validate persisted owner keys by
+/// algorithm/version rather than by length alone.
+final RegExp _ownerKeyV4Pattern = RegExp(r'^v4:[0-9a-f]{64}$');
+
+/// Derives a deterministic, cryptographic owner key from a raw [accountId].
 ///
-/// The key is a non-reversible digest — the raw account ID is never persisted in
-/// the manifest or folded verbatim into a notification ID. Stable across app
-/// launches for the same account, and distinct across accounts.
+/// `ownerKey = "v4:" + SHA-256(namespace + accountId)` (64 lowercase hex chars,
+/// 67 with the scheme tag). SHA-256 is a cryptographic hash, so the digest is
+/// deterministic for the same account (stable across launches), distinct across
+/// accounts, and the raw account ID is never persisted or folded verbatim into a
+/// notification ID. This replaces the previous two-pass 32-bit FNV-1a
+/// concatenation, which was NOT cryptographic (FNV is a fast non-cryptographic
+/// hash) and only 64 bits wide.
+///
+/// Output length / collision trade-off: the full 256-bit digest (64 hex) makes
+/// an accidental cross-account collision negligible (~2^-128 birthday bound).
+///
+/// PRIVACY LIMITATION (documented, per design): this is a *namespaced* digest,
+/// not a keyed one. If the account-ID space is small/enumerable, an offline
+/// attacker who can guess candidate account IDs can confirm a match by
+/// recomputing this digest (a plain digest cannot hide a low-entropy input).
+/// For that threat model the stronger derivation is
+/// `HMAC-SHA-256(per-install secret, namespace + accountId)` with the secret
+/// stored in the platform keystore (`flutter_secure_storage`) — recommended as a
+/// follow-up when the reminder session can resolve the secret asynchronously.
+/// The v4 scheme tag lets such an upgrade coexist with, and supersede, these
+/// keys without inferring the algorithm from length.
+///
+/// Throws [ArgumentError] on an empty [accountId]: an empty account must never
+/// own reminders (see the reminder session lifecycle).
 String reminderOwnerKey(String accountId) {
-  final canonical = 'owner-v3|$accountId';
-  final a = _fnv1a32(canonical, _fnvOffsetBasis);
-  final b = _fnv1a32(canonical, _fnvAltOffsetBasis);
-  return a.toRadixString(16).padLeft(8, '0') +
-      b.toRadixString(16).padLeft(8, '0');
+  if (accountId.isEmpty) {
+    throw ArgumentError.value(accountId, 'accountId', 'must be non-empty');
+  }
+  final digest = sha256.convert(utf8.encode('$_ownerKeyV4Namespace$accountId'));
+  return '$kReminderOwnerKeyScheme:$digest';
 }
+
+/// Whether [value] is a well-formed v4 owner-key token (scheme + 64-hex digest).
+/// Persisted owner keys that do not match (e.g. legacy FNV keys, or corrupt
+/// values) are recognised as NOT current-scheme owner keys.
+bool isV4OwnerKey(String value) => _ownerKeyV4Pattern.hasMatch(value);
 
 /// A deterministic, privacy-safe fingerprint of everything that affects the
 /// notification a [candidate] would schedule.
