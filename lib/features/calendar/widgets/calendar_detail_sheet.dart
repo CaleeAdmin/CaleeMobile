@@ -56,6 +56,7 @@ class _CalendarDetailSheetState extends State<CalendarDetailSheet> {
     super.initState();
     _nameController = TextEditingController(text: widget.calendar.name);
     _colorController = TextEditingController(text: widget.calendar.color ?? '');
+    _nameController.addListener(() => setState(() {}));
     _colorController.addListener(() => setState(() {}));
   }
 
@@ -66,11 +67,24 @@ class _CalendarDetailSheetState extends State<CalendarDetailSheet> {
     super.dispose();
   }
 
-  bool get _canEdit =>
-      !widget.calendar.readOnly || widget.calendar.isSubscription;
+  bool get _canEdit => widget.calendar.capabilities.canEditAppearance;
 
   bool get _canDelete =>
       !widget.calendar.readOnly || widget.calendar.isSubscription;
+
+  /// Explanatory copy shown in the edit view for the calendar's
+  /// appearanceMode, e.g. clarifying that editing a subscription only
+  /// changes how it appears in Calee rather than the original calendar.
+  String? get _appearanceEditCopy =>
+      calendarAppearanceEditCopy(widget.calendar.appearanceMode);
+
+  /// Preserves the provider/source's own name for this calendar somewhere
+  /// visible, whenever it differs from the effective name shown/edited here.
+  String? get _sourceNameCaption {
+    final sourceName = widget.calendar.sourceName?.trim() ?? '';
+    if (sourceName.isEmpty || sourceName == widget.calendar.name) return null;
+    return 'Originally "$sourceName" at the source.';
+  }
 
   bool _isPaletteSelected(String hex) =>
       _colorController.text.trim().toUpperCase() == hex.toUpperCase();
@@ -81,18 +95,43 @@ class _CalendarDetailSheetState extends State<CalendarDetailSheet> {
     return parseCalendarHexColor(hex) ?? widget.color;
   }
 
+  /// The fields the user actually changed relative to the calendar's
+  /// current effective appearance, or null for a no-op edit. Only changed
+  /// fields may be sent — an unchanged field sent anyway would become a
+  /// permanent local override on the backend.
+  CalendarAppearancePatch? get _pendingAppearancePatch =>
+      buildCalendarAppearancePatch(
+        originalName: widget.calendar.name,
+        originalColor: widget.calendar.color,
+        nextName: _nameController.text,
+        nextColor: _colorController.text,
+      );
+
   Future<void> _submitEdit() async {
     if (_isSubmitting || !_formKey.currentState!.validate()) return;
+    final patch = _pendingAppearancePatch;
+    if (patch == null) return;
     setState(() => _isSubmitting = true);
     try {
-      await widget.hubClient.updateCalendar(
-        accessToken: widget.accessToken,
-        calendarId: widget.calendar.id,
-        name: _nameController.text.trim(),
-        color: _colorController.text.trim().isEmpty
-            ? null
-            : _colorController.text.trim(),
-      );
+      if (widget.calendar.hasServerAppearanceContract) {
+        await widget.hubClient.updateCalendarAppearance(
+          accessToken: widget.accessToken,
+          calendarId: widget.calendar.id,
+          name: patch.name,
+          color: patch.color,
+        );
+      } else {
+        // Old backend: /appearance doesn't exist yet. A calendar is only
+        // editable here without the server contract via the conservative
+        // fallback (writable, non-subscription), whose appearance lives in
+        // the source metadata — the legacy endpoint handles exactly that.
+        await widget.hubClient.updateCalendar(
+          accessToken: widget.accessToken,
+          calendarId: widget.calendar.id,
+          name: patch.name,
+          color: patch.color,
+        );
+      }
       if (mounted) widget.onMutated('Calendar updated.');
     } catch (error) {
       if (mounted) {
@@ -283,10 +322,15 @@ class _CalendarDetailSheetState extends State<CalendarDetailSheet> {
               if (_canEdit)
                 _DetailActionRow(
                   icon: Icons.edit_outlined,
-                  title: 'Edit Name & Color',
+                  title: 'Edit Name & Colour',
                   onTap: _isSubmitting
                       ? null
                       : () => setState(() => _mode = _DetailMode.edit),
+                )
+              else if (cal.appearanceMode == 'unsupported')
+                _DetailInfoNote(
+                  icon: Icons.lock_outline,
+                  message: calendarOwnerManagedMessage,
                 ),
               if (_canDelete)
                 _DetailActionRow(
@@ -341,7 +385,27 @@ class _CalendarDetailSheetState extends State<CalendarDetailSheet> {
                 Text('Edit Calendar', style: theme.textTheme.titleLarge),
               ],
             ),
-            const SizedBox(height: CaleeSpacing.md),
+            const SizedBox(height: CaleeSpacing.sm),
+
+            if (_appearanceEditCopy != null) ...[
+              Text(
+                _appearanceEditCopy!,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: CaleeColors.textSecondary,
+                ),
+              ),
+              const SizedBox(height: CaleeSpacing.xs),
+            ],
+            if (_sourceNameCaption != null) ...[
+              Text(
+                _sourceNameCaption!,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: CaleeColors.textTertiary,
+                ),
+              ),
+              const SizedBox(height: CaleeSpacing.xs),
+            ],
+            const SizedBox(height: CaleeSpacing.sm),
 
             // Color preview dot + name field
             Row(
@@ -362,7 +426,9 @@ class _CalendarDetailSheetState extends State<CalendarDetailSheet> {
                     enabled: !_isSubmitting,
                     autofocus: true,
                     textCapitalization: TextCapitalization.words,
-                    decoration: const InputDecoration(labelText: 'Name'),
+                    decoration: const InputDecoration(
+                      labelText: 'Name in Calee',
+                    ),
                     validator: (value) =>
                         (value ?? '').trim().isEmpty ? 'Enter a name' : null,
                   ),
@@ -398,7 +464,7 @@ class _CalendarDetailSheetState extends State<CalendarDetailSheet> {
               controller: _colorController,
               enabled: !_isSubmitting,
               decoration: const InputDecoration(
-                labelText: 'Custom color',
+                labelText: 'Colour in Calee',
                 hintText: '#007AFF',
               ),
               validator: (value) {
@@ -414,7 +480,11 @@ class _CalendarDetailSheetState extends State<CalendarDetailSheet> {
             const SizedBox(height: CaleeSpacing.md),
 
             FilledButton(
-              onPressed: _isSubmitting ? null : _submitEdit,
+              // Disabled for a no-op edit: with nothing changed there is
+              // nothing to send (the endpoint requires at least one field).
+              onPressed: _isSubmitting || _pendingAppearancePatch == null
+                  ? null
+                  : _submitEdit,
               child: _isSubmitting
                   ? const SizedBox(
                       width: 18,
@@ -512,6 +582,40 @@ class _DetailActionRow extends StatelessWidget {
             if (trailing != null) trailing!,
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// A non-interactive counterpart to [_DetailActionRow], used to explain why
+/// an action (e.g. editing appearance) isn't offered for this calendar.
+class _DetailInfoNote extends StatelessWidget {
+  const _DetailInfoNote({required this.icon, required this.message});
+
+  final IconData icon;
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: CaleeSpacing.md,
+        vertical: 13,
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: CaleeColors.textTertiary, size: 22),
+          const SizedBox(width: CaleeSpacing.md),
+          Expanded(
+            child: Text(
+              message,
+              style: const TextStyle(
+                fontSize: 14,
+                color: CaleeColors.textSecondary,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

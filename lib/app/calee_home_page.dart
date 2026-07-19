@@ -5,6 +5,7 @@ import '../data/models/client_bootstrap.dart';
 import '../features/calendar/calendar_page.dart';
 import '../features/chores/chores_page.dart';
 import '../features/meals/meals_page.dart';
+import '../features/notifications/calendar_reminder_coordinator.dart';
 import '../features/settings/settings_page.dart';
 import '../features/tasks/tasks_page.dart';
 import '../features/today/today_page.dart';
@@ -16,6 +17,7 @@ class CaleeHomePage extends StatefulWidget {
     required this.bootstrap,
     required this.onSignOut,
     this.onBootstrapRefreshed,
+    this.reminderCoordinator,
     this.initialSelectedIndex = 0,
     this.onInitialTabConsumed,
     super.key,
@@ -26,6 +28,11 @@ class CaleeHomePage extends StatefulWidget {
   final ClientBootstrap bootstrap;
   final VoidCallback onSignOut;
   final void Function(ClientBootstrap)? onBootstrapRefreshed;
+
+  /// App-level reminder coordinator, threaded to the Calendar and Settings tabs
+  /// so explicit event changes and enabling reminders can force a refresh.
+  final CalendarReminderCoordinator? reminderCoordinator;
+
   final int initialSelectedIndex;
   // Called once after the first frame when initialSelectedIndex != 0,
   // so callers can clear any one-shot tab override.
@@ -154,6 +161,7 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
         services: widget.bootstrap.services,
         accountId: widget.bootstrap.account.id,
         isFamilyUxContext: widget.bootstrap.isFamilyUxContext,
+        reminderCoordinator: widget.reminderCoordinator,
         refreshGeneration: _calendarRefreshGeneration,
       ),
       TasksPage(
@@ -179,6 +187,7 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
         bootstrap: widget.bootstrap,
         onSignOut: widget.onSignOut,
         onBootstrapRefreshed: widget.onBootstrapRefreshed,
+        reminderCoordinator: widget.reminderCoordinator,
         onNavigateToCalendar: () => setState(() {
           _selectedIndex = _calendarTabIndex;
           _calendarRefreshGeneration++;

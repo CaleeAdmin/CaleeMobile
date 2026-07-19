@@ -17,6 +17,8 @@ import 'family_setup_page.dart';
 import 'household_people_page.dart';
 import 'recently_deleted_page.dart';
 import 'service_details_page.dart';
+import '../notifications/calendar_notification_candidates.dart';
+import '../notifications/calendar_reminder_coordinator.dart';
 import '../notifications/local_calendar_notification_service.dart';
 import 'settings_controller.dart';
 import 'settings_repository.dart';
@@ -28,7 +30,9 @@ class SettingsPage extends StatefulWidget {
     required this.bootstrap,
     required this.onSignOut,
     this.onBootstrapRefreshed,
+    this.reminderCoordinator,
     this.onNavigateToCalendar,
+    this.preferencesOverride,
     super.key,
   });
 
@@ -37,8 +41,20 @@ class SettingsPage extends StatefulWidget {
   final ClientBootstrap bootstrap;
   final VoidCallback onSignOut;
   final void Function(ClientBootstrap)? onBootstrapRefreshed;
+
+  /// App-level reminder coordinator. Used to force an independent
+  /// upcoming-reminder refresh when the user enables reminders. Null in
+  /// contexts (e.g. some tests) that do not exercise reminders.
+  final CalendarReminderCoordinator? reminderCoordinator;
+
   // Called after manual onboarding "View calendar" to switch the home tab.
   final VoidCallback? onNavigateToCalendar;
+
+  /// Test-only override for the local preferences store, so reminder-preference
+  /// persistence failures can be simulated in widget tests. Null in production,
+  /// where the real [CaleePreferences] is used.
+  @visibleForTesting
+  final CaleePreferences? preferencesOverride;
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
@@ -53,6 +69,7 @@ class _SettingsPageState extends State<SettingsPage> {
     final repository = SettingsRepository(
       hubClient: widget.hubClient,
       accessToken: widget.accessToken,
+      preferences: widget.preferencesOverride,
     );
     _controller = SettingsController(
       repository: repository,
@@ -184,18 +201,52 @@ class _SettingsPageState extends State<SettingsPage> {
         return;
       }
 
-      await _controller.setCalendarRemindersEnabled(true);
+      final persisted = await _controller.setCalendarRemindersEnabled(true);
+      if (!persisted) {
+        // Enabling did not persist: the controller has already rolled the switch
+        // back. Surface the transient error and do NOT start reconciliation
+        // (nothing was actually enabled).
+        await _showSaveErrorIfAny();
+        return;
+      }
 
-      // Switching to the calendar tab triggers CalendarController.loadMonth(),
-      // which immediately reschedules notifications for the loaded events.
+      // Reminders are scheduled from an independent 30-day upcoming-event
+      // window, not the visible calendar month, so force a reconcile now.
+      final coordinator = widget.reminderCoordinator;
+      if (coordinator != null) {
+        unawaited(
+          coordinator.refresh(
+            accessToken: widget.accessToken,
+            reason: CalendarReminderRefreshReason.remindersEnabled,
+          ),
+        );
+      }
+
+      // Show the calendar so the user sees the feature they just enabled.
       widget.onNavigateToCalendar?.call();
 
       return;
     }
 
-    await _controller.setCalendarRemindersEnabled(false);
-    await LocalCalendarNotificationService.instance
-        .cancelAllCalendarEventNotifications();
+    final persisted = await _controller.setCalendarRemindersEnabled(false);
+    if (!persisted) {
+      // Disabling did not persist: the switch is rolled back to on. Surface the
+      // transient error and do NOT run disable cleanup (reminders are still
+      // enabled as far as storage is concerned).
+      await _showSaveErrorIfAny();
+      return;
+    }
+    // Cancel only the calendar reminder IDs Calee owns for THIS account (via the
+    // manifest) — never a global cancelAll() that would also drop notifications
+    // belonging to other Calee features or other accounts on this device. Skip
+    // when the account identity is invalid (no owner key can be derived).
+    final ownerKey = tryReminderOwnerKey(widget.bootstrap.account.id);
+    if (ownerKey != null) {
+      await LocalCalendarNotificationService.instance.disableCalendarReminders(
+        ownerKey: ownerKey,
+        includeLegacyOwnerless: true,
+      );
+    }
   }
 
   ClientCalendar? _findById(List<ClientCalendar> list, String id) {
@@ -248,6 +299,8 @@ class _SettingsPageState extends State<SettingsPage> {
     final calendars = _controller.calendars;
     final preferences = _controller.preferences;
     final remindersEnabled = _controller.calendarRemindersEnabled;
+    final reminderUnavailable = _controller.reminderPreferenceUnavailable;
+    final reminderSwitchEnabled = _controller.isReminderSwitchEnabled;
     final isLoadingPrefs = _controller.isLoadingPreferences;
     final isOpeningFamily = _controller.isOpeningFamily;
     final loadError = _controller.error;
@@ -392,8 +445,8 @@ class _SettingsPageState extends State<SettingsPage> {
               CaleeListRow(
                 title: 'Calendar reminders',
                 subtitle:
-                    'Remind me 10 minutes before upcoming events on this phone.'
-                    ' Reminders work best when you open Calee regularly.',
+                    'Remind me around 10 minutes before upcoming events on this'
+                    ' phone. Reminders work best when you open Calee regularly.',
                 leading: const Icon(
                   Icons.notifications_outlined,
                   size: 20,
@@ -402,11 +455,26 @@ class _SettingsPageState extends State<SettingsPage> {
                 trailing: Switch(
                   key: const Key('settings_calendar_reminders_switch'),
                   value: remindersEnabled,
-                  onChanged: isLoadingPrefs
-                      ? null
-                      : (v) => unawaited(_toggleCalendarReminders(v)),
+                  onChanged: reminderSwitchEnabled
+                      ? (v) => unawaited(_toggleCalendarReminders(v))
+                      : null,
                 ),
               ),
+              if (reminderUnavailable)
+                Padding(
+                  key: const Key('settings_calendar_reminders_unavailable'),
+                  padding: const EdgeInsets.only(
+                    left: CaleeSpacing.md,
+                    right: CaleeSpacing.md,
+                    bottom: CaleeSpacing.sm,
+                  ),
+                  child: Text(
+                    "Couldn't load the reminder setting. Please try again.",
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodySmall?.copyWith(color: CaleeColors.danger),
+                  ),
+                ),
             ],
           ],
         ),

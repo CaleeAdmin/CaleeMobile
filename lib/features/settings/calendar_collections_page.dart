@@ -8,6 +8,7 @@ import '../../data/models/client_calendar.dart';
 import '../../data/models/external_calendar_connection.dart';
 import '../../ui/calee_design.dart';
 import '../calendar/widgets/calendar_error_state.dart';
+import '../calendar/widgets/calendar_widget_helpers.dart';
 import '../calendar_onboarding/calendar_source_picker_page.dart';
 import '../calendar_onboarding/provider_guides/google_calendar_selection_page.dart';
 
@@ -427,7 +428,7 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
   // ── Edit ──────────────────────────────────────────────────────────────────
 
   Future<void> _openEditSheet(ClientCalendar calendar) async {
-    if ((!calendar.isSubscription && calendar.readOnly) ||
+    if (!calendar.capabilities.canEditAppearance ||
         _updatingCalendarIds.contains(calendar.id)) {
       return;
     }
@@ -440,6 +441,8 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
         initialColor: calendar.color,
         initialPrimaryKind: calendar.primaryKind,
         allowKindChange: false,
+        appearanceMode: calendar.appearanceMode,
+        sourceName: calendar.sourceName,
         services: const [],
         onSubmit:
             ({
@@ -448,12 +451,37 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
               required String? color,
               required ClientService? service,
             }) async {
-              await widget.hubClient.updateCalendar(
-                accessToken: widget.accessToken,
-                calendarId: calendar.id,
-                name: name,
-                color: color,
+              // Send only the fields that actually changed — an unchanged
+              // field sent anyway would become a permanent local override
+              // on the backend. The form disables Save for no-op edits, so
+              // a null patch here means nothing to do.
+              final patch = buildCalendarAppearancePatch(
+                originalName: calendar.name,
+                originalColor: calendar.color,
+                nextName: name,
+                nextColor: color,
               );
+              if (patch == null) return;
+
+              if (calendar.hasServerAppearanceContract) {
+                await widget.hubClient.updateCalendarAppearance(
+                  accessToken: widget.accessToken,
+                  calendarId: calendar.id,
+                  name: patch.name,
+                  color: patch.color,
+                );
+              } else {
+                // Old backend: /appearance doesn't exist. Editing is only
+                // reachable without the server contract for a
+                // fallback-writable calendar, whose appearance lives in the
+                // source metadata — use the legacy endpoint.
+                await widget.hubClient.updateCalendar(
+                  accessToken: widget.accessToken,
+                  calendarId: calendar.id,
+                  name: patch.name,
+                  color: patch.color,
+                );
+              }
             },
       ),
     );
@@ -663,7 +691,7 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
 
   Widget _buildCollectionRow(ClientCalendar calendar) {
     final isUpdating = _updatingCalendarIds.contains(calendar.id);
-    final canRename = !calendar.readOnly && !isUpdating;
+    final canRename = calendar.capabilities.canEditAppearance && !isUpdating;
     final canDelete =
         (!calendar.readOnly || calendar.isSubscription) && !isUpdating;
     final dotColor = _collectionColor(calendar);
@@ -672,6 +700,7 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
       if (calendar.serviceName.trim().isNotEmpty) calendar.serviceName,
       if (calendar.isSubscription) 'Connected calendar',
       if (calendar.readOnly) 'Read-only',
+      if (calendar.appearanceMode == 'unsupported') calendarOwnerManagedMessage,
     ];
 
     Widget? trailing;
@@ -857,7 +886,7 @@ class _CollectionMenuButton extends StatelessWidget {
         actions: [
           if (onEdit != null)
             CaleeAction(
-              label: 'Rename',
+              label: 'Edit Name & Colour',
               icon: Icons.edit_outlined,
               onTap: onEdit!,
             ),
@@ -890,6 +919,8 @@ class _CollectionFormContent extends StatefulWidget {
     this.initialPrimaryKind = 'calendar',
     this.allowKindChange = true,
     this.availableKinds = const ['calendar', 'tasks', 'chores'],
+    this.appearanceMode,
+    this.sourceName,
   });
 
   final List<ClientService> services;
@@ -898,6 +929,16 @@ class _CollectionFormContent extends StatefulWidget {
   final String initialPrimaryKind;
   final bool allowKindChange;
   final List<String> availableKinds;
+
+  /// Set only when editing an existing calendar (never for creation). Drives
+  /// the appearance-editing explanatory copy and the "Name/Colour in Calee"
+  /// field labels, matching CalendarDetailSheet's edit view.
+  final String? appearanceMode;
+
+  /// The provider/source's own name for the calendar being edited, shown
+  /// alongside the name field when it differs from [initialName]. Only
+  /// meaningful together with [appearanceMode].
+  final String? sourceName;
   final Future<void> Function({
     required String name,
     required String primaryKind,
@@ -938,6 +979,7 @@ class _CollectionFormContentState extends State<_CollectionFormContent> {
     _colorController = TextEditingController(text: widget.initialColor ?? '');
     _selectedService = widget.services.isEmpty ? null : widget.services.first;
     _selectedKind = widget.initialPrimaryKind;
+    _nameController.addListener(() => setState(() {}));
     _colorController.addListener(() => setState(() {}));
   }
 
@@ -961,6 +1003,20 @@ class _CollectionFormContentState extends State<_CollectionFormContent> {
 
   bool _isPaletteColorSelected(String hex) {
     return _colorController.text.trim().toUpperCase() == hex.toUpperCase();
+  }
+
+  /// True when editing an existing calendar and neither the name nor the
+  /// colour differs from what the form was opened with — there is nothing
+  /// to send, so Save stays disabled. Never true during creation.
+  bool get _isNoOpEdit {
+    if (widget.appearanceMode == null) return false;
+    return buildCalendarAppearancePatch(
+          originalName: widget.initialName ?? '',
+          originalColor: widget.initialColor,
+          nextName: _nameController.text,
+          nextColor: _colorController.text,
+        ) ==
+        null;
   }
 
   Future<void> _submit() async {
@@ -994,9 +1050,26 @@ class _CollectionFormContentState extends State<_CollectionFormContent> {
     }
   }
 
+  /// Explanatory copy for the calendar's appearanceMode, shown only when
+  /// editing an existing calendar (never during creation).
+  String? get _appearanceEditCopy {
+    final mode = widget.appearanceMode;
+    return mode == null ? null : calendarAppearanceEditCopy(mode);
+  }
+
+  /// Preserves the provider/source's own name for the calendar being
+  /// edited, whenever it differs from the name the form was opened with.
+  String? get _sourceNameCaption {
+    if (widget.appearanceMode == null) return null;
+    final sourceName = widget.sourceName?.trim() ?? '';
+    if (sourceName.isEmpty || sourceName == widget.initialName) return null;
+    return 'Originally "$sourceName" at the source.';
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isEditingExisting = widget.appearanceMode != null;
 
     return Form(
       key: _formKey,
@@ -1005,6 +1078,26 @@ class _CollectionFormContentState extends State<_CollectionFormContent> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (_appearanceEditCopy != null) ...[
+              Text(
+                _appearanceEditCopy!,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: CaleeColors.textSecondary,
+                ),
+              ),
+              const SizedBox(height: CaleeSpacing.xs),
+            ],
+            if (_sourceNameCaption != null) ...[
+              Text(
+                _sourceNameCaption!,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: CaleeColors.textTertiary,
+                ),
+              ),
+              const SizedBox(height: CaleeSpacing.xs),
+            ],
+            if (_appearanceEditCopy != null || _sourceNameCaption != null)
+              const SizedBox(height: CaleeSpacing.sm),
             if (widget.services.length >= 2) ...[
               DropdownButtonFormField<ClientService>(
                 initialValue: _selectedService,
@@ -1028,7 +1121,9 @@ class _CollectionFormContentState extends State<_CollectionFormContent> {
               controller: _nameController,
               enabled: !_isSubmitting,
               autofocus: true,
-              decoration: const InputDecoration(labelText: 'Name'),
+              decoration: InputDecoration(
+                labelText: isEditingExisting ? 'Name in Calee' : 'Name',
+              ),
               validator: (value) =>
                   (value ?? '').trim().isEmpty ? 'Enter a name' : null,
             ),
@@ -1081,8 +1176,10 @@ class _CollectionFormContentState extends State<_CollectionFormContent> {
             TextFormField(
               controller: _colorController,
               enabled: !_isSubmitting,
-              decoration: const InputDecoration(
-                labelText: 'Custom color',
+              decoration: InputDecoration(
+                labelText: isEditingExisting
+                    ? 'Colour in Calee'
+                    : 'Custom color',
                 hintText: '#8BC34A',
               ),
               validator: (value) {
@@ -1097,7 +1194,7 @@ class _CollectionFormContentState extends State<_CollectionFormContent> {
             ),
             const SizedBox(height: CaleeSpacing.md),
             FilledButton(
-              onPressed: _isSubmitting ? null : _submit,
+              onPressed: _isSubmitting || _isNoOpEdit ? null : _submit,
               child: _isSubmitting
                   ? const SizedBox(
                       width: 18,
