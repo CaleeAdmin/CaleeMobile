@@ -26,6 +26,94 @@ class CalendarReminderManifestStorageException implements Exception {
       'CalendarReminderManifestStorageException(operation: $operation)';
 }
 
+/// Thrown when the calendar-reminders-enabled preference cannot be persisted.
+///
+/// Persisting the toggle is not inconsequential best-effort storage: a failed
+/// write must be surfaced so the caller (Settings, or the permission-denied
+/// path) can roll the displayed value back and avoid acting on a value that did
+/// not actually persist. Carries only the [operation] and an optional [cause]
+/// — never a raw account ID or preference value — so it is safe to log.
+class CalendarReminderPreferenceStorageException implements Exception {
+  const CalendarReminderPreferenceStorageException(
+    this.operation, [
+    this.cause,
+  ]);
+
+  /// The failed operation, e.g. `'save'`.
+  final String operation;
+
+  /// The underlying error, if any.
+  final Object? cause;
+
+  @override
+  String toString() =>
+      'CalendarReminderPreferenceStorageException(operation: $operation)';
+}
+
+/// How the calendar-reminders-enabled preference was resolved for an account.
+enum CalendarReminderPreferenceLoadStatus {
+  /// An account-scoped (or migratable legacy) value was read successfully.
+  loaded,
+
+  /// No stored value applies to this account: the effective product default
+  /// (disabled) governs, and it is safe to run the default-disabled path.
+  absent,
+
+  /// SharedPreferences access — or a write required to complete the one-time
+  /// migration — failed. The real value is unknown, so callers must preserve
+  /// existing reminders and NOT reinterpret this as `false`.
+  unavailable,
+}
+
+/// Structured, log-safe result of loading the reminders-enabled preference.
+///
+/// A SharedPreferences failure is represented as
+/// [CalendarReminderPreferenceLoadStatus.unavailable], never as a `false`
+/// value, so a transient storage error can never be mistaken for the user
+/// having disabled reminders.
+class CalendarReminderPreferenceLoadResult {
+  const CalendarReminderPreferenceLoadResult({
+    required this.status,
+    this.enabled,
+    this.errorCategory,
+  });
+
+  const CalendarReminderPreferenceLoadResult.loaded(bool value)
+    : status = CalendarReminderPreferenceLoadStatus.loaded,
+      enabled = value,
+      errorCategory = null;
+
+  const CalendarReminderPreferenceLoadResult.absent()
+    : status = CalendarReminderPreferenceLoadStatus.absent,
+      enabled = null,
+      errorCategory = null;
+
+  const CalendarReminderPreferenceLoadResult.unavailable([this.errorCategory])
+    : status = CalendarReminderPreferenceLoadStatus.unavailable,
+      enabled = null;
+
+  final CalendarReminderPreferenceLoadStatus status;
+
+  /// The stored boolean when [status] is
+  /// [CalendarReminderPreferenceLoadStatus.loaded]; otherwise `null`.
+  final bool? enabled;
+
+  /// Short, non-sensitive category when [status] is
+  /// [CalendarReminderPreferenceLoadStatus.unavailable]. Never a raw value.
+  final String? errorCategory;
+
+  bool get isLoaded => status == CalendarReminderPreferenceLoadStatus.loaded;
+  bool get isAbsent => status == CalendarReminderPreferenceLoadStatus.absent;
+  bool get isUnavailable =>
+      status == CalendarReminderPreferenceLoadStatus.unavailable;
+
+  @override
+  String toString() =>
+      'CalendarReminderPreferenceLoadResult(status: ${status.name}'
+      '${enabled != null ? ', enabled: $enabled' : ''}'
+      '${errorCategory != null ? ', error: $errorCategory' : ''})';
+}
+
 /// Lightweight local user preferences stored in SharedPreferences.
 /// One-time migration from FlutterSecureStorage is performed on first load.
 class CaleePreferences {
@@ -144,7 +232,20 @@ class CaleePreferences {
 
   // ── Calendar reminders ────────────────────────────────────────────────────
 
-  /// Loads whether calendar reminders are enabled for a specific account.
+  /// Loads whether calendar reminders are enabled for a specific account,
+  /// returning just the boolean (an unavailable/absent read collapses to
+  /// `false`).
+  ///
+  /// Prefer [loadCalendarRemindersEnabledResult] where a storage failure must be
+  /// distinguished from a genuine `false` — this convenience method deliberately
+  /// cannot make that distinction and is retained for Settings/UI callers that
+  /// only need a best-effort display value.
+  Future<bool> loadCalendarRemindersEnabled({String? ownerKey}) async =>
+      (await loadCalendarRemindersEnabledResult(ownerKey: ownerKey)).enabled ??
+      false;
+
+  /// Loads whether calendar reminders are enabled for a specific account,
+  /// classifying how the value was obtained.
   ///
   /// The preference is account-scoped: two accounts on the same device keep
   /// independent values, and a new account defaults to off. Pass the current
@@ -154,35 +255,85 @@ class CaleePreferences {
   /// On the first read for an account, the old device-global value is migrated
   /// exactly once — claimed for whichever account is active at migration time —
   /// so an existing user's setting is preserved without propagating a legacy
-  /// `true` to every later account.
-  Future<bool> loadCalendarRemindersEnabled({String? ownerKey}) async {
+  /// `true` to every later account. The one-time migration marker is consumed
+  /// only when the migration completed consistently: the migrated value is
+  /// written first and the marker last, and a failure of either required write
+  /// is reported as [CalendarReminderPreferenceLoadStatus.unavailable] (never
+  /// silently as `false`) so the caller preserves existing reminders and retries.
+  ///
+  /// A SharedPreferences access failure is likewise reported as
+  /// [CalendarReminderPreferenceLoadStatus.unavailable]; a clean read with no
+  /// applicable value is [CalendarReminderPreferenceLoadStatus.absent]; a read
+  /// that found a value is [CalendarReminderPreferenceLoadStatus.loaded].
+  Future<CalendarReminderPreferenceLoadResult>
+  loadCalendarRemindersEnabledResult({String? ownerKey}) async {
+    final SharedPreferences prefs;
     try {
-      final prefs = await SharedPreferences.getInstance();
+      prefs = await SharedPreferences.getInstance();
+    } catch (e) {
+      return CalendarReminderPreferenceLoadResult.unavailable(
+        _prefErrorCategory(e),
+      );
+    }
+
+    try {
       if (ownerKey == null) {
-        return prefs.getBool(_calendarRemindersEnabledKey) ?? false;
+        final legacy = prefs.getBool(_calendarRemindersEnabledKey);
+        return legacy == null
+            ? const CalendarReminderPreferenceLoadResult.absent()
+            : CalendarReminderPreferenceLoadResult.loaded(legacy);
       }
 
       final scopedKey = _calendarRemindersEnabledOwnerKey(ownerKey);
       final scoped = prefs.getBool(scopedKey);
-      if (scoped != null) return scoped;
-
-      // No account-scoped value yet. Migrate the legacy global value at most
-      // once, claiming it for this (the active) account.
-      if (prefs.getString(_calendarRemindersEnabledMigratedKey) == null) {
-        await prefs.setString(_calendarRemindersEnabledMigratedKey, ownerKey);
-        final legacy = prefs.getBool(_calendarRemindersEnabledKey);
-        if (legacy != null) {
-          await prefs.setBool(scopedKey, legacy);
-          return legacy;
-        }
-        return false;
+      if (scoped != null) {
+        return CalendarReminderPreferenceLoadResult.loaded(scoped);
       }
 
-      // Migration already claimed by another account — default off so the
-      // legacy value never leaks into a later account.
-      return false;
-    } catch (_) {
-      return false;
+      // No account-scoped value yet. If migration was already claimed by another
+      // account, default off so the legacy value never leaks — that is a clean
+      // [absent], not a failure.
+      if (prefs.getString(_calendarRemindersEnabledMigratedKey) != null) {
+        return const CalendarReminderPreferenceLoadResult.absent();
+      }
+
+      // First read for any account: attempt the one-time legacy migration.
+      final legacy = prefs.getBool(_calendarRemindersEnabledKey);
+      if (legacy != null) {
+        // Write the migrated value FIRST; only then consume the marker, so the
+        // marker is never claimed unless the migration completed consistently.
+        if (!await prefs.setBool(scopedKey, legacy)) {
+          return const CalendarReminderPreferenceLoadResult.unavailable(
+            'migrated_value_write_failed',
+          );
+        }
+        if (!await prefs.setString(
+          _calendarRemindersEnabledMigratedKey,
+          ownerKey,
+        )) {
+          return const CalendarReminderPreferenceLoadResult.unavailable(
+            'migration_marker_write_failed',
+          );
+        }
+        return CalendarReminderPreferenceLoadResult.loaded(legacy);
+      }
+
+      // No legacy value to migrate: claim the marker so no later account can
+      // inherit a stale global value. A failed claim is reported (not absent),
+      // so the migration is retried rather than left half-done.
+      if (!await prefs.setString(
+        _calendarRemindersEnabledMigratedKey,
+        ownerKey,
+      )) {
+        return const CalendarReminderPreferenceLoadResult.unavailable(
+          'migration_marker_write_failed',
+        );
+      }
+      return const CalendarReminderPreferenceLoadResult.absent();
+    } catch (e) {
+      return CalendarReminderPreferenceLoadResult.unavailable(
+        _prefErrorCategory(e),
+      );
     }
   }
 
@@ -192,6 +343,14 @@ class CaleePreferences {
   /// value when [ownerKey] is `null`). An explicit account-scoped write also
   /// consumes the one-time legacy migration, so no other account can later
   /// inherit the stale global value.
+  ///
+  /// A persistence failure is surfaced as a
+  /// [CalendarReminderPreferenceStorageException] (never swallowed), and the
+  /// boolean results SharedPreferences returns are checked, so the caller can
+  /// roll a Settings switch back and avoid acting on a value that did not
+  /// actually persist. The account-scoped value is written first and the
+  /// migration marker last, so a marker-write failure never leaves a value
+  /// that disagrees with a rolled-back switch.
   Future<void> saveCalendarRemindersEnabled({
     String? ownerKey,
     required bool enabled,
@@ -199,17 +358,38 @@ class CaleePreferences {
     try {
       final prefs = await SharedPreferences.getInstance();
       if (ownerKey == null) {
-        await prefs.setBool(_calendarRemindersEnabledKey, enabled);
+        if (!await prefs.setBool(_calendarRemindersEnabledKey, enabled)) {
+          throw const CalendarReminderPreferenceStorageException('save');
+        }
         return;
       }
-      if (prefs.getString(_calendarRemindersEnabledMigratedKey) == null) {
-        await prefs.setString(_calendarRemindersEnabledMigratedKey, ownerKey);
+      // Persist the account-scoped value first (the essential write)...
+      if (!await prefs.setBool(
+        _calendarRemindersEnabledOwnerKey(ownerKey),
+        enabled,
+      )) {
+        throw const CalendarReminderPreferenceStorageException('save');
       }
-      await prefs.setBool(_calendarRemindersEnabledOwnerKey(ownerKey), enabled);
-    } catch (_) {
-      // Best-effort.
+      // ...then consume the one-time legacy migration so no later account
+      // inherits the stale global value.
+      if (prefs.getString(_calendarRemindersEnabledMigratedKey) == null) {
+        if (!await prefs.setString(
+          _calendarRemindersEnabledMigratedKey,
+          ownerKey,
+        )) {
+          throw const CalendarReminderPreferenceStorageException('save');
+        }
+      }
+    } on CalendarReminderPreferenceStorageException {
+      rethrow;
+    } catch (e) {
+      throw CalendarReminderPreferenceStorageException('save', e);
     }
   }
+
+  /// Short, non-sensitive category for a preference storage error suitable for
+  /// logs — the runtime type only, never a raw value, key, or account ID.
+  String _prefErrorCategory(Object error) => error.runtimeType.toString();
 
   // ── Calendar reminder manifest ────────────────────────────────────────────
   //

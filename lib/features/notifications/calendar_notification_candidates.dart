@@ -154,23 +154,30 @@ class NotificationIdAllocation {
 /// collisions deterministically.
 ///
 /// Process (see also [NotificationIdAllocation]):
-///   1. Walk candidates in priority order.
-///   2. Compute the initial (probe-0) SHA-256 identity ID.
-///   3. If it is already taken by an earlier candidate, probe with
-///      `probe = 1, 2, …` — each probe hashes the same identity plus the probe
-///      index — until an unused ID is found.
-///   4. Stop at [maxProbes]; a candidate that exhausts its probes is reported in
+///   1. Pre-occupy every ID in [reservedIds] so no candidate is ever assigned
+///      one — these are IDs still owned on the device by another account, or by
+///      an ownerless legacy entry, that this pass must not overwrite.
+///   2. Walk candidates in priority order (earliest reminder first).
+///   3. Compute the initial (probe-0) SHA-256 identity ID.
+///   4. If it is already taken — by [reservedIds] or by an earlier candidate —
+///      probe with `probe = 1, 2, …` (each probe hashes the same identity plus
+///      the probe index) until an unused ID is found.
+///   5. Stop at [maxProbes]; a candidate that exhausts its probes is reported in
 ///      [NotificationIdAllocation.unresolved] rather than silently overwriting
-///      another candidate (the Defect-6 map-overwrite hazard).
+///      another candidate or a reserved ID (the Defect-6 map-overwrite hazard).
 ///
-/// Deterministic: identical input sets always produce identical IDs, and the
-/// earliest candidate always keeps its base ID.
+/// Deterministic: identical inputs always produce identical IDs, and the
+/// earliest candidate always keeps its base ID (unless that base ID is
+/// reserved, in which case it probes to the next free ID). An existing
+/// current-owner ID for the same occurrence is safely reused because such IDs
+/// are deliberately NOT reserved by the caller.
 NotificationIdAllocation allocateNotificationIds(
   List<CalendarNotificationCandidate> sortedCandidates, {
+  Set<int> reservedIds = const <int>{},
   int maxProbes = kMaxNotificationIdProbes,
   NotificationIdDerivation? idDerivation,
 }) {
-  final used = <int>{};
+  final used = <int>{...reservedIds};
   final resolved = <CalendarNotificationCandidate>[];
   final unresolved = <CalendarNotificationCandidate>[];
   var collisions = 0;
@@ -191,7 +198,8 @@ NotificationIdAllocation allocateNotificationIds(
       }
     }
     if (chosen == null) {
-      // Probe limit exhausted — do not overwrite an existing candidate's ID.
+      // Probe limit exhausted — do not overwrite an existing candidate's ID or a
+      // reserved (foreign/legacy) ID.
       unresolved.add(candidate);
       continue;
     }
@@ -225,13 +233,60 @@ int notificationIdForEvent(ClientEvent event, {String? ownerKey}) =>
 
 /// Derives a deterministic, privacy-safe owner key from a raw [accountId].
 ///
-/// The key is a SHA-256 digest — the raw account ID is never persisted in the
-/// manifest or folded verbatim into a notification ID, and the digest is
-/// one-way (the account ID cannot be recovered from it). Stable across app
-/// launches for the same account, and distinct across accounts. Returned as
-/// lowercase hexadecimal (64 characters).
-String reminderOwnerKey(String accountId) =>
-    _sha256Hex('$_ownerSchema\x00$accountId');
+/// The key is an **unkeyed** SHA-256 digest of a fixed schema tag plus the raw
+/// [accountId]. Its security properties, stated accurately:
+///
+/// * The raw account ID is **not persisted** — neither in the manifest nor
+///   folded verbatim into a notification ID; only this digest is stored.
+/// * The digest is **deterministic**: the same account ID always yields the
+///   same key (stable across app launches), and different account IDs yield
+///   different keys, which is what lets a shared device keep accounts' reminders
+///   isolated.
+/// * This is a one-way hash, **not encryption**: it cannot be "decrypted", but
+///   because it is unkeyed and deterministic it is not a secret-preserving
+///   transform either.
+/// * A **low-entropy account ID** (e.g. a small integer, an email, or any
+///   guessable value) is therefore susceptible to **offline guessing**: an
+///   attacker who obtains the stored digest can confirm a candidate account ID
+///   by hashing it and comparing, since no per-install secret is mixed in.
+/// * The recommended stronger future design is a **per-install HMAC-SHA-256**
+///   keyed with a random secret held only in secure storage, so the stored key
+///   cannot be brute-forced offline from a guessed account ID. That migration is
+///   intentionally out of scope here and is NOT implemented by this function.
+///
+/// Returned as lowercase hexadecimal (64 characters).
+///
+/// Throws an [ArgumentError] for an empty or whitespace-only [accountId]: an
+/// owner key must never be derived from a missing/blank identity (which would
+/// collapse every unauthenticated caller onto one shared owner). Callers that
+/// may hold an absent ID must gate on [isValidReminderAccountId] or use
+/// [tryReminderOwnerKey] instead of relying on this throwing.
+String reminderOwnerKey(String accountId) {
+  if (!isValidReminderAccountId(accountId)) {
+    throw ArgumentError.value(
+      accountId,
+      'accountId',
+      'reminderOwnerKey requires a non-empty, non-whitespace account ID',
+    );
+  }
+  return _sha256Hex('$_ownerSchema\x00$accountId');
+}
+
+/// Whether [accountId] is a usable reminder identity: non-null and not blank
+/// once surrounding whitespace is trimmed. An owner key, an active reminder
+/// session, and a reminder refresh must all require a valid identity, so a
+/// missing or temporarily-unavailable bootstrap never creates a bogus owner.
+bool isValidReminderAccountId(String? accountId) =>
+    accountId != null && accountId.trim().isNotEmpty;
+
+/// The owner key for [accountId], or `null` when the ID is missing or blank.
+///
+/// Prefer this at call sites where the account ID may be absent or only
+/// temporarily available (e.g. bootstrap not yet loaded): it returns `null`
+/// rather than throwing, so an invalid identity is skipped instead of crashing
+/// the UI or fabricating an empty-account owner.
+String? tryReminderOwnerKey(String? accountId) =>
+    isValidReminderAccountId(accountId) ? reminderOwnerKey(accountId!) : null;
 
 /// A deterministic, privacy-safe fingerprint of everything that affects the
 /// notification a [candidate] would schedule.

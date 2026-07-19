@@ -57,6 +57,10 @@ class _StubPreferences extends CaleePreferences {
   final List<String?> loadOwnerKeys = [];
   final List<String?> saveOwnerKeys = [];
 
+  /// When set, [saveCalendarRemindersEnabled] throws it (simulating a storage
+  /// failure) instead of persisting.
+  Object? saveError;
+
   @override
   Future<bool> loadCalendarRemindersEnabled({String? ownerKey}) async {
     loadOwnerKeys.add(ownerKey);
@@ -69,6 +73,7 @@ class _StubPreferences extends CaleePreferences {
     required bool enabled,
   }) async {
     saveOwnerKeys.add(ownerKey);
+    if (saveError != null) throw saveError!;
     _remindersEnabled = enabled;
   }
 }
@@ -174,6 +179,20 @@ class _StubHubClient extends CaleeHubClient {
 ClientBootstrap _emptyBootstrap() => ClientBootstrap(
   account: const ClientAccount(
     id: 'acc1',
+    displayName: 'Test User',
+    primaryEmail: 'test@example.com',
+    timeZone: null,
+    status: 'active',
+  ),
+  services: const [],
+  contexts: const ClientContexts(households: [], organisations: []),
+  availableContexts: const [],
+  capabilities: const {},
+);
+
+ClientBootstrap _blankAccountBootstrap() => ClientBootstrap(
+  account: const ClientAccount(
+    id: '   ',
     displayName: 'Test User',
     primaryEmail: 'test@example.com',
     timeZone: null,
@@ -555,6 +574,86 @@ void main() {
         isEmpty,
         reason: 'calendarRemindersEnabled must never reach Hub',
       );
+    });
+  });
+
+  group('setCalendarRemindersEnabled — observable save + rollback (Fix 3)', () {
+    test('a successful enable persists and reports success', () async {
+      final prefs = _StubPreferences();
+      final controller = _makeController(prefs: prefs);
+      await controller.load();
+
+      final ok = await controller.setCalendarRemindersEnabled(true);
+
+      expect(ok, isTrue);
+      expect(controller.calendarRemindersEnabled, isTrue);
+      expect(controller.preferencesSaveError, isNull);
+    });
+
+    test('a failed enable rolls the switch back and records a transient error, '
+        'keeping the page usable', () async {
+      final prefs = _StubPreferences()
+        ..saveError = const CalendarReminderPreferenceStorageException('save');
+      final controller = _makeController(prefs: prefs);
+      await controller.load();
+      expect(controller.calendarRemindersEnabled, isFalse);
+
+      final ok = await controller.setCalendarRemindersEnabled(true);
+
+      expect(ok, isFalse, reason: 'a failed persist reports failure');
+      expect(
+        controller.calendarRemindersEnabled,
+        isFalse,
+        reason: 'the switch is rolled back to its previous value',
+      );
+      expect(controller.preferencesSaveError, isNotNull);
+      expect(controller.error, isNull, reason: 'page-level error is untouched');
+    });
+
+    test('a failed disable rolls the switch back to on', () async {
+      final prefs = _StubPreferences();
+      final controller = _makeController(prefs: prefs);
+      await controller.load();
+      expect(await controller.setCalendarRemindersEnabled(true), isTrue);
+      expect(controller.calendarRemindersEnabled, isTrue);
+
+      prefs.saveError = const CalendarReminderPreferenceStorageException(
+        'save',
+      );
+      final ok = await controller.setCalendarRemindersEnabled(false);
+
+      expect(ok, isFalse);
+      expect(
+        controller.calendarRemindersEnabled,
+        isTrue,
+        reason: 'a failed disable leaves the switch on',
+      );
+      expect(controller.preferencesSaveError, isNotNull);
+    });
+
+    test('an invalid account identity fails the save without deriving an owner '
+        'key', () async {
+      final prefs = _StubPreferences();
+      final repository = SettingsRepository(
+        hubClient: _StubHubClient(),
+        accessToken: 'token',
+        preferences: prefs,
+      );
+      final controller = SettingsController(
+        repository: repository,
+        initialBootstrap: _blankAccountBootstrap(),
+      );
+
+      final ok = await controller.setCalendarRemindersEnabled(true);
+
+      expect(ok, isFalse);
+      expect(
+        prefs.saveOwnerKeys,
+        isEmpty,
+        reason: 'no owner key may be derived from a blank account ID',
+      );
+      expect(controller.preferencesSaveError, isNotNull);
+      expect(controller.calendarRemindersEnabled, isFalse);
     });
   });
 

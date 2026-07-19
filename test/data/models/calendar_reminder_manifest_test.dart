@@ -338,19 +338,57 @@ void main() {
       expect(result.manifest.scheduledIds, [1, 2]);
     });
 
-    test('a floating-point version does not crash', () {
-      // 4.0 coerces to the current version; a non-whole float is unknown.
-      expect(
-        CalendarReminderManifest.parse({'version': 4.0, 'entries': []}).status,
-        CalendarReminderManifestLoadStatus.loaded,
-      );
-      expect(
-        () => CalendarReminderManifest.parse({
-          'version': 4.5,
-          'ids': [1],
-        }),
-        returnsNormally,
-      );
+    test(
+      'a floating-point version does not crash and is not trusted as v4',
+      () {
+        // 4.0 is NOT an actual JSON integer, so it must not take the trusted
+        // current-schema path. With an empty entries list there is nothing to
+        // recover, so it is conservatively recovered (empty), never loaded.
+        expect(
+          CalendarReminderManifest.parse({
+            'version': 4.0,
+            'entries': [],
+          }).status,
+          CalendarReminderManifestLoadStatus.recovered,
+        );
+        expect(
+          () => CalendarReminderManifest.parse({
+            'version': 4.5,
+            'ids': [1],
+          }),
+          returnsNormally,
+        );
+      },
+    );
+
+    test('a string, float, or null version is never a trusted v4 load', () {
+      // Only an actual integer 4 may use the trusted current-schema path; a
+      // clean-looking entries list under "4", 4.0, or null must be recovered
+      // (IDs kept, digests cleared) rather than loaded with trusted digests.
+      for (final version in <Object?>['4', 4.0, null]) {
+        final result = CalendarReminderManifest.parse({
+          'version': version,
+          'entries': [
+            {'id': 10, 'fp': _fp1, 'owner': _owner1},
+          ],
+        });
+        expect(
+          result.status,
+          CalendarReminderManifestLoadStatus.recovered,
+          reason: 'version $version must not be trusted as current v4',
+        );
+        expect(result.manifest.scheduledIds, [10]);
+        expect(
+          result.manifest.entryFor(10)!.fingerprint,
+          isNull,
+          reason: 'an untrusted version must clear fingerprints',
+        );
+        expect(
+          result.manifest.entryFor(10)!.ownerKey,
+          isNull,
+          reason: 'an untrusted version must clear owner keys',
+        );
+      }
     });
 
     test('negative and out-of-range IDs are rejected (v4)', () {
@@ -384,25 +422,100 @@ void main() {
       );
     });
 
+    test('identical duplicate IDs (same fp and owner) collapse to one (v4, '
+        'recovered)', () {
+      final result = CalendarReminderManifest.parse({
+        'version': 4,
+        'entries': [
+          {'id': 7, 'fp': _fp1, 'owner': _owner1},
+          {'id': 7, 'fp': _fp1, 'owner': _owner1},
+        ],
+      });
+      expect(result.manifest.scheduledIds, [7]);
+      expect(result.manifest.entryFor(7)!.fingerprint, _fp1);
+      expect(result.manifest.entryFor(7)!.ownerKey, _owner1);
+      expect(
+        result.status,
+        CalendarReminderManifestLoadStatus.recovered,
+        reason: 'a collapsed duplicate is recovered, not cleanly loaded',
+      );
+    });
+
+    test('a conflicting duplicate ID (different fingerprint) is corrupt, not '
+        'first-entry-wins', () {
+      final result = CalendarReminderManifest.parse({
+        'version': 4,
+        'entries': [
+          {'id': 7, 'fp': _fp1, 'owner': _owner1},
+          {'id': 7, 'fp': _fp2, 'owner': _owner1},
+        ],
+      });
+      expect(
+        result.status,
+        CalendarReminderManifestLoadStatus.corrupt,
+        reason: 'ambiguous ownership must never resolve first-entry-wins',
+      );
+      expect(result.manifest.isEmpty, isTrue);
+    });
+
+    test('a conflicting duplicate ID (different owner) is corrupt', () {
+      final result = CalendarReminderManifest.parse({
+        'version': 4,
+        'entries': [
+          {'id': 7, 'fp': _fp1, 'owner': _owner1},
+          {'id': 7, 'fp': _fp1, 'owner': _owner2},
+        ],
+      });
+      expect(result.status, CalendarReminderManifestLoadStatus.corrupt);
+      expect(result.manifest.isEmpty, isTrue);
+    });
+
     test(
-      'duplicate IDs are deduplicated deterministically (v4, recovered)',
+      'a present-but-malformed digest field downgrades a v4 load to recovered',
       () {
-        final result = CalendarReminderManifest.parse({
+        // The ID is valid and kept, but a present (non-hex) fingerprint means the
+        // entry was silently degraded — that must never be reported as loaded.
+        final loadedResult = CalendarReminderManifest.parse({
           'version': 4,
           'entries': [
-            {'id': 7, 'fp': _fp1},
-            {'id': 7, 'fp': _fp2},
+            {'id': 5, 'fp': _fp1, 'owner': _owner1},
           ],
         });
-        expect(result.manifest.scheduledIds, [7]);
+        expect(loadedResult.status, CalendarReminderManifestLoadStatus.loaded);
+
+        final degraded = CalendarReminderManifest.parse({
+          'version': 4,
+          'entries': [
+            {'id': 5, 'fp': 'not-a-valid-hex-digest', 'owner': _owner1},
+          ],
+        });
         expect(
-          result.manifest.entryFor(7)!.fingerprint,
-          _fp1,
-          reason: 'the first occurrence wins',
+          degraded.status,
+          CalendarReminderManifestLoadStatus.recovered,
+          reason: 'a present malformed digest must cause recovered, not loaded',
         );
-        expect(result.status, CalendarReminderManifestLoadStatus.recovered);
+        expect(degraded.manifest.scheduledIds, [5]);
+        expect(degraded.manifest.entryFor(5)!.fingerprint, isNull);
+        expect(degraded.manifest.entryFor(5)!.ownerKey, _owner1);
       },
     );
+
+    test('a missing (absent) digest field keeps a v4 load clean (loaded)', () {
+      // A completely absent optional digest legitimately produces null without
+      // degrading the load to recovered.
+      final result = CalendarReminderManifest.parse({
+        'version': 4,
+        'entries': [
+          {'id': 5, 'owner': _owner1},
+          {'id': 6, 'fp': _fp2},
+        ],
+      });
+      expect(result.status, CalendarReminderManifestLoadStatus.loaded);
+      expect(result.manifest.entryFor(5)!.fingerprint, isNull);
+      expect(result.manifest.entryFor(5)!.ownerKey, _owner1);
+      expect(result.manifest.entryFor(6)!.fingerprint, _fp2);
+      expect(result.manifest.entryFor(6)!.ownerKey, isNull);
+    });
 
     test('a v4 entry with a non-hex fingerprint/owner drops those digests', () {
       final result = CalendarReminderManifest.parse({

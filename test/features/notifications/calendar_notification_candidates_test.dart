@@ -328,6 +328,30 @@ void main() {
       expect(key, matches(RegExp(r'^[0-9a-f]{64}$')));
       expect(key.contains('secret'), isFalse);
     });
+
+    test('rejects an empty or whitespace-only account ID', () {
+      expect(() => reminderOwnerKey(''), throwsArgumentError);
+      expect(() => reminderOwnerKey('   '), throwsArgumentError);
+      expect(() => reminderOwnerKey('\t\n'), throwsArgumentError);
+    });
+  });
+
+  group('reminder account-identity validation (Fix 1)', () {
+    test('isValidReminderAccountId accepts only non-blank IDs', () {
+      expect(isValidReminderAccountId('acct-A'), isTrue);
+      expect(isValidReminderAccountId(null), isFalse);
+      expect(isValidReminderAccountId(''), isFalse);
+      expect(isValidReminderAccountId('   '), isFalse);
+      expect(isValidReminderAccountId('\t\n'), isFalse);
+    });
+
+    test('tryReminderOwnerKey returns null for an invalid ID and a key for a '
+        'valid one', () {
+      expect(tryReminderOwnerKey(null), isNull);
+      expect(tryReminderOwnerKey(''), isNull);
+      expect(tryReminderOwnerKey('   '), isNull);
+      expect(tryReminderOwnerKey('acct-A'), reminderOwnerKey('acct-A'));
+    });
   });
 
   group('account isolation — notification identity', () {
@@ -489,6 +513,66 @@ void main() {
       final result = allocateNotificationIds([a], idDerivation: derive);
       expect(result.candidates.single.notificationId, 0);
       expect(result.hasUnresolved, isFalse);
+    });
+
+    test(
+      'a candidate whose base ID is reserved probes to a free ID (Fix 5)',
+      () {
+        final a = cand('a');
+        // Base id 200 is reserved (owned by another account / a legacy entry).
+        int derive(CalendarNotificationCandidate c, int probe) => 200 + probe;
+
+        final result = allocateNotificationIds(
+          [a],
+          reservedIds: {200},
+          idDerivation: derive,
+        );
+
+        expect(
+          result.candidates.single.notificationId,
+          201,
+          reason: 'the reserved base ID is skipped via deterministic probing',
+        );
+        expect(result.collisionsResolved, 1);
+        expect(result.hasUnresolved, isFalse);
+      },
+    );
+
+    test('reserved IDs are never assigned even across multiple candidates, and '
+        'earliest-reminder priority is preserved (Fix 5)', () {
+      final a = cand('a', startsAt: '2026-07-05T09:00:00'); // earliest
+      final b = cand('b', startsAt: '2026-07-06T09:00:00');
+      // Both want base 300; 300 and 301 are reserved, so they land on 302, 303.
+      int derive(CalendarNotificationCandidate c, int probe) => 300 + probe;
+
+      final result = allocateNotificationIds(
+        [a, b],
+        reservedIds: {300, 301},
+        idDerivation: derive,
+      );
+
+      final ids = result.candidates.map((c) => c.notificationId).toList();
+      expect(ids, [302, 303], reason: 'reserved IDs skipped, order preserved');
+      expect(ids.toSet().intersection({300, 301}), isEmpty);
+      expect(result.candidates.first.event.id, 'a', reason: 'earliest first');
+      expect(result.collisionsResolved, 2);
+    });
+
+    test('a candidate that exhausts probes against reserved IDs is reported, '
+        'not forced onto a reserved ID (Fix 5)', () {
+      final a = cand('a');
+      int derive(CalendarNotificationCandidate c, int probe) => 400;
+
+      final result = allocateNotificationIds(
+        [a],
+        reservedIds: {400},
+        maxProbes: 3,
+        idDerivation: derive,
+      );
+
+      expect(result.candidates, isEmpty);
+      expect(result.unresolved, hasLength(1));
+      expect(result.hasUnresolved, isTrue);
     });
   });
 }

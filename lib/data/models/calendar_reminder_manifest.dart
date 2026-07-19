@@ -123,6 +123,18 @@ class CalendarReminderManifestEntry {
     return raw;
   }
 
+  /// Whether a current-schema digest field is *present but malformed*.
+  ///
+  /// An absent field (a missing key, or an explicit JSON `null`) is legitimate
+  /// and produces a `null` digest without degrading the load. A field that is
+  /// present with any other value but is not a lowercase-hex SHA-256 digest is
+  /// malformed: it is still dropped to `null`, but the caller must treat the
+  /// manifest as recovered rather than cleanly loaded.
+  static bool _isMalformedPresentDigest(Object? raw) {
+    if (raw == null) return false;
+    return _asDigest(raw, requireHex: true) == null;
+  }
+
   /// Whether [value] is a lowercase-hexadecimal SHA-256 digest (64 chars).
   static bool _isSha256Hex(String value) {
     if (value.length != _sha256HexLength) return false;
@@ -314,15 +326,19 @@ class CalendarReminderManifest {
       );
     }
 
-    final version = _asInt(decoded['version']);
+    final rawVersion = decoded['version'];
     final lastReconciledAt = _parseDate(decoded['lastReconciledAt']);
     final entriesRaw = decoded['entries'];
     final idsRaw = decoded['ids'];
     final hasShape = entriesRaw is List || idsRaw is List;
 
-    // Current schema (v4): strengthened validation. Trust SHA-256 fingerprints
-    // and owner keys only when they match the required lowercase-hex format.
-    if (version == currentVersion) {
+    // Current schema (v4): strengthened validation. Only an actual JSON integer
+    // equal to [currentVersion] may take the trusted current-schema path — a
+    // string ("4"), a float (4.0), or a null version is deliberately NOT trusted
+    // as v4 and falls through to conservative legacy/unknown recovery below.
+    // Trust SHA-256 fingerprints and owner keys only when they match the
+    // required lowercase-hex format.
+    if (rawVersion is int && rawVersion == currentVersion) {
       return _parseCurrent(entriesRaw, lastReconciledAt);
     }
 
@@ -354,8 +370,18 @@ class CalendarReminderManifest {
   /// * a missing/non-list `entries` field → [corrupt];
   /// * an empty list → [loaded] (valid empty manifest);
   /// * a non-empty list whose every record is invalid → [corrupt];
-  /// * a list with some invalid records, or duplicate IDs → [recovered];
+  /// * a list with some invalid records, a present-but-malformed digest field,
+  ///   or identical duplicate IDs collapsed → [recovered];
+  /// * a list with a *conflicting* duplicate ID (same ID, different fingerprint
+  ///   or owner) → [corrupt] — ownership is ambiguous, so we neither pick the
+  ///   first entry nor schedule/cancel/overwrite off it;
   /// * an otherwise-clean list → [loaded].
+  ///
+  /// A digest field that is entirely absent legitimately produces `null` and
+  /// keeps the entry [loaded]; a digest field that is *present but malformed*
+  /// (not a lowercase-hex SHA-256) is dropped to `null` AND downgrades the whole
+  /// load to [recovered], so a silently-degraded entry is never reported as a
+  /// clean load.
   static CalendarReminderManifestLoadResult _parseCurrent(
     Object? entriesRaw,
     DateTime? lastReconciledAt,
@@ -380,15 +406,45 @@ class CalendarReminderManifest {
       );
     }
 
-    final parsed = _parseEntries(
-      entriesRaw,
-      trustFingerprint: true,
-      trustOwner: true,
-      requireHexDigest: true,
-    );
-    final deduped = _dedupe(parsed);
+    // Parse each entry, distinguishing:
+    //  * a valid ID with valid (or absent) digest fields;
+    //  * a valid ID with a present-but-malformed digest field (→ degraded);
+    //  * an invalid ID or non-map shape (→ dropped).
+    final parsed = <CalendarReminderManifestEntry>[];
+    var droppedInvalid = false;
+    var degradedDigest = false;
+    for (final item in entriesRaw) {
+      if (item is! Map) {
+        droppedInvalid = true;
+        continue;
+      }
+      final id = CalendarReminderManifestEntry._asValidId(item['id']);
+      if (id == null) {
+        droppedInvalid = true;
+        continue;
+      }
+      if (CalendarReminderManifestEntry._isMalformedPresentDigest(item['fp']) ||
+          CalendarReminderManifestEntry._isMalformedPresentDigest(
+            item['owner'],
+          )) {
+        degradedDigest = true;
+      }
+      parsed.add(
+        CalendarReminderManifestEntry(
+          notificationId: id,
+          fingerprint: CalendarReminderManifestEntry._asDigest(
+            item['fp'],
+            requireHex: true,
+          ),
+          ownerKey: CalendarReminderManifestEntry._asDigest(
+            item['owner'],
+            requireHex: true,
+          ),
+        ),
+      );
+    }
 
-    if (deduped.isEmpty) {
+    if (parsed.isEmpty) {
       // A non-empty list none of whose records were usable is corrupt, not a
       // clean empty manifest — filtered malformed data must never look loaded.
       return const CalendarReminderManifestLoadResult(
@@ -397,11 +453,21 @@ class CalendarReminderManifest {
       );
     }
 
-    // Some raw records had no valid ID (dropped), or duplicate IDs were
-    // collapsed → the data was recovered, not cleanly loaded.
-    final droppedInvalid = parsed.length < entriesRaw.length;
+    // Deduplicate by ID with conflict detection. A duplicate ID whose entries
+    // agree on fingerprint and owner collapses to one (recovered); a duplicate
+    // ID whose entries disagree is a genuine ownership conflict — corrupt, so we
+    // never resolve it first-entry-wins nor act on it.
+    final dedupe = _dedupeCurrent(parsed);
+    if (dedupe.conflict) {
+      return const CalendarReminderManifestLoadResult(
+        manifest: empty,
+        status: CalendarReminderManifestLoadStatus.corrupt,
+      );
+    }
+    final deduped = dedupe.entries;
     final hadDuplicates = deduped.length < parsed.length;
-    final status = (droppedInvalid || hadDuplicates)
+
+    final status = (droppedInvalid || degradedDigest || hadDuplicates)
         ? CalendarReminderManifestLoadStatus.recovered
         : CalendarReminderManifestLoadStatus.loaded;
 
@@ -413,6 +479,34 @@ class CalendarReminderManifest {
       ),
       status: status,
     );
+  }
+
+  /// Deduplicates current-schema entries by notification ID, detecting conflicts.
+  ///
+  /// The first occurrence of each ID is retained. A later occurrence of the same
+  /// ID that agrees on both fingerprint and owner is dropped as a harmless
+  /// duplicate; one that disagrees on either sets [_DedupeResult.conflict], so
+  /// the caller can classify the whole manifest as corrupt rather than pick a
+  /// winner.
+  static _DedupeResult _dedupeCurrent(
+    List<CalendarReminderManifestEntry> entries,
+  ) {
+    final byId = <int, CalendarReminderManifestEntry>{};
+    final result = <CalendarReminderManifestEntry>[];
+    for (final entry in entries) {
+      final existing = byId[entry.notificationId];
+      if (existing == null) {
+        byId[entry.notificationId] = entry;
+        result.add(entry);
+        continue;
+      }
+      if (existing.fingerprint != entry.fingerprint ||
+          existing.ownerKey != entry.ownerKey) {
+        return const _DedupeResult(conflict: true);
+      }
+      // Identical duplicate — keep the one already retained.
+    }
+    return _DedupeResult(entries: result);
   }
 
   /// Wraps recovered [entries] as [recovered], unless the value had no
@@ -480,6 +574,8 @@ class CalendarReminderManifest {
   }
 
   /// Deduplicates entries by notification ID, keeping the first occurrence.
+  /// Used for the legacy/unknown path, where every digest has already been
+  /// dropped to `null`, so no two same-ID entries can conflict.
   static List<CalendarReminderManifestEntry> _dedupe(
     List<CalendarReminderManifestEntry> entries,
   ) {
@@ -491,15 +587,21 @@ class CalendarReminderManifest {
     return result;
   }
 
-  static int? _asInt(Object? raw) {
-    if (raw is int) return raw;
-    if (raw is double && raw.isFinite && raw == raw.truncateToDouble()) {
-      return raw.toInt();
-    }
-    if (raw is String) return int.tryParse(raw);
-    return null;
-  }
-
   static DateTime? _parseDate(Object? raw) =>
       raw is String ? DateTime.tryParse(raw) : null;
+}
+
+/// Result of deduplicating current-schema entries by notification ID.
+///
+/// [conflict] is set when two entries share a notification ID but disagree on
+/// fingerprint or owner; in that case [entries] is empty and the caller treats
+/// the manifest as corrupt rather than choosing a winner.
+class _DedupeResult {
+  const _DedupeResult({
+    this.entries = const <CalendarReminderManifestEntry>[],
+    this.conflict = false,
+  });
+
+  final List<CalendarReminderManifestEntry> entries;
+  final bool conflict;
 }
