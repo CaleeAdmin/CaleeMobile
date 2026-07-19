@@ -29,16 +29,21 @@ on:
       - dev
       - stage
       - main
-  # A push trigger on the protected integration branches gives post-merge
-  # (and direct-push) coverage on the same three branches, so a merge that
-  # somehow lands unformatted or failing code is still caught on the branch.
+  # Pull requests already validate every change headed for dev. Do not repeat
+  # the full gate after the same change merges there. Push runs remain on the
+  # release branches because they execute the gated release smoke checks below.
   push:
     branches:
-      - dev
       - stage
       - main
   # Allow the gate to be started on demand from the Actions tab (any branch).
   workflow_dispatch:
+
+# A new commit on an open PR makes its older in-flight run obsolete. Keep every
+# stage/main push and manual run, because release verification must complete.
+concurrency:
+  group: flutter-ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   analyze-and-test:
