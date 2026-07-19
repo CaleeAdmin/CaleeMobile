@@ -39,6 +39,23 @@ row in both result logs remains outstanding:
 These remain outstanding until run on real hardware; this file's result-log
 tables are left empty rather than filled with unverified entries.
 
+### Status: release DEX receiver-class verification (post-#483)
+
+A follow-up device-less verification session (Flutter 3.44.1, Android SDK
+cmdline-tools on Linux) confirmed via `apkanalyzer dex packages
+--defined-only` that the R8-minified release APK **defines** both
+`ScheduledNotificationReceiver` and `ScheduledNotificationBootReceiver` in
+its DEX — i.e. the receivers survive minification as bytecode, not just as
+manifest declarations. `check_notification_release_apk.py check` now performs
+this DEX check automatically alongside the existing manifest/resource/version
+checks. The same session found that CI runs 429/430 (PR #483 and its merge to
+`dev`) failed in the release-build step from GitHub-runner disk exhaustion
+("No space left on device"), not a code defect, and added a disk-cleanup step
+to the workflow. **No emulator (no KVM) or physical device was available**,
+so no launch smoke test or delivery scenario was performed; every scenario
+listed above remains outstanding, and the result-log tables below remain
+empty.
+
 ## Preconditions (all devices)
 
 - A signed-in Calee account with at least one connected calendar.
