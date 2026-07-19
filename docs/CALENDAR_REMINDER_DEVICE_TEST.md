@@ -13,6 +13,32 @@ not reproduce Doze, reboot alarm restoration, or package-replacement behaviour.
 **Do not mark any scenario below as passed unless it was actually performed on a
 physical device.**
 
+### Status: Android release-build smoke verification (post-#482)
+
+The Android release-smoke-verification pass (ephemeral-keystore `flutter build
+apk --release` with R8 minification + resource shrinking, plus packaged-APK
+inspection via `check_notification_release_apk.py`) was performed in a
+CI-equivalent, device-less environment. It confirmed the release build
+succeeds, the packaged manifest/receivers/permissions/icon survive shrinking,
+and R8 produced its normal mapping output — see the PR description for the
+specifics. **No physical device or emulator was available in that session**,
+so none of the scenarios below (Android or iPhone) were exercised and every
+row in both result logs remains outstanding:
+
+- Android background delivery
+- Android locked-device delivery
+- Android reboot restoration
+- Android package-replacement restoration
+- Android Doze timing
+- iPhone foreground delivery
+- iPhone background delivery
+- iPhone terminated-state delivery
+- iPhone locked-device delivery
+- Timezone-change re-anchoring (both platforms)
+
+These remain outstanding until run on real hardware; this file's result-log
+tables are left empty rather than filled with unverified entries.
+
 ## Preconditions (all devices)
 
 - A signed-in Calee account with at least one connected calendar.
