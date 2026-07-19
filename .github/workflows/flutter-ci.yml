@@ -12,6 +12,17 @@ name: Flutter CI
 # Settings -> Branches -> Branch protection rules -> Require status checks to
 # pass before merging, for each of `dev`, `stage`, and `main`, so no pull
 # request can merge into an integration branch without a green run.
+#
+# Release-build scope: the job name and its fast steps (format, analyze,
+# test, debug build) always run on every trigger below, so the required
+# check above is unaffected. The release-APK build/sign/notification-config
+# steps near the bottom of this job are gated to only execute on a push to
+# `stage` or `main` (i.e. a merge/promotion into those branches) or a manual
+# workflow_dispatch targeting one of them — never on a `dev` push or on any
+# pull_request, including PRs targeting stage/main. See the `if:` conditions
+# on those individual steps for the exact rule. This trades pre-merge
+# R8/shrinking-regression coverage on `dev` PRs for a faster PR gate; a
+# shrinking regression is still caught before it reaches `stage`/`main`.
 on:
   pull_request:
     branches:
@@ -101,7 +112,12 @@ jobs:
       # Generated fresh in $RUNNER_TEMP (job-scoped, never cached, never
       # uploaded as an artifact, and unrelated to android/key.properties or
       # any repository/organization secret).
+      #
+      # Gated to stage/main merges (push) or a manual dispatch targeting one
+      # of them — not run on dev pushes or any pull_request — per the
+      # release-build-scope note at the top of this file.
       - name: Generate temporary CI keystore
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && contains(fromJSON('["stage","main"]'), github.ref_name)
         run: |
           keytool -genkeypair \
             -keystore "$RUNNER_TEMP/calee-ci-release.jks" \
@@ -118,7 +134,11 @@ jobs:
       # resource shrinking exercise real code paths a debug build does not).
       # Signed with the ephemeral keystore above; this APK is a smoke-test
       # product only — never uploaded, never published.
+      #
+      # Gated to stage/main merges (push) or a manual dispatch targeting one
+      # of them — see the release-build-scope note at the top of this file.
       - name: Build Android APK (release)
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && contains(fromJSON('["stage","main"]'), github.ref_name)
         run: flutter build apk --release
         env:
           ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/calee-ci-release.jks
@@ -131,7 +151,12 @@ jobs:
       # all survive R8 + resource shrinking. The source-level config check
       # above can't catch a shrinker regression; this reads the built APK.
       # Standard-library Python only; never modifies the APK.
+      #
+      # Gated identically to the release build above (it inspects that
+      # build's output, so it must skip whenever that step skips) — see the
+      # release-build-scope note at the top of this file.
       - name: Inspect release APK notification configuration
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && contains(fromJSON('["stage","main"]'), github.ref_name)
         run: |
           python3 .github/scripts/check_notification_release_apk.py selftest
           python3 .github/scripts/check_notification_release_apk.py check \

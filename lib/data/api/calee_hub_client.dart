@@ -358,6 +358,38 @@ class CaleeHubClient {
     );
   }
 
+  /// Edits a calendar's Calee-facing appearance (name/colour) only.
+  ///
+  /// Unlike [updateCalendar], this never touches the underlying source:
+  /// depending on the calendar's appearanceMode the backend either
+  /// PROPPATCHes the real CalDAV calendar (source_metadata) or only updates
+  /// the local Calee-side mapping/row (subscription_mapping,
+  /// external_calendar). Callers should gate on
+  /// `calendar.capabilities.canEditAppearance` before offering this.
+  Future<ClientCalendar> updateCalendarAppearance({
+    required String accessToken,
+    required String calendarId,
+    required String name,
+    String? color,
+  }) async {
+    final body = <String, dynamic>{'name': name};
+
+    if (color != null) {
+      body['color'] = color;
+    }
+
+    final encodedCalendarId = Uri.encodeComponent(calendarId);
+    final json = await _patchJson(
+      '/client/v1/calendars/$encodedCalendarId/appearance',
+      accessToken: accessToken,
+      body: body,
+    );
+
+    return ClientCalendar.fromJson(
+      _data(json)['calendar'] as Map<String, dynamic>,
+    );
+  }
+
   Future<void> deleteCalendar({
     required String accessToken,
     required String calendarId,
