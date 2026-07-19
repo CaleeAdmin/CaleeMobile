@@ -35,6 +35,23 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # Free runner disk space before the toolchain and builds. Runs 429/430
+      # (the first to include the release smoke build) failed with "No space
+      # left on device" in :app:mergeReleaseNativeDebugMetadata — the default
+      # ubuntu-latest image leaves ~14 GB free, which the debug + R8 release
+      # builds together exhaust. Removing preinstalled toolchains this job
+      # never uses (.NET, Haskell, CodeQL, Boost, Swift) frees ~15 GB. The
+      # Android SDK and JDK are NOT touched.
+      - name: Free runner disk space
+        run: |
+          echo "Free space before cleanup:"
+          df -h /
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/boost \
+            /usr/share/swift
+          echo "Free space after cleanup:"
+          df -h /
+
       - uses: actions/checkout@v4
 
       # JDK 17 for the Android Gradle build below. The GitHub-hosted Android SDK

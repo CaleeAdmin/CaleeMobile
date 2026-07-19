@@ -9,8 +9,9 @@ notification icon because a shrinker rule was too narrow. This script
 inspects the *built* release APK instead, after `flutter build apk --release`
 has produced it.
 
-Standard library only. Shells out to the Android SDK's `apkanalyzer` (manifest
-+ packaged-file listing) and `aapt2`/`aapt` (resource table) via subprocess.
+Standard library only. Shells out to the Android SDK's `apkanalyzer` (manifest,
+packaged-file listing + DEX defined-class listing) and `aapt2`/`aapt`
+(resource table) via subprocess.
 Never writes to the APK. Run:
 
     python3 .github/scripts/check_notification_release_apk.py selftest
@@ -51,6 +52,14 @@ REQUIRED_BOOT_ACTIONS = {
 }
 
 ICON_RESOURCE = "drawable/ic_stat_calee"
+
+# Receiver classes that must survive R8 in the release DEX. The packaged
+# manifest declaring them is not enough — if R8 stripped the classes, Android
+# would throw ClassNotFoundException when the alarm/boot broadcast fires.
+REQUIRED_DEX_CLASSES = {
+    SCHEDULED_RECEIVER,
+    BOOT_RECEIVER,
+}
 
 
 # ── Pure check functions (unit-testable: they take captured tool output) ───
@@ -185,6 +194,48 @@ def check_icon_file_packaged(backing_file: str | None, apkanalyzer_files_text: s
     return []
 
 
+def parse_dex_defined_classes(dex_packages_text: str) -> set[str]:
+    """Parse `apkanalyzer dex packages --defined-only <apk>` output into the
+    set of fully-qualified class names defined in the APK's DEX files.
+
+    Each line looks like:
+
+        C d 8	22	1042	com.example.Foo
+
+    i.e. node type ("P" package / "C" class / "M" method / "F" field), a
+    defined/removed flag, three numeric columns (defined methods, referenced
+    methods, byte size), then the fully-qualified name. Only "C" (class) rows
+    marked defined ("d") are collected; the name is the final
+    whitespace-separated field, so method/field rows (whose names contain
+    spaces and parentheses) are excluded by the node-type filter, not by
+    guessing at the name format.
+    """
+    classes: set[str] = set()
+    for raw_line in dex_packages_text.splitlines():
+        parts = raw_line.split()
+        if len(parts) < 6:
+            continue
+        node_type, state = parts[0], parts[1]
+        if node_type != "C" or state != "d":
+            continue
+        classes.add(parts[-1])
+    return classes
+
+
+def check_dex_receiver_classes(defined_classes: set[str]) -> list[str]:
+    """Both scheduled-notification receiver classes must be *defined* in the
+    release DEX — manifest declarations alone do not prove R8 kept the code."""
+    errors: list[str] = []
+    for required in sorted(REQUIRED_DEX_CLASSES):
+        if required not in defined_classes:
+            errors.append(
+                f"release DEX does not define class {required} (declared in "
+                "the manifest but stripped by R8/minification — the receiver "
+                "would crash with ClassNotFoundException at delivery time)"
+            )
+    return errors
+
+
 def parse_pubspec_version(pubspec_text: str) -> tuple[str | None, str | None]:
     """Parse the top-level `version: X.Y.Z+N` line from pubspec.yaml."""
     for line in pubspec_text.splitlines():
@@ -277,6 +328,19 @@ def run_check(apk_path: str, repo_root: str) -> list[str]:
     expected_name, expected_code = _expected_version(repo_root)
     errors.extend(check_version(manifest_xml, expected_name, expected_code))
 
+    # The manifest can declare a receiver whose class R8 nevertheless removed;
+    # prove the classes are really defined in the packaged DEX.
+    try:
+        dex_packages_text = _run(
+            [apkanalyzer, "dex", "packages", "--defined-only", apk_path]
+        )
+    except RuntimeError as exc:
+        errors.append(str(exc))
+    else:
+        errors.extend(
+            check_dex_receiver_classes(parse_dex_defined_classes(dex_packages_text))
+        )
+
     aapt2 = _find_tool("aapt2") or _find_tool("aapt")
     if aapt2 is None:
         errors.append(
@@ -357,6 +421,15 @@ _GOOD_APKANALYZER_FILES = """/res/
 /classes.dex
 """
 
+_GOOD_DEX_PACKAGES = """P d 41\t173\t12886\tcom.dexterous.flutterlocalnotifications
+C d 12\t48\t4102\tcom.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver
+C d 9\t31\t2077\tcom.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver
+C d 20\t94\t6707\tcom.dexterous.flutterlocalnotifications.FlutterLocalNotificationsPlugin
+M d 1\t1\t68\tvoid com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver.onReceive(android.content.Context, android.content.Intent)
+P d 120\t455\t60110\tio.flutter
+C d 30\t101\t9552\tio.flutter.app.FlutterApplication
+"""
+
 
 def _run_selftest() -> int:
     failures: list[str] = []
@@ -384,6 +457,47 @@ def _run_selftest() -> int:
     name, code = parse_pubspec_version("name: calee_mobile\nversion: 0.0.24+24\n")
     if (name, code) != ("0.0.24", "24"):
         failures.append(f"selftest 'parse pubspec version' failed: got {(name, code)!r}")
+
+    # Both receiver classes defined in DEX → no errors.
+    defined = parse_dex_defined_classes(_GOOD_DEX_PACKAGES)
+    if SCHEDULED_RECEIVER not in defined or BOOT_RECEIVER not in defined:
+        failures.append(f"selftest 'parse dex defined classes' failed: got {sorted(defined)!r}")
+    expect("good dex receiver classes", check_dex_receiver_classes(defined), True)
+
+    # Method rows must not be mistaken for class definitions.
+    method_only = "M d 1\t1\t68\tvoid com.example.Foo.bar()\n"
+    if parse_dex_defined_classes(method_only):
+        failures.append("selftest 'dex method row ignored' failed")
+
+    # A class R8 removed (state 'r' under --show-removed) must not count.
+    removed = _GOOD_DEX_PACKAGES.replace(
+        "C d 9\t31\t2077\tcom.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver",
+        "C r 9\t31\t2077\tcom.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver",
+    )
+    expect(
+        "dex removed boot receiver",
+        check_dex_receiver_classes(parse_dex_defined_classes(removed)),
+        False,
+    )
+
+    # Scheduled receiver absent from the DEX listing entirely → error.
+    stripped_dex = "\n".join(
+        line
+        for line in _GOOD_DEX_PACKAGES.splitlines()
+        if not line.endswith(SCHEDULED_RECEIVER)
+    )
+    expect(
+        "dex missing scheduled receiver",
+        check_dex_receiver_classes(parse_dex_defined_classes(stripped_dex)),
+        False,
+    )
+
+    # Empty tool output (e.g. wrong file) → both classes reported missing.
+    empty_dex_errors = check_dex_receiver_classes(parse_dex_defined_classes(""))
+    if len(empty_dex_errors) != 2:
+        failures.append(
+            f"selftest 'dex empty output' failed: got {empty_dex_errors!r}"
+        )
 
     # Wrong application id → error.
     wrong_id = _GOOD_MANIFEST.replace(
