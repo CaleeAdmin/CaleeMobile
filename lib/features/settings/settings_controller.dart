@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import '../../data/auth/calee_preferences.dart';
 import '../../data/models/client_bootstrap.dart';
 import '../../data/models/client_calendar.dart';
+import '../notifications/calendar_notification_candidates.dart';
 import 'settings_repository.dart';
 
 class SettingsController extends ChangeNotifier {
@@ -12,6 +13,11 @@ class SettingsController extends ChangeNotifier {
   }) : bootstrap = initialBootstrap;
 
   final SettingsRepository repository;
+
+  /// Privacy-safe owner key for the current account, used to scope the
+  /// reminder-enabled preference so two accounts on the same device keep
+  /// independent values (never a raw account ID).
+  String get _reminderOwnerKey => reminderOwnerKey(bootstrap.account.id);
 
   // ── State ─────────────────────────────────────────────────────────────────
 
@@ -43,7 +49,7 @@ class SettingsController extends ChangeNotifier {
       error = null;
       try {
         calendarRemindersEnabled = await repository
-            .loadCalendarRemindersEnabled();
+            .loadCalendarRemindersEnabled(ownerKey: _reminderOwnerKey);
       } catch (_) {
         // Best-effort; keep default of false.
       }
@@ -110,7 +116,10 @@ class SettingsController extends ChangeNotifier {
   Future<void> setCalendarRemindersEnabled(bool value) async {
     calendarRemindersEnabled = value;
     notifyListeners();
-    await repository.saveCalendarRemindersEnabled(value);
+    await repository.saveCalendarRemindersEnabled(
+      ownerKey: _reminderOwnerKey,
+      enabled: value,
+    );
   }
 
   // ── Family setup ──────────────────────────────────────────────────────────

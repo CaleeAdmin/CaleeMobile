@@ -28,6 +28,7 @@ class _FakeNotificationService extends LocalCalendarNotificationService {
 
   final bool permissionGranted;
   int disableCount = 0;
+  final List<String> disableOwnerKeys = [];
 
   @override
   Future<void> initialize() async {}
@@ -36,8 +37,12 @@ class _FakeNotificationService extends LocalCalendarNotificationService {
   Future<bool> requestPermissionIfNeeded() async => permissionGranted;
 
   @override
-  Future<CalendarReminderDisableResult> disableCalendarReminders() async {
+  Future<CalendarReminderDisableResult> disableCalendarReminders({
+    required String ownerKey,
+    bool includeLegacyOwnerless = false,
+  }) async {
     disableCount++;
+    disableOwnerKeys.add(ownerKey);
     return const CalendarReminderDisableResult(
       cancelledCount: 0,
       failedCount: 0,

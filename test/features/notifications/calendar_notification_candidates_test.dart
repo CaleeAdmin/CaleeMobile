@@ -304,11 +304,11 @@ void main() {
       expect(scheduleFingerprint(a), isNot(scheduleFingerprint(b)));
     });
 
-    test('is a fixed-width hex digest that does not embed the raw title', () {
+    test('is a SHA-256 hex digest that does not embed the raw title', () {
       final fp = scheduleFingerprint(
         candidate(_event('e1', title: 'Secret dinner plans')),
       );
-      expect(fp, matches(RegExp(r'^[0-9a-f]{16}$')));
+      expect(fp, matches(RegExp(r'^[0-9a-f]{64}$')));
       expect(
         fp.toLowerCase().contains('secret'),
         isFalse,
@@ -323,14 +323,11 @@ void main() {
       expect(reminderOwnerKey('acct-A'), isNot(reminderOwnerKey('acct-B')));
     });
 
-    test(
-      'is a fixed-width hex digest that does not embed the raw account ID',
-      () {
-        final key = reminderOwnerKey('super-secret-account-id');
-        expect(key, matches(RegExp(r'^[0-9a-f]{16}$')));
-        expect(key.contains('secret'), isFalse);
-      },
-    );
+    test('is a SHA-256 hex digest that does not embed the raw account ID', () {
+      final key = reminderOwnerKey('super-secret-account-id');
+      expect(key, matches(RegExp(r'^[0-9a-f]{64}$')));
+      expect(key.contains('secret'), isFalse);
+    });
   });
 
   group('account isolation — notification identity', () {
@@ -396,5 +393,102 @@ void main() {
         );
       },
     );
+  });
+
+  group('allocateNotificationIds — collision resolution (Defect 6)', () {
+    CalendarNotificationCandidate cand(
+      String id, {
+      String startsAt = '2026-07-05T09:00:00',
+    }) => buildNotificationCandidates([
+      _event(id, startsAt: startsAt),
+    ], now: _now).single;
+
+    test('two forced-collision candidates both survive with distinct '
+        'deterministic IDs', () {
+      final a = cand('a', startsAt: '2026-07-05T09:00:00');
+      final b = cand('b', startsAt: '2026-07-06T09:00:00');
+      // Force both to base id 100; probe p resolves to 100 + p.
+      int derive(CalendarNotificationCandidate c, int probe) => 100 + probe;
+
+      final result = allocateNotificationIds([a, b], idDerivation: derive);
+
+      expect(result.candidates, hasLength(2), reason: 'no candidate is lost');
+      final ids = result.candidates.map((c) => c.notificationId).toList();
+      expect(ids.toSet(), hasLength(2), reason: 'IDs are distinct');
+      expect(
+        ids.first,
+        100,
+        reason: 'the earliest candidate keeps the base ID',
+      );
+      expect(ids[1], 101, reason: 'the collider deterministically probes');
+      expect(result.collisionsResolved, 1);
+      expect(result.hasUnresolved, isFalse);
+    });
+
+    test('repeated construction produces the same resolved IDs', () {
+      final a = cand('a', startsAt: '2026-07-05T09:00:00');
+      final b = cand('b', startsAt: '2026-07-06T09:00:00');
+      int derive(CalendarNotificationCandidate c, int probe) => 100 + probe;
+
+      final first = allocateNotificationIds([a, b], idDerivation: derive);
+      final second = allocateNotificationIds([a, b], idDerivation: derive);
+
+      expect(
+        first.candidates.map((c) => c.notificationId).toList(),
+        second.candidates.map((c) => c.notificationId).toList(),
+      );
+    });
+
+    test('candidate count equals the number of allocated IDs (no map '
+        'overwrite)', () {
+      final list = buildNotificationCandidates([
+        _event('a', startsAt: '2026-07-05T09:00:00'),
+        _event('b', startsAt: '2026-07-06T09:00:00'),
+        _event('c', startsAt: '2026-07-07T09:00:00'),
+      ], now: _now);
+
+      final result = allocateNotificationIds(list);
+
+      expect(result.candidates, hasLength(3));
+      expect(
+        result.candidates.map((c) => c.notificationId).toSet(),
+        hasLength(3),
+        reason: 'distinct events get distinct IDs with no overwrite',
+      );
+      expect(result.collisionsResolved, 0);
+      expect(result.hasUnresolved, isFalse);
+    });
+
+    test('an exhausted probe limit is reported rather than dropping an event '
+        'silently', () {
+      final a = cand('a', startsAt: '2026-07-05T09:00:00');
+      final b = cand('b', startsAt: '2026-07-06T09:00:00');
+      // Every probe returns the same ID, so the second candidate can never find
+      // a free slot within the probe budget.
+      int derive(CalendarNotificationCandidate c, int probe) => 500;
+
+      final result = allocateNotificationIds(
+        [a, b],
+        maxProbes: 4,
+        idDerivation: derive,
+      );
+
+      expect(
+        result.candidates.single.notificationId,
+        500,
+        reason: 'the first candidate still gets the ID',
+      );
+      expect(result.unresolved, hasLength(1));
+      expect(result.unresolved.single.event.id, 'b');
+      expect(result.hasUnresolved, isTrue);
+    });
+
+    test('notification ID zero is a valid allocation', () {
+      final a = cand('a');
+      int derive(CalendarNotificationCandidate c, int probe) => 0;
+      final result = allocateNotificationIds([a], idDerivation: derive);
+      expect(result.candidates.single.notificationId, 0);
+      expect(result.hasUnresolved, isFalse);
+    });
   });
 }

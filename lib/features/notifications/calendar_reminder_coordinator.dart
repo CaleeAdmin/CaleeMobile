@@ -92,13 +92,14 @@ enum CalendarReminderRefreshStatus {
   fetchFailed,
 
   /// The reminder session was invalidated (sign-out, or a newer session began)
-  /// before this work could run or reconcile. Nothing was fetched, scheduled,
-  /// or written — the result belongs to a session that is no longer current.
+  /// before this work could run or reconcile, or partway through reconciliation.
+  /// Nothing that this session scheduled or wrote survives — the result belongs
+  /// to a session that is no longer current.
   skippedSessionInvalidated,
 
-  /// Events were fetched but the stored manifest was corrupt, so ownership is
-  /// unknown: nothing was scheduled or cancelled and the stored value was left
-  /// intact for a later retry.
+  /// The stored manifest was corrupt, so ownership is unknown: nothing was
+  /// scheduled or cancelled and the stored value was left intact for a later
+  /// retry.
   manifestCorrupt,
 }
 
@@ -117,8 +118,10 @@ class CalendarReminderRefreshResult {
   final CalendarReminderRefreshStatus status;
   final DateTime completedAt;
 
-  /// Present only when [status] is
-  /// [CalendarReminderRefreshStatus.reconciled].
+  /// Present when reconciliation ran — i.e. [status] is
+  /// [CalendarReminderRefreshStatus.reconciled] or
+  /// [CalendarReminderRefreshStatus.manifestCorrupt], or a mid-pass
+  /// invalidation was reported.
   final CalendarReconciliationResult? reconciliation;
 
   /// Present when a targeted cleanup ran — i.e. [status] is
@@ -144,26 +147,46 @@ class CalendarReminderRefreshResult {
       '${errorCategory != null ? ', error: $errorCategory' : ''})';
 }
 
-/// A single forced refresh queued to run immediately after the in-flight
-/// refresh finishes. At most one is ever pending: additional forced requests
-/// coalesce into it (adopting the latest token and reason), so an in-flight
-/// refresh can never lose an explicit state change and the queue is bounded.
-class _PendingForcedRefresh {
-  _PendingForcedRefresh({
+/// The reminder refresh currently running, tagged with the session it belongs
+/// to. A routine request may join this future only when it belongs to the same
+/// session generation and owner; a request from a newer session must never
+/// receive an older session's (possibly invalidated) result.
+class _ActiveReminderRefresh {
+  const _ActiveReminderRefresh({
+    required this.generation,
+    required this.ownerKey,
+    required this.future,
+  });
+
+  final int generation;
+  final String? ownerKey;
+  final Future<CalendarReminderRefreshResult> future;
+}
+
+/// A single refresh queued to run immediately after the active refresh reaches
+/// a safe terminal point. At most one is ever pending: additional requests
+/// coalesce into it (within the same session) or replace it (a newer session),
+/// so the queue is bounded and no forced change or new-session refresh is lost.
+class _PendingRefresh {
+  _PendingRefresh({
     required this.accessToken,
     required this.reason,
     required this.generation,
+    required this.ownerKey,
   }) : completer = Completer<CalendarReminderRefreshResult>();
 
   /// The latest valid access token to use for the follow-up.
   String accessToken;
 
-  /// The latest forced reason — preserved for diagnostics.
+  /// The latest reason — preserved for diagnostics.
   CalendarReminderRefreshReason reason;
 
   /// The session generation this follow-up belongs to. If the session changes
-  /// before the follow-up runs, it must not start (stale token/account).
+  /// before it runs, it must not start (stale token/account).
   final int generation;
+
+  /// The owner key of the session this follow-up belongs to.
+  final String? ownerKey;
 
   /// Completed with the follow-up's result (success or error).
   final Completer<CalendarReminderRefreshResult> completer;
@@ -177,13 +200,15 @@ class _PendingForcedRefresh {
 /// * fetch events for [horizon] starting at the current local day using the
 ///   existing authenticated [CaleeHubClient];
 /// * hand the fetched events to [LocalCalendarNotificationService] for
-///   manifest-based reconciliation;
-/// * prevent overlapping refreshes with a single-flight guard, while queueing
-///   one forced follow-up so explicit state changes are never lost;
+///   manifest-based reconciliation, scoped to the current account;
+/// * prevent overlapping refreshes with a single-flight guard that is aware of
+///   the reminder session, so a newer session never joins an older session's
+///   in-flight future and a queued follow-up is never lost;
 /// * throttle routine lifecycle refreshes while letting explicit changes force
 ///   reconciliation;
-/// * when reminders are disabled or permission is denied, run targeted cleanup
-///   (never fetching, never a global cancel) so owned reminders don't linger;
+/// * when reminders are disabled or permission is denied, run targeted,
+///   owner-scoped cleanup (never fetching, never a global cancel) so owned
+///   reminders don't linger;
 /// * return a structured, log-safe [CalendarReminderRefreshResult].
 class CalendarReminderCoordinator {
   CalendarReminderCoordinator({
@@ -208,14 +233,15 @@ class CalendarReminderCoordinator {
   final Duration _throttle;
   final Duration _horizon;
 
-  Future<CalendarReminderRefreshResult>? _inFlight;
-  _PendingForcedRefresh? _pendingForced;
+  _ActiveReminderRefresh? _activeRefresh;
+  _PendingRefresh? _pending;
   DateTime? _lastRefreshAt;
 
-  // Monotonic reminder-session generation. Every [beginSession]/[endSession]
-  // increments it. Async work captures the generation it started under and must
-  // re-check before reconciling or writing, so an old session never schedules,
-  // cancels, or writes the manifest after a new one begins.
+  // Monotonic reminder-session generation. Every [beginSession]/[endSession]/
+  // [transitionSession] increments it. Async work captures the generation it
+  // started under and must re-check before reconciling or writing, so an old
+  // session never schedules, cancels, or writes the manifest after a new one
+  // begins.
   int _sessionGeneration = 0;
 
   // Privacy-safe key of the account owning the current reminder session, or
@@ -226,16 +252,22 @@ class CalendarReminderCoordinator {
 
   /// Whether a refresh is currently running (exposed for tests).
   @visibleForTesting
-  bool get isRefreshing => _inFlight != null;
+  bool get isRefreshing => _activeRefresh != null;
 
-  /// Whether a forced follow-up is queued behind the in-flight refresh
-  /// (exposed for tests).
+  /// Whether a follow-up refresh is queued behind the active refresh (exposed
+  /// for tests). Named for historical continuity with the forced-follow-up
+  /// queue it generalises.
   @visibleForTesting
-  bool get hasPendingForcedRefresh => _pendingForced != null;
+  bool get hasPendingForcedRefresh => _pending != null;
 
   /// The current reminder-session generation (exposed for tests).
   @visibleForTesting
   int get sessionGeneration => _sessionGeneration;
+
+  /// The current account owner key, or null while signed out (exposed for
+  /// tests).
+  @visibleForTesting
+  String? get ownerKey => _ownerKey;
 
   // ── Session lifecycle ─────────────────────────────────────────────────────
 
@@ -246,7 +278,7 @@ class CalendarReminderCoordinator {
   /// queued work from a previous session so it can neither reconcile nor write
   /// the manifest. Returns the new generation for diagnostics/tests.
   int beginSession({required String accountId}) {
-    _invalidatePendingForced();
+    _invalidatePending();
     _sessionGeneration++;
     _ownerKey = reminderOwnerKey(accountId);
     _lastRefreshAt = null;
@@ -255,34 +287,81 @@ class CalendarReminderCoordinator {
 
   /// Ends the current reminder session (sign-out or unauthorized sign-out).
   ///
-  /// Immediately invalidates all in-flight and queued reminder work (so an
-  /// in-flight fetch cannot reconcile and a queued forced follow-up cannot
-  /// start), then runs a targeted cleanup of all manifest-owned reminders —
-  /// never fetching, never a global `cancelAll()`. IDs whose cancellation fails
-  /// stay tracked, and a manifest-persistence failure is reported (not
-  /// swallowed) so the retryable cleanup state is preserved. Sign-out itself is
-  /// never blocked or failed by a cleanup failure: the outcome is returned for
-  /// diagnostics only.
+  /// Captures the ended account's owner key, immediately invalidates all
+  /// in-flight and queued reminder work (so an in-flight fetch cannot reconcile
+  /// and a queued follow-up cannot start), then runs a targeted, owner-scoped
+  /// cleanup of just that account's manifest entries — never fetching, never a
+  /// global `cancelAll()`, and never using a new account's owner key. The
+  /// cleanup runs through the notification service's serialized mutation queue.
+  /// Sign-out itself is never blocked or failed by a cleanup failure: the
+  /// outcome is returned for diagnostics only.
   Future<CalendarReminderDisableResult> endSession() async {
-    _invalidatePendingForced();
+    final endedOwnerKey = _ownerKey;
+    _invalidatePending();
     _sessionGeneration++;
     _ownerKey = null;
     _lastRefreshAt = null;
-    final cleanup = await _notificationService.disableCalendarReminders();
+    final cleanup = await _cleanupOwner(endedOwnerKey);
     _logSignOutCleanup(cleanup);
     return cleanup;
   }
 
+  /// Performs an explicit account transition rather than beginning a new session
+  /// over an old one.
+  ///
+  /// Invalidates the outgoing session's work synchronously, queues an
+  /// owner-scoped cleanup of the previous account through the serialized
+  /// mutation queue, then begins the new generation. The caller fires the new
+  /// account's initial refresh afterwards; because both the old cleanup and the
+  /// new reconcile run through the same serialization boundary, the new
+  /// reconcile waits for the old cleanup to reach a safe terminal point, and the
+  /// old cleanup can never cancel the new account's entries (it is owner-scoped
+  /// to the previous account). Never blocks on cleanup: the returned future is
+  /// for diagnostics only.
+  ///
+  /// Covers signed out → signed in ([previousAccountId] null), account A →
+  /// account B, and re-entry after an unauthorized sign-out.
+  Future<void> transitionSession({
+    required String? previousAccountId,
+    required String nextAccountId,
+  }) {
+    final endedOwnerKey = _ownerKey;
+    // Queue the previous owner's cleanup before the new session's work is
+    // enqueued, so it runs first in the serialized mutation queue.
+    Future<void> cleanup = Future<void>.value();
+    if (previousAccountId != null && endedOwnerKey != null) {
+      cleanup = _cleanupOwner(endedOwnerKey).then(_logSignOutCleanup);
+    }
+    // Begin the new generation, invalidating any in-flight/queued old-session
+    // work so it can neither reconcile nor write after the new session begins.
+    beginSession(accountId: nextAccountId);
+    return cleanup;
+  }
+
+  /// Owner-scoped targeted cleanup through the notification service's serialized
+  /// mutation queue. Cleans ownerless legacy entries too, so a departing (or
+  /// disabling) account's pre-migration reminders don't linger. A null owner is
+  /// the account-agnostic legacy path.
+  Future<CalendarReminderDisableResult> _cleanupOwner(String? ownerKey) =>
+      _notificationService.disableCalendarReminders(
+        ownerKey: ownerKey ?? '',
+        includeLegacyOwnerless: true,
+      );
+
   /// Whether [generation] is still the current session generation.
   bool _isCurrentGeneration(int generation) => generation == _sessionGeneration;
 
-  /// Drops any queued forced follow-up, completing its caller with an explicit
+  /// Drops any queued follow-up, completing its caller with an explicit
   /// [CalendarReminderRefreshStatus.skippedSessionInvalidated] result so no
   /// completer is ever left dangling across a session boundary.
-  void _invalidatePendingForced() {
-    final pending = _pendingForced;
+  void _invalidatePending() {
+    final pending = _pending;
     if (pending == null) return;
-    _pendingForced = null;
+    _pending = null;
+    _completePendingInvalidated(pending);
+  }
+
+  void _completePendingInvalidated(_PendingRefresh pending) {
     if (!pending.completer.isCompleted) {
       pending.completer.complete(
         _skipped(
@@ -296,10 +375,11 @@ class CalendarReminderCoordinator {
   /// Refreshes upcoming reminders.
   ///
   /// [accessToken] is passed per call so the coordinator never runs signed
-  /// out. Routine reasons join any in-flight refresh and are throttled;
-  /// explicit reasons (or [force]) reconcile immediately, and if one arrives
-  /// while a refresh is in flight it is queued as a single forced follow-up
-  /// (coalescing additional forced requests) rather than being dropped.
+  /// out. A routine request joins the active refresh only when it belongs to
+  /// the same session (generation + owner); a request from a newer session, or
+  /// any explicit request while a refresh is in flight, is queued as a single
+  /// pending follow-up (coalescing within a session, replacing across sessions)
+  /// rather than being dropped or joined to a stale future.
   Future<CalendarReminderRefreshResult> refresh({
     required String? accessToken,
     required CalendarReminderRefreshReason reason,
@@ -313,19 +393,21 @@ class CalendarReminderCoordinator {
     }
 
     final generation = _sessionGeneration;
+    final owner = _ownerKey;
     final explicit = force || reason.forcesReconciliation;
 
-    // A refresh is already running.
-    final existing = _inFlight;
-    if (existing != null) {
-      if (!explicit) {
-        // Routine request: join the in-flight refresh; start no new work. This
-        // also covers a routine request arriving while a forced follow-up is
-        // already queued — it must not add another refresh.
-        return existing;
+    final active = _activeRefresh;
+    if (active != null) {
+      final sameSession =
+          active.generation == generation && active.ownerKey == owner;
+      if (sameSession && !explicit) {
+        // Routine request within the current session: join the active refresh;
+        // start no new work.
+        return active.future;
       }
-      // Forced request: queue exactly one forced follow-up (coalescing).
-      return _enqueueForcedFollowUp(token, reason, generation);
+      // Same-session forced request, or a request from a newer session that
+      // must not join the older future — queue a single pending follow-up.
+      return _enqueuePending(token, reason, generation, owner);
     }
 
     final startedAt = _now();
@@ -340,32 +422,37 @@ class CalendarReminderCoordinator {
       reason: reason,
       startedAt: startedAt,
       generation: generation,
+      owner: owner,
     );
   }
 
-  /// Queues (or coalesces into) the single pending forced follow-up and returns
-  /// the future that resolves to that follow-up's result.
-  Future<CalendarReminderRefreshResult> _enqueueForcedFollowUp(
+  /// Queues (or coalesces into / replaces) the single pending follow-up and
+  /// returns the future that resolves to that follow-up's result.
+  Future<CalendarReminderRefreshResult> _enqueuePending(
     String accessToken,
     CalendarReminderRefreshReason reason,
     int generation,
+    String? owner,
   ) {
-    final pending = _pendingForced;
-    if (pending != null && pending.generation == generation) {
+    final pending = _pending;
+    if (pending != null &&
+        pending.generation == generation &&
+        pending.ownerKey == owner) {
       // Coalesce: keep one follow-up, adopt the latest token and reason.
       pending.accessToken = accessToken;
       pending.reason = reason;
       return pending.completer.future;
     }
-    // No pending follow-up (or a stale-generation one that a session change
-    // already invalidated): create a fresh one for this generation.
-    _invalidatePendingForced();
-    final created = _PendingForcedRefresh(
+    // No pending follow-up, or one belonging to a now-superseded session:
+    // invalidate it and create a fresh one for this session.
+    _invalidatePending();
+    final created = _PendingRefresh(
       accessToken: accessToken,
       reason: reason,
       generation: generation,
+      ownerKey: owner,
     );
-    _pendingForced = created;
+    _pending = created;
     return created.completer.future;
   }
 
@@ -374,14 +461,22 @@ class CalendarReminderCoordinator {
     required CalendarReminderRefreshReason reason,
     required DateTime startedAt,
     required int generation,
+    required String? owner,
   }) {
+    late _ActiveReminderRefresh active;
     final future = _runGuarded(
       accessToken: accessToken,
       reason: reason,
       startedAt: startedAt,
       generation: generation,
+      self: () => active,
     );
-    _inFlight = future;
+    active = _ActiveReminderRefresh(
+      generation: generation,
+      ownerKey: owner,
+      future: future,
+    );
+    _activeRefresh = active;
     return future;
   }
 
@@ -395,6 +490,7 @@ class CalendarReminderCoordinator {
     required CalendarReminderRefreshReason reason,
     required DateTime startedAt,
     required int generation,
+    required _ActiveReminderRefresh Function() self,
   }) async {
     try {
       return await _run(
@@ -404,45 +500,48 @@ class CalendarReminderCoordinator {
         generation: generation,
       );
     } finally {
-      // Clear the in-flight guard, then synchronously kick any queued forced
-      // follow-up. There is no await between these, so no routine request can
-      // slip in and start a duplicate refresh while the follow-up is pending.
-      _inFlight = null;
-      _startPendingForcedIfAny();
+      // Clear the active guard only if it is still THIS operation — never stomp
+      // a newer session's active refresh that has already replaced it. Then
+      // synchronously kick any queued follow-up. There is no await between
+      // these, so no routine request can slip in and start a duplicate refresh.
+      if (identical(_activeRefresh, self())) {
+        _activeRefresh = null;
+      }
+      _startPendingIfAny();
     }
   }
 
-  /// Starts the queued forced follow-up, if one is pending. Runs synchronously
-  /// (no await) so state transitions atomically from the just-finished refresh
-  /// to the follow-up.
-  void _startPendingForcedIfAny() {
-    final pending = _pendingForced;
+  /// Starts the queued follow-up, if one is pending and still current. Runs
+  /// synchronously (no await) so state transitions atomically from the
+  /// just-finished refresh to the follow-up.
+  void _startPendingIfAny() {
+    final pending = _pending;
     if (pending == null) return;
-    _pendingForced = null;
+    _pending = null;
 
     // A session change since this follow-up was queued means it belongs to an
     // ended session — do not start it; complete its caller as invalidated.
     if (!_isCurrentGeneration(pending.generation)) {
-      if (!pending.completer.isCompleted) {
-        pending.completer.complete(
-          _skipped(
-            pending.reason,
-            CalendarReminderRefreshStatus.skippedSessionInvalidated,
-          ),
-        );
-      }
+      _completePendingInvalidated(pending);
       return;
     }
 
-    // Forced follow-ups bypass throttling by construction: they go straight to
-    // a guarded run without an [_isThrottled] check.
+    // Follow-ups bypass throttling by construction: they go straight to a
+    // guarded run without an [_isThrottled] check.
+    late _ActiveReminderRefresh active;
     final future = _runGuarded(
       accessToken: pending.accessToken,
       reason: pending.reason,
       startedAt: _now(),
       generation: pending.generation,
+      self: () => active,
     );
-    _inFlight = future;
+    active = _ActiveReminderRefresh(
+      generation: pending.generation,
+      ownerKey: pending.ownerKey,
+      future: future,
+    );
+    _activeRefresh = active;
     // Resolve the queued callers with the follow-up's outcome. Always completes
     // (success or error), so a pending completer can never dangle.
     future.then(
@@ -465,7 +564,10 @@ class CalendarReminderCoordinator {
       );
     }
 
-    final enabled = await _preferences.loadCalendarRemindersEnabled();
+    final ownerKey = _ownerKey;
+    final enabled = await _preferences.loadCalendarRemindersEnabled(
+      ownerKey: ownerKey,
+    );
     if (!enabled) {
       return _runDisabled(reason, generation);
     }
@@ -481,13 +583,16 @@ class CalendarReminderCoordinator {
         );
       }
       // Keep the stored preference honest so Settings does not keep showing a
-      // switch that is silently doing nothing.
-      await _preferences.saveCalendarRemindersEnabled(false);
+      // switch that is silently doing nothing — scoped to the current account.
+      await _preferences.saveCalendarRemindersEnabled(
+        ownerKey: ownerKey,
+        enabled: false,
+      );
       // Previously scheduled reminders would otherwise become unmanaged if the
-      // user later re-grants permission via system settings. Cancel the ones we
-      // own (targeted, never a global cancelAll) and keep any that fail for a
-      // later retry. Do not fetch events.
-      final cleanup = await _notificationService.disableCalendarReminders();
+      // user later re-grants permission via system settings. Cancel the ones
+      // this account owns (targeted, never a global cancelAll) and keep any that
+      // fail for a later retry. Do not fetch events.
+      final cleanup = await _cleanupOwner(ownerKey);
       _log(reason, CalendarReminderRefreshStatus.permissionDenied);
       return CalendarReminderRefreshResult(
         reason: reason,
@@ -534,16 +639,33 @@ class CalendarReminderCoordinator {
       );
     }
 
+    // Thread a session-validity context into reconciliation so it stops (and
+    // never writes) the instant this session stops being current — including
+    // while it waits its turn in the serialized mutation queue.
+    final context = ownerKey == null
+        ? null
+        : CalendarReminderOperationContext(
+            generation: generation,
+            ownerKey: ownerKey,
+            isCurrent: () => _isCurrentGeneration(generation),
+          );
+
     final reconciliation = await _notificationService
         .reconcileCalendarReminders(
           events,
           now: startedAt,
-          ownerKey: _ownerKey,
+          ownerKey: ownerKey,
+          context: context,
         );
 
-    final status = reconciliation.manifestCorrupt
-        ? CalendarReminderRefreshStatus.manifestCorrupt
-        : CalendarReminderRefreshStatus.reconciled;
+    final CalendarReminderRefreshStatus status;
+    if (reconciliation.sessionInvalidated) {
+      status = CalendarReminderRefreshStatus.skippedSessionInvalidated;
+    } else if (reconciliation.manifestCorrupt) {
+      status = CalendarReminderRefreshStatus.manifestCorrupt;
+    } else {
+      status = CalendarReminderRefreshStatus.reconciled;
+    }
     final result = CalendarReminderRefreshResult(
       reason: reason,
       status: status,
@@ -556,16 +678,22 @@ class CalendarReminderCoordinator {
 
   /// Handles a refresh while calendar reminders are disabled.
   ///
-  /// Never fetches events or requests permission. If the manifest is already
-  /// empty there is nothing to do. If a previous cleanup left owned IDs behind,
-  /// the targeted disable/cleanup path is retried so cancellation can complete
-  /// — without repeatedly doing work once the manifest is empty.
+  /// Never fetches events or requests permission. Uses the structured manifest
+  /// load result so a corrupt manifest is handled conservatively (no cleanup,
+  /// no write, explicit corrupt result) instead of being mistaken for an empty
+  /// manifest. If the manifest is empty there is nothing to do; if a previous
+  /// cleanup left owned IDs behind, the targeted owner-scoped cleanup is retried.
   Future<CalendarReminderRefreshResult> _runDisabled(
     CalendarReminderRefreshReason reason,
     int generation,
   ) async {
-    final manifest = await _preferences.loadCalendarReminderManifest();
-    if (manifest.scheduledIds.isEmpty) {
+    final loadResult = await _preferences.loadCalendarReminderManifestResult();
+    if (loadResult.isCorrupt) {
+      // Ownership is unknown: never schedule, cancel, or write. Report corrupt.
+      _log(reason, CalendarReminderRefreshStatus.manifestCorrupt);
+      return _skipped(reason, CalendarReminderRefreshStatus.manifestCorrupt);
+    }
+    if (loadResult.manifest.scheduledIds.isEmpty) {
       _log(reason, CalendarReminderRefreshStatus.skippedDisabled);
       return _skipped(reason, CalendarReminderRefreshStatus.skippedDisabled);
     }
@@ -579,9 +707,9 @@ class CalendarReminderCoordinator {
       );
     }
 
-    final cleanup = await _notificationService.disableCalendarReminders();
-    // A fully clean cleanup requires both every cancellation to succeed *and*
-    // the manifest state to persist (cleared, or the retained IDs saved).
+    final cleanup = await _cleanupOwner(_ownerKey);
+    // A fully clean cleanup requires both every owned cancellation to succeed
+    // *and* the manifest state to persist.
     final status = cleanup.isFullyClean
         ? CalendarReminderRefreshStatus.disabledCleanupCompleted
         : CalendarReminderRefreshStatus.disabledCleanupPartial;
