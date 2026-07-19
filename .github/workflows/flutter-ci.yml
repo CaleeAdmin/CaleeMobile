@@ -53,6 +53,15 @@ jobs:
       - name: Get dependencies
         run: flutter pub get
 
+      # Guard the native Android/iOS notification configuration (scheduled-
+      # notification receivers, reboot permission, notification delegate,
+      # dedicated icon, release shrinking config). Runs before the Flutter build
+      # so a platform-config regression fails fast. Standard-library Python only.
+      - name: Check notification platform config
+        run: |
+          python3 .github/scripts/check_notification_platform_config.py selftest
+          python3 .github/scripts/check_notification_platform_config.py check
+
       - name: Check formatting
         run: dart format --set-exit-if-changed lib test
 

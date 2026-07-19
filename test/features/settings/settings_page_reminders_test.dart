@@ -32,7 +32,10 @@ class _FakeNotificationService extends LocalCalendarNotificationService {
   final List<String> disableOwnerKeys = [];
 
   @override
-  Future<void> initialize() async {}
+  Future<LocalNotificationInitializationResult> initialize() async =>
+      const LocalNotificationInitializationResult(
+        status: LocalNotificationInitializationStatus.initialized,
+      );
 
   @override
   Future<bool> requestPermissionIfNeeded() async => permissionGranted;

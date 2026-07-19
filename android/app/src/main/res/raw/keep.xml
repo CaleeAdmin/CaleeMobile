@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Resource-shrinking keep rules.
+
+     The calendar-reminder small icon (@drawable/ic_stat_calee) is referenced
+     from Dart (AndroidInitializationSettings / AndroidNotificationDetails) and
+     passed to flutter_local_notifications as a string name at runtime, so the
+     Android resource shrinker cannot see the reference and would strip the
+     drawable from a shrunk release build. Keeping it here ensures the status-bar
+     icon survives release shrinking. tools:shrinkMode is left as the default
+     (safe) mode; only this one resource is force-kept. -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@drawable/ic_stat_calee" />

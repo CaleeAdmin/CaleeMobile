@@ -2,6 +2,10 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Required by flutter_local_notifications so scheduled (zonedSchedule)
+         reminders can be re-registered with AlarmManager after a device reboot
+         or an app update. Without it, pending reminders are lost on reboot. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application
         android:label="Calee"
@@ -112,6 +116,26 @@
         <meta-data
             android:name="flutter_deeplinking_enabled"
             android:value="false" />
+
+        <!-- flutter_local_notifications scheduled-notification components.
+             ScheduledNotificationReceiver delivers a zonedSchedule() reminder
+             when its alarm fires; ScheduledNotificationBootReceiver re-registers
+             pending reminders after a reboot or an app update. Both are internal
+             to the app and must not be exported. -->
+        <receiver
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
     </application>
 
     <queries>
