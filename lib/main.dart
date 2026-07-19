@@ -24,6 +24,10 @@ Future<void> main() async {
   // release. See CaleeEnvironment.
   CaleeEnvironment.logDiagnostics();
   await _configureLocalTimezone();
-  await LocalCalendarNotificationService.instance.initialize();
+  // Best-effort: a notification-plugin init failure must not crash startup.
+  // The service stays uninitialized and retries on the next reconcile.
+  try {
+    await LocalCalendarNotificationService.instance.initialize();
+  } catch (_) {}
   runApp(const CaleeApp());
 }

@@ -32,6 +32,7 @@ import '../features/display_setup/display_setup_landing_page.dart';
 import '../features/display_setup/display_setup_repository.dart';
 import '../features/display_setup/display_setup_link_controller.dart';
 import '../features/local_subscriber/local_calendar_subscription.dart';
+import '../features/notifications/calendar_reminder_coordinator.dart';
 import '../features/onboarding/welcome_page.dart';
 import '../features/local_subscriber/local_calendar_subscription_repository.dart';
 import '../features/local_subscriber/local_subscriber_calendar_page.dart';
@@ -59,6 +60,7 @@ class CaleeAppTestDependencies {
     this.externalCalendarConnectedLinkController,
     this.shoppingLinkController,
     this.deviceProfileDefaultsProvider,
+    this.reminderCoordinator,
   });
 
   final CaleeHubClient hubClient;
@@ -71,6 +73,7 @@ class CaleeAppTestDependencies {
   externalCalendarConnectedLinkController;
   final ShoppingLinkController? shoppingLinkController;
   final DeviceProfileDefaultsProvider? deviceProfileDefaultsProvider;
+  final CalendarReminderCoordinator? reminderCoordinator;
 }
 
 class CaleeApp extends StatefulWidget {
@@ -98,10 +101,18 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
   late final ShoppingLinkController _shoppingLinkController;
   late final DisplayActivationController _displayActivationController;
   late final LocalCalendarSubscriptionRepository _localSubscriptionRepo;
+  late final CalendarReminderCoordinator _reminderCoordinator;
   final _navigatorKey = GlobalKey<NavigatorState>();
 
   // Set to true when the app goes to background; cleared and transport reset on resume.
   bool _transportMayBeStale = false;
+
+  // Account whose reminder session is currently active in the coordinator, or
+  // null while signed out. Drives the once-per-signed-in-session reminder
+  // refresh (a restored or freshly signed-in session schedules reminders
+  // exactly once) and detects the sign-in → sign-out and account-switch
+  // transitions that begin/end the coordinator's reminder session.
+  String? _reminderSessionAccountId;
 
   // Calendar follow state
   bool _showingFollowSignIn = false;
@@ -204,6 +215,12 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
       _localSubscriptionRepo = LocalCalendarSubscriptionRepository();
     }
 
+    // App-level reminder coordinator: schedules device reminders from an
+    // independent 30-day upcoming-event window, never from the visible month.
+    _reminderCoordinator =
+        testDeps?.reminderCoordinator ??
+        CalendarReminderCoordinator(hubClient: _hubClient);
+
     // Listeners must be attached before any controller's init() can deliver
     // an intent, so a notification fired mid-init is never missed.
     _followLinkController.addListener(_onFollowLinkChanged);
@@ -213,6 +230,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
     );
     _shoppingLinkController.addListener(_onShoppingLinkChanged);
     _sessionController.addListener(_onSessionChanged);
+    _sessionController.addListener(_onSessionChangedForReminders);
 
     // DisplaySetupLinkController.init() is idempotent and, in tests, always
     // backed by a fake (see CaleeAppTestDependencies), so it's called
@@ -253,6 +271,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
     );
     _shoppingLinkController.removeListener(_onShoppingLinkChanged);
     _sessionController.removeListener(_onSessionChanged);
+    _sessionController.removeListener(_onSessionChangedForReminders);
     _followLinkController.dispose();
     _displaySetupLinkController.dispose();
     _externalCalendarConnectedLinkController.dispose();
@@ -274,8 +293,93 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
       _hubClient.resetTransport();
       if (_sessionController.isSignedIn) {
         unawaited(_sessionController.refreshBootstrap());
+        // Reconcile reminders against the independent 30-day window on resume
+        // (throttled) — an event may have changed while backgrounded.
+        _fireReminderRefresh(CalendarReminderRefreshReason.appResumed);
       }
     }
+  }
+
+  /// Drives the coordinator's reminder session across sign-in/out transitions:
+  /// begins a session (and fires a once-per-session refresh) when a signed-in
+  /// session appears, and ends it — invalidating in-flight work and running
+  /// targeted cleanup of the signed-out account's reminders — when it goes away.
+  /// Never runs reminder work while signed out.
+  void _onSessionChangedForReminders() {
+    if (_sessionController.isRestoringSession) return;
+
+    if (!_sessionController.isSignedIn) {
+      final endedAccountId = _reminderSessionAccountId;
+      _reminderSessionAccountId = null;
+      if (endedAccountId != null) {
+        // Signed-in → signed-out (explicit sign-out or unauthorized automatic
+        // sign-out): invalidate all in-flight/queued reminder work and clean up
+        // the previous account's reminders. Never blocks or fails sign-out.
+        _fireReminderSignOutCleanup();
+      }
+      return;
+    }
+
+    final accountId = _sessionController.bootstrap?.account.id ?? '';
+    final previousAccountId = _reminderSessionAccountId;
+    if (previousAccountId == accountId) return;
+
+    // A new signed-in session (restore, fresh sign-in, or account switch).
+    // Transition the coordinator's reminder session — invalidating any old-
+    // session work and cleaning the previous owner through the serialized
+    // mutation queue before beginning the new generation — then fire the
+    // once-per-session refresh for the new account.
+    _reminderSessionAccountId = accountId;
+    _fireReminderTransition(
+      previousAccountId: previousAccountId,
+      nextAccountId: accountId,
+    );
+    _fireReminderRefresh(CalendarReminderRefreshReason.sessionRestored);
+  }
+
+  /// Transitions the coordinator's reminder session to [nextAccountId] without
+  /// ever blocking the UI. [CalendarReminderCoordinator.transitionSession]
+  /// begins the new session synchronously (so the refresh fired next belongs to
+  /// the new account); only the previous owner's cleanup is async and
+  /// best-effort. Failures are swallowed: a session transition must never crash
+  /// the app or block navigation.
+  void _fireReminderTransition({
+    required String? previousAccountId,
+    required String nextAccountId,
+  }) {
+    final cleanup = _reminderCoordinator.transitionSession(
+      previousAccountId: previousAccountId,
+      nextAccountId: nextAccountId,
+    );
+    unawaited(cleanup.catchError((Object _) {}));
+  }
+
+  /// Invalidates and cleans up reminders for the signed-out account without ever
+  /// blocking sign-out, using a network-free targeted cleanup (never
+  /// `cancelAll()`). Failures are swallowed: sign-out must always complete.
+  void _fireReminderSignOutCleanup() {
+    unawaited(() async {
+      try {
+        await _reminderCoordinator.endSession();
+      } catch (_) {
+        // Sign-out reminder cleanup is best-effort and must never crash the app
+        // or block sign-out.
+      }
+    }());
+  }
+
+  /// Requests an upcoming-reminder refresh without ever blocking startup or
+  /// navigation, and without surfacing failures. No-op while signed out.
+  void _fireReminderRefresh(CalendarReminderRefreshReason reason) {
+    final token = _sessionController.accessToken;
+    if (token == null || !_sessionController.isSignedIn) return;
+    unawaited(() async {
+      try {
+        await _reminderCoordinator.refresh(accessToken: token, reason: reason);
+      } catch (_) {
+        // Reminder scheduling is best-effort and must never crash the app.
+      }
+    }());
   }
 
   Future<void> _loadLocalSubscriptions() async {
@@ -1339,6 +1443,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
       bootstrap: _sessionController.bootstrap!,
       onSignOut: () => _sessionController.signOut(),
       onBootstrapRefreshed: _sessionController.updateBootstrap,
+      reminderCoordinator: _reminderCoordinator,
       initialSelectedIndex: _initialHomeTab ?? 0,
       onInitialTabConsumed: _initialHomeTab != null
           ? () => setState(() => _initialHomeTab = null)

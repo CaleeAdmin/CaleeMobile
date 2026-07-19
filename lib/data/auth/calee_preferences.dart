@@ -1,5 +1,30 @@
+import 'dart:convert';
+
+import 'package:crypto/crypto.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import '../models/calendar_reminder_manifest.dart';
+
+/// Thrown when the calendar reminder manifest cannot be persisted or cleared.
+///
+/// Manifest persistence is part of the reconciliation transaction, so its
+/// failures must be observable (not silently swallowed). Deliberately carries
+/// only the [operation] and an optional underlying [cause] — never manifest
+/// contents — so it stays safe to log.
+class CalendarReminderManifestStorageException implements Exception {
+  const CalendarReminderManifestStorageException(this.operation, [this.cause]);
+
+  /// The failed operation: `'save'` or `'clear'`.
+  final String operation;
+
+  /// The underlying error, if any.
+  final Object? cause;
+
+  @override
+  String toString() =>
+      'CalendarReminderManifestStorageException(operation: $operation)';
+}
 
 /// Lightweight local user preferences stored in SharedPreferences.
 /// One-time migration from FlutterSecureStorage is performed on first load.
@@ -11,9 +36,35 @@ class CaleePreferences {
   static const _defaultCalendarIdKey = 'calee_pref_default_calendar_id';
   static const _defaultTaskListIdKey = 'calee_pref_default_task_list_id';
 
+  // Legacy device-global reminder-enabled preference. Retained only as the
+  // one-time migration source for the account-scoped keys below (and as the
+  // account-agnostic value for the null-owner legacy path). New writes for a
+  // signed-in account go to the namespaced key instead.
   static const _calendarRemindersEnabledKey =
       'calee_pref_calendar_reminders_enabled';
+  // Marker recording that the one-time legacy→account migration has run. Its
+  // value is the privacy-safe owner key that claimed the legacy value (never a
+  // raw account ID); its mere presence prevents any later account from
+  // inheriting the legacy value.
+  static const _calendarRemindersEnabledMigratedKey =
+      'calee_pref_calendar_reminders_enabled_migrated';
+  static const _calendarReminderManifestKey =
+      'calee_pref_calendar_reminder_manifest';
+  // Legacy diagnostic slot that previously stored the *raw* corrupt manifest
+  // value. That could capture unexpected content, so it is removed on sight and
+  // superseded by the privacy-safe metadata key below.
+  static const _calendarReminderManifestCorruptKey =
+      'calee_pref_calendar_reminder_manifest_corrupt';
+  // Privacy-safe diagnostic slot for the most recent corrupt manifest value:
+  // stores only a SHA-256 digest and the length, never the raw value.
+  static const _calendarReminderManifestCorruptMetaKey =
+      'calee_pref_calendar_reminder_manifest_corrupt_meta';
   static const _migrationDoneKey = 'calee_pref_migrated_to_shared_prefs';
+
+  /// Namespaced reminder-enabled key for a specific account [ownerKey] (a
+  /// privacy-safe SHA-256 digest, never a raw account ID).
+  static String _calendarRemindersEnabledOwnerKey(String ownerKey) =>
+      'calee_pref_calendar_reminders_enabled_$ownerKey';
 
   // ── Load all ─────────────────────────────────────────────────────────────
 
@@ -93,21 +144,202 @@ class CaleePreferences {
 
   // ── Calendar reminders ────────────────────────────────────────────────────
 
-  Future<bool> loadCalendarRemindersEnabled() async {
+  /// Loads whether calendar reminders are enabled for a specific account.
+  ///
+  /// The preference is account-scoped: two accounts on the same device keep
+  /// independent values, and a new account defaults to off. Pass the current
+  /// account's privacy-safe [ownerKey]; a `null` [ownerKey] reads the legacy
+  /// device-global value (the account-agnostic path).
+  ///
+  /// On the first read for an account, the old device-global value is migrated
+  /// exactly once — claimed for whichever account is active at migration time —
+  /// so an existing user's setting is preserved without propagating a legacy
+  /// `true` to every later account.
+  Future<bool> loadCalendarRemindersEnabled({String? ownerKey}) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      return prefs.getBool(_calendarRemindersEnabledKey) ?? false;
+      if (ownerKey == null) {
+        return prefs.getBool(_calendarRemindersEnabledKey) ?? false;
+      }
+
+      final scopedKey = _calendarRemindersEnabledOwnerKey(ownerKey);
+      final scoped = prefs.getBool(scopedKey);
+      if (scoped != null) return scoped;
+
+      // No account-scoped value yet. Migrate the legacy global value at most
+      // once, claiming it for this (the active) account.
+      if (prefs.getString(_calendarRemindersEnabledMigratedKey) == null) {
+        await prefs.setString(_calendarRemindersEnabledMigratedKey, ownerKey);
+        final legacy = prefs.getBool(_calendarRemindersEnabledKey);
+        if (legacy != null) {
+          await prefs.setBool(scopedKey, legacy);
+          return legacy;
+        }
+        return false;
+      }
+
+      // Migration already claimed by another account — default off so the
+      // legacy value never leaks into a later account.
+      return false;
     } catch (_) {
       return false;
     }
   }
 
-  Future<void> saveCalendarRemindersEnabled(bool enabled) async {
+  /// Saves whether calendar reminders are enabled for a specific account.
+  ///
+  /// Writes the account-scoped value for [ownerKey] (or the legacy device-global
+  /// value when [ownerKey] is `null`). An explicit account-scoped write also
+  /// consumes the one-time legacy migration, so no other account can later
+  /// inherit the stale global value.
+  Future<void> saveCalendarRemindersEnabled({
+    String? ownerKey,
+    required bool enabled,
+  }) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool(_calendarRemindersEnabledKey, enabled);
+      if (ownerKey == null) {
+        await prefs.setBool(_calendarRemindersEnabledKey, enabled);
+        return;
+      }
+      if (prefs.getString(_calendarRemindersEnabledMigratedKey) == null) {
+        await prefs.setString(_calendarRemindersEnabledMigratedKey, ownerKey);
+      }
+      await prefs.setBool(_calendarRemindersEnabledOwnerKey(ownerKey), enabled);
     } catch (_) {
       // Best-effort.
+    }
+  }
+
+  // ── Calendar reminder manifest ────────────────────────────────────────────
+  //
+  // Tracks the notification IDs calendar reminders have scheduled on the
+  // device so reconciliation can cancel only IDs it owns, never touching
+  // notifications belonging to other Calee features.
+
+  /// Loads the manifest and classifies how it was obtained.
+  ///
+  /// Reads are conservative: nothing stored is reported as
+  /// [CalendarReminderManifestLoadStatus.absent], a valid current-schema value
+  /// as [CalendarReminderManifestLoadStatus.loaded], legacy/partially-malformed
+  /// but recoverable data as [CalendarReminderManifestLoadStatus.recovered],
+  /// and genuinely unparseable data (bad JSON, or an unrecoverable shape) as
+  /// [CalendarReminderManifestLoadStatus.corrupt] — never silently collapsed to
+  /// an empty manifest. On corrupt data only privacy-safe metadata (a SHA-256
+  /// digest and length) is recorded for diagnostics — never the raw value,
+  /// which could contain unexpected content — and the primary value is left
+  /// untouched, so ownership is not discarded and callers can retry.
+  Future<CalendarReminderManifestLoadResult>
+  loadCalendarReminderManifestResult() async {
+    final SharedPreferences prefs;
+    final String? raw;
+    try {
+      prefs = await SharedPreferences.getInstance();
+      raw = prefs.getString(_calendarReminderManifestKey);
+    } catch (_) {
+      // Storage itself is unavailable; ownership is unknown, so report corrupt
+      // rather than fabricating an empty manifest that could be overwritten.
+      return const CalendarReminderManifestLoadResult(
+        manifest: CalendarReminderManifest.empty,
+        status: CalendarReminderManifestLoadStatus.corrupt,
+      );
+    }
+
+    if (raw == null || raw.isEmpty) {
+      return const CalendarReminderManifestLoadResult(
+        manifest: CalendarReminderManifest.empty,
+        status: CalendarReminderManifestLoadStatus.absent,
+      );
+    }
+
+    Object? decoded;
+    try {
+      decoded = jsonDecode(raw);
+    } catch (_) {
+      // Unparseable JSON: record only privacy-safe metadata for diagnostics and
+      // report corrupt without touching the primary key.
+      await _preserveCorruptManifestMetadata(prefs, raw);
+      return const CalendarReminderManifestLoadResult(
+        manifest: CalendarReminderManifest.empty,
+        status: CalendarReminderManifestLoadStatus.corrupt,
+      );
+    }
+
+    final result = CalendarReminderManifest.parse(decoded);
+    if (result.isCorrupt) {
+      await _preserveCorruptManifestMetadata(prefs, raw);
+    }
+    return result;
+  }
+
+  /// Loads just the manifest, discarding the load status. Kept for callers that
+  /// only need the owned IDs; prefer [loadCalendarReminderManifestResult] where
+  /// corrupt data must be handled conservatively.
+  Future<CalendarReminderManifest> loadCalendarReminderManifest() async =>
+      (await loadCalendarReminderManifestResult()).manifest;
+
+  /// Records privacy-safe diagnostics for a corrupt manifest value.
+  ///
+  /// Stores only a SHA-256 digest of the raw value and its length — never the
+  /// raw value itself, which (being unparseable) could contain unexpected
+  /// content. Also removes any legacy raw diagnostic value left by an earlier
+  /// build so it does not linger.
+  Future<void> _preserveCorruptManifestMetadata(
+    SharedPreferences prefs,
+    String raw,
+  ) async {
+    try {
+      final digest = sha256.convert(utf8.encode(raw)).toString();
+      await prefs.setString(
+        _calendarReminderManifestCorruptMetaKey,
+        jsonEncode({'sha256': digest, 'length': raw.length}),
+      );
+      // Migrate away from the old raw diagnostic value if present.
+      await prefs.remove(_calendarReminderManifestCorruptKey);
+    } catch (_) {
+      // Best-effort diagnostics; never block on this.
+    }
+  }
+
+  /// Persists the calendar reminder manifest.
+  ///
+  /// Manifest persistence is part of the reconciliation transaction, not
+  /// inconsequential best-effort storage: a newly scheduled notification that
+  /// cannot be recorded here would become an untracked notification. Failures
+  /// are therefore surfaced as a [CalendarReminderManifestStorageException]
+  /// rather than swallowed, so callers can roll back or report.
+  Future<void> saveCalendarReminderManifest(
+    CalendarReminderManifest manifest,
+  ) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final ok = await prefs.setString(
+        _calendarReminderManifestKey,
+        jsonEncode(manifest.toJson()),
+      );
+      if (!ok) {
+        throw const CalendarReminderManifestStorageException('save');
+      }
+    } on CalendarReminderManifestStorageException {
+      rethrow;
+    } catch (e) {
+      throw CalendarReminderManifestStorageException('save', e);
+    }
+  }
+
+  /// Clears the calendar reminder manifest. Like [saveCalendarReminderManifest],
+  /// failures are surfaced (not swallowed) so cleanup can be retried. A `false`
+  /// return from [SharedPreferences.remove] is not treated as an error — it does
+  /// not indicate a failed write, only that there may have been nothing to
+  /// remove — but a thrown storage error propagates.
+  Future<void> clearCalendarReminderManifest() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_calendarReminderManifestKey);
+    } on CalendarReminderManifestStorageException {
+      rethrow;
+    } catch (e) {
+      throw CalendarReminderManifestStorageException('clear', e);
     }
   }
 

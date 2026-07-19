@@ -54,11 +54,21 @@ class _StubPreferences extends CaleePreferences {
     _stored = preferences;
   }
 
-  @override
-  Future<bool> loadCalendarRemindersEnabled() async => _remindersEnabled;
+  final List<String?> loadOwnerKeys = [];
+  final List<String?> saveOwnerKeys = [];
 
   @override
-  Future<void> saveCalendarRemindersEnabled(bool enabled) async {
+  Future<bool> loadCalendarRemindersEnabled({String? ownerKey}) async {
+    loadOwnerKeys.add(ownerKey);
+    return _remindersEnabled;
+  }
+
+  @override
+  Future<void> saveCalendarRemindersEnabled({
+    String? ownerKey,
+    required bool enabled,
+  }) async {
+    saveOwnerKeys.add(ownerKey);
     _remindersEnabled = enabled;
   }
 }

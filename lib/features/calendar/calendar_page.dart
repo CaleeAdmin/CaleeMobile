@@ -8,6 +8,7 @@ import '../../data/auth/calee_preferences.dart';
 import '../../data/models/client_bootstrap.dart';
 import '../../data/models/client_calendar.dart';
 import '../../ui/calee_design.dart';
+import '../notifications/calendar_reminder_coordinator.dart';
 import '../settings/calendar_collections_page.dart';
 import 'calendar_controller.dart';
 import 'calendar_repository.dart';
@@ -27,6 +28,7 @@ class CalendarPage extends StatefulWidget {
     required this.services,
     required this.accountId,
     required this.isFamilyUxContext,
+    this.reminderCoordinator,
     this.refreshGeneration = 0,
     super.key,
   });
@@ -39,6 +41,12 @@ class CalendarPage extends StatefulWidget {
   /// UX-only: hides the Chore lists section (and the "Chore list" create
   /// option) for business/workspace accounts, matching Chores/Meals gating.
   final bool isFamilyUxContext;
+
+  /// App-level reminder coordinator. When present, successful event CRUD and
+  /// manual refreshes trigger an independent upcoming-reminder refresh. Null in
+  /// contexts (e.g. some tests) that do not exercise reminders.
+  final CalendarReminderCoordinator? reminderCoordinator;
+
   // Increment to trigger a refresh of calendars and events from the parent.
   final int refreshGeneration;
 
@@ -59,8 +67,22 @@ class _CalendarPageState extends State<CalendarPage> {
       accessToken: widget.accessToken,
       preferences: CaleePreferences(),
     );
-    _controller = CalendarController(repository: repository);
+    _controller = CalendarController(
+      repository: repository,
+      onRequestReminderRefresh: _requestReminderRefresh,
+    );
     _controller.loadMonth();
+  }
+
+  /// Bridges CalendarController's explicit-change/manual-refresh hooks to the
+  /// app-level reminder coordinator, supplying this page's access token. Kept
+  /// no-op when no coordinator was injected.
+  Future<void> _requestReminderRefresh(
+    CalendarReminderRefreshReason reason,
+  ) async {
+    final coordinator = widget.reminderCoordinator;
+    if (coordinator == null) return;
+    await coordinator.refresh(accessToken: widget.accessToken, reason: reason);
   }
 
   @override

@@ -37,6 +37,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # JDK 17 for the Android Gradle build below. The GitHub-hosted Android SDK
+      # (preinstalled on ubuntu-latest) is used as-is; no SDK download, no
+      # signing config, and no secrets are introduced.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: "3.44.1"
@@ -55,3 +63,9 @@ jobs:
         run: flutter test
         env:
           TZ: Australia/Perth
+
+      # Compile the Android app so a change that builds green in tests but breaks
+      # the platform build is caught here. A build failure fails the required
+      # gate. Debug only: no release artifact is produced, published, or signed.
+      - name: Build Android APK (debug)
+        run: flutter build apk --debug
