@@ -366,16 +366,28 @@ class CaleeHubClient {
   /// the local Calee-side mapping/row (subscription_mapping,
   /// external_calendar). Callers should gate on
   /// `calendar.capabilities.canEditAppearance` before offering this.
+  ///
+  /// The backend applies a partial update: an omitted field is left exactly
+  /// as it was, while a sent field becomes a local override. Callers must
+  /// therefore pass only the fields the user actually changed — sending an
+  /// unchanged name (or colour) would accidentally pin it as a permanent
+  /// override, breaking provider renames from then on.
   Future<ClientCalendar> updateCalendarAppearance({
     required String accessToken,
     required String calendarId,
-    required String name,
+    String? name,
     String? color,
   }) async {
-    final body = <String, dynamic>{'name': name};
+    final body = <String, dynamic>{
+      if (name != null) 'name': name,
+      if (color != null) 'color': color,
+    };
 
-    if (color != null) {
-      body['color'] = color;
+    if (body.isEmpty) {
+      throw const CaleeHubException(
+        statusCode: 0,
+        message: 'No calendar appearance updates provided',
+      );
     }
 
     final encodedCalendarId = Uri.encodeComponent(calendarId);

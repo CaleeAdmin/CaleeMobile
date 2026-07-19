@@ -451,12 +451,37 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
               required String? color,
               required ClientService? service,
             }) async {
-              await widget.hubClient.updateCalendarAppearance(
-                accessToken: widget.accessToken,
-                calendarId: calendar.id,
-                name: name,
-                color: color,
+              // Send only the fields that actually changed — an unchanged
+              // field sent anyway would become a permanent local override
+              // on the backend. The form disables Save for no-op edits, so
+              // a null patch here means nothing to do.
+              final patch = buildCalendarAppearancePatch(
+                originalName: calendar.name,
+                originalColor: calendar.color,
+                nextName: name,
+                nextColor: color,
               );
+              if (patch == null) return;
+
+              if (calendar.hasServerAppearanceContract) {
+                await widget.hubClient.updateCalendarAppearance(
+                  accessToken: widget.accessToken,
+                  calendarId: calendar.id,
+                  name: patch.name,
+                  color: patch.color,
+                );
+              } else {
+                // Old backend: /appearance doesn't exist. Editing is only
+                // reachable without the server contract for a
+                // fallback-writable calendar, whose appearance lives in the
+                // source metadata — use the legacy endpoint.
+                await widget.hubClient.updateCalendar(
+                  accessToken: widget.accessToken,
+                  calendarId: calendar.id,
+                  name: patch.name,
+                  color: patch.color,
+                );
+              }
             },
       ),
     );
@@ -954,6 +979,7 @@ class _CollectionFormContentState extends State<_CollectionFormContent> {
     _colorController = TextEditingController(text: widget.initialColor ?? '');
     _selectedService = widget.services.isEmpty ? null : widget.services.first;
     _selectedKind = widget.initialPrimaryKind;
+    _nameController.addListener(() => setState(() {}));
     _colorController.addListener(() => setState(() {}));
   }
 
@@ -977,6 +1003,20 @@ class _CollectionFormContentState extends State<_CollectionFormContent> {
 
   bool _isPaletteColorSelected(String hex) {
     return _colorController.text.trim().toUpperCase() == hex.toUpperCase();
+  }
+
+  /// True when editing an existing calendar and neither the name nor the
+  /// colour differs from what the form was opened with — there is nothing
+  /// to send, so Save stays disabled. Never true during creation.
+  bool get _isNoOpEdit {
+    if (widget.appearanceMode == null) return false;
+    return buildCalendarAppearancePatch(
+          originalName: widget.initialName ?? '',
+          originalColor: widget.initialColor,
+          nextName: _nameController.text,
+          nextColor: _colorController.text,
+        ) ==
+        null;
   }
 
   Future<void> _submit() async {
@@ -1154,7 +1194,7 @@ class _CollectionFormContentState extends State<_CollectionFormContent> {
             ),
             const SizedBox(height: CaleeSpacing.md),
             FilledButton(
-              onPressed: _isSubmitting ? null : _submit,
+              onPressed: _isSubmitting || _isNoOpEdit ? null : _submit,
               child: _isSubmitting
                   ? const SizedBox(
                       width: 18,

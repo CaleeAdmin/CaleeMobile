@@ -158,7 +158,7 @@ void main() {
       expect(capturedBodies.single, {'name': 'School', 'color': '#FF9500'});
     });
 
-    test('omits color from the body when not provided', () async {
+    test('name-only update sends exactly {"name": ...}', () async {
       final client = await startServer({
         'data': {'calendar': _calendarJson()},
       });
@@ -171,6 +171,36 @@ void main() {
 
       expect(capturedBodies.single, {'name': 'School'});
       expect(capturedBodies.single.containsKey('color'), isFalse);
+    });
+
+    test('colour-only update sends exactly {"color": ...}', () async {
+      final client = await startServer({
+        'data': {'calendar': _calendarJson()},
+      });
+
+      await client.updateCalendarAppearance(
+        accessToken: 'tok',
+        calendarId: 'cal1',
+        color: '#FF9500',
+      );
+
+      expect(capturedBodies.single, {'color': '#FF9500'});
+      expect(capturedBodies.single.containsKey('name'), isFalse);
+    });
+
+    test('an empty update is rejected locally without any request', () async {
+      final client = await startServer({
+        'data': {'calendar': _calendarJson()},
+      });
+
+      await expectLater(
+        client.updateCalendarAppearance(accessToken: 'tok', calendarId: 'cal1'),
+        throwsA(isA<CaleeHubException>()),
+      );
+
+      expect(capturedPaths, isEmpty);
+      expect(capturedMethods, isEmpty);
+      expect(capturedBodies, isEmpty);
     });
 
     test('never sends a null-valued key in the body', () async {
@@ -245,6 +275,9 @@ void main() {
         expect(result.capabilities.canEditSourceMetadata, isFalse);
         expect(result.capabilities.canRemoveFromCalee, isTrue);
         expect(result.capabilities.canDeleteSource, isFalse);
+        // A capabilities key in the payload marks the new server contract,
+        // which is what authorises the /appearance route.
+        expect(result.hasServerAppearanceContract, isTrue);
       },
     );
 
@@ -366,6 +399,10 @@ void main() {
         // sourceName/sourceColor default to the effective name/color.
         expect(result.sourceName, 'Family');
         expect(result.sourceColor, '#FF9500');
+        // No capabilities key means an old backend: canEditAppearance came
+        // from the conservative fallback, so callers must not assume the
+        // /appearance route exists.
+        expect(result.hasServerAppearanceContract, isFalse);
       },
     );
 

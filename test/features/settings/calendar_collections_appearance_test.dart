@@ -16,16 +16,24 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 class _StubHubClient extends CaleeHubClient {
-  _StubHubClient({this.calendarsToReturn = const [], this.appearanceError})
-    : super(baseUri: Uri.parse('http://localhost'));
+  _StubHubClient({
+    this.calendarsToReturn = const [],
+    this.appearanceError,
+    this.allowLegacyUpdate = false,
+  }) : super(baseUri: Uri.parse('http://localhost'));
 
   final List<ClientCalendar> calendarsToReturn;
   final Object? appearanceError;
 
+  /// Only the old-backend routing tests set this; everywhere else a legacy
+  /// updateCalendar() call from appearance editing is a hard failure.
+  final bool allowLegacyUpdate;
+
   int updateCalendarAppearanceCallCount = 0;
   int updateCalendarCallCount = 0;
   int createCalendarCallCount = 0;
-  ({String calendarId, String name, String? color})? lastAppearanceCall;
+  ({String calendarId, String? name, String? color})? lastAppearanceCall;
+  ({String calendarId, String? name, String? color})? lastLegacyCall;
 
   @override
   Future<ClientCalendarList> calendars({required String accessToken}) async {
@@ -43,7 +51,7 @@ class _StubHubClient extends CaleeHubClient {
   Future<ClientCalendar> updateCalendarAppearance({
     required String accessToken,
     required String calendarId,
-    required String name,
+    String? name,
     String? color,
   }) async {
     updateCalendarAppearanceCallCount++;
@@ -60,9 +68,13 @@ class _StubHubClient extends CaleeHubClient {
     String? color,
   }) async {
     updateCalendarCallCount++;
-    throw StateError(
-      'updateCalendar() must not be called by appearance editing',
-    );
+    lastLegacyCall = (calendarId: calendarId, name: name, color: color);
+    if (!allowLegacyUpdate) {
+      throw StateError(
+        'updateCalendar() must not be called by appearance editing',
+      );
+    }
+    return calendarsToReturn.firstWhere((c) => c.id == calendarId);
   }
 
   @override
@@ -339,30 +351,145 @@ void main() {
     expect(find.text('Original provider calendar name'), findsNothing);
   });
 
-  group('submitting the edit form', () {
-    testWidgets('calls updateCalendarAppearance and not updateCalendar', (
-      tester,
-    ) async {
+  group('submitting the edit form sends only changed fields', () {
+    Finder nameField() => find.widgetWithText(TextFormField, 'Name in Calee');
+    Finder colorField() =>
+        find.widgetWithText(TextFormField, 'Colour in Calee');
+
+    Future<_StubHubClient> openEditSheet(
+      WidgetTester tester,
+      ClientCalendar calendar, {
+      bool allowLegacyUpdate = false,
+    }) async {
+      final stub = _StubHubClient(
+        calendarsToReturn: [calendar],
+        allowLegacyUpdate: allowLegacyUpdate,
+      );
+      await tester.pumpWidget(_wrap(stub));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(calendar.name));
+      await tester.pumpAndSettle();
+      return stub;
+    }
+
+    testWidgets('changing only the name omits colour', (tester) async {
       final calendar = _calendar(
         appearanceMode: 'source_metadata',
         capabilities: _sourceMetadataCapabilities,
       );
-      final stub = _StubHubClient(calendarsToReturn: [calendar]);
+      final stub = await openEditSheet(tester, calendar);
 
-      await tester.pumpWidget(_wrap(stub));
-      await tester.pumpAndSettle();
-
-      await tester.tap(find.text('Family'));
-      await tester.pumpAndSettle();
-
+      await tester.enterText(nameField(), 'School');
+      await tester.pump();
       await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
 
       expect(stub.updateCalendarAppearanceCallCount, 1);
       expect(stub.updateCalendarCallCount, 0);
       expect(stub.lastAppearanceCall?.calendarId, calendar.id);
-      expect(stub.lastAppearanceCall?.name, calendar.name);
+      expect(stub.lastAppearanceCall?.name, 'School');
+      expect(stub.lastAppearanceCall?.color, isNull);
     });
+
+    testWidgets('changing only the colour omits name', (tester) async {
+      final calendar = _calendar(
+        appearanceMode: 'source_metadata',
+        capabilities: _sourceMetadataCapabilities,
+        color: '#FF9500',
+      );
+      final stub = await openEditSheet(tester, calendar);
+
+      await tester.enterText(colorField(), '#007AFF');
+      await tester.pump();
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      expect(stub.updateCalendarAppearanceCallCount, 1);
+      expect(stub.lastAppearanceCall?.name, isNull);
+      expect(stub.lastAppearanceCall?.color, '#007AFF');
+    });
+
+    testWidgets('changing both sends both', (tester) async {
+      final calendar = _calendar(
+        appearanceMode: 'source_metadata',
+        capabilities: _sourceMetadataCapabilities,
+        color: '#FF9500',
+      );
+      final stub = await openEditSheet(tester, calendar);
+
+      await tester.enterText(nameField(), 'School');
+      await tester.enterText(colorField(), '#007AFF');
+      await tester.pump();
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      expect(stub.updateCalendarAppearanceCallCount, 1);
+      expect(stub.lastAppearanceCall?.name, 'School');
+      expect(stub.lastAppearanceCall?.color, '#007AFF');
+    });
+
+    testWidgets('an unchanged form does not submit (Save disabled)', (
+      tester,
+    ) async {
+      final calendar = _calendar(
+        appearanceMode: 'source_metadata',
+        capabilities: _sourceMetadataCapabilities,
+      );
+      final stub = await openEditSheet(tester, calendar);
+
+      final saveButton = tester.widget<FilledButton>(
+        find.widgetWithText(FilledButton, 'Save'),
+      );
+      expect(saveButton.onPressed, isNull);
+
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      expect(stub.updateCalendarAppearanceCallCount, 0);
+      expect(stub.updateCalendarCallCount, 0);
+    });
+
+    testWidgets('retyping the colour in a different case is not a change', (
+      tester,
+    ) async {
+      final calendar = _calendar(
+        appearanceMode: 'source_metadata',
+        capabilities: _sourceMetadataCapabilities,
+        color: '#FF9500',
+      );
+      final stub = await openEditSheet(tester, calendar);
+
+      await tester.enterText(colorField(), '#ff9500');
+      await tester.pump();
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      expect(stub.updateCalendarAppearanceCallCount, 0);
+      expect(stub.updateCalendarCallCount, 0);
+    });
+
+    testWidgets(
+      'a null original colour with an untouched blank field is not a change',
+      (tester) async {
+        final calendar = _calendar(
+          appearanceMode: 'subscription_mapping',
+          capabilities: _subscriptionMappingCapabilities,
+          isSubscription: true,
+          readOnly: true,
+          color: null,
+        );
+        final stub = await openEditSheet(tester, calendar);
+
+        await tester.enterText(nameField(), 'School');
+        await tester.pump();
+        await tester.tap(find.text('Save'));
+        await tester.pumpAndSettle();
+
+        expect(stub.updateCalendarAppearanceCallCount, 1);
+        expect(stub.lastAppearanceCall?.name, 'School');
+        expect(stub.lastAppearanceCall?.color, isNull);
+      },
+    );
 
     testWidgets(
       'a CaleeHubException from updateCalendarAppearance shows a friendly message',
@@ -386,6 +513,8 @@ void main() {
         await tester.tap(find.text('Family'));
         await tester.pumpAndSettle();
 
+        await tester.enterText(nameField(), 'School');
+        await tester.pump();
         await tester.tap(find.text('Save'));
         await tester.pumpAndSettle();
 
@@ -472,6 +601,51 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(find.text('Name in Calee'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'an old-backend writable calendar saves via the legacy updateCalendar '
+      'endpoint with only the changed field, never /appearance',
+      (tester) async {
+        final calendar = ClientCalendar.fromJson({
+          'id': 'cal1',
+          'serviceId': 'svc1',
+          'serviceName': 'Calee Portal',
+          'name': 'Family',
+          'color': '#FF9500',
+          'components': ['VEVENT'],
+          'primaryKind': 'calendar',
+          'supportsEvents': true,
+          'supportsTasks': false,
+          'supportsChores': false,
+          'readOnly': false,
+          'isSubscription': false,
+          'source': 'calee',
+        });
+        expect(calendar.hasServerAppearanceContract, isFalse);
+
+        final stub = _StubHubClient(
+          calendarsToReturn: [calendar],
+          allowLegacyUpdate: true,
+        );
+        await tester.pumpWidget(_wrap(stub));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Family'));
+        await tester.pumpAndSettle();
+
+        await tester.enterText(
+          find.widgetWithText(TextFormField, 'Name in Calee'),
+          'School',
+        );
+        await tester.pump();
+        await tester.tap(find.text('Save'));
+        await tester.pumpAndSettle();
+
+        expect(stub.updateCalendarCallCount, 1);
+        expect(stub.updateCalendarAppearanceCallCount, 0);
+        expect(stub.lastLegacyCall?.name, 'School');
+        expect(stub.lastLegacyCall?.color, isNull);
       },
     );
 
