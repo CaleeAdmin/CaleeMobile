@@ -71,6 +71,47 @@ class _FakeSessionController extends SessionController {
     notifyListeners();
   }
 
+  /// Finishes session restore signed in, but with a specific (possibly blank or
+  /// whitespace-only) account ID, so invalid-identity handling can be exercised.
+  void finishRestoreWithAccountId(String accountId) {
+    accessToken = 'test_access_token';
+    bootstrap = ClientBootstrap(
+      account: ClientAccount(
+        id: accountId,
+        displayName: 'Test',
+        primaryEmail: 'test@example.com',
+        timeZone: 'Australia/Perth',
+        status: 'active',
+      ),
+      services: const [],
+      contexts: const ClientContexts(households: [], organisations: []),
+      availableContexts: const [],
+      capabilities: const {},
+    );
+    isRestoringSession = false;
+    notifyListeners();
+  }
+
+  /// Delivers a fresh bootstrap carrying [accountId] while keeping the current
+  /// access token, mimicking a later session notification whose bootstrap has
+  /// finally loaded a valid account.
+  void deliverBootstrapAccountId(String accountId) {
+    bootstrap = ClientBootstrap(
+      account: ClientAccount(
+        id: accountId,
+        displayName: 'Test',
+        primaryEmail: 'test@example.com',
+        timeZone: 'Australia/Perth',
+        status: 'active',
+      ),
+      services: const [],
+      contexts: const ClientContexts(households: [], organisations: []),
+      availableContexts: const [],
+      capabilities: const {},
+    );
+    notifyListeners();
+  }
+
   /// Switches the signed-in session to a different account.
   void switchAccount({required String accountId}) {
     accessToken = 'test_access_token_$accountId';
@@ -110,7 +151,7 @@ class _RecordingCoordinator extends CalendarReminderCoordinator {
   int endSessionCount = 0;
 
   @override
-  int beginSession({required String accountId}) {
+  CalendarReminderSessionStartResult beginSession({required String accountId}) {
     begunAccounts.add(accountId);
     return super.beginSession(accountId: accountId);
   }
@@ -333,5 +374,115 @@ void main() {
     await tester.pump();
 
     expect(coordinator.begunAccounts, ['u1', 'u2']);
+  });
+
+  // ── Fix 1: invalid account identity ─────────────────────────────────────────
+
+  testWidgets('a signed-in session with a blank account ID begins no reminder '
+      'session and fires no refresh', (tester) async {
+    final session = _FakeSessionController();
+    final coordinator = _RecordingCoordinator();
+
+    await tester.pumpWidget(
+      CaleeApp.forTesting(
+        testDeps: _makeDeps(session: session, coordinator: coordinator),
+      ),
+    );
+
+    // Nominally signed in (token + bootstrap present) but the account ID is
+    // empty — an owner must not be derived from it.
+    session.finishRestoreWithAccountId('');
+    await tester.pump();
+
+    expect(
+      coordinator.begunAccounts,
+      isEmpty,
+      reason: 'no owner/session may be created for an empty account ID',
+    );
+    expect(
+      coordinator.reasons,
+      isEmpty,
+      reason: 'no reminder refresh may fire without a valid account ID',
+    );
+  });
+
+  testWidgets('a whitespace-only account ID begins no reminder session', (
+    tester,
+  ) async {
+    final session = _FakeSessionController();
+    final coordinator = _RecordingCoordinator();
+
+    await tester.pumpWidget(
+      CaleeApp.forTesting(
+        testDeps: _makeDeps(session: session, coordinator: coordinator),
+      ),
+    );
+
+    session.finishRestoreWithAccountId('   ');
+    await tester.pump();
+
+    expect(coordinator.begunAccounts, isEmpty);
+    expect(coordinator.reasons, isEmpty);
+  });
+
+  testWidgets('a valid bootstrap arriving after a blank one starts the session '
+      'normally', (tester) async {
+    final session = _FakeSessionController();
+    final coordinator = _RecordingCoordinator();
+
+    await tester.pumpWidget(
+      CaleeApp.forTesting(
+        testDeps: _makeDeps(session: session, coordinator: coordinator),
+      ),
+    );
+
+    // First: a signed-in notification whose account ID is not yet usable.
+    session.finishRestoreWithAccountId('');
+    await tester.pump();
+    expect(coordinator.begunAccounts, isEmpty);
+
+    // Later: the bootstrap finally carries a valid account ID.
+    session.deliverBootstrapAccountId('u1');
+    await tester.pump();
+
+    expect(coordinator.begunAccounts, ['u1']);
+    expect(
+      coordinator.reasons,
+      contains(CalendarReminderRefreshReason.sessionRestored),
+    );
+  });
+
+  testWidgets('a duplicate blank-bootstrap callback does not end a currently '
+      'valid reminder session', (tester) async {
+    final session = _FakeSessionController();
+    final coordinator = _RecordingCoordinator();
+
+    await tester.pumpWidget(
+      CaleeApp.forTesting(
+        testDeps: _makeDeps(session: session, coordinator: coordinator),
+      ),
+    );
+
+    // A valid session is established.
+    session.finishRestore(signedIn: true);
+    await tester.pump();
+    expect(coordinator.begunAccounts, ['u1']);
+    expect(coordinator.endSessionCount, 0);
+
+    // A duplicate notification whose bootstrap momentarily carries a blank
+    // account ID must not tear down the valid session or begin a new one.
+    session.deliverBootstrapAccountId('');
+    await tester.pump();
+
+    expect(
+      coordinator.begunAccounts,
+      ['u1'],
+      reason: 'the blank callback must not begin a new session',
+    );
+    expect(
+      coordinator.endSessionCount,
+      0,
+      reason: 'a valid session must survive a blank duplicate callback',
+    );
   });
 }

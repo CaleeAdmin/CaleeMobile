@@ -59,6 +59,7 @@ class CalendarReconciliationResult {
     this.collisionsResolved = 0,
     this.idAllocationFailures = 0,
     this.rollback,
+    this.invalidationRollback,
   });
 
   final int eventsFetched;
@@ -110,6 +111,11 @@ class CalendarReconciliationResult {
   /// describes how completely the newly-scheduled IDs were undone/recovered.
   final CalendarReminderRollbackResult? rollback;
 
+  /// Present only when [sessionInvalidated] is true and the stale pass had
+  /// already scheduled at least one notification; describes how completely those
+  /// stale schedules (both brand-new and replacement) were rolled back.
+  final CalendarReminderInvalidationRollbackResult? invalidationRollback;
+
   final DateTime completedAt;
 
   bool get hasFailures =>
@@ -128,7 +134,8 @@ class CalendarReconciliationResult {
       !manifestCorrupt &&
       !sessionInvalidated &&
       idAllocationFailures == 0 &&
-      (rollback?.isFullySuccessful ?? true);
+      (rollback?.isFullySuccessful ?? true) &&
+      (invalidationRollback?.isFullySuccessful ?? true);
 
   @override
   String toString() =>
@@ -141,7 +148,50 @@ class CalendarReconciliationResult {
       'sessionInvalidated: $sessionInvalidated, '
       'collisionsResolved: $collisionsResolved, '
       'idAllocationFailures: $idAllocationFailures'
-      '${rollback != null ? ', $rollback' : ''})';
+      '${rollback != null ? ', $rollback' : ''}'
+      '${invalidationRollback != null ? ', $invalidationRollback' : ''})';
+}
+
+/// Structured, log-safe outcome of rolling back the platform schedules a stale
+/// (session-invalidated) reconciliation pass had already made before it noticed
+/// its session was no longer current.
+///
+/// Every notification the stale pass successfully scheduled — both brand-new IDs
+/// and replacements of existing (changed) IDs — is cancelled, so nothing the
+/// dead session put on the device survives. The stale pass never persists its
+/// manifest, leaving the previous stored manifest intact for the new session's
+/// serialized cleanup/reconcile to repair device state. Cancellation failures
+/// are represented here structurally (a count), not merely debug-logged.
+class CalendarReminderInvalidationRollbackResult {
+  const CalendarReminderInvalidationRollbackResult({
+    this.newIdsCancelled = 0,
+    this.replacedIdsCancelled = 0,
+    this.cancellationFailures = 0,
+  });
+
+  /// Brand-new IDs (not previously owned) the stale pass had scheduled, then
+  /// successfully cancelled during rollback.
+  final int newIdsCancelled;
+
+  /// Previously-owned IDs the stale pass had re-scheduled (replaced), then
+  /// successfully cancelled during rollback.
+  final int replacedIdsCancelled;
+
+  /// Rollback cancellations that themselves failed; those notifications may
+  /// still be on the device and are left for the new session's cleanup.
+  final int cancellationFailures;
+
+  /// The total number of stale schedules successfully rolled back.
+  int get totalCancelled => newIdsCancelled + replacedIdsCancelled;
+
+  /// True when every stale schedule was cancelled without a failure.
+  bool get isFullySuccessful => cancellationFailures == 0;
+
+  @override
+  String toString() =>
+      'CalendarReminderInvalidationRollbackResult(newIdsCancelled: '
+      '$newIdsCancelled, replacedIdsCancelled: $replacedIdsCancelled, '
+      'cancellationFailures: $cancellationFailures)';
 }
 
 /// Structured, log-safe outcome of rolling back after a failed final manifest
@@ -462,10 +512,77 @@ class LocalCalendarNotificationService {
       maxCandidates: _maxScheduled,
       ownerKey: effectiveOwner,
     );
-    // Assign collision-free IDs across the selected set. A candidate that
-    // exhausts its probe budget is reported (never silently dropped).
+
+    // Session may have ended before this (possibly queued) pass began. Nothing
+    // has been allocated or mutated yet.
+    if (!isCurrent()) {
+      return _invalidatedResult(events.length, rawCandidates.length, 0, 0, at);
+    }
+
+    // Load and validate the manifest BEFORE allocating final notification IDs,
+    // so IDs still on the device but owned by another account (or by an
+    // ownerless legacy entry) can be reserved and never overwritten. A corrupt
+    // manifest allocates and mutates nothing.
+    final prefs = preferences;
+    final loadResult = await prefs.loadCalendarReminderManifestResult();
+    if (loadResult.isCorrupt) {
+      // Ownership is unknown. Do not schedule or cancel anything, and do not
+      // overwrite the stored value — report corruption so the caller can retry
+      // or diagnose. Never a global cancel.
+      _debugLog('reconcile skipped: manifest corrupt');
+      return CalendarReconciliationResult(
+        eventsFetched: events.length,
+        eligibleCandidates: rawCandidates.length,
+        scheduledCount: 0,
+        updatedCount: 0,
+        cancelledCount: 0,
+        unchangedCount: 0,
+        failedCount: 0,
+        manifestPersisted: false,
+        manifestCorrupt: true,
+        collisionsResolved: 0,
+        idAllocationFailures: 0,
+        completedAt: at,
+      );
+    }
+    final previous = loadResult.manifest;
+    final previousById = <int, CalendarReminderManifestEntry>{
+      for (final entry in previous.entries) entry.notificationId: entry,
+    };
+
+    // Partition previously-owned entries relative to the current account:
+    //  * foreign — owned by another (non-null) account: reserve its ID and
+    //    retain it untouched; never cancel or overwrite another account's
+    //    notification;
+    //  * ownerless legacy (only when the current owner is a real account):
+    //    reserve its ID during this pass so a candidate cannot land on it, then
+    //    clean it up as stale (migrated to a current-owner entry);
+    //  * current-owner — normal unchanged/changed/stale handling below; its ID
+    //    is deliberately NOT reserved so the same occurrence can reuse it.
+    final reservedIds = <int>{};
+    final retainedForeign = <int, CalendarReminderManifestEntry>{};
+    final legacyStaleIds = <int>{};
+    final currentOwnerIds = <int>{};
+    for (final entry in previous.entries) {
+      final id = entry.notificationId;
+      if (entry.ownerKey != null && entry.ownerKey != effectiveOwner) {
+        reservedIds.add(id);
+        retainedForeign[id] = entry;
+      } else if (entry.ownerKey == null && effectiveOwner != null) {
+        reservedIds.add(id);
+        legacyStaleIds.add(id);
+      } else {
+        currentOwnerIds.add(id);
+      }
+    }
+
+    // Assign collision-free IDs across the selected set, reserving the foreign
+    // and ownerless-legacy IDs so no candidate is scheduled onto one. A
+    // candidate that exhausts its probe budget is reported (never silently
+    // dropped, never allowed to overwrite a reserved ID).
     final allocation = allocateNotificationIds(
       rawCandidates,
+      reservedIds: reservedIds,
       idDerivation: debugNotificationIdOverride,
     );
     final candidates = allocation.candidates;
@@ -477,44 +594,6 @@ class LocalCalendarNotificationService {
         'limit and were not scheduled',
       );
     }
-
-    // Session may have ended before this (possibly queued) pass began.
-    if (!isCurrent()) {
-      return _invalidatedResult(
-        events.length,
-        candidates.length,
-        collisionsResolved,
-        idAllocationFailures,
-        at,
-      );
-    }
-
-    final prefs = preferences;
-    final loadResult = await prefs.loadCalendarReminderManifestResult();
-    if (loadResult.isCorrupt) {
-      // Ownership is unknown. Do not schedule or cancel anything, and do not
-      // overwrite the stored value — report corruption so the caller can retry
-      // or diagnose. Never a global cancel.
-      _debugLog('reconcile skipped: manifest corrupt');
-      return CalendarReconciliationResult(
-        eventsFetched: events.length,
-        eligibleCandidates: candidates.length,
-        scheduledCount: 0,
-        updatedCount: 0,
-        cancelledCount: 0,
-        unchangedCount: 0,
-        failedCount: 0,
-        manifestPersisted: false,
-        manifestCorrupt: true,
-        collisionsResolved: collisionsResolved,
-        idAllocationFailures: idAllocationFailures,
-        completedAt: at,
-      );
-    }
-    final previous = loadResult.manifest;
-    final previousById = <int, CalendarReminderManifestEntry>{
-      for (final entry in previous.entries) entry.notificationId: entry,
-    };
 
     final initialized = await ensureInitialized();
     // Session may have ended while initialization resolved.
@@ -557,29 +636,18 @@ class LocalCalendarNotificationService {
 
     final desiredIds = desiredById.keys.toSet();
 
-    // Classify every previously-owned ID and every desired ID, treating owner
-    // mismatch as "not the current account's" so a foreign or legacy entry is
-    // never classified as unchanged.
-    final staleIds = <int>{};
+    // Classify desired IDs against the current account's own entries only.
+    // Foreign and legacy IDs were reserved out of the candidate pool, so a
+    // candidate's final ID is either brand-new or a reuse of a current-owner ID
+    // for the same occurrence — never a foreign/legacy ID.
     final newIds = <int>{};
     final changedIds = <int>{};
     final unchangedIds = <int>{};
-
-    for (final id in previousById.keys) {
-      if (!desiredIds.contains(id)) staleIds.add(id);
-    }
     for (final id in desiredIds) {
       final prev = previousById[id];
       if (prev == null || prev.ownerKey != effectiveOwner) {
-        // Not owned by the current account (new, foreign, or legacy) — schedule
-        // fresh under the current owner. A same-ID foreign entry is re-scheduled
-        // in place (which replaces the platform notification), so it is not also
-        // added to [staleIds].
-        if (prev == null) {
-          newIds.add(id);
-        } else {
-          changedIds.add(id);
-        }
+        // Brand-new under the current owner.
+        newIds.add(id);
       } else {
         final prevFp = prev.fingerprint;
         if (prevFp != null && prevFp == desiredFingerprint[id]) {
@@ -590,8 +658,19 @@ class LocalCalendarNotificationService {
       }
     }
 
-    // Entries believed to be on the device after this pass.
-    final keptEntries = <int, CalendarReminderManifestEntry>{};
+    // Current-owner entries no longer desired are stale; ownerless legacy
+    // entries are always cleaned (migrated). Foreign entries are never stale —
+    // they belong to another account and are retained untouched.
+    final staleIds = <int>{...legacyStaleIds};
+    for (final id in currentOwnerIds) {
+      if (!desiredIds.contains(id)) staleIds.add(id);
+    }
+
+    // Entries believed to be on the device after this pass. Foreign entries are
+    // retained untouched from the start so another account's reminders survive.
+    final keptEntries = <int, CalendarReminderManifestEntry>{
+      ...retainedForeign,
+    };
     for (final id in unchangedIds) {
       keptEntries[id] = CalendarReminderManifestEntry(
         notificationId: id,
@@ -605,15 +684,20 @@ class LocalCalendarNotificationService {
     var cancelled = 0;
     var failed = 0;
 
-    // Newly-scheduled IDs not previously owned — the exact set to roll back if
-    // the session is invalidated or the final manifest write fails.
+    // Every successful platform schedule this pass, split by kind, so a mid-pass
+    // session invalidation can roll back BOTH brand-new schedules and
+    // replacements — not only the new ones. (The save-failure rollback below
+    // still uses only [newlyScheduledIds]: a replaced ID remains tracked by the
+    // intact previous manifest, so it must not be cancelled there.)
     final newlyScheduledIds = <int>{};
+    final replacedIds = <int>{};
 
     // 3a. Schedule newly-desired reminders.
     for (final id in newIds) {
       if (!isCurrent()) {
         return _rollbackInvalidated(
           newlyScheduledIds,
+          replacedIds,
           eventsFetched: events.length,
           eligibleCandidates: candidates.length,
           collisionsResolved: collisionsResolved,
@@ -636,6 +720,7 @@ class LocalCalendarNotificationService {
       if (!isCurrent()) {
         return _rollbackInvalidated(
           newlyScheduledIds,
+          replacedIds,
           eventsFetched: events.length,
           eligibleCandidates: candidates.length,
           collisionsResolved: collisionsResolved,
@@ -651,6 +736,7 @@ class LocalCalendarNotificationService {
       if (!isCurrent()) {
         return _rollbackInvalidated(
           newlyScheduledIds,
+          replacedIds,
           eventsFetched: events.length,
           eligibleCandidates: candidates.length,
           collisionsResolved: collisionsResolved,
@@ -661,6 +747,7 @@ class LocalCalendarNotificationService {
       final ok = await scheduleReminder(desiredById[id]!);
       if (ok) {
         updated++;
+        replacedIds.add(id);
         keptEntries[id] = CalendarReminderManifestEntry(
           notificationId: id,
           fingerprint: desiredFingerprint[id],
@@ -675,6 +762,7 @@ class LocalCalendarNotificationService {
       if (!isCurrent()) {
         return _rollbackInvalidated(
           newlyScheduledIds,
+          replacedIds,
           eventsFetched: events.length,
           eligibleCandidates: candidates.length,
           collisionsResolved: collisionsResolved,
@@ -689,6 +777,7 @@ class LocalCalendarNotificationService {
       if (!isCurrent()) {
         return _rollbackInvalidated(
           newlyScheduledIds,
+          replacedIds,
           eventsFetched: events.length,
           eligibleCandidates: candidates.length,
           collisionsResolved: collisionsResolved,
@@ -709,6 +798,7 @@ class LocalCalendarNotificationService {
       if (!isCurrent()) {
         return _rollbackInvalidated(
           newlyScheduledIds,
+          replacedIds,
           eventsFetched: events.length,
           eligibleCandidates: candidates.length,
           collisionsResolved: collisionsResolved,
@@ -723,6 +813,7 @@ class LocalCalendarNotificationService {
     if (!isCurrent()) {
       return _rollbackInvalidated(
         newlyScheduledIds,
+        replacedIds,
         eventsFetched: events.length,
         eligibleCandidates: candidates.length,
         collisionsResolved: collisionsResolved,
@@ -772,28 +863,63 @@ class LocalCalendarNotificationService {
     return result;
   }
 
-  /// Cancels the IDs a now-invalidated pass had scheduled and returns a
-  /// [sessionInvalidated] result. Never writes the manifest: the previous
-  /// manifest is left intact for the new session, and cancel failures are
-  /// tolerated (writing to re-track them would clobber the new session).
+  /// Cancels every notification a now-invalidated pass had scheduled — both
+  /// brand-new IDs and replacements of existing (changed) IDs — and returns a
+  /// [sessionInvalidated] result carrying a structured
+  /// [CalendarReminderInvalidationRollbackResult].
+  ///
+  /// Never writes the manifest: the previous stored manifest is left intact for
+  /// the new session, whose serialized cleanup/reconcile repairs device state
+  /// afterwards. A rollback cancel that itself fails is represented structurally
+  /// (a count), not merely debug-logged, so a stale schedule that could not be
+  /// undone is observable rather than silent.
   Future<CalendarReconciliationResult> _rollbackInvalidated(
-    Set<int> newlyScheduledIds, {
+    Set<int> newlyScheduledIds,
+    Set<int> replacedIds, {
     required int eventsFetched,
     required int eligibleCandidates,
     required int collisionsResolved,
     required int idAllocationFailures,
     required DateTime at,
   }) async {
+    var newCancelled = 0;
+    var replacedCancelled = 0;
+    var cancellationFailures = 0;
     for (final id in newlyScheduledIds) {
       try {
         await cancelNotification(id);
+        newCancelled++;
       } catch (e) {
+        cancellationFailures++;
         _debugLog(
-          'invalidation rollback cancel failed for id=$id '
+          'invalidation rollback cancel failed for new id=$id '
           '(${_errorCategory(e)})',
         );
       }
     }
+    for (final id in replacedIds) {
+      try {
+        await cancelNotification(id);
+        replacedCancelled++;
+      } catch (e) {
+        cancellationFailures++;
+        _debugLog(
+          'invalidation rollback cancel failed for replaced id=$id '
+          '(${_errorCategory(e)})',
+        );
+      }
+    }
+    // Only attach a rollback record when the stale pass had actually scheduled
+    // something; a pass invalidated before any successful schedule has nothing
+    // to undo.
+    final invalidationRollback =
+        (newlyScheduledIds.isEmpty && replacedIds.isEmpty)
+        ? null
+        : CalendarReminderInvalidationRollbackResult(
+            newIdsCancelled: newCancelled,
+            replacedIdsCancelled: replacedCancelled,
+            cancellationFailures: cancellationFailures,
+          );
     _debugLog('reconcile aborted: session invalidated mid-pass');
     return CalendarReconciliationResult(
       eventsFetched: eventsFetched,
@@ -807,6 +933,7 @@ class LocalCalendarNotificationService {
       sessionInvalidated: true,
       collisionsResolved: collisionsResolved,
       idAllocationFailures: idAllocationFailures,
+      invalidationRollback: invalidationRollback,
       completedAt: at,
     );
   }

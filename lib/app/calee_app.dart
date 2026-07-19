@@ -32,6 +32,7 @@ import '../features/display_setup/display_setup_landing_page.dart';
 import '../features/display_setup/display_setup_repository.dart';
 import '../features/display_setup/display_setup_link_controller.dart';
 import '../features/local_subscriber/local_calendar_subscription.dart';
+import '../features/notifications/calendar_notification_candidates.dart';
 import '../features/notifications/calendar_reminder_coordinator.dart';
 import '../features/onboarding/welcome_page.dart';
 import '../features/local_subscriber/local_calendar_subscription_repository.dart';
@@ -320,7 +321,14 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
       return;
     }
 
-    final accountId = _sessionController.bootstrap?.account.id ?? '';
+    // Signed in, but the bootstrap (hence the account ID) may not be available
+    // yet, or may be momentarily blank. Never substitute an empty string: an
+    // invalid identity must not begin a session, store an empty owner, or fire a
+    // refresh — and, critically, must NOT invalidate an already-valid session
+    // (a duplicate transient callback without bootstrap is a no-op here). A
+    // later notification carrying a valid bootstrap starts the session normally.
+    final accountId = _sessionController.bootstrap?.account.id;
+    if (!isValidReminderAccountId(accountId)) return;
     final previousAccountId = _reminderSessionAccountId;
     if (previousAccountId == accountId) return;
 
@@ -332,7 +340,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
     _reminderSessionAccountId = accountId;
     _fireReminderTransition(
       previousAccountId: previousAccountId,
-      nextAccountId: accountId,
+      nextAccountId: accountId!,
     );
     _fireReminderRefresh(CalendarReminderRefreshReason.sessionRestored);
   }

@@ -16,8 +16,10 @@ class SettingsController extends ChangeNotifier {
 
   /// Privacy-safe owner key for the current account, used to scope the
   /// reminder-enabled preference so two accounts on the same device keep
-  /// independent values (never a raw account ID).
-  String get _reminderOwnerKey => reminderOwnerKey(bootstrap.account.id);
+  /// independent values (never a raw account ID). `null` when the bootstrap
+  /// carries no usable account ID, so an owner key is never derived from invalid
+  /// bootstrap data.
+  String? get _reminderOwnerKey => tryReminderOwnerKey(bootstrap.account.id);
 
   // ── State ─────────────────────────────────────────────────────────────────
 
@@ -48,8 +50,11 @@ class SettingsController extends ChangeNotifier {
       calendars = overview.calendars;
       error = null;
       try {
-        calendarRemindersEnabled = await repository
-            .loadCalendarRemindersEnabled(ownerKey: _reminderOwnerKey);
+        final ownerKey = _reminderOwnerKey;
+        if (ownerKey != null) {
+          calendarRemindersEnabled = await repository
+              .loadCalendarRemindersEnabled(ownerKey: ownerKey);
+        }
       } catch (_) {
         // Best-effort; keep default of false.
       }
@@ -113,13 +118,43 @@ class SettingsController extends ChangeNotifier {
     }
   }
 
-  Future<void> setCalendarRemindersEnabled(bool value) async {
-    calendarRemindersEnabled = value;
-    notifyListeners();
-    await repository.saveCalendarRemindersEnabled(
-      ownerKey: _reminderOwnerKey,
-      enabled: value,
-    );
+  /// Persists the reminders-enabled preference for the current account.
+  ///
+  /// Returns `true` only when the new value actually persisted. On failure (a
+  /// storage error, or an invalid account identity) the displayed
+  /// [calendarRemindersEnabled] is left at its previous value — never showing a
+  /// change that did not persist — and a transient [preferencesSaveError] is
+  /// recorded (the page-level [error] is untouched, so the page stays usable and
+  /// the SnackBar mechanism can surface it). The caller gates any reminder
+  /// reconciliation or cleanup on the returned boolean.
+  Future<bool> setCalendarRemindersEnabled(bool value) async {
+    final ownerKey = _reminderOwnerKey;
+    if (ownerKey == null) {
+      // No usable account identity: never derive an owner key from invalid
+      // bootstrap data. Preserve the switch and surface a transient error.
+      preferencesSaveError = StateError(
+        'reminder preference has no valid account owner',
+      );
+      notifyListeners();
+      return false;
+    }
+    preferencesSaveError = null;
+    try {
+      await repository.saveCalendarRemindersEnabled(
+        ownerKey: ownerKey,
+        enabled: value,
+      );
+      // Only reflect the change after the write is confirmed.
+      calendarRemindersEnabled = value;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      // Persistence failed — leave the previous switch value in place (rolled
+      // back) and surface a transient, non-blocking error.
+      preferencesSaveError = e;
+      notifyListeners();
+      return false;
+    }
   }
 
   // ── Family setup ──────────────────────────────────────────────────────────
