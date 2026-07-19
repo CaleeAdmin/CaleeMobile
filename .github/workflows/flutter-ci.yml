@@ -78,3 +78,44 @@ jobs:
       # gate. Debug only: no release artifact is produced, published, or signed.
       - name: Build Android APK (debug)
         run: flutter build apk --debug
+
+      # Ephemeral CI-only signing key so the release smoke build below can
+      # produce a signed APK without touching production signing secrets.
+      # Generated fresh in $RUNNER_TEMP (job-scoped, never cached, never
+      # uploaded as an artifact, and unrelated to android/key.properties or
+      # any repository/organization secret).
+      - name: Generate temporary CI keystore
+        run: |
+          keytool -genkeypair \
+            -keystore "$RUNNER_TEMP/calee-ci-release.jks" \
+            -storepass "ci-temporary-password" \
+            -keypass "ci-temporary-password" \
+            -alias "calee-ci" \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 1 \
+            -dname "CN=Calee CI, OU=CI, O=Calee, L=Perth, ST=WA, C=AU"
+
+      # Smoke-verify that the isMinifyEnabled/isShrinkResources release config
+      # still produces a working, correctly packaged release build (R8 +
+      # resource shrinking exercise real code paths a debug build does not).
+      # Signed with the ephemeral keystore above; this APK is a smoke-test
+      # product only — never uploaded, never published.
+      - name: Build Android APK (release)
+        run: flutter build apk --release
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/calee-ci-release.jks
+          ANDROID_KEYSTORE_PASSWORD: ci-temporary-password
+          ANDROID_KEY_ALIAS: calee-ci
+          ANDROID_KEY_PASSWORD: ci-temporary-password
+
+      # Inspect the packaged release artifact itself — manifest permissions,
+      # the scheduled-notification receivers, and the notification icon must
+      # all survive R8 + resource shrinking. The source-level config check
+      # above can't catch a shrinker regression; this reads the built APK.
+      # Standard-library Python only; never modifies the APK.
+      - name: Inspect release APK notification configuration
+        run: |
+          python3 .github/scripts/check_notification_release_apk.py selftest
+          python3 .github/scripts/check_notification_release_apk.py check \
+            build/app/outputs/flutter-apk/app-release.apk
