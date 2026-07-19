@@ -299,6 +299,8 @@ class _SettingsPageState extends State<SettingsPage> {
     final calendars = _controller.calendars;
     final preferences = _controller.preferences;
     final remindersEnabled = _controller.calendarRemindersEnabled;
+    final reminderUnavailable = _controller.reminderPreferenceUnavailable;
+    final reminderSwitchEnabled = _controller.isReminderSwitchEnabled;
     final isLoadingPrefs = _controller.isLoadingPreferences;
     final isOpeningFamily = _controller.isOpeningFamily;
     final loadError = _controller.error;
@@ -453,11 +455,26 @@ class _SettingsPageState extends State<SettingsPage> {
                 trailing: Switch(
                   key: const Key('settings_calendar_reminders_switch'),
                   value: remindersEnabled,
-                  onChanged: isLoadingPrefs
-                      ? null
-                      : (v) => unawaited(_toggleCalendarReminders(v)),
+                  onChanged: reminderSwitchEnabled
+                      ? (v) => unawaited(_toggleCalendarReminders(v))
+                      : null,
                 ),
               ),
+              if (reminderUnavailable)
+                Padding(
+                  key: const Key('settings_calendar_reminders_unavailable'),
+                  padding: const EdgeInsets.only(
+                    left: CaleeSpacing.md,
+                    right: CaleeSpacing.md,
+                    bottom: CaleeSpacing.sm,
+                  ),
+                  child: Text(
+                    "Couldn't load the reminder setting. Please try again.",
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodySmall?.copyWith(color: CaleeColors.danger),
+                  ),
+                ),
             ],
           ],
         ),

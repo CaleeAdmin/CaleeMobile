@@ -89,6 +89,11 @@ class _FailingPreferences extends CaleePreferences {
       enabledSeed;
 
   @override
+  Future<CalendarReminderPreferenceLoadResult>
+  loadCalendarRemindersEnabledResult({String? ownerKey}) async =>
+      CalendarReminderPreferenceLoadResult.loaded(enabledSeed);
+
+  @override
   Future<void> saveCalendarRemindersEnabled({
     String? ownerKey,
     required bool enabled,
@@ -96,6 +101,18 @@ class _FailingPreferences extends CaleePreferences {
     saveAttempts++;
     throw const CalendarReminderPreferenceStorageException('save');
   }
+}
+
+// ── Preferences whose reminder read is unavailable ────────────────────────────
+
+class _UnavailablePreferences extends CaleePreferences {
+  @override
+  Future<bool> loadCalendarRemindersEnabled({String? ownerKey}) async => false;
+
+  @override
+  Future<CalendarReminderPreferenceLoadResult>
+  loadCalendarRemindersEnabledResult({String? ownerKey}) async =>
+      const CalendarReminderPreferenceLoadResult.unavailable('io');
 }
 
 // ── Stub hub client ───────────────────────────────────────────────────────────
@@ -325,6 +342,35 @@ void main() {
         find.text("Couldn't save your preference. Please try again."),
         findsOneWidget,
       );
+    },
+  );
+
+  // ── Fix 7: an unavailable read is shown accurately, not as a real "off" ──────
+
+  testWidgets(
+    'an unavailable reminder read disables the switch and shows a concise '
+    'message without a full-page error',
+    (tester) async {
+      await tester.pumpWidget(
+        _wrap(
+          permissionGranted: true,
+          preferencesOverride: _UnavailablePreferences(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final sw = tester.widget<Switch>(find.byType(Switch));
+      expect(
+        sw.onChanged,
+        isNull,
+        reason: 'the switch is disabled while the value is untrustworthy',
+      );
+      expect(
+        find.text("Couldn't load the reminder setting. Please try again."),
+        findsOneWidget,
+      );
+      // Other Settings sections remain usable (no full-page error state).
+      expect(find.byType(Switch), findsOneWidget);
     },
   );
 }

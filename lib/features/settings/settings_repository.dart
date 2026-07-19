@@ -165,6 +165,12 @@ class SettingsRepository {
   Future<bool> loadCalendarRemindersEnabled({required String ownerKey}) =>
       _caleePrefs.loadCalendarRemindersEnabled(ownerKey: ownerKey);
 
+  /// Structured load so Settings can distinguish an unavailable read from a
+  /// genuine `false` and never present unavailable as a trustworthy off value.
+  Future<CalendarReminderPreferenceLoadResult>
+  loadCalendarRemindersEnabledResult({required String ownerKey}) =>
+      _caleePrefs.loadCalendarRemindersEnabledResult(ownerKey: ownerKey);
+
   Future<void> saveCalendarRemindersEnabled({
     required String ownerKey,
     required bool enabled,

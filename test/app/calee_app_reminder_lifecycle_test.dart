@@ -452,6 +452,132 @@ void main() {
     );
   });
 
+  // ── Fix 5: gate lifecycle refreshes on an active reminder session ───────────
+
+  testWidgets('app resume with no valid reminder session does not refresh '
+      'reminders', (tester) async {
+    final session = _FakeSessionController();
+    final coordinator = _RecordingCoordinator();
+
+    await tester.pumpWidget(
+      CaleeApp.forTesting(
+        testDeps: _makeDeps(session: session, coordinator: coordinator),
+      ),
+    );
+
+    // Nominally signed in (token present) but the account ID is blank, so no
+    // reminder session is begun.
+    session.finishRestoreWithAccountId('');
+    await tester.pump();
+    expect(coordinator.reasons, isEmpty);
+    expect(coordinator.hasActiveSession, isFalse);
+
+    // A resume must NOT fire a null-owner refresh while there is no session.
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pump();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+
+    expect(
+      coordinator.reasons,
+      isEmpty,
+      reason: 'resume without an active session fires no reminder refresh',
+    );
+  });
+
+  testWidgets('bootstrap completion after a blank account begins the session '
+      'and refreshes exactly once', (tester) async {
+    final session = _FakeSessionController();
+    final coordinator = _RecordingCoordinator();
+
+    await tester.pumpWidget(
+      CaleeApp.forTesting(
+        testDeps: _makeDeps(session: session, coordinator: coordinator),
+      ),
+    );
+
+    session.finishRestoreWithAccountId(''); // signed in, bootstrap not ready
+    await tester.pump();
+    expect(coordinator.reasons, isEmpty);
+
+    session.deliverBootstrapAccountId('u1'); // bootstrap finally arrives
+    await tester.pump();
+
+    expect(coordinator.begunAccounts, ['u1']);
+    expect(
+      coordinator.reasons
+          .where((r) => r == CalendarReminderRefreshReason.sessionRestored)
+          .length,
+      1,
+      reason: 'exactly one initial refresh once a valid account arrives',
+    );
+  });
+
+  testWidgets('a temporary missing bootstrap does not destroy an active '
+      'session, and a later resume still refreshes', (tester) async {
+    final session = _FakeSessionController();
+    final coordinator = _RecordingCoordinator();
+
+    await tester.pumpWidget(
+      CaleeApp.forTesting(
+        testDeps: _makeDeps(session: session, coordinator: coordinator),
+      ),
+    );
+
+    session.finishRestore(signedIn: true); // valid session for u1
+    await tester.pump();
+    expect(coordinator.hasActiveSession, isTrue);
+
+    // A transient blank-bootstrap callback must not tear down the session.
+    session.deliverBootstrapAccountId('');
+    await tester.pump();
+    expect(
+      coordinator.hasActiveSession,
+      isTrue,
+      reason: 'the active session survives a transient missing bootstrap',
+    );
+    expect(coordinator.endSessionCount, 0);
+
+    coordinator.reasons.clear();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pump();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+
+    expect(
+      coordinator.reasons,
+      [CalendarReminderRefreshReason.appResumed],
+      reason: 'resume with a still-active session refreshes normally',
+    );
+  });
+
+  testWidgets('a restored session fires exactly one initial refresh (no '
+      'duplicate)', (tester) async {
+    final session = _FakeSessionController();
+    final coordinator = _RecordingCoordinator();
+
+    await tester.pumpWidget(
+      CaleeApp.forTesting(
+        testDeps: _makeDeps(session: session, coordinator: coordinator),
+      ),
+    );
+
+    session.finishRestore(signedIn: true);
+    await tester.pump();
+    // A duplicate session notification carrying the same account must not fire
+    // a second initial refresh.
+    session.deliverBootstrapAccountId('u1');
+    await tester.pump();
+
+    expect(
+      coordinator.reasons
+          .where((r) => r == CalendarReminderRefreshReason.sessionRestored)
+          .length,
+      1,
+      reason: 'the same account must not fire a duplicate initial refresh',
+    );
+  });
+
   testWidgets('a duplicate blank-bootstrap callback does not end a currently '
       'valid reminder session', (tester) async {
     final session = _FakeSessionController();

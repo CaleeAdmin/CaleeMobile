@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
@@ -114,10 +115,170 @@ class CalendarReminderPreferenceLoadResult {
       '${errorCategory != null ? ', error: $errorCategory' : ''})';
 }
 
+/// A versioned, atomic record of the calendar-reminders-enabled preference for
+/// every account on this device, plus the one-time legacy-claim bookkeeping.
+///
+/// The whole record is persisted as a single JSON string under one
+/// SharedPreferences key (see [CaleePreferences._reminderSettingsV2Key]), so a
+/// successful `setString()` is the transaction commit and a failed one leaves
+/// the previously committed logical state unchanged — there is no window in
+/// which a scoped value is stored while its migration marker is not (the
+/// two-key hazard the previous multi-write design suffered from).
+///
+/// Privacy: keys in [valuesByOwner] and [legacyClaimOwner] are privacy-safe
+/// owner digests (see `reminderOwnerKey`), never raw account IDs. No event data
+/// is stored here.
+class CalendarReminderPreferenceRecord {
+  const CalendarReminderPreferenceRecord({
+    this.version = currentVersion,
+    this.legacyClaimConsumed = false,
+    this.legacyClaimOwner,
+    this.legacyValue,
+    this.valuesByOwner = const <String, bool>{},
+  });
+
+  /// The only schema version this build understands. A stored record carrying
+  /// any other version is treated as unavailable/corrupt, never silently reset.
+  static const int currentVersion = 1;
+
+  static const CalendarReminderPreferenceRecord empty =
+      CalendarReminderPreferenceRecord();
+
+  final int version;
+
+  /// Whether the one-time legacy device-global claim has been taken. Once true,
+  /// no later account may inherit the legacy value.
+  final bool legacyClaimConsumed;
+
+  /// The owner digest that consumed the legacy claim, or `null` when the claim
+  /// was consumed without granting the value to any specific account (e.g.
+  /// several pre-existing owner-scoped values were found at migration time).
+  final String? legacyClaimOwner;
+
+  /// The as-yet-unclaimed legacy device-global value, preserved through
+  /// migration so the first valid account load may claim it exactly once. Once
+  /// claimed (or once the claim is otherwise consumed) this is `null`.
+  final bool? legacyValue;
+
+  /// Explicit per-account values, keyed by owner digest.
+  final Map<String, bool> valuesByOwner;
+
+  CalendarReminderPreferenceRecord copyWith({
+    bool? legacyClaimConsumed,
+    String? legacyClaimOwner,
+    bool clearLegacyClaimOwner = false,
+    bool? legacyValue,
+    bool clearLegacyValue = false,
+    Map<String, bool>? valuesByOwner,
+  }) {
+    return CalendarReminderPreferenceRecord(
+      version: currentVersion,
+      legacyClaimConsumed: legacyClaimConsumed ?? this.legacyClaimConsumed,
+      legacyClaimOwner: clearLegacyClaimOwner
+          ? null
+          : (legacyClaimOwner ?? this.legacyClaimOwner),
+      legacyValue: clearLegacyValue ? null : (legacyValue ?? this.legacyValue),
+      valuesByOwner: valuesByOwner ?? this.valuesByOwner,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'version': version,
+    'legacyClaimConsumed': legacyClaimConsumed,
+    if (legacyClaimOwner != null) 'legacyClaimOwner': legacyClaimOwner,
+    if (legacyValue != null) 'legacyValue': legacyValue,
+    'values': valuesByOwner,
+  };
+
+  /// Parses [decoded] JSON into a record, or returns `null` when the shape is
+  /// malformed or the version is unsupported — so the caller reports an
+  /// unavailable/corrupt result rather than defaulting to `false`.
+  static CalendarReminderPreferenceRecord? fromJson(Object? decoded) {
+    if (decoded is! Map) return null;
+    final version = decoded['version'];
+    if (version is! int || version != currentVersion) return null;
+
+    final consumed = decoded['legacyClaimConsumed'];
+    if (consumed is! bool) return null;
+
+    final owner = decoded['legacyClaimOwner'];
+    if (owner != null && owner is! String) return null;
+
+    final legacy = decoded['legacyValue'];
+    if (legacy != null && legacy is! bool) return null;
+
+    final rawValues = decoded['values'];
+    final values = <String, bool>{};
+    if (rawValues != null) {
+      if (rawValues is! Map) return null;
+      for (final entry in rawValues.entries) {
+        final key = entry.key;
+        final value = entry.value;
+        if (key is! String || value is! bool) return null;
+        values[key] = value;
+      }
+    }
+
+    return CalendarReminderPreferenceRecord(
+      version: currentVersion,
+      legacyClaimConsumed: consumed,
+      legacyClaimOwner: owner as String?,
+      legacyValue: legacy as bool?,
+      valuesByOwner: values,
+    );
+  }
+}
+
+/// Narrow storage seam for the calendar-reminder preference record and its
+/// legacy migration keys.
+///
+/// Injecting an implementation lets tests deterministically simulate failed or
+/// delayed writes (and read the committed value back) without depending on real
+/// SharedPreferences behaviour. The production implementation
+/// ([_SharedPreferencesReminderStore]) is a thin wrapper over
+/// [SharedPreferences]. Never adds a package.
+abstract class ReminderPreferenceStore {
+  Future<String?> readString(String key);
+  Future<bool?> readBool(String key);
+
+  /// Persists [value]. Returns `true` on a confirmed write; a `false` return (or
+  /// a thrown error) is treated by callers as a failed commit.
+  Future<bool> writeString(String key, String value);
+  Future<bool> remove(String key);
+  Future<Set<String>> keys();
+}
+
+class _SharedPreferencesReminderStore implements ReminderPreferenceStore {
+  _SharedPreferencesReminderStore(this._prefs);
+
+  final SharedPreferences _prefs;
+
+  @override
+  Future<String?> readString(String key) async => _prefs.getString(key);
+
+  @override
+  Future<bool?> readBool(String key) async => _prefs.getBool(key);
+
+  @override
+  Future<bool> writeString(String key, String value) =>
+      _prefs.setString(key, value);
+
+  @override
+  Future<bool> remove(String key) => _prefs.remove(key);
+
+  @override
+  Future<Set<String>> keys() async => _prefs.getKeys();
+}
+
 /// Lightweight local user preferences stored in SharedPreferences.
 /// One-time migration from FlutterSecureStorage is performed on first load.
 class CaleePreferences {
-  CaleePreferences();
+  CaleePreferences({ReminderPreferenceStore? reminderStore})
+    : _reminderStoreOverride = reminderStore;
+
+  /// Optional injected storage seam for the reminder-preference record (tests).
+  /// `null` in production, where the store is created from [SharedPreferences].
+  final ReminderPreferenceStore? _reminderStoreOverride;
 
   static const _firstDayOfWeekKey = 'calee_pref_first_day_of_week';
   static const _timeFormatKey = 'calee_pref_time_format';
@@ -136,6 +297,17 @@ class CaleePreferences {
   // inheriting the legacy value.
   static const _calendarRemindersEnabledMigratedKey =
       'calee_pref_calendar_reminders_enabled_migrated';
+  // Single transactional record holding the reminder-enabled state for every
+  // account plus the one-time legacy-claim bookkeeping. Written through one
+  // [SharedPreferences.setString] call, so its commit is atomic. Supersedes the
+  // three keys above, which are read once at migration and then removed.
+  static const _reminderSettingsV2Key =
+      'calee_pref_calendar_reminder_settings_v2';
+  // Prefix shared by the legacy per-account keys. Enumerated during migration to
+  // import every discoverable owner-scoped value. NOTE: the migration marker key
+  // also begins with this prefix and must be excluded when enumerating.
+  static const _calendarRemindersEnabledOwnerPrefix =
+      'calee_pref_calendar_reminders_enabled_';
   static const _calendarReminderManifestKey =
       'calee_pref_calendar_reminder_manifest';
   // Legacy diagnostic slot that previously stored the *raw* corrupt manifest
@@ -148,11 +320,6 @@ class CaleePreferences {
   static const _calendarReminderManifestCorruptMetaKey =
       'calee_pref_calendar_reminder_manifest_corrupt_meta';
   static const _migrationDoneKey = 'calee_pref_migrated_to_shared_prefs';
-
-  /// Namespaced reminder-enabled key for a specific account [ownerKey] (a
-  /// privacy-safe SHA-256 digest, never a raw account ID).
-  static String _calendarRemindersEnabledOwnerKey(String ownerKey) =>
-      'calee_pref_calendar_reminders_enabled_$ownerKey';
 
   // ── Load all ─────────────────────────────────────────────────────────────
 
@@ -250,146 +417,343 @@ class CaleePreferences {
   /// The preference is account-scoped: two accounts on the same device keep
   /// independent values, and a new account defaults to off. Pass the current
   /// account's privacy-safe [ownerKey]; a `null` [ownerKey] reads the legacy
-  /// device-global value (the account-agnostic path).
+  /// device-global value (the account-agnostic path, retained for lower-level
+  /// tests — production reminder reads always carry a real owner).
   ///
-  /// On the first read for an account, the old device-global value is migrated
-  /// exactly once — claimed for whichever account is active at migration time —
-  /// so an existing user's setting is preserved without propagating a legacy
-  /// `true` to every later account. The one-time migration marker is consumed
-  /// only when the migration completed consistently: the migrated value is
-  /// written first and the marker last, and a failure of either required write
-  /// is reported as [CalendarReminderPreferenceLoadStatus.unavailable] (never
-  /// silently as `false`) so the caller preserves existing reminders and retries.
+  /// State lives in one versioned JSON record (see
+  /// [CalendarReminderPreferenceRecord]) written through a single
+  /// `SharedPreferences.setString()`, so there is no partial-commit window. All
+  /// read-modify-write access runs on a process-wide serialization queue, so two
+  /// accounts racing to migrate can never both inherit the legacy value.
   ///
-  /// A SharedPreferences access failure is likewise reported as
-  /// [CalendarReminderPreferenceLoadStatus.unavailable]; a clean read with no
-  /// applicable value is [CalendarReminderPreferenceLoadStatus.absent]; a read
-  /// that found a value is [CalendarReminderPreferenceLoadStatus.loaded].
+  /// On the first access, the legacy multi-key format is migrated into the
+  /// record and committed atomically; only after that commit succeeds are the
+  /// old keys removed best-effort. A migration/claim commit failure — or a
+  /// storage access failure, or a malformed/unsupported record — is reported as
+  /// [CalendarReminderPreferenceLoadStatus.unavailable] (never silently as
+  /// `false`), so the caller preserves existing reminders and retries.
   Future<CalendarReminderPreferenceLoadResult>
-  loadCalendarRemindersEnabledResult({String? ownerKey}) async {
-    final SharedPreferences prefs;
-    try {
-      prefs = await SharedPreferences.getInstance();
-    } catch (e) {
-      return CalendarReminderPreferenceLoadResult.unavailable(
-        _prefErrorCategory(e),
-      );
-    }
-
-    try {
-      if (ownerKey == null) {
-        final legacy = prefs.getBool(_calendarRemindersEnabledKey);
-        return legacy == null
-            ? const CalendarReminderPreferenceLoadResult.absent()
-            : CalendarReminderPreferenceLoadResult.loaded(legacy);
-      }
-
-      final scopedKey = _calendarRemindersEnabledOwnerKey(ownerKey);
-      final scoped = prefs.getBool(scopedKey);
-      if (scoped != null) {
-        return CalendarReminderPreferenceLoadResult.loaded(scoped);
-      }
-
-      // No account-scoped value yet. If migration was already claimed by another
-      // account, default off so the legacy value never leaks — that is a clean
-      // [absent], not a failure.
-      if (prefs.getString(_calendarRemindersEnabledMigratedKey) != null) {
-        return const CalendarReminderPreferenceLoadResult.absent();
-      }
-
-      // First read for any account: attempt the one-time legacy migration.
-      final legacy = prefs.getBool(_calendarRemindersEnabledKey);
-      if (legacy != null) {
-        // Write the migrated value FIRST; only then consume the marker, so the
-        // marker is never claimed unless the migration completed consistently.
-        if (!await prefs.setBool(scopedKey, legacy)) {
-          return const CalendarReminderPreferenceLoadResult.unavailable(
-            'migrated_value_write_failed',
-          );
-        }
-        if (!await prefs.setString(
-          _calendarRemindersEnabledMigratedKey,
-          ownerKey,
-        )) {
-          return const CalendarReminderPreferenceLoadResult.unavailable(
-            'migration_marker_write_failed',
-          );
-        }
-        return CalendarReminderPreferenceLoadResult.loaded(legacy);
-      }
-
-      // No legacy value to migrate: claim the marker so no later account can
-      // inherit a stale global value. A failed claim is reported (not absent),
-      // so the migration is retried rather than left half-done.
-      if (!await prefs.setString(
-        _calendarRemindersEnabledMigratedKey,
-        ownerKey,
-      )) {
-        return const CalendarReminderPreferenceLoadResult.unavailable(
-          'migration_marker_write_failed',
+  loadCalendarRemindersEnabledResult({String? ownerKey}) {
+    return _runSerialized(() async {
+      final ReminderPreferenceStore store;
+      try {
+        store = await _openReminderStore();
+      } catch (e) {
+        return CalendarReminderPreferenceLoadResult.unavailable(
+          _prefErrorCategory(e),
         );
       }
-      return const CalendarReminderPreferenceLoadResult.absent();
-    } catch (e) {
-      return CalendarReminderPreferenceLoadResult.unavailable(
-        _prefErrorCategory(e),
-      );
-    }
+
+      try {
+        final loaded = await _loadOrMigrateRecord(store);
+        if (loaded.unavailableCategory != null) {
+          return CalendarReminderPreferenceLoadResult.unavailable(
+            loaded.unavailableCategory,
+          );
+        }
+        var record = loaded.record!;
+
+        // The account-agnostic (legacy/test) path reads the unclaimed legacy
+        // value directly and never mutates the record.
+        if (ownerKey == null) {
+          return record.legacyValue == null
+              ? const CalendarReminderPreferenceLoadResult.absent()
+              : CalendarReminderPreferenceLoadResult.loaded(
+                  record.legacyValue!,
+                );
+        }
+
+        // An explicit account-scoped value always wins.
+        if (record.valuesByOwner.containsKey(ownerKey)) {
+          return CalendarReminderPreferenceLoadResult.loaded(
+            record.valuesByOwner[ownerKey]!,
+          );
+        }
+
+        // First account to arrive may claim the unclaimed legacy value exactly
+        // once. This mutates the record, so it must be committed.
+        if (!record.legacyClaimConsumed && record.legacyValue != null) {
+          final claimed = record.legacyValue!;
+          record = record.copyWith(
+            legacyClaimConsumed: true,
+            legacyClaimOwner: ownerKey,
+            clearLegacyValue: true,
+            valuesByOwner: {...record.valuesByOwner, ownerKey: claimed},
+          );
+          if (!await _commitRecord(store, record)) {
+            return const CalendarReminderPreferenceLoadResult.unavailable(
+              'record_write_failed',
+            );
+          }
+          return CalendarReminderPreferenceLoadResult.loaded(claimed);
+        }
+
+        // No value for this account and nothing left to inherit: a clean
+        // default-off absent (no write needed — the legacy value, if any, was
+        // already claimed or never existed).
+        return const CalendarReminderPreferenceLoadResult.absent();
+      } catch (e) {
+        return CalendarReminderPreferenceLoadResult.unavailable(
+          _prefErrorCategory(e),
+        );
+      }
+    });
   }
 
-  /// Saves whether calendar reminders are enabled for a specific account.
+  /// Saves whether calendar reminders are enabled for a specific account in one
+  /// serialized, atomic read-modify-write transaction.
   ///
-  /// Writes the account-scoped value for [ownerKey] (or the legacy device-global
-  /// value when [ownerKey] is `null`). An explicit account-scoped write also
-  /// consumes the one-time legacy migration, so no other account can later
-  /// inherit the stale global value.
+  /// The account-scoped value for [ownerKey] (or the account-agnostic legacy
+  /// value when [ownerKey] is `null`) is updated inside the single versioned
+  /// record and committed with one `setString()`. An explicit account-scoped
+  /// write also consumes the one-time legacy claim in the same commit, so no
+  /// later account can inherit the stale global value, and saving one account
+  /// never changes another. Concurrent saves for two accounts each run serially,
+  /// so both updates are retained rather than the earlier one being lost.
   ///
   /// A persistence failure is surfaced as a
-  /// [CalendarReminderPreferenceStorageException] (never swallowed), and the
-  /// boolean results SharedPreferences returns are checked, so the caller can
-  /// roll a Settings switch back and avoid acting on a value that did not
-  /// actually persist. The account-scoped value is written first and the
-  /// migration marker last, so a marker-write failure never leaves a value
-  /// that disagrees with a rolled-back switch.
+  /// [CalendarReminderPreferenceStorageException] (never swallowed): on failure
+  /// the previously committed value remains, so a later reload can never reveal
+  /// the value from a failed save and the caller can safely leave a Settings
+  /// switch unchanged.
   Future<void> saveCalendarRemindersEnabled({
     String? ownerKey,
     required bool enabled,
-  }) async {
+  }) {
+    return _runSerialized(() async {
+      try {
+        final store = await _openReminderStore();
+        final loaded = await _loadOrMigrateRecord(store);
+        if (loaded.unavailableCategory != null) {
+          throw const CalendarReminderPreferenceStorageException('save');
+        }
+        var record = loaded.record!;
+
+        if (ownerKey == null) {
+          // Account-agnostic legacy/test path: store the value as the legacy
+          // global so a null-owner load reads it back.
+          record = record.copyWith(legacyValue: enabled);
+        } else {
+          record = record.copyWith(
+            valuesByOwner: {...record.valuesByOwner, ownerKey: enabled},
+            // An explicit save consumes the one-time legacy claim so no later
+            // account inherits the stale global value.
+            legacyClaimConsumed: true,
+            legacyClaimOwner: record.legacyClaimConsumed
+                ? record.legacyClaimOwner
+                : ownerKey,
+            clearLegacyValue: true,
+          );
+        }
+
+        if (!await _commitRecord(store, record)) {
+          throw const CalendarReminderPreferenceStorageException('save');
+        }
+      } on CalendarReminderPreferenceStorageException {
+        rethrow;
+      } catch (e) {
+        throw CalendarReminderPreferenceStorageException('save', e);
+      }
+    });
+  }
+
+  /// Opens the reminder-preference storage seam: the injected override in tests,
+  /// or a thin wrapper over [SharedPreferences] in production.
+  Future<ReminderPreferenceStore> _openReminderStore() async {
+    final override = _reminderStoreOverride;
+    if (override != null) return override;
+    return _SharedPreferencesReminderStore(
+      await SharedPreferences.getInstance(),
+    );
+  }
+
+  /// Reads the committed v2 record, or migrates the legacy multi-key format into
+  /// one on first access and commits it atomically. Old keys are removed only
+  /// after a successful commit (best-effort — their removal failing does not
+  /// invalidate the committed record). A commit failure, or a malformed/
+  /// unsupported stored record, yields an [_unavailableCategory] and leaves any
+  /// old keys untouched.
+  Future<_ReminderRecordLoad> _loadOrMigrateRecord(
+    ReminderPreferenceStore store,
+  ) async {
+    final raw = await store.readString(_reminderSettingsV2Key);
+    if (raw != null && raw.isNotEmpty) {
+      Object? decoded;
+      try {
+        decoded = jsonDecode(raw);
+      } catch (_) {
+        return const _ReminderRecordLoad.unavailable('record_corrupt_json');
+      }
+      final record = CalendarReminderPreferenceRecord.fromJson(decoded);
+      if (record == null) {
+        return const _ReminderRecordLoad.unavailable('record_unsupported');
+      }
+      return _ReminderRecordLoad.ok(record);
+    }
+
+    // No v2 record yet: migrate the legacy multi-key format.
+    final migrated = await _buildMigratedRecord(store);
+    if (migrated.needsCommit) {
+      if (!await _commitRecord(store, migrated.record)) {
+        // Leave old keys untouched so migration is retried later.
+        return const _ReminderRecordLoad.unavailable('record_write_failed');
+      }
+      await _removeLegacyKeys(store, migrated.legacyKeys);
+    }
+    return _ReminderRecordLoad.ok(migrated.record);
+  }
+
+  /// Builds the v2 record from the legacy keys, applying the documented policy
+  /// for ambiguous partial state left by the previous format:
+  ///
+  /// * every discoverable owner-scoped boolean is preserved;
+  /// * if the old migration marker exists, its claimant is preserved as the
+  ///   legacy claimant (claim consumed);
+  /// * else if exactly one owner-scoped value exists, that owner is
+  ///   conservatively treated as having consumed the legacy claim;
+  /// * else if several owner-scoped values exist, the claim is consumed without
+  ///   granting the legacy value to any account;
+  /// * else if only a legacy global value exists, it is preserved as an
+  ///   unclaimed value the first valid account load may claim;
+  /// * else the record is empty (no legacy state).
+  Future<_MigratedRecord> _buildMigratedRecord(
+    ReminderPreferenceStore store,
+  ) async {
+    final keys = await store.keys();
+    final legacyKeys = <String>[];
+
+    final valuesByOwner = <String, bool>{};
+    for (final key in keys) {
+      if (!key.startsWith(_calendarRemindersEnabledOwnerPrefix)) continue;
+      if (key == _calendarRemindersEnabledMigratedKey) continue;
+      final owner = key.substring(_calendarRemindersEnabledOwnerPrefix.length);
+      if (owner.isEmpty) continue;
+      final value = await store.readBool(key);
+      if (value == null) continue;
+      valuesByOwner[owner] = value;
+      legacyKeys.add(key);
+    }
+
+    final marker = await store.readString(_calendarRemindersEnabledMigratedKey);
+    if (marker != null) legacyKeys.add(_calendarRemindersEnabledMigratedKey);
+
+    final legacyGlobal = await store.readBool(_calendarRemindersEnabledKey);
+    if (legacyGlobal != null) legacyKeys.add(_calendarRemindersEnabledKey);
+
+    final hadAnyLegacy = legacyKeys.isNotEmpty;
+
+    bool legacyClaimConsumed;
+    String? legacyClaimOwner;
+    bool? legacyValue;
+
+    if (marker != null) {
+      legacyClaimConsumed = true;
+      legacyClaimOwner = marker.isEmpty ? null : marker;
+    } else if (valuesByOwner.length == 1) {
+      legacyClaimConsumed = true;
+      legacyClaimOwner = valuesByOwner.keys.first;
+    } else if (valuesByOwner.length > 1) {
+      legacyClaimConsumed = true;
+      legacyClaimOwner = null;
+    } else if (legacyGlobal != null) {
+      legacyClaimConsumed = false;
+      legacyValue = legacyGlobal;
+    } else {
+      legacyClaimConsumed = false;
+    }
+
+    final record = CalendarReminderPreferenceRecord(
+      legacyClaimConsumed: legacyClaimConsumed,
+      legacyClaimOwner: legacyClaimOwner,
+      legacyValue: legacyValue,
+      valuesByOwner: valuesByOwner,
+    );
+    // Only commit (and thus write) when there was pre-existing legacy state to
+    // migrate; a brand-new install has nothing to persist until an actual save.
+    return _MigratedRecord(
+      record: record,
+      needsCommit: hadAnyLegacy,
+      legacyKeys: legacyKeys,
+    );
+  }
+
+  Future<bool> _commitRecord(
+    ReminderPreferenceStore store,
+    CalendarReminderPreferenceRecord record,
+  ) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      if (ownerKey == null) {
-        if (!await prefs.setBool(_calendarRemindersEnabledKey, enabled)) {
-          throw const CalendarReminderPreferenceStorageException('save');
-        }
-        return;
+      return await store.writeString(
+        _reminderSettingsV2Key,
+        jsonEncode(record.toJson()),
+      );
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> _removeLegacyKeys(
+    ReminderPreferenceStore store,
+    List<String> legacyKeys,
+  ) async {
+    for (final key in legacyKeys) {
+      try {
+        await store.remove(key);
+      } catch (_) {
+        // Best-effort cleanup: a failed removal does not invalidate the already
+        // committed v2 record.
       }
-      // Persist the account-scoped value first (the essential write)...
-      if (!await prefs.setBool(
-        _calendarRemindersEnabledOwnerKey(ownerKey),
-        enabled,
-      )) {
-        throw const CalendarReminderPreferenceStorageException('save');
-      }
-      // ...then consume the one-time legacy migration so no later account
-      // inherits the stale global value.
-      if (prefs.getString(_calendarRemindersEnabledMigratedKey) == null) {
-        if (!await prefs.setString(
-          _calendarRemindersEnabledMigratedKey,
-          ownerKey,
-        )) {
-          throw const CalendarReminderPreferenceStorageException('save');
-        }
-      }
-    } on CalendarReminderPreferenceStorageException {
-      rethrow;
-    } catch (e) {
-      throw CalendarReminderPreferenceStorageException('save', e);
     }
   }
 
   /// Short, non-sensitive category for a preference storage error suitable for
   /// logs — the runtime type only, never a raw value, key, or account ID.
   String _prefErrorCategory(Object error) => error.runtimeType.toString();
+
+  // ── Reminder-preference serialization boundary ────────────────────────────
+  //
+  // Process-wide serial queue for every read-modify-write on the reminder
+  // record. Multiple [CaleePreferences] instances (Settings, the coordinator,
+  // lifecycle handlers) may load or save concurrently; running them serially is
+  // what makes "two accounts racing to migrate" and "concurrent A/B saves"
+  // safe. Mirrors the notification service's mutation queue in intent.
+
+  /// Tail of the serialization chain. Advanced past each operation's completion,
+  /// swallowing that operation's error so a single failure never poisons the
+  /// queue for later callers.
+  static Future<void> _reminderPrefTail = Future<void>.value();
+
+  /// Number of operations currently queued or running. When it is zero the queue
+  /// is idle and the next operation starts a fresh chain rather than chaining off
+  /// a retained-but-completed future — which matters in widget tests, where a
+  /// future retained across test async-zones would otherwise stall the
+  /// framework's async tracking (and is harmless in production, where the queue
+  /// is a single long-lived chain).
+  static int _pendingReminderOps = 0;
+
+  /// Runs [operation] after every previously-queued reminder-preference
+  /// operation completes. The returned future always completes (with the
+  /// operation's value or error); the queue tail advances regardless of outcome
+  /// so a single failure never poisons the queue.
+  static Future<T> _runSerialized<T>(Future<T> Function() operation) {
+    final completer = Completer<T>();
+    // Only chain off the existing tail while operations actually overlap; when
+    // the queue is idle, begin a fresh chain in the current zone.
+    final previous = _pendingReminderOps == 0
+        ? Future<void>.value()
+        : _reminderPrefTail;
+    _pendingReminderOps++;
+    _reminderPrefTail = completer.future.then((_) {}, onError: (_) {});
+    previous.whenComplete(() async {
+      try {
+        completer.complete(await operation());
+      } catch (e, st) {
+        completer.completeError(e, st);
+      } finally {
+        _pendingReminderOps--;
+      }
+    });
+    return completer.future;
+  }
 
   // ── Calendar reminder manifest ────────────────────────────────────────────
   //
@@ -577,6 +941,36 @@ class CaleePreferences {
 
     await prefs.setBool(_migrationDoneKey, true);
   }
+}
+
+// ── Reminder-record load/migration helpers ────────────────────────────────────
+
+/// Result of reading or migrating the reminder-preference record: either a
+/// usable [record], or an [unavailableCategory] describing why it could not be
+/// obtained (storage failure, malformed/unsupported record, or a failed
+/// migration commit) — never a fabricated default.
+class _ReminderRecordLoad {
+  const _ReminderRecordLoad.ok(this.record) : unavailableCategory = null;
+  const _ReminderRecordLoad.unavailable(this.unavailableCategory)
+    : record = null;
+
+  final CalendarReminderPreferenceRecord? record;
+  final String? unavailableCategory;
+}
+
+/// A record freshly built from the legacy multi-key format, plus whether it must
+/// be committed (there was pre-existing state to migrate) and which old keys to
+/// remove best-effort after a successful commit.
+class _MigratedRecord {
+  const _MigratedRecord({
+    required this.record,
+    required this.needsCommit,
+    required this.legacyKeys,
+  });
+
+  final CalendarReminderPreferenceRecord record;
+  final bool needsCommit;
+  final List<String> legacyKeys;
 }
 
 // ── Value types ───────────────────────────────────────────────────────────────

@@ -26,10 +26,40 @@ class SettingsController extends ChangeNotifier {
   ClientBootstrap bootstrap;
   StoredPreferences preferences = const StoredPreferences();
   List<ClientCalendar> calendars = [];
+
+  /// The displayed reminders-enabled value (product default off). Only ever set
+  /// from a trustworthy source: a successful `loaded`/`absent` read or a
+  /// confirmed save. An `unavailable` read never overwrites it, so a previously
+  /// loaded value is preserved across a transient storage failure.
   bool calendarRemindersEnabled = false;
+
+  /// How the last reminder-preference read resolved. Drives whether the switch
+  /// may be trusted and whether the "couldn't load" message is shown.
+  CalendarReminderPreferenceLoadStatus reminderPreferenceStatus =
+      CalendarReminderPreferenceLoadStatus.absent;
+
+  /// Whether any trustworthy reminder value has ever loaded for this account. If
+  /// false while [reminderPreferenceStatus] is unavailable, the switch has no
+  /// value to trust and must be disabled.
+  bool _hasTrustworthyReminderValue = false;
+
   bool isLoadingPreferences = false;
   bool isOpeningFamily = false;
   Object? error;
+
+  /// Whether the reminder setting is currently unavailable (storage read
+  /// failed). Surfaced as a concise, non-blocking message — never a full-page
+  /// error.
+  bool get reminderPreferenceUnavailable =>
+      reminderPreferenceStatus ==
+      CalendarReminderPreferenceLoadStatus.unavailable;
+
+  /// Whether the reminders switch should be interactive. Disabled while
+  /// preferences are loading, or while the value is unavailable and no
+  /// trustworthy value has ever loaded (so the switch shows nothing false).
+  bool get isReminderSwitchEnabled =>
+      !isLoadingPreferences &&
+      !(reminderPreferenceUnavailable && !_hasTrustworthyReminderValue);
 
   /// Transient error from the most recent preference save attempt. Unlike
   /// [error], this never blocks the page: the previous preference value is
@@ -49,15 +79,7 @@ class SettingsController extends ChangeNotifier {
       preferences = overview.preferences;
       calendars = overview.calendars;
       error = null;
-      try {
-        final ownerKey = _reminderOwnerKey;
-        if (ownerKey != null) {
-          calendarRemindersEnabled = await repository
-              .loadCalendarRemindersEnabled(ownerKey: ownerKey);
-        }
-      } catch (_) {
-        // Best-effort; keep default of false.
-      }
+      await _loadReminderPreference();
     } catch (e) {
       error = e;
     } finally {
@@ -67,6 +89,45 @@ class SettingsController extends ChangeNotifier {
   }
 
   Future<void> refresh() => load();
+
+  /// Loads the reminders-enabled preference using the structured result, so an
+  /// unavailable read is represented accurately instead of being shown as a
+  /// trustworthy `false`.
+  ///
+  /// * `loaded` / `absent` set the displayed value from a trustworthy source.
+  /// * `unavailable` preserves any previously loaded value (never overwriting it
+  ///   with false) and flags the switch as untrustworthy; if nothing has ever
+  ///   loaded, the switch is disabled. A concise, non-blocking message is
+  ///   surfaced by the page — the page-level [error] is deliberately untouched
+  ///   so other Settings sections remain usable and a retry stays possible.
+  Future<void> _loadReminderPreference() async {
+    final ownerKey = _reminderOwnerKey;
+    if (ownerKey == null) return;
+    final CalendarReminderPreferenceLoadResult result;
+    try {
+      result = await repository.loadCalendarRemindersEnabledResult(
+        ownerKey: ownerKey,
+      );
+    } catch (_) {
+      // Treat an unexpected throw like an unavailable read: preserve any
+      // previously loaded value rather than fabricating false.
+      reminderPreferenceStatus =
+          CalendarReminderPreferenceLoadStatus.unavailable;
+      return;
+    }
+    reminderPreferenceStatus = result.status;
+    switch (result.status) {
+      case CalendarReminderPreferenceLoadStatus.loaded:
+        calendarRemindersEnabled = result.enabled ?? false;
+        _hasTrustworthyReminderValue = true;
+      case CalendarReminderPreferenceLoadStatus.absent:
+        calendarRemindersEnabled = false;
+        _hasTrustworthyReminderValue = true;
+      case CalendarReminderPreferenceLoadStatus.unavailable:
+        // Preserve the previously displayed value; do not present false.
+        break;
+    }
+  }
 
   // ── Preference mutations ──────────────────────────────────────────────────
 
@@ -144,8 +205,11 @@ class SettingsController extends ChangeNotifier {
         ownerKey: ownerKey,
         enabled: value,
       );
-      // Only reflect the change after the write is confirmed.
+      // Only reflect the change after the write is confirmed. A confirmed save
+      // is a trustworthy value and clears any prior unavailable state.
       calendarRemindersEnabled = value;
+      reminderPreferenceStatus = CalendarReminderPreferenceLoadStatus.loaded;
+      _hasTrustworthyReminderValue = true;
       notifyListeners();
       return true;
     } catch (e) {

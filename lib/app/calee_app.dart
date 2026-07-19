@@ -377,10 +377,19 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
   }
 
   /// Requests an upcoming-reminder refresh without ever blocking startup or
-  /// navigation, and without surfacing failures. No-op while signed out.
+  /// navigation, and without surfacing failures.
+  ///
+  /// No-op unless there is BOTH a signed-in session with an access token AND an
+  /// active account-owned reminder session in the coordinator. Being signed in
+  /// is not sufficient: on resume (or restore) before the bootstrap/account
+  /// identity is available there is no valid reminder session yet, and firing
+  /// would run the null-owner legacy path. The session listener begins the
+  /// reminder session and fires the initial refresh once a valid account
+  /// arrives.
   void _fireReminderRefresh(CalendarReminderRefreshReason reason) {
     final token = _sessionController.accessToken;
     if (token == null || !_sessionController.isSignedIn) return;
+    if (!_reminderCoordinator.hasActiveSession) return;
     unawaited(() async {
       try {
         await _reminderCoordinator.refresh(accessToken: token, reason: reason);
