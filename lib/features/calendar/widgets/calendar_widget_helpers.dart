@@ -44,3 +44,27 @@ String? calendarSubscriptionHost(String? url) {
 
 String calendarEventTimeLabel(ClientEvent event, {bool use24h = true}) =>
     eventTimeLabel(event, use24h: use24h);
+
+// Shared appearance-editing copy, used by both CalendarDetailSheet and
+// CalendarCollectionsPage so the two surfaces stay textually consistent.
+
+/// Explanatory copy shown while editing a calendar's name/colour, based on
+/// its [ClientCalendar.appearanceMode]. Returns null for the `unsupported`
+/// mode, which never reaches an edit view — see [calendarOwnerManagedMessage].
+String? calendarAppearanceEditCopy(String appearanceMode) {
+  switch (appearanceMode) {
+    case 'source_metadata':
+      return 'This updates the calendar name and colour.';
+    case 'subscription_mapping':
+    case 'external_calendar':
+      return 'These changes only affect how this calendar appears in Calee.';
+    default:
+      return null;
+  }
+}
+
+/// Shown in place of the edit action for a calendar whose appearance can't
+/// be edited from Calee (a shared, read-only CalDAV calendar —
+/// appearanceMode `unsupported`).
+const String calendarOwnerManagedMessage =
+    'This shared calendar is managed by its owner.';
