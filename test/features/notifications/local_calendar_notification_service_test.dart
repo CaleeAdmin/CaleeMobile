@@ -12,6 +12,7 @@ import 'package:calee_mobile/data/models/calendar_reminder_manifest.dart';
 import 'package:calee_mobile/data/models/client_calendar.dart';
 import 'package:calee_mobile/features/notifications/calendar_notification_candidates.dart';
 import 'package:calee_mobile/features/notifications/local_calendar_notification_service.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -64,11 +65,15 @@ class _FlakyInitService extends LocalCalendarNotificationService {
   bool failFirst = true;
 
   @override
-  Future<void> performPluginInitialization() async {
+  Future<LocalNotificationInitializationResult>
+  performPluginInitialization() async {
     attempts++;
     if (failFirst && attempts == 1) {
       throw Exception('simulated init failure');
     }
+    return const LocalNotificationInitializationResult(
+      status: LocalNotificationInitializationStatus.initialized,
+    );
   }
 }
 
@@ -79,6 +84,94 @@ class _UninitializedService extends LocalCalendarNotificationService {
   @override
   Future<bool> ensureInitialized() async => false;
 }
+
+/// Drives [performPluginInitialization] through its real orchestration while
+/// controlling every low-level seam (plugin result, platform, Android impl,
+/// channel creation) so each initialization outcome can be exercised without
+/// platform channels.
+class _ConfigurableInitService extends LocalCalendarNotificationService {
+  _ConfigurableInitService({
+    this.pluginResult = true,
+    this.android = true,
+    this.androidImplPresent = true,
+    this.channelThrows = false,
+    this.pluginThrows = false,
+  }) : super.forTest();
+
+  bool? pluginResult;
+  bool android;
+  bool androidImplPresent;
+  bool channelThrows;
+  bool pluginThrows;
+  int pluginCalls = 0;
+  int channelCalls = 0;
+
+  @override
+  Future<bool?> initializePlugin(InitializationSettings settings) async {
+    pluginCalls++;
+    if (pluginThrows) throw Exception('simulated plugin init throw');
+    return pluginResult;
+  }
+
+  @override
+  bool get isAndroidPlatform => android;
+
+  @override
+  Object? resolveAndroidImplementation() => androidImplPresent ? _marker : null;
+
+  static final Object _marker = Object();
+
+  @override
+  Future<void> createAndroidChannel(Object androidImpl) async {
+    channelCalls++;
+    if (channelThrows) throw Exception('simulated channel failure');
+  }
+}
+
+/// Controls pending platform requests and the manifest so [collectDiagnostics]
+/// can be exercised without platform channels.
+class _DiagnosticsService extends LocalCalendarNotificationService {
+  _DiagnosticsService({
+    required this.pending,
+    this.prefsOverride,
+    this.pendingThrows = false,
+  }) : super.forTest();
+
+  final List<PendingNotificationRequest> pending;
+  final CaleePreferences? prefsOverride;
+  final bool pendingThrows;
+
+  @override
+  CaleePreferences get preferences => prefsOverride ?? super.preferences;
+
+  @override
+  Future<bool> ensureInitialized() async => true;
+
+  @override
+  Future<List<PendingNotificationRequest>> pendingNotificationRequests() async {
+    if (pendingThrows) throw Exception('simulated pending query failure');
+    return pending;
+  }
+}
+
+/// A Calee calendar-reminder pending request whose payload embeds event data
+/// (so diagnostics privacy can be verified).
+PendingNotificationRequest _caleePending(
+  int id, {
+  String title = 'Secret title',
+  String eventId = 'evt-secret',
+}) => PendingNotificationRequest(
+  id,
+  title,
+  'body-secret',
+  jsonEncode({
+    'type': 'calendar_event_reminder',
+    'eventId': eventId,
+    'occurrenceId': 'occ-secret',
+    'calendarId': 'cal-secret',
+    'startsAt': '2030-01-01T00:00:00Z',
+  }),
+);
 
 /// In-memory [CaleePreferences] so manifest persistence can be observed and its
 /// failures simulated without SharedPreferences.
@@ -833,6 +926,226 @@ void main() {
     );
   });
 
+  group('initialize — structured result (Defect 3)', () {
+    test('plugin returns true → initialized, service usable', () async {
+      final service = _ConfigurableInitService(pluginResult: true);
+      final result = await service.initialize();
+      expect(result.status, LocalNotificationInitializationStatus.initialized);
+      expect(result.isInitialized, isTrue);
+      expect(service.debugInitialized, isTrue);
+      expect(service.channelCalls, 1, reason: 'channel created after init');
+    });
+
+    test('plugin returns false → not initialized', () async {
+      final service = _ConfigurableInitService(pluginResult: false);
+      final result = await service.initialize();
+      expect(
+        result.status,
+        LocalNotificationInitializationStatus.pluginRejected,
+      );
+      expect(service.debugInitialized, isFalse);
+      expect(service.channelCalls, 0, reason: 'no channel on rejected init');
+    });
+
+    test('plugin returns null → not initialized', () async {
+      final service = _ConfigurableInitService(pluginResult: null);
+      final result = await service.initialize();
+      expect(
+        result.status,
+        LocalNotificationInitializationStatus.pluginResultMissing,
+      );
+      expect(service.debugInitialized, isFalse);
+    });
+
+    test('Android implementation missing → not initialized', () async {
+      final service = _ConfigurableInitService(
+        pluginResult: true,
+        android: true,
+        androidImplPresent: false,
+      );
+      final result = await service.initialize();
+      expect(
+        result.status,
+        LocalNotificationInitializationStatus.platformImplementationMissing,
+      );
+      expect(service.debugInitialized, isFalse);
+    });
+
+    test('channel creation failure → not initialized', () async {
+      final service = _ConfigurableInitService(
+        pluginResult: true,
+        channelThrows: true,
+      );
+      final result = await service.initialize();
+      expect(
+        result.status,
+        LocalNotificationInitializationStatus.channelCreationFailed,
+      );
+      expect(result.errorCategory, isNotNull);
+      expect(service.debugInitialized, isFalse);
+    });
+
+    test('exception during plugin init → not initialized', () async {
+      final service = _ConfigurableInitService(pluginThrows: true);
+      final result = await service.initialize();
+      expect(result.status, LocalNotificationInitializationStatus.exception);
+      expect(service.debugInitialized, isFalse);
+    });
+
+    test('non-Android platform skips channel creation', () async {
+      final service = _ConfigurableInitService(
+        pluginResult: true,
+        android: false,
+      );
+      final result = await service.initialize();
+      expect(result.isInitialized, isTrue);
+      expect(service.channelCalls, 0);
+    });
+
+    test('retry succeeds after each failure type', () async {
+      for (final configure in <void Function(_ConfigurableInitService)>[
+        (s) => s.pluginResult = false,
+        (s) => s.pluginResult = null,
+        (s) => s.androidImplPresent = false,
+        (s) => s.channelThrows = true,
+        (s) => s.pluginThrows = true,
+      ]) {
+        final service = _ConfigurableInitService();
+        configure(service);
+        final failed = await service.initialize();
+        expect(failed.isInitialized, isFalse);
+        expect(service.debugInitialized, isFalse);
+
+        // Fix the fault and retry: the failed attempt must not poison it.
+        service
+          ..pluginResult = true
+          ..androidImplPresent = true
+          ..channelThrows = false
+          ..pluginThrows = false;
+        final ok = await service.initialize();
+        expect(ok.isInitialized, isTrue);
+        expect(service.debugInitialized, isTrue);
+      }
+    });
+
+    test('concurrent callers share one in-flight attempt', () async {
+      final service = _ConfigurableInitService(pluginResult: true);
+      await Future.wait([
+        service.initialize(),
+        service.initialize(),
+        service.initialize(),
+      ]);
+      expect(service.pluginCalls, 1);
+      expect(service.debugInitialized, isTrue);
+    });
+
+    test('lastInitializationResult carries no sensitive data', () async {
+      final service = _ConfigurableInitService(channelThrows: true);
+      await service.initialize();
+      final text = service.lastInitializationResult.toString();
+      // Only status/category, never content.
+      expect(text, contains('channelCreationFailed'));
+      expect(text, isNot(contains('@')));
+    });
+  });
+
+  group('collectDiagnostics — pending vs manifest (Defect 8)', () {
+    test('counts only Calee reminders and agrees with manifest', () async {
+      final prefs = _InMemoryPreferences(
+        initial: CalendarReminderManifest.fromIds([1, 2]),
+      );
+      final service = _DiagnosticsService(
+        prefsOverride: prefs,
+        pending: [
+          _caleePending(1),
+          _caleePending(2),
+          // A non-Calee notification the diagnostics must ignore.
+          PendingNotificationRequest(
+            999,
+            't',
+            'b',
+            jsonEncode({'type': 'other'}),
+          ),
+        ],
+      );
+
+      final d = await service.collectDiagnostics();
+      expect(d.initialized, isTrue);
+      expect(d.pendingPlatformCount, 2);
+      expect(d.trackedManifestCount, 2);
+      expect(d.trackedButNotPendingCount, 0);
+      expect(d.pendingButUntrackedCalendarCount, 0);
+      expect(d.scheduleMode, 'inexactAllowWhileIdle');
+    });
+
+    test('detects manifest-claims-but-not-pending', () async {
+      final prefs = _InMemoryPreferences(
+        initial: CalendarReminderManifest.fromIds([1, 2, 3]),
+      );
+      final service = _DiagnosticsService(
+        prefsOverride: prefs,
+        pending: [_caleePending(1)],
+      );
+      final d = await service.collectDiagnostics();
+      expect(d.pendingPlatformCount, 1);
+      expect(d.trackedManifestCount, 3);
+      expect(d.trackedButNotPendingCount, 2);
+      expect(d.pendingButUntrackedCalendarCount, 0);
+    });
+
+    test('detects pending-but-untracked', () async {
+      final prefs = _InMemoryPreferences(
+        initial: CalendarReminderManifest.fromIds([1]),
+      );
+      final service = _DiagnosticsService(
+        prefsOverride: prefs,
+        pending: [_caleePending(1), _caleePending(2)],
+      );
+      final d = await service.collectDiagnostics();
+      expect(d.pendingButUntrackedCalendarCount, 1);
+    });
+
+    test('a pending-query failure is non-destructive and reported', () async {
+      final prefs = _InMemoryPreferences(
+        initial: CalendarReminderManifest.fromIds([1]),
+      );
+      final service = _DiagnosticsService(
+        prefsOverride: prefs,
+        pending: const [],
+        pendingThrows: true,
+      );
+      final d = await service.collectDiagnostics();
+      expect(d.errorCategory, isNotNull);
+      // Nothing was cancelled or written.
+      expect(prefs.saveCount, 0);
+      expect(prefs.clearCount, 0);
+    });
+
+    test('diagnostic output contains no event or account data', () async {
+      final prefs = _InMemoryPreferences(
+        initial: CalendarReminderManifest.fromIds([1]),
+      );
+      final service = _DiagnosticsService(
+        prefsOverride: prefs,
+        pending: [
+          _caleePending(1, title: 'Dentist at 3pm', eventId: 'evt-12345'),
+        ],
+      );
+      final d = await service.collectDiagnostics();
+      final text = d.toString();
+      for (final leak in [
+        'Dentist',
+        'evt-12345',
+        'occ-secret',
+        'cal-secret',
+        'body-secret',
+        '2030-01-01',
+      ]) {
+        expect(text, isNot(contains(leak)), reason: 'leaked $leak');
+      }
+    });
+  });
+
   group('reconcileCalendarReminders — account isolation (Defect 2)', () {
     final ownerA = reminderOwnerKey('acct-A');
     final ownerB = reminderOwnerKey('acct-B');
@@ -868,38 +1181,49 @@ void main() {
       expect(stored.entryFor(idA)!.ownerKey, ownerA);
     });
 
-    test(
-      'account A entries are never unchanged for account B: they are cleaned '
-      'and fresh B-owned entries are scheduled',
-      () async {
-        final e1 = _event('e1');
-        final idA = notificationIdForEvent(e1, ownerKey: ownerA);
-        final idB = notificationIdForEvent(e1, ownerKey: ownerB);
-        expect(idA, isNot(idB));
+    test('account A entries are retained (never cancelled) when account B '
+        'reconciles; a fresh B-owned entry is scheduled alongside', () async {
+      // Foreign-owner (A) reminders belong to another account on the device.
+      // B's reconcile must never cancel or overwrite them — it reserves their
+      // IDs and retains them, scheduling its own entry independently. A's own
+      // cleanup (sign-out / owner-scoped disable) is the only thing that
+      // removes A's reminders.
+      final e1 = _event('e1');
+      final idA = notificationIdForEvent(e1, ownerKey: ownerA);
+      final idB = notificationIdForEvent(e1, ownerKey: ownerB);
+      expect(idA, isNot(idB));
 
-        final prefs = _InMemoryPreferences(
-          initial: CalendarReminderManifest(
-            version: CalendarReminderManifest.currentVersion,
-            entries: [ownedEntry(e1, ownerA)],
-          ),
-        );
-        final service = _RecordingService(prefsOverride: prefs);
+      final prefs = _InMemoryPreferences(
+        initial: CalendarReminderManifest(
+          version: CalendarReminderManifest.currentVersion,
+          entries: [ownedEntry(e1, ownerA)],
+        ),
+      );
+      final service = _RecordingService(prefsOverride: prefs);
 
-        final result = await service.reconcileCalendarReminders(
-          [e1],
-          now: _now,
-          ownerKey: ownerB,
-        );
+      final result = await service.reconcileCalendarReminders(
+        [e1],
+        now: _now,
+        ownerKey: ownerB,
+      );
 
-        expect(result.unchangedCount, 0, reason: 'A is not unchanged for B');
-        expect(service.scheduled, [idB], reason: 'fresh B-owned entry');
-        expect(service.cancelled, [idA], reason: 'A-owned entry cleaned up');
+      expect(result.unchangedCount, 0, reason: 'A is not unchanged for B');
+      expect(service.scheduled, [idB], reason: 'fresh B-owned entry');
+      expect(
+        service.cancelled,
+        isEmpty,
+        reason: 'the foreign A entry is retained, never cancelled',
+      );
 
-        final stored = await prefs.loadCalendarReminderManifest();
-        expect(stored.scheduledIds, [idB]);
-        expect(stored.entryFor(idB)!.ownerKey, ownerB);
-      },
-    );
+      final stored = await prefs.loadCalendarReminderManifest();
+      expect(
+        stored.scheduledIds,
+        containsAll(<int>[idA, idB]),
+        reason: 'both accounts are independently represented',
+      );
+      expect(stored.entryFor(idA)!.ownerKey, ownerA);
+      expect(stored.entryFor(idB)!.ownerKey, ownerB);
+    });
 
     test(
       'ownerless v1/v2 entries are cleaned and migrated to owned entries',
@@ -928,7 +1252,8 @@ void main() {
       },
     );
 
-    test('a failed cleanup of an old account entry remains tracked', () async {
+    test('a foreign-owner entry is retained and never cancelled, so a failing '
+        'cancel is never even attempted', () async {
       final e1 = _event('e1');
       final idA = notificationIdForEvent(e1, ownerKey: ownerA);
       final idB = notificationIdForEvent(e1, ownerKey: ownerB);
@@ -938,6 +1263,7 @@ void main() {
           entries: [ownedEntry(e1, ownerA)],
         ),
       );
+      // Even if cancelling A's ID would fail, reconcile never touches it.
       final service = _RecordingService(
         prefsOverride: prefs,
         failCancelIds: {idA},
@@ -949,15 +1275,74 @@ void main() {
         ownerKey: ownerB,
       );
 
-      expect(result.failedCount, 1);
+      expect(
+        result.failedCount,
+        0,
+        reason: 'the foreign entry is never cancelled, so there is no failure',
+      );
+      expect(service.cancelled, isEmpty);
       final stored = await prefs.loadCalendarReminderManifest();
       expect(stored.scheduledIds, containsAll(<int>[idA, idB]));
       expect(
         stored.entryFor(idA)!.ownerKey,
         ownerA,
-        reason: 'the retained old-account entry keeps its owner',
+        reason: 'the retained foreign entry keeps its owner',
       );
       expect(stored.entryFor(idB)!.ownerKey, ownerB);
+    });
+
+    test('a forced foreign-owner ID collision: the candidate probes to a new '
+        'ID, the foreign notification is never replaced, and both remain '
+        '(Fix 5)', () async {
+      const foreignId = 424242;
+      final e1 = _event('e1');
+      final prefs = _InMemoryPreferences(
+        initial: CalendarReminderManifest(
+          version: CalendarReminderManifest.currentVersion,
+          entries: [
+            CalendarReminderManifestEntry(
+              notificationId: foreignId,
+              fingerprint: 'f' * 64,
+              ownerKey: ownerA,
+            ),
+          ],
+        ),
+      );
+      final service = _RecordingService(prefsOverride: prefs);
+      // Force the new account's (B) base ID to equal the foreign entry's ID;
+      // probe p resolves to foreignId + p.
+      service.debugNotificationIdOverride = (c, probe) => foreignId + probe;
+
+      final result = await service.reconcileCalendarReminders(
+        [e1],
+        now: _now,
+        ownerKey: ownerB,
+      );
+
+      expect(
+        service.scheduled,
+        [foreignId + 1],
+        reason: 'the current candidate uses a probed (non-foreign) ID',
+      );
+      expect(result.collisionsResolved, 1);
+      expect(
+        service.cancelled,
+        isEmpty,
+        reason: 'no global cancellation; the foreign notification is untouched',
+      );
+
+      final stored = await prefs.loadCalendarReminderManifest();
+      expect(
+        stored.scheduledIds,
+        containsAll(<int>[foreignId, foreignId + 1]),
+        reason: 'both entries remain independently represented',
+      );
+      expect(
+        stored.entryFor(foreignId)!.ownerKey,
+        ownerA,
+        reason: 'the foreign entry is preserved with its owner',
+      );
+      expect(stored.entryFor(foreignId + 1)!.ownerKey, ownerB);
     });
 
     test('no raw account ID, title, location, or description appears in the '
@@ -1556,6 +1941,226 @@ void main() {
         );
       },
     );
+  });
+
+  group('reconcileCalendarReminders — invalidation rollback of new AND '
+      'replaced schedules (Fix 6)', () {
+    final owner = reminderOwnerKey('acct-A');
+
+    CalendarReminderOperationContext ctx(bool Function() isCurrent) =>
+        CalendarReminderOperationContext(
+          generation: 1,
+          ownerKey: owner,
+          isCurrent: isCurrent,
+        );
+
+    // A current-owner entry for [e] with a deliberately stale (but valid-shaped)
+    // fingerprint, so reconciling [e] classifies it as changed → a replacement.
+    CalendarReminderManifestEntry staleOwned(ClientEvent e) =>
+        CalendarReminderManifestEntry(
+          notificationId: notificationIdForEvent(e, ownerKey: owner),
+          fingerprint: '0' * 64,
+          ownerKey: owner,
+        );
+
+    test(
+      'invalidation after a replacement schedule cancels the replacement and '
+      'reports it structurally',
+      () async {
+        final e1 = _event('e1');
+        final id = notificationIdForEvent(e1, ownerKey: owner);
+        final prefs = _InMemoryPreferences(
+          initial: CalendarReminderManifest(
+            version: CalendarReminderManifest.currentVersion,
+            entries: [staleOwned(e1)],
+          ),
+        );
+        final service = _RecordingService(prefsOverride: prefs);
+
+        final result = await service.reconcileCalendarReminders(
+          [e1],
+          now: _now,
+          ownerKey: owner,
+          // Becomes invalid right after the replacement is scheduled.
+          context: ctx(() => service.scheduled.isEmpty),
+        );
+
+        expect(result.sessionInvalidated, isTrue);
+        expect(service.scheduled, [
+          id,
+        ], reason: 'the replacement was scheduled');
+        expect(
+          service.cancelled,
+          [id],
+          reason: 'the replacement is rolled back, not left on the device',
+        );
+        expect(result.invalidationRollback, isNotNull);
+        expect(result.invalidationRollback!.replacedIdsCancelled, 1);
+        expect(result.invalidationRollback!.newIdsCancelled, 0);
+        expect(result.invalidationRollback!.cancellationFailures, 0);
+        expect(result.isFullySuccessful, isFalse);
+        expect(prefs.saveCount, 0, reason: 'no stale-session manifest write');
+        final stored = await prefs.loadCalendarReminderManifest();
+        expect(
+          stored.entryFor(id)!.fingerprint,
+          '0' * 64,
+          reason: 'the previous manifest is left untouched',
+        );
+      },
+    );
+
+    test('invalidation after BOTH a new and a replacement schedule rolls back '
+        'both', () async {
+      final changed = _event('e1', startsAt: '2026-07-05T09:00:00');
+      final fresh = _event('e2', startsAt: '2026-07-06T09:00:00');
+      final changedId = notificationIdForEvent(changed, ownerKey: owner);
+      final freshId = notificationIdForEvent(fresh, ownerKey: owner);
+      final prefs = _InMemoryPreferences(
+        initial: CalendarReminderManifest(
+          version: CalendarReminderManifest.currentVersion,
+          entries: [staleOwned(changed)],
+        ),
+      );
+      final service = _RecordingService(prefsOverride: prefs);
+
+      final result = await service.reconcileCalendarReminders(
+        [changed, fresh],
+        now: _now,
+        ownerKey: owner,
+        // Invalid only after two successful schedules (the new + the change).
+        context: ctx(() => service.scheduled.length < 2),
+      );
+
+      expect(result.sessionInvalidated, isTrue);
+      expect(service.scheduled, containsAll(<int>[freshId, changedId]));
+      expect(
+        service.cancelled,
+        containsAll(<int>[freshId, changedId]),
+        reason: 'both the new and the replacement schedule are rolled back',
+      );
+      expect(result.invalidationRollback!.newIdsCancelled, 1);
+      expect(result.invalidationRollback!.replacedIdsCancelled, 1);
+      expect(result.invalidationRollback!.cancellationFailures, 0);
+      expect(prefs.saveCount, 0);
+    });
+
+    test('a rollback cancellation failure is represented structurally, not '
+        'only debug-logged', () async {
+      final e1 = _event('e1');
+      final id = notificationIdForEvent(e1, ownerKey: owner);
+      final prefs = _InMemoryPreferences();
+      final service = _RecordingService(
+        prefsOverride: prefs,
+        failCancelIds: {id},
+      );
+
+      final result = await service.reconcileCalendarReminders(
+        [e1],
+        now: _now,
+        ownerKey: owner,
+        context: ctx(() => service.scheduled.isEmpty),
+      );
+
+      expect(result.sessionInvalidated, isTrue);
+      expect(result.invalidationRollback, isNotNull);
+      expect(
+        result.invalidationRollback!.newIdsCancelled,
+        0,
+        reason: 'the rollback cancel failed, so nothing was cancelled',
+      );
+      expect(result.invalidationRollback!.cancellationFailures, 1);
+      expect(result.invalidationRollback!.isFullySuccessful, isFalse);
+      expect(result.isFullySuccessful, isFalse);
+    });
+
+    test('invalidation before any successful schedule attaches no rollback '
+        'record', () async {
+      final e1 = _event('e1');
+      final prefs = _InMemoryPreferences();
+      final service = _RecordingService(prefsOverride: prefs);
+
+      // Invalid the instant the first schedule is about to run (before-schedule
+      // check trips), so nothing is ever scheduled.
+      final result = await service.reconcileCalendarReminders(
+        [e1],
+        now: _now,
+        ownerKey: owner,
+        context: ctx(() => service.scheduled.isEmpty ? false : true),
+      );
+
+      expect(result.sessionInvalidated, isTrue);
+      expect(service.scheduled, isEmpty);
+      expect(
+        result.invalidationRollback,
+        isNull,
+        reason: 'nothing was scheduled, so there is nothing to roll back',
+      );
+    });
+
+    test('account B waits for account A serialized rollback to reach a terminal '
+        'state before mutating', () async {
+      // Account A reconcile is invalidated mid-pass; account B reconcile is
+      // submitted while A holds the serial lock. B must not begin until A has
+      // fully rolled back and released the lock.
+      final ownerB = reminderOwnerKey('acct-B');
+      final e1 = _event('e1');
+      final prefs = _InMemoryPreferences();
+      final service = _SerialService(prefsOverride: prefs);
+      service.scheduleGate = Completer<void>();
+
+      var aCurrent = true;
+      // A schedules e1 (blocked at the gate), then is invalidated.
+      final fA = service.reconcileCalendarReminders(
+        [e1],
+        now: _now,
+        ownerKey: owner,
+        context: CalendarReminderOperationContext(
+          generation: 1,
+          ownerKey: owner,
+          isCurrent: () => aCurrent,
+        ),
+      );
+      await pumpEventQueue();
+      expect(service.log, [
+        'schedule-start',
+      ], reason: 'A holds the serial lock');
+
+      // Submit B while A is mid-schedule — it must queue behind A.
+      final fB = service.reconcileCalendarReminders(
+        [e1],
+        now: _now,
+        ownerKey: ownerB,
+      );
+      await pumpEventQueue();
+      expect(
+        service.log.where((e) => e.startsWith('cancel')),
+        isEmpty,
+        reason: 'B has not started; only A is running',
+      );
+
+      // Invalidate A, then release its blocked schedule → A rolls back (cancels)
+      // and releases the lock; only then may B run.
+      aCurrent = false;
+      service.scheduleGate!.complete();
+      final rA = await fA;
+      final rB = await fB;
+
+      expect(rA.sessionInvalidated, isTrue);
+      // A's rollback cancel happens before B's first schedule.
+      final firstCancel = service.log.indexWhere((e) => e.startsWith('cancel'));
+      final bScheduleStarts = <int>[];
+      for (var i = 0; i < service.log.length; i++) {
+        if (service.log[i] == 'schedule-start') bScheduleStarts.add(i);
+      }
+      expect(firstCancel, isNonNegative, reason: "A's rollback cancel ran");
+      // The second schedule-start (B's) must come after A's rollback cancel.
+      expect(
+        bScheduleStarts.last,
+        greaterThan(firstCancel),
+        reason: "B's mutation runs only after A's rollback reached terminal",
+      );
+      expect(rB.sessionInvalidated, isFalse);
+    });
   });
 
   group('serialized mutations (Requirement 2)', () {

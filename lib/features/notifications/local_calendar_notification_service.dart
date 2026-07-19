@@ -15,6 +15,58 @@ import 'calendar_notification_candidates.dart';
 // can become stale if calendars change elsewhere. The long-term reliable
 // design is server-side occurrence scheduling plus push delivery.
 
+/// Why a notification-service initialization attempt ended. Every value except
+/// [initialized] leaves the service unusable (`_initialized == false`) and
+/// retryable. Deliberately privacy-safe: a status name carries no notification
+/// content, tokens, URLs, or account identifiers.
+enum LocalNotificationInitializationStatus {
+  /// Plugin initialization returned exactly `true` and (on Android) the channel
+  /// was created. The only usable state.
+  initialized,
+
+  /// `FlutterLocalNotificationsPlugin.initialize()` returned `false`.
+  pluginRejected,
+
+  /// `FlutterLocalNotificationsPlugin.initialize()` returned `null` (result not
+  /// confirmed).
+  pluginResultMissing,
+
+  /// On Android, the Android platform implementation could not be resolved, so
+  /// the notification channel could not be created.
+  platformImplementationMissing,
+
+  /// Creating the Android notification channel threw.
+  channelCreationFailed,
+
+  /// An unexpected exception was thrown during initialization.
+  exception,
+}
+
+/// Structured, log-safe outcome of a notification-service initialization
+/// attempt. Holds only a status and a sanitized error category — never
+/// notification content, tokens, URLs, or account identifiers.
+class LocalNotificationInitializationResult {
+  const LocalNotificationInitializationResult({
+    required this.status,
+    this.errorCategory,
+  });
+
+  final LocalNotificationInitializationStatus status;
+
+  /// A short, non-sensitive category (typically a runtime type name) for the
+  /// underlying failure, when one applies. Never event content or identifiers.
+  final String? errorCategory;
+
+  /// Whether initialization fully succeeded and the service is usable.
+  bool get isInitialized =>
+      status == LocalNotificationInitializationStatus.initialized;
+
+  @override
+  String toString() =>
+      'LocalNotificationInitializationResult(status: ${status.name}'
+      '${errorCategory != null ? ', errorCategory: $errorCategory' : ''})';
+}
+
 /// Session-validity context threaded into a reconciliation pass so it can stop
 /// (and never write) the moment its reminder session stops being current — e.g.
 /// a sign-out or an account switch that began while the pass was running.
@@ -59,6 +111,7 @@ class CalendarReconciliationResult {
     this.collisionsResolved = 0,
     this.idAllocationFailures = 0,
     this.rollback,
+    this.invalidationRollback,
   });
 
   final int eventsFetched;
@@ -110,6 +163,11 @@ class CalendarReconciliationResult {
   /// describes how completely the newly-scheduled IDs were undone/recovered.
   final CalendarReminderRollbackResult? rollback;
 
+  /// Present only when [sessionInvalidated] is true and the stale pass had
+  /// already scheduled at least one notification; describes how completely those
+  /// stale schedules (both brand-new and replacement) were rolled back.
+  final CalendarReminderInvalidationRollbackResult? invalidationRollback;
+
   final DateTime completedAt;
 
   bool get hasFailures =>
@@ -128,7 +186,8 @@ class CalendarReconciliationResult {
       !manifestCorrupt &&
       !sessionInvalidated &&
       idAllocationFailures == 0 &&
-      (rollback?.isFullySuccessful ?? true);
+      (rollback?.isFullySuccessful ?? true) &&
+      (invalidationRollback?.isFullySuccessful ?? true);
 
   @override
   String toString() =>
@@ -141,7 +200,50 @@ class CalendarReconciliationResult {
       'sessionInvalidated: $sessionInvalidated, '
       'collisionsResolved: $collisionsResolved, '
       'idAllocationFailures: $idAllocationFailures'
-      '${rollback != null ? ', $rollback' : ''})';
+      '${rollback != null ? ', $rollback' : ''}'
+      '${invalidationRollback != null ? ', $invalidationRollback' : ''})';
+}
+
+/// Structured, log-safe outcome of rolling back the platform schedules a stale
+/// (session-invalidated) reconciliation pass had already made before it noticed
+/// its session was no longer current.
+///
+/// Every notification the stale pass successfully scheduled — both brand-new IDs
+/// and replacements of existing (changed) IDs — is cancelled, so nothing the
+/// dead session put on the device survives. The stale pass never persists its
+/// manifest, leaving the previous stored manifest intact for the new session's
+/// serialized cleanup/reconcile to repair device state. Cancellation failures
+/// are represented here structurally (a count), not merely debug-logged.
+class CalendarReminderInvalidationRollbackResult {
+  const CalendarReminderInvalidationRollbackResult({
+    this.newIdsCancelled = 0,
+    this.replacedIdsCancelled = 0,
+    this.cancellationFailures = 0,
+  });
+
+  /// Brand-new IDs (not previously owned) the stale pass had scheduled, then
+  /// successfully cancelled during rollback.
+  final int newIdsCancelled;
+
+  /// Previously-owned IDs the stale pass had re-scheduled (replaced), then
+  /// successfully cancelled during rollback.
+  final int replacedIdsCancelled;
+
+  /// Rollback cancellations that themselves failed; those notifications may
+  /// still be on the device and are left for the new session's cleanup.
+  final int cancellationFailures;
+
+  /// The total number of stale schedules successfully rolled back.
+  int get totalCancelled => newIdsCancelled + replacedIdsCancelled;
+
+  /// True when every stale schedule was cancelled without a failure.
+  bool get isFullySuccessful => cancellationFailures == 0;
+
+  @override
+  String toString() =>
+      'CalendarReminderInvalidationRollbackResult(newIdsCancelled: '
+      '$newIdsCancelled, replacedIdsCancelled: $replacedIdsCancelled, '
+      'cancellationFailures: $cancellationFailures)';
 }
 
 /// Structured, log-safe outcome of rolling back after a failed final manifest
@@ -224,6 +326,63 @@ class CalendarReminderDisableResult {
       'failed: $failedCount, manifestPersisted: $manifestPersisted)';
 }
 
+/// Structured, log-safe snapshot comparing the platform's scheduled calendar
+/// reminders against the persisted manifest.
+///
+/// Deliberately holds only counts, booleans, status names, and sanitized
+/// categories — never titles, bodies, event IDs, occurrence IDs, calendar IDs,
+/// owner keys, tokens, or URLs — so it is always safe to log. It distinguishes
+/// three states without being destructive: nothing scheduled; the manifest
+/// claims schedules the platform does not have; platform and manifest agree.
+class LocalNotificationDiagnostics {
+  const LocalNotificationDiagnostics({
+    required this.initialized,
+    required this.pendingPlatformCount,
+    required this.trackedManifestCount,
+    required this.trackedButNotPendingCount,
+    required this.pendingButUntrackedCalendarCount,
+    required this.scheduleMode,
+    required this.timezoneName,
+    this.errorCategory,
+  });
+
+  /// Whether the notification service is initialized/usable.
+  final bool initialized;
+
+  /// Count of pending platform requests whose payload is a Calee calendar
+  /// reminder. Never includes other apps'/features' notifications.
+  final int pendingPlatformCount;
+
+  /// Count of reminder IDs tracked in the persisted manifest.
+  final int trackedManifestCount;
+
+  /// Tracked (manifest) IDs the platform does NOT report as pending.
+  final int trackedButNotPendingCount;
+
+  /// Pending Calee-reminder IDs not tracked by the manifest.
+  final int pendingButUntrackedCalendarCount;
+
+  /// The Android schedule mode in use (a constant name; no content).
+  final String scheduleMode;
+
+  /// The local timezone name reminders are scheduled against.
+  final String timezoneName;
+
+  /// Set only when diagnostics collection failed; a sanitized category. A
+  /// failure never cancels or alters reminders.
+  final String? errorCategory;
+
+  @override
+  String toString() =>
+      'LocalNotificationDiagnostics(initialized: $initialized, '
+      'pendingPlatform: $pendingPlatformCount, '
+      'trackedManifest: $trackedManifestCount, '
+      'trackedButNotPending: $trackedButNotPendingCount, '
+      'pendingButUntracked: $pendingButUntrackedCalendarCount, '
+      'scheduleMode: $scheduleMode, timezone: $timezoneName'
+      '${errorCategory != null ? ', errorCategory: $errorCategory' : ''})';
+}
+
 class LocalCalendarNotificationService {
   LocalCalendarNotificationService._();
 
@@ -248,7 +407,7 @@ class LocalCalendarNotificationService {
   // completed without error. Left false on failure so a later call retries.
   bool _initialized = false;
   // Shared in-flight initialization, so concurrent callers await one attempt.
-  Future<void>? _initializing;
+  Future<LocalNotificationInitializationResult>? _initializing;
 
   // Tail of the serial mutation queue. Every operation that mutates platform
   // notifications or the manifest chains onto it (see [runSerialized]), so
@@ -302,11 +461,37 @@ class LocalCalendarNotificationService {
 
   // ── Initialization ──────────────────────────────────────────────────────
 
-  /// Initializes the plugin and Android channel. Retry-safe: on failure the
-  /// service does not mark itself initialized, so a later call can retry.
-  /// Concurrent calls share a single in-flight attempt.
-  Future<void> initialize() {
-    if (_initialized) return Future<void>.value();
+  /// The structured result of the most recent initialization attempt, retained
+  /// for diagnostics and tests. Null until the first attempt runs.
+  LocalNotificationInitializationResult? _lastInitResult;
+
+  /// The result of the most recent initialization attempt (test/diagnostic
+  /// observability). Never carries notification content, tokens, URLs, or
+  /// account identifiers.
+  @visibleForTesting
+  LocalNotificationInitializationResult? get lastInitializationResult =>
+      _lastInitResult;
+
+  /// Small monochrome status-bar icon for calendar reminders. Referenced by
+  /// name (a resource identifier, not the launcher asset) so both plugin init
+  /// and each scheduled notification use the dedicated icon. Kept from resource
+  /// shrinking by `res/raw/keep.xml`.
+  static const androidNotificationIcon = 'ic_stat_calee';
+
+  /// Initializes the plugin and Android channel, returning a structured,
+  /// log-safe result. Retry-safe: on any non-success the service does not mark
+  /// itself initialized, so a later call retries. Concurrent callers share a
+  /// single in-flight attempt, and a failed attempt does not poison later
+  /// retries (the shared future is always cleared when it settles).
+  Future<LocalNotificationInitializationResult> initialize() {
+    if (_initialized) {
+      return Future<LocalNotificationInitializationResult>.value(
+        _lastInitResult ??
+            const LocalNotificationInitializationResult(
+              status: LocalNotificationInitializationStatus.initialized,
+            ),
+      );
+    }
     final existing = _initializing;
     if (existing != null) return existing;
     final future = _doInitialize();
@@ -314,28 +499,42 @@ class LocalCalendarNotificationService {
     return future;
   }
 
-  Future<void> _doInitialize() async {
+  Future<LocalNotificationInitializationResult> _doInitialize() async {
+    LocalNotificationInitializationResult result;
     try {
-      await performPluginInitialization();
-      // Only now — after plugin init AND channel creation both succeeded — is
-      // the service safe to use.
-      _initialized = true;
+      result = await performPluginInitialization();
     } catch (e) {
-      // Leave _initialized false so a later reconcile can retry.
-      _initialized = false;
-      _debugLog('initialize failed (${_errorCategory(e)})');
-      rethrow;
+      // Any unexpected throw is a failed attempt, not a crash: capture it as a
+      // structured result so a later reconcile can retry.
+      result = LocalNotificationInitializationResult(
+        status: LocalNotificationInitializationStatus.exception,
+        errorCategory: _errorCategory(e),
+      );
     } finally {
+      // Always clear the shared in-flight future so a failed attempt never
+      // poisons later retries.
       _initializing = null;
     }
+    // Only an exact `initialized` status marks the service usable; false, null,
+    // a missing Android implementation, a channel failure, or an exception all
+    // leave _initialized false.
+    _initialized =
+        result.status == LocalNotificationInitializationStatus.initialized;
+    _lastInitResult = result;
+    if (!_initialized) {
+      _debugLog('initialize failed (${result.status.name})');
+    }
+    return result;
   }
 
-  /// Performs the actual plugin initialization and Android channel creation.
-  /// Overridable so init retry-safety can be tested without platform channels.
+  /// Performs the actual plugin initialization and Android channel creation,
+  /// returning a structured result. Overridable so init behaviour can be tested
+  /// without platform channels.
   @visibleForTesting
-  Future<void> performPluginInitialization() async {
+  Future<LocalNotificationInitializationResult>
+  performPluginInitialization() async {
     const androidSettings = AndroidInitializationSettings(
-      '@mipmap/ic_launcher',
+      androidNotificationIcon,
     );
     const darwinSettings = DarwinInitializationSettings(
       requestAlertPermission: false,
@@ -346,20 +545,83 @@ class LocalCalendarNotificationService {
       android: androidSettings,
       iOS: darwinSettings,
     );
-    await _plugin.initialize(settings);
 
-    await _plugin
-        .resolvePlatformSpecificImplementation<
-          AndroidFlutterLocalNotificationsPlugin
-        >()
-        ?.createNotificationChannel(
-          const AndroidNotificationChannel(
-            _channelId,
-            _channelName,
-            description: _channelDescription,
-            importance: Importance.defaultImportance,
-          ),
+    // 1. Initialize the plugin and require an exact `true` result. A `false` or
+    //    `null` result means platform initialization was not confirmed.
+    final bool? initialized = await initializePlugin(settings);
+    if (initialized == null) {
+      return const LocalNotificationInitializationResult(
+        status: LocalNotificationInitializationStatus.pluginResultMissing,
+      );
+    }
+    if (initialized != true) {
+      return const LocalNotificationInitializationResult(
+        status: LocalNotificationInitializationStatus.pluginRejected,
+      );
+    }
+
+    // 2. On Android, the platform implementation must be present to create the
+    //    notification channel.
+    if (isAndroidPlatform) {
+      final androidImpl = resolveAndroidImplementation();
+      if (androidImpl == null) {
+        return const LocalNotificationInitializationResult(
+          status: LocalNotificationInitializationStatus
+              .platformImplementationMissing,
         );
+      }
+      // 3. Create the channel only after a successful plugin initialization. A
+      //    channel-creation failure leaves the service uninitialized.
+      try {
+        await createAndroidChannel(androidImpl);
+      } catch (e) {
+        return LocalNotificationInitializationResult(
+          status: LocalNotificationInitializationStatus.channelCreationFailed,
+          errorCategory: _errorCategory(e),
+        );
+      }
+    }
+
+    return const LocalNotificationInitializationResult(
+      status: LocalNotificationInitializationStatus.initialized,
+    );
+  }
+
+  /// Invokes the plugin's `initialize`. Overridable so init results (true/false/
+  /// null) can be simulated in tests without platform channels.
+  @visibleForTesting
+  Future<bool?> initializePlugin(InitializationSettings settings) =>
+      _plugin.initialize(settings);
+
+  /// Whether the current platform is Android. Overridable in tests so the
+  /// Android-implementation requirement can be exercised off-device.
+  @visibleForTesting
+  bool get isAndroidPlatform => defaultTargetPlatform == TargetPlatform.android;
+
+  /// Resolves the Android platform implementation. Overridable so a missing
+  /// implementation can be simulated in tests. Returns an opaque marker object
+  /// (the resolved plugin) that is passed back to [createAndroidChannel].
+  @visibleForTesting
+  Object? resolveAndroidImplementation() => _plugin
+      .resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin
+      >();
+
+  /// Creates the Android notification channel using the resolved implementation.
+  /// Overridable so a channel-creation failure can be simulated in tests without
+  /// a real platform implementation.
+  @visibleForTesting
+  Future<void> createAndroidChannel(Object androidImpl) async {
+    if (androidImpl is AndroidFlutterLocalNotificationsPlugin) {
+      await androidImpl.createNotificationChannel(
+        const AndroidNotificationChannel(
+          _channelId,
+          _channelName,
+          description: _channelDescription,
+          importance: Importance.defaultImportance,
+        ),
+      );
+    }
   }
 
   /// Whether initialization has completed successfully (test observability).
@@ -371,8 +633,8 @@ class LocalCalendarNotificationService {
   @visibleForTesting
   Future<bool> ensureInitialized() async {
     try {
-      await initialize();
-      return _initialized;
+      final result = await initialize();
+      return result.status == LocalNotificationInitializationStatus.initialized;
     } catch (_) {
       return false;
     }
@@ -462,10 +724,77 @@ class LocalCalendarNotificationService {
       maxCandidates: _maxScheduled,
       ownerKey: effectiveOwner,
     );
-    // Assign collision-free IDs across the selected set. A candidate that
-    // exhausts its probe budget is reported (never silently dropped).
+
+    // Session may have ended before this (possibly queued) pass began. Nothing
+    // has been allocated or mutated yet.
+    if (!isCurrent()) {
+      return _invalidatedResult(events.length, rawCandidates.length, 0, 0, at);
+    }
+
+    // Load and validate the manifest BEFORE allocating final notification IDs,
+    // so IDs still on the device but owned by another account (or by an
+    // ownerless legacy entry) can be reserved and never overwritten. A corrupt
+    // manifest allocates and mutates nothing.
+    final prefs = preferences;
+    final loadResult = await prefs.loadCalendarReminderManifestResult();
+    if (loadResult.isCorrupt) {
+      // Ownership is unknown. Do not schedule or cancel anything, and do not
+      // overwrite the stored value — report corruption so the caller can retry
+      // or diagnose. Never a global cancel.
+      _debugLog('reconcile skipped: manifest corrupt');
+      return CalendarReconciliationResult(
+        eventsFetched: events.length,
+        eligibleCandidates: rawCandidates.length,
+        scheduledCount: 0,
+        updatedCount: 0,
+        cancelledCount: 0,
+        unchangedCount: 0,
+        failedCount: 0,
+        manifestPersisted: false,
+        manifestCorrupt: true,
+        collisionsResolved: 0,
+        idAllocationFailures: 0,
+        completedAt: at,
+      );
+    }
+    final previous = loadResult.manifest;
+    final previousById = <int, CalendarReminderManifestEntry>{
+      for (final entry in previous.entries) entry.notificationId: entry,
+    };
+
+    // Partition previously-owned entries relative to the current account:
+    //  * foreign — owned by another (non-null) account: reserve its ID and
+    //    retain it untouched; never cancel or overwrite another account's
+    //    notification;
+    //  * ownerless legacy (only when the current owner is a real account):
+    //    reserve its ID during this pass so a candidate cannot land on it, then
+    //    clean it up as stale (migrated to a current-owner entry);
+    //  * current-owner — normal unchanged/changed/stale handling below; its ID
+    //    is deliberately NOT reserved so the same occurrence can reuse it.
+    final reservedIds = <int>{};
+    final retainedForeign = <int, CalendarReminderManifestEntry>{};
+    final legacyStaleIds = <int>{};
+    final currentOwnerIds = <int>{};
+    for (final entry in previous.entries) {
+      final id = entry.notificationId;
+      if (entry.ownerKey != null && entry.ownerKey != effectiveOwner) {
+        reservedIds.add(id);
+        retainedForeign[id] = entry;
+      } else if (entry.ownerKey == null && effectiveOwner != null) {
+        reservedIds.add(id);
+        legacyStaleIds.add(id);
+      } else {
+        currentOwnerIds.add(id);
+      }
+    }
+
+    // Assign collision-free IDs across the selected set, reserving the foreign
+    // and ownerless-legacy IDs so no candidate is scheduled onto one. A
+    // candidate that exhausts its probe budget is reported (never silently
+    // dropped, never allowed to overwrite a reserved ID).
     final allocation = allocateNotificationIds(
       rawCandidates,
+      reservedIds: reservedIds,
       idDerivation: debugNotificationIdOverride,
     );
     final candidates = allocation.candidates;
@@ -477,44 +806,6 @@ class LocalCalendarNotificationService {
         'limit and were not scheduled',
       );
     }
-
-    // Session may have ended before this (possibly queued) pass began.
-    if (!isCurrent()) {
-      return _invalidatedResult(
-        events.length,
-        candidates.length,
-        collisionsResolved,
-        idAllocationFailures,
-        at,
-      );
-    }
-
-    final prefs = preferences;
-    final loadResult = await prefs.loadCalendarReminderManifestResult();
-    if (loadResult.isCorrupt) {
-      // Ownership is unknown. Do not schedule or cancel anything, and do not
-      // overwrite the stored value — report corruption so the caller can retry
-      // or diagnose. Never a global cancel.
-      _debugLog('reconcile skipped: manifest corrupt');
-      return CalendarReconciliationResult(
-        eventsFetched: events.length,
-        eligibleCandidates: candidates.length,
-        scheduledCount: 0,
-        updatedCount: 0,
-        cancelledCount: 0,
-        unchangedCount: 0,
-        failedCount: 0,
-        manifestPersisted: false,
-        manifestCorrupt: true,
-        collisionsResolved: collisionsResolved,
-        idAllocationFailures: idAllocationFailures,
-        completedAt: at,
-      );
-    }
-    final previous = loadResult.manifest;
-    final previousById = <int, CalendarReminderManifestEntry>{
-      for (final entry in previous.entries) entry.notificationId: entry,
-    };
 
     final initialized = await ensureInitialized();
     // Session may have ended while initialization resolved.
@@ -557,29 +848,18 @@ class LocalCalendarNotificationService {
 
     final desiredIds = desiredById.keys.toSet();
 
-    // Classify every previously-owned ID and every desired ID, treating owner
-    // mismatch as "not the current account's" so a foreign or legacy entry is
-    // never classified as unchanged.
-    final staleIds = <int>{};
+    // Classify desired IDs against the current account's own entries only.
+    // Foreign and legacy IDs were reserved out of the candidate pool, so a
+    // candidate's final ID is either brand-new or a reuse of a current-owner ID
+    // for the same occurrence — never a foreign/legacy ID.
     final newIds = <int>{};
     final changedIds = <int>{};
     final unchangedIds = <int>{};
-
-    for (final id in previousById.keys) {
-      if (!desiredIds.contains(id)) staleIds.add(id);
-    }
     for (final id in desiredIds) {
       final prev = previousById[id];
       if (prev == null || prev.ownerKey != effectiveOwner) {
-        // Not owned by the current account (new, foreign, or legacy) — schedule
-        // fresh under the current owner. A same-ID foreign entry is re-scheduled
-        // in place (which replaces the platform notification), so it is not also
-        // added to [staleIds].
-        if (prev == null) {
-          newIds.add(id);
-        } else {
-          changedIds.add(id);
-        }
+        // Brand-new under the current owner.
+        newIds.add(id);
       } else {
         final prevFp = prev.fingerprint;
         if (prevFp != null && prevFp == desiredFingerprint[id]) {
@@ -590,8 +870,19 @@ class LocalCalendarNotificationService {
       }
     }
 
-    // Entries believed to be on the device after this pass.
-    final keptEntries = <int, CalendarReminderManifestEntry>{};
+    // Current-owner entries no longer desired are stale; ownerless legacy
+    // entries are always cleaned (migrated). Foreign entries are never stale —
+    // they belong to another account and are retained untouched.
+    final staleIds = <int>{...legacyStaleIds};
+    for (final id in currentOwnerIds) {
+      if (!desiredIds.contains(id)) staleIds.add(id);
+    }
+
+    // Entries believed to be on the device after this pass. Foreign entries are
+    // retained untouched from the start so another account's reminders survive.
+    final keptEntries = <int, CalendarReminderManifestEntry>{
+      ...retainedForeign,
+    };
     for (final id in unchangedIds) {
       keptEntries[id] = CalendarReminderManifestEntry(
         notificationId: id,
@@ -605,15 +896,20 @@ class LocalCalendarNotificationService {
     var cancelled = 0;
     var failed = 0;
 
-    // Newly-scheduled IDs not previously owned — the exact set to roll back if
-    // the session is invalidated or the final manifest write fails.
+    // Every successful platform schedule this pass, split by kind, so a mid-pass
+    // session invalidation can roll back BOTH brand-new schedules and
+    // replacements — not only the new ones. (The save-failure rollback below
+    // still uses only [newlyScheduledIds]: a replaced ID remains tracked by the
+    // intact previous manifest, so it must not be cancelled there.)
     final newlyScheduledIds = <int>{};
+    final replacedIds = <int>{};
 
     // 3a. Schedule newly-desired reminders.
     for (final id in newIds) {
       if (!isCurrent()) {
         return _rollbackInvalidated(
           newlyScheduledIds,
+          replacedIds,
           eventsFetched: events.length,
           eligibleCandidates: candidates.length,
           collisionsResolved: collisionsResolved,
@@ -636,6 +932,7 @@ class LocalCalendarNotificationService {
       if (!isCurrent()) {
         return _rollbackInvalidated(
           newlyScheduledIds,
+          replacedIds,
           eventsFetched: events.length,
           eligibleCandidates: candidates.length,
           collisionsResolved: collisionsResolved,
@@ -651,6 +948,7 @@ class LocalCalendarNotificationService {
       if (!isCurrent()) {
         return _rollbackInvalidated(
           newlyScheduledIds,
+          replacedIds,
           eventsFetched: events.length,
           eligibleCandidates: candidates.length,
           collisionsResolved: collisionsResolved,
@@ -661,6 +959,7 @@ class LocalCalendarNotificationService {
       final ok = await scheduleReminder(desiredById[id]!);
       if (ok) {
         updated++;
+        replacedIds.add(id);
         keptEntries[id] = CalendarReminderManifestEntry(
           notificationId: id,
           fingerprint: desiredFingerprint[id],
@@ -675,6 +974,7 @@ class LocalCalendarNotificationService {
       if (!isCurrent()) {
         return _rollbackInvalidated(
           newlyScheduledIds,
+          replacedIds,
           eventsFetched: events.length,
           eligibleCandidates: candidates.length,
           collisionsResolved: collisionsResolved,
@@ -689,6 +989,7 @@ class LocalCalendarNotificationService {
       if (!isCurrent()) {
         return _rollbackInvalidated(
           newlyScheduledIds,
+          replacedIds,
           eventsFetched: events.length,
           eligibleCandidates: candidates.length,
           collisionsResolved: collisionsResolved,
@@ -709,6 +1010,7 @@ class LocalCalendarNotificationService {
       if (!isCurrent()) {
         return _rollbackInvalidated(
           newlyScheduledIds,
+          replacedIds,
           eventsFetched: events.length,
           eligibleCandidates: candidates.length,
           collisionsResolved: collisionsResolved,
@@ -723,6 +1025,7 @@ class LocalCalendarNotificationService {
     if (!isCurrent()) {
       return _rollbackInvalidated(
         newlyScheduledIds,
+        replacedIds,
         eventsFetched: events.length,
         eligibleCandidates: candidates.length,
         collisionsResolved: collisionsResolved,
@@ -769,31 +1072,71 @@ class LocalCalendarNotificationService {
       completedAt: at,
     );
     _debugLog('reconcile complete: $result');
+    if (result.isFullySuccessful) {
+      // Log-safe pending/tracked counts after a clean pass. Non-destructive and
+      // never allowed to affect the reconciliation outcome.
+      await _logReconciliationDiagnostics();
+    }
     return result;
   }
 
-  /// Cancels the IDs a now-invalidated pass had scheduled and returns a
-  /// [sessionInvalidated] result. Never writes the manifest: the previous
-  /// manifest is left intact for the new session, and cancel failures are
-  /// tolerated (writing to re-track them would clobber the new session).
+  /// Cancels every notification a now-invalidated pass had scheduled — both
+  /// brand-new IDs and replacements of existing (changed) IDs — and returns a
+  /// [sessionInvalidated] result carrying a structured
+  /// [CalendarReminderInvalidationRollbackResult].
+  ///
+  /// Never writes the manifest: the previous stored manifest is left intact for
+  /// the new session, whose serialized cleanup/reconcile repairs device state
+  /// afterwards. A rollback cancel that itself fails is represented structurally
+  /// (a count), not merely debug-logged, so a stale schedule that could not be
+  /// undone is observable rather than silent.
   Future<CalendarReconciliationResult> _rollbackInvalidated(
-    Set<int> newlyScheduledIds, {
+    Set<int> newlyScheduledIds,
+    Set<int> replacedIds, {
     required int eventsFetched,
     required int eligibleCandidates,
     required int collisionsResolved,
     required int idAllocationFailures,
     required DateTime at,
   }) async {
+    var newCancelled = 0;
+    var replacedCancelled = 0;
+    var cancellationFailures = 0;
     for (final id in newlyScheduledIds) {
       try {
         await cancelNotification(id);
+        newCancelled++;
       } catch (e) {
+        cancellationFailures++;
         _debugLog(
-          'invalidation rollback cancel failed for id=$id '
+          'invalidation rollback cancel failed for new id=$id '
           '(${_errorCategory(e)})',
         );
       }
     }
+    for (final id in replacedIds) {
+      try {
+        await cancelNotification(id);
+        replacedCancelled++;
+      } catch (e) {
+        cancellationFailures++;
+        _debugLog(
+          'invalidation rollback cancel failed for replaced id=$id '
+          '(${_errorCategory(e)})',
+        );
+      }
+    }
+    // Only attach a rollback record when the stale pass had actually scheduled
+    // something; a pass invalidated before any successful schedule has nothing
+    // to undo.
+    final invalidationRollback =
+        (newlyScheduledIds.isEmpty && replacedIds.isEmpty)
+        ? null
+        : CalendarReminderInvalidationRollbackResult(
+            newIdsCancelled: newCancelled,
+            replacedIdsCancelled: replacedCancelled,
+            cancellationFailures: cancellationFailures,
+          );
     _debugLog('reconcile aborted: session invalidated mid-pass');
     return CalendarReconciliationResult(
       eventsFetched: eventsFetched,
@@ -807,6 +1150,7 @@ class LocalCalendarNotificationService {
       sessionInvalidated: true,
       collisionsResolved: collisionsResolved,
       idAllocationFailures: idAllocationFailures,
+      invalidationRollback: invalidationRollback,
       completedAt: at,
     );
   }
@@ -1035,6 +1379,8 @@ class LocalCalendarNotificationService {
         channelDescription: _channelDescription,
         importance: Importance.defaultImportance,
         priority: Priority.defaultPriority,
+        // Use the dedicated monochrome status-bar icon, not the launcher icon.
+        icon: androidNotificationIcon,
       ),
       iOS: DarwinNotificationDetails(),
     );
@@ -1068,6 +1414,118 @@ class LocalCalendarNotificationService {
         'schedule failed for id=${c.notificationId} (${_errorCategory(e)})',
       );
       return false;
+    }
+  }
+
+  // ── Diagnostics ───────────────────────────────────────────────────────────
+
+  /// The payload `type` all Calee calendar reminders carry, used to match only
+  /// Calee reminders among the platform's pending requests.
+  static const _reminderPayloadType = 'calendar_event_reminder';
+
+  /// Fetches pending platform notification requests. Overridable so diagnostics
+  /// can be tested without platform channels.
+  @visibleForTesting
+  Future<List<PendingNotificationRequest>> pendingNotificationRequests() =>
+      _plugin.pendingNotificationRequests();
+
+  /// Collects a log-safe [LocalNotificationDiagnostics] snapshot comparing the
+  /// platform's pending Calee reminders to the persisted manifest.
+  ///
+  /// Purely observational: never schedules, cancels (never `cancelAll()`),
+  /// writes the manifest, or otherwise alters reminders. Any failure is
+  /// captured as a sanitized [LocalNotificationDiagnostics.errorCategory]; it
+  /// never throws and never mutates reminder state. Only Calee calendar-reminder
+  /// payloads are counted, and only counts/booleans/status names are exposed —
+  /// no titles, bodies, event/occurrence/calendar IDs, owner keys, tokens, or
+  /// URLs.
+  Future<LocalNotificationDiagnostics> collectDiagnostics() async {
+    final initialized = await ensureInitialized();
+    const scheduleMode = 'inexactAllowWhileIdle';
+    final timezoneName = _safeTimezoneName();
+    try {
+      final pending = await pendingNotificationRequests();
+      final pendingCalendarIds = <int>{};
+      for (final request in pending) {
+        if (_isCalendarReminderPayload(request.payload)) {
+          pendingCalendarIds.add(request.id);
+        }
+      }
+
+      final loadResult = await preferences.loadCalendarReminderManifestResult();
+      // A corrupt manifest yields no known tracked IDs; report zero tracked
+      // rather than guessing, and never overwrite the stored value here.
+      final trackedIds = loadResult.isCorrupt
+          ? <int>{}
+          : {
+              for (final entry in loadResult.manifest.entries)
+                entry.notificationId,
+            };
+
+      final trackedButNotPending = trackedIds
+          .difference(pendingCalendarIds)
+          .length;
+      final pendingButUntracked = pendingCalendarIds
+          .difference(trackedIds)
+          .length;
+
+      return LocalNotificationDiagnostics(
+        initialized: initialized,
+        pendingPlatformCount: pendingCalendarIds.length,
+        trackedManifestCount: trackedIds.length,
+        trackedButNotPendingCount: trackedButNotPending,
+        pendingButUntrackedCalendarCount: pendingButUntracked,
+        scheduleMode: scheduleMode,
+        timezoneName: timezoneName,
+      );
+    } catch (e) {
+      // A diagnostics failure is non-destructive: report a sanitized category
+      // and leave all reminder state untouched.
+      _debugLog('diagnostics failed (${_errorCategory(e)})');
+      return LocalNotificationDiagnostics(
+        initialized: initialized,
+        pendingPlatformCount: 0,
+        trackedManifestCount: 0,
+        trackedButNotPendingCount: 0,
+        pendingButUntrackedCalendarCount: 0,
+        scheduleMode: scheduleMode,
+        timezoneName: timezoneName,
+        errorCategory: _errorCategory(e),
+      );
+    }
+  }
+
+  /// The local timezone name, or `'unknown'` if the timezone database has not
+  /// been initialized. Never throws.
+  String _safeTimezoneName() {
+    try {
+      return tz.local.name;
+    } catch (_) {
+      return 'unknown';
+    }
+  }
+
+  /// Whether [payload] is a Calee calendar-reminder payload. Only the payload
+  /// `type` is inspected; no event content is read or retained.
+  bool _isCalendarReminderPayload(String? payload) {
+    if (payload == null || payload.isEmpty) return false;
+    try {
+      final decoded = jsonDecode(payload);
+      return decoded is Map && decoded['type'] == _reminderPayloadType;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Emits a debug log of safe diagnostic counts after a successful
+  /// reconciliation. Never throws and never alters reminders.
+  Future<void> _logReconciliationDiagnostics() async {
+    if (!kDebugMode) return;
+    try {
+      final diagnostics = await collectDiagnostics();
+      _debugLog('post-reconcile diagnostics: $diagnostics');
+    } catch (e) {
+      _debugLog('post-reconcile diagnostics skipped (${_errorCategory(e)})');
     }
   }
 

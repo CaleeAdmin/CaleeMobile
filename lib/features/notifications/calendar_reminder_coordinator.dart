@@ -9,6 +9,40 @@ import '../../data/models/client_calendar.dart';
 import 'calendar_notification_candidates.dart';
 import 'local_calendar_notification_service.dart';
 
+/// Outcome of an attempt to begin a reminder session.
+enum CalendarReminderSessionStartStatus {
+  /// A new session generation and owner key were created for a valid account.
+  started,
+
+  /// The account identity was missing, empty, or whitespace-only, so no owner
+  /// was created and no active session was entered. Any currently-valid session
+  /// is left untouched (a duplicate transient callback must not tear it down).
+  skippedInvalidAccount,
+}
+
+/// Structured, log-safe result of [CalendarReminderCoordinator.beginSession].
+class CalendarReminderSessionStartResult {
+  const CalendarReminderSessionStartResult({
+    required this.status,
+    required this.generation,
+  });
+
+  final CalendarReminderSessionStartStatus status;
+
+  /// The session generation after the call. For
+  /// [CalendarReminderSessionStartStatus.started] this is the new generation;
+  /// for [CalendarReminderSessionStartStatus.skippedInvalidAccount] it is the
+  /// unchanged current generation.
+  final int generation;
+
+  bool get started => status == CalendarReminderSessionStartStatus.started;
+
+  @override
+  String toString() =>
+      'CalendarReminderSessionStartResult(status: ${status.name}, '
+      'generation: $generation)';
+}
+
 /// Why a reminder refresh was requested. Reasons are explicit rather than
 /// unrelated booleans, and they decide whether a refresh may be throttled
 /// (routine lifecycle events) or must force reconciliation (explicit changes).
@@ -67,6 +101,13 @@ enum CalendarReminderRefreshStatus {
   /// No access token — signed out. Nothing was fetched or changed.
   skippedSignedOut,
 
+  /// There is no active account-owned reminder session (no owner key), so no
+  /// reminder work may run — a non-empty access token is not sufficient on its
+  /// own. Nothing was read, fetched, or changed: no preference read, no
+  /// permission request, no event fetch, no reconciliation or cleanup. The
+  /// initial refresh runs once the session listener begins a valid session.
+  skippedNoActiveSession,
+
   /// Calendar reminders are disabled and there was nothing owned to clean up.
   /// Nothing was fetched or changed.
   skippedDisabled,
@@ -101,6 +142,14 @@ enum CalendarReminderRefreshStatus {
   /// scheduled or cancelled and the stored value was left intact for a later
   /// retry.
   manifestCorrupt,
+
+  /// The reminders-enabled preference could not be read — a SharedPreferences
+  /// access failure, or a write required to complete the one-time migration
+  /// failed — so the stored value is unknown. Nothing was fetched, no
+  /// permission was requested, nothing was scheduled or cancelled, the manifest
+  /// and stored preference were left untouched, and existing reminders are
+  /// preserved. The read is retried on a later refresh.
+  preferenceUnavailable,
 }
 
 /// Structured, log-safe result of a reminder refresh.
@@ -112,6 +161,7 @@ class CalendarReminderRefreshResult {
     this.reconciliation,
     this.cleanup,
     this.errorCategory,
+    this.preferenceSaveFailed = false,
   });
 
   final CalendarReminderRefreshReason reason;
@@ -131,8 +181,15 @@ class CalendarReminderRefreshResult {
   final CalendarReminderDisableResult? cleanup;
 
   /// Short, non-sensitive error category when [status] is
-  /// [CalendarReminderRefreshStatus.fetchFailed].
+  /// [CalendarReminderRefreshStatus.fetchFailed] or
+  /// [CalendarReminderRefreshStatus.preferenceUnavailable].
   final String? errorCategory;
+
+  /// Whether persisting the reminders-enabled preference failed on the
+  /// permission-denied path. When true, the coordinator flipped the switch off
+  /// for safety but could not confirm the write persisted, so this result is not
+  /// fully successful even though owned reminders were cleaned up.
+  final bool preferenceSaveFailed;
 
   bool get didReconcile => status == CalendarReminderRefreshStatus.reconciled;
 
@@ -144,7 +201,8 @@ class CalendarReminderRefreshResult {
       'status: ${status.name}'
       '${reconciliation != null ? ', $reconciliation' : ''}'
       '${cleanup != null ? ', $cleanup' : ''}'
-      '${errorCategory != null ? ', error: $errorCategory' : ''})';
+      '${errorCategory != null ? ', error: $errorCategory' : ''}'
+      '${preferenceSaveFailed ? ', preferenceSaveFailed: true' : ''})';
 }
 
 /// The reminder refresh currently running, tagged with the session it belongs
@@ -269,6 +327,13 @@ class CalendarReminderCoordinator {
   @visibleForTesting
   String? get ownerKey => _ownerKey;
 
+  /// Whether an account-owned reminder session is currently active.
+  ///
+  /// A refresh requires this to be true: a non-empty access token alone is not
+  /// enough. Lifecycle handlers gate on it so a signed-in-but-bootstrap-not-yet-
+  /// available state never fires a null-owner refresh.
+  bool get hasActiveSession => _ownerKey != null;
+
   // ── Session lifecycle ─────────────────────────────────────────────────────
 
   /// Begins a reminder session for [accountId].
@@ -276,13 +341,29 @@ class CalendarReminderCoordinator {
   /// Records a privacy-safe owner key derived from the account ID (never the raw
   /// ID) and opens a new session generation, invalidating any in-flight or
   /// queued work from a previous session so it can neither reconcile nor write
-  /// the manifest. Returns the new generation for diagnostics/tests.
-  int beginSession({required String accountId}) {
+  /// the manifest.
+  ///
+  /// An empty, whitespace-only, or otherwise invalid [accountId] is rejected:
+  /// no owner key is created, the generation is NOT advanced, and any queued
+  /// follow-up and currently-valid session are left intact. This prevents a
+  /// missing/temporarily-unavailable bootstrap from both creating a bogus
+  /// empty-account owner and tearing down a valid session via a duplicate
+  /// transient callback. The structured result reports which happened.
+  CalendarReminderSessionStartResult beginSession({required String accountId}) {
+    if (!isValidReminderAccountId(accountId)) {
+      return CalendarReminderSessionStartResult(
+        status: CalendarReminderSessionStartStatus.skippedInvalidAccount,
+        generation: _sessionGeneration,
+      );
+    }
     _invalidatePending();
     _sessionGeneration++;
     _ownerKey = reminderOwnerKey(accountId);
     _lastRefreshAt = null;
-    return _sessionGeneration;
+    return CalendarReminderSessionStartResult(
+      status: CalendarReminderSessionStartStatus.started,
+      generation: _sessionGeneration,
+    );
   }
 
   /// Ends the current reminder session (sign-out or unauthorized sign-out).
@@ -325,6 +406,12 @@ class CalendarReminderCoordinator {
     required String? previousAccountId,
     required String nextAccountId,
   }) {
+    // An invalid next identity must not begin a session, must not tear down the
+    // current (possibly valid) session, and must not clean up the previous
+    // owner: a transient callback lacking bootstrap data is a no-op.
+    if (!isValidReminderAccountId(nextAccountId)) {
+      return Future<void>.value();
+    }
     final endedOwnerKey = _ownerKey;
     // Queue the previous owner's cleanup before the new session's work is
     // enqueued, so it runs first in the serialized mutation queue.
@@ -350,6 +437,13 @@ class CalendarReminderCoordinator {
 
   /// Whether [generation] is still the current session generation.
   bool _isCurrentGeneration(int generation) => generation == _sessionGeneration;
+
+  /// Whether [generation] and [owner] both still match the current reminder
+  /// session. Validates the captured owner as well as the generation, so an
+  /// account switch (which changes the owner) invalidates in-flight work even in
+  /// the unlikely event the generation counter alone did not disambiguate it.
+  bool _isCurrentSession(int generation, String? owner) =>
+      generation == _sessionGeneration && owner == _ownerKey;
 
   /// Drops any queued follow-up, completing its caller with an explicit
   /// [CalendarReminderRefreshStatus.skippedSessionInvalidated] result so no
@@ -394,6 +488,15 @@ class CalendarReminderCoordinator {
 
     final generation = _sessionGeneration;
     final owner = _ownerKey;
+    // A non-empty access token is not sufficient: there must be an active
+    // account-owned reminder session. Without an owner, do nothing — no
+    // preference read, no permission request, no fetch, no cleanup — so
+    // production never runs the null-owner legacy path.
+    if (owner == null) {
+      return Future<CalendarReminderRefreshResult>.value(
+        _skipped(reason, CalendarReminderRefreshStatus.skippedNoActiveSession),
+      );
+    }
     final explicit = force || reason.forcesReconciliation;
 
     final active = _activeRefresh;
@@ -469,6 +572,7 @@ class CalendarReminderCoordinator {
       reason: reason,
       startedAt: startedAt,
       generation: generation,
+      owner: owner,
       self: () => active,
     );
     active = _ActiveReminderRefresh(
@@ -490,6 +594,7 @@ class CalendarReminderCoordinator {
     required CalendarReminderRefreshReason reason,
     required DateTime startedAt,
     required int generation,
+    required String? owner,
     required _ActiveReminderRefresh Function() self,
   }) async {
     try {
@@ -498,6 +603,7 @@ class CalendarReminderCoordinator {
         reason: reason,
         startedAt: startedAt,
         generation: generation,
+        owner: owner,
       );
     } finally {
       // Clear the active guard only if it is still THIS operation — never stomp
@@ -534,6 +640,7 @@ class CalendarReminderCoordinator {
       reason: pending.reason,
       startedAt: _now(),
       generation: pending.generation,
+      owner: pending.ownerKey,
       self: () => active,
     );
     active = _ActiveReminderRefresh(
@@ -555,28 +662,71 @@ class CalendarReminderCoordinator {
     required CalendarReminderRefreshReason reason,
     required DateTime startedAt,
     required int generation,
+    required String? owner,
   }) async {
     // The session may have ended before this work even began running.
-    if (!_isCurrentGeneration(generation)) {
+    if (!_isCurrentSession(generation, owner)) {
       return _skipped(
         reason,
         CalendarReminderRefreshStatus.skippedSessionInvalidated,
       );
     }
 
-    final ownerKey = _ownerKey;
-    final enabled = await _preferences.loadCalendarRemindersEnabled(
+    final ownerKey = owner;
+    final prefResult = await _preferences.loadCalendarRemindersEnabledResult(
       ownerKey: ownerKey,
     );
-    if (!enabled) {
-      return _runDisabled(reason, generation);
+    // The session may have ended (sign-out) or switched (account B) while the
+    // preference was loading. Do not request permission or fetch for a stale
+    // session — even to interpret an unavailable read.
+    if (!_isCurrentSession(generation, owner)) {
+      return _skipped(
+        reason,
+        CalendarReminderRefreshStatus.skippedSessionInvalidated,
+      );
+    }
+    if (prefResult.isUnavailable) {
+      // The stored value is unknown (storage failure, or a required migration
+      // write failed). Do NOT reinterpret this as disabled: request no
+      // permission, fetch nothing, schedule/cancel nothing, touch neither the
+      // manifest nor the preference — preserve existing reminders and retry on a
+      // later refresh.
+      _log(
+        reason,
+        CalendarReminderRefreshStatus.preferenceUnavailable,
+        error: prefResult.errorCategory,
+      );
+      return CalendarReminderRefreshResult(
+        reason: reason,
+        status: CalendarReminderRefreshStatus.preferenceUnavailable,
+        completedAt: _now(),
+        errorCategory: prefResult.errorCategory,
+      );
+    }
+    if (prefResult.enabled != true) {
+      // `absent` (normal default-disabled) or `loaded false` (explicit disable):
+      // both take the disabled-cleanup path, which retries any leftover owned
+      // IDs and otherwise does nothing.
+      return _runDisabled(reason, generation, owner);
+    }
+    // `loaded true` — continue to permission + reconciliation below.
+
+    // Immediately before requesting permission, confirm the session is still
+    // current: a sign-out during the preference load must not surface a
+    // permission prompt for a session that no longer exists.
+    if (!_isCurrentSession(generation, owner)) {
+      return _skipped(
+        reason,
+        CalendarReminderRefreshStatus.skippedSessionInvalidated,
+      );
     }
 
     final granted = await _notificationService.requestPermissionIfNeeded();
     if (!granted) {
       // The session may have ended while permission was being resolved. Do not
-      // let an old session write (clear) the manifest after a new one began.
-      if (!_isCurrentGeneration(generation)) {
+      // let an old session write (clear) the manifest, or clean up, after a new
+      // one began — validate both generation and owner.
+      if (!_isCurrentSession(generation, owner)) {
         return _skipped(
           reason,
           CalendarReminderRefreshStatus.skippedSessionInvalidated,
@@ -584,10 +734,37 @@ class CalendarReminderCoordinator {
       }
       // Keep the stored preference honest so Settings does not keep showing a
       // switch that is silently doing nothing — scoped to the current account.
-      await _preferences.saveCalendarRemindersEnabled(
-        ownerKey: ownerKey,
-        enabled: false,
-      );
+      // Surface a persistence failure (never swallow it): the result must not
+      // look fully successful if the write did not persist.
+      var preferenceSaveFailed = false;
+      try {
+        await _preferences.saveCalendarRemindersEnabled(
+          ownerKey: ownerKey,
+          enabled: false,
+        );
+      } on CalendarReminderPreferenceStorageException catch (e) {
+        preferenceSaveFailed = true;
+        _log(
+          reason,
+          CalendarReminderRefreshStatus.permissionDenied,
+          error: '$e',
+        );
+      }
+      // The preference save is asynchronous: a sign-out or account switch can
+      // occur while it is queued. Re-check the captured generation and owner
+      // before running any targeted cleanup. If the session is no longer
+      // current, do not launch a stale-refresh cleanup — the outgoing owner's
+      // reminders are the responsibility of endSession()/account-transition
+      // cleanup, and the incoming account must never be cleaned by this stale
+      // refresh. Surface the structured save outcome for diagnostics.
+      if (!_isCurrentSession(generation, owner)) {
+        return CalendarReminderRefreshResult(
+          reason: reason,
+          status: CalendarReminderRefreshStatus.skippedSessionInvalidated,
+          completedAt: _now(),
+          preferenceSaveFailed: preferenceSaveFailed,
+        );
+      }
       // Previously scheduled reminders would otherwise become unmanaged if the
       // user later re-grants permission via system settings. Cancel the ones
       // this account owns (targeted, never a global cancelAll) and keep any that
@@ -599,6 +776,17 @@ class CalendarReminderCoordinator {
         status: CalendarReminderRefreshStatus.permissionDenied,
         completedAt: _now(),
         cleanup: cleanup,
+        preferenceSaveFailed: preferenceSaveFailed,
+      );
+    }
+
+    // Permission was granted. Confirm the session is still current before
+    // beginning an event fetch: permission granted after the session ended must
+    // not fetch with the old token.
+    if (!_isCurrentSession(generation, owner)) {
+      return _skipped(
+        reason,
+        CalendarReminderRefreshStatus.skippedSessionInvalidated,
       );
     }
 
@@ -630,8 +818,10 @@ class CalendarReminderCoordinator {
     }
 
     // The fetch may complete after the session ended (sign-out, or account B
-    // began). Never reconcile or write the manifest for a stale session.
-    if (!_isCurrentGeneration(generation)) {
+    // began). Never reconcile or write the manifest for a stale session — and,
+    // before passing work into reconciliation, validate both generation and
+    // owner.
+    if (!_isCurrentSession(generation, owner)) {
       _log(reason, CalendarReminderRefreshStatus.skippedSessionInvalidated);
       return _skipped(
         reason,
@@ -647,7 +837,7 @@ class CalendarReminderCoordinator {
         : CalendarReminderOperationContext(
             generation: generation,
             ownerKey: ownerKey,
-            isCurrent: () => _isCurrentGeneration(generation),
+            isCurrent: () => _isCurrentSession(generation, owner),
           );
 
     final reconciliation = await _notificationService
@@ -686,6 +876,7 @@ class CalendarReminderCoordinator {
   Future<CalendarReminderRefreshResult> _runDisabled(
     CalendarReminderRefreshReason reason,
     int generation,
+    String? owner,
   ) async {
     final loadResult = await _preferences.loadCalendarReminderManifestResult();
     if (loadResult.isCorrupt) {
@@ -698,9 +889,10 @@ class CalendarReminderCoordinator {
       return _skipped(reason, CalendarReminderRefreshStatus.skippedDisabled);
     }
 
-    // A new session may have begun while we were reading the manifest — an old
-    // session must not clear/rewrite it after that.
-    if (!_isCurrentGeneration(generation)) {
+    // A new session may have begun (or the account switched) while we were
+    // reading the manifest — an old session must not clear/rewrite it after
+    // that. Validate both generation and owner.
+    if (!_isCurrentSession(generation, owner)) {
       return _skipped(
         reason,
         CalendarReminderRefreshStatus.skippedSessionInvalidated,

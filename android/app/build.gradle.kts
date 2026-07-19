@@ -102,6 +102,18 @@ android {
                 signingConfig = signingConfigs.getByName("release")
             }
 
+            // Enable code + resource shrinking for release and wire in the
+            // flutter_local_notifications 17.2.4 ProGuard rules (see
+            // proguard-rules.pro). Resource shrinking honours res/raw/keep.xml so
+            // the notification icon is retained. Signing behaviour above is
+            // unchanged.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
+
             ndk {
                 debugSymbolLevel = "FULL"
             }

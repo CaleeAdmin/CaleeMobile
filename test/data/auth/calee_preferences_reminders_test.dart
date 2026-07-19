@@ -1,6 +1,8 @@
 // Tests for the account-scoped calendar-reminder-enabled preference and its
 // one-time legacy-global migration.
 
+import 'dart:convert';
+
 import 'package:calee_mobile/data/auth/calee_preferences.dart';
 import 'package:calee_mobile/features/notifications/calendar_notification_candidates.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -70,6 +72,46 @@ void main() {
     }
   });
 
+  group('structured load result (Fix 2)', () {
+    test('a new account is absent (not a failure)', () async {
+      final prefs = CaleePreferences();
+      final result = await prefs.loadCalendarRemindersEnabledResult(
+        ownerKey: ownerA,
+      );
+      expect(result.status, CalendarReminderPreferenceLoadStatus.absent);
+      expect(result.enabled, isNull);
+    });
+
+    test('a saved value is loaded with its actual boolean', () async {
+      final prefs = CaleePreferences();
+      await prefs.saveCalendarRemindersEnabled(ownerKey: ownerA, enabled: true);
+      await prefs.saveCalendarRemindersEnabled(
+        ownerKey: ownerB,
+        enabled: false,
+      );
+
+      final a = await prefs.loadCalendarRemindersEnabledResult(
+        ownerKey: ownerA,
+      );
+      final b = await prefs.loadCalendarRemindersEnabledResult(
+        ownerKey: ownerB,
+      );
+      expect(a.status, CalendarReminderPreferenceLoadStatus.loaded);
+      expect(a.enabled, isTrue);
+      expect(b.status, CalendarReminderPreferenceLoadStatus.loaded);
+      expect(b.enabled, isFalse);
+    });
+
+    test(
+      'the null-owner legacy path is absent when nothing is stored',
+      () async {
+        final prefs = CaleePreferences();
+        final result = await prefs.loadCalendarRemindersEnabledResult();
+        expect(result.status, CalendarReminderPreferenceLoadStatus.absent);
+      },
+    );
+  });
+
   group('legacy global migration', () {
     setUp(() {
       SharedPreferences.setMockInitialValues({
@@ -113,23 +155,39 @@ void main() {
       );
     });
 
-    test('the migration marker stores only the owner key, no raw ID', () async {
-      const rawId = 'raw-account-42';
-      final owner = reminderOwnerKey(rawId);
-      final prefs = CaleePreferences();
-      await prefs.loadCalendarRemindersEnabled(ownerKey: owner);
+    test(
+      'the migrated record records the claiming owner key, no raw ID',
+      () async {
+        const rawId = 'raw-account-42';
+        final owner = reminderOwnerKey(rawId);
+        final prefs = CaleePreferences();
+        await prefs.loadCalendarRemindersEnabled(ownerKey: owner);
 
-      final sp = await SharedPreferences.getInstance();
-      final marker = sp.getString(
-        'calee_pref_calendar_reminders_enabled_migrated',
-      );
-      expect(
-        marker,
-        owner,
-        reason: 'the marker records the claiming owner key',
-      );
-      expect(marker, isNot(contains(rawId)));
-    });
+        final sp = await SharedPreferences.getInstance();
+        final raw = sp.getString('calee_pref_calendar_reminder_settings_v2');
+        expect(raw, isNotNull, reason: 'the migration commits the v2 record');
+        final record = CalendarReminderPreferenceRecord.fromJson(
+          jsonDecode(raw!),
+        );
+        expect(record, isNotNull);
+        expect(
+          record!.legacyClaimConsumed,
+          isTrue,
+          reason: 'the claim is consumed by the migrating account',
+        );
+        expect(
+          record.legacyClaimOwner,
+          owner,
+          reason: 'the record records the claiming owner key',
+        );
+        // No raw account ID may appear anywhere in storage.
+        for (final key in sp.getKeys()) {
+          expect(key, isNot(contains(rawId)));
+          final value = sp.get(key);
+          if (value is String) expect(value, isNot(contains(rawId)));
+        }
+      },
+    );
 
     test(
       'the account-agnostic (null owner) path reads the legacy value',
@@ -138,5 +196,49 @@ void main() {
         expect(await prefs.loadCalendarRemindersEnabled(), isTrue);
       },
     );
+
+    test('structured result: migrating account is loaded(true), a later '
+        'account is absent', () async {
+      final prefs = CaleePreferences();
+      final a = await prefs.loadCalendarRemindersEnabledResult(
+        ownerKey: ownerA,
+      );
+      expect(a.status, CalendarReminderPreferenceLoadStatus.loaded);
+      expect(a.enabled, isTrue, reason: 'A inherits the legacy value once');
+
+      final b = await prefs.loadCalendarRemindersEnabledResult(
+        ownerKey: ownerB,
+      );
+      expect(
+        b.status,
+        CalendarReminderPreferenceLoadStatus.absent,
+        reason: 'a later account does not inherit; absent is not a failure',
+      );
+      expect(b.enabled, isNull);
+    });
+
+    test(
+      'structured result: the null-owner legacy path is loaded(true)',
+      () async {
+        final prefs = CaleePreferences();
+        final result = await prefs.loadCalendarRemindersEnabledResult();
+        expect(result.status, CalendarReminderPreferenceLoadStatus.loaded);
+        expect(result.enabled, isTrue);
+      },
+    );
+  });
+
+  group('observable save (Fix 3)', () {
+    test('a successful save does not throw', () async {
+      final prefs = CaleePreferences();
+      await expectLater(
+        prefs.saveCalendarRemindersEnabled(ownerKey: ownerA, enabled: true),
+        completes,
+      );
+      expect(
+        await prefs.loadCalendarRemindersEnabled(ownerKey: ownerA),
+        isTrue,
+      );
+    });
   });
 }

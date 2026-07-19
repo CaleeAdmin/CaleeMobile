@@ -9,6 +9,7 @@
 // without hitting flutter_local_notifications platform channels.
 
 import 'package:calee_mobile/data/api/calee_hub_client.dart';
+import 'package:calee_mobile/data/auth/calee_preferences.dart';
 import 'package:calee_mobile/data/models/client_bootstrap.dart';
 import 'package:calee_mobile/data/models/client_calendar.dart';
 import 'package:calee_mobile/data/models/client_preferences.dart';
@@ -31,7 +32,10 @@ class _FakeNotificationService extends LocalCalendarNotificationService {
   final List<String> disableOwnerKeys = [];
 
   @override
-  Future<void> initialize() async {}
+  Future<LocalNotificationInitializationResult> initialize() async =>
+      const LocalNotificationInitializationResult(
+        status: LocalNotificationInitializationStatus.initialized,
+      );
 
   @override
   Future<bool> requestPermissionIfNeeded() async => permissionGranted;
@@ -73,6 +77,47 @@ class _RecordingCoordinator extends CalendarReminderCoordinator {
   }
 }
 
+// ── Preferences that fail to persist the reminder toggle ──────────────────────
+
+class _FailingPreferences extends CaleePreferences {
+  _FailingPreferences({this.enabledSeed = false});
+
+  /// The value [loadCalendarRemindersEnabled] returns, so a test can start the
+  /// switch on (to exercise the failed-disable path) or off.
+  final bool enabledSeed;
+  int saveAttempts = 0;
+
+  @override
+  Future<bool> loadCalendarRemindersEnabled({String? ownerKey}) async =>
+      enabledSeed;
+
+  @override
+  Future<CalendarReminderPreferenceLoadResult>
+  loadCalendarRemindersEnabledResult({String? ownerKey}) async =>
+      CalendarReminderPreferenceLoadResult.loaded(enabledSeed);
+
+  @override
+  Future<void> saveCalendarRemindersEnabled({
+    String? ownerKey,
+    required bool enabled,
+  }) async {
+    saveAttempts++;
+    throw const CalendarReminderPreferenceStorageException('save');
+  }
+}
+
+// ── Preferences whose reminder read is unavailable ────────────────────────────
+
+class _UnavailablePreferences extends CaleePreferences {
+  @override
+  Future<bool> loadCalendarRemindersEnabled({String? ownerKey}) async => false;
+
+  @override
+  Future<CalendarReminderPreferenceLoadResult>
+  loadCalendarRemindersEnabledResult({String? ownerKey}) async =>
+      const CalendarReminderPreferenceLoadResult.unavailable('io');
+}
+
 // ── Stub hub client ───────────────────────────────────────────────────────────
 
 class _StubHubClient extends CaleeHubClient {
@@ -110,10 +155,12 @@ Widget _wrap({
   required bool permissionGranted,
   VoidCallback? onNavigateToCalendar,
   CalendarReminderCoordinator? coordinator,
+  CaleePreferences? preferencesOverride,
+  LocalCalendarNotificationService? notificationService,
 }) {
-  LocalCalendarNotificationService.testOverride = _FakeNotificationService(
-    permissionGranted: permissionGranted,
-  );
+  LocalCalendarNotificationService.testOverride =
+      notificationService ??
+      _FakeNotificationService(permissionGranted: permissionGranted);
   return MaterialApp(
     theme: CaleeTheme.buildThemeData(),
     home: Scaffold(
@@ -124,6 +171,7 @@ Widget _wrap({
         onSignOut: () {},
         reminderCoordinator: coordinator,
         onNavigateToCalendar: onNavigateToCalendar,
+        preferencesOverride: preferencesOverride,
       ),
     ),
   );
@@ -220,6 +268,112 @@ void main() {
         findsOneWidget,
         reason: 'SnackBar should explain the denial',
       );
+    },
+  );
+
+  // ── Fix 3: failed persistence gates reconcile/cleanup + rolls the switch back ─
+
+  testWidgets(
+    'a failed enable persist rolls the switch back, shows a SnackBar, and does '
+    'not reconcile',
+    (tester) async {
+      final coordinator = _RecordingCoordinator();
+      await tester.pumpWidget(
+        _wrap(
+          permissionGranted: true,
+          coordinator: coordinator,
+          preferencesOverride: _FailingPreferences(enabledSeed: false),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byType(Switch));
+      await tester.pumpAndSettle();
+
+      final sw = tester.widget<Switch>(find.byType(Switch));
+      expect(
+        sw.value,
+        isFalse,
+        reason: 'the switch rolls back when enabling did not persist',
+      );
+      expect(
+        coordinator.reasons,
+        isEmpty,
+        reason: 'no reconciliation may run when enabling failed to persist',
+      );
+      expect(
+        find.text("Couldn't save your preference. Please try again."),
+        findsOneWidget,
+        reason: 'the transient save error is surfaced via a SnackBar',
+      );
+    },
+  );
+
+  testWidgets(
+    'a failed disable persist rolls the switch back on, shows a SnackBar, and '
+    'does not run cleanup',
+    (tester) async {
+      final notifs = _FakeNotificationService(permissionGranted: true);
+      await tester.pumpWidget(
+        _wrap(
+          permissionGranted: true,
+          notificationService: notifs,
+          preferencesOverride: _FailingPreferences(enabledSeed: true),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // The switch starts on (loaded value is true).
+      expect(tester.widget<Switch>(find.byType(Switch)).value, isTrue);
+
+      // Tap to disable — the persist fails.
+      await tester.tap(find.byType(Switch));
+      await tester.pumpAndSettle();
+
+      final sw = tester.widget<Switch>(find.byType(Switch));
+      expect(
+        sw.value,
+        isTrue,
+        reason: 'the switch stays on when disabling did not persist',
+      );
+      expect(
+        notifs.disableCount,
+        0,
+        reason: 'no owner cleanup may run when disabling failed to persist',
+      );
+      expect(
+        find.text("Couldn't save your preference. Please try again."),
+        findsOneWidget,
+      );
+    },
+  );
+
+  // ── Fix 7: an unavailable read is shown accurately, not as a real "off" ──────
+
+  testWidgets(
+    'an unavailable reminder read disables the switch and shows a concise '
+    'message without a full-page error',
+    (tester) async {
+      await tester.pumpWidget(
+        _wrap(
+          permissionGranted: true,
+          preferencesOverride: _UnavailablePreferences(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final sw = tester.widget<Switch>(find.byType(Switch));
+      expect(
+        sw.onChanged,
+        isNull,
+        reason: 'the switch is disabled while the value is untrustworthy',
+      );
+      expect(
+        find.text("Couldn't load the reminder setting. Please try again."),
+        findsOneWidget,
+      );
+      // Other Settings sections remain usable (no full-page error state).
+      expect(find.byType(Switch), findsOneWidget);
     },
   );
 }

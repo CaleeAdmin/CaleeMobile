@@ -12,6 +12,17 @@ name: Flutter CI
 # Settings -> Branches -> Branch protection rules -> Require status checks to
 # pass before merging, for each of `dev`, `stage`, and `main`, so no pull
 # request can merge into an integration branch without a green run.
+#
+# Release-build scope: the job name and its fast steps (format, analyze,
+# test, debug build) always run on every trigger below, so the required
+# check above is unaffected. The release-APK build/sign/notification-config
+# steps near the bottom of this job are gated to only execute on a push to
+# `stage` or `main` (i.e. a merge/promotion into those branches) or a manual
+# workflow_dispatch targeting one of them — never on a `dev` push or on any
+# pull_request, including PRs targeting stage/main. See the `if:` conditions
+# on those individual steps for the exact rule. This trades pre-merge
+# R8/shrinking-regression coverage on `dev` PRs for a faster PR gate; a
+# shrinking regression is still caught before it reaches `stage`/`main`.
 on:
   pull_request:
     branches:
@@ -35,6 +46,23 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # Free runner disk space before the toolchain and builds. Runs 429/430
+      # (the first to include the release smoke build) failed with "No space
+      # left on device" in :app:mergeReleaseNativeDebugMetadata — the default
+      # ubuntu-latest image leaves ~14 GB free, which the debug + R8 release
+      # builds together exhaust. Removing preinstalled toolchains this job
+      # never uses (.NET, Haskell, CodeQL, Boost, Swift) frees ~15 GB. The
+      # Android SDK and JDK are NOT touched.
+      - name: Free runner disk space
+        run: |
+          echo "Free space before cleanup:"
+          df -h /
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/boost \
+            /usr/share/swift
+          echo "Free space after cleanup:"
+          df -h /
+
       - uses: actions/checkout@v4
 
       # JDK 17 for the Android Gradle build below. The GitHub-hosted Android SDK
@@ -53,6 +81,15 @@ jobs:
       - name: Get dependencies
         run: flutter pub get
 
+      # Guard the native Android/iOS notification configuration (scheduled-
+      # notification receivers, reboot permission, notification delegate,
+      # dedicated icon, release shrinking config). Runs before the Flutter build
+      # so a platform-config regression fails fast. Standard-library Python only.
+      - name: Check notification platform config
+        run: |
+          python3 .github/scripts/check_notification_platform_config.py selftest
+          python3 .github/scripts/check_notification_platform_config.py check
+
       - name: Check formatting
         run: dart format --set-exit-if-changed lib test
 
@@ -69,3 +106,58 @@ jobs:
       # gate. Debug only: no release artifact is produced, published, or signed.
       - name: Build Android APK (debug)
         run: flutter build apk --debug
+
+      # Ephemeral CI-only signing key so the release smoke build below can
+      # produce a signed APK without touching production signing secrets.
+      # Generated fresh in $RUNNER_TEMP (job-scoped, never cached, never
+      # uploaded as an artifact, and unrelated to android/key.properties or
+      # any repository/organization secret).
+      #
+      # Gated to stage/main merges (push) or a manual dispatch targeting one
+      # of them — not run on dev pushes or any pull_request — per the
+      # release-build-scope note at the top of this file.
+      - name: Generate temporary CI keystore
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && contains(fromJSON('["stage","main"]'), github.ref_name)
+        run: |
+          keytool -genkeypair \
+            -keystore "$RUNNER_TEMP/calee-ci-release.jks" \
+            -storepass "ci-temporary-password" \
+            -keypass "ci-temporary-password" \
+            -alias "calee-ci" \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 1 \
+            -dname "CN=Calee CI, OU=CI, O=Calee, L=Perth, ST=WA, C=AU"
+
+      # Smoke-verify that the isMinifyEnabled/isShrinkResources release config
+      # still produces a working, correctly packaged release build (R8 +
+      # resource shrinking exercise real code paths a debug build does not).
+      # Signed with the ephemeral keystore above; this APK is a smoke-test
+      # product only — never uploaded, never published.
+      #
+      # Gated to stage/main merges (push) or a manual dispatch targeting one
+      # of them — see the release-build-scope note at the top of this file.
+      - name: Build Android APK (release)
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && contains(fromJSON('["stage","main"]'), github.ref_name)
+        run: flutter build apk --release
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/calee-ci-release.jks
+          ANDROID_KEYSTORE_PASSWORD: ci-temporary-password
+          ANDROID_KEY_ALIAS: calee-ci
+          ANDROID_KEY_PASSWORD: ci-temporary-password
+
+      # Inspect the packaged release artifact itself — manifest permissions,
+      # the scheduled-notification receivers, and the notification icon must
+      # all survive R8 + resource shrinking. The source-level config check
+      # above can't catch a shrinker regression; this reads the built APK.
+      # Standard-library Python only; never modifies the APK.
+      #
+      # Gated identically to the release build above (it inspects that
+      # build's output, so it must skip whenever that step skips) — see the
+      # release-build-scope note at the top of this file.
+      - name: Inspect release APK notification configuration
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && contains(fromJSON('["stage","main"]'), github.ref_name)
+        run: |
+          python3 .github/scripts/check_notification_release_apk.py selftest
+          python3 .github/scripts/check_notification_release_apk.py check \
+            build/app/outputs/flutter-apk/app-release.apk

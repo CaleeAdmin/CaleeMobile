@@ -216,6 +216,161 @@ class _CleanupSpyNotifs extends LocalCalendarNotificationService {
   }
 }
 
+/// Preferences stub returning a configured structured load result, and
+/// optionally throwing on save, so the coordinator's preference-unavailable and
+/// permission-denied-plus-save-failure paths can be driven without real storage.
+class _StubPrefs extends CaleePreferences {
+  _StubPrefs(this.loadResult, {this.saveError});
+
+  final CalendarReminderPreferenceLoadResult loadResult;
+  final Object? saveError;
+  int loadCount = 0;
+  int saveCount = 0;
+
+  @override
+  Future<CalendarReminderPreferenceLoadResult>
+  loadCalendarRemindersEnabledResult({String? ownerKey}) async {
+    loadCount++;
+    return loadResult;
+  }
+
+  @override
+  Future<void> saveCalendarRemindersEnabled({
+    String? ownerKey,
+    required bool enabled,
+  }) async {
+    saveCount++;
+    if (saveError != null) throw saveError!;
+  }
+}
+
+/// Preferences stub whose load blocks until [releaseLoad] is called, so a
+/// session change can be injected while a preference read is in flight.
+class _BlockingLoadPrefs extends CaleePreferences {
+  _BlockingLoadPrefs(this._result);
+
+  final CalendarReminderPreferenceLoadResult _result;
+  final Completer<void> _reached = Completer<void>();
+  final Completer<void> _gate = Completer<void>();
+  int loadCount = 0;
+  int saveCount = 0;
+
+  Future<void> get reachedLoad => _reached.future;
+  void releaseLoad() {
+    if (!_gate.isCompleted) _gate.complete();
+  }
+
+  @override
+  Future<CalendarReminderPreferenceLoadResult>
+  loadCalendarRemindersEnabledResult({String? ownerKey}) async {
+    loadCount++;
+    if (!_reached.isCompleted) _reached.complete();
+    await _gate.future;
+    return _result;
+  }
+
+  @override
+  Future<void> saveCalendarRemindersEnabled({
+    String? ownerKey,
+    required bool enabled,
+  }) async {
+    saveCount++;
+  }
+}
+
+/// Preferences stub whose `saveCalendarRemindersEnabled` blocks until released,
+/// so a sign-out / account switch can be injected while the permission-denied
+/// preference write is still queued (Fix: stale permission-denied cleanup race).
+class _BlockingSavePrefs extends CaleePreferences {
+  _BlockingSavePrefs(this._loadResult, {this.saveError});
+
+  final CalendarReminderPreferenceLoadResult _loadResult;
+  final Object? saveError;
+  final Completer<void> _reached = Completer<void>();
+  final Completer<void> _gate = Completer<void>();
+  int loadCount = 0;
+  int saveCount = 0;
+
+  Future<void> get reachedSave => _reached.future;
+  void releaseSave() {
+    if (!_gate.isCompleted) _gate.complete();
+  }
+
+  @override
+  Future<CalendarReminderPreferenceLoadResult>
+  loadCalendarRemindersEnabledResult({String? ownerKey}) async {
+    loadCount++;
+    return _loadResult;
+  }
+
+  @override
+  Future<void> saveCalendarRemindersEnabled({
+    String? ownerKey,
+    required bool enabled,
+  }) async {
+    saveCount++;
+    if (!_reached.isCompleted) _reached.complete();
+    await _gate.future;
+    if (saveError != null) throw saveError!;
+  }
+}
+
+/// Notification service whose permission request blocks until released, so a
+/// session change can be injected while the permission dialog is resolving.
+class _BlockingPermissionNotifs extends LocalCalendarNotificationService {
+  _BlockingPermissionNotifs({required this.grant}) : super.forTest();
+
+  final bool grant;
+  final Completer<void> _reached = Completer<void>();
+  final Completer<void> _gate = Completer<void>();
+  int reconcileCount = 0;
+  int disableCount = 0;
+
+  Future<void> get reachedPermission => _reached.future;
+  void releasePermission() {
+    if (!_gate.isCompleted) _gate.complete();
+  }
+
+  @override
+  Future<bool> requestPermissionIfNeeded() async {
+    if (!_reached.isCompleted) _reached.complete();
+    await _gate.future;
+    return grant;
+  }
+
+  @override
+  Future<CalendarReminderDisableResult> disableCalendarReminders({
+    required String ownerKey,
+    bool includeLegacyOwnerless = false,
+  }) async {
+    disableCount++;
+    return const CalendarReminderDisableResult(
+      cancelledCount: 0,
+      failedCount: 0,
+      manifestPersisted: true,
+    );
+  }
+
+  @override
+  Future<CalendarReconciliationResult> reconcileCalendarReminders(
+    List<ClientEvent> events, {
+    DateTime? now,
+    String? ownerKey,
+    CalendarReminderOperationContext? context,
+  }) async {
+    reconcileCount++;
+    return CalendarReconciliationResult(
+      eventsFetched: events.length,
+      eligibleCandidates: events.length,
+      scheduledCount: events.length,
+      cancelledCount: 0,
+      unchangedCount: 0,
+      failedCount: 0,
+      completedAt: now ?? DateTime(2026),
+    );
+  }
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 final _now = DateTime(2026, 7, 4, 12, 0, 0);
@@ -233,17 +388,31 @@ ClientEvent _event(String id) => ClientEvent(
   source: 'test',
 );
 
+/// Builds a coordinator and, by default, begins an active reminder session for
+/// [beginAccount]. A refresh now requires an active session (a non-empty token
+/// is not sufficient), so tests that exercise refresh behaviour need an owner;
+/// pass `beginAccount: null` for tests that deliberately start with no session
+/// (e.g. verifying an empty/whitespace begin creates no owner).
 CalendarReminderCoordinator _make({
   required CaleeHubClient hub,
   required LocalCalendarNotificationService notifs,
   DateTime Function()? clock,
   Duration throttle = const Duration(minutes: 5),
-}) => CalendarReminderCoordinator(
-  hubClient: hub,
-  notificationService: notifs,
-  now: clock ?? () => _now,
-  throttle: throttle,
-);
+  CaleePreferences? prefs,
+  String? beginAccount = 'acct-A',
+}) {
+  final coord = CalendarReminderCoordinator(
+    hubClient: hub,
+    notificationService: notifs,
+    preferences: prefs,
+    now: clock ?? () => _now,
+    throttle: throttle,
+  );
+  if (beginAccount != null) {
+    coord.beginSession(accountId: beginAccount);
+  }
+  return coord;
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -268,6 +437,77 @@ void main() {
     expect(result.status, CalendarReminderRefreshStatus.skippedSignedOut);
     expect(hub.eventsCallCount, 0);
     expect(notifs.reconcileCount, 0);
+  });
+
+  group('active-session guard (Defect 2)', () {
+    test('a non-empty token without an active session does nothing', () async {
+      final hub = _FakeHub(eventsToReturn: [_event('e1')]);
+      final notifs = _FakeNotifs();
+      // A stub that records whether the preference was even read.
+      final prefs = _StubPrefs(
+        const CalendarReminderPreferenceLoadResult.loaded(true),
+      );
+      // No session: begin nothing.
+      final coord = _make(
+        hub: hub,
+        notifs: notifs,
+        prefs: prefs,
+        beginAccount: null,
+      );
+      expect(coord.hasActiveSession, isFalse);
+
+      final result = await coord.refresh(
+        accessToken: 'tok',
+        reason: CalendarReminderRefreshReason.sessionRestored,
+      );
+
+      expect(
+        result.status,
+        CalendarReminderRefreshStatus.skippedNoActiveSession,
+      );
+      expect(
+        prefs.loadCount,
+        0,
+        reason: 'no preference read without a session',
+      );
+      expect(hub.eventsCallCount, 0, reason: 'no event fetch');
+      expect(notifs.reconcileCount, 0, reason: 'no reconciliation');
+      expect(notifs.disableCount, 0, reason: 'no notification mutation');
+    });
+
+    test('beginning a valid session then permits a refresh', () async {
+      final hub = _FakeHub(eventsToReturn: [_event('e1')]);
+      final notifs = _FakeNotifs();
+      final coord = _make(
+        hub: hub,
+        notifs: notifs,
+        prefs: _StubPrefs(
+          const CalendarReminderPreferenceLoadResult.loaded(true),
+        ),
+        beginAccount: null,
+      );
+
+      // Guarded before a session exists.
+      final skipped = await coord.refresh(
+        accessToken: 'tok',
+        reason: CalendarReminderRefreshReason.sessionRestored,
+      );
+      expect(
+        skipped.status,
+        CalendarReminderRefreshStatus.skippedNoActiveSession,
+      );
+
+      // After a valid session begins, the refresh proceeds.
+      coord.beginSession(accountId: 'acct-A');
+      expect(coord.hasActiveSession, isTrue);
+      final result = await coord.refresh(
+        accessToken: 'tok',
+        reason: CalendarReminderRefreshReason.sessionRestored,
+      );
+      expect(result.status, CalendarReminderRefreshStatus.reconciled);
+      expect(hub.eventsCallCount, 1);
+      expect(notifs.reconcileCount, 1);
+    });
   });
 
   test('reminders disabled: does not fetch or reconcile', () async {
@@ -1168,6 +1408,607 @@ void main() {
         expect(coord.ownerKey, reminderOwnerKey('acct-B'));
       },
     );
+  });
+
+  group('preference load result (Fix 2)', () {
+    test('unavailable preference read preserves reminders: no fetch, no '
+        'reconcile, no cleanup, no permission request', () async {
+      final hub = _FakeHub(eventsToReturn: [_event('e1')]);
+      final notifs = _FakeNotifs();
+      final coord = _make(
+        hub: hub,
+        notifs: notifs,
+        prefs: _StubPrefs(
+          const CalendarReminderPreferenceLoadResult.unavailable('io'),
+        ),
+      );
+
+      final result = await coord.refresh(
+        accessToken: 'tok',
+        reason: CalendarReminderRefreshReason.sessionRestored,
+      );
+
+      expect(
+        result.status,
+        CalendarReminderRefreshStatus.preferenceUnavailable,
+      );
+      expect(result.errorCategory, 'io');
+      expect(hub.eventsCallCount, 0, reason: 'never fetch on unavailable read');
+      expect(notifs.reconcileCount, 0, reason: 'never reconcile');
+      expect(notifs.disableCount, 0, reason: 'never cancel/clean');
+    });
+
+    test('loaded-true preference proceeds to reconcile', () async {
+      final hub = _FakeHub(eventsToReturn: [_event('e1')]);
+      final notifs = _FakeNotifs();
+      final coord = _make(
+        hub: hub,
+        notifs: notifs,
+        prefs: _StubPrefs(
+          const CalendarReminderPreferenceLoadResult.loaded(true),
+        ),
+      );
+
+      final result = await coord.refresh(
+        accessToken: 'tok',
+        reason: CalendarReminderRefreshReason.sessionRestored,
+      );
+
+      expect(result.status, CalendarReminderRefreshStatus.reconciled);
+      expect(hub.eventsCallCount, 1);
+      expect(notifs.reconcileCount, 1);
+    });
+
+    test(
+      'loaded-false preference takes the disabled path (no fetch)',
+      () async {
+        final hub = _FakeHub();
+        final notifs = _FakeNotifs();
+        final coord = _make(
+          hub: hub,
+          notifs: notifs,
+          prefs: _StubPrefs(
+            const CalendarReminderPreferenceLoadResult.loaded(false),
+          ),
+        );
+
+        final result = await coord.refresh(
+          accessToken: 'tok',
+          reason: CalendarReminderRefreshReason.sessionRestored,
+        );
+
+        expect(result.status, CalendarReminderRefreshStatus.skippedDisabled);
+        expect(hub.eventsCallCount, 0);
+        expect(notifs.reconcileCount, 0);
+      },
+    );
+
+    test(
+      'absent preference takes the default-disabled path (no fetch)',
+      () async {
+        final hub = _FakeHub();
+        final notifs = _FakeNotifs();
+        final coord = _make(
+          hub: hub,
+          notifs: notifs,
+          prefs: _StubPrefs(
+            const CalendarReminderPreferenceLoadResult.absent(),
+          ),
+        );
+
+        final result = await coord.refresh(
+          accessToken: 'tok',
+          reason: CalendarReminderRefreshReason.sessionRestored,
+        );
+
+        expect(result.status, CalendarReminderRefreshStatus.skippedDisabled);
+        expect(hub.eventsCallCount, 0);
+        expect(notifs.reconcileCount, 0);
+      },
+    );
+  });
+
+  group('permission denied + preference save failure (Fix 3)', () {
+    test(
+      'permission denial with a failed preference write cleans up but is not '
+      'fully successful',
+      () async {
+        final hub = _FakeHub();
+        final notifs = _CleanupSpyNotifs(permission: false);
+        final coord = _make(
+          hub: hub,
+          notifs: notifs,
+          prefs: _StubPrefs(
+            const CalendarReminderPreferenceLoadResult.loaded(true),
+            saveError: const CalendarReminderPreferenceStorageException('save'),
+          ),
+        );
+
+        final result = await coord.refresh(
+          accessToken: 'tok',
+          reason: CalendarReminderRefreshReason.remindersEnabled,
+        );
+
+        expect(result.status, CalendarReminderRefreshStatus.permissionDenied);
+        expect(
+          result.preferenceSaveFailed,
+          isTrue,
+          reason: 'a failed preference write must be exposed, not swallowed',
+        );
+        expect(
+          notifs.disableCount,
+          1,
+          reason: 'targeted owner cleanup still runs for safety',
+        );
+        expect(hub.eventsCallCount, 0, reason: 'never fetch when denied');
+      },
+    );
+
+    test('permission denial with a successful preference write reports no save '
+        'failure', () async {
+      final hub = _FakeHub();
+      final notifs = _CleanupSpyNotifs(permission: false);
+      final coord = _make(
+        hub: hub,
+        notifs: notifs,
+        prefs: _StubPrefs(
+          const CalendarReminderPreferenceLoadResult.loaded(true),
+        ),
+      );
+
+      final result = await coord.refresh(
+        accessToken: 'tok',
+        reason: CalendarReminderRefreshReason.remindersEnabled,
+      );
+
+      expect(result.status, CalendarReminderRefreshStatus.permissionDenied);
+      expect(result.preferenceSaveFailed, isFalse);
+      expect(notifs.disableCount, 1);
+    });
+  });
+
+  group('permission-denied save/session race (Fix 6)', () {
+    test('sign-out while the denied preference save is blocked → invalidated, '
+        'no extra cleanup from the stale refresh', () async {
+      final hub = _FakeHub();
+      final notifs = _CleanupSpyNotifs(permission: false);
+      final prefs = _BlockingSavePrefs(
+        const CalendarReminderPreferenceLoadResult.loaded(true),
+      );
+      final coord = _make(hub: hub, notifs: notifs, prefs: prefs);
+
+      final future = coord.refresh(
+        accessToken: 'tok',
+        reason: CalendarReminderRefreshReason.remindersEnabled,
+      );
+      await prefs.reachedSave;
+
+      // Sign out while the save is still queued. endSession runs its own
+      // owner-scoped cleanup (disableCount becomes 1).
+      final signOut = coord.endSession();
+      prefs.releaseSave();
+      final result = await future;
+      await signOut;
+
+      expect(
+        result.status,
+        CalendarReminderRefreshStatus.skippedSessionInvalidated,
+      );
+      // Exactly one cleanup — endSession's — and none from the stale refresh.
+      expect(notifs.disableCount, 1);
+      expect(notifs.disableOwnerKeys.single, reminderOwnerKey('acct-A'));
+      expect(hub.eventsCallCount, 0);
+    });
+
+    test('account switch while the save is blocked → no incoming-account '
+        'cleanup', () async {
+      final hub = _FakeHub();
+      final notifs = _CleanupSpyNotifs(permission: false);
+      final prefs = _BlockingSavePrefs(
+        const CalendarReminderPreferenceLoadResult.loaded(true),
+      );
+      final coord = _make(hub: hub, notifs: notifs, prefs: prefs);
+
+      final future = coord.refresh(
+        accessToken: 'tok',
+        reason: CalendarReminderRefreshReason.remindersEnabled,
+      );
+      await prefs.reachedSave;
+
+      // Switch A → B while the save is queued.
+      await coord.transitionSession(
+        previousAccountId: 'acct-A',
+        nextAccountId: 'acct-B',
+      );
+      prefs.releaseSave();
+      final result = await future;
+
+      expect(
+        result.status,
+        CalendarReminderRefreshStatus.skippedSessionInvalidated,
+      );
+      // Only the outgoing owner A was cleaned; the incoming account B never is.
+      expect(notifs.disableOwnerKeys, [reminderOwnerKey('acct-A')]);
+      expect(
+        notifs.disableOwnerKeys,
+        isNot(contains(reminderOwnerKey('acct-B'))),
+      );
+    });
+
+    test('save failure plus session invalidation preserves the save outcome '
+        'and skips cleanup', () async {
+      final hub = _FakeHub();
+      final notifs = _CleanupSpyNotifs(permission: false);
+      final prefs = _BlockingSavePrefs(
+        const CalendarReminderPreferenceLoadResult.loaded(true),
+        saveError: const CalendarReminderPreferenceStorageException('save'),
+      );
+      final coord = _make(hub: hub, notifs: notifs, prefs: prefs);
+
+      final future = coord.refresh(
+        accessToken: 'tok',
+        reason: CalendarReminderRefreshReason.remindersEnabled,
+      );
+      await prefs.reachedSave;
+      final signOut = coord.endSession();
+      prefs.releaseSave();
+      final result = await future;
+      await signOut;
+
+      expect(
+        result.status,
+        CalendarReminderRefreshStatus.skippedSessionInvalidated,
+      );
+      expect(result.preferenceSaveFailed, isTrue);
+      // Stale refresh launched no cleanup; only endSession's ran.
+      expect(notifs.disableCount, 1);
+    });
+
+    test('normal sign-out cleanup still runs when there is no race', () async {
+      final hub = _FakeHub();
+      final notifs = _CleanupSpyNotifs(permission: false);
+      final coord = _make(
+        hub: hub,
+        notifs: notifs,
+        prefs: _StubPrefs(
+          const CalendarReminderPreferenceLoadResult.loaded(true),
+        ),
+      );
+
+      // No race: the permission-denied refresh completes and cleans up once.
+      final result = await coord.refresh(
+        accessToken: 'tok',
+        reason: CalendarReminderRefreshReason.remindersEnabled,
+      );
+      expect(result.status, CalendarReminderRefreshStatus.permissionDenied);
+      expect(notifs.disableCount, 1);
+    });
+  });
+
+  group('invalid account identity (Fix 1)', () {
+    test('beginSession with an empty account ID is skipped: no owner, no '
+        'generation change', () {
+      final coord = _make(
+        hub: _FakeHub(),
+        notifs: _FakeNotifs(),
+        beginAccount: null,
+      );
+      final g0 = coord.sessionGeneration;
+
+      final result = coord.beginSession(accountId: '');
+
+      expect(
+        result.status,
+        CalendarReminderSessionStartStatus.skippedInvalidAccount,
+      );
+      expect(coord.ownerKey, isNull, reason: 'no owner from an empty ID');
+      expect(
+        coord.sessionGeneration,
+        g0,
+        reason: 'an invalid begin must not advance the generation',
+      );
+    });
+
+    test('beginSession with a whitespace-only account ID is skipped', () {
+      final coord = _make(
+        hub: _FakeHub(),
+        notifs: _FakeNotifs(),
+        beginAccount: null,
+      );
+      final g0 = coord.sessionGeneration;
+
+      final result = coord.beginSession(accountId: '   ');
+
+      expect(
+        result.status,
+        CalendarReminderSessionStartStatus.skippedInvalidAccount,
+      );
+      expect(coord.ownerKey, isNull);
+      expect(coord.sessionGeneration, g0);
+    });
+
+    test('a valid account arriving after an invalid one starts normally', () {
+      final coord = _make(hub: _FakeHub(), notifs: _FakeNotifs());
+
+      final skipped = coord.beginSession(accountId: '');
+      expect(
+        skipped.status,
+        CalendarReminderSessionStartStatus.skippedInvalidAccount,
+      );
+
+      final started = coord.beginSession(accountId: 'acct-A');
+      expect(started.status, CalendarReminderSessionStartStatus.started);
+      expect(coord.ownerKey, reminderOwnerKey('acct-A'));
+    });
+
+    test('a valid account-to-account switch begins each session', () {
+      final coord = _make(hub: _FakeHub(), notifs: _FakeNotifs());
+
+      coord.beginSession(accountId: 'acct-A');
+      expect(coord.ownerKey, reminderOwnerKey('acct-A'));
+      final gA = coord.sessionGeneration;
+
+      coord.beginSession(accountId: 'acct-B');
+      expect(coord.ownerKey, reminderOwnerKey('acct-B'));
+      expect(coord.sessionGeneration, greaterThan(gA));
+    });
+
+    test(
+      'an invalid begin does not invalidate a currently valid session or its '
+      'queued follow-up',
+      () async {
+        final hub = _GatedHub();
+        final notifs = _FakeNotifs();
+        final coord = _make(hub: hub, notifs: notifs);
+        coord.beginSession(accountId: 'acct-A');
+
+        // Start a refresh and queue a forced follow-up behind it.
+        final f1 = coord.refresh(
+          accessToken: 'tok',
+          reason: CalendarReminderRefreshReason.appResumed,
+        );
+        await hub.reached(0);
+        final f2 = coord.refresh(
+          accessToken: 'tok',
+          reason: CalendarReminderRefreshReason.eventCreated,
+        );
+        expect(coord.hasPendingForcedRefresh, isTrue);
+        final ownerBefore = coord.ownerKey;
+        final genBefore = coord.sessionGeneration;
+
+        // A duplicate transient callback lacking bootstrap data begins '' — it
+        // must be a no-op that leaves the valid session and follow-up intact.
+        final skipped = coord.beginSession(accountId: '');
+        expect(
+          skipped.status,
+          CalendarReminderSessionStartStatus.skippedInvalidAccount,
+        );
+        expect(coord.ownerKey, ownerBefore);
+        expect(coord.sessionGeneration, genBefore);
+        expect(
+          coord.hasPendingForcedRefresh,
+          isTrue,
+          reason: 'the queued follow-up must survive an invalid begin',
+        );
+
+        // The session runs to completion normally.
+        hub.release(0);
+        await f1;
+        await hub.reached(1);
+        hub.release(1);
+        final r2 = await f2;
+        expect(r2.status, CalendarReminderRefreshStatus.reconciled);
+        expect(
+          notifs.reconcileOwnerKeys,
+          everyElement(reminderOwnerKey('acct-A')),
+          reason: 'every reconcile stayed under the valid acct-A owner',
+        );
+      },
+    );
+
+    test(
+      'transitionSession to an invalid next account is a no-op: no owner, no '
+      'cleanup',
+      () async {
+        final notifs = _CleanupSpyNotifs();
+        final coord = _make(
+          hub: _FakeHub(),
+          notifs: notifs,
+          beginAccount: null,
+        );
+
+        await coord.transitionSession(
+          previousAccountId: null,
+          nextAccountId: '',
+        );
+
+        expect(
+          coord.ownerKey,
+          isNull,
+          reason: 'no owner from an invalid switch',
+        );
+        expect(notifs.disableCount, 0);
+      },
+    );
+
+    test('transitionSession with an invalid next account preserves the current '
+        'valid session', () async {
+      final notifs = _CleanupSpyNotifs();
+      final coord = _make(hub: _FakeHub(), notifs: notifs);
+      coord.beginSession(accountId: 'acct-A');
+      final gA = coord.sessionGeneration;
+
+      await coord.transitionSession(
+        previousAccountId: 'acct-A',
+        nextAccountId: '   ',
+      );
+
+      expect(
+        coord.ownerKey,
+        reminderOwnerKey('acct-A'),
+        reason: 'the valid session must survive an invalid transition',
+      );
+      expect(coord.sessionGeneration, gA);
+      expect(
+        notifs.disableCount,
+        0,
+        reason: 'no cleanup for an invalid switch',
+      );
+    });
+  });
+
+  group('session boundary races (Fix 6: revalidate after every await)', () {
+    test(
+      'sign-out during the preference read: no permission, no fetch',
+      () async {
+        final hub = _FakeHub(eventsToReturn: [_event('e1')]);
+        final notifs = _FakeNotifs();
+        final prefs = _BlockingLoadPrefs(
+          const CalendarReminderPreferenceLoadResult.loaded(true),
+        );
+        final coord = _make(
+          hub: hub,
+          notifs: notifs,
+          prefs: prefs,
+          beginAccount: null,
+        );
+        coord.beginSession(accountId: 'acct-A');
+
+        final future = coord.refresh(
+          accessToken: 'tok',
+          reason: CalendarReminderRefreshReason.sessionRestored,
+        );
+        await prefs.reachedLoad;
+
+        // Sign out while the preference read is blocked.
+        await coord.endSession();
+        prefs.releaseLoad();
+
+        final result = await future;
+        expect(
+          result.status,
+          CalendarReminderRefreshStatus.skippedSessionInvalidated,
+        );
+        expect(hub.eventsCallCount, 0, reason: 'no stale-token fetch');
+        expect(notifs.reconcileCount, 0);
+      },
+    );
+
+    test(
+      'account switch during the preference read: no old-account fetch',
+      () async {
+        final hub = _FakeHub(eventsToReturn: [_event('e1')]);
+        final notifs = _FakeNotifs();
+        final prefs = _BlockingLoadPrefs(
+          const CalendarReminderPreferenceLoadResult.loaded(true),
+        );
+        final coord = _make(
+          hub: hub,
+          notifs: notifs,
+          prefs: prefs,
+          beginAccount: null,
+        );
+        coord.beginSession(accountId: 'acct-A');
+
+        final future = coord.refresh(
+          accessToken: 'tokA',
+          reason: CalendarReminderRefreshReason.sessionRestored,
+        );
+        await prefs.reachedLoad;
+
+        // Account B begins while A's preference read is blocked.
+        coord.beginSession(accountId: 'acct-B');
+        prefs.releaseLoad();
+
+        final result = await future;
+        expect(
+          result.status,
+          CalendarReminderRefreshStatus.skippedSessionInvalidated,
+        );
+        expect(hub.eventsCallCount, 0, reason: 'no old-account fetch');
+        expect(notifs.reconcileCount, 0);
+      },
+    );
+
+    test('sign-out while a granted permission resolves: no stale-token fetch or '
+        'write', () async {
+      final hub = _FakeHub(eventsToReturn: [_event('e1')]);
+      final notifs = _BlockingPermissionNotifs(grant: true);
+      final coord = _make(
+        hub: hub,
+        notifs: notifs,
+        prefs: _StubPrefs(
+          const CalendarReminderPreferenceLoadResult.loaded(true),
+        ),
+        beginAccount: null,
+      );
+      coord.beginSession(accountId: 'acct-A');
+
+      final future = coord.refresh(
+        accessToken: 'tok',
+        reason: CalendarReminderRefreshReason.sessionRestored,
+      );
+      await notifs.reachedPermission;
+
+      // Sign out while the permission dialog resolves; permission then grants.
+      await coord.endSession();
+      notifs.releasePermission();
+
+      final result = await future;
+      expect(
+        result.status,
+        CalendarReminderRefreshStatus.skippedSessionInvalidated,
+      );
+      expect(
+        hub.eventsCallCount,
+        0,
+        reason: 'permission granted after sign-out must not fetch',
+      );
+      expect(notifs.reconcileCount, 0);
+    });
+
+    test('sign-out while a denied permission resolves: no old-session write or '
+        'cleanup', () async {
+      final hub = _FakeHub();
+      final notifs = _BlockingPermissionNotifs(grant: false);
+      final prefs = _StubPrefs(
+        const CalendarReminderPreferenceLoadResult.loaded(true),
+      );
+      final coord = _make(
+        hub: hub,
+        notifs: notifs,
+        prefs: prefs,
+        beginAccount: null,
+      );
+      coord.beginSession(accountId: 'acct-A');
+
+      final future = coord.refresh(
+        accessToken: 'tok',
+        reason: CalendarReminderRefreshReason.sessionRestored,
+      );
+      await notifs.reachedPermission;
+
+      // Sign out while the permission dialog resolves; permission then denies.
+      await coord.endSession();
+      final disableCountAfterSignOut = notifs.disableCount;
+      notifs.releasePermission();
+
+      final result = await future;
+      expect(
+        result.status,
+        CalendarReminderRefreshStatus.skippedSessionInvalidated,
+      );
+      expect(
+        prefs.saveCount,
+        0,
+        reason: 'no old-session preference write after sign-out',
+      );
+      expect(
+        notifs.disableCount,
+        disableCountAfterSignOut,
+        reason: 'no additional old-session cleanup from the stale refresh',
+      );
+    });
   });
 }
 

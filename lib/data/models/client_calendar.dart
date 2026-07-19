@@ -23,6 +23,55 @@ class ClientCalendarList {
   final List<CalendarServiceError> serviceErrors;
 }
 
+// Capabilities describing what a caller is allowed to do to a single
+// calendar, as returned by the Hub alongside each ClientCalendar. These are
+// server-computed (derived from the calendar's appearanceMode, ACL, and
+// provider access role) — CaleeMobile only parses and consumes them, it
+// never derives them itself.
+class CalendarCapabilities {
+  const CalendarCapabilities({
+    required this.canEditAppearance,
+    required this.canEditEvents,
+    required this.canEditSourceMetadata,
+    required this.canRemoveFromCalee,
+    required this.canDeleteSource,
+  });
+
+  factory CalendarCapabilities.fromJson(Map<String, dynamic> json) {
+    return CalendarCapabilities(
+      canEditAppearance: json['canEditAppearance'] as bool? ?? false,
+      canEditEvents: json['canEditEvents'] as bool? ?? false,
+      canEditSourceMetadata: json['canEditSourceMetadata'] as bool? ?? false,
+      canRemoveFromCalee: json['canRemoveFromCalee'] as bool? ?? false,
+      canDeleteSource: json['canDeleteSource'] as bool? ?? false,
+    );
+  }
+
+  /// Safe fallback for a backend that predates the capabilities field.
+  /// Only canEditAppearance is inferred (matching what editing already does
+  /// today); every other capability fails closed to false rather than
+  /// guessing, so e.g. subscriptions never become appearance-editable
+  /// against an old backend.
+  factory CalendarCapabilities.fallback({
+    required bool readOnly,
+    required bool isSubscription,
+  }) {
+    return CalendarCapabilities(
+      canEditAppearance: !readOnly && !isSubscription,
+      canEditEvents: false,
+      canEditSourceMetadata: false,
+      canRemoveFromCalee: false,
+      canDeleteSource: false,
+    );
+  }
+
+  final bool canEditAppearance;
+  final bool canEditEvents;
+  final bool canEditSourceMetadata;
+  final bool canRemoveFromCalee;
+  final bool canDeleteSource;
+}
+
 // Calee calendar model
 //
 // Calee displays all calendars together, but only Calee calendars are edited
@@ -70,15 +119,51 @@ class ClientCalendar {
     this.sourceOfTruthPolicy,
     this.syncStatus,
     this.lastSyncedAt,
+    this.sourceName,
+    this.sourceColor,
+    this.appearanceMode = 'source_metadata',
+    this.hasServerAppearanceContract = true,
+    this.capabilities = const CalendarCapabilities(
+      canEditAppearance: true,
+      canEditEvents: false,
+      canEditSourceMetadata: false,
+      canRemoveFromCalee: false,
+      canDeleteSource: false,
+    ),
   });
 
   factory ClientCalendar.fromJson(Map<String, dynamic> json) {
+    final readOnly = json['readOnly'] as bool? ?? false;
+    final isSubscription = json['isSubscription'] as bool? ?? false;
+    final name = json['name'] as String? ?? '';
+    final color = json['color'] as String?;
+
+    // Old backends don't send capabilities at all — containsKey (rather than
+    // a null check) is what distinguishes "old server, key absent" from "new
+    // server, capabilities present". Without this distinction a new server's
+    // explicit {} or malformed capabilities would be indistinguishable from
+    // "not sent", which is fine (both fail closed via fromJson/fallback),
+    // but an old server must never be mistaken for a new one either.
+    final rawCapabilities = json['capabilities'];
+    final capabilities =
+        json.containsKey('capabilities') &&
+            rawCapabilities is Map<String, dynamic>
+        ? CalendarCapabilities.fromJson(rawCapabilities)
+        : CalendarCapabilities.fallback(
+            readOnly: readOnly,
+            isSubscription: isSubscription,
+          );
+
+    final fallbackAppearanceMode = capabilities.canEditAppearance
+        ? 'source_metadata'
+        : 'unsupported';
+
     return ClientCalendar(
       id: json['id'] as String? ?? '',
       serviceId: json['serviceId'] as String? ?? '',
       serviceName: json['serviceName'] as String? ?? '',
-      name: json['name'] as String? ?? '',
-      color: json['color'] as String?,
+      name: name,
+      color: color,
       components: (json['components'] as List<dynamic>? ?? const [])
           .whereType<String>()
           .toList(),
@@ -86,8 +171,8 @@ class ClientCalendar {
       supportsEvents: json['supportsEvents'] as bool? ?? true,
       supportsTasks: json['supportsTasks'] as bool? ?? false,
       supportsChores: json['supportsChores'] as bool? ?? false,
-      readOnly: json['readOnly'] as bool? ?? false,
-      isSubscription: json['isSubscription'] as bool? ?? false,
+      readOnly: readOnly,
+      isSubscription: isSubscription,
       subscriptionUrl: json['subscriptionUrl'] as String?,
       source: json['source'] as String? ?? '',
       providerKey: json['providerKey'] as String?,
@@ -95,6 +180,23 @@ class ClientCalendar {
       sourceOfTruthPolicy: json['sourceOfTruthPolicy'] as String?,
       syncStatus: json['syncStatus'] as String?,
       lastSyncedAt: json['lastSyncedAt'] as String?,
+      // sourceColor in particular is legitimately null on a new backend
+      // (e.g. always null for external/Google calendars), so containsKey is
+      // used here too rather than defaulting whenever the parsed value is
+      // null.
+      sourceName: json.containsKey('sourceName')
+          ? json['sourceName'] as String?
+          : name,
+      sourceColor: json.containsKey('sourceColor')
+          ? json['sourceColor'] as String?
+          : color,
+      appearanceMode: json.containsKey('appearanceMode')
+          ? (json['appearanceMode'] as String? ?? fallbackAppearanceMode)
+          : fallbackAppearanceMode,
+      hasServerAppearanceContract:
+          json.containsKey('capabilities') &&
+          rawCapabilities is Map<String, dynamic>,
+      capabilities: capabilities,
     );
   }
 
@@ -117,6 +219,39 @@ class ClientCalendar {
   final String? sourceOfTruthPolicy;
   final String? syncStatus;
   final String? lastSyncedAt;
+
+  /// The provider/source's own name for this calendar, independent of any
+  /// local Calee override. Defaults to [name] when the backend doesn't send
+  /// it (old backend, or no override has ever been applied).
+  final String? sourceName;
+
+  /// The provider/source's own colour for this calendar. Unlike
+  /// [sourceName], this is legitimately null even from a current backend
+  /// (e.g. always null for external/Google calendars, which have no
+  /// separately-tracked provider colour once a local override exists).
+  final String? sourceColor;
+
+  /// One of 'source_metadata', 'subscription_mapping', 'external_calendar',
+  /// or 'unsupported'. Drives [capabilities] and the copy shown while
+  /// editing appearance.
+  final String appearanceMode;
+
+  /// What the current caller may do to this calendar. Always populated —
+  /// either parsed from the backend or, for an old backend that predates
+  /// this field, computed via [CalendarCapabilities.fallback].
+  final CalendarCapabilities capabilities;
+
+  /// Whether [capabilities] genuinely came from the backend (the
+  /// `capabilities` key was present in the payload) rather than from
+  /// [CalendarCapabilities.fallback]. The `/appearance` endpoint only exists
+  /// on backends that emit capabilities, so appearance editing must route
+  /// through the legacy `updateCalendar()` source-metadata endpoint when
+  /// this is false — a fallback-writable calendar has
+  /// `canEditAppearance == true` but an old backend would 404 the new
+  /// route. Defaults to true for direct construction (tests/fixtures model
+  /// a current backend); [ClientCalendar.fromJson] always sets it from the
+  /// payload.
+  final bool hasServerAppearanceContract;
 
   bool get isCalendarKind => primaryKind == 'calendar';
   bool get isTaskKind => primaryKind == 'tasks';

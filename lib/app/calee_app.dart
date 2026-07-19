@@ -32,6 +32,7 @@ import '../features/display_setup/display_setup_landing_page.dart';
 import '../features/display_setup/display_setup_repository.dart';
 import '../features/display_setup/display_setup_link_controller.dart';
 import '../features/local_subscriber/local_calendar_subscription.dart';
+import '../features/notifications/calendar_notification_candidates.dart';
 import '../features/notifications/calendar_reminder_coordinator.dart';
 import '../features/onboarding/welcome_page.dart';
 import '../features/local_subscriber/local_calendar_subscription_repository.dart';
@@ -320,7 +321,14 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
       return;
     }
 
-    final accountId = _sessionController.bootstrap?.account.id ?? '';
+    // Signed in, but the bootstrap (hence the account ID) may not be available
+    // yet, or may be momentarily blank. Never substitute an empty string: an
+    // invalid identity must not begin a session, store an empty owner, or fire a
+    // refresh — and, critically, must NOT invalidate an already-valid session
+    // (a duplicate transient callback without bootstrap is a no-op here). A
+    // later notification carrying a valid bootstrap starts the session normally.
+    final accountId = _sessionController.bootstrap?.account.id;
+    if (!isValidReminderAccountId(accountId)) return;
     final previousAccountId = _reminderSessionAccountId;
     if (previousAccountId == accountId) return;
 
@@ -332,7 +340,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
     _reminderSessionAccountId = accountId;
     _fireReminderTransition(
       previousAccountId: previousAccountId,
-      nextAccountId: accountId,
+      nextAccountId: accountId!,
     );
     _fireReminderRefresh(CalendarReminderRefreshReason.sessionRestored);
   }
@@ -369,10 +377,19 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
   }
 
   /// Requests an upcoming-reminder refresh without ever blocking startup or
-  /// navigation, and without surfacing failures. No-op while signed out.
+  /// navigation, and without surfacing failures.
+  ///
+  /// No-op unless there is BOTH a signed-in session with an access token AND an
+  /// active account-owned reminder session in the coordinator. Being signed in
+  /// is not sufficient: on resume (or restore) before the bootstrap/account
+  /// identity is available there is no valid reminder session yet, and firing
+  /// would run the null-owner legacy path. The session listener begins the
+  /// reminder session and fires the initial refresh once a valid account
+  /// arrives.
   void _fireReminderRefresh(CalendarReminderRefreshReason reason) {
     final token = _sessionController.accessToken;
     if (token == null || !_sessionController.isSignedIn) return;
+    if (!_reminderCoordinator.hasActiveSession) return;
     unawaited(() async {
       try {
         await _reminderCoordinator.refresh(accessToken: token, reason: reason);
