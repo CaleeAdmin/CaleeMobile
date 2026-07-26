@@ -616,6 +616,92 @@ class CaleeColorDot extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────
+// CaleeColorSwatch / CaleeColorPalettePicker
+// ─────────────────────────────────────────────
+
+/// A single tappable colour swatch. Shows a check mark and an outlined ring
+/// when [isSelected]. Used to build colour pickers such as
+/// [CaleeColorPalettePicker].
+class CaleeColorSwatch extends StatelessWidget {
+  const CaleeColorSwatch({
+    required this.color,
+    required this.isSelected,
+    required this.onTap,
+    this.size = 30,
+    super.key,
+  });
+
+  final Color color;
+  final bool isSelected;
+  final VoidCallback onTap;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: color,
+          border: isSelected
+              ? Border.all(
+                  color: CaleeColors.textPrimary,
+                  width: 2,
+                  strokeAlign: BorderSide.strokeAlignOutside,
+                )
+              : null,
+        ),
+        child: isSelected
+            ? const Icon(Icons.check, size: 16, color: Colors.white)
+            : null,
+      ),
+    );
+  }
+}
+
+/// A wrap of tappable colour swatches. The swatch whose hex matches
+/// [selectedHex] (case-insensitive) is highlighted. Tapping a swatch reports
+/// its canonical hex string via [onSelected]. Defaults to the shared
+/// [CaleeColors.swatchPalette] so every colour picker in the app offers the
+/// same choices.
+class CaleeColorPalettePicker extends StatelessWidget {
+  const CaleeColorPalettePicker({
+    required this.selectedHex,
+    required this.onSelected,
+    this.palette = CaleeColors.swatchPalette,
+    super.key,
+  });
+
+  final String? selectedHex;
+  final ValueChanged<String> onSelected;
+  final List<(String, Color)> palette;
+
+  bool _isSelected(String hex) {
+    return (selectedHex ?? '').trim().toUpperCase() == hex.toUpperCase();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: CaleeSpacing.sm,
+      runSpacing: CaleeSpacing.sm,
+      children: [
+        for (final (hex, color) in palette)
+          CaleeColorSwatch(
+            color: color,
+            isSelected: _isSelected(hex),
+            onTap: () => onSelected(hex),
+          ),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
 // CaleeCheckCircle
 // ─────────────────────────────────────────────
 

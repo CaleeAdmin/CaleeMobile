@@ -356,6 +356,8 @@ class _PersonFormContentState extends State<_PersonFormContent> {
     _avatarColorController = TextEditingController(
       text: person?.avatarColor ?? '',
     );
+    // Keep the selected swatch in sync whether the colour is picked or typed.
+    _avatarColorController.addListener(() => setState(() {}));
     _sortOrderController = TextEditingController(
       text: (person?.sortOrder ?? 0).toString(),
     );
@@ -379,6 +381,11 @@ class _PersonFormContentState extends State<_PersonFormContent> {
 
     final sortOrder = int.tryParse(_sortOrderController.text.trim()) ?? 0;
     final avatarColor = _avatarColorController.text.trim();
+
+    if (avatarColor.isNotEmpty && !_isValidHexColor(avatarColor)) {
+      _showSnack('Use a colour like #FFCC00.');
+      return;
+    }
 
     setState(() => _saving = true);
 
@@ -411,6 +418,11 @@ class _PersonFormContentState extends State<_PersonFormContent> {
     ).showSnackBar(SnackBar(content: Text(message)));
   }
 
+  bool _isValidHexColor(String value) {
+    final normalized = value.startsWith('#') ? value : '#$value';
+    return RegExp(r'^#[0-9A-Fa-f]{6}$').hasMatch(normalized);
+  }
+
   @override
   Widget build(BuildContext context) {
     return SingleChildScrollView(
@@ -427,10 +439,35 @@ class _PersonFormContentState extends State<_PersonFormContent> {
                 hintText: 'Name',
                 textInputAction: TextInputAction.next,
               ),
+            ],
+          ),
+          const SizedBox(height: CaleeSpacing.md),
+          // ── Colour ─────────────────────────────────────────────────────
+          CaleeSection(
+            title: 'Colour',
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  CaleeSpacing.md,
+                  CaleeSpacing.sm + 2,
+                  CaleeSpacing.md,
+                  CaleeSpacing.sm,
+                ),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: CaleeColorPalettePicker(
+                    selectedHex: _avatarColorController.text,
+                    onSelected: (hex) {
+                      if (_saving) return;
+                      _avatarColorController.text = hex;
+                    },
+                  ),
+                ),
+              ),
               CaleeSectionTextFormField(
                 controller: _avatarColorController,
                 enabled: !_saving,
-                hintText: 'Avatar colour  (#FFCC00)',
+                hintText: 'Custom colour  (#FFCC00)',
                 textInputAction: TextInputAction.next,
               ),
             ],
