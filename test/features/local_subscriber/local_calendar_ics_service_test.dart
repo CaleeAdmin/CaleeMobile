@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:timezone/data/latest.dart' as tz_data;
+import 'package:timezone/timezone.dart' as tz;
 
 import 'package:calee_mobile/features/local_subscriber/local_calendar_ics_service.dart';
 import 'package:calee_mobile/features/local_subscriber/local_calendar_subscription.dart';
@@ -589,20 +590,47 @@ void main() {
     });
 
     test(
-      'DTSTART;TZID=Australia/Sydney:20260701T100000 converts to UTC+10',
+      'DTSTART;TZID=Australia/Sydney converts to the correct UTC instant',
       () {
-        // Sydney AEST in July (no DST, UTC+10): 10:00 → 00:00Z same day.
-        const ics =
+        // Anchored to `now` (like the `tomorrow` helper above) rather than a
+        // fixed calendar date -- a hardcoded absolute DTSTART (e.g.
+        // 20260701T100000) silently falls out of the service's 30-day past
+        // window once "today" drifts more than 30 days past it, making the
+        // event vanish from parseBody()'s output and this test fail with no
+        // code change involved. The expected UTC instant is computed via the
+        // same `timezone` package/location production code uses
+        // (LocalCalendarIcsService resolves TZID through
+        // tz.getLocation()/tz.TZDateTime()), so this stays correct whether
+        // "yesterday" falls in AEST or AEDT.
+        final recentPast = DateTime(
+          now.year,
+          now.month,
+          now.day,
+          10,
+          0,
+          0,
+        ).subtract(const Duration(days: 1));
+        final expectedUtc = tz.TZDateTime(
+          tz.getLocation('Australia/Sydney'),
+          recentPast.year,
+          recentPast.month,
+          recentPast.day,
+          recentPast.hour,
+          recentPast.minute,
+          recentPast.second,
+        ).toUtc();
+
+        final ics =
             'BEGIN:VEVENT\r\n'
             'UID:tzid-utc@example.com\r\n'
             'SUMMARY:Sydney to UTC\r\n'
-            'DTSTART;TZID=Australia/Sydney:20260701T100000\r\n'
+            'DTSTART;TZID=Australia/Sydney:${fmtDateTime(recentPast)}\r\n'
             'END:VEVENT';
 
         final events = service.parseBody(icsWrap(ics), fakeSub());
         expect(events.length, 1);
         expect(events[0].start.isUtc, isTrue);
-        expect(events[0].start, DateTime.utc(2026, 7, 1, 0, 0, 0));
+        expect(events[0].start, expectedUtc);
       },
     );
 
