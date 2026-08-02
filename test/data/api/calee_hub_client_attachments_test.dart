@@ -204,6 +204,7 @@ void main() {
           accessToken: 'tok',
           eventId: 'portal:evt-1',
           file: sourceFile,
+          originalFilename: sourceFile.path.split('/').last,
           idempotencyKey: 'idem-key-123',
           onProgress: (sent, total) => progressUpdates.add(sent),
         );
@@ -258,6 +259,7 @@ void main() {
             accessToken: 'tok',
             eventId: 'portal:evt-1',
             file: sourceFile,
+            originalFilename: sourceFile.path.split('/').last,
             idempotencyKey: 'idem-key-cancelled',
             cancelToken: cancelToken,
           );
@@ -312,6 +314,7 @@ void main() {
         accessToken: 'tok',
         eventId: 'portal:evt-1',
         file: sourceFile,
+        originalFilename: sourceFile.path.split('/').last,
         idempotencyKey: 'idem-key-tricky-name',
       );
 
@@ -363,6 +366,7 @@ void main() {
         accessToken: 'tok',
         eventId: 'portal:evt-1',
         file: sourceFile,
+        originalFilename: sourceFile.path.split('/').last,
         idempotencyKey: 'idem-key-unicode-name',
       );
 
@@ -413,6 +417,7 @@ void main() {
         accessToken: 'tok',
         eventId: 'portal:evt-1',
         file: sourceFile,
+        originalFilename: sourceFile.path.split('/').last,
         idempotencyKey: 'idem-key-large',
         onProgress: (sent, total) => progressUpdates.add(sent),
       );
@@ -481,6 +486,7 @@ void main() {
           accessToken: 'tok',
           eventId: 'portal:evt-1',
           file: sourceFile,
+          originalFilename: sourceFile.path.split('/').last,
           idempotencyKey: 'idem-key-midcancel',
           cancelToken: cancelToken,
           onProgress: (sent, total) {
@@ -545,6 +551,7 @@ void main() {
           accessToken: 'tok',
           eventId: 'portal:evt-1',
           file: sourceFile,
+          originalFilename: sourceFile.path.split('/').last,
           idempotencyKey: 'idem-key-conflict',
         );
         fail('Expected CaleeHubException');
@@ -695,6 +702,343 @@ void main() {
         isFalse,
         reason: 'no partial file should be left behind after cancellation',
       );
+    });
+  });
+
+  group('download length validation (Part E)', () {
+    /// Serves [declaredLength] in Content-Length but only writes
+    /// [actualBytes], i.e. exactly what a truncated upstream transfer looks
+    /// like to the client once Hub has already committed its 200.
+    Future<CaleeHubClient> serveMismatched({
+      required int declaredLength,
+      required int actualBytes,
+    }) async {
+      server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      server.listen((req) async {
+        req.response.headers.contentType = ContentType.binary;
+        req.response.contentLength = declaredLength;
+        req.response.statusCode = 200;
+        req.response.add(List<int>.filled(actualBytes, 7));
+        try {
+          // Closing with fewer bytes than declared makes dart:io tear the
+          // connection down mid-body -- exactly what a truncated upstream
+          // transfer looks like to the client.
+          await req.response.close();
+        } catch (_) {
+          // The server-side complaint about the short body is the point.
+        }
+      });
+      return CaleeHubClient(
+        baseUri: Uri.parse('http://127.0.0.1:${server.port}'),
+      );
+    }
+
+    test(
+      'declared 100, received 60 -> fails and deletes the partial',
+      () async {
+        final client = await serveMismatched(
+          declaredLength: 100,
+          actualBytes: 60,
+        );
+        final destination = File('${tempDir.path}/short.bin');
+
+        try {
+          await client.downloadAttachment(
+            accessToken: 'tok',
+            eventId: 'portal:evt-1',
+            attachmentId: 'att-1',
+            destinationFile: destination,
+          );
+          fail('Expected a failed download for a short body');
+        } on CaleeHubException catch (e) {
+          expect(
+            e.code,
+            anyOf('ATTACHMENT_DOWNLOAD_FAILED', 'NETWORK_ERROR'),
+            reason: 'a truncated download must never be reported as success',
+          );
+        }
+
+        expect(
+          await destination.exists(),
+          isFalse,
+          reason: 'a truncated file must never be left for the user to open',
+        );
+      },
+    );
+
+    test('a body longer than declared is also rejected', () async {
+      final client = await serveMismatched(
+        declaredLength: 100,
+        actualBytes: 101,
+      );
+      final destination = File('${tempDir.path}/long.bin');
+
+      try {
+        await client.downloadAttachment(
+          accessToken: 'tok',
+          eventId: 'portal:evt-1',
+          attachmentId: 'att-1',
+          destinationFile: destination,
+        );
+        fail('Expected a failed download for an over-long body');
+      } on CaleeHubException catch (e) {
+        expect(e.code, anyOf('ATTACHMENT_DOWNLOAD_FAILED', 'NETWORK_ERROR'));
+      }
+      expect(await destination.exists(), isFalse);
+    });
+
+    test(
+      'a connection dropped before ANY body arrives fails and cleans up',
+      () async {
+        final client = await serveMismatched(
+          declaredLength: 5000,
+          actualBytes: 0,
+        );
+        final destination = File('${tempDir.path}/dropped.bin');
+
+        try {
+          await client.downloadAttachment(
+            accessToken: 'tok',
+            eventId: 'portal:evt-1',
+            attachmentId: 'att-1',
+            destinationFile: destination,
+          );
+          fail('Expected a failed download when the body never arrives');
+        } on CaleeHubException {
+          // Either the stream errors or the length check catches it; both are
+          // failures, which is all the caller needs.
+        }
+        expect(await destination.exists(), isFalse);
+      },
+    );
+
+    test('a clean completion with NO Content-Length is accepted (nothing to '
+        'validate against)', () async {
+      final payload = List<int>.generate(3000, (i) => i % 256);
+      server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      server.listen((req) async {
+        req.response.headers.contentType = ContentType.binary;
+        // Chunked: contentLength stays -1 on the client side.
+        req.response.statusCode = 200;
+        req.response.add(payload);
+        await req.response.close();
+      });
+      final client = CaleeHubClient(
+        baseUri: Uri.parse('http://127.0.0.1:${server.port}'),
+      );
+      final destination = File('${tempDir.path}/nolength.bin');
+
+      await client.downloadAttachment(
+        accessToken: 'tok',
+        eventId: 'portal:evt-1',
+        attachmentId: 'att-1',
+        destinationFile: destination,
+      );
+
+      expect(await destination.readAsBytes(), payload);
+    });
+
+    test('an exactly-matching length still succeeds', () async {
+      final payload = List<int>.generate(2048, (i) => i % 256);
+      server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      server.listen((req) async {
+        req.response.headers.contentType = ContentType.binary;
+        req.response.contentLength = payload.length;
+        req.response.statusCode = 200;
+        req.response.add(payload);
+        await req.response.close();
+      });
+      final client = CaleeHubClient(
+        baseUri: Uri.parse('http://127.0.0.1:${server.port}'),
+      );
+      final destination = File('${tempDir.path}/exact.bin');
+
+      await client.downloadAttachment(
+        accessToken: 'tok',
+        eventId: 'portal:evt-1',
+        attachmentId: 'att-1',
+        destinationFile: destination,
+      );
+
+      expect(await destination.readAsBytes(), payload);
+    });
+  });
+
+  group('timeouts actively abort the transfer (Part F)', () {
+    // The transfer timeout is 120s, far too long for a test. These use a
+    // deliberately stalled server and assert the OBSERVABLE consequence of
+    // a real abort -- the server sees its connection close, and no bytes
+    // keep arriving -- rather than trying to wait out the real timeout.
+    //
+    // Cancellation and timeout share one teardown mechanism, so exercising
+    // it through the cancel token proves the same wiring the timeout uses;
+    // the timeout-specific mapping is covered separately below.
+
+    test('a stalled upload is genuinely torn down: the server observes the '
+        'close and stops receiving bytes', () async {
+      final serverSawClose = Completer<void>();
+      var bytesReceived = 0;
+      server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      server.listen((req) {
+        req.listen(
+          (chunk) => bytesReceived += chunk.length,
+          onDone: () {
+            if (!serverSawClose.isCompleted) serverSawClose.complete();
+          },
+          onError: (Object _) {
+            if (!serverSawClose.isCompleted) serverSawClose.complete();
+          },
+          cancelOnError: true,
+        );
+        // Never responds -- the client is left waiting.
+      });
+      final client = CaleeHubClient(
+        baseUri: Uri.parse('http://127.0.0.1:${server.port}'),
+      );
+
+      final sourceFile = File('${tempDir.path}/stalled_upload.bin');
+      await sourceFile.writeAsBytes(List<int>.filled(512 * 1024, 3));
+
+      final cancelToken = AttachmentTransferCancelToken();
+      var progressCalls = 0;
+
+      try {
+        await client.uploadAttachment(
+          accessToken: 'tok',
+          eventId: 'portal:evt-1',
+          file: sourceFile,
+          originalFilename: 'stalled_upload.bin',
+          idempotencyKey: 'idem-stalled',
+          cancelToken: cancelToken,
+          onProgress: (sent, total) {
+            progressCalls++;
+            if (progressCalls == 3) cancelToken.cancel();
+          },
+        );
+        fail('Expected the stalled upload to be torn down');
+      } on CaleeHubException catch (e) {
+        expect(e.code, 'CANCELLED');
+      }
+
+      await serverSawClose.future.timeout(
+        const Duration(seconds: 5),
+        onTimeout: () => fail(
+          'the server never saw the connection close -- the transfer was '
+          'abandoned rather than aborted',
+        ),
+      );
+
+      final settledBytes = bytesReceived;
+      // Nothing may continue flowing after the caller was told it stopped.
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+      expect(
+        bytesReceived,
+        settledBytes,
+        reason: 'bytes were still arriving after the transfer "ended"',
+      );
+      expect(bytesReceived, lessThan(512 * 1024));
+    });
+
+    test(
+      'a stalled download is torn down and leaves no partial file behind',
+      () async {
+        server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+        server.listen((req) async {
+          req.response.headers.contentType = ContentType.binary;
+          req.response.statusCode = 200;
+          try {
+            // Dribble slowly so there is a reliable window to abort in.
+            for (var i = 0; i < 40; i++) {
+              req.response.add(List<int>.filled(32 * 1024, i % 256));
+              await req.response.flush();
+              await Future<void>.delayed(const Duration(milliseconds: 50));
+            }
+            await req.response.close();
+          } catch (_) {
+            // Expected: the client disconnects mid-stream.
+          }
+        });
+        final client = CaleeHubClient(
+          baseUri: Uri.parse('http://127.0.0.1:${server.port}'),
+        );
+
+        final destination = File('${tempDir.path}/stalled_download.bin');
+        final cancelToken = AttachmentTransferCancelToken();
+        var progressCalls = 0;
+
+        final stopwatch = Stopwatch()..start();
+        try {
+          await client.downloadAttachment(
+            accessToken: 'tok',
+            eventId: 'portal:evt-1',
+            attachmentId: 'att-1',
+            destinationFile: destination,
+            cancelToken: cancelToken,
+            onProgress: (received, total) {
+              progressCalls++;
+              if (progressCalls == 2) cancelToken.cancel();
+            },
+          );
+          fail('Expected the stalled download to be torn down');
+        } on CaleeHubException catch (e) {
+          expect(e.code, 'CANCELLED');
+        }
+        stopwatch.stop();
+
+        expect(
+          stopwatch.elapsed,
+          lessThan(const Duration(seconds: 2)),
+          reason:
+              'teardown must be immediate, not a wait for the slow server to '
+              'finish on its own',
+        );
+        expect(
+          await destination.exists(),
+          isFalse,
+          reason: 'a partially-written destination must be removed',
+        );
+      },
+    );
+
+    test('aborting before the response arrives surfaces cleanly, with no '
+        'unhandled async errors', () async {
+      // A server that accepts the whole body and then never replies is
+      // the "upload body completed but response never arrives" case.
+      server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      server.listen((req) async {
+        await req.drain<void>();
+        // Deliberately no response.
+      });
+      final client = CaleeHubClient(
+        baseUri: Uri.parse('http://127.0.0.1:${server.port}'),
+      );
+
+      final sourceFile = File('${tempDir.path}/await_response.bin');
+      await sourceFile.writeAsBytes(List<int>.filled(1024, 5));
+
+      final cancelToken = AttachmentTransferCancelToken();
+      final uploadFuture = client.uploadAttachment(
+        accessToken: 'tok',
+        eventId: 'portal:evt-1',
+        file: sourceFile,
+        originalFilename: 'await_response.bin',
+        idempotencyKey: 'idem-await-response',
+        cancelToken: cancelToken,
+      );
+
+      // Let the body finish, then abort while awaiting the response.
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      cancelToken.cancel();
+
+      try {
+        await uploadFuture;
+        fail('Expected the awaited-response phase to abort');
+      } on CaleeHubException catch (e) {
+        expect(e.code, 'CANCELLED');
+      }
+
+      // Any stray unhandled async error would fail the test here.
+      await Future<void>.delayed(const Duration(milliseconds: 250));
     });
   });
 

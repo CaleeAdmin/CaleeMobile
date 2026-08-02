@@ -41,6 +41,8 @@ class _StubHub extends CaleeHubClient {
 
   int listAttachmentsCallCount = 0;
   final List<String> downloadedPaths = [];
+  final List<String> uploadIdempotencyKeys = [];
+  final List<String> uploadOriginalFilenames = [];
 
   @override
   Future<List<CalendarAttachment>> listAttachments({
@@ -56,10 +58,13 @@ class _StubHub extends CaleeHubClient {
     required String accessToken,
     required String eventId,
     required File file,
+    required String originalFilename,
     required String idempotencyKey,
     void Function(int sent, int total)? onProgress,
     AttachmentTransferCancelToken? cancelToken,
   }) async {
+    uploadIdempotencyKeys.add(idempotencyKey);
+    uploadOriginalFilenames.add(originalFilename);
     final attachment = await _onUpload!(onProgress);
     _attachments = [..._attachments, attachment];
     return attachment;
@@ -502,10 +507,36 @@ void main() {
   // filenames, re-download-and-delete-stale-copy, delete-on-detach,
   // delete-on-dispose) is covered by direct code review instead.
 
-  group('upload timeout reconciliation', () {
+  group('upload timeout reconciliation and same-key retry (Part G)', () {
+    late ImagePickerPlatform originalImagePickerPlatform;
+
+    setUp(() {
+      originalImagePickerPlatform = ImagePickerPlatform.instance;
+    });
+
+    tearDown(() {
+      ImagePickerPlatform.instance = originalImagePickerPlatform;
+    });
+
+    /// Drives the "Choose photo" flow to the point where the upload has
+    /// been attempted (and, in these tests, failed).
+    Future<void> pickAndAttempt(WidgetTester tester, File sourceFile) async {
+      ImagePickerPlatform.instance = _FakeImagePickerPlatform(
+        XFile(sourceFile.path),
+      );
+      await tester.tap(find.byKey(const Key('add_attachment_row')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Choose photo'));
+      await tester.pump();
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)),
+      );
+      await tester.pumpAndSettle();
+    }
+
     testWidgets(
-      'a TIMEOUT during upload refreshes the attachment list instead of '
-      'just reporting failure, since the upload may have actually succeeded',
+      'a TIMEOUT reconciles against the attachment list instead of assuming '
+      'failure',
       (tester) async {
         final hub = _StubHub(
           onUpload: (onProgress) async {
@@ -520,35 +551,215 @@ void main() {
         await tester.runAsync(
           () => sourceFile.writeAsBytes(List<int>.filled(2048, 1)),
         );
-        final originalPlatform = ImagePickerPlatform.instance;
-        ImagePickerPlatform.instance = _FakeImagePickerPlatform(
-          XFile(sourceFile.path),
-        );
-        addTearDown(() => ImagePickerPlatform.instance = originalPlatform);
 
         await pumpSection(tester, hub: hub, canAdd: true, canRemove: true);
         await tester.pumpAndSettle();
         final loadCallsBeforeUpload = hub.listAttachmentsCallCount;
 
-        await tester.tap(find.byKey(const Key('add_attachment_row')));
+        await pickAndAttempt(tester, sourceFile);
+
+        expect(
+          hub.listAttachmentsCallCount,
+          greaterThan(loadCallsBeforeUpload),
+          reason:
+              'a timed-out upload must reconcile against the server list, '
+              'not just assume failure',
+        );
+      },
+    );
+
+    testWidgets(
+      'retrying after a timeout reuses the SAME idempotency key, so Hub can '
+      'recognise it as the same operation instead of duplicating',
+      (tester) async {
+        final hub = _StubHub(
+          onUpload: (onProgress) async {
+            throw const CaleeHubException(
+              statusCode: 0,
+              code: 'TIMEOUT',
+              message: 'Check your connection and try again.',
+            );
+          },
+        );
+        final sourceFile = File('${tempDir.path}/retry_pick.jpg');
+        await tester.runAsync(
+          () => sourceFile.writeAsBytes(List<int>.filled(2048, 1)),
+        );
+
+        await pumpSection(tester, hub: hub, canAdd: true, canRemove: true);
         await tester.pumpAndSettle();
-        await tester.tap(find.text('Choose photo'));
+        await pickAndAttempt(tester, sourceFile);
+
+        expect(hub.uploadIdempotencyKeys, hasLength(1));
+
+        // The operation is left resolvable by the user, not silently dropped.
+        expect(find.byKey(const Key('pending_upload_row')), findsOneWidget);
+        expect(find.byKey(const Key('retry_pending_upload')), findsOneWidget);
+
+        await tester.tap(find.byKey(const Key('retry_pending_upload')));
         await tester.pump();
         await tester.runAsync(
           () => Future<void>.delayed(const Duration(milliseconds: 100)),
         );
         await tester.pumpAndSettle();
 
+        expect(hub.uploadIdempotencyKeys, hasLength(2));
         expect(
-          find.text('Upload status unknown. Checking for the attachment…'),
-          findsOneWidget,
+          hub.uploadIdempotencyKeys[1],
+          hub.uploadIdempotencyKeys[0],
+          reason:
+              'a retry of the same selected file is the SAME logical upload '
+              'and must not mint a new key',
         );
+      },
+    );
+
+    testWidgets(
+      'ATTACHMENT_UPLOAD_IN_PROGRESS also keeps the key and reconciles, '
+      'rather than starting a second upload',
+      (tester) async {
+        final hub = _StubHub(
+          onUpload: (onProgress) async {
+            throw const CaleeHubException(
+              statusCode: 409,
+              code: 'ATTACHMENT_UPLOAD_IN_PROGRESS',
+              message: 'still processing',
+            );
+          },
+        );
+        final sourceFile = File('${tempDir.path}/inprogress_pick.jpg');
+        await tester.runAsync(
+          () => sourceFile.writeAsBytes(List<int>.filled(2048, 1)),
+        );
+
+        await pumpSection(tester, hub: hub, canAdd: true, canRemove: true);
+        await tester.pumpAndSettle();
+        final loadCallsBefore = hub.listAttachmentsCallCount;
+
+        await pickAndAttempt(tester, sourceFile);
+
         expect(
           hub.listAttachmentsCallCount,
-          greaterThan(loadCallsBeforeUpload),
+          greaterThan(loadCallsBefore),
+          reason: 'in-progress must reconcile, never re-upload blindly',
+        );
+        expect(hub.uploadIdempotencyKeys, hasLength(1));
+
+        await tester.tap(find.byKey(const Key('retry_pending_upload')));
+        await tester.pump();
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 100)),
+        );
+        await tester.pumpAndSettle();
+
+        expect(hub.uploadIdempotencyKeys[1], hub.uploadIdempotencyKeys[0]);
+      },
+    );
+
+    testWidgets(
+      'reconciliation that FINDS the attachment completes the operation and '
+      'clears the pending row',
+      (tester) async {
+        // Times out, but the attachment is already present server-side --
+        // exactly the case a blind retry would have duplicated.
+        final hub = _StubHub(
+          initialAttachments: [
+            _attachment(
+              id: 'already-there',
+              filename: 'found_pick.jpg',
+              size: 2048,
+            ),
+          ],
+          onUpload: (onProgress) async {
+            throw const CaleeHubException(
+              statusCode: 0,
+              code: 'TIMEOUT',
+              message: 'Check your connection and try again.',
+            );
+          },
+        );
+        final sourceFile = File('${tempDir.path}/found_pick.jpg');
+        await tester.runAsync(
+          () => sourceFile.writeAsBytes(List<int>.filled(2048, 1)),
+        );
+
+        await pumpSection(tester, hub: hub, canAdd: true, canRemove: true);
+        await tester.pumpAndSettle();
+        await pickAndAttempt(tester, sourceFile);
+
+        expect(
+          find.byKey(const Key('pending_upload_row')),
+          findsNothing,
           reason:
-              'a timed-out upload should reconcile against the server list, '
-              'not just assume failure',
+              'the upload actually landed, so there is nothing left to retry',
+        );
+        expect(hub.uploadIdempotencyKeys, hasLength(1));
+      },
+    );
+
+    testWidgets(
+      'discarding a pending upload lets the next pick mint a NEW key',
+      (tester) async {
+        final hub = _StubHub(
+          onUpload: (onProgress) async {
+            throw const CaleeHubException(
+              statusCode: 0,
+              code: 'TIMEOUT',
+              message: 'Check your connection and try again.',
+            );
+          },
+        );
+        final sourceFile = File('${tempDir.path}/discard_pick.jpg');
+        await tester.runAsync(
+          () => sourceFile.writeAsBytes(List<int>.filled(2048, 1)),
+        );
+
+        await pumpSection(tester, hub: hub, canAdd: true, canRemove: true);
+        await tester.pumpAndSettle();
+        await pickAndAttempt(tester, sourceFile);
+
+        await tester.tap(find.byKey(const Key('discard_pending_upload')));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('pending_upload_row')), findsNothing);
+
+        await pickAndAttempt(tester, sourceFile);
+
+        expect(hub.uploadIdempotencyKeys, hasLength(2));
+        expect(
+          hub.uploadIdempotencyKeys[1],
+          isNot(hub.uploadIdempotencyKeys[0]),
+          reason:
+              'a deliberately discarded operation is over -- the next pick is '
+              'a genuinely new upload and needs its own key',
+        );
+      },
+    );
+
+    testWidgets(
+      'the picker-reported filename is sent, not the local cache path '
+      '(Part H)',
+      (tester) async {
+        final hub = _StubHub(
+          onUpload: (onProgress) async =>
+              _attachment(id: 'new-1', filename: 'Quarterly Report.pdf'),
+        );
+        // A cache/temp path whose basename is nothing like the user's name.
+        final sourceFile = File('${tempDir.path}/image_picker_8f2a91cc.jpg');
+        await tester.runAsync(
+          () => sourceFile.writeAsBytes(List<int>.filled(2048, 1)),
+        );
+
+        await pumpSection(tester, hub: hub, canAdd: true, canRemove: true);
+        await tester.pumpAndSettle();
+        await pickAndAttempt(tester, sourceFile);
+
+        expect(hub.uploadOriginalFilenames, hasLength(1));
+        expect(
+          hub.uploadOriginalFilenames.single,
+          'image_picker_8f2a91cc.jpg',
+          reason:
+              'XFile.name is what the picker reported for this pick; the API '
+              'receives it verbatim rather than re-deriving it downstream',
         );
       },
     );

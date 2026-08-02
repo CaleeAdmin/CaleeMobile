@@ -37,6 +37,12 @@ class CaleeHubClient {
   static const _kImageAiTimeout = Duration(seconds: 90);
   static const _kAttachmentTransferTimeout = Duration(seconds: 120);
 
+  /// How long a timed-out transfer is given to actually unwind (abort the
+  /// request, close the sink, delete a partial file) before `TIMEOUT` is
+  /// surfaced regardless. Bounded so a wedged teardown can never turn a
+  /// timeout into an indefinite hang.
+  static const _kAttachmentTeardownGrace = Duration(seconds: 5);
+
   // Set by CaleeApp after construction to enable transparent 401 refresh+retry.
   // The callback should refresh the access token and return the new one,
   // or return null (or throw) if refresh fails, which causes the original
@@ -1388,10 +1394,22 @@ class CaleeHubClient {
         .toList();
   }
 
+  /// Uploads [file] as an attachment on [eventId].
+  ///
+  /// [originalFilename] is the name the USER knows the document by -- the
+  /// one the platform picker displayed (`FilePicker`'s `name`,
+  /// `XFile.name`) -- and is what Hub records. It is deliberately separate
+  /// from [file], whose path is frequently a cache/temp location with a
+  /// generated basename (`image_picker` copies into the app cache, Android
+  /// content URIs resolve to opaque names), so deriving the wire filename
+  /// from the path would attach documents under names the user never chose
+  /// and would leak local cache path structure. Hub re-sanitizes whatever
+  /// it receives and remains authoritative.
   Future<CalendarAttachment> uploadAttachment({
     required String accessToken,
     required String eventId,
     required File file,
+    required String originalFilename,
     required String idempotencyKey,
     void Function(int sent, int total)? onProgress,
     AttachmentTransferCancelToken? cancelToken,
@@ -1404,6 +1422,7 @@ class CaleeHubClient {
         path,
         accessToken: token,
         file: file,
+        originalFilename: originalFilename,
         idempotencyKey: idempotencyKey,
         onProgress: onProgress,
         cancelToken: cancelToken,
@@ -1458,102 +1477,111 @@ class CaleeHubClient {
     String path, {
     required String accessToken,
     required File file,
+    required String originalFilename,
     required String idempotencyKey,
     void Function(int sent, int total)? onProgress,
     AttachmentTransferCancelToken? cancelToken,
   }) {
-    return _executeAttachmentTransferRequest(() async {
-      final boundary = 'CaleeBoundary${DateTime.now().millisecondsSinceEpoch}';
-      final request = await _httpClient.postUrl(baseUri.resolve(path));
-      request.headers.set(HttpHeaders.acceptHeader, 'application/json');
-      request.headers.set(
-        HttpHeaders.authorizationHeader,
-        'Bearer $accessToken',
-      );
-      // A client-supplied idempotency key, scoped by Hub to
-      // account+event+upload-request: a retried upload with the same key
-      // returns the original attachment instead of creating a duplicate.
-      request.headers.set('Idempotency-Key', idempotencyKey);
-      request.headers.contentType = ContentType(
-        'multipart',
-        'form-data',
-        parameters: {'boundary': boundary},
-      );
-
-      // Aborting the request genuinely tears down the connection (Hub never
-      // sees a complete body, so no partial upload can be misread as
-      // success) as long as this fires before the response has arrived --
-      // true for the entire body-writing phase below. Detached once we have
-      // a response, since abort() becomes a no-op past that point anyway.
-      const cancelException = CaleeHubException(
-        statusCode: 0,
-        code: 'CANCELLED',
-        message: 'Upload cancelled.',
-      );
-      // A mid-body abort tears down the socket before the declared
-      // Content-Length has actually been written, which dart:io flags
-      // internally on request.done -- a Future our own code never awaits on
-      // this path (we throw cancelException directly below instead). Left
-      // unlistened, that would surface as a second, stray unhandled async
-      // error alongside the CANCELLED one. .ignore() marks it observed
-      // without affecting the independent await request.close() below.
-      request.done.ignore();
-      cancelToken?.attachAbort(() => request.abort(cancelException));
-      if (cancelToken?.isCancelled ?? false) {
-        // Already cancelled before we wrote anything: bail out now so the
-        // file is never opened and no bytes reach the wire.
-        throw cancelException;
-      }
-
-      final rawFilename = file.path.split('/').last;
-      final sanitizedFilename = _sanitizeMultipartFilename(rawFilename);
-      final dispositionBuffer = StringBuffer(
-        'Content-Disposition: form-data; name="file"; '
-        'filename="${sanitizedFilename.ascii}"',
-      );
-      if (sanitizedFilename.utf8Star != null) {
-        dispositionBuffer.write(
-          "; filename*=UTF-8''${sanitizedFilename.utf8Star}",
+    return _executeAttachmentTransferRequest((handle) async {
+      try {
+        final boundary =
+            'CaleeBoundary${DateTime.now().millisecondsSinceEpoch}';
+        final request = await _httpClient.postUrl(baseUri.resolve(path));
+        request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+        request.headers.set(
+          HttpHeaders.authorizationHeader,
+          'Bearer $accessToken',
         );
-      }
-      dispositionBuffer.write('\r\n');
+        // A client-supplied idempotency key, scoped by Hub to
+        // account+event+upload-request: a retried upload with the same key
+        // returns the original attachment instead of creating a duplicate.
+        request.headers.set('Idempotency-Key', idempotencyKey);
+        request.headers.contentType = ContentType(
+          'multipart',
+          'form-data',
+          parameters: {'boundary': boundary},
+        );
 
-      final head = BytesBuilder()
-        ..add(utf8.encode('--$boundary\r\n'))
-        ..add(utf8.encode(dispositionBuffer.toString()))
-        ..add(utf8.encode('Content-Type: application/octet-stream\r\n\r\n'));
-      final headBytes = head.toBytes();
-      final tailBytes = utf8.encode('\r\n--$boundary--\r\n');
-      final fileSize = await file.length();
-      final totalBytes = headBytes.length + fileSize + tailBytes.length;
-      request.contentLength = totalBytes;
+        // Aborting the request genuinely tears down the connection (Hub
+        // never sees a complete body, so no partial upload can be misread
+        // as success) as long as this fires before the response has
+        // arrived -- true for the entire body-writing phase below.
+        const cancelException = CaleeHubException(
+          statusCode: 0,
+          code: 'CANCELLED',
+          message: 'Upload cancelled.',
+        );
+        // A mid-body abort tears down the socket before the declared
+        // Content-Length has actually been written, which dart:io flags
+        // internally on request.done -- a Future our own code never awaits
+        // on this path (we throw directly below instead). Left unlistened,
+        // that would surface as a stray unhandled async error alongside
+        // the real one. .ignore() marks it observed without affecting the
+        // independent await request.close() below.
+        request.done.ignore();
 
-      request.add(headBytes);
-      var sent = headBytes.length;
-      onProgress?.call(sent, totalBytes);
+        // Both user cancellation AND the transfer timeout tear the request
+        // down the same way; only the surfaced code differs.
+        cancelToken?.attachAbort(() => request.abort(cancelException));
+        handle.armAbort((reason) => request.abort(reason));
 
-      // Streamed straight from disk (never file.readAsBytes()) so the peak
-      // memory used for an upload stays proportional to a chunk, not to the
-      // whole attachment.
-      await for (final chunk in file.openRead()) {
+        if (cancelToken?.isCancelled ?? false) {
+          // Already cancelled before we wrote anything: bail out now so the
+          // file is never opened and no bytes reach the wire.
+          throw cancelException;
+        }
+
+        final sanitizedFilename = _sanitizeMultipartFilename(originalFilename);
+        final dispositionBuffer = StringBuffer(
+          'Content-Disposition: form-data; name="file"; '
+          'filename="${sanitizedFilename.ascii}"',
+        );
+        if (sanitizedFilename.utf8Star != null) {
+          dispositionBuffer.write(
+            "; filename*=UTF-8''${sanitizedFilename.utf8Star}",
+          );
+        }
+        dispositionBuffer.write('\r\n');
+
+        final head = BytesBuilder()
+          ..add(utf8.encode('--$boundary\r\n'))
+          ..add(utf8.encode(dispositionBuffer.toString()))
+          ..add(utf8.encode('Content-Type: application/octet-stream\r\n\r\n'));
+        final headBytes = head.toBytes();
+        final tailBytes = utf8.encode('\r\n--$boundary--\r\n');
+        final fileSize = await file.length();
+        final totalBytes = headBytes.length + fileSize + tailBytes.length;
+        request.contentLength = totalBytes;
+
+        request.add(headBytes);
+        var sent = headBytes.length;
+        onProgress?.call(sent, totalBytes);
+
+        // Streamed straight from disk (never file.readAsBytes()) so the
+        // peak memory used for an upload stays proportional to a chunk, not
+        // to the whole attachment.
+        await for (final chunk in file.openRead()) {
+          if (cancelToken?.isCancelled ?? false) {
+            throw cancelException;
+          }
+          request.add(chunk);
+          sent += chunk.length;
+          onProgress?.call(sent, totalBytes);
+        }
+
         if (cancelToken?.isCancelled ?? false) {
           throw cancelException;
         }
-        request.add(chunk);
-        sent += chunk.length;
+        request.add(tailBytes);
+        sent += tailBytes.length;
         onProgress?.call(sent, totalBytes);
-      }
 
-      if (cancelToken?.isCancelled ?? false) {
-        throw cancelException;
+        final response = await request.close();
+        cancelToken?.detach();
+        return _readJsonResponse(response, endpoint: path);
+      } finally {
+        handle.markFinished();
       }
-      request.add(tailBytes);
-      sent += tailBytes.length;
-      onProgress?.call(sent, totalBytes);
-
-      final response = await request.close();
-      cancelToken?.detach();
-      return _readJsonResponse(response, endpoint: path);
     });
   }
 
@@ -1601,74 +1629,106 @@ class CaleeHubClient {
     void Function(int received, int? total)? onProgress,
     AttachmentTransferCancelToken? cancelToken,
   }) {
-    return _executeAttachmentTransferRequest(() async {
-      const cancelException = CaleeHubException(
-        statusCode: 0,
-        code: 'CANCELLED',
-        message: 'Download cancelled.',
-      );
-
-      final request = await _httpClient.getUrl(baseUri.resolve(path));
-      request.headers.set(HttpHeaders.acceptHeader, '*/*');
-      request.headers.set(
-        HttpHeaders.authorizationHeader,
-        'Bearer $accessToken',
-      );
-
-      // Covers cancellation up until the response arrives; abort() becomes
-      // a no-op after that; the body-streaming phase below re-attaches to
-      // the response subscription instead.
-      cancelToken?.attachAbort(() => request.abort(cancelException));
-
-      final response = await request.close();
-
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        cancelToken?.detach();
-        // Error responses use the same JSON envelope as every other Hub
-        // error -- _readJsonResponse always throws for a non-2xx status.
-        await _readJsonResponse(response, endpoint: path);
-        return;
-      }
-
-      final total = response.contentLength >= 0 ? response.contentLength : null;
-      var received = 0;
-
-      final sink = destinationFile.openWrite();
-      final bodyCompleter = Completer<void>();
-      StreamSubscription<List<int>>? subscription;
-      subscription = response.listen(
-        (chunk) {
-          sink.add(chunk);
-          received += chunk.length;
-          onProgress?.call(received, total);
-        },
-        onDone: () {
-          if (!bodyCompleter.isCompleted) bodyCompleter.complete();
-        },
-        onError: (Object error, StackTrace stackTrace) {
-          if (!bodyCompleter.isCompleted) {
-            bodyCompleter.completeError(error, stackTrace);
-          }
-        },
-        cancelOnError: true,
-      );
-
-      // Cancelling a StreamSubscription silently stops further events --
-      // it never completes onDone/onError on its own -- so the abort
-      // callback must also fail the completer to unblock the await below.
-      cancelToken?.attachAbort(() {
-        subscription?.cancel();
-        if (!bodyCompleter.isCompleted) {
-          bodyCompleter.completeError(cancelException);
-        }
-      });
-
+    return _executeAttachmentTransferRequest((handle) async {
       try {
-        await bodyCompleter.future;
-        await sink.flush();
+        const cancelException = CaleeHubException(
+          statusCode: 0,
+          code: 'CANCELLED',
+          message: 'Download cancelled.',
+        );
+
+        final request = await _httpClient.getUrl(baseUri.resolve(path));
+        request.headers.set(HttpHeaders.acceptHeader, '*/*');
+        request.headers.set(
+          HttpHeaders.authorizationHeader,
+          'Bearer $accessToken',
+        );
+
+        // Covers cancellation up until the response arrives; abort()
+        // becomes a no-op after that, so the body-streaming phase below
+        // re-arms both the cancel token and the timeout handle against the
+        // response subscription instead.
+        cancelToken?.attachAbort(() => request.abort(cancelException));
+        handle.armAbort((reason) => request.abort(reason));
+
+        final response = await request.close();
+
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          cancelToken?.detach();
+          // Error responses use the same JSON envelope as every other Hub
+          // error -- _readJsonResponse always throws for a non-2xx status.
+          await _readJsonResponse(response, endpoint: path);
+          return;
+        }
+
+        final total = response.contentLength >= 0
+            ? response.contentLength
+            : null;
+        var received = 0;
+
+        final sink = destinationFile.openWrite();
+        final bodyCompleter = Completer<void>();
+        StreamSubscription<List<int>>? subscription;
+        subscription = response.listen(
+          (chunk) {
+            sink.add(chunk);
+            received += chunk.length;
+            onProgress?.call(received, total);
+          },
+          onDone: () {
+            if (!bodyCompleter.isCompleted) bodyCompleter.complete();
+          },
+          onError: (Object error, StackTrace stackTrace) {
+            if (!bodyCompleter.isCompleted) {
+              bodyCompleter.completeError(error, stackTrace);
+            }
+          },
+          cancelOnError: true,
+        );
+
+        // Cancelling a StreamSubscription silently stops further events --
+        // it never completes onDone/onError on its own -- so the abort
+        // callbacks must also fail the completer to unblock the await
+        // below.
+        cancelToken?.attachAbort(() {
+          subscription?.cancel();
+          if (!bodyCompleter.isCompleted) {
+            bodyCompleter.completeError(cancelException);
+          }
+        });
+        handle.armAbort((reason) {
+          subscription?.cancel();
+          if (!bodyCompleter.isCompleted) {
+            bodyCompleter.completeError(reason);
+          }
+        });
+
+        try {
+          await bodyCompleter.future;
+          await sink.flush();
+        } finally {
+          cancelToken?.detach();
+          await sink.close();
+        }
+
+        // Part E: Hub cannot retract a response it has already committed,
+        // so a truncated upstream download arrives here as a SHORT BODY
+        // under an otherwise-successful 200. Trusting it would hand the
+        // user a silently corrupt file to open or share. Compare what
+        // actually arrived against the length Hub declared, and treat any
+        // disagreement -- short OR long -- as a failed download. The
+        // caller (downloadAttachment) deletes the partial file.
+        if (total != null && received != total) {
+          throw const CaleeHubException(
+            statusCode: 0,
+            code: 'ATTACHMENT_DOWNLOAD_FAILED',
+            message:
+                'This attachment did not download completely. '
+                'Please try again.',
+          );
+        }
       } finally {
-        cancelToken?.detach();
-        await sink.close();
+        handle.markFinished();
       }
     });
   }
@@ -1716,19 +1776,49 @@ class CaleeHubClient {
     }
   }
 
+  /// Runs an attachment transfer under the shared timeout, with the ability
+  /// to ACTIVELY abort the underlying HTTP work when that timeout fires
+  /// (Part F). `Future.timeout()` alone only stops the caller waiting -- the
+  /// request or response stream keeps running, so bytes could still be
+  /// flowing (and a destination file still being written) long after the
+  /// caller was told `TIMEOUT`.
+  ///
+  /// [fn] receives a handle it must arm with its own teardown callback and
+  /// mark finished when it unwinds; on timeout this aborts the transfer and
+  /// then waits (briefly, bounded) for that unwind to actually complete, so
+  /// sinks are closed and partial files removed before `TIMEOUT` surfaces.
   Future<T> _executeAttachmentTransferRequest<T>(
-    Future<T> Function() fn,
+    Future<T> Function(_AttachmentTransferHandle handle) fn,
   ) async {
+    final handle = _AttachmentTransferHandle();
+    const timeoutException = CaleeHubException(
+      statusCode: 0,
+      code: 'TIMEOUT',
+      message: 'Check your connection and try again.',
+    );
+
     try {
-      return await fn().timeout(_kAttachmentTransferTimeout);
+      return await fn(handle).timeout(
+        _kAttachmentTransferTimeout,
+        onTimeout: () async {
+          handle.abort(timeoutException);
+          // Bounded: a wedged teardown must not turn a timeout into a hang.
+          await handle.finished
+              .timeout(_kAttachmentTeardownGrace)
+              .catchError((Object _) {});
+          throw timeoutException;
+        },
+      );
     } on CaleeHubException {
       rethrow;
     } on TimeoutException {
-      throw const CaleeHubException(
-        statusCode: 0,
-        code: 'TIMEOUT',
-        message: 'Check your connection and try again.',
-      );
+      // A timeout raised from inside the transfer body rather than by the
+      // wrapper above -- tear down on the same path.
+      handle.abort(timeoutException);
+      await handle.finished
+          .timeout(_kAttachmentTeardownGrace)
+          .catchError((Object _) {});
+      throw timeoutException;
     } on SocketException {
       throw const CaleeHubException(
         statusCode: 0,
@@ -1741,6 +1831,20 @@ class CaleeHubClient {
         code: 'NETWORK_ERROR',
         message: 'Check your connection and try again.',
       );
+    } on HttpException {
+      // dart:io raises this when a body ends before its declared
+      // Content-Length ("Connection closed while receiving data") -- i.e.
+      // a truncated transfer, which is the failure Part E is about. It must
+      // surface as a typed, actionable failure rather than a raw dart:io
+      // exception escaping the client layer.
+      throw const CaleeHubException(
+        statusCode: 0,
+        code: 'ATTACHMENT_DOWNLOAD_FAILED',
+        message:
+            'This attachment did not transfer completely. Please try again.',
+      );
+    } finally {
+      handle.disarm();
     }
   }
 
@@ -2478,6 +2582,36 @@ class CaleeHubClient {
     }
 
     return data;
+  }
+}
+
+/// Internal plumbing letting the transfer timeout reach the in-flight HTTP
+/// operation (Part F). The transfer body arms [armAbort] with whatever
+/// teardown is correct for its current phase -- `HttpClientRequest.abort()`
+/// before a response exists, `StreamSubscription.cancel()` once a download
+/// body is streaming -- and calls [markFinished] from a `finally` once it
+/// has fully unwound.
+class _AttachmentTransferHandle {
+  void Function(Object reason)? _onAbort;
+  final Completer<void> _finished = Completer<void>();
+
+  void armAbort(void Function(Object reason) onAbort) {
+    _onAbort = onAbort;
+  }
+
+  void disarm() {
+    _onAbort = null;
+  }
+
+  void abort(Object reason) {
+    _onAbort?.call(reason);
+  }
+
+  /// Completes once the transfer body has finished unwinding.
+  Future<void> get finished => _finished.future;
+
+  void markFinished() {
+    if (!_finished.isCompleted) _finished.complete();
   }
 }
 

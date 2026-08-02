@@ -1,18 +1,19 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:math';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:open_filex/open_filex.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../../data/api/calee_hub_client.dart';
 import '../../../data/models/client_calendar.dart';
 import '../../../ui/calee_design.dart';
+import '../attachment_cache_manager.dart';
+import '../attachment_error_policy.dart';
+import '../pending_attachment_upload.dart';
 
 /// Conservative client-side pre-check mirroring calee-hub-core's default
 /// allowlist (core_attachments_cfg.php). Server-side content inspection
@@ -36,12 +37,6 @@ const kAttachmentAllowedExtensions = {
   'pptx',
 };
 
-String generateAttachmentIdempotencyKey() {
-  final random = Random.secure();
-  final bytes = List<int>.generate(16, (_) => random.nextInt(256));
-  return bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
-}
-
 enum _AttachmentSource { camera, gallery, file }
 
 /// Attachments section for the event editor (and, unchanged, for viewing a
@@ -58,6 +53,7 @@ class EventAttachmentsSection extends StatefulWidget {
     required this.canRemove,
     required this.isSeriesScoped,
     this.openFile = OpenFilex.open,
+    this.cacheManager,
     super.key,
   });
 
@@ -82,6 +78,12 @@ class EventAttachmentsSection extends StatefulWidget {
   /// for real in a test/CI environment.
   final Future<OpenResult> Function(String path) openFile;
 
+  /// Owns the on-disk lifecycle of downloaded copies. Injected so tests can
+  /// supply a temp-directory provider instead of path_provider's platform
+  /// channel; defaults to a manager backed by the real application cache
+  /// directory.
+  final AttachmentCacheManager? cacheManager;
+
   @override
   State<EventAttachmentsSection> createState() =>
       _EventAttachmentsSectionState();
@@ -94,10 +96,28 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
   double? _uploadProgress;
   AttachmentTransferCancelToken? _uploadCancelToken;
   final Set<String> _busyAttachmentIds = {};
-  final Map<String, String> _downloadedPaths = {};
+  late final AttachmentCacheManager _cache =
+      widget.cacheManager ?? AttachmentCacheManager();
 
-  bool get _effectiveCanAdd => widget.canAdd && !widget.isSeriesScoped;
+  /// The current logical upload operation, if any. Survives timeouts and
+  /// retries so the SAME idempotency key is reused -- see
+  /// [PendingAttachmentUpload].
+  PendingAttachmentUpload? _pendingUpload;
+
+  /// Set when Hub says attachments are unsupported for this calendar.
+  bool _attachmentsDisabled = false;
+
+  bool get _effectiveCanAdd =>
+      widget.canAdd && !widget.isSeriesScoped && !_attachmentsDisabled;
   bool get _effectiveCanRemove => widget.canRemove && !widget.isSeriesScoped;
+
+  /// True when a pending upload is waiting on the user to retry or discard
+  /// it. Deliberately excludes states the app is still resolving on its
+  /// own, and states that are already finished.
+  bool get _pendingUploadNeedsAction {
+    final pending = _pendingUpload;
+    return pending != null && pending.canRetryWithSameKey;
+  }
 
   @override
   void initState() {
@@ -107,21 +127,10 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
 
   @override
   void dispose() {
-    // The cache this section builds up is only meant to live as long as the
-    // editor screen itself -- clear it out rather than letting downloaded
-    // copies accumulate in the cache directory across sessions.
-    final paths = _downloadedPaths.values.toList();
-    _downloadedPaths.clear();
-    unawaited(
-      Future.wait(
-        paths.map((path) async {
-          final file = File(path);
-          if (await file.exists()) {
-            await file.delete();
-          }
-        }),
-      ),
-    );
+    // Cached copies are only meant to live as long as the editor screen --
+    // confidential family documents must not accumulate in the cache
+    // directory across sessions.
+    unawaited(_cache.clear());
     super.dispose();
   }
 
@@ -186,6 +195,8 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
       final picked = result?.files.single;
       if (picked == null || picked.path == null || !mounted) return;
       file = File(picked.path!);
+      // The picker's displayed name, NOT the (often cache/temp) path -- see
+      // CaleeHubClient.uploadAttachment's originalFilename.
       originalName = picked.name;
     } else {
       final xFile = await ImagePicker().pickImage(
@@ -195,7 +206,9 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
       );
       if (xFile == null || !mounted) return;
       file = File(xFile.path);
-      originalName = xFile.name;
+      originalName = xFile.name.trim().isEmpty
+          ? 'photo.jpg' // camera captures can arrive unnamed
+          : xFile.name;
     }
 
     final size = await file.length();
@@ -216,7 +229,27 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
     }
     if (!mounted) return;
 
+    // One logical operation begins here -- and with it, ONE idempotency
+    // key that will survive every timeout and retry below.
+    final pending = PendingAttachmentUpload(
+      file: file,
+      originalFilename: originalName,
+      size: size,
+    );
+    setState(() => _pendingUpload = pending);
+    await _sendPendingUpload();
+  }
+
+  /// Sends (or re-sends) [_pendingUpload], always with its original
+  /// idempotency key. Retrying via this method is what makes a retry the
+  /// SAME operation to Hub rather than a new one that could duplicate.
+  Future<void> _sendPendingUpload() async {
+    final pending = _pendingUpload;
+    if (pending == null || !mounted) return;
+
     final cancelToken = AttachmentTransferCancelToken();
+    var bytesLeftTheApp = false;
+    pending.state = AttachmentUploadState.uploading;
     setState(() {
       _isUploading = true;
       _uploadProgress = 0;
@@ -227,47 +260,31 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
       final attachment = await widget.hubClient.uploadAttachment(
         accessToken: widget.accessToken,
         eventId: widget.eventId,
-        file: file,
-        idempotencyKey: generateAttachmentIdempotencyKey(),
+        file: pending.file,
+        originalFilename: pending.originalFilename,
+        idempotencyKey: pending.idempotencyKey,
         cancelToken: cancelToken,
         onProgress: (sent, total) {
+          if (sent > 0) bytesLeftTheApp = true;
           if (!mounted) return;
           setState(() => _uploadProgress = total > 0 ? sent / total : null);
         },
       );
       if (!mounted) return;
+      pending.state = AttachmentUploadState.completed;
       setState(() {
         _attachments = [...?_attachments, attachment];
+        _pendingUpload = null;
       });
     } on CaleeHubException catch (e) {
       if (!mounted) return;
-      if (e.code == 'CANCELLED') {
-        // User-initiated cancellation; no error to show.
-      } else if (e.statusCode == 409) {
-        _showMessage('This event changed elsewhere. Refreshing attachments.');
-        unawaited(_load());
-      } else if (e.code == 'TIMEOUT') {
-        // A timeout means the outcome is genuinely unknown -- Hub may have
-        // received and completed the upload even though this client gave up
-        // waiting for the response. Reconcile against the source of truth
-        // instead of assuming failure. This never mints a new idempotency
-        // key itself; if the user taps "Add attachment" again, that's a
-        // deliberate new attempt with its own fresh key.
-        _showMessage('Upload status unknown. Checking for the attachment…');
-        unawaited(_load());
-      } else {
-        _showMessage(
-          _friendlyErrorMessage(
-            e,
-            fallback: 'Could not upload this attachment. Please try again.',
-          ),
-        );
-      }
+      await _handleUploadFailure(e, pending, bytesLeftTheApp);
     } catch (error) {
       if (!mounted) return;
       if (kDebugMode) {
         debugPrint('EventAttachmentsSection: upload error=$error');
       }
+      pending.state = AttachmentUploadState.retryable;
       _showMessage('Could not upload this attachment. Please try again.');
     } finally {
       if (mounted) {
@@ -278,6 +295,102 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
         });
       }
     }
+  }
+
+  /// Applies the per-code policy (Part I) to a failed upload. Every branch
+  /// here decides three things explicitly: what the user is told, what the
+  /// UI does next, and what happens to the pending operation's key.
+  Future<void> _handleUploadFailure(
+    CaleeHubException e,
+    PendingAttachmentUpload pending,
+    bool bytesLeftTheApp,
+  ) async {
+    if (e.code == 'CANCELLED') {
+      // Whether this is safe to forget depends on whether anything could
+      // have reached Hub. If bytes went out, the server-side outcome is
+      // unknown and must be reconciled before the operation is dropped.
+      if (bytesLeftTheApp) {
+        pending.state = AttachmentUploadState.cancelledUncertain;
+        setState(() {});
+        await _reconcilePendingUpload();
+      } else {
+        pending.state = AttachmentUploadState.cancelledBeforeSend;
+        setState(() => _pendingUpload = null);
+      }
+      return;
+    }
+
+    final decision = decideAttachmentError(e);
+    if (decision.message.isNotEmpty) {
+      _showMessage(decision.message);
+    }
+    if (decision.nextUploadState != null) {
+      pending.state = decision.nextUploadState!;
+    }
+
+    switch (decision.action) {
+      case AttachmentErrorAction.reconcile:
+        await _reconcilePendingUpload();
+      case AttachmentErrorAction.refreshList:
+        unawaited(_load());
+      case AttachmentErrorAction.discardOperation:
+        setState(() => _pendingUpload = null);
+      case AttachmentErrorAction.disableAttachments:
+        setState(() {
+          _attachmentsDisabled = true;
+          _pendingUpload = null;
+        });
+        unawaited(_load());
+      case AttachmentErrorAction.showMessageOnly:
+        setState(() {});
+    }
+  }
+
+  /// Resolves an UNCERTAIN outcome by asking Hub what actually exists,
+  /// rather than assuming success or failure. Never mints a new key: if the
+  /// attachment is not there, the same operation stays retryable.
+  Future<void> _reconcilePendingUpload() async {
+    final pending = _pendingUpload;
+    if (pending == null) return;
+
+    try {
+      final attachments = await widget.hubClient.listAttachments(
+        accessToken: widget.accessToken,
+        eventId: widget.eventId,
+      );
+      if (!mounted) return;
+
+      final matched = attachments.any(
+        (a) => a.filename == pending.originalFilename && a.size == pending.size,
+      );
+      setState(() {
+        _attachments = attachments;
+        if (matched) {
+          pending.state = AttachmentUploadState.completed;
+          _pendingUpload = null;
+        } else {
+          // Genuinely did not land -- keep the operation (and its key) so a
+          // retry is recognised as the same upload.
+          pending.state = AttachmentUploadState.retryable;
+        }
+      });
+      if (!matched) {
+        _showMessage('That upload did not complete. You can try again.');
+      }
+    } catch (_) {
+      if (!mounted) return;
+      // Still unknown. Leave it retryable rather than guessing.
+      setState(() => pending.state = AttachmentUploadState.retryable);
+    }
+  }
+
+  /// Explicit user action: re-send the SAME operation with the SAME key.
+  Future<void> _retryPendingUpload() => _sendPendingUpload();
+
+  /// Explicit user action: abandon the operation. Only after this does a
+  /// subsequent pick mint a new idempotency key.
+  void _discardPendingUpload() {
+    setState(() => _pendingUpload = null);
   }
 
   void _cancelUpload() {
@@ -306,13 +419,13 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
       );
       if (!mounted) return;
       setState(() => _attachments = updated);
-      unawaited(_forgetCachedFile(attachment.id));
+      unawaited(_cache.evict(attachment.id));
     } on CaleeHubException catch (e) {
       if (!mounted) return;
       if (e.statusCode == 409 || e.code == 'ATTACHMENT_NOT_FOUND') {
         _showMessage('This event changed elsewhere. Refreshing attachments.');
         await _load();
-        unawaited(_forgetCachedFile(attachment.id));
+        unawaited(_cache.evict(attachment.id));
       } else {
         _showMessage(
           _friendlyErrorMessage(
@@ -336,59 +449,30 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
 
   // ── Download / open / share ─────────────────────────────────────────────
 
-  /// Deletes and forgets any cached local copy of [attachmentId], if one
-  /// exists. Safe to call whether or not a copy was ever downloaded.
-  Future<void> _forgetCachedFile(String attachmentId) async {
-    final path = _downloadedPaths.remove(attachmentId);
-    if (path == null) return;
-    final file = File(path);
-    if (await file.exists()) {
-      await file.delete();
-    }
-  }
-
-  /// Downloads [attachment] fresh to a new cache file with an unpredictable
-  /// name (never the attachment ID or its original filename, so a cache
-  /// directory listing can't be used to enumerate or guess at another
-  /// event's attachments). path_provider's application-cache directory maps
-  /// to NSCachesDirectory on iOS and Context.getCacheDir() on Android, both
-  /// of which are already excluded from OS-level cloud/auto backups by
-  /// platform convention -- no separate exclusion API is needed here.
-  Future<File> _downloadToFreshCacheFile(CalendarAttachment attachment) async {
-    final cacheDir = await getApplicationCacheDirectory();
-    final random = Random.secure();
-    final token = List<int>.generate(
-      16,
-      (_) => random.nextInt(256),
-    ).map((b) => b.toRadixString(16).padLeft(2, '0')).join();
-    final rawExtension = attachment.filename.contains('.')
-        ? attachment.filename.split('.').last.toLowerCase()
-        : '';
-    // Kept only so OS "open with" file-type detection still works; never
-    // carries the original filename or the attachment ID.
-    final safeExtension = rawExtension.replaceAll(RegExp(r'[^a-z0-9]'), '');
-    final suffix = safeExtension.isEmpty ? '' : '.$safeExtension';
-    final destination = File('${cacheDir.path}/att_cache_$token$suffix');
-
-    await widget.hubClient.downloadAttachment(
-      accessToken: widget.accessToken,
-      eventId: widget.eventId,
-      attachmentId: attachment.id,
-      destinationFile: destination,
-    );
-    return destination;
-  }
-
   /// Always re-downloads rather than trusting a previously cached copy: the
-  /// attachment API exposes no content-version/ETag signal an attachment ID
-  /// alone can be checked against, so treating an ID as a permanently-valid
-  /// cache key risks silently serving stale bytes. The old copy (if any) is
-  /// deleted first, bounding on-disk cache growth to at most one file per
-  /// currently-open attachment.
+  /// attachment API exposes no content-version/ETag an attachment ID could
+  /// be validated against, so a cached file can never be proven current.
+  /// [AttachmentCacheManager] deletes the previous copy first and hands
+  /// back a fresh, unpredictably-named target.
   Future<String?> _ensureDownloaded(CalendarAttachment attachment) async {
-    await _forgetCachedFile(attachment.id);
-    final destination = await _downloadToFreshCacheFile(attachment);
-    _downloadedPaths[attachment.id] = destination.path;
+    final destination = await _cache.prepareDownloadTarget(
+      attachmentId: attachment.id,
+      originalFilename: attachment.filename,
+    );
+    try {
+      await widget.hubClient.downloadAttachment(
+        accessToken: widget.accessToken,
+        eventId: widget.eventId,
+        attachmentId: attachment.id,
+        destinationFile: destination,
+      );
+    } catch (_) {
+      // Never leave a partial (or truncated -- see Part E) file behind for
+      // the user to open or share.
+      await _cache.discardPartial(attachment.id);
+      rethrow;
+    }
+    _cache.commit(attachmentId: attachment.id, file: destination);
     return destination.path;
   }
 
@@ -534,6 +618,39 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
               onShare: () => _shareAttachment(attachment),
               onRemove: () => _removeAttachment(attachment),
             ),
+        // A pending operation that is neither in flight nor finished needs
+        // explicit user resolution -- retrying reuses the SAME idempotency
+        // key, discarding is the only thing that lets a later pick mint a
+        // new one (Part G).
+        if (_effectiveCanAdd && !_isUploading && _pendingUploadNeedsAction)
+          CaleeListRow(
+            key: const Key('pending_upload_row'),
+            title: _pendingUpload!.isUncertain
+                ? 'Checking "${_pendingUpload!.originalFilename}"…'
+                : 'Could not attach "${_pendingUpload!.originalFilename}"',
+            subtitle: _pendingUpload!.isUncertain
+                ? 'Confirming whether this upload completed'
+                : 'Tap Retry to finish this upload',
+            leading: const Icon(
+              Icons.error_outline,
+              color: CaleeColors.destructive,
+            ),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextButton(
+                  key: const Key('retry_pending_upload'),
+                  onPressed: _retryPendingUpload,
+                  child: const Text('Retry'),
+                ),
+                TextButton(
+                  key: const Key('discard_pending_upload'),
+                  onPressed: _discardPendingUpload,
+                  child: const Text('Discard'),
+                ),
+              ],
+            ),
+          ),
         if (_effectiveCanAdd)
           CaleeListRow(
             key: const Key('add_attachment_row'),
@@ -560,7 +677,9 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
                     child: const Text('Cancel'),
                   )
                 : null,
-            onTap: _isUploading ? null : _addAttachment,
+            onTap: (_isUploading || _pendingUploadNeedsAction)
+                ? null
+                : _addAttachment,
           ),
       ],
     );
