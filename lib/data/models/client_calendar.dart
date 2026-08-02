@@ -35,6 +35,9 @@ class CalendarCapabilities {
     required this.canEditSourceMetadata,
     required this.canRemoveFromCalee,
     required this.canDeleteSource,
+    this.canViewAttachments = false,
+    this.canAddAttachments = false,
+    this.canRemoveAttachments = false,
   });
 
   factory CalendarCapabilities.fromJson(Map<String, dynamic> json) {
@@ -44,6 +47,14 @@ class CalendarCapabilities {
       canEditSourceMetadata: json['canEditSourceMetadata'] as bool? ?? false,
       canRemoveFromCalee: json['canRemoveFromCalee'] as bool? ?? false,
       canDeleteSource: json['canDeleteSource'] as bool? ?? false,
+      // Additive fields: a backend that predates them simply omits the
+      // keys, which the ?? false below already treats the same as
+      // CalendarCapabilities.fallback() would -- no containsKey needed
+      // here (unlike appearanceMode/sourceName elsewhere in this file),
+      // since "not supported" is the correct reading either way.
+      canViewAttachments: json['canViewAttachments'] as bool? ?? false,
+      canAddAttachments: json['canAddAttachments'] as bool? ?? false,
+      canRemoveAttachments: json['canRemoveAttachments'] as bool? ?? false,
     );
   }
 
@@ -51,7 +62,8 @@ class CalendarCapabilities {
   /// Only canEditAppearance is inferred (matching what editing already does
   /// today); every other capability fails closed to false rather than
   /// guessing, so e.g. subscriptions never become appearance-editable
-  /// against an old backend.
+  /// against an old backend. Attachment capabilities always fail closed to
+  /// false here too -- never inferred from provider name or other fields.
   factory CalendarCapabilities.fallback({
     required bool readOnly,
     required bool isSubscription,
@@ -70,6 +82,96 @@ class CalendarCapabilities {
   final bool canEditSourceMetadata;
   final bool canRemoveFromCalee;
   final bool canDeleteSource;
+
+  /// Whether this calendar's events may show an Attachments section at
+  /// all. Always backend-derived (see [CalendarCapabilities.fromJson]) --
+  /// never inferred from [ClientCalendar.providerKey] or similar.
+  final bool canViewAttachments;
+
+  /// Whether CaleeMobile may upload a new attachment to an event on this
+  /// calendar.
+  final bool canAddAttachments;
+
+  /// Whether CaleeMobile may remove an attachment from an event on this
+  /// calendar.
+  final bool canRemoveAttachments;
+}
+
+/// v1 always returns 'series' -- see docs/attachment-investigation-findings.md
+/// on calee-hub-core for why per-occurrence attachments are out of scope.
+/// Modeled as an enum (rather than a bare String, unlike e.g.
+/// [ClientCalendar.primaryKind]) so a future per-occurrence scope is a
+/// compile-time-checked addition, not a silent new string value.
+enum AttachmentScope {
+  series;
+
+  static AttachmentScope fromJson(String? value) {
+    switch (value) {
+      case 'series':
+        return AttachmentScope.series;
+      default:
+        return AttachmentScope.series;
+    }
+  }
+}
+
+/// One file attached to a calendar event's series-master, as returned by
+/// GET/POST /client/v1/events/{eventId}/attachments. Deliberately carries
+/// no Nextcloud file ID, WebDAV path, or download URL -- [id] is an opaque
+/// token only Hub can resolve (see calee-hub-core's
+/// client_caldav_attachment_id()); downloading always goes through
+/// CaleeHubClient.downloadAttachment(), never a URL CaleeMobile constructs
+/// itself.
+class CalendarAttachment {
+  const CalendarAttachment({
+    required this.id,
+    required this.filename,
+    required this.hasPreview,
+    required this.scope,
+    required this.downloadAvailable,
+    this.contentType,
+    this.size,
+  });
+
+  factory CalendarAttachment.fromJson(Map<String, dynamic> json) {
+    return CalendarAttachment(
+      id: json['id'] as String? ?? '',
+      filename: json['filename'] as String? ?? '',
+      contentType: json['contentType'] as String?,
+      size: json['size'] as int?,
+      hasPreview: json['hasPreview'] as bool? ?? false,
+      scope: AttachmentScope.fromJson(json['scope'] as String?),
+      downloadAvailable: json['downloadAvailable'] as bool? ?? false,
+    );
+  }
+
+  final String id;
+  final String filename;
+  final String? contentType;
+
+  /// Bytes, when currently known. Null when the backend could not
+  /// currently resolve live metadata for this file (see
+  /// [downloadAvailable]) -- never assume 0 means empty.
+  final int? size;
+  final bool hasPreview;
+  final AttachmentScope scope;
+
+  /// False means "File no longer available" -- the underlying Nextcloud
+  /// file could not currently be resolved (deleted, or no longer
+  /// accessible). Still shown in the list (per the task's product scope),
+  /// just without a working download/open action.
+  final bool downloadAvailable;
+
+  /// Human-readable size, e.g. "1.2 MB". Null when [size] is unknown.
+  String? get formattedSize {
+    final bytes = size;
+    if (bytes == null) return null;
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) {
+      return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    }
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
 }
 
 // Calee calendar model

@@ -35,6 +35,7 @@ class CaleeHubClient {
 
   static const _kTimeout = Duration(seconds: 25);
   static const _kImageAiTimeout = Duration(seconds: 90);
+  static const _kAttachmentTransferTimeout = Duration(seconds: 120);
 
   // Set by CaleeApp after construction to enable transparent 401 refresh+retry.
   // The callback should refresh the access token and return the new one,
@@ -1367,6 +1368,294 @@ class CaleeHubClient {
     }
   }
 
+  // ── Calendar event attachments ──────────────────────────────────────────────────────────────────
+
+  Future<List<CalendarAttachment>> listAttachments({
+    required String accessToken,
+    required String eventId,
+  }) async {
+    final encodedEventId = Uri.encodeComponent(eventId);
+    final json = await _getJson(
+      '/client/v1/events/$encodedEventId/attachments',
+      accessToken: accessToken,
+    );
+
+    final attachments = _data(json)['attachments'];
+    if (attachments is! List) return const [];
+    return attachments
+        .whereType<Map<String, dynamic>>()
+        .map(CalendarAttachment.fromJson)
+        .toList();
+  }
+
+  Future<CalendarAttachment> uploadAttachment({
+    required String accessToken,
+    required String eventId,
+    required File file,
+    required String idempotencyKey,
+    void Function(int sent, int total)? onProgress,
+    AttachmentTransferCancelToken? cancelToken,
+  }) async {
+    final encodedEventId = Uri.encodeComponent(eventId);
+    final path = '/client/v1/events/$encodedEventId/attachments';
+
+    final raw = await _withRetry(
+      (token) => _doUploadAttachment(
+        path,
+        accessToken: token,
+        file: file,
+        idempotencyKey: idempotencyKey,
+        onProgress: onProgress,
+        cancelToken: cancelToken,
+      ),
+      accessToken,
+    );
+
+    return CalendarAttachment.fromJson(
+      _data(raw)['attachment'] as Map<String, dynamic>,
+    );
+  }
+
+  Future<Map<String, dynamic>> _doUploadAttachment(
+    String path, {
+    required String accessToken,
+    required File file,
+    required String idempotencyKey,
+    void Function(int sent, int total)? onProgress,
+    AttachmentTransferCancelToken? cancelToken,
+  }) {
+    return _executeAttachmentTransferRequest(() async {
+      final boundary = 'CaleeBoundary${DateTime.now().millisecondsSinceEpoch}';
+      final request = await _httpClient.postUrl(baseUri.resolve(path));
+      request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+      request.headers.set(
+        HttpHeaders.authorizationHeader,
+        'Bearer $accessToken',
+      );
+      // A client-supplied idempotency key, scoped by Hub to
+      // account+event+upload-request: a retried upload with the same key
+      // returns the original attachment instead of creating a duplicate.
+      request.headers.set('Idempotency-Key', idempotencyKey);
+      request.headers.contentType = ContentType(
+        'multipart',
+        'form-data',
+        parameters: {'boundary': boundary},
+      );
+
+      final filename = file.path.split('/').last;
+      final fileBytes = await file.readAsBytes();
+      final head = BytesBuilder()
+        ..add(utf8.encode('--$boundary\r\n'))
+        ..add(
+          utf8.encode(
+            'Content-Disposition: form-data; name="file"; filename="$filename"\r\n',
+          ),
+        )
+        ..add(utf8.encode('Content-Type: application/octet-stream\r\n\r\n'));
+      final headBytes = head.toBytes();
+      final tailBytes = utf8.encode('\r\n--$boundary--\r\n');
+      final totalBytes = headBytes.length + fileBytes.length + tailBytes.length;
+      request.contentLength = totalBytes;
+
+      // dart:io's HttpClientRequest has no explicit abort/cancel API. On
+      // cancellation this simply stops writing further bytes and throws --
+      // the request is left un-closed and abandoned (never awaited further),
+      // so the socket is torn down when the request object is garbage
+      // collected. Hub's own request-body read will time out server-side;
+      // no response is ever read here, so nothing is misinterpreted as
+      // success.
+      void checkCancelled() {
+        if (cancelToken?.isCancelled ?? false) {
+          throw const CaleeHubException(
+            statusCode: 0,
+            code: 'CANCELLED',
+            message: 'Upload cancelled.',
+          );
+        }
+      }
+
+      checkCancelled();
+      request.add(headBytes);
+      var sent = headBytes.length;
+      onProgress?.call(sent, totalBytes);
+
+      const chunkSize = 64 * 1024;
+      for (var offset = 0; offset < fileBytes.length; offset += chunkSize) {
+        checkCancelled();
+        final end = offset + chunkSize < fileBytes.length
+            ? offset + chunkSize
+            : fileBytes.length;
+        request.add(fileBytes.sublist(offset, end));
+        sent += end - offset;
+        onProgress?.call(sent, totalBytes);
+      }
+
+      checkCancelled();
+      request.add(tailBytes);
+      sent += tailBytes.length;
+      onProgress?.call(sent, totalBytes);
+
+      final response = await request.close();
+      return _readJsonResponse(response, endpoint: path);
+    });
+  }
+
+  /// Downloads an attachment's bytes to [destinationFile] (caller-chosen --
+  /// see the Attachments feature's controller for how a safe application
+  /// cache path is built). Streams the response directly to disk, never
+  /// buffering the whole file in memory. Deletes [destinationFile] if it
+  /// exists partially written after a failure or cancellation.
+  Future<void> downloadAttachment({
+    required String accessToken,
+    required String eventId,
+    required String attachmentId,
+    required File destinationFile,
+    void Function(int received, int? total)? onProgress,
+    AttachmentTransferCancelToken? cancelToken,
+  }) async {
+    final encodedEventId = Uri.encodeComponent(eventId);
+    final encodedAttachmentId = Uri.encodeComponent(attachmentId);
+    final path =
+        '/client/v1/events/$encodedEventId/attachments/$encodedAttachmentId/content';
+
+    try {
+      await _withRetryGeneric<void>(
+        (token) => _doDownloadAttachment(
+          path,
+          accessToken: token,
+          destinationFile: destinationFile,
+          onProgress: onProgress,
+          cancelToken: cancelToken,
+        ),
+        accessToken,
+      );
+    } catch (_) {
+      if (await destinationFile.exists()) {
+        await destinationFile.delete();
+      }
+      rethrow;
+    }
+  }
+
+  Future<void> _doDownloadAttachment(
+    String path, {
+    required String accessToken,
+    required File destinationFile,
+    void Function(int received, int? total)? onProgress,
+    AttachmentTransferCancelToken? cancelToken,
+  }) {
+    return _executeAttachmentTransferRequest(() async {
+      final request = await _httpClient.getUrl(baseUri.resolve(path));
+      request.headers.set(HttpHeaders.acceptHeader, '*/*');
+      request.headers.set(
+        HttpHeaders.authorizationHeader,
+        'Bearer $accessToken',
+      );
+
+      final response = await request.close();
+
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        // Error responses use the same JSON envelope as every other Hub
+        // error -- _readJsonResponse always throws for a non-2xx status.
+        await _readJsonResponse(response, endpoint: path);
+        return;
+      }
+
+      final total = response.contentLength >= 0 ? response.contentLength : null;
+      var received = 0;
+
+      final sink = destinationFile.openWrite();
+      try {
+        await for (final chunk in response) {
+          if (cancelToken?.isCancelled ?? false) {
+            throw const CaleeHubException(
+              statusCode: 0,
+              code: 'CANCELLED',
+              message: 'Download cancelled.',
+            );
+          }
+          sink.add(chunk);
+          received += chunk.length;
+          onProgress?.call(received, total);
+        }
+        await sink.flush();
+      } finally {
+        await sink.close();
+      }
+    });
+  }
+
+  Future<List<CalendarAttachment>> detachAttachment({
+    required String accessToken,
+    required String eventId,
+    required String attachmentId,
+  }) async {
+    final encodedEventId = Uri.encodeComponent(eventId);
+    final encodedAttachmentId = Uri.encodeComponent(attachmentId);
+    final json = await _deleteJson(
+      '/client/v1/events/$encodedEventId/attachments/$encodedAttachmentId',
+      accessToken: accessToken,
+    );
+
+    final attachments = _data(json)['attachments'];
+    if (attachments is! List) return const [];
+    return attachments
+        .whereType<Map<String, dynamic>>()
+        .map(CalendarAttachment.fromJson)
+        .toList();
+  }
+
+  // _withRetry above is JSON-response-specific (Future<Map<String, dynamic>>);
+  // this is the same 401-refresh-and-retry-once logic generalized over any
+  // return type, needed for downloadAttachment()'s void/file-streaming
+  // result. Intentionally not used to reimplement _withRetry itself, to
+  // avoid touching the well-tested existing JSON path for an unrelated
+  // feature.
+  Future<T> _withRetryGeneric<T>(
+    Future<T> Function(String token) doRequest,
+    String accessToken,
+  ) async {
+    final effectiveToken = _refreshedToken ?? accessToken;
+    try {
+      return await doRequest(effectiveToken);
+    } on CaleeHubException catch (e) {
+      if (e.statusCode != 401 || onUnauthorized == null) rethrow;
+      _refreshedToken = null;
+      final newToken = await onUnauthorized!();
+      if (newToken == null) rethrow;
+      _refreshedToken = newToken;
+      return doRequest(newToken);
+    }
+  }
+
+  Future<T> _executeAttachmentTransferRequest<T>(
+    Future<T> Function() fn,
+  ) async {
+    try {
+      return await fn().timeout(_kAttachmentTransferTimeout);
+    } on CaleeHubException {
+      rethrow;
+    } on TimeoutException {
+      throw const CaleeHubException(
+        statusCode: 0,
+        code: 'TIMEOUT',
+        message: 'Check your connection and try again.',
+      );
+    } on SocketException {
+      throw const CaleeHubException(
+        statusCode: 0,
+        code: 'NETWORK_ERROR',
+        message: 'Check your connection and try again.',
+      );
+    } on HandshakeException {
+      throw const CaleeHubException(
+        statusCode: 0,
+        code: 'NETWORK_ERROR',
+        message: 'Check your connection and try again.',
+      );
+    }
+  }
+
   Future<ClientEventList> events({
     required String accessToken,
     required String from,
@@ -2101,6 +2390,23 @@ class CaleeHubClient {
     }
 
     return data;
+  }
+}
+
+/// Lightweight user-cancellation signal for
+/// [CaleeHubClient.uploadAttachment]/[CaleeHubClient.downloadAttachment].
+/// dart:io's HttpClient has no request-abort API, so cancelling only stops
+/// the transfer from writing/reading further bytes and throws a
+/// `CaleeHubException(code: 'CANCELLED')` -- it does not forcibly close the
+/// underlying socket. One token is good for one transfer; create a new one
+/// for each upload/download.
+class AttachmentTransferCancelToken {
+  bool _cancelled = false;
+
+  bool get isCancelled => _cancelled;
+
+  void cancel() {
+    _cancelled = true;
   }
 }
 

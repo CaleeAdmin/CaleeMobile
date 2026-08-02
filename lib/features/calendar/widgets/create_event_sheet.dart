@@ -14,6 +14,7 @@ import '../../../shared/recurrence/calee_repeat_rule.dart';
 import '../../../ui/calee_design.dart';
 import '../event_draft_image_preparer.dart';
 import 'calendar_widget_helpers.dart';
+import 'event_attachments_section.dart';
 
 class CreateEventSheet extends StatefulWidget {
   const CreateEventSheet({
@@ -856,6 +857,41 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
                           ),
                         ],
                       ),
+
+                      // ── Attachments ───────────────────────────────────────
+                      // Only for an existing event (attaching a file
+                      // requires an eventId, so this never shows while
+                      // creating a new event) on a calendar the backend
+                      // explicitly reports as attachment-capable -- never
+                      // inferred from provider name.
+                      if (_isEditing &&
+                          _selectedCalendar
+                              .capabilities
+                              .canViewAttachments) ...[
+                        const SizedBox(height: CaleeSpacing.sectionSpacing),
+                        EventAttachmentsSection(
+                          key: ValueKey(
+                            'attachments-${widget.initialEvent!.id}',
+                          ),
+                          // Deliberately widget.initialEvent!.id, not
+                          // writableEventId -- when editing a single
+                          // occurrence, id keeps its RECURRENCE-ID suffix,
+                          // so if this section's own add/remove gating
+                          // (isSeriesScoped below) were ever wrong, Hub's
+                          // own occurrence-context rejection is still a
+                          // second, independent backstop. writableEventId
+                          // would collapse to the series id and lose that.
+                          eventId: widget.initialEvent!.id,
+                          hubClient: widget.hubClient,
+                          accessToken: widget.accessToken,
+                          canAdd:
+                              _selectedCalendar.capabilities.canAddAttachments,
+                          canRemove: _selectedCalendar
+                              .capabilities
+                              .canRemoveAttachments,
+                          isSeriesScoped: _isEditingSingleOccurrence,
+                        ),
+                      ],
 
                       // ── Submit ────────────────────────────────────────────
                       const SizedBox(height: CaleeSpacing.lg),
