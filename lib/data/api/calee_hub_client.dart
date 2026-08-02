@@ -21,6 +21,7 @@ import '../models/client_profile.dart';
 import '../models/client_shopping_list.dart';
 import '../models/client_task.dart';
 import '../models/external_calendar_connection.dart';
+import '../../features/calendar/attachment_upload_status.dart';
 
 class CaleeHubClient {
   CaleeHubClient({Uri? baseUri, HttpClient? httpClient})
@@ -1392,6 +1393,36 @@ class CaleeHubClient {
         .whereType<Map<String, dynamic>>()
         .map(CalendarAttachment.fromJson)
         .toList();
+  }
+
+  /// Asks Hub what actually happened to the upload operation identified by
+  /// [idempotencyKey].
+  ///
+  /// This is the ONLY sanctioned way to resolve an uncertain upload. The
+  /// alternative the app used to rely on -- looking for an attachment whose
+  /// filename and size matched what was sent -- is not identity: two
+  /// different files can share both, so it could report a stranger's
+  /// same-named attachment as this operation's success and silently drop the
+  /// user's document.
+  ///
+  /// Hub scopes the lookup to the authenticated account, the event's own UID
+  /// and the key, so a key belonging to another account or another event
+  /// simply does not resolve (404). A missing operation is never success.
+  ///
+  /// Read-only on Hub's side: calling this never uploads, never deletes and
+  /// never mutates the event.
+  Future<AttachmentUploadStatus> attachmentUploadStatus({
+    required String accessToken,
+    required String eventId,
+    required String idempotencyKey,
+  }) async {
+    final encodedEventId = Uri.encodeComponent(eventId);
+    final encodedKey = Uri.encodeComponent(idempotencyKey);
+    final json = await _getJson(
+      '/client/v1/events/$encodedEventId/attachment-uploads/$encodedKey',
+      accessToken: accessToken,
+    );
+    return AttachmentUploadStatus.fromJson(_data(json));
   }
 
   /// Uploads [file] as an attachment on [eventId].

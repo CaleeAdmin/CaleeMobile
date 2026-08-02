@@ -9,6 +9,7 @@ import 'dart:io';
 
 import 'package:calee_mobile/data/api/calee_hub_client.dart';
 import 'package:calee_mobile/data/models/client_calendar.dart';
+import 'package:calee_mobile/features/calendar/attachment_upload_status.dart';
 import 'package:calee_mobile/features/calendar/widgets/event_attachments_section.dart';
 import 'package:calee_mobile/ui/calee_theme.dart';
 import 'package:calee_mobile/ui/calee_widgets.dart';
@@ -44,6 +45,16 @@ class _StubHub extends CaleeHubClient {
   final List<String> uploadIdempotencyKeys = [];
   final List<String> uploadOriginalFilenames = [];
 
+  /// Every key the widget asked Hub about, in order. Reconciliation MUST go
+  /// through here and not through the attachment list.
+  final List<String> statusQueriedKeys = [];
+
+  /// Responses handed out one per status call; the last one repeats.
+  List<AttachmentUploadStatus> statusResponses = const [];
+
+  /// When set, the status call throws this instead of answering.
+  Object? statusThrows;
+
   @override
   Future<List<CalendarAttachment>> listAttachments({
     required String accessToken,
@@ -51,6 +62,24 @@ class _StubHub extends CaleeHubClient {
   }) async {
     listAttachmentsCallCount++;
     return List.of(_attachments);
+  }
+
+  @override
+  Future<AttachmentUploadStatus> attachmentUploadStatus({
+    required String accessToken,
+    required String eventId,
+    required String idempotencyKey,
+  }) async {
+    statusQueriedKeys.add(idempotencyKey);
+    if (statusThrows != null) throw statusThrows!;
+    if (statusResponses.isEmpty) {
+      return const AttachmentUploadStatus(
+        kind: AttachmentUploadStatusKind.retryable,
+        retryable: true,
+      );
+    }
+    final index = statusQueriedKeys.length - 1;
+    return statusResponses[index.clamp(0, statusResponses.length - 1)];
   }
 
   @override
@@ -150,6 +179,7 @@ Future<void> pumpSection(
   bool isSeriesScoped = false,
   TextScaler? textScaler,
   Future<OpenResult> Function(String path) openFile = _fakeOpenFile,
+  List<Duration>? statusPollBackoff,
 }) {
   return tester.pumpWidget(
     MaterialApp(
@@ -170,6 +200,7 @@ Future<void> pumpSection(
             canRemove: canRemove,
             isSeriesScoped: isSeriesScoped,
             openFile: openFile,
+            statusPollBackoff: statusPollBackoff,
           ),
         ),
       ),
@@ -534,9 +565,23 @@ void main() {
       await tester.pumpAndSettle();
     }
 
+    /// A poll schedule with no real waiting, so the bounded-polling
+    /// behaviour can be asserted without burning 15 seconds of test clock.
+    const fastBackoff = [Duration.zero, Duration.zero, Duration.zero];
+
+    AttachmentUploadStatus status(
+      AttachmentUploadStatusKind kind, {
+      CalendarAttachment? attachment,
+      bool retryable = true,
+    }) => AttachmentUploadStatus(
+      kind: kind,
+      retryable: retryable,
+      attachment: attachment,
+    );
+
     testWidgets(
-      'a TIMEOUT reconciles against the attachment list instead of assuming '
-      'failure',
+      'a TIMEOUT resolves the operation by its IDEMPOTENCY KEY, not by '
+      'scanning the attachment list',
       (tester) async {
         final hub = _StubHub(
           onUpload: (onProgress) async {
@@ -547,6 +592,7 @@ void main() {
             );
           },
         );
+        hub.statusResponses = [status(AttachmentUploadStatusKind.retryable)];
         final sourceFile = File('${tempDir.path}/timeout_pick.jpg');
         await tester.runAsync(
           () => sourceFile.writeAsBytes(List<int>.filled(2048, 1)),
@@ -554,17 +600,65 @@ void main() {
 
         await pumpSection(tester, hub: hub, canAdd: true, canRemove: true);
         await tester.pumpAndSettle();
-        final loadCallsBeforeUpload = hub.listAttachmentsCallCount;
 
         await pickAndAttempt(tester, sourceFile);
 
         expect(
-          hub.listAttachmentsCallCount,
-          greaterThan(loadCallsBeforeUpload),
-          reason:
-              'a timed-out upload must reconcile against the server list, '
-              'not just assume failure',
+          hub.statusQueriedKeys,
+          isNotEmpty,
+          reason: 'a timed-out upload must ask Hub about its own operation',
         );
+        expect(
+          hub.statusQueriedKeys.first,
+          hub.uploadIdempotencyKeys.first,
+          reason:
+              'the operation is identified by the key it uploaded with -- '
+              'nothing else identifies it',
+        );
+      },
+    );
+
+    testWidgets(
+      'an existing attachment with the SAME filename AND size does not make '
+      'a failed upload look successful',
+      (tester) async {
+        // The exact defect this replaced: filename+size is not identity, so
+        // a decoy attachment that happens to match must not resolve this
+        // operation. Hub says retryable; the decoy must not override that.
+        final hub = _StubHub(
+          initialAttachments: [
+            _attachment(
+              id: 'unrelated-but-identical-looking',
+              filename: 'decoy_pick.jpg',
+              size: 2048,
+            ),
+          ],
+          onUpload: (onProgress) async {
+            throw const CaleeHubException(
+              statusCode: 0,
+              code: 'TIMEOUT',
+              message: 'Check your connection and try again.',
+            );
+          },
+        );
+        hub.statusResponses = [status(AttachmentUploadStatusKind.retryable)];
+        final sourceFile = File('${tempDir.path}/decoy_pick.jpg');
+        await tester.runAsync(
+          () => sourceFile.writeAsBytes(List<int>.filled(2048, 1)),
+        );
+
+        await pumpSection(tester, hub: hub, canAdd: true, canRemove: true);
+        await tester.pumpAndSettle();
+        await pickAndAttempt(tester, sourceFile);
+
+        expect(
+          find.byKey(const Key('pending_upload_row')),
+          findsOneWidget,
+          reason:
+              'a same-name, same-size stranger must NOT be mistaken for this '
+              'upload -- the user would silently lose their document',
+        );
+        expect(find.byKey(const Key('retry_pending_upload')), findsOneWidget);
       },
     );
 
@@ -581,6 +675,7 @@ void main() {
             );
           },
         );
+        hub.statusResponses = [status(AttachmentUploadStatusKind.retryable)];
         final sourceFile = File('${tempDir.path}/retry_pick.jpg');
         await tester.runAsync(
           () => sourceFile.writeAsBytes(List<int>.filled(2048, 1)),
@@ -611,12 +706,18 @@ void main() {
               'a retry of the same selected file is the SAME logical upload '
               'and must not mint a new key',
         );
+        // And every status check along the way used that same key.
+        expect(
+          hub.statusQueriedKeys.toSet(),
+          {hub.uploadIdempotencyKeys[0]},
+          reason: 'bounded polling must never rotate the key',
+        );
       },
     );
 
     testWidgets(
-      'ATTACHMENT_UPLOAD_IN_PROGRESS also keeps the key and reconciles, '
-      'rather than starting a second upload',
+      'ATTACHMENT_UPLOAD_IN_PROGRESS keeps the key and asks Hub, rather than '
+      'starting a second upload',
       (tester) async {
         final hub = _StubHub(
           onUpload: (onProgress) async {
@@ -627,6 +728,7 @@ void main() {
             );
           },
         );
+        hub.statusResponses = [status(AttachmentUploadStatusKind.retryable)];
         final sourceFile = File('${tempDir.path}/inprogress_pick.jpg');
         await tester.runAsync(
           () => sourceFile.writeAsBytes(List<int>.filled(2048, 1)),
@@ -634,14 +736,13 @@ void main() {
 
         await pumpSection(tester, hub: hub, canAdd: true, canRemove: true);
         await tester.pumpAndSettle();
-        final loadCallsBefore = hub.listAttachmentsCallCount;
 
         await pickAndAttempt(tester, sourceFile);
 
         expect(
-          hub.listAttachmentsCallCount,
-          greaterThan(loadCallsBefore),
-          reason: 'in-progress must reconcile, never re-upload blindly',
+          hub.statusQueriedKeys,
+          isNotEmpty,
+          reason: 'in-progress must ask Hub, never re-upload blindly',
         );
         expect(hub.uploadIdempotencyKeys, hasLength(1));
 
@@ -657,19 +758,10 @@ void main() {
     );
 
     testWidgets(
-      'reconciliation that FINDS the attachment completes the operation and '
-      'clears the pending row',
+      'a completed status clears the pending operation and shows the real '
+      'attachment Hub returned',
       (tester) async {
-        // Times out, but the attachment is already present server-side --
-        // exactly the case a blind retry would have duplicated.
         final hub = _StubHub(
-          initialAttachments: [
-            _attachment(
-              id: 'already-there',
-              filename: 'found_pick.jpg',
-              size: 2048,
-            ),
-          ],
           onUpload: (onProgress) async {
             throw const CaleeHubException(
               statusCode: 0,
@@ -678,6 +770,17 @@ void main() {
             );
           },
         );
+        hub.statusResponses = [
+          status(
+            AttachmentUploadStatusKind.completed,
+            retryable: false,
+            attachment: _attachment(
+              id: 'the-real-one',
+              filename: 'found_pick.jpg',
+              size: 2048,
+            ),
+          ),
+        ];
         final sourceFile = File('${tempDir.path}/found_pick.jpg');
         await tester.runAsync(
           () => sourceFile.writeAsBytes(List<int>.filled(2048, 1)),
@@ -690,12 +793,220 @@ void main() {
         expect(
           find.byKey(const Key('pending_upload_row')),
           findsNothing,
-          reason:
-              'the upload actually landed, so there is nothing left to retry',
+          reason: 'a confirmed completion resolves the operation',
         );
         expect(hub.uploadIdempotencyKeys, hasLength(1));
       },
     );
+
+    testWidgets(
+      'a completed status with NO attachment payload is not treated as '
+      'success',
+      (tester) async {
+        final hub = _StubHub(
+          onUpload: (onProgress) async {
+            throw const CaleeHubException(
+              statusCode: 0,
+              code: 'TIMEOUT',
+              message: 'Check your connection and try again.',
+            );
+          },
+        );
+        hub.statusResponses = [
+          status(AttachmentUploadStatusKind.completed, retryable: false),
+        ];
+        final sourceFile = File('${tempDir.path}/hollow_pick.jpg');
+        await tester.runAsync(
+          () => sourceFile.writeAsBytes(List<int>.filled(2048, 1)),
+        );
+
+        await pumpSection(
+          tester,
+          hub: hub,
+          canAdd: true,
+          canRemove: true,
+          statusPollBackoff: fastBackoff,
+        );
+        await tester.pumpAndSettle();
+        await pickAndAttempt(tester, sourceFile);
+
+        expect(
+          find.byKey(const Key('pending_upload_row')),
+          findsOneWidget,
+          reason:
+              'claiming success without the thing that succeeded is the '
+              'failure mode this endpoint exists to remove',
+        );
+      },
+    );
+
+    testWidgets('polling is BOUNDED -- it does not spin forever', (
+      tester,
+    ) async {
+      final hub = _StubHub(
+        onUpload: (onProgress) async {
+          throw const CaleeHubException(
+            statusCode: 0,
+            code: 'TIMEOUT',
+            message: 'Check your connection and try again.',
+          );
+        },
+      );
+      // Hub never resolves: always in_progress.
+      hub.statusResponses = [status(AttachmentUploadStatusKind.inProgress)];
+      final sourceFile = File('${tempDir.path}/bounded_pick.jpg');
+      await tester.runAsync(
+        () => sourceFile.writeAsBytes(List<int>.filled(2048, 1)),
+      );
+
+      await pumpSection(
+        tester,
+        hub: hub,
+        canAdd: true,
+        canRemove: true,
+        statusPollBackoff: fastBackoff,
+      );
+      await tester.pumpAndSettle();
+      await pickAndAttempt(tester, sourceFile);
+
+      expect(
+        hub.statusQueriedKeys,
+        hasLength(fastBackoff.length),
+        reason:
+            'exactly one status call per scheduled attempt, then it stops -- '
+            'an unresolvable operation must not poll indefinitely',
+      );
+      expect(hub.uploadIdempotencyKeys, hasLength(1));
+    });
+
+    testWidgets('a network failure during the status check leaves the outcome '
+        'UNCERTAIN, never classified as success or failure', (tester) async {
+      final hub = _StubHub(
+        onUpload: (onProgress) async {
+          throw const CaleeHubException(
+            statusCode: 0,
+            code: 'TIMEOUT',
+            message: 'Check your connection and try again.',
+          );
+        },
+      );
+      hub.statusThrows = const SocketException('offline');
+      final sourceFile = File('${tempDir.path}/offline_pick.jpg');
+      await tester.runAsync(
+        () => sourceFile.writeAsBytes(List<int>.filled(2048, 1)),
+      );
+
+      await pumpSection(
+        tester,
+        hub: hub,
+        canAdd: true,
+        canRemove: true,
+        statusPollBackoff: fastBackoff,
+      );
+      await tester.pumpAndSettle();
+      await pickAndAttempt(tester, sourceFile);
+
+      expect(
+        find.byKey(const Key('pending_upload_row')),
+        findsOneWidget,
+        reason: 'the operation and its key survive an unreachable Hub',
+      );
+      expect(find.byKey(const Key('retry_pending_upload')), findsOneWidget);
+      expect(
+        hub.uploadIdempotencyKeys,
+        hasLength(1),
+        reason: 'a failed status check must not trigger a second upload',
+      );
+    });
+
+    testWidgets(
+      'an unknown key (404) is a FINAL answer, not a silent re-upload',
+      (tester) async {
+        final hub = _StubHub(
+          onUpload: (onProgress) async {
+            throw const CaleeHubException(
+              statusCode: 0,
+              code: 'TIMEOUT',
+              message: 'Check your connection and try again.',
+            );
+          },
+        );
+        hub.statusThrows = const CaleeHubException(
+          statusCode: 404,
+          code: 'UPLOAD_NOT_FOUND',
+          message: 'not found',
+        );
+        final sourceFile = File('${tempDir.path}/gone_pick.jpg');
+        await tester.runAsync(
+          () => sourceFile.writeAsBytes(List<int>.filled(2048, 1)),
+        );
+
+        await pumpSection(
+          tester,
+          hub: hub,
+          canAdd: true,
+          canRemove: true,
+          statusPollBackoff: fastBackoff,
+        );
+        await tester.pumpAndSettle();
+        await pickAndAttempt(tester, sourceFile);
+
+        expect(
+          hub.uploadIdempotencyKeys,
+          hasLength(1),
+          reason:
+              'a missing operation must never be read as success, and must '
+              'not re-upload behind the user\'s back',
+        );
+        expect(
+          find.byKey(const Key('retry_pending_upload')),
+          findsNothing,
+          reason: 'a final failure requires an explicit fresh selection',
+        );
+      },
+    );
+
+    testWidgets('disposing the widget stops the status poll', (tester) async {
+      final hub = _StubHub(
+        onUpload: (onProgress) async {
+          throw const CaleeHubException(
+            statusCode: 0,
+            code: 'TIMEOUT',
+            message: 'Check your connection and try again.',
+          );
+        },
+      );
+      hub.statusResponses = [status(AttachmentUploadStatusKind.inProgress)];
+      final sourceFile = File('${tempDir.path}/dispose_pick.jpg');
+      await tester.runAsync(
+        () => sourceFile.writeAsBytes(List<int>.filled(2048, 1)),
+      );
+
+      await pumpSection(
+        tester,
+        hub: hub,
+        canAdd: true,
+        canRemove: true,
+        statusPollBackoff: const [
+          Duration(milliseconds: 50),
+          Duration(milliseconds: 50),
+          Duration(milliseconds: 50),
+          Duration(milliseconds: 50),
+        ],
+      );
+      await tester.pumpAndSettle();
+      await pickAndAttempt(tester, sourceFile);
+
+      final callsAtDispose = hub.statusQueriedKeys.length;
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump(const Duration(seconds: 2));
+
+      expect(
+        hub.statusQueriedKeys.length,
+        callsAtDispose,
+        reason: 'no further status calls may run after the screen is gone',
+      );
+    });
 
     testWidgets(
       'discarding a pending upload lets the next pick mint a NEW key',

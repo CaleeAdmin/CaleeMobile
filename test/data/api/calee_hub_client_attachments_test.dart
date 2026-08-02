@@ -10,6 +10,7 @@ import 'dart:io';
 
 import 'package:calee_mobile/data/api/calee_hub_client.dart';
 import 'package:calee_mobile/data/models/client_calendar.dart';
+import 'package:calee_mobile/features/calendar/attachment_upload_status.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -158,6 +159,235 @@ void main() {
         expect(e.statusCode, 409);
         expect(e.code, 'ATTACHMENTS_NOT_SUPPORTED_FOR_CALENDAR');
       }
+    });
+  });
+
+  group('CaleeHubClient.attachmentUploadStatus()', () {
+    Future<CaleeHubClient> startServerReturning(
+      int statusCode,
+      Map<String, dynamic> body, {
+      void Function(HttpRequest request)? onRequest,
+    }) async {
+      server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      server.listen((req) async {
+        onRequest?.call(req);
+        req.response.headers.contentType = ContentType.json;
+        req.response.statusCode = statusCode;
+        req.response.write(jsonEncode(body));
+        await req.response.close();
+      });
+      return CaleeHubClient(
+        baseUri: Uri.parse('http://127.0.0.1:${server.port}'),
+      );
+    }
+
+    test('GETs the key-scoped path, encoding both segments', () async {
+      String? capturedMethod;
+      String? capturedPath;
+      final client = await startServerReturning(
+        200,
+        {
+          'data': {
+            'upload': {
+              'status': 'in_progress',
+              'attachment': null,
+              'retryable': true,
+            },
+          },
+          'meta': <String, dynamic>{},
+        },
+        onRequest: (req) {
+          capturedMethod = req.method;
+          capturedPath = req.uri.path;
+        },
+      );
+
+      final status = await client.attachmentUploadStatus(
+        accessToken: 'tok',
+        eventId: 'portal:evt 1',
+        idempotencyKey: 'key/with special',
+      );
+
+      expect(capturedMethod, 'GET');
+      expect(
+        capturedPath,
+        '/client/v1/events/portal%3Aevt%201/attachment-uploads/key%2Fwith%20special',
+        reason:
+            'both the event id and the key are user-controlled and must be '
+            'percent-encoded, or a key containing a slash would address a '
+            'different route entirely',
+      );
+      expect(status.kind, AttachmentUploadStatusKind.inProgress);
+      expect(status.retryable, isTrue);
+      expect(status.attachment, isNull);
+    });
+
+    test('parses a completed status into a real attachment', () async {
+      final client = await startServerReturning(200, {
+        'data': {
+          'upload': {
+            'status': 'completed',
+            'retryable': false,
+            'attachment': {
+              'id': 'att-9',
+              'filename': 'report.pdf',
+              'contentType': 'application/pdf',
+              'size': 4096,
+              'hasPreview': false,
+              'scope': 'series',
+              'downloadAvailable': true,
+            },
+          },
+        },
+        'meta': <String, dynamic>{},
+      });
+
+      final status = await client.attachmentUploadStatus(
+        accessToken: 'tok',
+        eventId: 'portal:evt-1',
+        idempotencyKey: 'k',
+      );
+
+      expect(status.kind, AttachmentUploadStatusKind.completed);
+      expect(status.isUsableCompletion, isTrue);
+      expect(status.attachment?.id, 'att-9');
+      expect(status.retryable, isFalse);
+    });
+
+    test(
+      'a completed status with no attachment is NOT a usable completion',
+      () async {
+        final client = await startServerReturning(200, {
+          'data': {
+            'upload': {
+              'status': 'completed',
+              'retryable': false,
+              'attachment': null,
+            },
+          },
+          'meta': <String, dynamic>{},
+        });
+
+        final status = await client.attachmentUploadStatus(
+          accessToken: 'tok',
+          eventId: 'portal:evt-1',
+          idempotencyKey: 'k',
+        );
+
+        expect(status.kind, AttachmentUploadStatusKind.completed);
+        expect(
+          status.isUsableCompletion,
+          isFalse,
+          reason:
+              'reporting success without the attachment that succeeded is '
+              'exactly the failure this endpoint replaced',
+        );
+      },
+    );
+
+    test('a status this build does not know is treated as unknown', () async {
+      final client = await startServerReturning(200, {
+        'data': {
+          'upload': {
+            'status': 'some_status_from_a_newer_hub',
+            'retryable': true,
+            'attachment': null,
+          },
+        },
+        'meta': <String, dynamic>{},
+      });
+
+      final status = await client.attachmentUploadStatus(
+        accessToken: 'tok',
+        eventId: 'portal:evt-1',
+        idempotencyKey: 'k',
+      );
+
+      expect(status.kind, AttachmentUploadStatusKind.unknown);
+      expect(
+        status.isUsableCompletion,
+        isFalse,
+        reason: 'an uninterpretable status must never read as success',
+      );
+      expect(status.kind.isFinalFailure, isFalse);
+    });
+
+    test('a 404 surfaces as a typed error, never as success', () async {
+      final client = await startServerReturning(404, {
+        'error': {'code': 'UPLOAD_NOT_FOUND', 'message': 'not found'},
+      });
+
+      await expectLater(
+        client.attachmentUploadStatus(
+          accessToken: 'tok',
+          eventId: 'portal:evt-1',
+          idempotencyKey: 'k',
+        ),
+        throwsA(
+          isA<CaleeHubException>()
+              .having((e) => e.statusCode, 'statusCode', 404)
+              .having((e) => e.code, 'code', 'UPLOAD_NOT_FOUND'),
+        ),
+      );
+    });
+
+    test('a 410 detached/expired result surfaces as a typed error', () async {
+      final client = await startServerReturning(410, {
+        'error': {
+          'code': 'UPLOAD_RESULT_NO_LONGER_PRESENT',
+          'message': 'removed',
+        },
+      });
+
+      await expectLater(
+        client.attachmentUploadStatus(
+          accessToken: 'tok',
+          eventId: 'portal:evt-1',
+          idempotencyKey: 'k',
+        ),
+        throwsA(
+          isA<CaleeHubException>()
+              .having((e) => e.statusCode, 'statusCode', 410)
+              .having((e) => e.code, 'code', 'UPLOAD_RESULT_NO_LONGER_PRESENT'),
+        ),
+      );
+    });
+
+    test('every documented wire status maps to a distinct kind', () {
+      const wire = {
+        'in_progress': AttachmentUploadStatusKind.inProgress,
+        'reconciliation_required':
+            AttachmentUploadStatusKind.reconciliationRequired,
+        'retryable': AttachmentUploadStatusKind.retryable,
+        'completed': AttachmentUploadStatusKind.completed,
+        'failed': AttachmentUploadStatusKind.failed,
+        'expired': AttachmentUploadStatusKind.expired,
+      };
+      for (final entry in wire.entries) {
+        expect(
+          AttachmentUploadStatusKind.fromWire(entry.key),
+          entry.value,
+          reason: '${entry.key} must map to its own kind',
+        );
+      }
+      expect(wire.values.toSet(), hasLength(wire.length));
+
+      // Only in_progress / reconciliation_required are worth polling again.
+      expect(AttachmentUploadStatusKind.inProgress.isSettling, isTrue);
+      expect(
+        AttachmentUploadStatusKind.reconciliationRequired.isSettling,
+        isTrue,
+      );
+      for (final kind in [
+        AttachmentUploadStatusKind.completed,
+        AttachmentUploadStatusKind.failed,
+        AttachmentUploadStatusKind.expired,
+      ]) {
+        expect(kind.isSettling, isFalse, reason: '$kind is a final answer');
+      }
+      expect(AttachmentUploadStatusKind.failed.isFinalFailure, isTrue);
+      expect(AttachmentUploadStatusKind.expired.isFinalFailure, isTrue);
+      expect(AttachmentUploadStatusKind.retryable.isFinalFailure, isFalse);
     });
   });
 

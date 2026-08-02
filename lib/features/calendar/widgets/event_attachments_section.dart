@@ -13,6 +13,7 @@ import '../../../data/models/client_calendar.dart';
 import '../../../ui/calee_design.dart';
 import '../attachment_cache_manager.dart';
 import '../attachment_error_policy.dart';
+import '../attachment_upload_status.dart';
 import '../pending_attachment_upload.dart';
 
 /// Conservative client-side pre-check mirroring calee-hub-core's default
@@ -54,6 +55,7 @@ class EventAttachmentsSection extends StatefulWidget {
     required this.isSeriesScoped,
     this.openFile = OpenFilex.open,
     this.cacheManager,
+    this.statusPollBackoff,
     super.key,
   });
 
@@ -83,6 +85,13 @@ class EventAttachmentsSection extends StatefulWidget {
   /// channel; defaults to a manager backed by the real application cache
   /// directory.
   final AttachmentCacheManager? cacheManager;
+
+  /// Overrides the upload-status polling schedule. Injected only so tests can
+  /// drive the bounded-polling behavior without waiting out the real 1/2/4/8
+  /// second backoff; production always uses
+  /// [_EventAttachmentsSectionState._statusPollBackoff].
+  @visibleForTesting
+  final List<Duration>? statusPollBackoff;
 
   @override
   State<EventAttachmentsSection> createState() =>
@@ -127,6 +136,9 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
 
   @override
   void dispose() {
+    // Stops any in-flight status poll from continuing past this screen: the
+    // generation check runs before every attempt and before every setState.
+    _pollGeneration++;
     // Cached copies are only meant to live as long as the editor screen --
     // confidential family documents must not accumulate in the cache
     // directory across sessions.
@@ -346,50 +358,171 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
     }
   }
 
-  /// Resolves an UNCERTAIN outcome by asking Hub what actually exists,
-  /// rather than assuming success or failure. Never mints a new key: if the
-  /// attachment is not there, the same operation stays retryable.
+  /// Bounded backoff for status polling: four attempts at 1s, 2s, 4s, 8s.
+  ///
+  /// Bounded on purpose. An operation Hub is still working on can legitimately
+  /// hold its lease for minutes, and polling until it resolves would either
+  /// spin forever or pin the UI on a spinner the user cannot escape. After
+  /// the last attempt the operation is simply left in an honest unresolved
+  /// state with Retry and Discard available -- the user is told what is known,
+  /// not shown a guess.
+  static const List<Duration> _defaultStatusPollBackoff = [
+    Duration(seconds: 1),
+    Duration(seconds: 2),
+    Duration(seconds: 4),
+    Duration(seconds: 8),
+  ];
+
+  List<Duration> get _statusPollBackoff =>
+      widget.statusPollBackoff ?? _defaultStatusPollBackoff;
+
+  /// Guards against overlapping status requests -- a Retry tap arriving while
+  /// a poll is in flight must not start a second one.
+  bool _statusPollInFlight = false;
+
+  /// Bumped whenever the pending operation is discarded or replaced, so an
+  /// in-flight poll for a superseded operation cannot write its result back.
+  int _pollGeneration = 0;
+
+  /// Resolves an UNCERTAIN outcome by asking Hub about THIS OPERATION's
+  /// idempotency key.
+  ///
+  /// The previous implementation listed the event's attachments and declared
+  /// success if any of them had the same filename and size as the file it had
+  /// sent. That is not identity. Two genuinely different files can share a
+  /// name and a byte count, and an event may already carry a same-named
+  /// attachment from an earlier upload -- in which case the app would report
+  /// success, clear the pending operation, and the user's document would
+  /// never be attached at all. Nothing about a filename, a size, a MIME type,
+  /// an attachment count or a list ordering is used here; those are display
+  /// details, not identity.
+  ///
+  /// The key is never rotated by this method: whatever it learns, a retry
+  /// must be recognisable to Hub as the SAME logical upload.
   Future<void> _reconcilePendingUpload() async {
-    final pending = _pendingUpload;
-    if (pending == null) return;
-
+    if (_statusPollInFlight) return;
+    _statusPollInFlight = true;
+    final generation = _pollGeneration;
     try {
-      final attachments = await widget.hubClient.listAttachments(
-        accessToken: widget.accessToken,
-        eventId: widget.eventId,
-      );
-      if (!mounted) return;
+      await _pollUploadStatus(generation);
+    } finally {
+      _statusPollInFlight = false;
+    }
+  }
 
-      final matched = attachments.any(
-        (a) => a.filename == pending.originalFilename && a.size == pending.size,
-      );
-      setState(() {
-        _attachments = attachments;
-        if (matched) {
+  Future<void> _pollUploadStatus(int generation) async {
+    for (var attempt = 0; attempt < _statusPollBackoff.length; attempt++) {
+      // Every stop condition is re-checked before each attempt: a disposed
+      // widget, a discarded or replaced operation, or a completed one all end
+      // the poll immediately rather than after the next delay elapses.
+      if (!mounted || generation != _pollGeneration) return;
+      final pending = _pendingUpload;
+      if (pending == null || !pending.isActive) return;
+
+      AttachmentUploadStatus status;
+      try {
+        status = await widget.hubClient.attachmentUploadStatus(
+          accessToken: widget.accessToken,
+          eventId: widget.eventId,
+          idempotencyKey: pending.idempotencyKey,
+        );
+      } on CaleeHubException catch (e) {
+        if (!mounted || generation != _pollGeneration) return;
+        _applyStatusCheckFailure(pending, e);
+        return;
+      } catch (_) {
+        if (!mounted || generation != _pollGeneration) return;
+        // A transport failure tells us nothing about the upload. Keep the
+        // operation and its key, and stay explicitly uncertain.
+        setState(() => pending.state = AttachmentUploadState.retryable);
+        _showMessage(
+          'Could not check on that upload just now. You can try again.',
+        );
+        return;
+      }
+
+      if (!mounted || generation != _pollGeneration) return;
+
+      if (status.isUsableCompletion) {
+        setState(() {
+          _attachments = [...?_attachments, status.attachment!];
           pending.state = AttachmentUploadState.completed;
           _pendingUpload = null;
-        } else {
-          // Genuinely did not land -- keep the operation (and its key) so a
-          // retry is recognised as the same upload.
-          pending.state = AttachmentUploadState.retryable;
-        }
-      });
-      if (!matched) {
-        _showMessage('That upload did not complete. You can try again.');
+        });
+        // Re-read the list so ordering and any server-side normalization are
+        // reflected, but the COMPLETION itself is already decided.
+        unawaited(_load());
+        return;
       }
-    } catch (_) {
-      if (!mounted) return;
-      // Still unknown. Leave it retryable rather than guessing.
-      setState(() => pending.state = AttachmentUploadState.retryable);
+
+      if (status.kind.isFinalFailure) {
+        setState(() => pending.state = AttachmentUploadState.failedFinal);
+        _showMessage(
+          status.kind == AttachmentUploadStatusKind.expired
+              ? 'That upload can no longer be confirmed. Please choose the file again.'
+              : 'That upload did not complete. Please choose the file again.',
+        );
+        return;
+      }
+
+      if (status.kind == AttachmentUploadStatusKind.retryable) {
+        setState(() => pending.state = AttachmentUploadState.retryable);
+        _showMessage('That upload did not complete. You can try again.');
+        return;
+      }
+
+      // in_progress / reconciliation_required / unknown: not established yet.
+      setState(
+        () =>
+            pending.state = status.kind == AttachmentUploadStatusKind.inProgress
+            ? AttachmentUploadState.uploading
+            : AttachmentUploadState.reconciling,
+      );
+
+      final isLastAttempt = attempt == _statusPollBackoff.length - 1;
+      if (isLastAttempt) break;
+      await Future<void>.delayed(_statusPollBackoff[attempt]);
     }
+
+    if (!mounted || generation != _pollGeneration) return;
+    final pending = _pendingUpload;
+    if (pending == null || !pending.isActive) return;
+
+    // Polling ran out without a definite answer. Say so plainly and leave
+    // Retry / Discard to the user -- do NOT decide on their behalf.
+    setState(() => pending.state = AttachmentUploadState.reconciling);
+    _showMessage(
+      'Still confirming that upload. You can check again or discard it.',
+    );
+  }
+
+  void _applyStatusCheckFailure(
+    PendingAttachmentUpload pending,
+    CaleeHubException e,
+  ) {
+    // Hub does not know this key. That is NOT success -- and it is not a
+    // reason to re-upload silently either, since the operation may have been
+    // deliberately detached. Require an explicit decision from the user.
+    if (e.statusCode == 404 || e.statusCode == 410) {
+      setState(() => pending.state = AttachmentUploadState.failedFinal);
+      _showMessage(
+        'That upload could not be confirmed. Please choose the file again.',
+      );
+      return;
+    }
+    setState(() => pending.state = AttachmentUploadState.retryable);
+    _showMessage('Could not check on that upload just now. You can try again.');
   }
 
   /// Explicit user action: re-send the SAME operation with the SAME key.
   Future<void> _retryPendingUpload() => _sendPendingUpload();
 
   /// Explicit user action: abandon the operation. Only after this does a
-  /// subsequent pick mint a new idempotency key.
+  /// subsequent pick mint a new idempotency key. Bumping the generation
+  /// stops any in-flight status poll from writing back a result for an
+  /// operation the user has already dismissed.
   void _discardPendingUpload() {
+    _pollGeneration++;
     setState(() => _pendingUpload = null);
   }
 
