@@ -15,6 +15,7 @@ import 'package:calee_mobile/ui/calee_widgets.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
+import 'package:open_filex/open_filex.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 
@@ -142,6 +143,15 @@ CalendarAttachment _attachment({
   );
 }
 
+/// Never actually invoked in production, but a real OpenFilex.open() call
+/// falls back to spawning a real OS process (e.g. `xdg-open`) on any
+/// non-mobile platform -- unsafe and environment-dependent to let run for
+/// real in a test/CI environment. EventAttachmentsSection.openFile is
+/// injected precisely so tests never take that path; this is the default
+/// fake used unless a test overrides it.
+Future<OpenResult> _fakeOpenFile(String path) async =>
+    OpenResult(type: ResultType.done, message: 'ok');
+
 Future<void> pumpSection(
   WidgetTester tester, {
   required CaleeHubClient hub,
@@ -149,6 +159,7 @@ Future<void> pumpSection(
   required bool canRemove,
   bool isSeriesScoped = false,
   TextScaler? textScaler,
+  Future<OpenResult> Function(String path) openFile = _fakeOpenFile,
 }) {
   return tester.pumpWidget(
     MaterialApp(
@@ -168,6 +179,7 @@ Future<void> pumpSection(
             canAdd: canAdd,
             canRemove: canRemove,
             isSeriesScoped: isSeriesScoped,
+            openFile: openFile,
           ),
         ),
       ),
@@ -175,25 +187,23 @@ Future<void> pumpSection(
   );
 }
 
-/// Taps [finder] (which triggers _ensureDownloaded()'s genuine file I/O,
-/// then OpenFilex.open() -- itself real process-spawning code on the Linux
-/// host this test runs on) and waits for that real work to actually run.
+/// Taps [finder] (which triggers _ensureDownloaded()'s genuine file I/O via
+/// pumpSection()'s stub hub) and waits for that real work to actually run.
 /// tap()/pump() must stay in the normal fake-async test zone -- only the
 /// real elapsed delay goes inside runAsync() -- matching the constraint
 /// documented on the "upload progress" test below (mixing tap/pump into
-/// runAsync() itself hangs). The wait must be generous enough for the
-/// *entire* chain (download, then OpenFilex) to finish, and the final pump
-/// deliberately is NOT pumpAndSettle(): the busy row shows an indeterminate
-/// CircularProgressIndicator, whose animation never stops on its own, so
-/// pumpAndSettle() would time out waiting for it regardless of how quickly
-/// the real work actually finishes.
+/// runAsync() itself hangs). Safe to finish with pumpAndSettle() (unlike an
+/// earlier version of this helper) now that pumpSection()'s default
+/// openFile fake resolves immediately, so the busy row's indeterminate
+/// CircularProgressIndicator always clears promptly instead of animating
+/// forever waiting on a real OpenFilex.open() call.
 Future<void> tapAndAwaitAsyncWork(WidgetTester tester, Finder finder) async {
   await tester.tap(finder);
   await tester.pump();
   await tester.runAsync(
-    () => Future<void>.delayed(const Duration(milliseconds: 300)),
+    () => Future<void>.delayed(const Duration(milliseconds: 100)),
   );
-  await tester.pump();
+  await tester.pumpAndSettle();
 }
 
 void main() {
@@ -531,9 +541,6 @@ void main() {
         await pumpSection(tester, hub: hub, canAdd: false, canRemove: false);
         await tester.pumpAndSettle();
 
-        // OpenFilex has no test platform-channel handler registered, so the
-        // plugin call after download throws and is caught generically --
-        // irrelevant here, since the cache write already happened by then.
         await tapAndAwaitAsyncWork(tester, find.text('my-original-name.pdf'));
 
         expect(hub.downloadedPaths, hasLength(1));

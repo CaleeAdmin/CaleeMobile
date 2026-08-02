@@ -57,6 +57,7 @@ class EventAttachmentsSection extends StatefulWidget {
     required this.canAdd,
     required this.canRemove,
     required this.isSeriesScoped,
+    this.openFile = OpenFilex.open,
     super.key,
   });
 
@@ -72,6 +73,14 @@ class EventAttachmentsSection extends StatefulWidget {
   /// regardless of [canAdd]/[canRemove] and an explanatory footer is shown,
   /// but existing attachments are still listed and still downloadable.
   final bool isSeriesScoped;
+
+  /// Opens a downloaded attachment with the platform's default viewer.
+  /// Injected (like [hubClient]) rather than calling OpenFilex.open()
+  /// directly, since -- unlike image_picker/path_provider -- open_filex has
+  /// no platform-interface testing seam, and its non-mobile fallback spawns
+  /// a real OS process (e.g. `xdg-open` on Linux), which is unsafe to run
+  /// for real in a test/CI environment.
+  final Future<OpenResult> Function(String path) openFile;
 
   @override
   State<EventAttachmentsSection> createState() =>
@@ -392,7 +401,7 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
     try {
       final path = await _ensureDownloaded(attachment);
       if (path == null || !mounted) return;
-      final result = await OpenFilex.open(path);
+      final result = await widget.openFile(path);
       if (result.type != ResultType.done && mounted) {
         _showMessage('Could not open this attachment.');
       }
