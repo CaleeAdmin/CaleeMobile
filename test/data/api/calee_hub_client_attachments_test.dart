@@ -4,6 +4,7 @@
 // API. Uses the same local-loopback HttpServer harness already established
 // in calee_hub_client_calendar_test.dart / calee_hub_client_concurrency_error_test.dart
 // -- no real network access.
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -277,6 +278,243 @@ void main() {
       },
     );
 
+    test('sanitizes CR/LF/quotes/backslash out of the filename and carries '
+        'Unicode via filename*', () async {
+      List<int> capturedBody = [];
+      server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      server.listen((req) async {
+        capturedBody = await req.fold<List<int>>(
+          [],
+          (acc, chunk) => acc..addAll(chunk),
+        );
+        req.response.headers.contentType = ContentType.json;
+        req.response.statusCode = 201;
+        req.response.write(
+          jsonEncode({
+            'data': {'attachment': attachmentJson(id: 'att-new')},
+            'meta': {},
+          }),
+        );
+        await req.response.close();
+      });
+      final client = CaleeHubClient(
+        baseUri: Uri.parse('http://127.0.0.1:${server.port}'),
+      );
+
+      // A real filename that embeds a CR, an LF, a double-quote and a
+      // backslash -- all legal bytes in a Unix path component -- to prove
+      // header-injection-capable characters never reach the wire raw.
+      final trickyName = 'evil\r\nInjected: header"quote\\slash.pdf';
+      final sourceFile = File('${tempDir.path}/$trickyName');
+      await sourceFile.writeAsBytes(utf8.encode('body'));
+
+      await client.uploadAttachment(
+        accessToken: 'tok',
+        eventId: 'portal:evt-1',
+        file: sourceFile,
+        idempotencyKey: 'idem-key-tricky-name',
+      );
+
+      final bodyText = latin1.decode(capturedBody, allowInvalid: true);
+      final physicalLines = bodyText.split('\r\n');
+      final dispositionLines = physicalLines.where(
+        (line) => line.startsWith('Content-Disposition:'),
+      );
+      expect(
+        dispositionLines,
+        hasLength(1),
+        reason:
+            'a stray CR/LF in the filename must never split into a second '
+            'physical line (which would be header/part injection)',
+      );
+      expect(
+        dispositionLines.single,
+        'Content-Disposition: form-data; name="file"; '
+        'filename="evilInjected: header\\"quote\\\\slash.pdf"',
+      );
+    });
+
+    test('carries a Unicode-only filename via filename*=UTF-8\'\'', () async {
+      List<int> capturedBody = [];
+      server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      server.listen((req) async {
+        capturedBody = await req.fold<List<int>>(
+          [],
+          (acc, chunk) => acc..addAll(chunk),
+        );
+        req.response.headers.contentType = ContentType.json;
+        req.response.statusCode = 201;
+        req.response.write(
+          jsonEncode({
+            'data': {'attachment': attachmentJson(id: 'att-new')},
+            'meta': {},
+          }),
+        );
+        await req.response.close();
+      });
+      final client = CaleeHubClient(
+        baseUri: Uri.parse('http://127.0.0.1:${server.port}'),
+      );
+
+      final sourceFile = File('${tempDir.path}/café.pdf');
+      await sourceFile.writeAsBytes(utf8.encode('body'));
+
+      await client.uploadAttachment(
+        accessToken: 'tok',
+        eventId: 'portal:evt-1',
+        file: sourceFile,
+        idempotencyKey: 'idem-key-unicode-name',
+      );
+
+      final bodyText = latin1.decode(capturedBody, allowInvalid: true);
+      final dispositionLine = bodyText
+          .split('\r\n')
+          .firstWhere((line) => line.startsWith('Content-Disposition:'));
+      expect(dispositionLine, contains('filename="caf_.pdf"'));
+      expect(dispositionLine, contains("filename*=UTF-8''caf%C3%A9.pdf"));
+    });
+
+    test('streams a multi-chunk file to the wire byte-for-byte via multiple '
+        'progress updates', () async {
+      List<int> capturedBody = [];
+      server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      server.listen((req) async {
+        capturedBody = await req.fold<List<int>>(
+          [],
+          (acc, chunk) => acc..addAll(chunk),
+        );
+        req.response.headers.contentType = ContentType.json;
+        req.response.statusCode = 201;
+        req.response.write(
+          jsonEncode({
+            'data': {'attachment': attachmentJson(id: 'att-new')},
+            'meta': {},
+          }),
+        );
+        await req.response.close();
+      });
+      final client = CaleeHubClient(
+        baseUri: Uri.parse('http://127.0.0.1:${server.port}'),
+      );
+
+      // 512 KB: several times dart:io's internal 64 KB File.openRead()
+      // block size, so a single-shot in-memory write versus genuine
+      // chunk-by-chunk streaming is distinguishable by progress-call count.
+      final pattern = List<int>.generate(16, (i) => i);
+      final fileBytes = List<int>.generate(
+        512 * 1024,
+        (i) => pattern[i % pattern.length],
+      );
+      final sourceFile = File('${tempDir.path}/large.bin');
+      await sourceFile.writeAsBytes(fileBytes);
+
+      final progressUpdates = <int>[];
+      await client.uploadAttachment(
+        accessToken: 'tok',
+        eventId: 'portal:evt-1',
+        file: sourceFile,
+        idempotencyKey: 'idem-key-large',
+        onProgress: (sent, total) => progressUpdates.add(sent),
+      );
+
+      expect(
+        progressUpdates.length,
+        greaterThan(4),
+        reason:
+            'a 512 KB file read in ~64 KB blocks should report several '
+            'distinct progress updates, not one single whole-file write',
+      );
+      for (var i = 1; i < progressUpdates.length; i++) {
+        expect(progressUpdates[i], greaterThan(progressUpdates[i - 1]));
+      }
+
+      final bodyText = latin1.decode(capturedBody, allowInvalid: true);
+      final headerEnd = bodyText.indexOf('\r\n\r\n') + 4;
+      final fileBytesInBody = capturedBody.sublist(
+        headerEnd,
+        headerEnd + fileBytes.length,
+      );
+      expect(
+        fileBytesInBody,
+        fileBytes,
+        reason: 'the full file must arrive intact, byte for byte',
+      );
+    });
+
+    test('cancelling mid-upload genuinely tears down the connection instead of '
+        'leaving it dangling', () async {
+      final serverClosed = Completer<void>();
+      var serverReceivedBytes = 0;
+      server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      server.listen((req) {
+        req.listen(
+          (chunk) => serverReceivedBytes += chunk.length,
+          onDone: () {
+            if (!serverClosed.isCompleted) serverClosed.complete();
+          },
+          onError: (Object _) {
+            if (!serverClosed.isCompleted) serverClosed.complete();
+          },
+          cancelOnError: true,
+        );
+        // Deliberately never responds: if the client left the socket
+        // merely dangling (the old behavior) rather than genuinely
+        // destroying it, nothing would ever complete serverClosed.
+      });
+      final client = CaleeHubClient(
+        baseUri: Uri.parse('http://127.0.0.1:${server.port}'),
+      );
+
+      final pattern = List<int>.generate(16, (i) => i);
+      final fileBytes = List<int>.generate(
+        512 * 1024,
+        (i) => pattern[i % pattern.length],
+      );
+      final sourceFile = File('${tempDir.path}/large-cancel.bin');
+      await sourceFile.writeAsBytes(fileBytes);
+
+      final cancelToken = AttachmentTransferCancelToken();
+      var progressCalls = 0;
+
+      try {
+        await client.uploadAttachment(
+          accessToken: 'tok',
+          eventId: 'portal:evt-1',
+          file: sourceFile,
+          idempotencyKey: 'idem-key-midcancel',
+          cancelToken: cancelToken,
+          onProgress: (sent, total) {
+            progressCalls++;
+            if (progressCalls == 3) {
+              cancelToken.cancel();
+            }
+          },
+        );
+        fail('Expected CaleeHubException(code: CANCELLED)');
+      } on CaleeHubException catch (e) {
+        expect(e.code, 'CANCELLED');
+      }
+
+      await serverClosed.future.timeout(
+        const Duration(seconds: 5),
+        onTimeout: () {
+          fail(
+            'the server never observed the connection close -- the '
+            'client left the socket dangling instead of genuinely '
+            'aborting it',
+          );
+        },
+      );
+
+      expect(
+        serverReceivedBytes,
+        lessThan(fileBytes.length),
+        reason:
+            'the connection should have been torn down well before the '
+            'full 512 KB body arrived',
+      );
+    });
+
     test('a 409 conflict during upload parses safely', () async {
       server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       server.listen((req) async {
@@ -393,6 +631,71 @@ void main() {
         );
       },
     );
+
+    test('cancelling mid-download stops the stream promptly and leaves no '
+        'partial file', () async {
+      server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      server.listen((req) async {
+        req.response.headers.contentType = ContentType.parse(
+          'application/octet-stream',
+        );
+        req.response.statusCode = 200;
+        try {
+          // Paced slowly (20 * 50ms = ~1s total) so there's a reliable
+          // window to cancel mid-stream rather than racing an
+          // instantaneous loopback transfer.
+          for (var i = 0; i < 20; i++) {
+            req.response.add(List<int>.filled(64 * 1024, i % 256));
+            await req.response.flush();
+            await Future<void>.delayed(const Duration(milliseconds: 50));
+          }
+          await req.response.close();
+        } catch (_) {
+          // The client is expected to disconnect mid-stream here.
+        }
+      });
+      final client = CaleeHubClient(
+        baseUri: Uri.parse('http://127.0.0.1:${server.port}'),
+      );
+
+      final destination = File('${tempDir.path}/cancelled-download.bin');
+      final cancelToken = AttachmentTransferCancelToken();
+      var receivedCalls = 0;
+
+      final stopwatch = Stopwatch()..start();
+      try {
+        await client.downloadAttachment(
+          accessToken: 'tok',
+          eventId: 'portal:evt-1',
+          attachmentId: 'att-1',
+          destinationFile: destination,
+          cancelToken: cancelToken,
+          onProgress: (received, total) {
+            receivedCalls++;
+            if (receivedCalls == 2) {
+              cancelToken.cancel();
+            }
+          },
+        );
+        fail('Expected CaleeHubException(code: CANCELLED)');
+      } on CaleeHubException catch (e) {
+        expect(e.code, 'CANCELLED');
+      }
+      stopwatch.stop();
+
+      expect(
+        stopwatch.elapsed,
+        lessThan(const Duration(seconds: 1)),
+        reason:
+            'cancellation should interrupt the stream immediately rather '
+            'than waiting for the artificially slow (~1s) server to finish',
+      );
+      expect(
+        await destination.exists(),
+        isFalse,
+        reason: 'no partial file should be left behind after cancellation',
+      );
+    });
   });
 
   group('CaleeHubClient.detachAttachment()', () {

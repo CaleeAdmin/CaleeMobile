@@ -51,6 +51,11 @@ dev_dependencies:
   # real platform channel.
   image_picker_platform_interface: ^2.11.1
   plugin_platform_interface: ^2.1.8
+  # Already present transitively via path_provider; pinned here as a direct
+  # dev dependency for the same reason -- faking PathProviderPlatform.instance
+  # so the attachment cache-lifecycle tests get a real, writable directory
+  # instead of the unregistered method channel.
+  path_provider_platform_interface: ^2.1.2
 
 flutter:
 

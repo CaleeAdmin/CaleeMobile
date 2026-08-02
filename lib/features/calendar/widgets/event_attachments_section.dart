@@ -96,6 +96,26 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
     _load();
   }
 
+  @override
+  void dispose() {
+    // The cache this section builds up is only meant to live as long as the
+    // editor screen itself -- clear it out rather than letting downloaded
+    // copies accumulate in the cache directory across sessions.
+    final paths = _downloadedPaths.values.toList();
+    _downloadedPaths.clear();
+    unawaited(
+      Future.wait(
+        paths.map((path) async {
+          final file = File(path);
+          if (await file.exists()) {
+            await file.delete();
+          }
+        }),
+      ),
+    );
+    super.dispose();
+  }
+
   Future<void> _load() async {
     setState(() => _loadError = null);
     try {
@@ -217,6 +237,15 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
       } else if (e.statusCode == 409) {
         _showMessage('This event changed elsewhere. Refreshing attachments.');
         unawaited(_load());
+      } else if (e.code == 'TIMEOUT') {
+        // A timeout means the outcome is genuinely unknown -- Hub may have
+        // received and completed the upload even though this client gave up
+        // waiting for the response. Reconcile against the source of truth
+        // instead of assuming failure. This never mints a new idempotency
+        // key itself; if the user taps "Add attachment" again, that's a
+        // deliberate new attempt with its own fresh key.
+        _showMessage('Upload status unknown. Checking for the attachment…');
+        unawaited(_load());
       } else {
         _showMessage(
           _friendlyErrorMessage(
@@ -268,11 +297,13 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
       );
       if (!mounted) return;
       setState(() => _attachments = updated);
+      unawaited(_forgetCachedFile(attachment.id));
     } on CaleeHubException catch (e) {
       if (!mounted) return;
       if (e.statusCode == 409 || e.code == 'ATTACHMENT_NOT_FOUND') {
         _showMessage('This event changed elsewhere. Refreshing attachments.');
         await _load();
+        unawaited(_forgetCachedFile(attachment.id));
       } else {
         _showMessage(
           _friendlyErrorMessage(
@@ -296,17 +327,39 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
 
   // ── Download / open / share ─────────────────────────────────────────────
 
-  Future<String?> _ensureDownloaded(CalendarAttachment attachment) async {
-    final cachedPath = _downloadedPaths[attachment.id];
-    if (cachedPath != null && await File(cachedPath).exists()) {
-      return cachedPath;
+  /// Deletes and forgets any cached local copy of [attachmentId], if one
+  /// exists. Safe to call whether or not a copy was ever downloaded.
+  Future<void> _forgetCachedFile(String attachmentId) async {
+    final path = _downloadedPaths.remove(attachmentId);
+    if (path == null) return;
+    final file = File(path);
+    if (await file.exists()) {
+      await file.delete();
     }
+  }
 
+  /// Downloads [attachment] fresh to a new cache file with an unpredictable
+  /// name (never the attachment ID or its original filename, so a cache
+  /// directory listing can't be used to enumerate or guess at another
+  /// event's attachments). path_provider's application-cache directory maps
+  /// to NSCachesDirectory on iOS and Context.getCacheDir() on Android, both
+  /// of which are already excluded from OS-level cloud/auto backups by
+  /// platform convention -- no separate exclusion API is needed here.
+  Future<File> _downloadToFreshCacheFile(CalendarAttachment attachment) async {
     final cacheDir = await getApplicationCacheDirectory();
-    final safeName = attachment.filename.replaceAll(RegExp(r'[\\/]'), '_');
-    final destination = File(
-      '${cacheDir.path}/attachment_${attachment.id}_$safeName',
-    );
+    final random = Random.secure();
+    final token = List<int>.generate(
+      16,
+      (_) => random.nextInt(256),
+    ).map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+    final rawExtension = attachment.filename.contains('.')
+        ? attachment.filename.split('.').last.toLowerCase()
+        : '';
+    // Kept only so OS "open with" file-type detection still works; never
+    // carries the original filename or the attachment ID.
+    final safeExtension = rawExtension.replaceAll(RegExp(r'[^a-z0-9]'), '');
+    final suffix = safeExtension.isEmpty ? '' : '.$safeExtension';
+    final destination = File('${cacheDir.path}/att_cache_$token$suffix');
 
     await widget.hubClient.downloadAttachment(
       accessToken: widget.accessToken,
@@ -314,7 +367,18 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
       attachmentId: attachment.id,
       destinationFile: destination,
     );
+    return destination;
+  }
 
+  /// Always re-downloads rather than trusting a previously cached copy: the
+  /// attachment API exposes no content-version/ETag signal an attachment ID
+  /// alone can be checked against, so treating an ID as a permanently-valid
+  /// cache key risks silently serving stale bytes. The old copy (if any) is
+  /// deleted first, bounding on-disk cache growth to at most one file per
+  /// currently-open attachment.
+  Future<String?> _ensureDownloaded(CalendarAttachment attachment) async {
+    await _forgetCachedFile(attachment.id);
+    final destination = await _downloadToFreshCacheFile(attachment);
     _downloadedPaths[attachment.id] = destination.path;
     return destination.path;
   }

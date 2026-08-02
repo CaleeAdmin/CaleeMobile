@@ -1416,6 +1416,44 @@ class CaleeHubClient {
     );
   }
 
+  /// Splits a raw filename into a wire-safe multipart `Content-Disposition`
+  /// pair: [ascii] always uses the plain `filename="..."` parameter (CR/LF/
+  /// NUL stripped, quotes and backslashes escaped, non-ASCII bytes replaced
+  /// with `_` so the quoted-string stays valid on any receiving parser), and
+  /// [utf8Star] -- present only when [ascii] had to drop non-ASCII
+  /// characters -- carries the original name losslessly via the RFC 5987
+  /// `filename*=UTF-8''...` form, mirroring how the Hub backend already
+  /// emits `Content-Disposition` for downloads
+  /// (`client_api_attachment_content_disposition()`). This only affects the
+  /// wire encoding of the upload request; the user-visible filename
+  /// elsewhere in the app is never altered.
+  static ({String ascii, String? utf8Star}) _sanitizeMultipartFilename(
+    String rawFilename,
+  ) {
+    final noControlChars = rawFilename.replaceAll(RegExp(r'[\r\n\x00]'), '');
+    final base = noControlChars.trim().isEmpty ? 'attachment' : noControlChars;
+
+    final asciiBuffer = StringBuffer();
+    var isPureAscii = true;
+    for (final rune in base.runes) {
+      if (rune == 0x5c || rune == 0x22) {
+        // Backslash or double-quote: escape so the quoted-string stays valid.
+        asciiBuffer.write('\\');
+        asciiBuffer.writeCharCode(rune);
+      } else if (rune >= 0x20 && rune <= 0x7e) {
+        asciiBuffer.writeCharCode(rune);
+      } else {
+        isPureAscii = false;
+        asciiBuffer.write('_');
+      }
+    }
+    var ascii = asciiBuffer.toString();
+    if (ascii.trim().isEmpty) ascii = 'attachment';
+
+    final utf8Star = isPureAscii ? null : Uri.encodeComponent(base);
+    return (ascii: ascii, utf8Star: utf8Star);
+  }
+
   Future<Map<String, dynamic>> _doUploadAttachment(
     String path, {
     required String accessToken,
@@ -1442,60 +1480,79 @@ class CaleeHubClient {
         parameters: {'boundary': boundary},
       );
 
-      final filename = file.path.split('/').last;
-      final fileBytes = await file.readAsBytes();
+      // Aborting the request genuinely tears down the connection (Hub never
+      // sees a complete body, so no partial upload can be misread as
+      // success) as long as this fires before the response has arrived --
+      // true for the entire body-writing phase below. Detached once we have
+      // a response, since abort() becomes a no-op past that point anyway.
+      const cancelException = CaleeHubException(
+        statusCode: 0,
+        code: 'CANCELLED',
+        message: 'Upload cancelled.',
+      );
+      // A mid-body abort tears down the socket before the declared
+      // Content-Length has actually been written, which dart:io flags
+      // internally on request.done -- a Future our own code never awaits on
+      // this path (we throw cancelException directly below instead). Left
+      // unlistened, that would surface as a second, stray unhandled async
+      // error alongside the CANCELLED one. .ignore() marks it observed
+      // without affecting the independent await request.close() below.
+      request.done.ignore();
+      cancelToken?.attachAbort(() => request.abort(cancelException));
+      if (cancelToken?.isCancelled ?? false) {
+        // Already cancelled before we wrote anything: bail out now so the
+        // file is never opened and no bytes reach the wire.
+        throw cancelException;
+      }
+
+      final rawFilename = file.path.split('/').last;
+      final sanitizedFilename = _sanitizeMultipartFilename(rawFilename);
+      final dispositionBuffer = StringBuffer(
+        'Content-Disposition: form-data; name="file"; '
+        'filename="${sanitizedFilename.ascii}"',
+      );
+      if (sanitizedFilename.utf8Star != null) {
+        dispositionBuffer.write(
+          "; filename*=UTF-8''${sanitizedFilename.utf8Star}",
+        );
+      }
+      dispositionBuffer.write('\r\n');
+
       final head = BytesBuilder()
         ..add(utf8.encode('--$boundary\r\n'))
-        ..add(
-          utf8.encode(
-            'Content-Disposition: form-data; name="file"; filename="$filename"\r\n',
-          ),
-        )
+        ..add(utf8.encode(dispositionBuffer.toString()))
         ..add(utf8.encode('Content-Type: application/octet-stream\r\n\r\n'));
       final headBytes = head.toBytes();
       final tailBytes = utf8.encode('\r\n--$boundary--\r\n');
-      final totalBytes = headBytes.length + fileBytes.length + tailBytes.length;
+      final fileSize = await file.length();
+      final totalBytes = headBytes.length + fileSize + tailBytes.length;
       request.contentLength = totalBytes;
 
-      // dart:io's HttpClientRequest has no explicit abort/cancel API. On
-      // cancellation this simply stops writing further bytes and throws --
-      // the request is left un-closed and abandoned (never awaited further),
-      // so the socket is torn down when the request object is garbage
-      // collected. Hub's own request-body read will time out server-side;
-      // no response is ever read here, so nothing is misinterpreted as
-      // success.
-      void checkCancelled() {
-        if (cancelToken?.isCancelled ?? false) {
-          throw const CaleeHubException(
-            statusCode: 0,
-            code: 'CANCELLED',
-            message: 'Upload cancelled.',
-          );
-        }
-      }
-
-      checkCancelled();
       request.add(headBytes);
       var sent = headBytes.length;
       onProgress?.call(sent, totalBytes);
 
-      const chunkSize = 64 * 1024;
-      for (var offset = 0; offset < fileBytes.length; offset += chunkSize) {
-        checkCancelled();
-        final end = offset + chunkSize < fileBytes.length
-            ? offset + chunkSize
-            : fileBytes.length;
-        request.add(fileBytes.sublist(offset, end));
-        sent += end - offset;
+      // Streamed straight from disk (never file.readAsBytes()) so the peak
+      // memory used for an upload stays proportional to a chunk, not to the
+      // whole attachment.
+      await for (final chunk in file.openRead()) {
+        if (cancelToken?.isCancelled ?? false) {
+          throw cancelException;
+        }
+        request.add(chunk);
+        sent += chunk.length;
         onProgress?.call(sent, totalBytes);
       }
 
-      checkCancelled();
+      if (cancelToken?.isCancelled ?? false) {
+        throw cancelException;
+      }
       request.add(tailBytes);
       sent += tailBytes.length;
       onProgress?.call(sent, totalBytes);
 
       final response = await request.close();
+      cancelToken?.detach();
       return _readJsonResponse(response, endpoint: path);
     });
   }
@@ -1545,6 +1602,12 @@ class CaleeHubClient {
     AttachmentTransferCancelToken? cancelToken,
   }) {
     return _executeAttachmentTransferRequest(() async {
+      const cancelException = CaleeHubException(
+        statusCode: 0,
+        code: 'CANCELLED',
+        message: 'Download cancelled.',
+      );
+
       final request = await _httpClient.getUrl(baseUri.resolve(path));
       request.headers.set(HttpHeaders.acceptHeader, '*/*');
       request.headers.set(
@@ -1552,9 +1615,15 @@ class CaleeHubClient {
         'Bearer $accessToken',
       );
 
+      // Covers cancellation up until the response arrives; abort() becomes
+      // a no-op after that; the body-streaming phase below re-attaches to
+      // the response subscription instead.
+      cancelToken?.attachAbort(() => request.abort(cancelException));
+
       final response = await request.close();
 
       if (response.statusCode < 200 || response.statusCode >= 300) {
+        cancelToken?.detach();
         // Error responses use the same JSON envelope as every other Hub
         // error -- _readJsonResponse always throws for a non-2xx status.
         await _readJsonResponse(response, endpoint: path);
@@ -1565,21 +1634,40 @@ class CaleeHubClient {
       var received = 0;
 
       final sink = destinationFile.openWrite();
-      try {
-        await for (final chunk in response) {
-          if (cancelToken?.isCancelled ?? false) {
-            throw const CaleeHubException(
-              statusCode: 0,
-              code: 'CANCELLED',
-              message: 'Download cancelled.',
-            );
-          }
+      final bodyCompleter = Completer<void>();
+      StreamSubscription<List<int>>? subscription;
+      subscription = response.listen(
+        (chunk) {
           sink.add(chunk);
           received += chunk.length;
           onProgress?.call(received, total);
+        },
+        onDone: () {
+          if (!bodyCompleter.isCompleted) bodyCompleter.complete();
+        },
+        onError: (Object error, StackTrace stackTrace) {
+          if (!bodyCompleter.isCompleted) {
+            bodyCompleter.completeError(error, stackTrace);
+          }
+        },
+        cancelOnError: true,
+      );
+
+      // Cancelling a StreamSubscription silently stops further events --
+      // it never completes onDone/onError on its own -- so the abort
+      // callback must also fail the completer to unblock the await below.
+      cancelToken?.attachAbort(() {
+        subscription?.cancel();
+        if (!bodyCompleter.isCompleted) {
+          bodyCompleter.completeError(cancelException);
         }
+      });
+
+      try {
+        await bodyCompleter.future;
         await sink.flush();
       } finally {
+        cancelToken?.detach();
         await sink.close();
       }
     });
@@ -2393,20 +2481,46 @@ class CaleeHubClient {
   }
 }
 
-/// Lightweight user-cancellation signal for
+/// User-cancellation signal for
 /// [CaleeHubClient.uploadAttachment]/[CaleeHubClient.downloadAttachment].
-/// dart:io's HttpClient has no request-abort API, so cancelling only stops
-/// the transfer from writing/reading further bytes and throws a
-/// `CaleeHubException(code: 'CANCELLED')` -- it does not forcibly close the
-/// underlying socket. One token is good for one transfer; create a new one
-/// for each upload/download.
+/// Cancelling genuinely tears down the in-flight transfer: whatever abort
+/// callback is currently attached (via [attachAbort]) runs synchronously,
+/// invoking `HttpClientRequest.abort()` and/or `StreamSubscription.cancel()`
+/// depending on which phase the transfer is in. One token is good for one
+/// transfer; create a new one for each upload/download.
 class AttachmentTransferCancelToken {
   bool _cancelled = false;
+  void Function()? _onCancel;
 
   bool get isCancelled => _cancelled;
 
+  /// Cancels the transfer. If an abort callback is attached, it runs
+  /// immediately; otherwise the cancellation is recorded and the next
+  /// [attachAbort] call fires straight away, so a cancel requested before
+  /// the request/subscription exists yet is never lost.
   void cancel() {
+    if (_cancelled) return;
     _cancelled = true;
+    _onCancel?.call();
+  }
+
+  /// Registers the callback that actually aborts the current phase of the
+  /// transfer (request abort before a response arrives; stream-subscription
+  /// cancel while a download body is being read). Replaces any previously
+  /// attached callback -- callers re-attach when the transfer moves into a
+  /// new phase. If the token was already cancelled, fires immediately.
+  void attachAbort(void Function() onCancel) {
+    _onCancel = onCancel;
+    if (_cancelled) {
+      onCancel();
+    }
+  }
+
+  /// Detaches the current abort callback without cancelling. Call this once
+  /// a phase completes (e.g. the request finished writing and a response
+  /// arrived) so a later [cancel] doesn't invoke a stale callback.
+  void detach() {
+    _onCancel = null;
   }
 }
 
