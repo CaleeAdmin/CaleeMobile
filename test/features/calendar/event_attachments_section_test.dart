@@ -188,21 +188,30 @@ Future<void> pumpSection(
 }
 
 /// Taps [finder] (which triggers _ensureDownloaded()'s genuine file I/O via
-/// pumpSection()'s stub hub) and waits for that real work to actually run.
-/// tap()/pump() must stay in the normal fake-async test zone -- only the
-/// real elapsed delay goes inside runAsync() -- matching the constraint
-/// documented on the "upload progress" test below (mixing tap/pump into
-/// runAsync() itself hangs). Safe to finish with pumpAndSettle() (unlike an
-/// earlier version of this helper) now that pumpSection()'s default
-/// openFile fake resolves immediately, so the busy row's indeterminate
-/// CircularProgressIndicator always clears promptly instead of animating
-/// forever waiting on a real OpenFilex.open() call.
+/// pumpSection()'s stub hub, chained with the openFile fake) and waits for
+/// that real work to actually run. tap()/pump() must stay in the normal
+/// fake-async test zone -- only the real elapsed delay goes inside
+/// runAsync() -- matching the constraint documented on the "upload
+/// progress" test below (mixing tap/pump into runAsync() itself hangs).
+/// pumpAndSettle() alone never drives real (non-Flutter-timer) async work
+/// forward, only runAsync() does -- so this polls in short real-time
+/// increments until the busy row's indeterminate CircularProgressIndicator
+/// actually clears (bounded, rather than guessing a single fixed delay
+/// that may not be enough under a loaded machine), then a final
+/// pumpAndSettle() is safe now that pumpSection()'s default openFile fake
+/// always resolves immediately.
 Future<void> tapAndAwaitAsyncWork(WidgetTester tester, Finder finder) async {
   await tester.tap(finder);
   await tester.pump();
-  await tester.runAsync(
-    () => Future<void>.delayed(const Duration(milliseconds: 100)),
-  );
+  for (var i = 0; i < 100; i++) {
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 50)),
+    );
+    await tester.pump();
+    if (find.byType(CircularProgressIndicator).evaluate().isEmpty) {
+      break;
+    }
+  }
   await tester.pumpAndSettle();
 }
 
