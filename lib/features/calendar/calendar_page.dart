@@ -30,6 +30,7 @@ class CalendarPage extends StatefulWidget {
     required this.isFamilyUxContext,
     this.reminderCoordinator,
     this.refreshGeneration = 0,
+    this.isActive = true,
     super.key,
   });
 
@@ -50,18 +51,31 @@ class CalendarPage extends StatefulWidget {
   // Increment to trigger a refresh of calendars and events from the parent.
   final int refreshGeneration;
 
+  /// Whether Calendar is the tab currently on screen. The home page keeps every
+  /// tab mounted in an IndexedStack, so a hidden Calendar must not spend a
+  /// network round trip refreshing when the app resumes — selecting the tab
+  /// again bumps [refreshGeneration], which reloads it anyway.
+  final bool isActive;
+
   @override
   State<CalendarPage> createState() => _CalendarPageState();
 }
 
-class _CalendarPageState extends State<CalendarPage> {
+class _CalendarPageState extends State<CalendarPage>
+    with WidgetsBindingObserver {
   late CalendarController _controller;
   final TextEditingController _searchController = TextEditingController();
   CalendarDisplayViewMode _viewMode = CalendarDisplayViewMode.month;
 
+  /// True once the app has left the foreground. Cleared on the next resume, so
+  /// exactly one refresh happens per background→foreground round trip and a
+  /// repeated (or duplicated) `resumed` notification cannot queue another.
+  bool _wasBackgrounded = false;
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     final repository = CalendarRepository(
       hubClient: widget.hubClient,
       accessToken: widget.accessToken,
@@ -94,7 +108,28 @@ class _CalendarPageState extends State<CalendarPage> {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state != AppLifecycleState.resumed) {
+      _wasBackgrounded = true;
+      return;
+    }
+    if (!_wasBackgrounded) return;
+    _wasBackgrounded = false;
+    // Calendar keeps its controller (and its already-loaded events) alive in
+    // the home IndexedStack, so anything that reached the hub while the app was
+    // away — a subscribed calendar picking up new events, for example — stayed
+    // invisible until the user left the tab and came back. Refetch just the
+    // month already on screen, without a blocking spinner, and only while
+    // Calendar is the visible tab: a hidden one reloads via refreshGeneration
+    // when it is next selected.
+    if (!widget.isActive || !mounted) return;
+    unawaited(_controller.refreshInBackground());
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _controller.dispose();
     _searchController.dispose();
     super.dispose();
