@@ -179,7 +179,7 @@ Future<void> pumpSection(
   bool isSeriesScoped = false,
   TextScaler? textScaler,
   Future<OpenResult> Function(String path) openFile = _fakeOpenFile,
-  List<Duration>? statusPollBackoff,
+  List<Duration>? statusPollSchedule,
 }) {
   return tester.pumpWidget(
     MaterialApp(
@@ -200,7 +200,7 @@ Future<void> pumpSection(
             canRemove: canRemove,
             isSeriesScoped: isSeriesScoped,
             openFile: openFile,
-            statusPollBackoff: statusPollBackoff,
+            statusPollSchedule: statusPollSchedule,
           ),
         ),
       ),
@@ -566,8 +566,10 @@ void main() {
     }
 
     /// A poll schedule with no real waiting, so the bounded-polling
-    /// behaviour can be asserted without burning 15 seconds of test clock.
-    const fastBackoff = [Duration.zero, Duration.zero, Duration.zero];
+    /// behaviour can be asserted without burning the real schedule's ~7
+    /// seconds of test clock. One entry per attempt, exactly like the
+    /// production schedule -- so `length` really is the attempt count.
+    const fastSchedule = [Duration.zero, Duration.zero, Duration.zero];
 
     AttachmentUploadStatus status(
       AttachmentUploadStatusKind kind, {
@@ -825,7 +827,7 @@ void main() {
           hub: hub,
           canAdd: true,
           canRemove: true,
-          statusPollBackoff: fastBackoff,
+          statusPollSchedule: fastSchedule,
         );
         await tester.pumpAndSettle();
         await pickAndAttempt(tester, sourceFile);
@@ -864,17 +866,94 @@ void main() {
         hub: hub,
         canAdd: true,
         canRemove: true,
-        statusPollBackoff: fastBackoff,
+        statusPollSchedule: fastSchedule,
       );
       await tester.pumpAndSettle();
       await pickAndAttempt(tester, sourceFile);
 
       expect(
         hub.statusQueriedKeys,
-        hasLength(fastBackoff.length),
+        hasLength(fastSchedule.length),
         reason:
             'exactly one status call per scheduled attempt, then it stops -- '
             'an unresolvable operation must not poll indefinitely',
+      );
+      expect(hub.uploadIdempotencyKeys, hasLength(1));
+    });
+
+    test(
+      'the default poll schedule is one immediate check, then 1s, 2s, 4s',
+      () {
+        const schedule = EventAttachmentsSection.defaultStatusPollSchedule;
+
+        expect(
+          schedule,
+          hasLength(4),
+          reason: 'four status requests in total -- one entry per attempt',
+        );
+        expect(
+          schedule.first,
+          Duration.zero,
+          reason: 'the first check is immediate, not delayed',
+        );
+        expect(
+          schedule.sublist(1),
+          const [
+            Duration(seconds: 1),
+            Duration(seconds: 2),
+            Duration(seconds: 4),
+          ],
+          reason: 'the waits BEFORE the remaining three attempts',
+        );
+        expect(
+          schedule.sublist(1).contains(const Duration(seconds: 8)),
+          isFalse,
+          reason:
+              'the old list documented an 8s backoff the loop never reached; a '
+              'schedule entry that is never consumed must not exist',
+        );
+      },
+    );
+
+    testWidgets('every entry in the default schedule is consumed -- exactly '
+        'four status requests, with no unused entry', (tester) async {
+      final hub = _StubHub(
+        onUpload: (onProgress) async {
+          throw const CaleeHubException(
+            statusCode: 0,
+            code: 'TIMEOUT',
+            message: 'Check your connection and try again.',
+          );
+        },
+      );
+      // Hub never resolves, so polling runs the schedule to its end.
+      hub.statusResponses = [status(AttachmentUploadStatusKind.inProgress)];
+      final sourceFile = File('${tempDir.path}/default_schedule_pick.jpg');
+      await tester.runAsync(
+        () => sourceFile.writeAsBytes(List<int>.filled(2048, 1)),
+      );
+
+      // No injected schedule: this exercises the REAL production one, so the
+      // documented schedule and the executed one cannot drift apart.
+      await pumpSection(tester, hub: hub, canAdd: true, canRemove: true);
+      await tester.pumpAndSettle();
+      await pickAndAttempt(tester, sourceFile);
+      // Let the real 1s + 2s + 4s of scheduled waiting elapse on the fake
+      // clock, so every attempt actually runs.
+      await tester.pump(const Duration(seconds: 10));
+      await tester.pumpAndSettle();
+
+      expect(
+        hub.statusQueriedKeys,
+        hasLength(EventAttachmentsSection.defaultStatusPollSchedule.length),
+        reason:
+            'the number of schedule entries IS the number of requests -- no '
+            'entry is skipped, and none is left unused',
+      );
+      expect(
+        hub.statusQueriedKeys.toSet(),
+        hasLength(1),
+        reason: 'every attempt uses the same idempotency key',
       );
       expect(hub.uploadIdempotencyKeys, hasLength(1));
     });
@@ -901,7 +980,7 @@ void main() {
         hub: hub,
         canAdd: true,
         canRemove: true,
-        statusPollBackoff: fastBackoff,
+        statusPollSchedule: fastSchedule,
       );
       await tester.pumpAndSettle();
       await pickAndAttempt(tester, sourceFile);
@@ -946,7 +1025,7 @@ void main() {
           hub: hub,
           canAdd: true,
           canRemove: true,
-          statusPollBackoff: fastBackoff,
+          statusPollSchedule: fastSchedule,
         );
         await tester.pumpAndSettle();
         await pickAndAttempt(tester, sourceFile);
@@ -987,7 +1066,7 @@ void main() {
         hub: hub,
         canAdd: true,
         canRemove: true,
-        statusPollBackoff: const [
+        statusPollSchedule: const [
           Duration(milliseconds: 50),
           Duration(milliseconds: 50),
           Duration(milliseconds: 50),

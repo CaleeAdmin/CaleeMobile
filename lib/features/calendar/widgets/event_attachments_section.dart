@@ -55,7 +55,7 @@ class EventAttachmentsSection extends StatefulWidget {
     required this.isSeriesScoped,
     this.openFile = OpenFilex.open,
     this.cacheManager,
-    this.statusPollBackoff,
+    this.statusPollSchedule,
     super.key,
   });
 
@@ -86,12 +86,36 @@ class EventAttachmentsSection extends StatefulWidget {
   /// directory.
   final AttachmentCacheManager? cacheManager;
 
-  /// Overrides the upload-status polling schedule. Injected only so tests can
-  /// drive the bounded-polling behavior without waiting out the real 1/2/4/8
-  /// second backoff; production always uses
-  /// [_EventAttachmentsSectionState._statusPollBackoff].
+  /// The status-polling schedule, as the wait BEFORE each attempt:
+  ///
+  ///   attempt 1 immediately, then waits of 1s, 2s and 4s before attempts
+  ///   2, 3 and 4. Four requests in total, ~7s of waiting.
+  ///
+  /// Expressed this way on purpose. The list used to be `[1s, 2s, 4s, 8s]`
+  /// read as "the backoff AFTER attempt n", which meant the first attempt
+  /// fired immediately and the loop broke out after the fourth -- so the 8s
+  /// entry was never used, and the documented schedule described a delay that
+  /// did not exist. One entry per attempt, holding that attempt's own wait,
+  /// cannot drift from the behavior that way: every entry is consumed, and
+  /// the number of entries IS the number of requests.
+  ///
+  /// Bounded on purpose, too. An operation Hub is still working on can
+  /// legitimately hold its lease for minutes, and polling until it resolves
+  /// would either spin forever or pin the UI on a spinner the user cannot
+  /// escape. After the last attempt the operation is simply left in an honest
+  /// unresolved state with Retry and Discard available -- the user is told
+  /// what is known, not shown a guess.
+  static const List<Duration> defaultStatusPollSchedule = [
+    Duration.zero,
+    Duration(seconds: 1),
+    Duration(seconds: 2),
+    Duration(seconds: 4),
+  ];
+
+  /// Overrides [defaultStatusPollSchedule]. Injected only so tests can drive
+  /// the bounded-polling behavior without waiting the real schedule out.
   @visibleForTesting
-  final List<Duration>? statusPollBackoff;
+  final List<Duration>? statusPollSchedule;
 
   @override
   State<EventAttachmentsSection> createState() =>
@@ -358,23 +382,9 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
     }
   }
 
-  /// Bounded backoff for status polling: four attempts at 1s, 2s, 4s, 8s.
-  ///
-  /// Bounded on purpose. An operation Hub is still working on can legitimately
-  /// hold its lease for minutes, and polling until it resolves would either
-  /// spin forever or pin the UI on a spinner the user cannot escape. After
-  /// the last attempt the operation is simply left in an honest unresolved
-  /// state with Retry and Discard available -- the user is told what is known,
-  /// not shown a guess.
-  static const List<Duration> _defaultStatusPollBackoff = [
-    Duration(seconds: 1),
-    Duration(seconds: 2),
-    Duration(seconds: 4),
-    Duration(seconds: 8),
-  ];
-
-  List<Duration> get _statusPollBackoff =>
-      widget.statusPollBackoff ?? _defaultStatusPollBackoff;
+  List<Duration> get _statusPollSchedule =>
+      widget.statusPollSchedule ??
+      EventAttachmentsSection.defaultStatusPollSchedule;
 
   /// Guards against overlapping status requests -- a Retry tap arriving while
   /// a poll is in flight must not start a second one.
@@ -411,7 +421,15 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
   }
 
   Future<void> _pollUploadStatus(int generation) async {
-    for (var attempt = 0; attempt < _statusPollBackoff.length; attempt++) {
+    final schedule = _statusPollSchedule;
+    for (var attempt = 0; attempt < schedule.length; attempt++) {
+      // Each entry is THIS attempt's own wait. The first is Duration.zero, so
+      // the first check is immediate; every later one waits before asking.
+      final wait = schedule[attempt];
+      if (wait > Duration.zero) {
+        await Future<void>.delayed(wait);
+      }
+
       // Every stop condition is re-checked before each attempt: a disposed
       // widget, a discarded or replaced operation, or a completed one all end
       // the poll immediately rather than after the next delay elapses.
@@ -478,10 +496,6 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
             ? AttachmentUploadState.uploading
             : AttachmentUploadState.reconciling,
       );
-
-      final isLastAttempt = attempt == _statusPollBackoff.length - 1;
-      if (isLastAttempt) break;
-      await Future<void>.delayed(_statusPollBackoff[attempt]);
     }
 
     if (!mounted || generation != _pollGeneration) return;
