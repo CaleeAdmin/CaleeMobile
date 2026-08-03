@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:calee_mobile/features/calendar/shared/calendar_display_event.dart';
 import 'package:calee_mobile/features/calendar/shared/read_only_calendar_event_row.dart';
 import 'package:calee_mobile/features/calendar/shared/read_only_calendar_view.dart';
@@ -33,6 +35,10 @@ Widget _buildView({
   DateTime? selectedDay,
   void Function(CalendarDisplayEvent)? onEventTap,
   List<Widget> actionWidgets = const [],
+  Future<void> Function()? onRefresh,
+  VoidCallback? onPreviousMonth,
+  VoidCallback? onNextMonth,
+  void Function(DateTime)? onSelectDay,
 }) {
   return MaterialApp(
     theme: CaleeTheme.buildThemeData(),
@@ -45,15 +51,25 @@ Widget _buildView({
         events: events,
         viewMode: viewMode,
         onViewModeChanged: (_) {},
-        onPreviousMonth: () {},
-        onNextMonth: () {},
+        onPreviousMonth: onPreviousMonth ?? () {},
+        onNextMonth: onNextMonth ?? () {},
         onGoToToday: () {},
-        onSelectDay: (_) {},
+        onSelectDay: onSelectDay ?? (_) {},
         onEventTap: onEventTap,
+        onRefresh: onRefresh,
         actionWidgets: actionWidgets,
       ),
     ),
   );
+}
+
+/// Drags the event list down far enough to arm [RefreshIndicator] and pumps
+/// until the callback has fired, without settling — the caller controls when
+/// the refresh future completes.
+Future<void> _pullToRefresh(WidgetTester tester) async {
+  await tester.fling(find.byType(ListView), const Offset(0, 400), 1000);
+  await tester.pump();
+  await tester.pump(const Duration(seconds: 1));
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -442,5 +458,172 @@ void main() {
         expect(find.text('Conference'), findsOneWidget);
       },
     );
+  });
+
+  // ── Pull-to-refresh ─────────────────────────────────────────────────────────
+  //
+  // The view owns the gesture only; it never fetches. onRefresh is optional so
+  // hosts with no refreshable data source keep the previous behaviour.
+
+  group('ReadOnlyCalendarView — pull to refresh', () {
+    testWidgets('agenda mode invokes onRefresh after a pull', (tester) async {
+      final completer = Completer<void>();
+      var calls = 0;
+
+      await tester.pumpWidget(
+        _buildView(
+          events: [_event()],
+          viewMode: CalendarDisplayViewMode.agenda,
+          onRefresh: () {
+            calls++;
+            return completer.future;
+          },
+        ),
+      );
+
+      await _pullToRefresh(tester);
+
+      expect(calls, 1);
+      expect(find.byType(RefreshIndicator), findsOneWidget);
+
+      completer.complete();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('agenda mode is still refreshable with no events', (
+      tester,
+    ) async {
+      final completer = Completer<void>();
+      var calls = 0;
+
+      await tester.pumpWidget(
+        _buildView(
+          viewMode: CalendarDisplayViewMode.agenda,
+          onRefresh: () {
+            calls++;
+            return completer.future;
+          },
+        ),
+      );
+      expect(find.text('No events this month'), findsOneWidget);
+
+      await _pullToRefresh(tester);
+
+      expect(
+        calls,
+        1,
+        reason: 'an empty month must still accept the pull gesture',
+      );
+
+      completer.complete();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('month mode invokes onRefresh from the selected-day list', (
+      tester,
+    ) async {
+      final completer = Completer<void>();
+      var calls = 0;
+
+      await tester.pumpWidget(
+        _buildView(
+          events: [_event()],
+          onRefresh: () {
+            calls++;
+            return completer.future;
+          },
+        ),
+      );
+      // The 42-cell grid stays a non-scrollable GridView; only the day agenda
+      // list below it is refreshable.
+      expect(find.byType(CalendarDayCell), findsNWidgets(42));
+
+      await _pullToRefresh(tester);
+
+      expect(calls, 1);
+
+      completer.complete();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('month mode with an empty selected day is still refreshable', (
+      tester,
+    ) async {
+      final completer = Completer<void>();
+      var calls = 0;
+
+      await tester.pumpWidget(
+        _buildView(
+          selectedDay: DateTime(2026, 6, 20),
+          onRefresh: () {
+            calls++;
+            return completer.future;
+          },
+        ),
+      );
+      expect(find.text('No events this day'), findsOneWidget);
+
+      await _pullToRefresh(tester);
+
+      expect(calls, 1);
+
+      completer.complete();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('omitting onRefresh preserves the existing read-only view', (
+      tester,
+    ) async {
+      for (final mode in CalendarDisplayViewMode.values) {
+        await tester.pumpWidget(_buildView(events: [_event()], viewMode: mode));
+        await tester.pumpAndSettle();
+
+        expect(
+          find.byType(RefreshIndicator),
+          findsNothing,
+          reason: 'no handler → no refresh affordance in $mode',
+        );
+        expect(find.text('Test Event'), findsOneWidget);
+
+        // The gesture is a no-op rather than an error.
+        await tester.fling(find.byType(ListView), const Offset(0, 400), 1000);
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        expect(find.text('Test Event'), findsOneWidget);
+      }
+    });
+
+    testWidgets('a pull does not tap an event or navigate months', (
+      tester,
+    ) async {
+      final completer = Completer<void>();
+      final tapped = <String>[];
+      var previousMonths = 0;
+      var nextMonths = 0;
+      var selectedDays = 0;
+
+      await tester.pumpWidget(
+        _buildView(
+          events: [_event()],
+          viewMode: CalendarDisplayViewMode.agenda,
+          onEventTap: (e) => tapped.add(e.id),
+          onPreviousMonth: () => previousMonths++,
+          onNextMonth: () => nextMonths++,
+          onSelectDay: (_) => selectedDays++,
+          onRefresh: () => completer.future,
+        ),
+      );
+
+      await _pullToRefresh(tester);
+
+      expect(tapped, isEmpty);
+      expect(previousMonths, 0);
+      expect(nextMonths, 0);
+      expect(selectedDays, 0);
+      expect(find.text('June 2026'), findsOneWidget);
+
+      completer.complete();
+      await tester.pumpAndSettle();
+    });
   });
 }
