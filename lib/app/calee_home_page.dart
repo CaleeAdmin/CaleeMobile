@@ -163,6 +163,11 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
         isFamilyUxContext: widget.bootstrap.isFamilyUxContext,
         reminderCoordinator: widget.reminderCoordinator,
         refreshGeneration: _calendarRefreshGeneration,
+        // Every tab stays mounted in the IndexedStack below, so Calendar needs
+        // to be told when it is the one actually on screen — that gates its
+        // refresh-on-app-resume, which would otherwise fetch for a tab nobody
+        // is looking at.
+        isActive: _selectedIndex == _calendarTabIndex,
       ),
       TasksPage(
         hubClient: widget.hubClient,

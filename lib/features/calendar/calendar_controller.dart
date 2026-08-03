@@ -50,33 +50,93 @@ class CalendarController extends ChangeNotifier {
 
   // ── Load / refresh ────────────────────────────────────────────────────────
 
-  Future<void> loadMonth() async {
-    isLoading = true;
-    error = null;
-    notifyListeners();
+  /// Id of the most recently *started* load. A load whose id no longer matches
+  /// has been superseded (by month navigation, a manual refresh, CRUD, or a
+  /// newer background refresh) and must drop its result instead of overwriting
+  /// newer state.
+  int _loadSequence = 0;
 
-    try {
-      final overview = await repository.loadMonth(selectedMonth: selectedMonth);
-      preferences = overview.preferences;
-      gridStart = overview.gridStart;
-      calendars = overview.calendars;
-      events = overview.events;
-      calendarServiceErrors = overview.serviceErrors;
-      // NOTE: loadMonth intentionally does not touch device reminders. Reminder
-      // scheduling is owned by CalendarReminderCoordinator and driven by an
-      // independent upcoming-event window, so navigating months never cancels
-      // or rebuilds reminders. See onRequestReminderRefresh.
-      hiddenCalendarIds.removeWhere(
-        (id) => !calendars.any((cal) => cal.id == id),
-      );
+  /// True while a load started here is still awaiting the repository. Only
+  /// [refreshInBackground] consults it: explicit loads (navigation, manual
+  /// refresh, CRUD) must always run, but an automatic refresh has nothing to
+  /// add while the same range is already being fetched.
+  bool _loadInFlight = false;
+
+  bool _disposed = false;
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
+  }
+
+  Future<void> loadMonth() => _load(showLoadingIndicator: true);
+
+  /// Silently refetches the month already on screen.
+  ///
+  /// Unlike [loadMonth] this never raises the blocking loading state and never
+  /// discards the last good snapshot, so an automatic refresh cannot flash a
+  /// full-screen spinner (or an error screen) over a calendar the user is
+  /// reading. It is skipped outright while another load is already fetching,
+  /// so repeated lifecycle notifications cannot stack overlapping requests.
+  ///
+  /// Deliberately does NOT request a reminder refresh: lifecycle-driven
+  /// reminder reconciliation is owned by the app-level observer
+  /// ([CalendarReminderRefreshReason.appResumed]).
+  Future<void> refreshInBackground() async {
+    if (_loadInFlight) return;
+    await _load(showLoadingIndicator: false);
+  }
+
+  Future<void> _load({required bool showLoadingIndicator}) async {
+    final requestId = ++_loadSequence;
+    _loadInFlight = true;
+
+    if (showLoadingIndicator) {
+      isLoading = true;
       error = null;
-    } catch (e) {
-      error = e;
-      calendarServiceErrors = [];
-    } finally {
-      isLoading = false;
       notifyListeners();
     }
+
+    CalendarOverview? overview;
+    Object? failure;
+    try {
+      overview = await repository.loadMonth(selectedMonth: selectedMonth);
+    } catch (e) {
+      failure = e;
+    }
+
+    // Disposed, or superseded by a load started after this one: drop the
+    // result. The newer load owns _loadInFlight and publishes its own state.
+    if (_disposed || requestId != _loadSequence) return;
+    _loadInFlight = false;
+
+    if (overview == null) {
+      // A failed background refresh leaves the last good snapshot exactly as
+      // it was; only an explicit load may replace the screen with an error.
+      if (!showLoadingIndicator) return;
+      error = failure;
+      calendarServiceErrors = [];
+      isLoading = false;
+      notifyListeners();
+      return;
+    }
+
+    preferences = overview.preferences;
+    gridStart = overview.gridStart;
+    calendars = overview.calendars;
+    events = overview.events;
+    calendarServiceErrors = overview.serviceErrors;
+    // NOTE: loading a month intentionally does not touch device reminders.
+    // Reminder scheduling is owned by CalendarReminderCoordinator and driven
+    // by an independent upcoming-event window, so navigating months never
+    // cancels or rebuilds reminders. See onRequestReminderRefresh.
+    hiddenCalendarIds.removeWhere(
+      (id) => !calendars.any((cal) => cal.id == id),
+    );
+    error = null;
+    isLoading = false;
+    notifyListeners();
   }
 
   /// A user-initiated calendar refresh. Unlike month navigation, this also

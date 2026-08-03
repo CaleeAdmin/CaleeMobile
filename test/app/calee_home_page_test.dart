@@ -360,6 +360,84 @@ void main() {
       expect(tester.takeException(), isNull);
       expect(find.text('Calendar'), findsWidgets);
     });
+
+    // Every tab stays mounted in the IndexedStack, so CalendarPage is told
+    // which one is on screen: it refetches when the app returns to the
+    // foreground, but only while Calendar is the tab the user is looking at.
+
+    testWidgets('resuming on the Calendar tab reloads the calendar', (
+      tester,
+    ) async {
+      final hub = _StubHubClient();
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: CaleeTheme.buildThemeData(),
+          home: CaleeHomePage(
+            hubClient: hub,
+            accessToken: 'tok',
+            bootstrap: _noChoresBootstrap(),
+            onSignOut: () {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.calendar_month_outlined));
+      await tester.pumpAndSettle();
+
+      final loadsBefore = hub.calendarLoadCount;
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      await tester.pump();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+
+      expect(
+        hub.calendarLoadCount,
+        loadsBefore + 1,
+        reason: 'the visible Calendar tab refetches the month on resume',
+      );
+    });
+
+    testWidgets('resuming on another tab does not reload the calendar', (
+      tester,
+    ) async {
+      final hub = _StubHubClient();
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: CaleeTheme.buildThemeData(),
+          home: CaleeHomePage(
+            hubClient: hub,
+            accessToken: 'tok',
+            bootstrap: _noChoresBootstrap(),
+            onSignOut: () {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Stay on Today; Calendar is mounted but hidden.
+      final loadsBefore = hub.calendarLoadCount;
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      await tester.pump();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+
+      expect(
+        hub.calendarLoadCount,
+        loadsBefore,
+        reason:
+            'a hidden Calendar reloads when its tab is next selected, so '
+            'resuming must not spend a request on it',
+      );
+    });
   });
 
   group('CaleeHomePage — one-shot tab command via didUpdateWidget', () {
