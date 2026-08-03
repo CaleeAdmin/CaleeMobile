@@ -12,6 +12,7 @@ import 'package:calee_mobile/data/models/client_bootstrap.dart';
 import 'package:calee_mobile/data/models/client_calendar.dart';
 import 'package:calee_mobile/features/calendar/calendar_page.dart';
 import 'package:calee_mobile/features/calendar/shared/read_only_calendar_view.dart';
+import 'package:calee_mobile/features/calendar/widgets/calendar_chooser_sheet.dart';
 import 'package:calee_mobile/ui/calee_design.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -93,6 +94,42 @@ const _setupEvent = ClientEvent(
   source: 'portal',
 );
 
+/// A second calendar, used to prove a hidden-calendar selection survives a
+/// pull-to-refresh.
+const _otherCalendar = ClientCalendar(
+  id: 'portal:other',
+  serviceId: 'portal',
+  serviceName: 'Portal',
+  name: 'Other Calendar',
+  components: [],
+  primaryKind: 'calendar',
+  supportsEvents: true,
+  supportsTasks: false,
+  supportsChores: false,
+  readOnly: false,
+  isSubscription: false,
+  source: 'portal',
+);
+
+const _otherEvent = ClientEvent(
+  id: 'training-1',
+  calendarId: 'portal:other',
+  serviceId: 'portal',
+  serviceName: 'Portal',
+  title: 'Training',
+  startsAt: '2026-08-04T08:00:00Z',
+  endsAt: '2026-08-04T09:00:00Z',
+  allDay: false,
+  recurring: false,
+  source: 'portal',
+);
+
+/// The time label the Setup event renders under the repository's standard test
+/// timezone (Australia/Perth — see CLAUDE.md and flutter-ci.yml, which set
+/// TZ=Australia/Perth). 05:30Z–06:30Z is 1:30 PM–2:30 PM there. The dash is an
+/// en dash, matching ReadOnlyCalendarEventRow.
+const _setupTimeLabel = '1:30 PM–2:30 PM';
+
 /// The local calendar day the Setup event falls on. Derived from the UTC
 /// instant so the assertion holds in any host timezone (CI runs
 /// Australia/Perth, where it renders as 1:30 PM–2:30 PM on 4 August).
@@ -105,18 +142,63 @@ final _setupDay = () {
 
 Widget _hostCalendar(_StubHub hub, {bool isActive = true}) => MaterialApp(
   theme: CaleeTheme.buildThemeData(),
-  home: CalendarPage(
-    hubClient: hub,
-    accessToken: 'tok',
-    services: const [_service],
-    accountId: 'acct1',
-    isFamilyUxContext: true,
-    isActive: isActive,
+  // TimeFormatPref.system defers to the platform, so pin 12-hour formatting
+  // here rather than depending on the host's default. Must sit inside
+  // MaterialApp, which installs its own MediaQuery from the view.
+  home: Builder(
+    builder: (context) => MediaQuery(
+      data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: false),
+      child: CalendarPage(
+        hubClient: hub,
+        accessToken: 'tok',
+        services: const [_service],
+        accountId: 'acct1',
+        isFamilyUxContext: true,
+        isActive: isActive,
+      ),
+    ),
   ),
 );
 
 ReadOnlyCalendarView _view(WidgetTester tester) =>
     tester.widget<ReadOnlyCalendarView>(find.byType(ReadOnlyCalendarView));
+
+/// Pulls down on Calendar's refreshable event list and pumps until the handler
+/// has fired. Does not settle — the caller controls when the gated response
+/// completes.
+Future<void> _pullToRefresh(WidgetTester tester) async {
+  final list = find.descendant(
+    of: find.byType(RefreshIndicator),
+    matching: find.byType(ListView),
+  );
+  expect(list, findsOneWidget, reason: 'Calendar exposes one refreshable list');
+  await tester.fling(list, const Offset(0, 400), 1000);
+  await tester.pump();
+  await tester.pump(const Duration(seconds: 1));
+}
+
+/// Hides [calendarName] through the real chooser-sheet path so the test
+/// exercises the same visibility state a user would set.
+Future<void> _hideCalendar(WidgetTester tester, String calendarName) async {
+  await tester.tap(find.byKey(const Key('calendar_filter_button')));
+  await tester.pumpAndSettle();
+  // Scope to the sheet: the calendar name also appears as an event-row
+  // subtitle on the page behind it.
+  await tester.tap(
+    find.descendant(
+      of: find.byType(CalendarChooserSheet),
+      matching: find.text(calendarName),
+    ),
+  );
+  await tester.pumpAndSettle();
+  await tester.tap(
+    find.descendant(
+      of: find.byType(CalendarChooserSheet),
+      matching: find.byIcon(Icons.close),
+    ),
+  );
+  await tester.pumpAndSettle();
+}
 
 /// Puts the agenda on 4 August 2026 the way a user would — by selecting that
 /// day in the month grid.
@@ -402,7 +484,9 @@ void main() {
       );
     });
 
-    testWidgets('a disposed page does not refresh on resume', (tester) async {
+    testWidgets('a disposed page does not refresh on resume (regression)', (
+      tester,
+    ) async {
       final hub = _StubHub(calendars: const [_lazersCalendar]);
 
       await tester.pumpWidget(_hostCalendar(hub));
@@ -419,6 +503,150 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(hub.eventLoadCount, eventLoadsBefore);
+    });
+  });
+
+  // ── Pull to refresh ──────────────────────────────────────────────────────────
+  //
+  // The user-controlled fallback for the case app-resume cannot cover: the app
+  // stays in the foreground, on Calendar, while the subscribed feed gains an
+  // event. Requires TZ=Australia/Perth (the repository's standard test
+  // timezone) for the rendered time assertion.
+
+  group('CalendarPage pull to refresh', () {
+    testWidgets(
+      'reveals a subscribed-calendar event with no navigation, no tab switch '
+      'and no lifecycle event',
+      (tester) async {
+        final hub = _StubHub(calendars: const [_lazersCalendar, _otherCalendar])
+          ..eventsPayload = const [_otherEvent];
+
+        await tester.pumpWidget(_hostCalendar(hub));
+        await tester.pumpAndSettle();
+        await _selectSetupDay(tester);
+
+        expect(_view(tester).selectedMonth, DateTime(2026, 8, 1));
+        expect(find.text('Setup'), findsNothing);
+        expect(find.text('Training'), findsOneWidget);
+
+        // Hide the second calendar so the refresh can be shown to preserve it.
+        await _hideCalendar(tester, 'Other Calendar');
+        expect(find.text('Training'), findsNothing);
+
+        final stateBefore = tester.state(find.byType(CalendarPage));
+        final eventLoadsBefore = hub.eventLoadCount;
+
+        // The subscribed feed now carries the Hub event; hold the response open
+        // so the in-flight state is observable.
+        hub.eventsPayload = const [_otherEvent, _setupEvent];
+        final gate = Completer<void>();
+        hub.gate = gate;
+
+        await _pullToRefresh(tester);
+
+        expect(
+          hub.eventLoadCount,
+          eventLoadsBefore + 1,
+          reason: 'one gesture → exactly one event-range request',
+        );
+        expect(
+          find.byType(ReadOnlyCalendarView),
+          findsOneWidget,
+          reason: 'the last good snapshot stays on screen while refreshing',
+        );
+
+        gate.complete();
+        await tester.pumpAndSettle();
+
+        expect(find.text('Setup'), findsOneWidget);
+        expect(find.text('Lazers (Morley Eagles)'), findsOneWidget);
+        expect(
+          find.text(_setupTimeLabel),
+          findsOneWidget,
+          reason: 'run with TZ=Australia/Perth (repository test standard)',
+        );
+        expect(
+          find.text('Training'),
+          findsNothing,
+          reason: 'the hidden-calendar selection survives the refresh',
+        );
+        expect(
+          identical(tester.state(find.byType(CalendarPage)), stateBefore),
+          isTrue,
+          reason: 'the same CalendarPage instance stayed mounted throughout',
+        );
+        expect(_view(tester).selectedDay, _setupDay);
+        expect(_view(tester).selectedMonth, DateTime(2026, 8, 1));
+        expect(_view(tester).viewMode, CalendarDisplayViewMode.month);
+        expect(
+          hub.eventLoadCount,
+          eventLoadsBefore + 1,
+          reason: 'no extra request after the response landed',
+        );
+
+        final shown = _view(tester).events.where((e) => e.title == 'Setup');
+        expect(shown.single.calendarId, 'portal:lazers-morley-eagles');
+        expect(
+          shown.single.readOnly,
+          isTrue,
+          reason: 'subscribed events stay read-only after a refresh',
+        );
+      },
+    );
+
+    testWidgets('works in Agenda mode, including an empty month', (
+      tester,
+    ) async {
+      final hub = _StubHub(calendars: const [_lazersCalendar]);
+
+      await tester.pumpWidget(_hostCalendar(hub));
+      await tester.pumpAndSettle();
+      await _selectSetupDay(tester);
+
+      await tester.tap(find.text('Agenda'));
+      await tester.pumpAndSettle();
+      expect(find.text('No events this month'), findsOneWidget);
+
+      final eventLoadsBefore = hub.eventLoadCount;
+      hub.eventsPayload = const [_setupEvent];
+      final gate = Completer<void>();
+      hub.gate = gate;
+
+      await _pullToRefresh(tester);
+      expect(hub.eventLoadCount, eventLoadsBefore + 1);
+
+      gate.complete();
+      await tester.pumpAndSettle();
+
+      expect(find.text('Setup'), findsOneWidget);
+      expect(find.text(_setupTimeLabel), findsOneWidget);
+      expect(
+        _view(tester).viewMode,
+        CalendarDisplayViewMode.agenda,
+        reason: 'the view mode must not reset',
+      );
+    });
+
+    testWidgets('app-resume refresh still works after a pull refresh', (
+      tester,
+    ) async {
+      final hub = _StubHub(calendars: const [_lazersCalendar]);
+
+      await tester.pumpWidget(_hostCalendar(hub));
+      await tester.pumpAndSettle();
+      await _selectSetupDay(tester);
+
+      await _pullToRefresh(tester);
+      await tester.pumpAndSettle();
+
+      final eventLoadsBefore = hub.eventLoadCount;
+      hub.eventsPayload = const [_setupEvent];
+
+      await _backgroundThenResume(tester);
+      await tester.pumpAndSettle();
+
+      expect(hub.eventLoadCount, eventLoadsBefore + 1);
+      expect(find.text('Setup'), findsOneWidget);
     });
   });
 }

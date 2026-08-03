@@ -577,6 +577,12 @@ class _CalendarPageState extends State<CalendarPage>
           onGoToToday: _controller.goToToday,
           onSelectDay: _controller.selectDay,
           onEventTap: _onDisplayEventTap,
+          // A pull is an explicit user refresh, so it goes through refresh()
+          // (manual-refresh + reminder semantics), not refreshInBackground().
+          // Returning the real future keeps the indicator up until the reload
+          // finishes; load sequencing in the controller stops it racing an
+          // app-resume refresh.
+          onRefresh: _controller.refresh,
           use24h: use24h,
           actionWidgets: [
             IconButton(

@@ -554,6 +554,52 @@ void main() {
       );
     });
 
+    // Pull-to-refresh enters through refresh(); app-resume enters through
+    // refreshInBackground(). This pins the interaction between the two entry
+    // points — the surrounding tests cover each in isolation.
+    test('a pull refresh racing a background refresh publishes only the '
+        'newest data', () async {
+      final reasons = <CalendarReminderRefreshReason>[];
+      final hub = _MutableStubHubClient(calendars: [_lazersCalendar]);
+      final ctrl = _controllerWithHub(
+        hub,
+        onRequestReminderRefresh: (r) async => reasons.add(r),
+      );
+      ctrl.selectedMonth = _setupMonth;
+      ctrl.selectedDay = _setupDay;
+      await ctrl.loadMonth();
+      reasons.clear();
+
+      // A background (app-resume) refresh is in flight on the stale payload…
+      final backgroundGate = Completer<void>();
+      hub.gate = backgroundGate;
+      final background = ctrl.refreshInBackground();
+      await _settle();
+      final fetchesAfterBackground = hub.eventFetchCount;
+
+      // …when the user pulls to refresh. The pull must still run.
+      hub.gate = null;
+      hub.eventsPayload = [_setupEvent];
+      await ctrl.refresh();
+      await _settle();
+
+      expect(hub.eventFetchCount, fetchesAfterBackground + 1);
+      expect(ctrl.eventsForDay(_setupDay).map((e) => e.title), ['Setup']);
+      expect(reasons, [
+        CalendarReminderRefreshReason.manualRefresh,
+      ], reason: 'a pull keeps manual-refresh semantics');
+
+      // The older background response now lands carrying the pre-sync payload.
+      backgroundGate.complete();
+      await background;
+
+      expect(
+        ctrl.eventsForDay(_setupDay).map((e) => e.title),
+        ['Setup'],
+        reason: 'a superseded background result must not undo the pull',
+      );
+    });
+
     test('a result arriving after dispose is dropped safely', () async {
       final hub = _MutableStubHubClient(calendars: [_lazersCalendar]);
       final ctrl = _controllerWithHub(hub);
