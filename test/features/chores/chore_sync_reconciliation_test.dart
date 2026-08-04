@@ -94,10 +94,9 @@ void main() {
   group('ChoreOccurrenceKey scoping', () {
     final base = _chore(completed: false);
 
-    test('distinguishes service, calendar and occurrence date', () {
+    test('distinguishes service and occurrence date', () {
       final variants = {
         'other service': _chore(completed: false, serviceId: 'business'),
-        'other calendar': _chore(completed: false, calendarId: 'cal-2'),
         'other date': _chore(completed: false, date: '2026-08-05'),
       };
 
@@ -108,6 +107,17 @@ void main() {
           reason: '${entry.key} must not share a key with the base occurrence',
         );
       }
+    });
+
+    test('ignores the calendar, which the backend id does not carry', () {
+      // "serviceId:choreUid" has no calendar component, so the backend can
+      // report one chore under a different calendar on the mutation response
+      // and the following list. Keying on the calendar would strand the
+      // overlay entry and replay a duplicate row.
+      expect(
+        _key(_chore(completed: false, calendarId: 'cal-2')),
+        equals(_key(base)),
+      );
     });
 
     test('is null without a stable completion action id', () {
@@ -137,6 +147,24 @@ void main() {
         expect(result.warning, isNull);
       }
     });
+
+    // One service can hold the same UID in two calendars. The backend resolves
+    // that to a single id but may report it under either calendar, so a row
+    // whose calendar differs from the accepted mutation's is still the same
+    // occurrence — not an omission to paper over with a duplicate.
+    test(
+      'backend reporting a different calendar still resolves the overlay',
+      () {
+        final overlay = _overlayWith(completing: true);
+        final backendRow = _chore(completed: true, calendarId: 'cal-2');
+
+        final result = _reconcile(overlay, [backendRow]);
+
+        expect(overlay.pendingCount, 0);
+        expect(result.chores, [backendRow]);
+        expect(result.warning, isNull);
+      },
+    );
 
     // The occurrence is missing from this response only. This is the single
     // case the overlay exists for.

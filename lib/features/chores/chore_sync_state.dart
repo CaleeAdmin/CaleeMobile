@@ -2,14 +2,23 @@ import 'package:flutter/foundation.dart';
 
 import '../../data/models/client_chore.dart';
 
-/// Identity of one chore occurrence, scoped tightly enough that no two
-/// occurrences can share a key.
+/// Identity of one chore occurrence, matching the identity the backend itself
+/// uses so an overlay entry and the backend row it is waiting for always agree.
 ///
-/// Two services can hold chores with the same UID, one service can hold the
-/// same chore in two calendars, and one recurring chore has many dates — so a
-/// key built from the chore id alone collides. Account and household are
-/// included so switching either cannot let a pending mutation from the previous
-/// context reappear against the new one.
+/// Two services can hold chores with the same UID and one recurring chore has
+/// many dates, so a key built from the chore id alone collides; service and
+/// occurrence date are part of the key for that reason. Account and household
+/// are included so switching either cannot let a pending mutation from the
+/// previous context reappear against the new one.
+///
+/// The calendar is deliberately NOT part of [value]. The backend identifies a
+/// chore as "serviceId:choreUid" with no calendar component, and when one
+/// service holds the same UID in two calendars it reports that single id under
+/// whichever calendar it resolved — which is not necessarily the same one on
+/// the mutation response and the following list. Matching on the calendar too
+/// would leave the overlay unable to find its own backend row and replaying a
+/// duplicate for the whole window. [calendarId] is still carried so
+/// [ChoreSyncOverlay.retainScope] can drop entries for a calendar that is gone.
 @immutable
 class ChoreOccurrenceKey {
   const ChoreOccurrenceKey({
@@ -49,7 +58,7 @@ class ChoreOccurrenceKey {
   final String occurrenceDate;
 
   String get value =>
-      '$accountId|$householdId|$serviceId|$calendarId|$completionActionId|$occurrenceDate';
+      '$accountId|$householdId|$serviceId|$completionActionId|$occurrenceDate';
 
   @override
   bool operator ==(Object other) =>
