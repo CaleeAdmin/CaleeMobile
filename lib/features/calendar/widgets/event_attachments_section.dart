@@ -131,9 +131,16 @@ class EventAttachmentsController {
   /// controller.
   bool get isAttached => _owner != null;
 
-  /// Cancels every in-flight upload and download, completing once they have
-  /// unwound (or a short grace period has passed), so the caller never
-  /// dismisses a screen on top of a still-spinning transfer.
+  /// Cancels the in-flight uploads and downloads -- the work that HAS a
+  /// cancel token -- and completes once they have unwound (or a short grace
+  /// period has passed), so the caller never acts on top of a still-spinning
+  /// transfer.
+  ///
+  /// Does not shut the section down. It is typically called as part of
+  /// closing an editor, but the caller may well stay open afterwards: an
+  /// open, share or remove has no cancellation mechanism and may still be
+  /// finishing. The section is fully usable again once this returns --
+  /// adding, retrying, opening, sharing and removing all work as normal.
   Future<void> cancelActiveTransfers() async {
     final cancel = _cancelActiveTransfers;
     if (cancel != null) await cancel();
@@ -313,12 +320,31 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
   /// `finally`, so the map is exactly the set of live downloads.
   final Map<String, AttachmentTransferCancelToken> _downloadTokens = {};
 
-  /// Set the moment teardown begins -- explicit close or dispose -- and
-  /// never cleared. Everything that could start new work checks it first,
-  /// so nothing is kicked off on the way out.
+  /// Set when this section is being PERMANENTLY torn down, and never
+  /// cleared. Only [dispose] sets it.
   bool _closing = false;
 
+  /// True only while [_cancelActiveTransfersAndSettle] is stopping the
+  /// current transfers and waiting for them to unwind.
+  ///
+  /// Transient on purpose. Cancelling transfers used to be the last thing
+  /// that ever happened to this section, so it could safely mark itself
+  /// closed -- but the editor above may now stay open after cancelling (an
+  /// open or share that cannot be cancelled is still finishing), and a
+  /// section stuck in teardown mode would silently refuse every later Add,
+  /// Retry, Open, Share and Remove while looking perfectly usable.
+  bool _cancellingTransfers = false;
+
   bool _disposed = false;
+
+  /// The single condition for "do not START anything new right now" --
+  /// permanently gone, temporarily cancelling, or already disposed.
+  ///
+  /// Deliberately distinct from [_closing] alone: work already running is
+  /// not affected by this, and once a temporary cancellation ends the
+  /// section is fully usable again.
+  bool get _stoppingAttachmentWork =>
+      _closing || _cancellingTransfers || _disposed;
 
   /// The last state handed to [EventAttachmentsSection.onOperationStateChanged],
   /// so an unchanged state is not re-reported.
@@ -486,28 +512,40 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
     }
   }
 
-  /// The editor's "cancel attachment and close" path: stop the transfers,
-  /// then wait for them to actually unwind so the screen is not dismissed
-  /// on top of a live one. Bounded -- a transfer that refuses to unwind must
-  /// not trap the user in the editor; disposal cancels it again regardless.
+  /// Stops the transfers that CAN be stopped, then waits for them to unwind
+  /// so the caller is not left acting on top of a live one.
+  ///
+  /// Usually part of closing the editor, but deliberately not the same
+  /// thing: an uncancellable open or share may still be finishing
+  /// afterwards, in which case the editor stays open and this section must
+  /// remain completely usable. So this marks a TEMPORARY state -- new work
+  /// is refused only while the cancellation is in progress, and the flag is
+  /// cleared however this returns (settled, timed out, or thrown).
+  ///
+  /// Bounded: a transfer that refuses to unwind must not trap the user in
+  /// the editor; disposal cancels everything again regardless.
   Future<void> _cancelActiveTransfersAndSettle() async {
-    // Only ever reached because the editor is closing with the user's
-    // agreement, so nothing new may start from here on -- including from a
-    // callback that lands while the cancellations are unwinding.
-    _closing = true;
-    _cancelActiveTransferTokens();
-    if (!_hasActiveTransfer || _disposed) return;
-    final settled = _transfersSettled ??= Completer<void>();
-    await settled.future.timeout(
-      const Duration(seconds: 5),
-      onTimeout: () {
-        if (kDebugMode) {
-          debugPrint(
-            'EventAttachmentsSection: transfers did not settle before close',
-          );
-        }
-      },
-    );
+    if (_disposed) return;
+    _cancellingTransfers = true;
+    try {
+      _cancelActiveTransferTokens();
+      if (!_hasActiveTransfer || _disposed) return;
+      final settled = _transfersSettled ??= Completer<void>();
+      await settled.future.timeout(
+        const Duration(seconds: 5),
+        onTimeout: () {
+          if (kDebugMode) {
+            debugPrint(
+              'EventAttachmentsSection: transfers did not settle before close',
+            );
+          }
+        },
+      );
+    } finally {
+      // Never left set: the editor may be staying open, and the only other
+      // way out of this section is dispose(), which sets _closing anyway.
+      _cancellingTransfers = false;
+    }
   }
 
   Future<void> _load() async {
@@ -584,10 +622,13 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
 
   Future<void> _runAddAttachment() async {
     final source = await _pickSource();
-    if (source == null || !mounted || _closing) return;
+    if (source == null || !mounted || _stoppingAttachmentWork) return;
 
     final result = await _pickAttachmentFile(source);
-    if (!mounted || _closing) return;
+    // Re-checked after the picker await: a cancellation (or a teardown) can
+    // begin while the OS picker is up, and the file that comes back must not
+    // start an upload into either.
+    if (!mounted || _stoppingAttachmentWork) return;
 
     switch (result) {
       // A normal cancellation is not an error and says nothing to the user.
@@ -857,7 +898,7 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
   /// SAME operation to Hub rather than a new one that could duplicate.
   Future<void> _sendPendingUpload() async {
     final pending = _pendingUpload;
-    if (pending == null || !mounted || _closing) return;
+    if (pending == null || !mounted || _stoppingAttachmentWork) return;
 
     final cancelToken = AttachmentTransferCancelToken();
     var bytesLeftTheApp = false;
@@ -1037,7 +1078,7 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
   /// The key is never rotated by this method: whatever it learns, a retry
   /// must be recognisable to Hub as the SAME logical upload.
   Future<void> _reconcilePendingUpload() async {
-    if (_statusPollInFlight || _closing) return;
+    if (_statusPollInFlight || _stoppingAttachmentWork) return;
     _statusPollInFlight = true;
     final generation = _pollGeneration;
     try {
@@ -1188,6 +1229,9 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
   // ── Remove ───────────────────────────────────────────────────────────────
 
   Future<void> _removeAttachment(CalendarAttachment attachment) async {
+    if (_stoppingAttachmentWork || _busyAttachmentIds.contains(attachment.id)) {
+      return;
+    }
     final confirmed = await CaleeDestructiveDialog.show(
       context: context,
       title: 'Remove attachment?',
@@ -1196,7 +1240,9 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
           'The original file is not deleted.',
       confirmLabel: 'Remove',
     );
-    if (!confirmed || !mounted) return;
+    // Re-checked after the confirmation: a detach cannot be recalled once
+    // sent, so it must not be started into a teardown or a cancellation.
+    if (!confirmed || !mounted || _stoppingAttachmentWork) return;
 
     // A detach request that has left cannot be recalled, so the editor is
     // told an action is running for exactly as long as it is in flight.
@@ -1244,7 +1290,7 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
   /// the cache is closed, or the download was cancelled. Callers treat that
   /// as "stop quietly", never as an error.
   Future<String?> _ensureDownloaded(CalendarAttachment attachment) async {
-    if (_closing) return null;
+    if (_stoppingAttachmentWork) return null;
 
     // Registered BEFORE the first await, so a teardown that begins while the
     // cache target is still being prepared already sees this download and
@@ -1302,7 +1348,7 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
   Future<void> _openAttachment(CalendarAttachment attachment) async {
     if (!attachment.downloadAvailable ||
         _busyAttachmentIds.contains(attachment.id) ||
-        _closing) {
+        _stoppingAttachmentWork) {
       return;
     }
     _markAttachmentBusy(attachment.id);
@@ -1344,7 +1390,7 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
   ) async {
     if (!attachment.downloadAvailable ||
         _busyAttachmentIds.contains(attachment.id) ||
-        _closing) {
+        _stoppingAttachmentWork) {
       return;
     }
     _markAttachmentBusy(attachment.id);
