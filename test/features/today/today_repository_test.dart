@@ -54,6 +54,7 @@ class _StubHubClient extends CaleeHubClient {
     required String accessToken,
     required String from,
     required String to,
+    String? timezone,
   }) {
     return Future.value(
       stubChores ?? ClientChoreList(from: from, to: to, chores: const []),

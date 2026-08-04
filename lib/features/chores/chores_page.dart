@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:timezone/timezone.dart' as tz_local;
 
 import '../../data/api/calee_hub_client.dart';
 import '../../data/models/client_bootstrap.dart';
@@ -18,6 +19,65 @@ import 'widgets/chore_row.dart';
 import 'widgets/chore_widget_helpers.dart';
 import 'widgets/create_chore_sheet.dart';
 import 'widgets/edit_chore_sheet.dart';
+
+/// Stable identity for the Chores scroll container.
+///
+/// Exported so tests (unit and integration) can target the real product list
+/// instead of resolving `find.byType(Scrollable)` positionally — `.first` and
+/// `.last` both pick the wrong container as soon as the page grows another
+/// scrollable, and both throw mid-rebuild when the list is briefly unmounted.
+const Key choresListKey = Key('chores-list');
+
+/// The device's IANA zone name, or null when the timezone database has not been
+/// initialised (widget tests, and any launch path that skips main.dart's
+/// setup). Null simply omits the hint, leaving the backend on its UTC default.
+String? deviceTimezoneName() {
+  try {
+    return tz_local.local.name;
+  } catch (_) {
+    return null;
+  }
+}
+
+/// Tells the user an accepted chore change never showed up in a list response,
+/// and gives them the refresh that resolves it. Shown instead of leaving a row
+/// on screen that the backend does not agree exists.
+class ChoreSyncErrorBanner extends StatelessWidget {
+  const ChoreSyncErrorBanner({
+    required this.message,
+    required this.onRefresh,
+    super.key,
+  });
+
+  final String message;
+  final Future<void> Function() onRefresh;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      key: const Key('chores-sync-error'),
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(
+        horizontal: CaleeSpacing.pagePadding,
+        vertical: CaleeSpacing.sm,
+      ),
+      color: CaleeColors.warning.withValues(alpha: 0.12),
+      child: Row(
+        children: [
+          const Icon(Icons.sync_problem_outlined, size: 20),
+          const SizedBox(width: CaleeSpacing.sm),
+          Expanded(
+            child: Text(message, style: Theme.of(context).textTheme.bodySmall),
+          ),
+          TextButton(
+            onPressed: () => onRefresh(),
+            child: const Text('Refresh'),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 // ─────────────────────────────────────────────
 // ChoresPage
@@ -57,6 +117,10 @@ class _ChoresPageState extends State<ChoresPage> {
       accessToken: widget.accessToken,
       services: widget.services,
       households: widget.households,
+      accountId: widget.accountId,
+      // main.dart resolves the device zone into the timezone package's local
+      // location at startup, so this is the device's own zone.
+      timezone: deviceTimezoneName(),
     );
     _controller = ChoresController(repository: _repository);
     _controller.load();
@@ -952,10 +1016,20 @@ class _ChoresPageState extends State<ChoresPage> {
             children: [
               if (choreServiceErrors.isNotEmpty && choreCalendars.isNotEmpty)
                 CalendarServiceWarningBanner(errors: choreServiceErrors),
+              if (_controller.syncError != null)
+                ChoreSyncErrorBanner(
+                  message: _controller.syncError!,
+                  onRefresh: _controller.refresh,
+                ),
               Expanded(
                 child: RefreshIndicator(
                   onRefresh: _controller.refresh,
                   child: ListView(
+                    // Stable identity for the chores scroll container. The
+                    // regression suite targets this key rather than picking a
+                    // Scrollable positionally, which silently selects the
+                    // wrong container when the tree changes shape.
+                    key: choresListKey,
                     padding: const EdgeInsets.symmetric(
                       horizontal: CaleeSpacing.pagePadding,
                       vertical: CaleeSpacing.md,

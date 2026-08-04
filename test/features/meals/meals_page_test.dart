@@ -259,6 +259,42 @@ Widget _buildFormSheet({
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
 void main() {
+  group('MealsPage — regression-suite contract', () {
+    // The regression suite scrolls the meal plan by this key. Resolving the
+    // scroll container positionally instead (Scrollable.first/.last) picks the
+    // wrong one and throws while the list rebuilds, so the key must exist and
+    // must resolve to exactly one widget.
+    testWidgets('exposes exactly one meals-list scroll container', (
+      tester,
+    ) async {
+      _useTallViewport(tester);
+      await tester.pumpWidget(_buildMealsPage(_StubHub()));
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.byKey(mealsListKey), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(mealsListKey),
+          matching: find.byType(Scrollable),
+        ),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('the meals list stays mounted while a week load is in flight', (
+      tester,
+    ) async {
+      _useTallViewport(tester);
+      await tester.pumpWidget(_buildMealsPage(_StubHub()));
+      // Deliberately not settled: this is the rebuild window the old
+      // scrollUntilVisible path raced against.
+      await tester.pump();
+
+      expect(find.byKey(mealsListKey), findsOneWidget);
+    });
+  });
+
   group('MealsPage — day sections', () {
     testWidgets('shows a Today section with breakfast, lunch and dinner rows', (
       tester,
