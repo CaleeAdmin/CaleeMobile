@@ -226,6 +226,12 @@ class _CalendarPageState extends State<CalendarPage>
     final created = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
+      // The editor decides for itself when it may close (an attachment
+      // upload in flight has to be confirmed away first). Flutter's
+      // drag-to-dismiss calls Navigator.pop() directly, which no PopScope
+      // can intercept, so dragging is off; the barrier stays dismissible
+      // because that path goes through maybePop() and IS intercepted.
+      enableDrag: false,
       backgroundColor: CaleeColors.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(
@@ -364,6 +370,9 @@ class _CalendarPageState extends State<CalendarPage>
     final updated = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
+      // See _openCreateEventSheet: drag-to-dismiss would bypass the editor's
+      // own close policy, which is what guards an in-flight attachment.
+      enableDrag: false,
       backgroundColor: CaleeColors.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(

@@ -83,6 +83,21 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
   bool _isSubmitting = false;
   bool _isScanningImage = false;
 
+  /// What the attachments section is doing, as it last reported it. The
+  /// editor cannot see inside that section, and used to close straight over
+  /// the top of an upload it knew nothing about.
+  AttachmentOperationState _attachmentOperations =
+      AttachmentOperationState.idle;
+
+  /// Lets [_requestClose] cancel in-flight transfers and drop an unresolved
+  /// upload when the user chooses to close anyway.
+  final EventAttachmentsController _attachmentsController =
+      EventAttachmentsController();
+
+  /// Guards against a second close request while the first is still
+  /// cancelling transfers -- a Back press during the confirmation, say.
+  bool _isClosing = false;
+
   bool get _isEditing => widget.initialEvent != null;
   bool get _isEditingSingleOccurrence =>
       _isEditing &&
@@ -172,6 +187,76 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
     _locationController.dispose();
     _descriptionController.dispose();
     super.dispose();
+  }
+
+  // ── Closing ───────────────────────────────────────────────────────────────
+
+  /// The ONE way this editor closes by user intent -- the top Close button,
+  /// Android Back, an iOS back gesture, a tap on the modal barrier, and any
+  /// programmatic pop all arrive here through [PopScope].
+  ///
+  /// Saving is deliberately not routed through it: `_submit` closes because
+  /// the user asked to save, which is a different intent from abandoning the
+  /// editor, and the attachments section cancels cleanly on disposal either
+  /// way.
+  Future<void> _requestClose() async {
+    if (_isClosing) return;
+
+    // Note the absence of an _isLocked check: submitting or scanning has
+    // never blocked Back or a barrier tap, and this method must not quietly
+    // start. The attachment policy below is the only new gate.
+    final operations = _attachmentOperations;
+    if (!operations.blocksEditorClose) {
+      _closeNow();
+      return;
+    }
+
+    final isTransferring = operations.hasActiveTransfer;
+    final confirmed = await CaleeDestructiveDialog.show(
+      context: context,
+      title: isTransferring
+          ? 'Attachment still transferring'
+          : 'Unfinished attachment upload',
+      body: isTransferring
+          ? 'An attachment is still being uploaded or downloaded. Closing '
+                'now cancels it.'
+          : "One attachment upload hasn't finished. Closing now discards it, "
+                'and the file will not be attached.',
+      confirmLabel: isTransferring
+          ? 'Cancel attachment and close'
+          : 'Discard upload and close',
+      cancelLabel: 'Keep editing',
+    );
+    if (!confirmed || !mounted) return;
+
+    _isClosing = true;
+    if (isTransferring) {
+      // Stop the transfer and wait for it to actually unwind, so the editor
+      // is never dismissed on top of a spinner that is still running.
+      await _attachmentsController.cancelActiveTransfers();
+    }
+    // A cancelled upload can leave an operation whose server-side outcome is
+    // unknown. The user has already said to close, so that operation is
+    // dropped here rather than asking a second time.
+    _attachmentsController.discardUnresolvedUpload();
+    if (!mounted) {
+      _isClosing = false;
+      return;
+    }
+    _closeNow();
+  }
+
+  void _closeNow() {
+    // Deliberately unconditional: this runs only after the close policy has
+    // been satisfied, so it must not be re-intercepted by PopScope.
+    Navigator.of(context).pop();
+  }
+
+  void _handleAttachmentOperationState(AttachmentOperationState state) {
+    // A plain field, not setState: nothing in build() depends on it (the
+    // pop is always intercepted and decided in _requestClose), and this can
+    // arrive while the attachments section is being disposed.
+    _attachmentOperations = state;
   }
 
   DateTime _dateTimeFor(TimeOfDay time) {
@@ -662,257 +747,280 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
               : 'Edit event'
         : 'Add event';
 
-    return SafeArea(
-      child: ColoredBox(
-        color: CaleeColors.scaffoldBackground,
-        child: Form(
-          key: _formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Drag handle
-              Center(
-                child: Container(
-                  width: 36,
-                  height: 4,
-                  margin: const EdgeInsets.only(top: CaleeSpacing.sm),
-                  decoration: BoxDecoration(
-                    color: CaleeColors.separatorOpaque,
-                    borderRadius: BorderRadius.circular(CaleeRadius.dot),
+    return PopScope(
+      // Never pops on its own. Every route to closing -- system Back, an
+      // iOS back gesture, a tap on the modal barrier, a programmatic
+      // maybePop -- lands in _requestClose(), which is the only place the
+      // close policy is decided. (The sheet is also presented with
+      // enableDrag: false, because the framework's drag-to-dismiss calls
+      // Navigator.pop() directly and would bypass this.)
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        unawaited(_requestClose());
+      },
+      child: SafeArea(
+        child: ColoredBox(
+          color: CaleeColors.scaffoldBackground,
+          child: Form(
+            key: _formKey,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Drag handle
+                Center(
+                  child: Container(
+                    width: 36,
+                    height: 4,
+                    margin: const EdgeInsets.only(top: CaleeSpacing.sm),
+                    decoration: BoxDecoration(
+                      color: CaleeColors.separatorOpaque,
+                      borderRadius: BorderRadius.circular(CaleeRadius.dot),
+                    ),
                   ),
                 ),
-              ),
-              Flexible(
-                child: SingleChildScrollView(
-                  padding: EdgeInsets.fromLTRB(
-                    CaleeSpacing.md,
-                    CaleeSpacing.md,
-                    CaleeSpacing.md,
-                    CaleeSpacing.md + bottomInset,
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      // Sheet title
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              sheetTitle,
-                              style: Theme.of(context).textTheme.titleLarge,
+                Flexible(
+                  child: SingleChildScrollView(
+                    padding: EdgeInsets.fromLTRB(
+                      CaleeSpacing.md,
+                      CaleeSpacing.md,
+                      CaleeSpacing.md,
+                      CaleeSpacing.md + bottomInset,
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        // Sheet title
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                sheetTitle,
+                                style: Theme.of(context).textTheme.titleLarge,
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.close),
+                              tooltip: 'Close',
+                              onPressed: _isLocked
+                                  ? null
+                                  : () => unawaited(_requestClose()),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(
+                                minWidth: 48,
+                                minHeight: 48,
+                              ),
+                            ),
+                          ],
+                        ),
+
+                        // Scan image button (create mode only)
+                        if (!_isEditing) ...[
+                          const SizedBox(height: CaleeSpacing.sm),
+                          OutlinedButton.icon(
+                            onPressed: _isLocked ? null : _scanImage,
+                            icon: _isScanningImage
+                                ? const SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Icon(Icons.document_scanner_outlined),
+                            label: Text(
+                              _isScanningImage
+                                  ? 'Scanning image…'
+                                  : 'Scan image',
                             ),
                           ),
-                          IconButton(
-                            icon: const Icon(Icons.close),
-                            onPressed: _isLocked
-                                ? null
-                                : () => Navigator.of(context).maybePop(),
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(),
+                        ],
+
+                        const SizedBox(height: CaleeSpacing.md),
+
+                        // ── Event ─────────────────────────────────────────────
+                        CaleeSection(
+                          children: [
+                            // Title field
+                            CaleeSectionTextFormField(
+                              key: const Key('event_title_field'),
+                              controller: _titleController,
+                              enabled: !_isLocked,
+                              autofocus: true,
+                              hintText: 'Title',
+                              textInputAction: TextInputAction.next,
+                              validator: (value) {
+                                if ((value ?? '').trim().isEmpty) {
+                                  return 'Enter a title';
+                                }
+                                return null;
+                              },
+                            ),
+                            // Calendar picker
+                            CaleeSectionDropdownRow<ClientCalendar>(
+                              label: 'Calendar',
+                              value: _selectedCalendar,
+                              items: [
+                                for (final cal in widget.calendars)
+                                  DropdownMenuItem(
+                                    value: cal,
+                                    child: Text(cal.name),
+                                  ),
+                              ],
+                              onChanged: (cal) {
+                                if (cal != null) {
+                                  setState(() => _selectedCalendar = cal);
+                                }
+                              },
+                              enabled: !_isLocked && !_isEditing,
+                            ),
+                          ],
+                        ),
+
+                        // ── Time ──────────────────────────────────────────────
+                        const SizedBox(height: CaleeSpacing.sectionSpacing),
+                        CaleeSection(
+                          children: [
+                            CaleeSectionSwitchRow(
+                              label: 'All day',
+                              value: _allDay,
+                              enabled: !_isLocked,
+                              switchKey: const Key('event_all_day_switch'),
+                              onChanged: (v) => setState(() => _allDay = v),
+                            ),
+                            if (_allDay) ...[
+                              CaleeSectionPickerRow(
+                                label: 'Date',
+                                value: _dateLabel(_selectedDate),
+                                onTap: _isLocked ? null : _pickDate,
+                                enabled: !_isLocked,
+                              ),
+                              CaleeSectionPickerRow(
+                                label: 'End',
+                                value: _dateLabel(_selectedEndDate),
+                                onTap: _isLocked ? null : _pickEndDate,
+                                enabled: !_isLocked,
+                              ),
+                            ] else ...[
+                              CaleeSectionPickerRow(
+                                label: 'Date',
+                                value: _dateLabel(_selectedDate),
+                                onTap: _isLocked ? null : _pickDate,
+                                enabled: !_isLocked,
+                              ),
+                              CaleeSectionPickerRow(
+                                label: 'Start',
+                                value: _timeLabel(_startTime),
+                                onTap: _isLocked ? null : _pickStartTime,
+                                enabled: !_isLocked,
+                              ),
+                              CaleeSectionPickerRow(
+                                label: 'End',
+                                value: _timeLabel(_endTime),
+                                onTap: _isLocked ? null : _pickEndTime,
+                                enabled: !_isLocked,
+                              ),
+                            ],
+                          ],
+                        ),
+
+                        // ── Repeat ────────────────────────────────────────────
+                        if (!_isEditingSingleOccurrence) ...[
+                          const SizedBox(height: CaleeSpacing.sectionSpacing),
+                          CaleeSection(
+                            children: [
+                              CaleeSectionPickerRow(
+                                label: 'Repeat',
+                                value: _selectedRepeatRule.label(
+                                  anchorDate: _selectedDate,
+                                ),
+                                onTap: _isLocked ? null : _pickRepeat,
+                                enabled: !_isLocked,
+                              ),
+                            ],
                           ),
                         ],
-                      ),
 
-                      // Scan image button (create mode only)
-                      if (!_isEditing) ...[
-                        const SizedBox(height: CaleeSpacing.sm),
-                        OutlinedButton.icon(
-                          onPressed: _isLocked ? null : _scanImage,
-                          icon: _isScanningImage
+                        // ── Details ───────────────────────────────────────────
+                        const SizedBox(height: CaleeSpacing.sectionSpacing),
+                        CaleeSection(
+                          children: [
+                            CaleeSectionTextFormField(
+                              key: const Key('event_location_field'),
+                              controller: _locationController,
+                              enabled: !_isLocked,
+                              hintText: 'Location',
+                            ),
+                            CaleeSectionTextFormField(
+                              key: const Key('event_description_field'),
+                              controller: _descriptionController,
+                              enabled: !_isLocked,
+                              hintText: 'Notes',
+                              maxLines: 3,
+                            ),
+                          ],
+                        ),
+
+                        // ── Attachments ───────────────────────────────────────
+                        // Only for an existing event (attaching a file
+                        // requires an eventId, so this never shows while
+                        // creating a new event) on a calendar the backend
+                        // explicitly reports as attachment-capable -- never
+                        // inferred from provider name.
+                        if (_isEditing &&
+                            _selectedCalendar
+                                .capabilities
+                                .canViewAttachments) ...[
+                          const SizedBox(height: CaleeSpacing.sectionSpacing),
+                          EventAttachmentsSection(
+                            key: ValueKey(
+                              'attachments-${widget.initialEvent!.id}',
+                            ),
+                            // Deliberately widget.initialEvent!.id, not
+                            // writableEventId -- when editing a single
+                            // occurrence, id keeps its RECURRENCE-ID suffix,
+                            // so if this section's own add/remove gating
+                            // (isSeriesScoped below) were ever wrong, Hub's
+                            // own occurrence-context rejection is still a
+                            // second, independent backstop. writableEventId
+                            // would collapse to the series id and lose that.
+                            eventId: widget.initialEvent!.id,
+                            hubClient: widget.hubClient,
+                            accessToken: widget.accessToken,
+                            canAdd: _selectedCalendar
+                                .capabilities
+                                .canAddAttachments,
+                            canRemove: _selectedCalendar
+                                .capabilities
+                                .canRemoveAttachments,
+                            isSeriesScoped: _isEditingSingleOccurrence,
+                            controller: _attachmentsController,
+                            onOperationStateChanged:
+                                _handleAttachmentOperationState,
+                          ),
+                        ],
+
+                        // ── Submit ────────────────────────────────────────────
+                        const SizedBox(height: CaleeSpacing.lg),
+                        FilledButton(
+                          key: const Key('event_submit_button'),
+                          onPressed: _isLocked ? null : _submit,
+                          child: _isSubmitting
                               ? const SizedBox(
-                                  width: 16,
-                                  height: 16,
+                                  width: 18,
+                                  height: 18,
                                   child: CircularProgressIndicator(
                                     strokeWidth: 2,
                                   ),
                                 )
-                              : const Icon(Icons.document_scanner_outlined),
-                          label: Text(
-                            _isScanningImage ? 'Scanning image…' : 'Scan image',
-                          ),
+                              : Text(_submitLabel),
                         ),
                       ],
-
-                      const SizedBox(height: CaleeSpacing.md),
-
-                      // ── Event ─────────────────────────────────────────────
-                      CaleeSection(
-                        children: [
-                          // Title field
-                          CaleeSectionTextFormField(
-                            key: const Key('event_title_field'),
-                            controller: _titleController,
-                            enabled: !_isLocked,
-                            autofocus: true,
-                            hintText: 'Title',
-                            textInputAction: TextInputAction.next,
-                            validator: (value) {
-                              if ((value ?? '').trim().isEmpty) {
-                                return 'Enter a title';
-                              }
-                              return null;
-                            },
-                          ),
-                          // Calendar picker
-                          CaleeSectionDropdownRow<ClientCalendar>(
-                            label: 'Calendar',
-                            value: _selectedCalendar,
-                            items: [
-                              for (final cal in widget.calendars)
-                                DropdownMenuItem(
-                                  value: cal,
-                                  child: Text(cal.name),
-                                ),
-                            ],
-                            onChanged: (cal) {
-                              if (cal != null) {
-                                setState(() => _selectedCalendar = cal);
-                              }
-                            },
-                            enabled: !_isLocked && !_isEditing,
-                          ),
-                        ],
-                      ),
-
-                      // ── Time ──────────────────────────────────────────────
-                      const SizedBox(height: CaleeSpacing.sectionSpacing),
-                      CaleeSection(
-                        children: [
-                          CaleeSectionSwitchRow(
-                            label: 'All day',
-                            value: _allDay,
-                            enabled: !_isLocked,
-                            switchKey: const Key('event_all_day_switch'),
-                            onChanged: (v) => setState(() => _allDay = v),
-                          ),
-                          if (_allDay) ...[
-                            CaleeSectionPickerRow(
-                              label: 'Date',
-                              value: _dateLabel(_selectedDate),
-                              onTap: _isLocked ? null : _pickDate,
-                              enabled: !_isLocked,
-                            ),
-                            CaleeSectionPickerRow(
-                              label: 'End',
-                              value: _dateLabel(_selectedEndDate),
-                              onTap: _isLocked ? null : _pickEndDate,
-                              enabled: !_isLocked,
-                            ),
-                          ] else ...[
-                            CaleeSectionPickerRow(
-                              label: 'Date',
-                              value: _dateLabel(_selectedDate),
-                              onTap: _isLocked ? null : _pickDate,
-                              enabled: !_isLocked,
-                            ),
-                            CaleeSectionPickerRow(
-                              label: 'Start',
-                              value: _timeLabel(_startTime),
-                              onTap: _isLocked ? null : _pickStartTime,
-                              enabled: !_isLocked,
-                            ),
-                            CaleeSectionPickerRow(
-                              label: 'End',
-                              value: _timeLabel(_endTime),
-                              onTap: _isLocked ? null : _pickEndTime,
-                              enabled: !_isLocked,
-                            ),
-                          ],
-                        ],
-                      ),
-
-                      // ── Repeat ────────────────────────────────────────────
-                      if (!_isEditingSingleOccurrence) ...[
-                        const SizedBox(height: CaleeSpacing.sectionSpacing),
-                        CaleeSection(
-                          children: [
-                            CaleeSectionPickerRow(
-                              label: 'Repeat',
-                              value: _selectedRepeatRule.label(
-                                anchorDate: _selectedDate,
-                              ),
-                              onTap: _isLocked ? null : _pickRepeat,
-                              enabled: !_isLocked,
-                            ),
-                          ],
-                        ),
-                      ],
-
-                      // ── Details ───────────────────────────────────────────
-                      const SizedBox(height: CaleeSpacing.sectionSpacing),
-                      CaleeSection(
-                        children: [
-                          CaleeSectionTextFormField(
-                            key: const Key('event_location_field'),
-                            controller: _locationController,
-                            enabled: !_isLocked,
-                            hintText: 'Location',
-                          ),
-                          CaleeSectionTextFormField(
-                            key: const Key('event_description_field'),
-                            controller: _descriptionController,
-                            enabled: !_isLocked,
-                            hintText: 'Notes',
-                            maxLines: 3,
-                          ),
-                        ],
-                      ),
-
-                      // ── Attachments ───────────────────────────────────────
-                      // Only for an existing event (attaching a file
-                      // requires an eventId, so this never shows while
-                      // creating a new event) on a calendar the backend
-                      // explicitly reports as attachment-capable -- never
-                      // inferred from provider name.
-                      if (_isEditing &&
-                          _selectedCalendar
-                              .capabilities
-                              .canViewAttachments) ...[
-                        const SizedBox(height: CaleeSpacing.sectionSpacing),
-                        EventAttachmentsSection(
-                          key: ValueKey(
-                            'attachments-${widget.initialEvent!.id}',
-                          ),
-                          // Deliberately widget.initialEvent!.id, not
-                          // writableEventId -- when editing a single
-                          // occurrence, id keeps its RECURRENCE-ID suffix,
-                          // so if this section's own add/remove gating
-                          // (isSeriesScoped below) were ever wrong, Hub's
-                          // own occurrence-context rejection is still a
-                          // second, independent backstop. writableEventId
-                          // would collapse to the series id and lose that.
-                          eventId: widget.initialEvent!.id,
-                          hubClient: widget.hubClient,
-                          accessToken: widget.accessToken,
-                          canAdd:
-                              _selectedCalendar.capabilities.canAddAttachments,
-                          canRemove: _selectedCalendar
-                              .capabilities
-                              .canRemoveAttachments,
-                          isSeriesScoped: _isEditingSingleOccurrence,
-                        ),
-                      ],
-
-                      // ── Submit ────────────────────────────────────────────
-                      const SizedBox(height: CaleeSpacing.lg),
-                      FilledButton(
-                        key: const Key('event_submit_button'),
-                        onPressed: _isLocked ? null : _submit,
-                        child: _isSubmitting
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : Text(_submitLabel),
-                      ),
-                    ],
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

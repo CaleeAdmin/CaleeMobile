@@ -344,20 +344,49 @@ class CaleeAction {
 /// Calee-style action sheet. Shows a list of [CaleeAction]s in a modal bottom
 /// sheet with an optional [title]. Automatically adds a Cancel row.
 class CaleeActionSheet extends StatelessWidget {
-  const CaleeActionSheet({required this.actions, this.title, super.key});
+  const CaleeActionSheet({
+    required this.actions,
+    this.title,
+    this.showCloseButton = false,
+    this.closeTooltip = 'Close',
+    super.key,
+  });
+
+  /// The size of the optional close control's tap target. Also reserved on
+  /// the opposite side of the header so [title] stays optically centred.
+  static const double _closeTargetSize = 48;
 
   final String? title;
   final List<CaleeAction> actions;
+
+  /// Adds a close control to the top-right of the sheet, alongside the
+  /// Cancel row that is always present. Off by default so every existing
+  /// action sheet keeps exactly the chrome it had.
+  ///
+  /// Dismisses the sheet and nothing else: an action sheet whose actions
+  /// each start something (a picker, a navigation) needs a way out that is
+  /// reachable without scanning to the bottom of the list.
+  final bool showCloseButton;
+
+  /// Tooltip and accessibility label for the [showCloseButton] control.
+  final String closeTooltip;
 
   static Future<void> show({
     required BuildContext context,
     required List<CaleeAction> actions,
     String? title,
+    bool showCloseButton = false,
+    String closeTooltip = 'Close',
   }) {
     return showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.transparent,
-      builder: (_) => CaleeActionSheet(title: title, actions: actions),
+      builder: (_) => CaleeActionSheet(
+        title: title,
+        actions: actions,
+        showCloseButton: showCloseButton,
+        closeTooltip: closeTooltip,
+      ),
     );
   }
 
@@ -379,19 +408,49 @@ class CaleeActionSheet extends StatelessWidget {
               clipBehavior: Clip.hardEdge,
               child: Column(
                 children: [
-                  if (title != null) ...[
-                    Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: CaleeSpacing.md,
-                        vertical: CaleeSpacing.sm,
-                      ),
-                      child: Text(
-                        title!,
-                        style: theme.textTheme.labelMedium?.copyWith(
-                          color: CaleeColors.textSecondary,
+                  if (title != null || showCloseButton) ...[
+                    Row(
+                      children: [
+                        // Reserves the close control's width on the leading
+                        // side so the title stays centred rather than
+                        // shifting left by half a button.
+                        if (showCloseButton)
+                          const SizedBox(width: _closeTargetSize),
+                        Expanded(
+                          child: title == null
+                              ? const SizedBox.shrink()
+                              : Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: CaleeSpacing.md,
+                                    vertical: CaleeSpacing.sm,
+                                  ),
+                                  child: Text(
+                                    title!,
+                                    style: theme.textTheme.labelMedium
+                                        ?.copyWith(
+                                          color: CaleeColors.textSecondary,
+                                        ),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                ),
                         ),
-                        textAlign: TextAlign.center,
-                      ),
+                        if (showCloseButton)
+                          IconButton(
+                            key: const Key('calee_action_sheet_close'),
+                            icon: const Icon(Icons.close),
+                            iconSize: 20,
+                            // Tooltip doubles as the semantic label, so the
+                            // control is announced rather than read as a bare
+                            // icon.
+                            tooltip: closeTooltip,
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(
+                              minWidth: _closeTargetSize,
+                              minHeight: _closeTargetSize,
+                            ),
+                            onPressed: () => Navigator.of(context).maybePop(),
+                          ),
+                      ],
                     ),
                     const Divider(),
                   ],
