@@ -44,48 +44,67 @@ enum _AttachmentSource { camera, gallery, file }
 /// What the attachments section is currently doing, as far as anything
 /// outside it needs to care.
 ///
-/// Two booleans, not an inference over unrelated flags: the editor above has
-/// to decide whether closing right now would destroy work, and "is a spinner
-/// visible somewhere" is not that question. [hasActiveTransfer] means bytes
-/// are moving and can be cancelled; [hasUnresolvedUpload] means an upload
-/// exists whose outcome nobody knows yet, which is the case that silently
-/// loses a user's document if the screen simply disappears.
+/// Three booleans, not an inference over unrelated flags: the editor above
+/// has to decide whether closing right now would destroy work, and "is a
+/// spinner visible somewhere" is not that question. They are kept apart
+/// because the honest answer to "may I close?" differs for each:
+///
+///  * [hasActiveTransfer] -- bytes are moving under a cancel token, so the
+///    editor may offer to cancel and close.
+///  * [hasActiveAction] -- an attachment action is running that has no
+///    cancellation mechanism at all (the platform viewer opening, the
+///    native share sheet, a detach request already sent). The editor must
+///    wait for it, and must NOT offer to cancel something it cannot.
+///  * [hasUnresolvedUpload] -- an upload exists whose outcome nobody knows
+///    yet, which is the case that silently loses a user's document if the
+///    screen simply disappears. Only the user resolves it, by retrying or
+///    discarding.
 @immutable
 class AttachmentOperationState {
   const AttachmentOperationState({
     required this.hasActiveTransfer,
+    required this.hasActiveAction,
     required this.hasUnresolvedUpload,
   });
 
   /// Nothing in flight and nothing owed to the user.
   static const idle = AttachmentOperationState(
     hasActiveTransfer: false,
+    hasActiveAction: false,
     hasUnresolvedUpload: false,
   );
 
   /// An upload is sending bytes, or a download backing an open/share is
-  /// receiving them. Cancellable.
+  /// receiving them. Cancellable through the transfer tokens.
   final bool hasActiveTransfer;
 
+  /// An attachment action is running that cannot be cancelled: opening a
+  /// downloaded file in the platform viewer, the native share sheet, or a
+  /// detach request that has already left. It can only be waited out.
+  final bool hasActiveAction;
+
   /// An upload operation is neither finished nor abandoned -- retryable,
-  /// reconciling, or cancelled with an uncertain server-side outcome. Only
-  /// the user can resolve it, by retrying or discarding.
+  /// reconciling, or cancelled with an uncertain server-side outcome.
   final bool hasUnresolvedUpload;
 
-  bool get blocksEditorClose => hasActiveTransfer || hasUnresolvedUpload;
+  bool get blocksEditorClose =>
+      hasActiveTransfer || hasActiveAction || hasUnresolvedUpload;
 
   @override
   bool operator ==(Object other) =>
       other is AttachmentOperationState &&
       other.hasActiveTransfer == hasActiveTransfer &&
+      other.hasActiveAction == hasActiveAction &&
       other.hasUnresolvedUpload == hasUnresolvedUpload;
 
   @override
-  int get hashCode => Object.hash(hasActiveTransfer, hasUnresolvedUpload);
+  int get hashCode =>
+      Object.hash(hasActiveTransfer, hasActiveAction, hasUnresolvedUpload);
 
   @override
   String toString() =>
       'AttachmentOperationState(hasActiveTransfer: $hasActiveTransfer, '
+      'hasActiveAction: $hasActiveAction, '
       'hasUnresolvedUpload: $hasUnresolvedUpload)';
 }
 
@@ -367,6 +386,11 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
     // generation check runs before every attempt and before every setState.
     _pollGeneration++;
     _cancelActiveTransferTokens();
+    // Uncancellable actions (a viewer opening, the share sheet, a detach
+    // already sent) are simply let go: nothing here can stop them, and this
+    // screen no longer represents them. Clearing the set keeps the final
+    // report below honestly idle.
+    _busyAttachmentIds.clear();
     // Anyone awaiting "the transfers have stopped" is released here rather
     // than left holding a future this state object will never complete.
     _completeTransfersSettled();
@@ -387,6 +411,14 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
 
   bool get _hasActiveTransfer => _isUploading || _downloadTokens.isNotEmpty;
 
+  /// An open, share or remove is under way. Deliberately separate from
+  /// [_hasActiveTransfer]: the download half of an open/share is
+  /// cancellable, but the platform viewer, the native share sheet and a
+  /// detach request already on the wire are not. Reporting these as
+  /// "transfers" would let the editor promise a cancellation it has no way
+  /// to perform.
+  bool get _hasActiveAction => _busyAttachmentIds.isNotEmpty;
+
   /// An upload that is not currently sending bytes but is not finished
   /// either: retryable, reconciling, or cancelled with an unknown
   /// server-side outcome. Exactly the states a close would silently drop.
@@ -397,8 +429,33 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
 
   AttachmentOperationState get _operationState => AttachmentOperationState(
     hasActiveTransfer: _hasActiveTransfer,
+    hasActiveAction: _hasActiveAction,
     hasUnresolvedUpload: _hasUnresolvedUpload,
   );
+
+  /// Marks [attachmentId] as having an action running, and tells the parent.
+  /// Open, share and remove all go through this pair rather than touching
+  /// the set directly, so no path can change it without reporting.
+  void _markAttachmentBusy(String attachmentId) {
+    if (mounted) {
+      setState(() => _busyAttachmentIds.add(attachmentId));
+    } else {
+      _busyAttachmentIds.add(attachmentId);
+    }
+    _notifyOperationState();
+  }
+
+  /// The counterpart of [_markAttachmentBusy]. Removes even when unmounted,
+  /// so a failed or cancelled action can never leave an attachment marked
+  /// busy for good.
+  void _markAttachmentIdle(String attachmentId) {
+    if (mounted) {
+      setState(() => _busyAttachmentIds.remove(attachmentId));
+    } else {
+      _busyAttachmentIds.remove(attachmentId);
+    }
+    _notifyOperationState();
+  }
 
   /// Reports the current state upward if -- and only if -- it differs from
   /// what was reported last. Called from every place that can change it,
@@ -1141,7 +1198,9 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
     );
     if (!confirmed || !mounted) return;
 
-    setState(() => _busyAttachmentIds.add(attachment.id));
+    // A detach request that has left cannot be recalled, so the editor is
+    // told an action is running for exactly as long as it is in flight.
+    _markAttachmentBusy(attachment.id);
     try {
       final updated = await widget.hubClient.detachAttachment(
         accessToken: widget.accessToken,
@@ -1170,9 +1229,7 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
       _debugLogAttachmentFailure('remove', error);
       _showMessage('Could not remove this attachment. Please try again.');
     } finally {
-      if (mounted) {
-        setState(() => _busyAttachmentIds.remove(attachment.id));
-      }
+      _markAttachmentIdle(attachment.id);
     }
   }
 
@@ -1248,7 +1305,7 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
         _closing) {
       return;
     }
-    setState(() => _busyAttachmentIds.add(attachment.id));
+    _markAttachmentBusy(attachment.id);
     try {
       final path = await _ensureDownloaded(attachment);
       if (path == null || !mounted) return;
@@ -1274,9 +1331,7 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
       _debugLogAttachmentFailure('open', error);
       _showMessage('Could not open this attachment. Please try again.');
     } finally {
-      if (mounted) {
-        setState(() => _busyAttachmentIds.remove(attachment.id));
-      }
+      _markAttachmentIdle(attachment.id);
     }
   }
 
@@ -1292,7 +1347,7 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
         _closing) {
       return;
     }
-    setState(() => _busyAttachmentIds.add(attachment.id));
+    _markAttachmentBusy(attachment.id);
     try {
       final path = await _ensureDownloaded(attachment);
       if (path == null || !mounted) return;
@@ -1327,9 +1382,7 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
       _debugLogAttachmentFailure('share', error);
       _showMessage('Could not share this attachment. Please try again.');
     } finally {
-      if (mounted) {
-        setState(() => _busyAttachmentIds.remove(attachment.id));
-      }
+      _markAttachmentIdle(attachment.id);
     }
   }
 

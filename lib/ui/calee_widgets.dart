@@ -597,6 +597,66 @@ class CaleeDestructiveDialog extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────
+// CaleeNoticeDialog
+// ─────────────────────────────────────────────
+
+/// A single-action informational dialog: something is explained, and the
+/// only thing to do is acknowledge it.
+///
+/// Distinct from [CaleeDestructiveDialog], which offers a choice. Use this
+/// when there is nothing to choose -- e.g. an action has to finish before
+/// the user can do what they asked -- so the UI does not offer a button
+/// that cannot do what it says.
+class CaleeNoticeDialog extends StatelessWidget {
+  const CaleeNoticeDialog({
+    required this.title,
+    required this.body,
+    this.dismissLabel = 'OK',
+    super.key,
+  });
+
+  final String title;
+  final String body;
+  final String dismissLabel;
+
+  static Future<void> show({
+    required BuildContext context,
+    required String title,
+    required String body,
+    String dismissLabel = 'OK',
+  }) {
+    return showDialog<void>(
+      context: context,
+      builder: (_) => CaleeNoticeDialog(
+        title: title,
+        body: body,
+        dismissLabel: dismissLabel,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(title),
+      content: Text(body),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(
+            dismissLabel,
+            style: const TextStyle(
+              fontWeight: FontWeight.w600,
+              color: CaleeColors.primary,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
 // CaleeEmptyState
 // ─────────────────────────────────────────────
 

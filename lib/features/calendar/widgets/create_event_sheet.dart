@@ -224,15 +224,20 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
   /// Android Back, an iOS back gesture, a tap on the modal barrier, and any
   /// programmatic pop all arrive here through [PopScope].
   ///
-  /// Saving is deliberately not routed through it: `_submit` closes because
-  /// the user asked to save, which is a different intent from abandoning the
-  /// editor, and the attachments section cancels cleanly on disposal either
-  /// way.
+  /// Saving does not come through here: `_submit` pops directly on success.
+  /// That is safe because saving is separately gated on the same condition
+  /// ([_hasBlockingAttachmentWork]), so a successful save can only reach its
+  /// pop when attachment work is already idle -- there is nothing left for
+  /// this policy to protect at that point.
+  ///
+  /// Three states, in this order, because the honest answer differs:
+  /// a cancellable transfer may be cancelled; an uncancellable action can
+  /// only be waited out; an unresolved upload is the user's to discard.
   Future<void> _requestClose() async {
     // Single-flight: one confirmation at a time, and a committed close can
-    // never be started twice. Both flags are set BEFORE the first await, so
-    // a second request arriving while the dialog is up is refused rather
-    // than opening a competing one.
+    // never be started twice. The request flag is set BEFORE the first
+    // await, so a second request arriving while a dialog is up is refused
+    // rather than opening a competing one.
     if (_closeRequestInProgress || _isClosing) return;
     _closeRequestInProgress = true;
     try {
@@ -241,49 +246,90 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
       // quietly start. The attachment policy below is the only new gate.
       final operations = _attachmentOperations;
       if (!operations.blocksEditorClose) {
-        _isClosing = true;
-        _closeNow();
+        _commitClose();
         return;
       }
 
-      final isTransferring = operations.hasActiveTransfer;
-      final confirmed = await CaleeDestructiveDialog.show(
-        context: context,
-        title: isTransferring
-            ? 'Attachment still transferring'
-            : 'Unfinished attachment upload',
-        body: isTransferring
-            ? 'An attachment is still being uploaded or downloaded. Closing '
-                  'now cancels it.'
-            : "One attachment upload hasn't finished. Closing now discards "
-                  'it, and the file will not be attached.',
-        confirmLabel: isTransferring
-            ? 'Cancel attachment and close'
-            : 'Discard upload and close',
-        cancelLabel: 'Keep editing',
-      );
-      // "Keep editing" ends the request and leaves everything usable.
-      if (!confirmed || !mounted) return;
+      // 1. A transfer is cancellable, so offer exactly that. Checked first
+      //    so bytes on the wire are dealt with before anything else.
+      if (operations.hasActiveTransfer) {
+        final confirmed = await CaleeDestructiveDialog.show(
+          context: context,
+          title: 'Attachment still transferring',
+          body:
+              'An attachment is still being uploaded or downloaded. Closing '
+              'now cancels it.',
+          confirmLabel: 'Cancel attachment and close',
+          cancelLabel: 'Keep editing',
+        );
+        // "Keep editing" ends the request and leaves everything usable.
+        if (!confirmed || !mounted) return;
 
-      _isClosing = true;
-      if (isTransferring) {
         // Stop the transfer and wait for it to actually unwind, so the
         // editor is never dismissed on top of a spinner still running.
         await _attachmentsController.cancelActiveTransfers();
+        if (!mounted) return;
+
+        // Cancelling the download half of an open or share can leave the
+        // action itself finishing, and nothing can cancel that -- so fall
+        // through to waiting rather than closing over it.
+        if (_attachmentOperations.hasActiveAction) {
+          await _showAttachmentActionNotice();
+          return;
+        }
+
+        // A cancelled upload can leave an operation whose server-side
+        // outcome is unknown. The user has already said to close, so that
+        // operation is dropped here rather than asking a second time.
+        _attachmentsController.discardUnresolvedUpload();
+        if (mounted) _commitClose();
+        return;
       }
-      // A cancelled upload can leave an operation whose server-side outcome
-      // is unknown. The user has already said to close, so that operation is
-      // dropped here rather than asking a second time.
+
+      // 2. An action with no cancellation mechanism. Say so and stay put --
+      //    an offer to "cancel and close" here would be a lie, and a close
+      //    would abandon a detach or a share the app cannot recall.
+      if (operations.hasActiveAction) {
+        await _showAttachmentActionNotice();
+        return;
+      }
+
+      // 3. An unresolved upload: the user's decision, unchanged.
+      final confirmed = await CaleeDestructiveDialog.show(
+        context: context,
+        title: 'Unfinished attachment upload',
+        body:
+            "One attachment upload hasn't finished. Closing now discards it, "
+            'and the file will not be attached.',
+        confirmLabel: 'Discard upload and close',
+        cancelLabel: 'Keep editing',
+      );
+      if (!confirmed || !mounted) return;
+
       _attachmentsController.discardUnresolvedUpload();
-      if (mounted) _closeNow();
+      if (mounted) _commitClose();
     } finally {
-      // Released only when the editor is staying: once committed to closing,
-      // the flag stays set so nothing can re-enter on the way out.
+      // Released whenever the editor is staying -- including after the
+      // wait notice -- so the next close attempt starts cleanly. Once
+      // committed to closing, the flag stays set instead.
       if (!_isClosing) _closeRequestInProgress = false;
     }
   }
 
-  void _closeNow() {
+  Future<void> _showAttachmentActionNotice() {
+    return CaleeNoticeDialog.show(
+      context: context,
+      title: 'Attachment action in progress',
+      body:
+          'Please wait for the attachment action to finish before closing '
+          'this event.',
+    );
+  }
+
+  void _commitClose() {
+    // Set at the moment of popping, not before: every path that decides NOT
+    // to close must leave the editor fully usable.
+    _isClosing = true;
     // Deliberately unconditional: this runs only after the close policy has
     // been satisfied, so it must not be re-intercepted by PopScope.
     Navigator.of(context).pop();
@@ -808,9 +854,14 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
       // Never pops on its own. Every route to closing -- system Back, an
       // iOS back gesture, a tap on the modal barrier, a programmatic
       // maybePop -- lands in _requestClose(), which is the only place the
-      // close policy is decided. (The sheet is also presented with
-      // enableDrag: false, because the framework's drag-to-dismiss calls
-      // Navigator.pop() directly and would bypass this.)
+      // close policy is decided.
+      //
+      // One route cannot be intercepted: the framework's drag-to-dismiss
+      // calls Navigator.pop() directly. Sheets that can hold attachment
+      // work (the EDIT-event sheets) are therefore presented with
+      // enableDrag: false; new-event sheets stay draggable, since attaching
+      // needs an event ID and they can never contain an attachments
+      // section.
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
         if (didPop) return;
@@ -1086,7 +1137,11 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
                           const SizedBox(height: CaleeSpacing.sm),
                           Text(
                             _attachmentOperations.hasActiveTransfer
-                                ? 'Waiting for the attachment to finish.'
+                                ? 'Waiting for the attachment transfer to '
+                                      'finish.'
+                                : _attachmentOperations.hasActiveAction
+                                ? 'Waiting for the attachment action to '
+                                      'finish.'
                                 : 'Retry or discard the attachment to '
                                       'continue.',
                             textAlign: TextAlign.center,
