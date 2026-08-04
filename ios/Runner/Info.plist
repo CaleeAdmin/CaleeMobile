@@ -5,9 +5,9 @@
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>Calee uses the camera to scan display QR codes and event details from flyers and notices.</string>
+	<string>Calee uses the camera to scan display QR codes and event details, and to attach photos to calendar events.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Calee uses your photo library to scan event details from selected images.</string>
+	<string>Calee uses selected photos to scan event details and to add attachments to calendar events.</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
