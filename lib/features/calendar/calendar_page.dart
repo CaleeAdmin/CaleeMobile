@@ -223,6 +223,9 @@ class _CalendarPageState extends State<CalendarPage>
       return;
     }
 
+    // Creating an event never shows the attachments section (attaching
+    // needs an event ID), so there is no attachment work for a drag to
+    // bypass and this sheet keeps its normal drag-to-dismiss.
     final created = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
@@ -361,9 +364,15 @@ class _CalendarPageState extends State<CalendarPage>
     ClientCalendar calendar, {
     String? editScope,
   }) async {
+    // Editing IS the case that can hold attachment work, and the editor
+    // decides for itself when it may close. Flutter's drag-to-dismiss calls
+    // Navigator.pop() directly, which no PopScope can intercept, so dragging
+    // is off here; the barrier stays dismissible because that path goes
+    // through maybePop() and IS intercepted.
     final updated = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
+      enableDrag: false,
       backgroundColor: CaleeColors.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(
@@ -373,6 +382,9 @@ class _CalendarPageState extends State<CalendarPage>
       builder: (context) => CreateEventSheet(
         calendars: [calendar],
         use24h: _use24h(context),
+        // Matches enableDrag above: no handle on a sheet that cannot be
+        // dragged.
+        showDragHandle: false,
         initialEvent: event,
         editScope: editScope,
         onCreate: _controller.createEvent,
