@@ -35,9 +35,8 @@ class ChoresController extends ChangeNotifier {
 
   final ChoresRepository repository;
 
-  /// Accepted-but-unconfirmed completions and undos. See [ChoreSyncOverlay] —
-  /// entries live only until the backend reports the occurrence, and never
-  /// beyond the reconciliation window.
+  /// Bridges list responses that have not yet caught up with an accepted
+  /// mutation. See [ChoreSyncOverlay].
   final ChoreSyncOverlay syncOverlay;
 
   bool isLoading = false;
@@ -47,24 +46,15 @@ class ChoresController extends ChangeNotifier {
   final Set<String> updatingChoreIds = {};
   String selectedAssigneeFilter = 'all';
 
-  /// Set when an accepted completion or undo outlived its reconciliation
-  /// window. Surfaced to the user as a controlled sync error with a refresh
-  /// action, rather than leaving a row on screen that the backend disowns.
+  /// Set when an accepted mutation did not hold, so the user is told rather
+  /// than left with a row the backend disowns.
   String? syncError;
 
   @override
   void dispose() {
-    // The controller's context is being replaced: nothing accepted under it
-    // may survive into whatever replaces it.
+    // The context this state was accepted under is going away with it.
     syncOverlay.clear();
     super.dispose();
-  }
-
-  /// Drops all locally held sync state. Call on logout, or whenever the
-  /// account/household context this controller was built for goes away.
-  void clearSyncState() {
-    syncOverlay.clear();
-    syncError = null;
   }
 
   Future<void> load() async {
@@ -87,12 +77,17 @@ class ChoresController extends ChangeNotifier {
       _logChoreDebugInfo(loaded);
 
       // Drop anything whose account, household, service or calendar has gone
-      // away before reconciling what is left.
+      // away before reconciling what is left. Services come from the bootstrap
+      // this controller was built with, so they are always known; calendars
+      // come from a request that can fail, so their set is only authoritative
+      // when that request succeeded.
       syncOverlay.retainScope(
         accountId: repository.accountId,
         householdId: repository.householdId,
         serviceIds: repository.choreServiceIds,
+        servicesAuthoritative: true,
         calendarIds: _knownCalendarIds(loaded),
+        calendarsAuthoritative: loaded.calendarsAuthoritative,
       );
 
       final reconciled = syncOverlay.reconcile(
@@ -104,9 +99,7 @@ class ChoresController extends ChangeNotifier {
         now: DateTime.now(),
       );
 
-      syncError = reconciled.hasSyncFailure
-          ? 'A chore update could not be confirmed. Refresh to see the latest state.'
-          : null;
+      syncError = reconciled.warning;
 
       overview = ChoresOverview(
         calendarList: loaded.calendarList,
@@ -133,10 +126,6 @@ class ChoresController extends ChangeNotifier {
 
   /// Calendar ids a pending occurrence may legitimately reference, in both the
   /// raw and `serviceId:`-prefixed forms the two endpoints use.
-  ///
-  /// Returns an empty set when the calendar list itself failed to load: an
-  /// empty set disables the calendar check rather than treating a transient
-  /// calendars outage as "every calendar was deleted".
   Set<String> _knownCalendarIds(ChoresOverview loaded) {
     final ids = <String>{};
 
@@ -253,13 +242,11 @@ class ChoresController extends ChangeNotifier {
         householdId: repository.householdId,
       );
 
+      // Every overlay write happens after its request has returned, so a
+      // failure rethrows first and leaves the occurrence exactly as it was.
       if (chore.isCompleted) {
-        // Pending state is only ever cleared after the undo succeeds; a failed
-        // undo must leave the occurrence looking completed, which it does
-        // because this rethrows before touching the overlay.
-        final result = await repository.undoCompletion(chore);
+        final active = (await repository.undoCompletion(chore)).chore;
         if (key != null) {
-          final active = result.chore;
           if (active != null) {
             syncOverlay.markUndoPending(
               key: key,
@@ -278,18 +265,13 @@ class ChoresController extends ChangeNotifier {
             code: 'FUTURE_COMPLETION_NOT_ALLOWED',
           );
         }
-        // Pending state is added only once the request has succeeded, so a
-        // failed completion leaves the occurrence in its original active state.
-        final result = await repository.completeChore(chore);
-        if (key != null) {
-          final completed = result.chore;
-          if (completed != null) {
-            syncOverlay.markCompletionPending(
-              key: key,
-              chore: completed,
-              now: DateTime.now(),
-            );
-          }
+        final completed = (await repository.completeChore(chore)).chore;
+        if (key != null && completed != null) {
+          syncOverlay.markCompletionPending(
+            key: key,
+            chore: completed,
+            now: DateTime.now(),
+          );
         }
       }
       await load();

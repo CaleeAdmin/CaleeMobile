@@ -18,6 +18,7 @@ class ChoresOverview {
     required this.from,
     required this.to,
     this.calendarServiceErrors = const [],
+    this.calendarsAuthoritative = true,
   });
 
   final ClientCalendarList calendarList;
@@ -26,6 +27,11 @@ class ChoresOverview {
   final String from;
   final String to;
   final List<CalendarServiceError> calendarServiceErrors;
+
+  /// False when the calendars request failed, so [calendarList] is "unknown"
+  /// rather than "empty". Callers must not read deletion into an empty list
+  /// they never successfully fetched.
+  final bool calendarsAuthoritative;
 }
 
 // ─────────────────────────────────────────────
@@ -80,6 +86,7 @@ class ChoresRepository {
   }) async {
     ClientCalendarList calList = const ClientCalendarList(calendars: []);
     final calendarServiceErrors = <CalendarServiceError>[];
+    var calendarsAuthoritative = true;
 
     try {
       calList = await hubClient.calendars(accessToken: accessToken);
@@ -87,6 +94,7 @@ class ChoresRepository {
     } on CaleeHubException catch (e) {
       if (isCalendarServiceConnectionCode(e.code)) {
         calendarServiceErrors.add(CalendarServiceError.fromException(e));
+        calendarsAuthoritative = false;
       } else {
         rethrow;
       }
@@ -121,6 +129,7 @@ class ChoresRepository {
       from: from,
       to: to,
       calendarServiceErrors: calendarServiceErrors,
+      calendarsAuthoritative: calendarsAuthoritative,
     );
   }
 
