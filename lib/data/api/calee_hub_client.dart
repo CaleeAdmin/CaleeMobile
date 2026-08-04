@@ -668,8 +668,19 @@ class CaleeHubClient {
       return ChoreCompletionResult.fromJson(_data(json));
     }
 
+    // The alias resolves "today" server-side, so it still needs the device's
+    // zone: without it the backend resolves today on its own UTC day, which
+    // can be a different calendar day than the one the completion was
+    // recorded under.
+    final aliasQuery = Uri(
+      queryParameters: {
+        if (timezone != null && timezone.trim().isNotEmpty)
+          'timezone': timezone.trim(),
+      },
+    ).query;
     final json = await _deleteJson(
-      '/client/v1/chores/$encodedChoreId/completion/today',
+      '/client/v1/chores/$encodedChoreId/completion/today'
+      '${aliasQuery.isEmpty ? '' : '?$aliasQuery'}',
       accessToken: accessToken,
     );
     return ChoreCompletionResult.fromJson(_data(json));
