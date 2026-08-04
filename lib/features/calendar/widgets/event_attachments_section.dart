@@ -97,12 +97,20 @@ class AttachmentOperationState {
 /// on dispose, so calling either method after the section is gone is a
 /// no-op rather than an error.
 class EventAttachmentsController {
+  /// The section State object that currently owns this controller.
+  ///
+  /// Ownership is tracked by this token rather than by comparing the bound
+  /// callbacks: those are instance-method tear-offs, and Dart does not
+  /// promise that two tear-offs of the same method are identical objects.
+  /// A comparison that happened to fail would leave the controller bound to
+  /// a disposed section -- exactly the case unbinding exists to prevent.
+  Object? _owner;
   Future<void> Function()? _cancelActiveTransfers;
   VoidCallback? _discardUnresolvedUpload;
 
   /// True while an [EventAttachmentsSection] is mounted and bound to this
   /// controller.
-  bool get isAttached => _cancelActiveTransfers != null;
+  bool get isAttached => _owner != null;
 
   /// Cancels every in-flight upload and download, completing once they have
   /// unwound (or a short grace period has passed), so the caller never
@@ -117,20 +125,24 @@ class EventAttachmentsController {
   void discardUnresolvedUpload() => _discardUnresolvedUpload?.call();
 
   void _bind({
+    required Object owner,
     required Future<void> Function() cancelActiveTransfers,
     required VoidCallback discardUnresolvedUpload,
   }) {
+    _owner = owner;
     _cancelActiveTransfers = cancelActiveTransfers;
     _discardUnresolvedUpload = discardUnresolvedUpload;
   }
 
-  void _unbind(Future<void> Function() cancelActiveTransfers) {
-    // Identity-checked so a section that is replaced (new section binds
-    // before the old one disposes) is not unbound by its predecessor.
-    if (identical(_cancelActiveTransfers, cancelActiveTransfers)) {
-      _cancelActiveTransfers = null;
-      _discardUnresolvedUpload = null;
-    }
+  /// Unbinds only if [owner] is still the current owner, so a section that
+  /// has already handed the controller to its replacement (the new section
+  /// binds before the old one disposes) does not tear down the new
+  /// binding on its way out.
+  void _unbind(Object owner) {
+    if (!identical(_owner, owner)) return;
+    _owner = null;
+    _cancelActiveTransfers = null;
+    _discardUnresolvedUpload = null;
   }
 }
 
@@ -322,6 +334,7 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
   void initState() {
     super.initState();
     widget.controller?._bind(
+      owner: this,
       cancelActiveTransfers: _cancelActiveTransfersAndSettle,
       discardUnresolvedUpload: _discardPendingUpload,
     );
@@ -332,8 +345,9 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
   void didUpdateWidget(EventAttachmentsSection oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (!identical(oldWidget.controller, widget.controller)) {
-      oldWidget.controller?._unbind(_cancelActiveTransfersAndSettle);
+      oldWidget.controller?._unbind(this);
       widget.controller?._bind(
+        owner: this,
         cancelActiveTransfers: _cancelActiveTransfersAndSettle,
         discardUnresolvedUpload: _discardPendingUpload,
       );
@@ -361,7 +375,7 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
     // directory across sessions.
     unawaited(_cache.close());
     // Last word to the parent: whatever it was blocking on is over.
-    widget.controller?._unbind(_cancelActiveTransfersAndSettle);
+    widget.controller?._unbind(this);
     if (_reportedOperationState != AttachmentOperationState.idle) {
       widget.onOperationStateChanged?.call(AttachmentOperationState.idle);
       _reportedOperationState = AttachmentOperationState.idle;
@@ -699,25 +713,38 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
   /// it exists. Camera captures can arrive unnamed; rather than jumping
   /// straight to `photo.jpg` -- which mislabels a HEIC or PNG capture and
   /// leaves Hub to reconcile a name that contradicts the bytes -- the
-  /// extension is taken from the reported MIME type, or failing that from
-  /// the temporary file's own extension. Only the EXTENSION comes from the
-  /// path: the generated basename is local cache structure, not a name any
-  /// user chose.
+  /// extension is taken from the reported MIME type, then from the
+  /// temporary file's own extension.
+  ///
+  /// Each of those sources is ACCEPTED only if it yields a supported
+  /// extension, so an uninformative MIME type cannot shadow a perfectly
+  /// good one on the path: a capture reported as `application/octet-stream`
+  /// at `/tmp/capture.heic` is a heic, not the jpg that first-non-empty
+  /// order would have called it.
+  ///
+  /// Only the EXTENSION ever comes from the path -- the generated basename
+  /// is local cache structure, not a name any user chose.
   static String _photoFilename(XFile xFile) {
     final name = xFile.name.trim();
     if (name.isNotEmpty) return name;
-    final fromMime = _extensionFromMimeType(xFile.mimeType);
-    final extension = fromMime.isNotEmpty ? fromMime : _extensionOf(xFile.path);
-    return _neutralFilename('photo', extension);
+
+    final mimeExtension = _extensionFromMimeType(xFile.mimeType);
+    if (kAttachmentAllowedExtensions.contains(mimeExtension)) {
+      return 'photo.$mimeExtension';
+    }
+
+    final pathExtension = _extensionOf(xFile.path);
+    if (kAttachmentAllowedExtensions.contains(pathExtension)) {
+      return 'photo.$pathExtension';
+    }
+
+    return 'photo.jpg';
   }
 
-  /// `photo.heic` / `attachment.pdf` when the extension is one Hub accepts;
-  /// otherwise the conservative default rather than an invented type.
+  /// `attachment.pdf` when the extension is one Hub accepts; otherwise a
+  /// bare name rather than an invented type.
   static String _neutralFilename(String base, String extension) {
-    if (extension.isEmpty ||
-        !kAttachmentAllowedExtensions.contains(extension)) {
-      return base == 'photo' ? 'photo.jpg' : base;
-    }
+    if (!kAttachmentAllowedExtensions.contains(extension)) return base;
     return '$base.$extension';
   }
 
@@ -830,30 +857,51 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
   /// Ends the "an upload is sending bytes" state. Idempotent, and safe after
   /// disposal: it only touches the widget tree while still mounted, but
   /// always updates the flags an awaiting close depends on.
+  ///
+  /// Re-reports the operation state even when the transfer fields were
+  /// already clear. A second call is not redundant: the pending operation's
+  /// own fate is usually decided BETWEEN the two calls (cleared, finalized,
+  /// or left retryable), and an early return here would strand the parent
+  /// on the state as it stood before that decision.
   void _markUploadStopped() {
-    if (!_isUploading &&
-        _uploadCancelToken == null &&
-        _uploadProgress == null) {
-      return;
-    }
-    if (mounted) {
-      setState(() {
+    final wasTransferring =
+        _isUploading || _uploadCancelToken != null || _uploadProgress != null;
+    if (wasTransferring) {
+      if (mounted) {
+        setState(() {
+          _isUploading = false;
+          _uploadProgress = null;
+          _uploadCancelToken = null;
+        });
+      } else {
         _isUploading = false;
         _uploadProgress = null;
         _uploadCancelToken = null;
-      });
-    } else {
-      _isUploading = false;
-      _uploadProgress = null;
-      _uploadCancelToken = null;
+      }
     }
     _notifyOperationState();
   }
 
-  /// Applies the per-code policy (Part I) to a failed upload. Every branch
-  /// here decides three things explicitly: what the user is told, what the
-  /// UI does next, and what happens to the pending operation's key.
+  /// Applies the per-code policy to a failed upload and then reports the
+  /// resulting state upward.
+  ///
+  /// The reporting lives here, not at the call site, because every branch
+  /// below decides a DIFFERENT fate for the pending operation -- cleared,
+  /// finalized, left retryable, or handed to reconciliation -- and each of
+  /// those changes whether the editor above may close without asking.
   Future<void> _handleUploadFailure(
+    CaleeHubException e,
+    PendingAttachmentUpload pending,
+    bool bytesLeftTheApp,
+  ) async {
+    try {
+      await _applyUploadFailure(e, pending, bytesLeftTheApp);
+    } finally {
+      _notifyOperationState();
+    }
+  }
+
+  Future<void> _applyUploadFailure(
     CaleeHubException e,
     PendingAttachmentUpload pending,
     bool bytesLeftTheApp,

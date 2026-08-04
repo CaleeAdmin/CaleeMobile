@@ -28,11 +28,21 @@ class CreateEventSheet extends StatefulWidget {
     this.editScope,
     this.defaultCalendarId,
     this.onUpdate,
+    this.showDragHandle = true,
     super.key,
   });
 
   final List<ClientCalendar> calendars;
   final bool use24h;
+
+  /// Whether to draw the sheet's drag handle.
+  ///
+  /// Set by the caller to match how the sheet was actually presented. An
+  /// editor that can hold attachment work is shown with `enableDrag: false`
+  /// (the framework's drag-to-dismiss pops directly, bypassing this
+  /// widget's close policy), and a handle on a sheet that cannot be dragged
+  /// advertises an interaction that does not exist.
+  final bool showDragHandle;
   final DateTime? initialDate;
   final ClientEvent? initialEvent;
   final String? editScope;
@@ -94,8 +104,15 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
   final EventAttachmentsController _attachmentsController =
       EventAttachmentsController();
 
-  /// Guards against a second close request while the first is still
-  /// cancelling transfers -- a Back press during the confirmation, say.
+  /// A close request is being decided: the confirmation is on screen, or
+  /// its answer is still being acted on. Stops a Back press landing on top
+  /// of the dialog it just opened and stacking a second one.
+  bool _closeRequestInProgress = false;
+
+  /// The editor is committed to closing. Distinct from
+  /// [_closeRequestInProgress] because a request can end in "Keep editing",
+  /// which must leave the editor fully usable again, whereas this one is
+  /// one-way.
   bool _isClosing = false;
 
   bool get _isEditing => widget.initialEvent != null;
@@ -105,6 +122,18 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
       widget.editScope == 'occurrence';
 
   bool get _isLocked => _isSubmitting || _isScanningImage;
+
+  /// True while the attachments section has work that closing the editor
+  /// would destroy: a transfer in flight, or an upload whose outcome is
+  /// still unresolved.
+  ///
+  /// Saving is a close too -- `_submit` pops the sheet on success, which
+  /// disposes the attachments section and cancels whatever it was doing.
+  /// So submission is gated on exactly the same condition as closing, and
+  /// the user resolves the attachment first rather than discovering
+  /// afterwards that it never made it.
+  bool get _hasBlockingAttachmentWork =>
+      _attachmentOperations.blocksEditorClose;
 
   @override
   void initState() {
@@ -200,50 +229,58 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
   /// editor, and the attachments section cancels cleanly on disposal either
   /// way.
   Future<void> _requestClose() async {
-    if (_isClosing) return;
+    // Single-flight: one confirmation at a time, and a committed close can
+    // never be started twice. Both flags are set BEFORE the first await, so
+    // a second request arriving while the dialog is up is refused rather
+    // than opening a competing one.
+    if (_closeRequestInProgress || _isClosing) return;
+    _closeRequestInProgress = true;
+    try {
+      // Note the absence of an _isLocked check: submitting or scanning has
+      // never blocked Back or a barrier tap, and this method must not
+      // quietly start. The attachment policy below is the only new gate.
+      final operations = _attachmentOperations;
+      if (!operations.blocksEditorClose) {
+        _isClosing = true;
+        _closeNow();
+        return;
+      }
 
-    // Note the absence of an _isLocked check: submitting or scanning has
-    // never blocked Back or a barrier tap, and this method must not quietly
-    // start. The attachment policy below is the only new gate.
-    final operations = _attachmentOperations;
-    if (!operations.blocksEditorClose) {
-      _closeNow();
-      return;
-    }
+      final isTransferring = operations.hasActiveTransfer;
+      final confirmed = await CaleeDestructiveDialog.show(
+        context: context,
+        title: isTransferring
+            ? 'Attachment still transferring'
+            : 'Unfinished attachment upload',
+        body: isTransferring
+            ? 'An attachment is still being uploaded or downloaded. Closing '
+                  'now cancels it.'
+            : "One attachment upload hasn't finished. Closing now discards "
+                  'it, and the file will not be attached.',
+        confirmLabel: isTransferring
+            ? 'Cancel attachment and close'
+            : 'Discard upload and close',
+        cancelLabel: 'Keep editing',
+      );
+      // "Keep editing" ends the request and leaves everything usable.
+      if (!confirmed || !mounted) return;
 
-    final isTransferring = operations.hasActiveTransfer;
-    final confirmed = await CaleeDestructiveDialog.show(
-      context: context,
-      title: isTransferring
-          ? 'Attachment still transferring'
-          : 'Unfinished attachment upload',
-      body: isTransferring
-          ? 'An attachment is still being uploaded or downloaded. Closing '
-                'now cancels it.'
-          : "One attachment upload hasn't finished. Closing now discards it, "
-                'and the file will not be attached.',
-      confirmLabel: isTransferring
-          ? 'Cancel attachment and close'
-          : 'Discard upload and close',
-      cancelLabel: 'Keep editing',
-    );
-    if (!confirmed || !mounted) return;
-
-    _isClosing = true;
-    if (isTransferring) {
-      // Stop the transfer and wait for it to actually unwind, so the editor
-      // is never dismissed on top of a spinner that is still running.
-      await _attachmentsController.cancelActiveTransfers();
+      _isClosing = true;
+      if (isTransferring) {
+        // Stop the transfer and wait for it to actually unwind, so the
+        // editor is never dismissed on top of a spinner still running.
+        await _attachmentsController.cancelActiveTransfers();
+      }
+      // A cancelled upload can leave an operation whose server-side outcome
+      // is unknown. The user has already said to close, so that operation is
+      // dropped here rather than asking a second time.
+      _attachmentsController.discardUnresolvedUpload();
+      if (mounted) _closeNow();
+    } finally {
+      // Released only when the editor is staying: once committed to closing,
+      // the flag stays set so nothing can re-enter on the way out.
+      if (!_isClosing) _closeRequestInProgress = false;
     }
-    // A cancelled upload can leave an operation whose server-side outcome is
-    // unknown. The user has already said to close, so that operation is
-    // dropped here rather than asking a second time.
-    _attachmentsController.discardUnresolvedUpload();
-    if (!mounted) {
-      _isClosing = false;
-      return;
-    }
-    _closeNow();
   }
 
   void _closeNow() {
@@ -253,10 +290,13 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
   }
 
   void _handleAttachmentOperationState(AttachmentOperationState state) {
-    // A plain field, not setState: nothing in build() depends on it (the
-    // pop is always intercepted and decided in _requestClose), and this can
-    // arrive while the attachments section is being disposed.
+    if (_attachmentOperations == state) return;
     _attachmentOperations = state;
+    // The submit button's enabled state reads this, so the editor does have
+    // to rebuild. Guarded on mounted because the section reports one final
+    // idle state as it is disposed, which happens while this sheet is
+    // already being torn down.
+    if (mounted) setState(() {});
   }
 
   DateTime _dateTimeFor(TimeOfDay time) {
@@ -641,7 +681,24 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
   // ── Submit ────────────────────────────────────────────────────────────────
 
   Future<void> _submit() async {
-    if (_isSubmitting || !_formKey.currentState!.validate()) return;
+    if (_isSubmitting) return;
+
+    // Defensive, even though the button is disabled in this state: this can
+    // be reached programmatically, or from a tap that raced the state change
+    // that disabled it. Saving would pop the sheet and take the attachment
+    // work down with it, so it is refused rather than reordered.
+    if (_hasBlockingAttachmentWork) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Finish or discard the attachment before updating this event.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    if (!_formKey.currentState!.validate()) return;
 
     final startsAt = _dateTimeFor(_startTime);
     late final DateTime endsAt;
@@ -767,18 +824,23 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Drag handle
-                Center(
-                  child: Container(
-                    width: 36,
-                    height: 4,
-                    margin: const EdgeInsets.only(top: CaleeSpacing.sm),
-                    decoration: BoxDecoration(
-                      color: CaleeColors.separatorOpaque,
-                      borderRadius: BorderRadius.circular(CaleeRadius.dot),
+                // Drag handle -- only when this sheet really can be dragged.
+                if (widget.showDragHandle)
+                  Center(
+                    child: Container(
+                      width: 36,
+                      height: 4,
+                      margin: const EdgeInsets.only(top: CaleeSpacing.sm),
+                      decoration: BoxDecoration(
+                        color: CaleeColors.separatorOpaque,
+                        borderRadius: BorderRadius.circular(CaleeRadius.dot),
+                      ),
                     ),
-                  ),
-                ),
+                  )
+                else
+                  // Keeps the title's spacing from the sheet's top edge the
+                  // same whether or not the handle is drawn.
+                  const SizedBox(height: CaleeSpacing.sm),
                 Flexible(
                   child: SingleChildScrollView(
                     padding: EdgeInsets.fromLTRB(
@@ -1004,7 +1066,9 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
                         const SizedBox(height: CaleeSpacing.lg),
                         FilledButton(
                           key: const Key('event_submit_button'),
-                          onPressed: _isLocked ? null : _submit,
+                          onPressed: (_isLocked || _hasBlockingAttachmentWork)
+                              ? null
+                              : _submit,
                           child: _isSubmitting
                               ? const SizedBox(
                                   width: 18,
@@ -1015,6 +1079,21 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
                                 )
                               : Text(_submitLabel),
                         ),
+                        // Says why the button is unavailable. The attachment
+                        // row directly above shows what is happening; this
+                        // says what it means for saving.
+                        if (_hasBlockingAttachmentWork) ...[
+                          const SizedBox(height: CaleeSpacing.sm),
+                          Text(
+                            _attachmentOperations.hasActiveTransfer
+                                ? 'Waiting for the attachment to finish.'
+                                : 'Retry or discard the attachment to '
+                                      'continue.',
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(color: CaleeColors.textSecondary),
+                          ),
+                        ],
                       ],
                     ),
                   ),
