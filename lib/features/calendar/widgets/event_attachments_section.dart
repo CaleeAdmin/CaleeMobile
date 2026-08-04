@@ -526,7 +526,7 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
   /// the editor; disposal cancels everything again regardless.
   Future<void> _cancelActiveTransfersAndSettle() async {
     if (_disposed) return;
-    _cancellingTransfers = true;
+    _setCancellingTransfers(true);
     try {
       _cancelActiveTransferTokens();
       if (!_hasActiveTransfer || _disposed) return;
@@ -544,7 +544,20 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
     } finally {
       // Never left set: the editor may be staying open, and the only other
       // way out of this section is dispose(), which sets _closing anyway.
-      _cancellingTransfers = false;
+      _setCancellingTransfers(false);
+    }
+  }
+
+  /// Flips the transient flag and rebuilds, because the "Add attachment"
+  /// row's enabled state reads it: while transfers are being cancelled the
+  /// row must not be tappable at all, rather than relying on the guard
+  /// inside the handler to swallow the tap afterwards.
+  void _setCancellingTransfers(bool value) {
+    if (_cancellingTransfers == value) return;
+    if (mounted) {
+      setState(() => _cancellingTransfers = value);
+    } else {
+      _cancellingTransfers = value;
     }
   }
 
@@ -610,6 +623,7 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
   /// asynchronous error with no message and no recovery, which is precisely
   /// what a failing picker used to do.
   Future<void> _addAttachment() async {
+    if (_stoppingAttachmentWork) return;
     try {
       await _runAddAttachment();
     } catch (error) {
@@ -620,7 +634,20 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
     }
   }
 
+  /// Guarded at all three points where this flow can be overtaken by a
+  /// teardown or a transfer cancellation.
+  ///
+  /// The first check is the important one, and it is about ROUTES, not just
+  /// wasted work: [_pickSource] pushes a modal sheet, and pushing one after
+  /// the editor has committed to closing would put an attachment-owned
+  /// route on top of the editor -- so the editor's own `Navigator.pop()`
+  /// would dismiss the source sheet instead of the editor, leaving the
+  /// editor open but already marked as closing. The guard lives here rather
+  /// than only in [_addAttachment] because this method owns the modal, and
+  /// must stay safe if it is ever called from somewhere else.
   Future<void> _runAddAttachment() async {
+    if (_stoppingAttachmentWork) return;
+
     final source = await _pickSource();
     if (source == null || !mounted || _stoppingAttachmentWork) return;
 
@@ -1574,7 +1601,14 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
                     child: const Text('Cancel'),
                   )
                 : null,
-            onTap: (_isUploading || _pendingUploadNeedsAction)
+            // Disabled while attachment work is stopping, so a normal tap
+            // cannot even reach the guard in _addAttachment. Both layers
+            // exist on purpose: this one is for users, that one is for
+            // races and programmatic calls.
+            onTap:
+                (_isUploading ||
+                    _pendingUploadNeedsAction ||
+                    _stoppingAttachmentWork)
                 ? null
                 : _addAttachment,
           ),
