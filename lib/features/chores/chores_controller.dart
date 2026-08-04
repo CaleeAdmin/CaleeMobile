@@ -38,6 +38,10 @@ class ChoresController extends ChangeNotifier {
   ChoresOverview? overview;
   List<CalendarServiceError> calendarServiceErrors = [];
   final Set<String> updatingChoreIds = {};
+  // Some calendar services accept a completion but omit its occurrence from
+  // the immediate list response. Keep the accepted occurrence visible so the
+  // user can see and undo the action until the service reports it normally.
+  final Map<String, ClientChore> _completedOverrides = {};
   String selectedAssigneeFilter = 'all';
 
   Future<void> load() async {
@@ -58,12 +62,19 @@ class ChoresController extends ChangeNotifier {
       final to = _formatChoreDate(todayDate.add(const Duration(days: 31)));
       final loaded = await repository.loadOverview(from: from, to: to);
       _logChoreDebugInfo(loaded);
+      var chores = dedupeChoreOccurrences(loaded.choreList.chores);
+      for (final entry in _completedOverrides.entries) {
+        final present = chores.any(
+          (chore) => _occurrenceKey(chore) == entry.key && chore.completedToday,
+        );
+        if (!present) chores = [...chores, entry.value];
+      }
       overview = ChoresOverview(
         calendarList: loaded.calendarList,
         choreList: ClientChoreList(
           from: loaded.choreList.from,
           to: loaded.choreList.to,
-          chores: dedupeChoreOccurrences(loaded.choreList.chores),
+          chores: chores,
         ),
         people: loaded.people,
         from: loaded.from,
@@ -80,6 +91,9 @@ class ChoresController extends ChangeNotifier {
       notifyListeners();
     }
   }
+
+  String _occurrenceKey(ClientChore chore) =>
+      '${chore.completionActionId}:${chore.effectiveOccurrenceDate ?? ''}';
 
   /// Logs chore counts right after the API response is parsed, before any
   /// client-side dedup/grouping runs, so a "Today" row-count mismatch between
@@ -175,6 +189,7 @@ class ChoresController extends ChangeNotifier {
     try {
       if (chore.completedToday || chore.normalizedSection == 'doneToday') {
         await repository.undoCompletion(chore);
+        _completedOverrides.remove(_occurrenceKey(chore));
       } else {
         if (_isFutureOccurrence(chore.effectiveOccurrenceDate)) {
           throw const CaleeHubException(
@@ -184,6 +199,10 @@ class ChoresController extends ChangeNotifier {
           );
         }
         await repository.completeChore(chore);
+        _completedOverrides[_occurrenceKey(chore)] = chore.copyWith(
+          completedToday: true,
+          section: 'doneToday',
+        );
       }
       await load();
     } finally {

@@ -145,6 +145,35 @@ class ClientChore {
   final String? assigneeAvatarColor;
   final String approvalState;
 
+  ClientChore copyWith({bool? completedToday, String? section}) {
+    return ClientChore(
+      id: id,
+      calendarId: calendarId,
+      serviceId: serviceId,
+      serviceName: serviceName,
+      title: title,
+      scheduledAt: scheduledAt,
+      scheduledDate: scheduledDate,
+      description: description,
+      source: source,
+      kind: kind,
+      choreUid: choreUid,
+      parentChoreUid: parentChoreUid,
+      baseChoreId: baseChoreId,
+      occurrenceDate: occurrenceDate,
+      completionLogId: completionLogId,
+      completedToday: completedToday ?? this.completedToday,
+      section: section ?? this.section,
+      recurrence: recurrence,
+      points: points,
+      metadataPoints: metadataPoints,
+      assigneePersonId: assigneePersonId,
+      assigneeName: assigneeName,
+      assigneeAvatarColor: assigneeAvatarColor,
+      approvalState: approvalState,
+    );
+  }
+
   /// The occurrence date this row represents, in `YYYY-MM-DD` form: the
   /// server-provided [occurrenceDate] for expanded recurring rows, falling
   /// back to [scheduledDate] / [scheduledAt] for rows that predate expansion.
