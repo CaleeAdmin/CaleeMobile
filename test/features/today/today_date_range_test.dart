@@ -42,6 +42,7 @@ class _CapturingClient extends CaleeHubClient {
     required String accessToken,
     required String from,
     required String to,
+    String? timezone,
   }) {
     choreFrom = from;
     choreTo = to;
@@ -241,5 +242,6 @@ class _FailTasksClient extends CaleeHubClient {
     required String accessToken,
     required String from,
     required String to,
+    String? timezone,
   }) => _inner.chores(accessToken: accessToken, from: from, to: to);
 }

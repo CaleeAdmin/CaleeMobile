@@ -428,10 +428,19 @@ class CaleeHubClient {
     required String accessToken,
     required String from,
     required String to,
+    String? timezone,
   }) async {
     final uri = Uri(
       path: '/client/v1/chores',
-      queryParameters: {'from': from, 'to': to},
+      queryParameters: {
+        'from': from,
+        'to': to,
+        // Chore sections are calendar-day decisions. Sending the device's zone
+        // lets the backend resolve "today" on the same day the user is on,
+        // instead of on its own UTC day.
+        if (timezone != null && timezone.trim().isNotEmpty)
+          'timezone': timezone.trim(),
+      },
     );
 
     final json = await _getJson(uri.toString(), accessToken: accessToken);
@@ -582,10 +591,11 @@ class CaleeHubClient {
     return ClientChore.fromJson(_data(json)['chore'] as Map<String, dynamic>);
   }
 
-  Future<void> completeChore({
+  Future<ChoreCompletionResult> completeChore({
     required String accessToken,
     required String choreId,
     String? date,
+    String? timezone,
   }) async {
     final encodedChoreId = Uri.encodeComponent(choreId);
     final body = <String, dynamic>{};
@@ -594,11 +604,17 @@ class CaleeHubClient {
       body['date'] = date.trim();
     }
 
-    await _postJson(
+    if (timezone != null && timezone.trim().isNotEmpty) {
+      body['timezone'] = timezone.trim();
+    }
+
+    final json = await _postJson(
       '/client/v1/chores/$encodedChoreId/complete',
       accessToken: accessToken,
       body: body,
     );
+
+    return ChoreCompletionResult.fromJson(_data(json));
   }
 
   Future<void> deleteChore({
@@ -625,10 +641,11 @@ class CaleeHubClient {
     await _deleteJson(path, accessToken: accessToken);
   }
 
-  Future<void> undoChoreCompletion({
+  Future<ChoreCompletionResult> undoChoreCompletion({
     required String accessToken,
     required String choreId,
     String? date,
+    String? timezone,
   }) async {
     final encodedChoreId = Uri.encodeComponent(choreId);
 
@@ -637,18 +654,25 @@ class CaleeHubClient {
     // alias (which only ever undoes today's completion) when no date is
     // available.
     if (date != null && date.trim().isNotEmpty) {
-      final query = Uri(queryParameters: {'date': date.trim()}).query;
-      await _deleteJson(
+      final query = Uri(
+        queryParameters: {
+          'date': date.trim(),
+          if (timezone != null && timezone.trim().isNotEmpty)
+            'timezone': timezone.trim(),
+        },
+      ).query;
+      final json = await _deleteJson(
         '/client/v1/chores/$encodedChoreId/completion?$query',
         accessToken: accessToken,
       );
-      return;
+      return ChoreCompletionResult.fromJson(_data(json));
     }
 
-    await _deleteJson(
+    final json = await _deleteJson(
       '/client/v1/chores/$encodedChoreId/completion/today',
       accessToken: accessToken,
     );
+    return ChoreCompletionResult.fromJson(_data(json));
   }
 
   Future<ClientTask> updateTask({
