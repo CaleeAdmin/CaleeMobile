@@ -30,6 +30,7 @@ class _AlwaysFailHubClient extends CaleeHubClient {
     required String accessToken,
     required String from,
     required String to,
+    String? timezone,
   }) => Future.error(Exception('network error'));
 }
 
@@ -230,21 +231,37 @@ class _CompletionTrackingHubClient extends CaleeHubClient {
   final undoCalls = <String>[];
 
   @override
-  Future<void> completeChore({
+  Future<ChoreCompletionResult> completeChore({
     required String accessToken,
     required String choreId,
     String? date,
+    String? timezone,
   }) async {
     completeCalls.add(date ?? '');
+    return ChoreCompletionResult(
+      completed: true,
+      alreadyCompleted: false,
+      completedDate: date,
+      completionLogId: '$choreId:log',
+      chore: null,
+    );
   }
 
   @override
-  Future<void> undoChoreCompletion({
+  Future<ChoreCompletionResult> undoChoreCompletion({
     required String accessToken,
     required String choreId,
     String? date,
+    String? timezone,
   }) async {
     undoCalls.add(date ?? '');
+    return ChoreCompletionResult(
+      completed: false,
+      alreadyCompleted: false,
+      completedDate: date,
+      completionLogId: '$choreId:log',
+      chore: null,
+    );
   }
 
   @override
@@ -256,6 +273,7 @@ class _CompletionTrackingHubClient extends CaleeHubClient {
     required String accessToken,
     required String from,
     required String to,
+    String? timezone,
   }) => Future.value(_emptyChoreList());
 }
 
@@ -270,6 +288,7 @@ class _SuccessHubClient extends CaleeHubClient {
     required String accessToken,
     required String from,
     required String to,
+    String? timezone,
   }) => Future.value(_emptyChoreList());
 
   @override
@@ -293,6 +312,7 @@ class _DuplicateChoresHubClient extends CaleeHubClient {
     required String accessToken,
     required String from,
     required String to,
+    String? timezone,
   }) => Future.value(
     ClientChoreList(
       from: from,

@@ -107,22 +107,30 @@ String? _exactOccurrenceKey(ClientChore chore) {
   return '$actionId|${chore.effectiveOccurrenceDate ?? ''}|${chore.normalizedKind}';
 }
 
-/// The uid a chore's completion is tracked under: its own [ClientChore.choreUid]
-/// for a baseChore row, or [ClientChore.parentChoreUid] for a completion-log
-/// row pointing back at its recurring chore. Mirrors [ClientChore.completionActionId].
-String? _choreIdentityUid(ClientChore chore) {
-  final uid = chore.choreUid ?? chore.parentChoreUid;
-  if (uid == null || uid.trim().isEmpty) return null;
-  return uid;
-}
-
-/// Key identifying one specific occurrence of a recurring chore: uid plus the
-/// occurrence date it applies to. A completion log only ever suppresses the
-/// active row sharing both, never every row for the same uid.
+/// Key identifying one specific occurrence: the service it belongs to, the uid
+/// its completion is tracked under, and the occurrence date it applies to.
+///
+/// The uid is the chore's own [ClientChore.choreUid] for a baseChore row, or
+/// [ClientChore.parentChoreUid] for a completion log pointing back at its
+/// chore — mirroring [ClientChore.completionActionId], with the chore id as a
+/// fallback for rows carrying neither.
+///
+/// The service component matters: two services can legitimately hold chores
+/// with the same UID, and without it, completing the chore in one service
+/// suppresses the other service's untouched occurrence from Today. The date
+/// component keeps a completion from suppressing every other date of the same
+/// recurring chore.
 String? _choreOccurrenceKey(ClientChore chore) {
-  final uid = _choreIdentityUid(chore);
-  if (uid == null) return null;
-  return '$uid|${chore.effectiveOccurrenceDate}';
+  final serviceId = chore.serviceId.trim();
+  final uid = (chore.choreUid ?? chore.parentChoreUid)?.trim();
+
+  if (uid != null && uid.isNotEmpty) {
+    return '$serviceId|$uid|${chore.effectiveOccurrenceDate}';
+  }
+
+  final actionId = chore.completionActionId.trim();
+  if (actionId.isEmpty) return null;
+  return '$serviceId|$actionId|${chore.effectiveOccurrenceDate}';
 }
 
 String _futureSubsection(
