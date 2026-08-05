@@ -229,17 +229,7 @@ class _HomePromoRow extends StatelessWidget {
                 ),
                 child: Row(
                   children: [
-                    Container(
-                      padding: const EdgeInsets.all(CaleeSpacing.sm),
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.primaryContainer,
-                        borderRadius: BorderRadius.circular(CaleeRadius.card),
-                      ),
-                      child: Icon(
-                        Icons.tablet_mac_outlined,
-                        color: theme.colorScheme.onPrimaryContainer,
-                      ),
-                    ),
+                    const CaleeHomeProductThumbnail(),
                     const SizedBox(width: CaleeSpacing.md),
                     Expanded(
                       child: Column(

@@ -250,6 +250,55 @@ void main() {
   );
 
   testWidgets(
+    'failed home launch from the calendars sheet closes the sheet and '
+    'shows the snackbar over the calendar page',
+    (tester) async {
+      final repo = LocalCalendarSubscriptionRepository();
+      await repo.add(
+        title: 'School Calendar',
+        url: _calendarUrl,
+        source: 'example.com',
+      );
+
+      final session = _FakeSessionController();
+      final follow = _FakeFollowLinkController();
+      await tester.pumpWidget(
+        CaleeApp.forTesting(
+          testDeps: _makeDeps(
+            session: session,
+            follow: follow,
+            localRepo: repo,
+            launchExternalUrl: (_) async => false,
+          ),
+        ),
+      );
+      session.finishRestore();
+      await tester.pump();
+      await tester.pump();
+      expect(find.byType(LocalSubscriberCalendarPage), findsOneWidget);
+
+      await tester.tap(find.byTooltip('Calendars on this phone'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(
+        find.byKey(const Key('local_calendar_home_promo')),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('local_calendar_home_promo')));
+      await tester.pumpAndSettle();
+
+      // The sheet closed before the launch, so the failure snackbar is
+      // visible over the calendar page rather than behind the modal.
+      expect(find.text('Calendars on this phone'), findsNothing);
+      expect(
+        find.text('Could not open Calee for your home. Please try again.'),
+        findsOneWidget,
+      );
+      // The promotion never touches local subscriptions.
+      expect((await repo.list()).length, 1);
+    },
+  );
+
+  testWidgets(
     'already-followed calendar offers Open calendar and does not duplicate '
     'the subscription',
     (tester) async {

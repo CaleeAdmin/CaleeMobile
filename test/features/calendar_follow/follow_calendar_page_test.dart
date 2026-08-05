@@ -82,6 +82,14 @@ void main() {
       );
       expect(find.text('Discover Calee for your home.'), findsOneWidget);
       expect(find.byIcon(Icons.chevron_right), findsOneWidget);
+      // The approved white-framed product thumbnail leads the row.
+      expect(
+        find.descendant(
+          of: find.byKey(_homePromo),
+          matching: find.byKey(const Key('calee_home_product_thumbnail')),
+        ),
+        findsOneWidget,
+      );
     });
 
     testWidgets('shows the existing-customer sign-in row and Cancel', (

@@ -287,27 +287,107 @@ void main() {
         ),
         findsOneWidget,
       );
-    });
-
-    testWidgets('tapping the Calee-for-home row invokes the callback', (
-      tester,
-    ) async {
-      var learnAboutHomeTaps = 0;
-      await tester.pumpWidget(
-        _buildPage(
-          subscriptions: [_sub()],
-          onLearnAboutHome: () => learnAboutHomeTaps++,
+      // The approved white-framed product thumbnail leads the row.
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('local_calendar_home_promo')),
+          matching: find.byKey(const Key('calee_home_product_thumbnail')),
         ),
+        findsOneWidget,
       );
-      await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Calendars on this phone'));
-      await tester.pumpAndSettle();
-
-      await tester.tap(find.byKey(const Key('local_calendar_home_promo')));
-      await tester.pumpAndSettle();
-
-      expect(learnAboutHomeTaps, 1);
     });
+
+    testWidgets(
+      'tapping the Calee-for-home row dismisses the sheet, then invokes '
+      'the callback exactly once',
+      (tester) async {
+        var learnAboutHomeTaps = 0;
+        await tester.pumpWidget(
+          _buildPage(
+            subscriptions: [_sub()],
+            onLearnAboutHome: () => learnAboutHomeTaps++,
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.byTooltip('Calendars on this phone'));
+        await tester.pumpAndSettle();
+        expect(find.text('Calendars on this phone'), findsOneWidget);
+
+        await tester.tap(find.byKey(const Key('local_calendar_home_promo')));
+        await tester.pumpAndSettle();
+
+        expect(learnAboutHomeTaps, 1);
+        // The modal sheet is gone and the calendar page is visible again.
+        expect(find.byType(BottomSheet), findsNothing);
+        expect(find.text('Calendars on this phone'), findsNothing);
+        expect(find.byType(ReadOnlyCalendarView), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'sheet scrolls without overflow for many calendars at 2.0 text scale',
+      (tester) async {
+        tester.view.physicalSize = const Size(360, 640);
+        tester.view.devicePixelRatio = 1.0;
+        tester.platformDispatcher.textScaleFactorTestValue = 2.0;
+        addTearDown(tester.view.reset);
+        addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+
+        final subs = [
+          for (var i = 1; i <= 12; i++)
+            _sub(id: 'sub$i', title: 'Calendar Number $i'),
+        ];
+        await tester.pumpWidget(_buildPage(subscriptions: subs));
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find.byTooltip('Calendars on this phone'),
+          warnIfMissed: false,
+        );
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        expect(find.text('Calendars on this phone'), findsOneWidget);
+
+        // First and last calendar rows and the Home promotion are all
+        // reachable by scrolling the sheet's list.
+        final sheetScrollable = find.descendant(
+          of: find.byKey(const Key('local_calendars_sheet_list')),
+          matching: find.byType(Scrollable),
+        );
+        final promo = find.byKey(const Key('local_calendar_home_promo'));
+
+        expect(find.text('Calendar Number 1').hitTestable(), findsOneWidget);
+
+        await tester.scrollUntilVisible(
+          find.text('Calendar Number 12'),
+          200,
+          scrollable: sheetScrollable,
+        );
+        await tester.ensureVisible(find.text('Calendar Number 12'));
+        await tester.pumpAndSettle();
+        expect(find.text('Calendar Number 12').hitTestable(), findsOneWidget);
+
+        await tester.scrollUntilVisible(
+          promo,
+          200,
+          scrollable: sheetScrollable,
+        );
+        await tester.ensureVisible(promo);
+        await tester.pumpAndSettle();
+        expect(promo.hitTestable(), findsOneWidget);
+        expect(tester.takeException(), isNull);
+
+        // Scrolling back up keeps the first row reachable too.
+        await tester.scrollUntilVisible(
+          find.text('Calendar Number 1'),
+          -200,
+          scrollable: sheetScrollable,
+        );
+        await tester.ensureVisible(find.text('Calendar Number 1'));
+        await tester.pumpAndSettle();
+        expect(find.text('Calendar Number 1').hitTestable(), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      },
+    );
 
     testWidgets('home promotion is not shown in the calendar body', (
       tester,
