@@ -3,8 +3,10 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart' as url_launcher;
 
 import '../config/calee_environment.dart';
+import '../config/calee_links.dart';
 import '../data/api/calee_hub_client.dart';
 import '../data/auth/calee_preferences.dart';
 import '../data/auth/session_store.dart';
@@ -62,6 +64,7 @@ class CaleeAppTestDependencies {
     this.shoppingLinkController,
     this.deviceProfileDefaultsProvider,
     this.reminderCoordinator,
+    this.launchExternalUrl,
   });
 
   final CaleeHubClient hubClient;
@@ -75,6 +78,11 @@ class CaleeAppTestDependencies {
   final ShoppingLinkController? shoppingLinkController;
   final DeviceProfileDefaultsProvider? deviceProfileDefaultsProvider;
   final CalendarReminderCoordinator? reminderCoordinator;
+
+  /// Replaces `url_launcher`'s launchUrl so tests can observe external
+  /// navigation (e.g. the Calee-for-home marketing page) without platform
+  /// channels. Returns whether the URL was opened.
+  final Future<bool> Function(Uri url)? launchExternalUrl;
 }
 
 class CaleeApp extends StatefulWidget {
@@ -1144,6 +1152,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
       return;
     }
 
+    // Only a successfully stored subscription consumes the pending intent.
     _followLinkController.clearPending();
     final updated = await _localSubscriptionRepo.list();
     if (!mounted) return;
@@ -1151,6 +1160,30 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
       _localSubscriptions = updated;
       _showingFollowSignIn = false;
     });
+    // Post-frame via _showSnackBar, so the local calendar page's Scaffold is
+    // mounted before the temporary confirmation appears.
+    _showSnackBar('Calendar added to this phone');
+  }
+
+  /// Opens the Calee-for-home marketing site in the external browser. Never
+  /// consumes a pending calendar-follow intent and never touches the session,
+  /// so returning to the app restores the same decision state.
+  Future<void> _openCaleeForHome() async {
+    final launch =
+        widget._testDeps?.launchExternalUrl ??
+        (Uri url) => url_launcher.launchUrl(
+          url,
+          mode: url_launcher.LaunchMode.externalApplication,
+        );
+    var opened = false;
+    try {
+      opened = await launch(Uri.parse(kCaleeForHomeUrl));
+    } catch (_) {
+      opened = false;
+    }
+    if (!opened && mounted) {
+      _showSnackBar('Could not open Calee for your home. Please try again.');
+    }
   }
 
   @override
@@ -1266,7 +1299,9 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
 
       // ── Calendar follow flows ─────────────────────────────────────────────────────────────────────
 
-      // User chose "Add to Calee" → show login (pending intent present, skip onboarding)
+      // User chose "Already have Calee at home? Sign in" → show login. The
+      // pending follow intent stays untouched so the account-backed
+      // subscription flow can process it after authentication.
       if (_showingFollowSignIn) {
         return LoginPage(
           authRepository: _sessionController.repository,
@@ -1293,28 +1328,16 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
         return FollowCalendarPage(
           intent: pendingFollowIntent,
           alreadyFollowed: alreadyFollowed,
-          onSignIn: () => setState(() => _showingFollowSignIn = true),
-          onFollowLocally: alreadyFollowed
-              ? () {
-                  _followLinkController.clearPending();
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    if (!mounted) return;
-                    final ctx = _navigatorKey.currentContext;
-                    if (ctx != null) {
-                      ScaffoldMessenger.of(ctx).showSnackBar(
-                        const SnackBar(
-                          content: Text(
-                            'This calendar is already added on this phone.',
-                          ),
-                        ),
-                      );
-                    }
-                  });
-                }
-              : () => _handleFollowLocally(pendingFollowIntent),
-          onCancel: () {
-            _followLinkController.clearPending();
-          },
+          onAddToPhone: () =>
+              unawaited(_handleFollowLocally(pendingFollowIntent)),
+          // Clearing the pending intent reveals the existing local calendar
+          // page; the repository already de-duplicates, so no second
+          // subscription can be created from this state.
+          onOpenLocalCalendar: _followLinkController.clearPending,
+          onLearnAboutHome: () => unawaited(_openCaleeForHome()),
+          onExistingCustomerSignIn: () =>
+              setState(() => _showingFollowSignIn = true),
+          onCancel: _followLinkController.clearPending,
         );
       }
 
@@ -1361,7 +1384,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
         return LocalSubscriberCalendarPage(
           subscriptions: _localSubscriptions,
           repository: _localSubscriptionRepo,
-          onSignIn: () => setState(() => _showingFollowSignIn = true),
+          onLearnAboutHome: () => unawaited(_openCaleeForHome()),
           onSubscriptionsChanged: (updated) {
             setState(() => _localSubscriptions = updated);
           },
