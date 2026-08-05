@@ -10,6 +10,7 @@ import 'local_calendar_event.dart';
 import 'local_calendar_ics_service.dart';
 import 'local_calendar_subscription.dart';
 import 'local_calendar_subscription_repository.dart';
+import 'local_subscriber_promotion_preferences.dart';
 
 // Palette cycled per subscription (index % length).
 const _kSubscriptionColors = [
@@ -26,23 +27,34 @@ class LocalSubscriberCalendarPage extends StatefulWidget {
   const LocalSubscriberCalendarPage({
     required this.subscriptions,
     required this.repository,
+    required this.onSignIn,
     required this.onLearnAboutHome,
     required this.onSubscriptionsChanged,
     this.icsService,
+    this.promotionPreferences,
     super.key,
   });
 
   final List<LocalCalendarSubscription> subscriptions;
   final LocalCalendarSubscriptionRepository repository;
 
-  /// Opens the Calee-for-home marketing page from the calendars sheet's
-  /// discovery row. Must never consume local calendar state.
+  /// Opens the normal sign-in flow for existing Calee Home customers.
+  /// Signing in never migrates, links, or removes the locally stored
+  /// calendar subscriptions.
+  final VoidCallback onSignIn;
+
+  /// Opens the Calee-for-home marketing page from the inline promotion and
+  /// the calendars sheet's discovery row. Must never consume local calendar
+  /// state.
   final VoidCallback onLearnAboutHome;
 
   final void Function(List<LocalCalendarSubscription>) onSubscriptionsChanged;
 
   /// Overrideable for tests; defaults to [LocalCalendarIcsService].
   final LocalCalendarIcsService? icsService;
+
+  /// Overrideable for tests; defaults to [LocalSubscriberPromotionPreferences].
+  final LocalSubscriberPromotionPreferences? promotionPreferences;
 
   @override
   State<LocalSubscriberCalendarPage> createState() =>
@@ -54,10 +66,19 @@ class _LocalSubscriberCalendarPageState
   LocalCalendarIcsService get _icsService =>
       widget.icsService ?? const LocalCalendarIcsService();
 
+  LocalSubscriberPromotionPreferences get _promotionPreferences =>
+      widget.promotionPreferences ??
+      const LocalSubscriberPromotionPreferences();
+
   List<LocalCalendarSubscription> _subscriptions = [];
   final Map<String, List<LocalCalendarEvent>> _eventsBySubscription = {};
   final Map<String, String?> _errorsBySubscription = {};
   final Set<String> _loadingIds = {};
+
+  // Tri-state: null while the saved preference is loading (nothing rendered,
+  // so a previously dismissed promotion never flashes in and out), then the
+  // persisted dismissal value.
+  bool? _inlinePromoDismissed;
 
   late DateTime _today;
   late DateTime _selectedMonth;
@@ -72,6 +93,20 @@ class _LocalSubscriberCalendarPageState
     _selectedDay = _today;
     _subscriptions = List.of(widget.subscriptions);
     _refreshAll();
+    unawaited(_loadInlinePromoPreference());
+  }
+
+  Future<void> _loadInlinePromoPreference() async {
+    final dismissed = await _promotionPreferences
+        .isInlineHomePromotionDismissed();
+    if (!mounted) return;
+    setState(() => _inlinePromoDismissed = dismissed);
+  }
+
+  void _dismissInlineHomePromo() {
+    // Hide immediately; persisting is best-effort and never blocks the UI.
+    setState(() => _inlinePromoDismissed = true);
+    unawaited(_promotionPreferences.dismissInlineHomePromotion());
   }
 
   @override
@@ -211,6 +246,8 @@ class _LocalSubscriberCalendarPageState
       appBar: AppBar(
         title: const Text('Calee'),
         actions: [
+          // Refresh keeps its slot while calendars load, and the Sign in
+          // action stays visible and tappable throughout.
           if (_isAnyLoading)
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 16),
@@ -226,46 +263,206 @@ class _LocalSubscriberCalendarPageState
               tooltip: 'Refresh',
               onPressed: _refreshAll,
             ),
+          // Existing Calee Home customers sign in here; local calendars are
+          // never migrated or linked by signing in.
+          Padding(
+            padding: const EdgeInsets.only(right: CaleeSpacing.xs),
+            child: Tooltip(
+              message: 'Sign in to Calee',
+              child: TextButton.icon(
+                key: const Key('local_calendar_sign_in_button'),
+                onPressed: widget.onSignIn,
+                icon: const Icon(Icons.login, size: 20),
+                label: const Text('Sign in'),
+                style: TextButton.styleFrom(
+                  minimumSize: const Size(48, 48),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: CaleeSpacing.sm,
+                  ),
+                ),
+              ),
+            ),
+          ),
         ],
       ),
-      body: _subscriptions.isEmpty
-          ? _EmptyState()
-          : ReadOnlyCalendarView(
-              selectedMonth: _selectedMonth,
-              selectedDay: _selectedDay,
-              today: _today,
-              firstDayOfWeek: 0,
-              events: _displayEvents,
-              viewMode: _viewMode,
-              use24h: use24h,
-              onViewModeChanged: (mode) => setState(() => _viewMode = mode),
-              onPreviousMonth: () => setState(() {
-                _selectedMonth = DateTime(
-                  _selectedMonth.year,
-                  _selectedMonth.month - 1,
-                );
-              }),
-              onNextMonth: () => setState(() {
-                _selectedMonth = DateTime(
-                  _selectedMonth.year,
-                  _selectedMonth.month + 1,
-                );
-              }),
-              onGoToToday: () => setState(() {
-                _today = DateTime.now();
-                _selectedMonth = DateTime(_today.year, _today.month);
-                _selectedDay = _today;
-              }),
-              onSelectDay: (day) => setState(() => _selectedDay = day),
-              actionWidgets: [
-                IconButton(
-                  icon: const Icon(Icons.calendar_month_outlined),
-                  color: CaleeColors.primary,
-                  tooltip: 'Calendars on this phone',
-                  onPressed: _openCalendarsSheet,
-                ),
-              ],
+      body: Column(
+        children: [
+          // Compact, dismissible Calee-for-home discovery strip. Only ever
+          // shown in this signed-out local-calendar mode, and only once the
+          // saved preference confirms it was not previously dismissed.
+          if (_inlinePromoDismissed == false)
+            _InlineHomePromo(
+              onTap: widget.onLearnAboutHome,
+              onDismiss: _dismissInlineHomePromo,
             ),
+          Expanded(
+            child: _subscriptions.isEmpty
+                ? _EmptyState()
+                : _buildCalendar(use24h),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCalendar(bool use24h) {
+    return ReadOnlyCalendarView(
+      selectedMonth: _selectedMonth,
+      selectedDay: _selectedDay,
+      today: _today,
+      firstDayOfWeek: 0,
+      events: _displayEvents,
+      viewMode: _viewMode,
+      use24h: use24h,
+      onViewModeChanged: (mode) => setState(() => _viewMode = mode),
+      onPreviousMonth: () => setState(() {
+        _selectedMonth = DateTime(
+          _selectedMonth.year,
+          _selectedMonth.month - 1,
+        );
+      }),
+      onNextMonth: () => setState(() {
+        _selectedMonth = DateTime(
+          _selectedMonth.year,
+          _selectedMonth.month + 1,
+        );
+      }),
+      onGoToToday: () => setState(() {
+        _today = DateTime.now();
+        _selectedMonth = DateTime(_today.year, _today.month);
+        _selectedDay = _today;
+      }),
+      onSelectDay: (day) => setState(() => _selectedDay = day),
+      actionWidgets: [
+        IconButton(
+          icon: const Icon(Icons.calendar_month_outlined),
+          color: CaleeColors.primary,
+          tooltip: 'Calendars on this phone',
+          onPressed: _openCalendarsSheet,
+        ),
+      ],
+    );
+  }
+}
+
+// ── Inline Calee-for-home promotion ───────────────────────────────────────────
+
+/// Compact, dismissible discovery strip shown between the app bar and the
+/// read-only calendar. Visually secondary to the calendar: no pricing, no
+/// feature list, no large sales button. The whole body is one tappable
+/// navigation surface; the dismiss control is a separate action that only
+/// hides the strip.
+class _InlineHomePromo extends StatelessWidget {
+  const _InlineHomePromo({required this.onTap, required this.onDismiss});
+
+  final VoidCallback onTap;
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    // Secondary chrome: the strip grows with accessibility text (wrapping,
+    // never truncating), but its scaling is moderated so enormous text sizes
+    // cannot let a promotion crowd the calendar — the page's primary
+    // content — off the screen.
+    return MediaQuery.withClampedTextScaling(
+      maxScaleFactor: 1.6,
+      child: Builder(builder: _buildStrip),
+    );
+  }
+
+  Widget _buildStrip(BuildContext context) {
+    final theme = Theme.of(context);
+    // The thumbnail is purely decorative (excluded from semantics), so at
+    // large text sizes its width is handed back to the wrapping text.
+    final showThumbnail = MediaQuery.textScalerOf(context).scale(100) <= 130;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        CaleeSpacing.md,
+        CaleeSpacing.sm,
+        CaleeSpacing.md,
+        CaleeSpacing.sm,
+      ),
+      child: Material(
+        key: const Key('local_calendar_inline_home_promo'),
+        color: theme.colorScheme.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(CaleeRadius.card),
+          side: BorderSide(color: theme.colorScheme.outlineVariant),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: MergeSemantics(
+                child: Semantics(
+                  button: true,
+                  child: InkWell(
+                    borderRadius: const BorderRadius.horizontal(
+                      left: Radius.circular(CaleeRadius.card),
+                    ),
+                    onTap: onTap,
+                    child: ConstrainedBox(
+                      // Compact by default, but only a minimum: large
+                      // accessibility text expands the strip instead of
+                      // truncating.
+                      constraints: const BoxConstraints(minHeight: 72),
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(
+                          CaleeSpacing.md,
+                          CaleeSpacing.sm,
+                          0,
+                          CaleeSpacing.sm,
+                        ),
+                        child: Row(
+                          children: [
+                            if (showThumbnail) ...[
+                              const CaleeHomeProductThumbnail(),
+                              const SizedBox(width: CaleeSpacing.md),
+                            ],
+                            Expanded(
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'See this calendar on a family screen',
+                                    style: theme.textTheme.bodyMedium?.copyWith(
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    'Discover Calee for your home.',
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: theme.colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: CaleeSpacing.xs),
+                            Icon(
+                              Icons.chevron_right,
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            IconButton(
+              key: const Key('local_calendar_inline_home_promo_dismiss'),
+              icon: const Icon(Icons.close, size: 20),
+              color: theme.colorScheme.onSurfaceVariant,
+              tooltip: 'Dismiss',
+              onPressed: onDismiss,
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
