@@ -9,6 +9,7 @@ import 'dart:io';
 
 import 'package:calee_mobile/data/api/calee_hub_client.dart';
 import 'package:calee_mobile/data/models/client_calendar.dart';
+import 'package:calee_mobile/features/calendar/attachment_upload_staging_manager.dart';
 import 'package:calee_mobile/features/calendar/attachment_upload_status.dart';
 import 'package:calee_mobile/features/calendar/widgets/event_attachments_section.dart';
 import 'package:calee_mobile/ui/calee_theme.dart';
@@ -171,6 +172,37 @@ CalendarAttachment _attachment({
 Future<OpenResult> _fakeOpenFile(String path) async =>
     OpenResult(type: ResultType.done, message: 'ok');
 
+/// Lets the section's real file I/O complete between frames.
+///
+/// A selection is now COPIED into Calee-owned staging before it becomes a
+/// pending upload, so the run from "the picker returned" to "an upload
+/// started" spans several real filesystem operations -- a directory create,
+/// a copy, and a verification read -- with no setState between them. Under
+/// the fake-async test binding each of those advances only when runAsync
+/// hands control back to the real event loop, and one pumpAndSettle alone
+/// stops as soon as no frame is scheduled, which happens while the chain is
+/// still in flight.
+///
+/// The bound is on the NUMBER of alternations, not on elapsed time -- the
+/// delay is nominal, and raising it does not help. The count is generous on
+/// purpose so this never becomes a timing assertion: it simply drives the
+/// chain to completion, whatever length it turns out to be.
+Future<void> settleWithFileIo(WidgetTester tester) async {
+  for (var i = 0; i < 40; i++) {
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 5)),
+    );
+    await tester.pumpAndSettle();
+  }
+}
+
+/// Per-test scratch directory, created in setUp and removed in tearDown.
+/// Library-level (rather than local to main) so [pumpSection] can point the
+/// section's staging manager at it: the picker paths below are driven for
+/// real, so the selection really is copied to disk, and the default manager
+/// would reach for path_provider's platform channel.
+late Directory tempDir;
+
 Future<void> pumpSection(
   WidgetTester tester, {
   required CaleeHubClient hub,
@@ -200,6 +232,9 @@ Future<void> pumpSection(
             canRemove: canRemove,
             isSeriesScoped: isSeriesScoped,
             openFile: openFile,
+            stagingManager: AttachmentUploadStagingManager(
+              stagingDirectoryProvider: () async => tempDir,
+            ),
             statusPollSchedule: statusPollSchedule,
           ),
         ),
@@ -209,8 +244,6 @@ Future<void> pumpSection(
 }
 
 void main() {
-  late Directory tempDir;
-
   setUp(() async {
     tempDir = await Directory.systemTemp.createTemp(
       'calee_attachment_widget_test_',
@@ -498,15 +531,11 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Choose photo'));
       await tester.pump();
-      // _addAttachment() awaits file.length() -- genuine file I/O -- before
-      // it ever sets _isUploading. Like the write above, that only
-      // completes if the real event loop gets to run; pumpAndSettle alone
-      // won't drive it (nothing is scheduled yet for it to wait on), so it
-      // needs a real elapsed delay under runAsync first.
-      await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 100)),
-      );
-      await tester.pumpAndSettle();
+      // _addAttachment() validates and then STAGES the selection -- genuine
+      // file I/O -- before it ever sets _isUploading. Like the write above,
+      // that only completes if the real event loop gets to run;
+      // pumpAndSettle alone won't drive it.
+      await settleWithFileIo(tester);
 
       expect(find.text('Uploading…'), findsOneWidget);
       final progressIndicator = tester.widget<CircularProgressIndicator>(
@@ -559,10 +588,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Choose photo'));
       await tester.pump();
-      await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 100)),
-      );
-      await tester.pumpAndSettle();
+      await settleWithFileIo(tester);
     }
 
     /// A poll schedule with no real waiting, so the bounded-polling
@@ -695,10 +721,9 @@ void main() {
 
         await tester.tap(find.byKey(const Key('retry_pending_upload')));
         await tester.pump();
-        await tester.runAsync(
-          () => Future<void>.delayed(const Duration(milliseconds: 100)),
-        );
-        await tester.pumpAndSettle();
+        // A retry re-verifies the staged file before it sends, so it needs
+        // the same real-I/O window the first attempt did.
+        await settleWithFileIo(tester);
 
         expect(hub.uploadIdempotencyKeys, hasLength(2));
         expect(
@@ -750,10 +775,9 @@ void main() {
 
         await tester.tap(find.byKey(const Key('retry_pending_upload')));
         await tester.pump();
-        await tester.runAsync(
-          () => Future<void>.delayed(const Duration(milliseconds: 100)),
-        );
-        await tester.pumpAndSettle();
+        // A retry re-verifies the staged file before it sends, so it needs
+        // the same real-I/O window the first attempt did.
+        await settleWithFileIo(tester);
 
         expect(hub.uploadIdempotencyKeys[1], hub.uploadIdempotencyKeys[0]);
       },
