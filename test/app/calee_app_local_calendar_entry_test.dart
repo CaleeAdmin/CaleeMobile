@@ -3,12 +3,14 @@
 // Verifies the commercial model wiring for an installation that already
 // follows a calendar locally: the app-bar Sign in opens the existing normal
 // LoginPage without touching the phone-only subscriptions, successful
-// existing-customer sign-in reuses the Welcome-path completion flow, and the
-// inline Calee-for-home promotion is dismissible with the dismissal persisted
-// per installation — while the management sheet's permanent discovery row
-// stays available.
+// existing-customer sign-in enters the normal authenticated Calee experience
+// (never display setup — that stays the Welcome path's behaviour, covered
+// here as a regression), and the inline Calee-for-home promotion is
+// dismissible with the dismissal persisted per installation — while the
+// management sheet's permanent discovery row stays available.
 
 import 'package:calee_mobile/app/calee_app.dart';
+import 'package:calee_mobile/app/calee_home_page.dart';
 import 'package:calee_mobile/config/calee_links.dart';
 import 'package:calee_mobile/data/api/calee_hub_client.dart';
 import 'package:calee_mobile/data/auth/session_store.dart';
@@ -23,6 +25,7 @@ import 'package:calee_mobile/features/display_setup/display_setup_link_controlle
 import 'package:calee_mobile/features/display_setup/display_setup_repository.dart';
 import 'package:calee_mobile/features/local_subscriber/local_calendar_subscription_repository.dart';
 import 'package:calee_mobile/features/local_subscriber/local_subscriber_calendar_page.dart';
+import 'package:calee_mobile/features/onboarding/welcome_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -219,8 +222,8 @@ void main() {
   );
 
   testWidgets(
-    'successful existing-customer sign-in uses the normal completion flow '
-    'and keeps the phone-only calendars stored',
+    'successful existing-customer sign-in enters the normal authenticated '
+    'Calee experience and keeps the phone-only calendars stored',
     (tester) async {
       final (session, follow, repo) = await _pumpWithLocalSubscription(tester);
 
@@ -232,18 +235,20 @@ void main() {
       await tester.pump();
       await tester.pump();
 
-      // Same completion as the Welcome-page path: session completed once,
-      // not registered as a new account, and — with no pending follow
-      // intent — the connect-display step of the signed-in experience.
       expect(session.completeSignInCalls, 1);
       expect(session.isSignedIn, isTrue);
-      expect(find.byType(ConnectDisplayPage), findsOneWidget);
 
-      // The inline promotion belongs to the signed-out local-calendar page
-      // only; no signed-in page shows it.
+      // This customer already has Calee at home: they land on the normal
+      // signed-in app root and are never routed through display setup.
+      expect(find.byType(CaleeHomePage), findsOneWidget);
+      expect(find.byType(ConnectDisplayPage), findsNothing);
+
+      // The signed-out local-calendar page and its promotion are gone.
+      expect(find.byType(LocalSubscriberCalendarPage), findsNothing);
       expect(find.byKey(_kInlinePromo), findsNothing);
 
-      // Local subscriptions are not migrated, account-linked, or deleted.
+      // Local subscriptions are not migrated, account-linked, or deleted,
+      // and no calendar-follow intent was invented.
       expect((await repo.list()).length, 1);
       expect(follow.pendingIntent, isNull);
 
@@ -253,6 +258,46 @@ void main() {
       await tester.pump();
       expect(find.byType(LocalSubscriberCalendarPage), findsOneWidget);
       expect((await repo.list()).length, 1);
+      expect((await repo.list()).single.url, _calendarUrl);
+    },
+  );
+
+  testWidgets(
+    'Welcome-page sign-in keeps its existing connect-display behaviour',
+    (tester) async {
+      // No local subscriptions and no pending intents: the signed-out app
+      // starts on the Welcome page rather than the local-calendar page.
+      final repo = LocalCalendarSubscriptionRepository();
+      final session = _FakeSessionController();
+      final follow = _FakeFollowLinkController();
+      await tester.pumpWidget(
+        CaleeApp.forTesting(
+          testDeps: _makeDeps(
+            session: session,
+            follow: follow,
+            localRepo: repo,
+          ),
+        ),
+      );
+      session.finishRestore();
+      await tester.pumpAndSettle();
+
+      expect(find.byType(WelcomePage), findsOneWidget);
+
+      await tester.tap(find.text('I already have an account'));
+      await tester.pumpAndSettle();
+      expect(find.byType(LoginPage), findsOneWidget);
+
+      final loginPage = tester.widget<LoginPage>(find.byType(LoginPage));
+      await loginPage.onSignedIn(_makeLoginResult());
+      await tester.pump();
+      await tester.pump();
+
+      // Unchanged by the local-calendar entry point's separate completion
+      // path: the Welcome path still offers the connect-display step.
+      expect(session.completeSignInCalls, 1);
+      expect(session.isSignedIn, isTrue);
+      expect(find.byType(ConnectDisplayPage), findsOneWidget);
     },
   );
 
