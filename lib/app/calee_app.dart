@@ -10,6 +10,7 @@ import '../config/calee_links.dart';
 import '../data/api/calee_hub_client.dart';
 import '../data/auth/calee_preferences.dart';
 import '../data/auth/session_store.dart';
+import '../data/models/client_bootstrap.dart';
 import '../features/auth/auth_repository.dart';
 import '../features/auth/create_account_page.dart';
 import '../features/auth/login_page.dart';
@@ -126,6 +127,12 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
   // Calendar follow state
   bool _showingFollowSignIn = false;
   bool _processingFollowLink = false;
+
+  // Sign-in initiated from the local-calendar page's app-bar action.
+  // Deliberately distinct from _showingFollowSignIn: there is no pending
+  // calendar-follow intent to preserve, and signing in must never migrate,
+  // link, or clear the locally stored subscriptions.
+  bool _showingLocalCalendarSignIn = false;
 
   // Shopping link state (signed-out sign-in/create-account sub-screens,
   // shown from ShoppingLinkLandingPage).
@@ -1165,6 +1172,50 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
     _showSnackBar('Calendar added to this phone');
   }
 
+  /// Low-level sign-in completion shared by the existing-customer entry
+  /// points: establishes the session and starts the existing background
+  /// bootstrap refresh. Never decides what is shown next — each entry point
+  /// owns its own post-login routing — and never marks the user as newly
+  /// registered or touches locally stored calendar subscriptions.
+  Future<void> _completeSignInSession(ClientLoginResult result) async {
+    await _sessionController.completeSignIn(result);
+    unawaited(_sessionController.refreshBootstrap());
+  }
+
+  /// Welcome-page "I already have an account" completion.
+  ///
+  /// Preserves the historical behaviour of this entry point: unless a pending
+  /// calendar-follow intent is about to be processed, the user is offered the
+  /// connect-display step after authenticating.
+  Future<void> _completeWelcomeSignIn(ClientLoginResult result) async {
+    final hasPendingIntent = _followLinkController.pendingIntent != null;
+    setState(() {
+      _showingSignInFromWelcome = false;
+      _showingFollowSignIn = false;
+    });
+    await _completeSignInSession(result);
+    if (!mounted) return;
+    if (!hasPendingIntent) {
+      setState(() => _showingConnectDisplayAfterAuth = true);
+    }
+  }
+
+  /// Local-calendar page Sign in completion, for an existing Calee Home
+  /// customer who already has a display at home.
+  ///
+  /// Deliberately does NOT offer the connect-display step: this customer is
+  /// signing in to reach their existing household, so authentication must
+  /// land them in the normal signed-in Calee experience rather than routing
+  /// them through display setup. It also leaves the phone-only calendar
+  /// subscriptions completely untouched — no migration, account-linking, or
+  /// removal — so they are still there after a later sign-out.
+  Future<void> _completeLocalCalendarSignIn(ClientLoginResult result) async {
+    setState(() => _showingLocalCalendarSignIn = false);
+    await _completeSignInSession(result);
+    // No _showingConnectDisplayAfterAuth, no follow-intent or local
+    // subscription changes: the normal signed-in build path now renders.
+  }
+
   /// Opens the Calee-for-home marketing site in the external browser. Never
   /// consumes a pending calendar-follow intent and never touches the session,
   /// so returning to the app restores the same decision state.
@@ -1379,11 +1430,25 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
         );
       }
 
+      // Sign-in requested from the local-calendar page (existing Calee Home
+      // customers). No follow intent is involved, and the locally stored
+      // subscriptions are left exactly as they are: cancel returns to the
+      // local calendar page, success continues into the normal signed-in
+      // Calee Home experience.
+      if (_showingLocalCalendarSignIn) {
+        return LoginPage(
+          authRepository: _sessionController.repository,
+          onCancel: () => setState(() => _showingLocalCalendarSignIn = false),
+          onSignedIn: _completeLocalCalendarSignIn,
+        );
+      }
+
       // Has local subscriptions → show local subscriber screen
       if (_localSubscriptions.isNotEmpty) {
         return LocalSubscriberCalendarPage(
           subscriptions: _localSubscriptions,
           repository: _localSubscriptionRepo,
+          onSignIn: () => setState(() => _showingLocalCalendarSignIn = true),
           onLearnAboutHome: () => unawaited(_openCaleeForHome()),
           onSubscriptionsChanged: (updated) {
             setState(() => _localSubscriptions = updated);
@@ -1396,19 +1461,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
         return LoginPage(
           authRepository: _sessionController.repository,
           onCancel: () => setState(() => _showingSignInFromWelcome = false),
-          onSignedIn: (result) async {
-            final hasPendingIntent =
-                _followLinkController.pendingIntent != null;
-            setState(() {
-              _showingSignInFromWelcome = false;
-              _showingFollowSignIn = false;
-            });
-            await _sessionController.completeSignIn(result);
-            unawaited(_sessionController.refreshBootstrap());
-            if (!hasPendingIntent) {
-              setState(() => _showingConnectDisplayAfterAuth = true);
-            }
-          },
+          onSignedIn: _completeWelcomeSignIn,
         );
       }
 
