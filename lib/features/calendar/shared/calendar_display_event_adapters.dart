@@ -7,16 +7,35 @@ import '../../local_subscriber/local_calendar_event.dart';
 import '../../local_subscriber/local_calendar_subscription.dart';
 import 'calendar_display_event.dart';
 
+/// Adapts a phone-only ("Added on this phone only") subscription event for the
+/// shared calendar view.
+///
+/// LocalCalendarIcsService resolves every timed value to an absolute instant:
+/// `DTSTART;TZID=Australia/Perth:20260809T140000` becomes `2026-08-09T06:00:00Z`.
+/// Handing that UTC value straight to the view rendered it as 06:00 instead of
+/// the intended 14:00, so timed values are converted to the device timezone
+/// here — the same treatment the Hub-backed adapter below already applies.
+///
+/// All-day values are deliberately left alone: they are floating calendar dates
+/// with no instant behind them, and converting one can shift its date.
 CalendarDisplayEvent calendarDisplayEventFromLocalEvent(
   LocalCalendarEvent event, {
   required LocalCalendarSubscription subscription,
   Color color = CaleeColors.dotBlue,
 }) {
+  final start = event.isAllDay ? event.start : event.start.toLocal();
+
+  final end = event.end == null
+      ? null
+      : event.isAllDay
+      ? event.end
+      : event.end!.toLocal();
+
   return CalendarDisplayEvent(
     id: event.id,
     title: event.title,
-    start: event.start,
-    end: event.end,
+    start: start,
+    end: end,
     allDay: event.isAllDay,
     calendarId: subscription.id,
     calendarName: subscription.title,
