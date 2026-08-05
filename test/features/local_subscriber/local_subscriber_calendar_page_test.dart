@@ -56,6 +56,8 @@ LocalCalendarEvent _event({
 Widget _buildPage({
   List<LocalCalendarSubscription> subscriptions = const [],
   LocalCalendarIcsService? icsService,
+  VoidCallback? onLearnAboutHome,
+  void Function(List<LocalCalendarSubscription>)? onSubscriptionsChanged,
 }) {
   SharedPreferences.setMockInitialValues({});
   return MaterialApp(
@@ -63,8 +65,8 @@ Widget _buildPage({
     home: LocalSubscriberCalendarPage(
       subscriptions: subscriptions,
       repository: LocalCalendarSubscriptionRepository(),
-      onSignIn: () {},
-      onSubscriptionsChanged: (_) {},
+      onLearnAboutHome: onLearnAboutHome ?? () {},
+      onSubscriptionsChanged: onSubscriptionsChanged ?? (_) {},
       icsService: icsService ?? _StubIcsService(const []),
     ),
   );
@@ -120,11 +122,29 @@ void main() {
       expect(find.byType(ReadOnlyCalendarView), findsOneWidget);
     });
 
-    testWidgets('shows sign-in banner', (tester) async {
+    testWidgets('does not show the old permanent banner or sign-in copy', (
+      tester,
+    ) async {
       await tester.pumpWidget(_buildPage(subscriptions: [_sub()]));
       await tester.pumpAndSettle();
-      expect(find.text('Added on this phone only'), findsOneWidget);
-      expect(find.text('Sign in'), findsOneWidget);
+      expect(find.text('Added on this phone only'), findsNothing);
+      expect(find.textContaining('Sign in to link'), findsNothing);
+      expect(find.text('Sign in'), findsNothing);
+      // The calendar itself is unobstructed and visible.
+      expect(find.byType(ReadOnlyCalendarView), findsOneWidget);
+    });
+
+    testWidgets('does not show paid-feature navigation in signed-out mode', (
+      tester,
+    ) async {
+      await tester.pumpWidget(_buildPage(subscriptions: [_sub()]));
+      await tester.pumpAndSettle();
+      expect(find.byType(NavigationBar), findsNothing);
+      expect(find.byType(BottomNavigationBar), findsNothing);
+      expect(find.text('Tasks'), findsNothing);
+      expect(find.text('Chores'), findsNothing);
+      expect(find.text('Meals'), findsNothing);
+      expect(find.text('Lists'), findsNothing);
     });
   });
 
@@ -217,6 +237,87 @@ void main() {
 
       expect(find.text('Refresh'), findsOneWidget);
       expect(find.text('Remove'), findsOneWidget);
+    });
+
+    testWidgets('removing a subscription via the sheet still works', (
+      tester,
+    ) async {
+      var reportedSubscriptions = <LocalCalendarSubscription>[];
+      await tester.pumpWidget(
+        _buildPage(
+          subscriptions: [_sub(title: 'Removable Calendar')],
+          onSubscriptionsChanged: (updated) => reportedSubscriptions = updated,
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Calendars on this phone'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byType(PopupMenuButton<String>).first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Remove'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Remove calendar'), findsOneWidget);
+      await tester.tap(find.widgetWithText(TextButton, 'Remove'));
+      await tester.pumpAndSettle();
+
+      expect(reportedSubscriptions, isEmpty);
+    });
+
+    testWidgets('sheet shows the Calee-for-home discovery row', (tester) async {
+      await tester.pumpWidget(_buildPage(subscriptions: [_sub()]));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Calendars on this phone'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const Key('local_calendar_home_promo')),
+        findsOneWidget,
+      );
+      expect(find.text('Calee for your home'), findsOneWidget);
+      expect(
+        find.text('One shared screen for the whole family'),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('local_calendar_home_promo')),
+          matching: find.byIcon(Icons.chevron_right),
+        ),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('tapping the Calee-for-home row invokes the callback', (
+      tester,
+    ) async {
+      var learnAboutHomeTaps = 0;
+      await tester.pumpWidget(
+        _buildPage(
+          subscriptions: [_sub()],
+          onLearnAboutHome: () => learnAboutHomeTaps++,
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Calendars on this phone'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('local_calendar_home_promo')));
+      await tester.pumpAndSettle();
+
+      expect(learnAboutHomeTaps, 1);
+    });
+
+    testWidgets('home promotion is not shown in the calendar body', (
+      tester,
+    ) async {
+      await tester.pumpWidget(_buildPage(subscriptions: [_sub()]));
+      await tester.pumpAndSettle();
+
+      // Discoverable only inside the management sheet, never permanently.
+      expect(find.byKey(const Key('local_calendar_home_promo')), findsNothing);
+      expect(find.text('Calee for your home'), findsNothing);
     });
   });
 

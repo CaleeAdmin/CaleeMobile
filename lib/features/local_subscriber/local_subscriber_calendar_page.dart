@@ -26,7 +26,7 @@ class LocalSubscriberCalendarPage extends StatefulWidget {
   const LocalSubscriberCalendarPage({
     required this.subscriptions,
     required this.repository,
-    required this.onSignIn,
+    required this.onLearnAboutHome,
     required this.onSubscriptionsChanged,
     this.icsService,
     super.key,
@@ -34,7 +34,11 @@ class LocalSubscriberCalendarPage extends StatefulWidget {
 
   final List<LocalCalendarSubscription> subscriptions;
   final LocalCalendarSubscriptionRepository repository;
-  final VoidCallback onSignIn;
+
+  /// Opens the Calee-for-home marketing page from the calendars sheet's
+  /// discovery row. Must never consume local calendar state.
+  final VoidCallback onLearnAboutHome;
+
   final void Function(List<LocalCalendarSubscription>) onSubscriptionsChanged;
 
   /// Overrideable for tests; defaults to [LocalCalendarIcsService].
@@ -188,6 +192,7 @@ class _LocalSubscriberCalendarPageState
         errorsBySubscription: Map.of(_errorsBySubscription),
         onRefresh: _refreshOne,
         onRemove: _removeSubscription,
+        onLearnAboutHome: widget.onLearnAboutHome,
       ),
     );
   }
@@ -217,104 +222,44 @@ class _LocalSubscriberCalendarPageState
             ),
         ],
       ),
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _LocalSubscriberBanner(onSignIn: widget.onSignIn),
-          Expanded(
-            child: _subscriptions.isEmpty
-                ? _EmptyState()
-                : ReadOnlyCalendarView(
-                    selectedMonth: _selectedMonth,
-                    selectedDay: _selectedDay,
-                    today: _today,
-                    firstDayOfWeek: 0,
-                    events: _displayEvents,
-                    viewMode: _viewMode,
-                    use24h: use24h,
-                    onViewModeChanged: (mode) =>
-                        setState(() => _viewMode = mode),
-                    onPreviousMonth: () => setState(() {
-                      _selectedMonth = DateTime(
-                        _selectedMonth.year,
-                        _selectedMonth.month - 1,
-                      );
-                    }),
-                    onNextMonth: () => setState(() {
-                      _selectedMonth = DateTime(
-                        _selectedMonth.year,
-                        _selectedMonth.month + 1,
-                      );
-                    }),
-                    onGoToToday: () => setState(() {
-                      _today = DateTime.now();
-                      _selectedMonth = DateTime(_today.year, _today.month);
-                      _selectedDay = _today;
-                    }),
-                    onSelectDay: (day) => setState(() => _selectedDay = day),
-                    actionWidgets: [
-                      IconButton(
-                        icon: const Icon(Icons.calendar_month_outlined),
-                        color: CaleeColors.primary,
-                        tooltip: 'Calendars on this phone',
-                        onPressed: _openCalendarsSheet,
-                      ),
-                    ],
-                  ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ── Banner ────────────────────────────────────────────────────────────────────
-
-class _LocalSubscriberBanner extends StatelessWidget {
-  const _LocalSubscriberBanner({required this.onSignIn});
-
-  final VoidCallback onSignIn;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return ColoredBox(
-      color: theme.colorScheme.surfaceContainerHighest,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Added on this phone only',
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  Text(
-                    'Read-only public calendar · Sign in to link it to your Calee account and Calee display.',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-              ),
+      body: _subscriptions.isEmpty
+          ? _EmptyState()
+          : ReadOnlyCalendarView(
+              selectedMonth: _selectedMonth,
+              selectedDay: _selectedDay,
+              today: _today,
+              firstDayOfWeek: 0,
+              events: _displayEvents,
+              viewMode: _viewMode,
+              use24h: use24h,
+              onViewModeChanged: (mode) => setState(() => _viewMode = mode),
+              onPreviousMonth: () => setState(() {
+                _selectedMonth = DateTime(
+                  _selectedMonth.year,
+                  _selectedMonth.month - 1,
+                );
+              }),
+              onNextMonth: () => setState(() {
+                _selectedMonth = DateTime(
+                  _selectedMonth.year,
+                  _selectedMonth.month + 1,
+                );
+              }),
+              onGoToToday: () => setState(() {
+                _today = DateTime.now();
+                _selectedMonth = DateTime(_today.year, _today.month);
+                _selectedDay = _today;
+              }),
+              onSelectDay: (day) => setState(() => _selectedDay = day),
+              actionWidgets: [
+                IconButton(
+                  icon: const Icon(Icons.calendar_month_outlined),
+                  color: CaleeColors.primary,
+                  tooltip: 'Calendars on this phone',
+                  onPressed: _openCalendarsSheet,
+                ),
+              ],
             ),
-            const SizedBox(width: 12),
-            FilledButton.tonal(
-              onPressed: onSignIn,
-              style: FilledButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                minimumSize: const Size(0, 36),
-              ),
-              child: const Text('Sign in'),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }
@@ -328,6 +273,7 @@ class _CalendarsSheet extends StatelessWidget {
     required this.errorsBySubscription,
     required this.onRefresh,
     required this.onRemove,
+    required this.onLearnAboutHome,
   });
 
   final List<LocalCalendarSubscription> subscriptions;
@@ -335,6 +281,7 @@ class _CalendarsSheet extends StatelessWidget {
   final Map<String, String?> errorsBySubscription;
   final void Function(LocalCalendarSubscription) onRefresh;
   final void Function(LocalCalendarSubscription) onRemove;
+  final VoidCallback onLearnAboutHome;
 
   @override
   Widget build(BuildContext context) {
@@ -402,7 +349,43 @@ class _CalendarsSheet extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 8),
+          const Divider(),
+          _HomePromoTile(onTap: onLearnAboutHome),
+          const SizedBox(height: 8),
         ],
+      ),
+    );
+  }
+}
+
+// ── Calee-for-home discovery row ──────────────────────────────────────────────
+
+class _HomePromoTile extends StatelessWidget {
+  const _HomePromoTile({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return ListTile(
+      key: const Key('local_calendar_home_promo'),
+      onTap: onTap,
+      minTileHeight: 48,
+      leading: Icon(
+        Icons.tablet_mac_outlined,
+        color: theme.colorScheme.primary,
+      ),
+      title: const Text('Calee for your home'),
+      subtitle: Text(
+        'One shared screen for the whole family',
+        style: theme.textTheme.bodySmall?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
+      ),
+      trailing: Icon(
+        Icons.chevron_right,
+        color: theme.colorScheme.onSurfaceVariant,
       ),
     );
   }
