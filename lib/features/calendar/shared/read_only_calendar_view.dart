@@ -50,6 +50,7 @@ class ReadOnlyCalendarView extends StatelessWidget {
     required this.onGoToToday,
     required this.onSelectDay,
     this.onEventTap,
+    this.onRefresh,
     this.actionWidgets = const [],
     this.use24h = true,
     super.key,
@@ -71,11 +72,35 @@ class ReadOnlyCalendarView extends StatelessWidget {
   final void Function(DateTime) onSelectDay;
   final void Function(CalendarDisplayEvent)? onEventTap;
 
+  /// Pull-to-refresh handler for the event lists. Optional: this view is shared
+  /// and some hosts have no data source to refresh, in which case the lists
+  /// keep their previous, non-refreshable behaviour. The view never fetches
+  /// anything itself — it only exposes the gesture and awaits this callback.
+  final Future<void> Function()? onRefresh;
+
   /// Extra icon buttons / widgets inserted after the Today button in the top bar.
   final List<Widget> actionWidgets;
   final bool use24h;
 
   // ── Private helpers ────────────────────────────────────────────────────────
+
+  /// Builds a vertical event list, wrapped in a [RefreshIndicator] when the
+  /// host supplied [onRefresh]. Physics are forced to always-scrollable so a
+  /// short or empty month can still be pulled; without a handler the list is
+  /// built exactly as before.
+  Widget _eventList({
+    required EdgeInsetsGeometry padding,
+    required List<Widget> children,
+  }) {
+    final refresh = onRefresh;
+    final list = ListView(
+      padding: padding,
+      physics: refresh == null ? null : const AlwaysScrollableScrollPhysics(),
+      children: children,
+    );
+    if (refresh == null) return list;
+    return RefreshIndicator(onRefresh: refresh, child: list);
+  }
 
   DateTime get _gridStart {
     final first = DateTime(selectedMonth.year, selectedMonth.month);
@@ -152,7 +177,7 @@ class ReadOnlyCalendarView extends StatelessWidget {
           ),
           const Divider(height: 1),
           Expanded(
-            child: ListView(
+            child: _eventList(
               padding: EdgeInsets.zero,
               children: _buildDayAgendaItems(),
             ),
@@ -514,7 +539,7 @@ class ReadOnlyCalendarView extends StatelessWidget {
     }
 
     if (!hasAnyEvent) {
-      return ListView(
+      return _eventList(
         padding: const EdgeInsets.symmetric(vertical: CaleeSpacing.xl),
         children: [
           Center(
@@ -528,6 +553,6 @@ class ReadOnlyCalendarView extends StatelessWidget {
     }
 
     dayWidgets.add(const SizedBox(height: CaleeSpacing.xl));
-    return ListView(padding: EdgeInsets.zero, children: dayWidgets);
+    return _eventList(padding: EdgeInsets.zero, children: dayWidgets);
   }
 }

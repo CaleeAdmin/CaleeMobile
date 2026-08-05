@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:calee_mobile/data/api/calee_hub_client.dart';
 import 'package:calee_mobile/data/auth/calee_preferences.dart';
 import 'package:calee_mobile/data/models/client_calendar.dart';
@@ -81,6 +83,50 @@ class _StubHubClient extends CaleeHubClient {
   }) async {}
 }
 
+/// Hub stub whose payload can change between fetches, that records every
+/// requested window, and that can hold a fetch open so overlapping loads are
+/// testable without arbitrary waits.
+class _MutableStubHubClient extends CaleeHubClient {
+  _MutableStubHubClient({
+    List<ClientCalendar>? calendars,
+    List<ClientEvent>? events,
+  }) : calendarsPayload = calendars ?? [],
+       eventsPayload = events ?? [],
+       super();
+
+  List<ClientCalendar> calendarsPayload;
+  List<ClientEvent> eventsPayload;
+  bool failEvents = false;
+  int eventFetchCount = 0;
+  final List<({String from, String to})> requestedWindows = [];
+
+  /// When set, `events()` waits on it before returning — the payload it will
+  /// return is snapshotted at call time, so a held-open fetch stays "old".
+  Completer<void>? gate;
+
+  @override
+  Future<ClientCalendarList> calendars({required String accessToken}) async =>
+      ClientCalendarList(
+        calendars: List<ClientCalendar>.from(calendarsPayload),
+      );
+
+  @override
+  Future<ClientEventList> events({
+    required String accessToken,
+    required String from,
+    required String to,
+  }) async {
+    eventFetchCount++;
+    requestedWindows.add((from: from, to: to));
+    final payload = List<ClientEvent>.from(eventsPayload);
+    final shouldFail = failEvents;
+    final pending = gate;
+    if (pending != null) await pending.future;
+    if (shouldFail) throw Exception('network error');
+    return ClientEventList(from: from, to: to, events: payload);
+  }
+}
+
 ClientEvent _stubEvent(String title) => ClientEvent(
   id: 'new',
   calendarId: 'cal1',
@@ -155,6 +201,70 @@ CalendarController _makeController({
     onRequestReminderRefresh: onRequestReminderRefresh,
   );
 }
+
+CalendarController _controllerWithHub(
+  CaleeHubClient hub, {
+  StoredPreferences? prefs,
+  Future<void> Function(CalendarReminderRefreshReason reason)?
+  onRequestReminderRefresh,
+}) => CalendarController(
+  repository: CalendarRepository(
+    hubClient: hub,
+    accessToken: 'tok',
+    preferences: _StubPrefs(prefs ?? const StoredPreferences()),
+  ),
+  onRequestReminderRefresh: onRequestReminderRefresh,
+);
+
+/// Lets pending microtasks (a repository fetch reaching the hub stub) run
+/// without an arbitrary wall-clock wait.
+Future<void> _settle() => Future<void>.delayed(Duration.zero);
+
+// ─── Live-evidence fixtures ───────────────────────────────────────────────────
+//
+// The read-only subscribed calendar and the event that reproduced the stale-
+// agenda defect on Pixel_9, taken verbatim from the confirmed hub responses.
+
+const _lazersCalendarId = 'portal:lazers-morley-eagles';
+
+const _lazersCalendar = ClientCalendar(
+  id: _lazersCalendarId,
+  serviceId: 'portal',
+  serviceName: 'Portal',
+  name: 'Lazers (Morley Eagles)',
+  components: [],
+  primaryKind: 'calendar',
+  supportsEvents: true,
+  supportsTasks: false,
+  supportsChores: false,
+  readOnly: true,
+  isSubscription: true,
+  source: 'portal',
+);
+
+const _setupEvent = ClientEvent(
+  id: 'setup-1',
+  calendarId: _lazersCalendarId,
+  serviceId: 'portal',
+  serviceName: 'Portal',
+  title: 'Setup',
+  startsAt: '2026-08-04T05:30:00Z',
+  endsAt: '2026-08-04T06:30:00Z',
+  allDay: false,
+  recurring: false,
+  readOnly: true,
+  source: 'portal',
+);
+
+final _setupMonth = DateTime(2026, 8, 1);
+
+/// The local calendar day the Setup event falls on. Derived from the UTC
+/// instant so the test asserts the same thing in any host timezone (CI runs
+/// Australia/Perth, where it renders as 1:30 PM–2:30 PM on 4 August).
+final _setupDay = () {
+  final local = DateTime.parse('2026-08-04T05:30:00Z').toLocal();
+  return DateTime(local.year, local.month, local.day);
+}();
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
@@ -232,6 +342,279 @@ void main() {
 
       expect(ctrl.calendars, hasLength(2));
       expect(ctrl.error, isNull);
+    });
+  });
+
+  // ── Background refresh ──────────────────────────────────────────────────────
+  //
+  // The controller keeps the loaded month in memory for as long as CalendarPage
+  // stays alive, so an event that reaches the hub after the initial load (a
+  // subscribed calendar syncing, for example) used to stay invisible until the
+  // user left Calendar and came back. refreshInBackground() is the deterministic
+  // refresh path the page drives from the app-resume lifecycle transition.
+
+  group('CalendarController.refreshInBackground', () {
+    test('shows a subscribed-calendar event that appeared after the initial '
+        'load', () async {
+      final hub = _MutableStubHubClient(calendars: [_lazersCalendar]);
+      final ctrl = _controllerWithHub(hub);
+      ctrl.selectedMonth = _setupMonth;
+      ctrl.selectedDay = _setupDay;
+
+      await ctrl.loadMonth();
+      expect(
+        ctrl.eventsForDay(_setupDay),
+        isEmpty,
+        reason: 'initial load returns the pre-sync feed',
+      );
+
+      // The subscribed feed now carries the event.
+      hub.eventsPayload = [_setupEvent];
+      await ctrl.refreshInBackground();
+
+      final shown = ctrl.eventsForDay(_setupDay);
+      expect(shown.map((e) => e.title), ['Setup']);
+      expect(shown.single.calendarId, _lazersCalendarId);
+      expect(
+        ctrl.calendarForEvent(shown.single)?.name,
+        'Lazers (Morley Eagles)',
+      );
+      expect(
+        ctrl.calendarForEvent(shown.single)?.readOnly,
+        isTrue,
+        reason: 'the read-only subscribed calendar still renders',
+      );
+    });
+
+    test('never raises the blocking loading state', () async {
+      final hub = _MutableStubHubClient(calendars: [_lazersCalendar]);
+      final ctrl = _controllerWithHub(hub);
+      await ctrl.loadMonth();
+
+      final observedLoading = <bool>[];
+      ctrl.addListener(() => observedLoading.add(ctrl.isLoading));
+
+      hub.eventsPayload = [_setupEvent];
+      await ctrl.refreshInBackground();
+
+      expect(observedLoading, isNotEmpty, reason: 'the refresh did publish');
+      expect(
+        observedLoading.any((loading) => loading),
+        isFalse,
+        reason: 'an automatic refresh must not flash a full-screen spinner',
+      );
+      expect(ctrl.isLoading, isFalse);
+    });
+
+    test(
+      'preserves the selected day, month, and hidden-calendar filters',
+      () async {
+        final hub = _MutableStubHubClient(calendars: [_lazersCalendar]);
+        final ctrl = _controllerWithHub(hub);
+        ctrl.selectedMonth = _setupMonth;
+        ctrl.selectedDay = _setupDay;
+        await ctrl.loadMonth();
+
+        ctrl.toggleCalendarVisibility(_lazersCalendarId);
+        hub.eventsPayload = [_setupEvent];
+        await ctrl.refreshInBackground();
+
+        expect(ctrl.selectedDay, _setupDay);
+        expect(ctrl.selectedMonth, _setupMonth);
+        expect(ctrl.isCalendarVisible(_lazersCalendarId), isFalse);
+        expect(
+          ctrl.eventsForDay(_setupDay),
+          isEmpty,
+          reason: 'a hidden calendar stays filtered out after a refresh',
+        );
+
+        ctrl.toggleCalendarVisibility(_lazersCalendarId);
+        expect(ctrl.eventsForDay(_setupDay).map((e) => e.title), ['Setup']);
+      },
+    );
+
+    test('refetches only the displayed 42-day grid, not all history', () async {
+      final hub = _MutableStubHubClient(calendars: [_lazersCalendar]);
+      final ctrl = _controllerWithHub(hub);
+      ctrl.selectedMonth = _setupMonth;
+      await ctrl.loadMonth();
+      hub.requestedWindows.clear();
+
+      await ctrl.refreshInBackground();
+
+      final gridStart = CalendarRepository.computeGridStart(
+        _setupMonth,
+        FirstDayOfWeek.sunday,
+      );
+      expect(hub.requestedWindows, hasLength(1));
+      expect(
+        hub.requestedWindows.single.from,
+        CalendarRepository.formatDate(gridStart),
+      );
+      expect(
+        hub.requestedWindows.single.to,
+        CalendarRepository.formatDate(gridStart.add(const Duration(days: 41))),
+      );
+    });
+
+    test('is skipped while another load is already in flight', () async {
+      final hub = _MutableStubHubClient(calendars: [_lazersCalendar]);
+      final ctrl = _controllerWithHub(hub);
+      final gate = Completer<void>();
+      hub.gate = gate;
+
+      final initial = ctrl.loadMonth();
+      await _settle();
+      expect(hub.eventFetchCount, 1);
+
+      // Repeated lifecycle notifications must not stack overlapping requests.
+      await ctrl.refreshInBackground();
+      await ctrl.refreshInBackground();
+      expect(hub.eventFetchCount, 1);
+
+      gate.complete();
+      await initial;
+      expect(hub.eventFetchCount, 1);
+
+      // Once nothing is in flight, a refresh runs normally again.
+      hub.gate = null;
+      await ctrl.refreshInBackground();
+      expect(hub.eventFetchCount, 2);
+    });
+
+    test('an older in-flight result cannot overwrite newer state', () async {
+      final hub = _MutableStubHubClient(calendars: [_lazersCalendar]);
+      final ctrl = _controllerWithHub(hub);
+      ctrl.selectedMonth = _setupMonth;
+      ctrl.selectedDay = _setupDay;
+      await ctrl.loadMonth();
+
+      // Hold a background refresh open on the stale (empty) payload…
+      final gate = Completer<void>();
+      hub.gate = gate;
+      final stale = ctrl.refreshInBackground();
+      await _settle();
+
+      // …then let a newer explicit load complete with the Setup event.
+      hub.gate = null;
+      hub.eventsPayload = [_setupEvent];
+      await ctrl.loadMonth();
+      expect(ctrl.events.map((e) => e.title), ['Setup']);
+
+      // The older fetch now returns its stale, empty payload.
+      gate.complete();
+      await stale;
+
+      expect(
+        ctrl.events.map((e) => e.title),
+        ['Setup'],
+        reason: 'a superseded result must never replace newer state',
+      );
+    });
+
+    test('a failed background refresh keeps the last good snapshot', () async {
+      final hub = _MutableStubHubClient(
+        calendars: [_lazersCalendar],
+        events: [_setupEvent],
+      );
+      final ctrl = _controllerWithHub(hub);
+      ctrl.selectedMonth = _setupMonth;
+      ctrl.selectedDay = _setupDay;
+      await ctrl.loadMonth();
+
+      hub.failEvents = true;
+      await ctrl.refreshInBackground();
+
+      expect(ctrl.eventsForDay(_setupDay).map((e) => e.title), ['Setup']);
+      expect(ctrl.calendars, hasLength(1));
+      expect(
+        ctrl.error,
+        isNull,
+        reason: 'a silent refresh failure must not swap in the error screen',
+      );
+    });
+
+    test('does not request a reminder refresh', () async {
+      final reasons = <CalendarReminderRefreshReason>[];
+      final hub = _MutableStubHubClient(calendars: [_lazersCalendar]);
+      final ctrl = _controllerWithHub(
+        hub,
+        onRequestReminderRefresh: (r) async => reasons.add(r),
+      );
+      await ctrl.loadMonth();
+      reasons.clear();
+
+      await ctrl.refreshInBackground();
+      await _settle();
+
+      expect(
+        reasons,
+        isEmpty,
+        reason: 'app-resume reminder reconciliation is owned by CaleeApp',
+      );
+    });
+
+    // Pull-to-refresh enters through refresh(); app-resume enters through
+    // refreshInBackground(). This pins the interaction between the two entry
+    // points — the surrounding tests cover each in isolation.
+    test('a pull refresh racing a background refresh publishes only the '
+        'newest data', () async {
+      final reasons = <CalendarReminderRefreshReason>[];
+      final hub = _MutableStubHubClient(calendars: [_lazersCalendar]);
+      final ctrl = _controllerWithHub(
+        hub,
+        onRequestReminderRefresh: (r) async => reasons.add(r),
+      );
+      ctrl.selectedMonth = _setupMonth;
+      ctrl.selectedDay = _setupDay;
+      await ctrl.loadMonth();
+      reasons.clear();
+
+      // A background (app-resume) refresh is in flight on the stale payload…
+      final backgroundGate = Completer<void>();
+      hub.gate = backgroundGate;
+      final background = ctrl.refreshInBackground();
+      await _settle();
+      final fetchesAfterBackground = hub.eventFetchCount;
+
+      // …when the user pulls to refresh. The pull must still run.
+      hub.gate = null;
+      hub.eventsPayload = [_setupEvent];
+      await ctrl.refresh();
+      await _settle();
+
+      expect(hub.eventFetchCount, fetchesAfterBackground + 1);
+      expect(ctrl.eventsForDay(_setupDay).map((e) => e.title), ['Setup']);
+      expect(reasons, [
+        CalendarReminderRefreshReason.manualRefresh,
+      ], reason: 'a pull keeps manual-refresh semantics');
+
+      // The older background response now lands carrying the pre-sync payload.
+      backgroundGate.complete();
+      await background;
+
+      expect(
+        ctrl.eventsForDay(_setupDay).map((e) => e.title),
+        ['Setup'],
+        reason: 'a superseded background result must not undo the pull',
+      );
+    });
+
+    test('a result arriving after dispose is dropped safely', () async {
+      final hub = _MutableStubHubClient(calendars: [_lazersCalendar]);
+      final ctrl = _controllerWithHub(hub);
+      await ctrl.loadMonth();
+
+      final gate = Completer<void>();
+      hub.gate = gate;
+      final pending = ctrl.refreshInBackground();
+      await _settle();
+
+      ctrl.dispose();
+      gate.complete();
+
+      // notifyListeners() after dispose would throw into this future.
+      await expectLater(pending, completes);
     });
   });
 

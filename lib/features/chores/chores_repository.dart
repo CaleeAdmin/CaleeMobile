@@ -18,6 +18,7 @@ class ChoresOverview {
     required this.from,
     required this.to,
     this.calendarServiceErrors = const [],
+    this.calendarsAuthoritative = true,
   });
 
   final ClientCalendarList calendarList;
@@ -26,6 +27,11 @@ class ChoresOverview {
   final String from;
   final String to;
   final List<CalendarServiceError> calendarServiceErrors;
+
+  /// False when the calendars request failed, so [calendarList] is "unknown"
+  /// rather than "empty". Callers must not read deletion into an empty list
+  /// they never successfully fetched.
+  final bool calendarsAuthoritative;
 }
 
 // ─────────────────────────────────────────────
@@ -38,6 +44,8 @@ class ChoresRepository {
     required this.accessToken,
     required this.services,
     required this.households,
+    this.accountId = '',
+    this.timezone,
   });
 
   final CaleeHubClient hubClient;
@@ -45,8 +53,23 @@ class ChoresRepository {
   final List<ClientService> services;
   final List<ClientContext> households;
 
+  /// Scopes locally held chore sync state so it can never leak across an
+  /// account switch.
+  final String accountId;
+
+  /// IANA zone name sent to the backend so calendar-day boundaries (due today,
+  /// completed today) resolve on the device's day rather than the server's.
+  final String? timezone;
+
   List<ClientService> get choreServices =>
       services.where((s) => s.supportsChores).toList();
+
+  String get householdId => primaryHousehold?.id ?? '';
+
+  Set<String> get choreServiceIds => choreServices
+      .map((s) => s.id.trim())
+      .where((id) => id.isNotEmpty)
+      .toSet();
 
   ClientContext? get primaryHousehold {
     for (final household in households) {
@@ -63,6 +86,7 @@ class ChoresRepository {
   }) async {
     ClientCalendarList calList = const ClientCalendarList(calendars: []);
     final calendarServiceErrors = <CalendarServiceError>[];
+    var calendarsAuthoritative = true;
 
     try {
       calList = await hubClient.calendars(accessToken: accessToken);
@@ -70,6 +94,7 @@ class ChoresRepository {
     } on CaleeHubException catch (e) {
       if (isCalendarServiceConnectionCode(e.code)) {
         calendarServiceErrors.add(CalendarServiceError.fromException(e));
+        calendarsAuthoritative = false;
       } else {
         rethrow;
       }
@@ -79,6 +104,7 @@ class ChoresRepository {
       accessToken: accessToken,
       from: from,
       to: to,
+      timezone: timezone,
     );
 
     final household = primaryHousehold;
@@ -103,6 +129,7 @@ class ChoresRepository {
       from: from,
       to: to,
       calendarServiceErrors: calendarServiceErrors,
+      calendarsAuthoritative: calendarsAuthoritative,
     );
   }
 
@@ -276,23 +303,25 @@ class ChoresRepository {
     }
   }
 
-  Future<void> completeChore(ClientChore chore) async {
+  Future<ChoreCompletionResult> completeChore(ClientChore chore) async {
     final choreId = chore.completionActionId;
     if (choreId.trim().isEmpty) throw StateError('Missing chore id');
-    await hubClient.completeChore(
+    return hubClient.completeChore(
       accessToken: accessToken,
       choreId: choreId,
       date: chore.effectiveOccurrenceDate,
+      timezone: timezone,
     );
   }
 
-  Future<void> undoCompletion(ClientChore chore) async {
+  Future<ChoreCompletionResult> undoCompletion(ClientChore chore) async {
     final choreId = chore.completionActionId;
     if (choreId.trim().isEmpty) throw StateError('Missing chore id');
-    await hubClient.undoChoreCompletion(
+    return hubClient.undoChoreCompletion(
       accessToken: accessToken,
       choreId: choreId,
       date: chore.effectiveOccurrenceDate,
+      timezone: timezone,
     );
   }
 

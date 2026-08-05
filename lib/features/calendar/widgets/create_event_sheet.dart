@@ -14,6 +14,7 @@ import '../../../shared/recurrence/calee_repeat_rule.dart';
 import '../../../ui/calee_design.dart';
 import '../event_draft_image_preparer.dart';
 import 'calendar_widget_helpers.dart';
+import 'event_attachments_section.dart';
 
 class CreateEventSheet extends StatefulWidget {
   const CreateEventSheet({
@@ -27,11 +28,21 @@ class CreateEventSheet extends StatefulWidget {
     this.editScope,
     this.defaultCalendarId,
     this.onUpdate,
+    this.showDragHandle = true,
     super.key,
   });
 
   final List<ClientCalendar> calendars;
   final bool use24h;
+
+  /// Whether to draw the sheet's drag handle.
+  ///
+  /// Set by the caller to match how the sheet was actually presented. An
+  /// editor that can hold attachment work is shown with `enableDrag: false`
+  /// (the framework's drag-to-dismiss pops directly, bypassing this
+  /// widget's close policy), and a handle on a sheet that cannot be dragged
+  /// advertises an interaction that does not exist.
+  final bool showDragHandle;
   final DateTime? initialDate;
   final ClientEvent? initialEvent;
   final String? editScope;
@@ -82,6 +93,28 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
   bool _isSubmitting = false;
   bool _isScanningImage = false;
 
+  /// What the attachments section is doing, as it last reported it. The
+  /// editor cannot see inside that section, and used to close straight over
+  /// the top of an upload it knew nothing about.
+  AttachmentOperationState _attachmentOperations =
+      AttachmentOperationState.idle;
+
+  /// Lets [_requestClose] cancel in-flight transfers and drop an unresolved
+  /// upload when the user chooses to close anyway.
+  final EventAttachmentsController _attachmentsController =
+      EventAttachmentsController();
+
+  /// A close request is being decided: the confirmation is on screen, or
+  /// its answer is still being acted on. Stops a Back press landing on top
+  /// of the dialog it just opened and stacking a second one.
+  bool _closeRequestInProgress = false;
+
+  /// The editor is committed to closing. Distinct from
+  /// [_closeRequestInProgress] because a request can end in "Keep editing",
+  /// which must leave the editor fully usable again, whereas this one is
+  /// one-way.
+  bool _isClosing = false;
+
   bool get _isEditing => widget.initialEvent != null;
   bool get _isEditingSingleOccurrence =>
       _isEditing &&
@@ -89,6 +122,18 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
       widget.editScope == 'occurrence';
 
   bool get _isLocked => _isSubmitting || _isScanningImage;
+
+  /// True while the attachments section has work that closing the editor
+  /// would destroy: a transfer in flight, or an upload whose outcome is
+  /// still unresolved.
+  ///
+  /// Saving is a close too -- `_submit` pops the sheet on success, which
+  /// disposes the attachments section and cancels whatever it was doing.
+  /// So submission is gated on exactly the same condition as closing, and
+  /// the user resolves the attachment first rather than discovering
+  /// afterwards that it never made it.
+  bool get _hasBlockingAttachmentWork =>
+      _attachmentOperations.blocksEditorClose;
 
   @override
   void initState() {
@@ -171,6 +216,133 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
     _locationController.dispose();
     _descriptionController.dispose();
     super.dispose();
+  }
+
+  // ── Closing ───────────────────────────────────────────────────────────────
+
+  /// The ONE way this editor closes by user intent -- the top Close button,
+  /// Android Back, an iOS back gesture, a tap on the modal barrier, and any
+  /// programmatic pop all arrive here through [PopScope].
+  ///
+  /// Saving does not come through here: `_submit` pops directly on success.
+  /// That is safe because saving is separately gated on the same condition
+  /// ([_hasBlockingAttachmentWork]), so a successful save can only reach its
+  /// pop when attachment work is already idle -- there is nothing left for
+  /// this policy to protect at that point.
+  ///
+  /// Three states, in this order, because the honest answer differs:
+  /// a cancellable transfer may be cancelled; an uncancellable action can
+  /// only be waited out; an unresolved upload is the user's to discard.
+  Future<void> _requestClose() async {
+    // Single-flight: one confirmation at a time, and a committed close can
+    // never be started twice. The request flag is set BEFORE the first
+    // await, so a second request arriving while a dialog is up is refused
+    // rather than opening a competing one.
+    if (_closeRequestInProgress || _isClosing) return;
+    _closeRequestInProgress = true;
+    try {
+      // Note the absence of an _isLocked check: submitting or scanning has
+      // never blocked Back or a barrier tap, and this method must not
+      // quietly start. The attachment policy below is the only new gate.
+      final operations = _attachmentOperations;
+      if (!operations.blocksEditorClose) {
+        _commitClose();
+        return;
+      }
+
+      // 1. A transfer is cancellable, so offer exactly that. Checked first
+      //    so bytes on the wire are dealt with before anything else.
+      if (operations.hasActiveTransfer) {
+        final confirmed = await CaleeDestructiveDialog.show(
+          context: context,
+          title: 'Attachment still transferring',
+          body:
+              'An attachment is still being uploaded or downloaded. Closing '
+              'now cancels it.',
+          confirmLabel: 'Cancel attachment and close',
+          cancelLabel: 'Keep editing',
+        );
+        // "Keep editing" ends the request and leaves everything usable.
+        if (!confirmed || !mounted) return;
+
+        // Stop the transfer and wait for it to actually unwind, so the
+        // editor is never dismissed on top of a spinner still running.
+        await _attachmentsController.cancelActiveTransfers();
+        if (!mounted) return;
+
+        // Cancelling the download half of an open or share can leave the
+        // action itself finishing, and nothing can cancel that -- so fall
+        // through to waiting rather than closing over it.
+        if (_attachmentOperations.hasActiveAction) {
+          await _showAttachmentActionNotice();
+          return;
+        }
+
+        // A cancelled upload can leave an operation whose server-side
+        // outcome is unknown. The user has already said to close, so that
+        // operation is dropped here rather than asking a second time.
+        _attachmentsController.discardUnresolvedUpload();
+        if (mounted) _commitClose();
+        return;
+      }
+
+      // 2. An action with no cancellation mechanism. Say so and stay put --
+      //    an offer to "cancel and close" here would be a lie, and a close
+      //    would abandon a detach or a share the app cannot recall.
+      if (operations.hasActiveAction) {
+        await _showAttachmentActionNotice();
+        return;
+      }
+
+      // 3. An unresolved upload: the user's decision, unchanged.
+      final confirmed = await CaleeDestructiveDialog.show(
+        context: context,
+        title: 'Unfinished attachment upload',
+        body:
+            "One attachment upload hasn't finished. Closing now discards it, "
+            'and the file will not be attached.',
+        confirmLabel: 'Discard upload and close',
+        cancelLabel: 'Keep editing',
+      );
+      if (!confirmed || !mounted) return;
+
+      _attachmentsController.discardUnresolvedUpload();
+      if (mounted) _commitClose();
+    } finally {
+      // Released whenever the editor is staying -- including after the
+      // wait notice -- so the next close attempt starts cleanly. Once
+      // committed to closing, the flag stays set instead.
+      if (!_isClosing) _closeRequestInProgress = false;
+    }
+  }
+
+  Future<void> _showAttachmentActionNotice() {
+    return CaleeNoticeDialog.show(
+      context: context,
+      title: 'Attachment action in progress',
+      body:
+          'Please wait for the attachment action to finish before closing '
+          'this event.',
+    );
+  }
+
+  void _commitClose() {
+    // Set at the moment of popping, not before: every path that decides NOT
+    // to close must leave the editor fully usable.
+    _isClosing = true;
+    // Deliberately unconditional: this runs only after the close policy has
+    // been satisfied, so it must not be re-intercepted by PopScope.
+    Navigator.of(context).pop();
+  }
+
+  void _handleAttachmentOperationState(AttachmentOperationState state) {
+    if (_attachmentOperations == state) return;
+    _attachmentOperations = state;
+    // The submit button's enabled state reads this, so the editor does have
+    // to rebuild. Guarded on mounted because the section reports one final
+    // idle state as it is disposed, which happens while this sheet is
+    // already being torn down.
+    if (mounted) setState(() {});
   }
 
   DateTime _dateTimeFor(TimeOfDay time) {
@@ -555,7 +727,24 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
   // ── Submit ────────────────────────────────────────────────────────────────
 
   Future<void> _submit() async {
-    if (_isSubmitting || !_formKey.currentState!.validate()) return;
+    if (_isSubmitting) return;
+
+    // Defensive, even though the button is disabled in this state: this can
+    // be reached programmatically, or from a tap that raced the state change
+    // that disabled it. Saving would pop the sheet and take the attachment
+    // work down with it, so it is refused rather than reordered.
+    if (_hasBlockingAttachmentWork) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Finish or discard the attachment before updating this event.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    if (!_formKey.currentState!.validate()) return;
 
     final startsAt = _dateTimeFor(_startTime);
     late final DateTime endsAt;
@@ -661,222 +850,311 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
               : 'Edit event'
         : 'Add event';
 
-    return SafeArea(
-      child: ColoredBox(
-        color: CaleeColors.scaffoldBackground,
-        child: Form(
-          key: _formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Drag handle
-              Center(
-                child: Container(
-                  width: 36,
-                  height: 4,
-                  margin: const EdgeInsets.only(top: CaleeSpacing.sm),
-                  decoration: BoxDecoration(
-                    color: CaleeColors.separatorOpaque,
-                    borderRadius: BorderRadius.circular(CaleeRadius.dot),
-                  ),
-                ),
-              ),
-              Flexible(
-                child: SingleChildScrollView(
-                  padding: EdgeInsets.fromLTRB(
-                    CaleeSpacing.md,
-                    CaleeSpacing.md,
-                    CaleeSpacing.md,
-                    CaleeSpacing.md + bottomInset,
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      // Sheet title
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              sheetTitle,
-                              style: Theme.of(context).textTheme.titleLarge,
+    return PopScope(
+      // Never pops on its own. Every route to closing -- system Back, an
+      // iOS back gesture, a tap on the modal barrier, a programmatic
+      // maybePop -- lands in _requestClose(), which is the only place the
+      // close policy is decided.
+      //
+      // One route cannot be intercepted: the framework's drag-to-dismiss
+      // calls Navigator.pop() directly. Sheets that can hold attachment
+      // work (the EDIT-event sheets) are therefore presented with
+      // enableDrag: false; new-event sheets stay draggable, since attaching
+      // needs an event ID and they can never contain an attachments
+      // section.
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        unawaited(_requestClose());
+      },
+      child: SafeArea(
+        child: ColoredBox(
+          color: CaleeColors.scaffoldBackground,
+          child: Form(
+            key: _formKey,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Drag handle -- only when this sheet really can be dragged.
+                if (widget.showDragHandle)
+                  Center(
+                    child: Container(
+                      width: 36,
+                      height: 4,
+                      margin: const EdgeInsets.only(top: CaleeSpacing.sm),
+                      decoration: BoxDecoration(
+                        color: CaleeColors.separatorOpaque,
+                        borderRadius: BorderRadius.circular(CaleeRadius.dot),
+                      ),
+                    ),
+                  )
+                else
+                  // Keeps the title's spacing from the sheet's top edge the
+                  // same whether or not the handle is drawn.
+                  const SizedBox(height: CaleeSpacing.sm),
+                Flexible(
+                  child: SingleChildScrollView(
+                    padding: EdgeInsets.fromLTRB(
+                      CaleeSpacing.md,
+                      CaleeSpacing.md,
+                      CaleeSpacing.md,
+                      CaleeSpacing.md + bottomInset,
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        // Sheet title
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                sheetTitle,
+                                style: Theme.of(context).textTheme.titleLarge,
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.close),
+                              tooltip: 'Close',
+                              onPressed: _isLocked
+                                  ? null
+                                  : () => unawaited(_requestClose()),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(
+                                minWidth: 48,
+                                minHeight: 48,
+                              ),
+                            ),
+                          ],
+                        ),
+
+                        // Scan image button (create mode only)
+                        if (!_isEditing) ...[
+                          const SizedBox(height: CaleeSpacing.sm),
+                          OutlinedButton.icon(
+                            onPressed: _isLocked ? null : _scanImage,
+                            icon: _isScanningImage
+                                ? const SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Icon(Icons.document_scanner_outlined),
+                            label: Text(
+                              _isScanningImage
+                                  ? 'Scanning image…'
+                                  : 'Scan image',
                             ),
                           ),
-                          IconButton(
-                            icon: const Icon(Icons.close),
-                            onPressed: _isLocked
-                                ? null
-                                : () => Navigator.of(context).maybePop(),
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(),
+                        ],
+
+                        const SizedBox(height: CaleeSpacing.md),
+
+                        // ── Event ─────────────────────────────────────────────
+                        CaleeSection(
+                          children: [
+                            // Title field
+                            CaleeSectionTextFormField(
+                              key: const Key('event_title_field'),
+                              controller: _titleController,
+                              enabled: !_isLocked,
+                              autofocus: true,
+                              hintText: 'Title',
+                              textInputAction: TextInputAction.next,
+                              validator: (value) {
+                                if ((value ?? '').trim().isEmpty) {
+                                  return 'Enter a title';
+                                }
+                                return null;
+                              },
+                            ),
+                            // Calendar picker
+                            CaleeSectionDropdownRow<ClientCalendar>(
+                              label: 'Calendar',
+                              value: _selectedCalendar,
+                              items: [
+                                for (final cal in widget.calendars)
+                                  DropdownMenuItem(
+                                    value: cal,
+                                    child: Text(cal.name),
+                                  ),
+                              ],
+                              onChanged: (cal) {
+                                if (cal != null) {
+                                  setState(() => _selectedCalendar = cal);
+                                }
+                              },
+                              enabled: !_isLocked && !_isEditing,
+                            ),
+                          ],
+                        ),
+
+                        // ── Time ──────────────────────────────────────────────
+                        const SizedBox(height: CaleeSpacing.sectionSpacing),
+                        CaleeSection(
+                          children: [
+                            CaleeSectionSwitchRow(
+                              label: 'All day',
+                              value: _allDay,
+                              enabled: !_isLocked,
+                              switchKey: const Key('event_all_day_switch'),
+                              onChanged: (v) => setState(() => _allDay = v),
+                            ),
+                            if (_allDay) ...[
+                              CaleeSectionPickerRow(
+                                label: 'Date',
+                                value: _dateLabel(_selectedDate),
+                                onTap: _isLocked ? null : _pickDate,
+                                enabled: !_isLocked,
+                              ),
+                              CaleeSectionPickerRow(
+                                label: 'End',
+                                value: _dateLabel(_selectedEndDate),
+                                onTap: _isLocked ? null : _pickEndDate,
+                                enabled: !_isLocked,
+                              ),
+                            ] else ...[
+                              CaleeSectionPickerRow(
+                                label: 'Date',
+                                value: _dateLabel(_selectedDate),
+                                onTap: _isLocked ? null : _pickDate,
+                                enabled: !_isLocked,
+                              ),
+                              CaleeSectionPickerRow(
+                                label: 'Start',
+                                value: _timeLabel(_startTime),
+                                onTap: _isLocked ? null : _pickStartTime,
+                                enabled: !_isLocked,
+                              ),
+                              CaleeSectionPickerRow(
+                                label: 'End',
+                                value: _timeLabel(_endTime),
+                                onTap: _isLocked ? null : _pickEndTime,
+                                enabled: !_isLocked,
+                              ),
+                            ],
+                          ],
+                        ),
+
+                        // ── Repeat ────────────────────────────────────────────
+                        if (!_isEditingSingleOccurrence) ...[
+                          const SizedBox(height: CaleeSpacing.sectionSpacing),
+                          CaleeSection(
+                            children: [
+                              CaleeSectionPickerRow(
+                                label: 'Repeat',
+                                value: _selectedRepeatRule.label(
+                                  anchorDate: _selectedDate,
+                                ),
+                                onTap: _isLocked ? null : _pickRepeat,
+                                enabled: !_isLocked,
+                              ),
+                            ],
                           ),
                         ],
-                      ),
 
-                      // Scan image button (create mode only)
-                      if (!_isEditing) ...[
-                        const SizedBox(height: CaleeSpacing.sm),
-                        OutlinedButton.icon(
-                          onPressed: _isLocked ? null : _scanImage,
-                          icon: _isScanningImage
+                        // ── Details ───────────────────────────────────────────
+                        const SizedBox(height: CaleeSpacing.sectionSpacing),
+                        CaleeSection(
+                          children: [
+                            CaleeSectionTextFormField(
+                              key: const Key('event_location_field'),
+                              controller: _locationController,
+                              enabled: !_isLocked,
+                              hintText: 'Location',
+                            ),
+                            CaleeSectionTextFormField(
+                              key: const Key('event_description_field'),
+                              controller: _descriptionController,
+                              enabled: !_isLocked,
+                              hintText: 'Notes',
+                              maxLines: 3,
+                            ),
+                          ],
+                        ),
+
+                        // ── Attachments ───────────────────────────────────────
+                        // Only for an existing event (attaching a file
+                        // requires an eventId, so this never shows while
+                        // creating a new event) on a calendar the backend
+                        // explicitly reports as attachment-capable -- never
+                        // inferred from provider name.
+                        if (_isEditing &&
+                            _selectedCalendar
+                                .capabilities
+                                .canViewAttachments) ...[
+                          const SizedBox(height: CaleeSpacing.sectionSpacing),
+                          EventAttachmentsSection(
+                            key: ValueKey(
+                              'attachments-${widget.initialEvent!.id}',
+                            ),
+                            // Deliberately widget.initialEvent!.id, not
+                            // writableEventId -- when editing a single
+                            // occurrence, id keeps its RECURRENCE-ID suffix,
+                            // so if this section's own add/remove gating
+                            // (isSeriesScoped below) were ever wrong, Hub's
+                            // own occurrence-context rejection is still a
+                            // second, independent backstop. writableEventId
+                            // would collapse to the series id and lose that.
+                            eventId: widget.initialEvent!.id,
+                            hubClient: widget.hubClient,
+                            accessToken: widget.accessToken,
+                            canAdd: _selectedCalendar
+                                .capabilities
+                                .canAddAttachments,
+                            canRemove: _selectedCalendar
+                                .capabilities
+                                .canRemoveAttachments,
+                            isSeriesScoped: _isEditingSingleOccurrence,
+                            controller: _attachmentsController,
+                            onOperationStateChanged:
+                                _handleAttachmentOperationState,
+                          ),
+                        ],
+
+                        // ── Submit ────────────────────────────────────────────
+                        const SizedBox(height: CaleeSpacing.lg),
+                        FilledButton(
+                          key: const Key('event_submit_button'),
+                          onPressed: (_isLocked || _hasBlockingAttachmentWork)
+                              ? null
+                              : _submit,
+                          child: _isSubmitting
                               ? const SizedBox(
-                                  width: 16,
-                                  height: 16,
+                                  width: 18,
+                                  height: 18,
                                   child: CircularProgressIndicator(
                                     strokeWidth: 2,
                                   ),
                                 )
-                              : const Icon(Icons.document_scanner_outlined),
-                          label: Text(
-                            _isScanningImage ? 'Scanning image…' : 'Scan image',
-                          ),
+                              : Text(_submitLabel),
                         ),
+                        // Says why the button is unavailable. The attachment
+                        // row directly above shows what is happening; this
+                        // says what it means for saving.
+                        if (_hasBlockingAttachmentWork) ...[
+                          const SizedBox(height: CaleeSpacing.sm),
+                          Text(
+                            _attachmentOperations.hasActiveTransfer
+                                ? 'Waiting for the attachment transfer to '
+                                      'finish.'
+                                : _attachmentOperations.hasActiveAction
+                                ? 'Waiting for the attachment action to '
+                                      'finish.'
+                                : 'Retry or discard the attachment to '
+                                      'continue.',
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(color: CaleeColors.textSecondary),
+                          ),
+                        ],
                       ],
-
-                      const SizedBox(height: CaleeSpacing.md),
-
-                      // ── Event ─────────────────────────────────────────────
-                      CaleeSection(
-                        children: [
-                          // Title field
-                          CaleeSectionTextFormField(
-                            key: const Key('event_title_field'),
-                            controller: _titleController,
-                            enabled: !_isLocked,
-                            autofocus: true,
-                            hintText: 'Title',
-                            textInputAction: TextInputAction.next,
-                            validator: (value) {
-                              if ((value ?? '').trim().isEmpty) {
-                                return 'Enter a title';
-                              }
-                              return null;
-                            },
-                          ),
-                          // Calendar picker
-                          CaleeSectionDropdownRow<ClientCalendar>(
-                            label: 'Calendar',
-                            value: _selectedCalendar,
-                            items: [
-                              for (final cal in widget.calendars)
-                                DropdownMenuItem(
-                                  value: cal,
-                                  child: Text(cal.name),
-                                ),
-                            ],
-                            onChanged: (cal) {
-                              if (cal != null) {
-                                setState(() => _selectedCalendar = cal);
-                              }
-                            },
-                            enabled: !_isLocked && !_isEditing,
-                          ),
-                        ],
-                      ),
-
-                      // ── Time ──────────────────────────────────────────────
-                      const SizedBox(height: CaleeSpacing.sectionSpacing),
-                      CaleeSection(
-                        children: [
-                          CaleeSectionSwitchRow(
-                            label: 'All day',
-                            value: _allDay,
-                            enabled: !_isLocked,
-                            switchKey: const Key('event_all_day_switch'),
-                            onChanged: (v) => setState(() => _allDay = v),
-                          ),
-                          if (_allDay) ...[
-                            CaleeSectionPickerRow(
-                              label: 'Date',
-                              value: _dateLabel(_selectedDate),
-                              onTap: _isLocked ? null : _pickDate,
-                              enabled: !_isLocked,
-                            ),
-                            CaleeSectionPickerRow(
-                              label: 'End',
-                              value: _dateLabel(_selectedEndDate),
-                              onTap: _isLocked ? null : _pickEndDate,
-                              enabled: !_isLocked,
-                            ),
-                          ] else ...[
-                            CaleeSectionPickerRow(
-                              label: 'Date',
-                              value: _dateLabel(_selectedDate),
-                              onTap: _isLocked ? null : _pickDate,
-                              enabled: !_isLocked,
-                            ),
-                            CaleeSectionPickerRow(
-                              label: 'Start',
-                              value: _timeLabel(_startTime),
-                              onTap: _isLocked ? null : _pickStartTime,
-                              enabled: !_isLocked,
-                            ),
-                            CaleeSectionPickerRow(
-                              label: 'End',
-                              value: _timeLabel(_endTime),
-                              onTap: _isLocked ? null : _pickEndTime,
-                              enabled: !_isLocked,
-                            ),
-                          ],
-                        ],
-                      ),
-
-                      // ── Repeat ────────────────────────────────────────────
-                      if (!_isEditingSingleOccurrence) ...[
-                        const SizedBox(height: CaleeSpacing.sectionSpacing),
-                        CaleeSection(
-                          children: [
-                            CaleeSectionPickerRow(
-                              label: 'Repeat',
-                              value: _selectedRepeatRule.label(
-                                anchorDate: _selectedDate,
-                              ),
-                              onTap: _isLocked ? null : _pickRepeat,
-                              enabled: !_isLocked,
-                            ),
-                          ],
-                        ),
-                      ],
-
-                      // ── Details ───────────────────────────────────────────
-                      const SizedBox(height: CaleeSpacing.sectionSpacing),
-                      CaleeSection(
-                        children: [
-                          CaleeSectionTextFormField(
-                            key: const Key('event_location_field'),
-                            controller: _locationController,
-                            enabled: !_isLocked,
-                            hintText: 'Location',
-                          ),
-                          CaleeSectionTextFormField(
-                            key: const Key('event_description_field'),
-                            controller: _descriptionController,
-                            enabled: !_isLocked,
-                            hintText: 'Notes',
-                            maxLines: 3,
-                          ),
-                        ],
-                      ),
-
-                      // ── Submit ────────────────────────────────────────────
-                      const SizedBox(height: CaleeSpacing.lg),
-                      FilledButton(
-                        key: const Key('event_submit_button'),
-                        onPressed: _isLocked ? null : _submit,
-                        child: _isSubmitting
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : Text(_submitLabel),
-                      ),
-                    ],
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

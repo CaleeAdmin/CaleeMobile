@@ -5,40 +5,47 @@ name: Flutter CI
 # normal CaleeMobile pull request (which targets `dev`) now receives this same
 # check; `stage` and `main` keep it for the promotion path.
 #
-# Branch-protection note for administrators: the required status check to
-# enforce on `dev` (and `stage`/`main`) is the job name below,
+# Branch-protection note for administrators: the required status checks to
+# enforce on `dev` (and `stage`/`main`) are the two job names below,
 #   "Format, Analyze & Test"
-# reported under this "Flutter CI" workflow. Add it under
+#   "Android debug build"
+# reported under this "Flutter CI" workflow. Add both under
 # Settings -> Branches -> Branch protection rules -> Require status checks to
 # pass before merging, for each of `dev`, `stage`, and `main`, so no pull
-# request can merge into an integration branch without a green run.
+# request can merge into an integration branch without a green run of each.
 #
-# Release-build scope: the job name and its fast steps (format, analyze,
-# test, debug build) always run on every trigger below, so the required
-# check above is unaffected. The release-APK build/sign/notification-config
-# steps near the bottom of this job are gated to only execute on a push to
-# `stage` or `main` (i.e. a merge/promotion into those branches) or a manual
+# Release-build scope: both required jobs run on every trigger below. The
+# release-APK build/sign/notification-config steps near the bottom of the
+# "Format, Analyze & Test" job are gated to only execute on a push to `stage`
+# or `main` (i.e. a merge/promotion into those branches) or a manual
 # workflow_dispatch targeting one of them — never on a `dev` push or on any
 # pull_request, including PRs targeting stage/main. See the `if:` conditions
-# on those individual steps for the exact rule. This trades pre-merge
-# R8/shrinking-regression coverage on `dev` PRs for a faster PR gate; a
-# shrinking regression is still caught before it reaches `stage`/`main`.
+# on those individual steps for the exact rule. The debug Android build in
+# the separate job below is not gated this way: it runs on every pull
+# request, so a platform build broken by a change that still passes
+# format/analyze/test is caught before merge, not only at stage/main
+# promotion.
 on:
   pull_request:
     branches:
       - dev
       - stage
       - main
-  # A push trigger on the protected integration branches gives post-merge
-  # (and direct-push) coverage on the same three branches, so a merge that
-  # somehow lands unformatted or failing code is still caught on the branch.
+  # Pull requests already validate every change headed for dev. Do not repeat
+  # the full gate after the same change merges there. Push runs remain on the
+  # release branches because they execute the gated release smoke checks below.
   push:
     branches:
-      - dev
       - stage
       - main
   # Allow the gate to be started on demand from the Actions tab (any branch).
   workflow_dispatch:
+
+# A new commit on an open PR makes its older in-flight run obsolete. Keep every
+# stage/main push and manual run, because release verification must complete.
+concurrency:
+  group: flutter-ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   analyze-and-test:
@@ -101,12 +108,6 @@ jobs:
         env:
           TZ: Australia/Perth
 
-      # Compile the Android app so a change that builds green in tests but breaks
-      # the platform build is caught here. A build failure fails the required
-      # gate. Debug only: no release artifact is produced, published, or signed.
-      - name: Build Android APK (debug)
-        run: flutter build apk --debug
-
       # Ephemeral CI-only signing key so the release smoke build below can
       # produce a signed APK without touching production signing secrets.
       # Generated fresh in $RUNNER_TEMP (job-scoped, never cached, never
@@ -161,3 +162,56 @@ jobs:
           python3 .github/scripts/check_notification_release_apk.py selftest
           python3 .github/scripts/check_notification_release_apk.py check \
             build/app/outputs/flutter-apk/app-release.apk
+
+  # Required, non-publishing platform-build gate: compiles the Android app so
+  # a change that builds green in analyze/test but breaks the platform build
+  # (a manifest-merge conflict, a plugin's minSdk requirement, a Gradle/Kotlin
+  # incompatibility) is caught on every PR, not only at stage/main promotion.
+  # Debug only: uses the Flutter/Gradle auto-generated debug keystore, no
+  # repository or organization signing secret; produces no artifact that is
+  # uploaded, published, or deployed anywhere.
+  android-debug-build:
+    name: Android debug build
+    runs-on: ubuntu-latest
+
+    steps:
+      # Same rationale as the equivalent step in analyze-and-test above: the
+      # default ubuntu-latest image doesn't reliably leave enough free space
+      # for a Gradle + Android build alongside preinstalled toolchains this
+      # job never uses.
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/boost \
+            /usr/share/swift
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.44.1"
+          cache: true
+
+      # Bounds build duration on repeat runs (a cold Gradle/AGP/Kotlin +
+      # dependency resolution is the dominant cost of this job). Cache-only:
+      # never affects build output or signing.
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('android/**/*.gradle*', 'android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Build Android APK (debug)
+        run: flutter build apk --debug

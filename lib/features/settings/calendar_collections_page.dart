@@ -952,18 +952,6 @@ class _CollectionFormContent extends StatefulWidget {
 }
 
 class _CollectionFormContentState extends State<_CollectionFormContent> {
-  static const List<(String, Color)> _colorPalette = [
-    ('#FF3B30', CaleeColors.dotRed),
-    ('#FF9500', CaleeColors.dotOrange),
-    ('#FFCC00', CaleeColors.dotYellow),
-    ('#34C759', CaleeColors.dotGreen),
-    ('#5AC8FA', CaleeColors.dotTeal),
-    ('#007AFF', CaleeColors.dotBlue),
-    ('#AF52DE', CaleeColors.dotPurple),
-    ('#FF2D55', CaleeColors.dotPink),
-    ('#8E8E93', CaleeColors.dotGray),
-  ];
-
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _nameController;
   late final TextEditingController _colorController;
@@ -999,10 +987,6 @@ class _CollectionFormContentState extends State<_CollectionFormContent> {
       default:
         return 'Calendar';
     }
-  }
-
-  bool _isPaletteColorSelected(String hex) {
-    return _colorController.text.trim().toUpperCase() == hex.toUpperCase();
   }
 
   /// True when editing an existing calendar and neither the name nor the
@@ -1159,18 +1143,9 @@ class _CollectionFormContentState extends State<_CollectionFormContent> {
               ),
             ),
             const SizedBox(height: CaleeSpacing.sm),
-            Wrap(
-              spacing: CaleeSpacing.sm,
-              runSpacing: CaleeSpacing.sm,
-              children: [
-                for (final (hex, color) in _colorPalette)
-                  _ColorSwatch(
-                    hex: hex,
-                    color: color,
-                    isSelected: _isPaletteColorSelected(hex),
-                    onTap: () => setState(() => _colorController.text = hex),
-                  ),
-              ],
+            CaleeColorPalettePicker(
+              selectedHex: _colorController.text,
+              onSelected: (hex) => setState(() => _colorController.text = hex),
             ),
             const SizedBox(height: CaleeSpacing.sm + 4),
             TextFormField(
@@ -1247,18 +1222,6 @@ class _SubscriptionFormContent extends StatefulWidget {
 }
 
 class _SubscriptionFormContentState extends State<_SubscriptionFormContent> {
-  static const List<(String, Color)> _colorPalette = [
-    ('#FF3B30', CaleeColors.dotRed),
-    ('#FF9500', CaleeColors.dotOrange),
-    ('#FFCC00', CaleeColors.dotYellow),
-    ('#34C759', CaleeColors.dotGreen),
-    ('#5AC8FA', CaleeColors.dotTeal),
-    ('#007AFF', CaleeColors.dotBlue),
-    ('#AF52DE', CaleeColors.dotPurple),
-    ('#FF2D55', CaleeColors.dotPink),
-    ('#8E8E93', CaleeColors.dotGray),
-  ];
-
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _nameController;
   late final TextEditingController _urlController;
@@ -1295,10 +1258,6 @@ class _SubscriptionFormContentState extends State<_SubscriptionFormContent> {
     _urlController.dispose();
     _colorController.dispose();
     super.dispose();
-  }
-
-  bool _isPaletteColorSelected(String hex) {
-    return _colorController.text.trim().toUpperCase() == hex.toUpperCase();
   }
 
   bool _isAllowedSubscriptionUrl(String value) {
@@ -1510,18 +1469,9 @@ class _SubscriptionFormContentState extends State<_SubscriptionFormContent> {
               ),
             ),
             const SizedBox(height: CaleeSpacing.sm),
-            Wrap(
-              spacing: CaleeSpacing.sm,
-              runSpacing: CaleeSpacing.sm,
-              children: [
-                for (final (hex, color) in _colorPalette)
-                  _ColorSwatch(
-                    hex: hex,
-                    color: color,
-                    isSelected: _isPaletteColorSelected(hex),
-                    onTap: () => setState(() => _colorController.text = hex),
-                  ),
-              ],
+            CaleeColorPalettePicker(
+              selectedHex: _colorController.text,
+              onSelected: (hex) => setState(() => _colorController.text = hex),
             ),
             const SizedBox(height: CaleeSpacing.sm + 4),
             TextFormField(
@@ -1673,48 +1623,6 @@ class _CalendarCheckPreviewCard extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-// ─── _ColorSwatch ─────────────────────────────────────────────────────────────
-
-class _ColorSwatch extends StatelessWidget {
-  const _ColorSwatch({
-    required this.hex,
-    required this.color,
-    required this.isSelected,
-    required this.onTap,
-  });
-
-  final String hex;
-  final Color color;
-  final bool isSelected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        width: 30,
-        height: 30,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: color,
-          border: isSelected
-              ? Border.all(
-                  color: CaleeColors.textPrimary,
-                  width: 2,
-                  strokeAlign: BorderSide.strokeAlignOutside,
-                )
-              : null,
-        ),
-        child: isSelected
-            ? const Icon(Icons.check, size: 16, color: Colors.white)
-            : null,
       ),
     );
   }

@@ -26,7 +26,7 @@ class LocalSubscriberCalendarPage extends StatefulWidget {
   const LocalSubscriberCalendarPage({
     required this.subscriptions,
     required this.repository,
-    required this.onSignIn,
+    required this.onLearnAboutHome,
     required this.onSubscriptionsChanged,
     this.icsService,
     super.key,
@@ -34,7 +34,11 @@ class LocalSubscriberCalendarPage extends StatefulWidget {
 
   final List<LocalCalendarSubscription> subscriptions;
   final LocalCalendarSubscriptionRepository repository;
-  final VoidCallback onSignIn;
+
+  /// Opens the Calee-for-home marketing page from the calendars sheet's
+  /// discovery row. Must never consume local calendar state.
+  final VoidCallback onLearnAboutHome;
+
   final void Function(List<LocalCalendarSubscription>) onSubscriptionsChanged;
 
   /// Overrideable for tests; defaults to [LocalCalendarIcsService].
@@ -172,8 +176,8 @@ class _LocalSubscriberCalendarPageState
     return all;
   }
 
-  void _openCalendarsSheet() {
-    showModalBottomSheet<void>(
+  Future<void> _openCalendarsSheet() async {
+    final action = await showModalBottomSheet<_CalendarsSheetAction>(
       context: context,
       isScrollControlled: true,
       backgroundColor: CaleeColors.surface,
@@ -190,6 +194,13 @@ class _LocalSubscriberCalendarPageState
         onRemove: _removeSubscription,
       ),
     );
+    if (!mounted) return;
+    // The sheet dismisses itself before the action runs, so external
+    // navigation (and any failure snackbar) happens over the calendar page,
+    // never behind a still-open modal.
+    if (action == _CalendarsSheetAction.learnAboutHome) {
+      widget.onLearnAboutHome();
+    }
   }
 
   @override
@@ -217,109 +228,53 @@ class _LocalSubscriberCalendarPageState
             ),
         ],
       ),
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _LocalSubscriberBanner(onSignIn: widget.onSignIn),
-          Expanded(
-            child: _subscriptions.isEmpty
-                ? _EmptyState()
-                : ReadOnlyCalendarView(
-                    selectedMonth: _selectedMonth,
-                    selectedDay: _selectedDay,
-                    today: _today,
-                    firstDayOfWeek: 0,
-                    events: _displayEvents,
-                    viewMode: _viewMode,
-                    use24h: use24h,
-                    onViewModeChanged: (mode) =>
-                        setState(() => _viewMode = mode),
-                    onPreviousMonth: () => setState(() {
-                      _selectedMonth = DateTime(
-                        _selectedMonth.year,
-                        _selectedMonth.month - 1,
-                      );
-                    }),
-                    onNextMonth: () => setState(() {
-                      _selectedMonth = DateTime(
-                        _selectedMonth.year,
-                        _selectedMonth.month + 1,
-                      );
-                    }),
-                    onGoToToday: () => setState(() {
-                      _today = DateTime.now();
-                      _selectedMonth = DateTime(_today.year, _today.month);
-                      _selectedDay = _today;
-                    }),
-                    onSelectDay: (day) => setState(() => _selectedDay = day),
-                    actionWidgets: [
-                      IconButton(
-                        icon: const Icon(Icons.calendar_month_outlined),
-                        color: CaleeColors.primary,
-                        tooltip: 'Calendars on this phone',
-                        onPressed: _openCalendarsSheet,
-                      ),
-                    ],
-                  ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ── Banner ────────────────────────────────────────────────────────────────────
-
-class _LocalSubscriberBanner extends StatelessWidget {
-  const _LocalSubscriberBanner({required this.onSignIn});
-
-  final VoidCallback onSignIn;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return ColoredBox(
-      color: theme.colorScheme.surfaceContainerHighest,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Added on this phone only',
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  Text(
-                    'Read-only public calendar · Sign in to link it to your Calee account and Calee display.',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-              ),
+      body: _subscriptions.isEmpty
+          ? _EmptyState()
+          : ReadOnlyCalendarView(
+              selectedMonth: _selectedMonth,
+              selectedDay: _selectedDay,
+              today: _today,
+              firstDayOfWeek: 0,
+              events: _displayEvents,
+              viewMode: _viewMode,
+              use24h: use24h,
+              onViewModeChanged: (mode) => setState(() => _viewMode = mode),
+              onPreviousMonth: () => setState(() {
+                _selectedMonth = DateTime(
+                  _selectedMonth.year,
+                  _selectedMonth.month - 1,
+                );
+              }),
+              onNextMonth: () => setState(() {
+                _selectedMonth = DateTime(
+                  _selectedMonth.year,
+                  _selectedMonth.month + 1,
+                );
+              }),
+              onGoToToday: () => setState(() {
+                _today = DateTime.now();
+                _selectedMonth = DateTime(_today.year, _today.month);
+                _selectedDay = _today;
+              }),
+              onSelectDay: (day) => setState(() => _selectedDay = day),
+              actionWidgets: [
+                IconButton(
+                  icon: const Icon(Icons.calendar_month_outlined),
+                  color: CaleeColors.primary,
+                  tooltip: 'Calendars on this phone',
+                  onPressed: _openCalendarsSheet,
+                ),
+              ],
             ),
-            const SizedBox(width: 12),
-            FilledButton.tonal(
-              onPressed: onSignIn,
-              style: FilledButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                minimumSize: const Size(0, 36),
-              ),
-              child: const Text('Sign in'),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }
 
 // ── Calendars sheet ───────────────────────────────────────────────────────────
+
+/// Result of the calendars bottom sheet: an action the owning page performs
+/// after the sheet has been dismissed.
+enum _CalendarsSheetAction { learnAboutHome }
 
 class _CalendarsSheet extends StatelessWidget {
   const _CalendarsSheet({
@@ -345,64 +300,118 @@ class _CalendarsSheet extends StatelessWidget {
         .toList();
 
     return SafeArea(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const SizedBox(height: 8),
-          Container(
-            width: 36,
-            height: 4,
-            decoration: BoxDecoration(
-              color: theme.colorScheme.onSurfaceVariant.withAlpha(
-                CaleeAlpha.pct24,
+      // Height-bounded: the drag handle and heading stay fixed while the
+      // error banners, calendar rows, and the Calee-for-home discovery row
+      // scroll — many calendars or large accessibility text can no longer
+      // overflow, and a short list still produces a compact sheet.
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(context).height * 0.85,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            Container(
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                color: theme.colorScheme.onSurfaceVariant.withAlpha(
+                  CaleeAlpha.pct24,
+                ),
+                borderRadius: BorderRadius.circular(2),
               ),
-              borderRadius: BorderRadius.circular(2),
             ),
-          ),
-          const SizedBox(height: 12),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 8, 8),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    'Calendars on this phone',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
+            const SizedBox(height: 12),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 8, 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Calendars on this phone',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.close),
-                  onPressed: () => Navigator.of(context).maybePop(),
-                ),
-              ],
-            ),
-          ),
-          if (errors.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-              child: Column(
-                children: errors
-                    .map(
-                      (e) => Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: _ErrorBanner(message: e),
-                      ),
-                    )
-                    .toList(),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.of(context).maybePop(),
+                  ),
+                ],
               ),
             ),
-          ...subscriptions.map(
-            (sub) => _SubscriptionTile(
-              subscription: sub,
-              isLoading: loadingIds.contains(sub.id),
-              onRefresh: () => onRefresh(sub),
-              onRemove: () => onRemove(sub),
+            Flexible(
+              child: ListView(
+                key: const Key('local_calendars_sheet_list'),
+                shrinkWrap: true,
+                children: [
+                  if (errors.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                      child: Column(
+                        children: errors
+                            .map(
+                              (e) => Padding(
+                                padding: const EdgeInsets.only(bottom: 8),
+                                child: _ErrorBanner(message: e),
+                              ),
+                            )
+                            .toList(),
+                      ),
+                    ),
+                  ...subscriptions.map(
+                    (sub) => _SubscriptionTile(
+                      subscription: sub,
+                      isLoading: loadingIds.contains(sub.id),
+                      onRefresh: () => onRefresh(sub),
+                      onRemove: () => onRemove(sub),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Divider(),
+                  _HomePromoTile(
+                    onTap: () => Navigator.of(
+                      context,
+                    ).pop(_CalendarsSheetAction.learnAboutHome),
+                  ),
+                  const SizedBox(height: 8),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(height: 8),
-        ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Calee-for-home discovery row ──────────────────────────────────────────────
+
+class _HomePromoTile extends StatelessWidget {
+  const _HomePromoTile({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return ListTile(
+      key: const Key('local_calendar_home_promo'),
+      onTap: onTap,
+      minTileHeight: 48,
+      leading: const CaleeHomeProductThumbnail(),
+      title: const Text('Calee for your home'),
+      subtitle: Text(
+        'One shared screen for the whole family',
+        style: theme.textTheme.bodySmall?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
+      ),
+      trailing: Icon(
+        Icons.chevron_right,
+        color: theme.colorScheme.onSurfaceVariant,
       ),
     );
   }

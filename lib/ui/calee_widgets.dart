@@ -344,20 +344,49 @@ class CaleeAction {
 /// Calee-style action sheet. Shows a list of [CaleeAction]s in a modal bottom
 /// sheet with an optional [title]. Automatically adds a Cancel row.
 class CaleeActionSheet extends StatelessWidget {
-  const CaleeActionSheet({required this.actions, this.title, super.key});
+  const CaleeActionSheet({
+    required this.actions,
+    this.title,
+    this.showCloseButton = false,
+    this.closeTooltip = 'Close',
+    super.key,
+  });
+
+  /// The size of the optional close control's tap target. Also reserved on
+  /// the opposite side of the header so [title] stays optically centred.
+  static const double _closeTargetSize = 48;
 
   final String? title;
   final List<CaleeAction> actions;
+
+  /// Adds a close control to the top-right of the sheet, alongside the
+  /// Cancel row that is always present. Off by default so every existing
+  /// action sheet keeps exactly the chrome it had.
+  ///
+  /// Dismisses the sheet and nothing else: an action sheet whose actions
+  /// each start something (a picker, a navigation) needs a way out that is
+  /// reachable without scanning to the bottom of the list.
+  final bool showCloseButton;
+
+  /// Tooltip and accessibility label for the [showCloseButton] control.
+  final String closeTooltip;
 
   static Future<void> show({
     required BuildContext context,
     required List<CaleeAction> actions,
     String? title,
+    bool showCloseButton = false,
+    String closeTooltip = 'Close',
   }) {
     return showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.transparent,
-      builder: (_) => CaleeActionSheet(title: title, actions: actions),
+      builder: (_) => CaleeActionSheet(
+        title: title,
+        actions: actions,
+        showCloseButton: showCloseButton,
+        closeTooltip: closeTooltip,
+      ),
     );
   }
 
@@ -379,19 +408,49 @@ class CaleeActionSheet extends StatelessWidget {
               clipBehavior: Clip.hardEdge,
               child: Column(
                 children: [
-                  if (title != null) ...[
-                    Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: CaleeSpacing.md,
-                        vertical: CaleeSpacing.sm,
-                      ),
-                      child: Text(
-                        title!,
-                        style: theme.textTheme.labelMedium?.copyWith(
-                          color: CaleeColors.textSecondary,
+                  if (title != null || showCloseButton) ...[
+                    Row(
+                      children: [
+                        // Reserves the close control's width on the leading
+                        // side so the title stays centred rather than
+                        // shifting left by half a button.
+                        if (showCloseButton)
+                          const SizedBox(width: _closeTargetSize),
+                        Expanded(
+                          child: title == null
+                              ? const SizedBox.shrink()
+                              : Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: CaleeSpacing.md,
+                                    vertical: CaleeSpacing.sm,
+                                  ),
+                                  child: Text(
+                                    title!,
+                                    style: theme.textTheme.labelMedium
+                                        ?.copyWith(
+                                          color: CaleeColors.textSecondary,
+                                        ),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                ),
                         ),
-                        textAlign: TextAlign.center,
-                      ),
+                        if (showCloseButton)
+                          IconButton(
+                            key: const Key('calee_action_sheet_close'),
+                            icon: const Icon(Icons.close),
+                            iconSize: 20,
+                            // Tooltip doubles as the semantic label, so the
+                            // control is announced rather than read as a bare
+                            // icon.
+                            tooltip: closeTooltip,
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(
+                              minWidth: _closeTargetSize,
+                              minHeight: _closeTargetSize,
+                            ),
+                            onPressed: () => Navigator.of(context).maybePop(),
+                          ),
+                      ],
                     ),
                     const Divider(),
                   ],
@@ -538,6 +597,66 @@ class CaleeDestructiveDialog extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────
+// CaleeNoticeDialog
+// ─────────────────────────────────────────────
+
+/// A single-action informational dialog: something is explained, and the
+/// only thing to do is acknowledge it.
+///
+/// Distinct from [CaleeDestructiveDialog], which offers a choice. Use this
+/// when there is nothing to choose -- e.g. an action has to finish before
+/// the user can do what they asked -- so the UI does not offer a button
+/// that cannot do what it says.
+class CaleeNoticeDialog extends StatelessWidget {
+  const CaleeNoticeDialog({
+    required this.title,
+    required this.body,
+    this.dismissLabel = 'OK',
+    super.key,
+  });
+
+  final String title;
+  final String body;
+  final String dismissLabel;
+
+  static Future<void> show({
+    required BuildContext context,
+    required String title,
+    required String body,
+    String dismissLabel = 'OK',
+  }) {
+    return showDialog<void>(
+      context: context,
+      builder: (_) => CaleeNoticeDialog(
+        title: title,
+        body: body,
+        dismissLabel: dismissLabel,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(title),
+      content: Text(body),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(
+            dismissLabel,
+            style: const TextStyle(
+              fontWeight: FontWeight.w600,
+              color: CaleeColors.primary,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
 // CaleeEmptyState
 // ─────────────────────────────────────────────
 
@@ -611,6 +730,92 @@ class CaleeColorDot extends StatelessWidget {
       width: size,
       height: size,
       decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
+// CaleeColorSwatch / CaleeColorPalettePicker
+// ─────────────────────────────────────────────
+
+/// A single tappable colour swatch. Shows a check mark and an outlined ring
+/// when [isSelected]. Used to build colour pickers such as
+/// [CaleeColorPalettePicker].
+class CaleeColorSwatch extends StatelessWidget {
+  const CaleeColorSwatch({
+    required this.color,
+    required this.isSelected,
+    required this.onTap,
+    this.size = 30,
+    super.key,
+  });
+
+  final Color color;
+  final bool isSelected;
+  final VoidCallback onTap;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: color,
+          border: isSelected
+              ? Border.all(
+                  color: CaleeColors.textPrimary,
+                  width: 2,
+                  strokeAlign: BorderSide.strokeAlignOutside,
+                )
+              : null,
+        ),
+        child: isSelected
+            ? const Icon(Icons.check, size: 16, color: Colors.white)
+            : null,
+      ),
+    );
+  }
+}
+
+/// A wrap of tappable colour swatches. The swatch whose hex matches
+/// [selectedHex] (case-insensitive) is highlighted. Tapping a swatch reports
+/// its canonical hex string via [onSelected]. Defaults to the shared
+/// [CaleeColors.swatchPalette] so every colour picker in the app offers the
+/// same choices.
+class CaleeColorPalettePicker extends StatelessWidget {
+  const CaleeColorPalettePicker({
+    required this.selectedHex,
+    required this.onSelected,
+    this.palette = CaleeColors.swatchPalette,
+    super.key,
+  });
+
+  final String? selectedHex;
+  final ValueChanged<String> onSelected;
+  final List<(String, Color)> palette;
+
+  bool _isSelected(String hex) {
+    return (selectedHex ?? '').trim().toUpperCase() == hex.toUpperCase();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: CaleeSpacing.sm,
+      runSpacing: CaleeSpacing.sm,
+      children: [
+        for (final (hex, color) in palette)
+          CaleeColorSwatch(
+            color: color,
+            isSelected: _isSelected(hex),
+            onTap: () => onSelected(hex),
+          ),
+      ],
     );
   }
 }

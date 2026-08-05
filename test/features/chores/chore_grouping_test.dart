@@ -345,6 +345,74 @@ void main() {
       expect(groups.containsKey('overdue'), isFalse);
     });
 
+    test('a completion in one service does not suppress another service\'s '
+        'occurrence sharing the same chore UID', () {
+      const today = '2026-06-01'; // _monday
+      final portalLog = ClientChore(
+        id: 'portal:log-1',
+        calendarId: 'cal-1',
+        serviceId: 'portal',
+        serviceName: 'Portal',
+        title: 'Shared chore',
+        scheduledAt: today,
+        scheduledDate: today,
+        description: null,
+        source: '',
+        kind: 'completionLog',
+        choreUid: 'shared-uid',
+        parentChoreUid: 'shared-uid',
+        baseChoreId: 'portal:shared-uid',
+        occurrenceDate: today,
+        completionLogId: 'portal:log-1',
+        completedToday: true,
+        section: 'doneToday',
+        recurrence: null,
+        points: 1,
+        metadataPoints: null,
+        assigneePersonId: null,
+        assigneeName: null,
+        assigneeAvatarColor: null,
+        approvalState: 'none',
+      );
+      final businessBase = ClientChore(
+        id: 'business:shared-uid',
+        calendarId: 'cal-9',
+        serviceId: 'business',
+        serviceName: 'Business',
+        title: 'Shared chore',
+        scheduledAt: today,
+        scheduledDate: today,
+        description: null,
+        source: '',
+        kind: 'baseChore',
+        choreUid: 'shared-uid',
+        parentChoreUid: null,
+        baseChoreId: 'business:shared-uid',
+        occurrenceDate: today,
+        completionLogId: null,
+        completedToday: false,
+        section: 'todoToday',
+        recurrence: null,
+        points: 1,
+        metadataPoints: null,
+        assigneePersonId: null,
+        assigneeName: null,
+        assigneeAvatarColor: null,
+        approvalState: 'none',
+      );
+
+      final groups = groupChoresBySection([portalLog, businessBase], _monday);
+
+      expect(groups['doneToday'], [portalLog]);
+      expect(
+        groups['todoToday'],
+        [businessBase],
+        reason:
+            "the other service's occurrence was never completed and must stay "
+            'in Today',
+      );
+    });
+
     test('baseChore is NOT suppressed from overdue by a same-choreUid '
         'completionLog for a different occurrence date — matching must be '
         'uid AND date, not uid alone', () {

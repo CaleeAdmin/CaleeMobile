@@ -10,6 +10,14 @@ import 'meals_controller.dart';
 import 'meals_repository.dart';
 import 'saved_meals_page.dart';
 
+/// Stable identity for the meal-plan scroll container.
+///
+/// Exported so tests (unit and integration) can target the real product list
+/// rather than picking a Scrollable positionally: `.first`/`.last` resolve to
+/// whichever container happens to come first in the tree, and both throw
+/// `Bad state: No element` when evaluated while the list is rebuilding.
+const Key mealsListKey = Key('meals-list');
+
 const _kMealTypeLabels = {
   'breakfast': 'Breakfast',
   'lunch': 'Lunch',
@@ -214,6 +222,12 @@ class _MealsPageState extends State<MealsPage> {
 
   Widget _buildBody() {
     return ListView(
+      // Stable identity for the meal-plan scroll container, kept mounted
+      // across week changes (the loading state is a child, not a replacement).
+      // The regression suite scrolls this list by key rather than resolving
+      // `find.byType(Scrollable)` positionally, which selects the wrong
+      // container as soon as the page holds more than one.
+      key: mealsListKey,
       padding: const EdgeInsets.symmetric(
         horizontal: CaleeSpacing.pagePadding,
         vertical: CaleeSpacing.md,

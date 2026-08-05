@@ -43,6 +43,7 @@ class _StubHubClient extends CaleeHubClient {
     required String accessToken,
     required String from,
     required String to,
+    String? timezone,
   }) async {
     return ClientChoreList(from: from, to: to, chores: const []);
   }
@@ -102,6 +103,7 @@ class _StubHubClientWithChore extends CaleeHubClient {
     required String accessToken,
     required String from,
     required String to,
+    String? timezone,
   }) async {
     return ClientChoreList(from: from, to: to, chores: [chore]);
   }
@@ -264,6 +266,25 @@ Widget _wrapWithChore(ClientChore chore) => MaterialApp(
 );
 
 void main() {
+  // The regression suite scrolls the chores page by this key. Resolving the
+  // scroll container positionally instead (Scrollable.first/.last) picks the
+  // wrong one and throws while the list rebuilds after a completion reload.
+  testWidgets('Chores exposes exactly one chores-list scroll container', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_wrap());
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(choresListKey), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(choresListKey),
+        matching: find.byType(Scrollable),
+      ),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('Chores top bar shows Search, Filter, and Add actions', (
     tester,
   ) async {

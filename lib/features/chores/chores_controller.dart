@@ -7,6 +7,7 @@ import '../../data/models/client_chore.dart';
 import '../../data/models/client_chore_metadata.dart';
 import '../../data/models/client_person.dart';
 import 'chore_grouping.dart';
+import 'chore_sync_state.dart';
 import 'chores_repository.dart';
 
 String _formatChoreDate(DateTime value) {
@@ -29,9 +30,14 @@ bool _isFutureOccurrence(String? occurrenceDate) {
 }
 
 class ChoresController extends ChangeNotifier {
-  ChoresController({required this.repository});
+  ChoresController({required this.repository, ChoreSyncOverlay? syncOverlay})
+    : syncOverlay = syncOverlay ?? ChoreSyncOverlay();
 
   final ChoresRepository repository;
+
+  /// Bridges list responses that have not yet caught up with an accepted
+  /// mutation. See [ChoreSyncOverlay].
+  final ChoreSyncOverlay syncOverlay;
 
   bool isLoading = false;
   Object? error;
@@ -39,6 +45,17 @@ class ChoresController extends ChangeNotifier {
   List<CalendarServiceError> calendarServiceErrors = [];
   final Set<String> updatingChoreIds = {};
   String selectedAssigneeFilter = 'all';
+
+  /// Set when an accepted mutation did not hold, so the user is told rather
+  /// than left with a row the backend disowns.
+  String? syncError;
+
+  @override
+  void dispose() {
+    // The context this state was accepted under is going away with it.
+    syncOverlay.clear();
+    super.dispose();
+  }
 
   Future<void> load() async {
     isLoading = true;
@@ -58,12 +75,38 @@ class ChoresController extends ChangeNotifier {
       final to = _formatChoreDate(todayDate.add(const Duration(days: 31)));
       final loaded = await repository.loadOverview(from: from, to: to);
       _logChoreDebugInfo(loaded);
+
+      // Drop anything whose account, household, service or calendar has gone
+      // away before reconciling what is left. Services come from the bootstrap
+      // this controller was built with, so they are always known; calendars
+      // come from a request that can fail, so their set is only authoritative
+      // when that request succeeded.
+      syncOverlay.retainScope(
+        accountId: repository.accountId,
+        householdId: repository.householdId,
+        serviceIds: repository.choreServiceIds,
+        servicesAuthoritative: true,
+        calendarIds: _knownCalendarIds(loaded),
+        calendarsAuthoritative: loaded.calendarsAuthoritative,
+      );
+
+      final reconciled = syncOverlay.reconcile(
+        chores: dedupeChoreOccurrences(loaded.choreList.chores),
+        accountId: repository.accountId,
+        householdId: repository.householdId,
+        fromDate: from,
+        toDate: to,
+        now: DateTime.now(),
+      );
+
+      syncError = reconciled.warning;
+
       overview = ChoresOverview(
         calendarList: loaded.calendarList,
         choreList: ClientChoreList(
           from: loaded.choreList.from,
           to: loaded.choreList.to,
-          chores: dedupeChoreOccurrences(loaded.choreList.chores),
+          chores: dedupeChoreOccurrences(reconciled.chores),
         ),
         people: loaded.people,
         from: loaded.from,
@@ -79,6 +122,23 @@ class ChoresController extends ChangeNotifier {
       isLoading = false;
       notifyListeners();
     }
+  }
+
+  /// Calendar ids a pending occurrence may legitimately reference, in both the
+  /// raw and `serviceId:`-prefixed forms the two endpoints use.
+  Set<String> _knownCalendarIds(ChoresOverview loaded) {
+    final ids = <String>{};
+
+    for (final calendar in loaded.calendarList.calendars) {
+      final id = calendar.id.trim();
+      if (id.isEmpty) continue;
+      ids.add(id);
+
+      final prefix = '${calendar.serviceId}:';
+      if (id.startsWith(prefix)) ids.add(id.substring(prefix.length));
+    }
+
+    return ids;
   }
 
   /// Logs chore counts right after the API response is parsed, before any
@@ -167,14 +227,36 @@ class ChoresController extends ChangeNotifier {
 
   Future<void> toggleChoreCompletion(ClientChore chore) async {
     final choreId = chore.completionActionId;
+    // Guarding on the action id also blocks a second toggle of the *same*
+    // occurrence while one is in flight, so a double tap cannot produce a
+    // complete/undo race.
     if (choreId.trim().isEmpty || updatingChoreIds.contains(choreId)) return;
 
     updatingChoreIds.add(choreId);
     notifyListeners();
 
     try {
-      if (chore.completedToday || chore.normalizedSection == 'doneToday') {
-        await repository.undoCompletion(chore);
+      final key = ChoreOccurrenceKey.forChore(
+        chore,
+        accountId: repository.accountId,
+        householdId: repository.householdId,
+      );
+
+      // Every overlay write happens after its request has returned, so a
+      // failure rethrows first and leaves the occurrence exactly as it was.
+      if (chore.isCompleted) {
+        final active = (await repository.undoCompletion(chore)).chore;
+        if (key != null) {
+          if (active != null) {
+            syncOverlay.markUndoPending(
+              key: key,
+              chore: active,
+              now: DateTime.now(),
+            );
+          } else {
+            syncOverlay.remove(key);
+          }
+        }
       } else {
         if (_isFutureOccurrence(chore.effectiveOccurrenceDate)) {
           throw const CaleeHubException(
@@ -183,7 +265,14 @@ class ChoresController extends ChangeNotifier {
             code: 'FUTURE_COMPLETION_NOT_ALLOWED',
           );
         }
-        await repository.completeChore(chore);
+        final completed = (await repository.completeChore(chore)).chore;
+        if (key != null && completed != null) {
+          syncOverlay.markCompletionPending(
+            key: key,
+            chore: completed,
+            now: DateTime.now(),
+          );
+        }
       }
       await load();
     } finally {

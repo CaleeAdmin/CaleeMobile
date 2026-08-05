@@ -46,6 +46,21 @@ abstract final class CaleeColors {
   static const dotPurple = Color(0xFFAF52DE);
   static const dotPink = Color(0xFFFF2D55);
   static const dotGray = Color(0xFF8E8E93);
+
+  /// Canonical colour-swatch palette shared by the app's colour pickers
+  /// (calendar collections, people avatars…). Each entry pairs the hex string
+  /// that is stored/sent to the backend with its rendered [Color].
+  static const List<(String, Color)> swatchPalette = [
+    ('#FF3B30', dotRed),
+    ('#FF9500', dotOrange),
+    ('#FFCC00', dotYellow),
+    ('#34C759', dotGreen),
+    ('#5AC8FA', dotTeal),
+    ('#007AFF', dotBlue),
+    ('#AF52DE', dotPurple),
+    ('#FF2D55', dotPink),
+    ('#8E8E93', dotGray),
+  ];
 }
 
 abstract final class CaleeSpacing {

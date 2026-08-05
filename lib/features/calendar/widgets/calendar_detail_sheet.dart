@@ -6,18 +6,6 @@ import '../../../data/models/client_calendar.dart';
 import '../../../ui/calee_design.dart';
 import 'calendar_widget_helpers.dart';
 
-const List<(String, Color)> _kDetailColorPalette = [
-  ('#FF3B30', CaleeColors.dotRed),
-  ('#FF9500', CaleeColors.dotOrange),
-  ('#FFCC00', CaleeColors.dotYellow),
-  ('#34C759', CaleeColors.dotGreen),
-  ('#5AC8FA', CaleeColors.dotTeal),
-  ('#007AFF', CaleeColors.dotBlue),
-  ('#AF52DE', CaleeColors.dotPurple),
-  ('#FF2D55', CaleeColors.dotPink),
-  ('#8E8E93', CaleeColors.dotGray),
-];
-
 enum _DetailMode { info, edit }
 
 class CalendarDetailSheet extends StatefulWidget {
@@ -85,9 +73,6 @@ class _CalendarDetailSheetState extends State<CalendarDetailSheet> {
     if (sourceName.isEmpty || sourceName == widget.calendar.name) return null;
     return 'Originally "$sourceName" at the source.';
   }
-
-  bool _isPaletteSelected(String hex) =>
-      _colorController.text.trim().toUpperCase() == hex.toUpperCase();
 
   Color get _previewColor {
     final hex = _colorController.text.trim();
@@ -445,18 +430,9 @@ class _CalendarDetailSheetState extends State<CalendarDetailSheet> {
             ),
             const SizedBox(height: CaleeSpacing.sm),
 
-            Wrap(
-              spacing: CaleeSpacing.sm,
-              runSpacing: CaleeSpacing.sm,
-              children: [
-                for (final (hex, color) in _kDetailColorPalette)
-                  _DetailColorSwatch(
-                    hex: hex,
-                    color: color,
-                    isSelected: _isPaletteSelected(hex),
-                    onTap: () => setState(() => _colorController.text = hex),
-                  ),
-              ],
+            CaleeColorPalettePicker(
+              selectedHex: _colorController.text,
+              onSelected: (hex) => setState(() => _colorController.text = hex),
             ),
             const SizedBox(height: CaleeSpacing.sm + 4),
 
@@ -616,46 +592,6 @@ class _DetailInfoNote extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _DetailColorSwatch extends StatelessWidget {
-  const _DetailColorSwatch({
-    required this.hex,
-    required this.color,
-    required this.isSelected,
-    required this.onTap,
-  });
-
-  final String hex;
-  final Color color;
-  final bool isSelected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        width: 30,
-        height: 30,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: color,
-          border: isSelected
-              ? Border.all(
-                  color: CaleeColors.textPrimary,
-                  width: 2,
-                  strokeAlign: BorderSide.strokeAlignOutside,
-                )
-              : null,
-        ),
-        child: isSelected
-            ? const Icon(Icons.check, size: 16, color: Colors.white)
-            : null,
       ),
     );
   }

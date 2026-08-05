@@ -61,6 +61,42 @@ class ClientChoreList {
   final List<ClientChore> chores;
 }
 
+/// What the backend reports after a completion or undo.
+///
+/// [chore] is the backend's own representation of the occurrence in its
+/// resulting state — completed after a completion, active again after an undo.
+/// It is null only when the backend could not describe the occurrence (an older
+/// backend that returns a bare acknowledgement, or an undo whose base chore has
+/// since been deleted), in which case the caller must fall back to a refresh
+/// rather than invent a row.
+class ChoreCompletionResult {
+  const ChoreCompletionResult({
+    required this.completed,
+    required this.alreadyCompleted,
+    required this.completedDate,
+    required this.completionLogId,
+    required this.chore,
+  });
+
+  factory ChoreCompletionResult.fromJson(Map<String, dynamic> json) {
+    final chore = json['chore'];
+
+    return ChoreCompletionResult(
+      completed: json['completed'] as bool? ?? false,
+      alreadyCompleted: json['alreadyCompleted'] as bool? ?? false,
+      completedDate: json['completedDate'] as String?,
+      completionLogId: json['completionLogId'] as String?,
+      chore: chore is Map<String, dynamic> ? ClientChore.fromJson(chore) : null,
+    );
+  }
+
+  final bool completed;
+  final bool alreadyCompleted;
+  final String? completedDate;
+  final String? completionLogId;
+  final ClientChore? chore;
+}
+
 class ClientChore {
   const ClientChore({
     required this.id,
@@ -145,6 +181,40 @@ class ClientChore {
   final String? assigneeAvatarColor;
   final String approvalState;
 
+  ClientChore copyWith({
+    String? id,
+    String? completionLogId,
+    bool? completedToday,
+    String? section,
+  }) {
+    return ClientChore(
+      id: id ?? this.id,
+      calendarId: calendarId,
+      serviceId: serviceId,
+      serviceName: serviceName,
+      title: title,
+      scheduledAt: scheduledAt,
+      scheduledDate: scheduledDate,
+      description: description,
+      source: source,
+      kind: kind,
+      choreUid: choreUid,
+      parentChoreUid: parentChoreUid,
+      baseChoreId: baseChoreId,
+      occurrenceDate: occurrenceDate,
+      completionLogId: completionLogId ?? this.completionLogId,
+      completedToday: completedToday ?? this.completedToday,
+      section: section ?? this.section,
+      recurrence: recurrence,
+      points: points,
+      metadataPoints: metadataPoints,
+      assigneePersonId: assigneePersonId,
+      assigneeName: assigneeName,
+      assigneeAvatarColor: assigneeAvatarColor,
+      approvalState: approvalState,
+    );
+  }
+
   /// The occurrence date this row represents, in `YYYY-MM-DD` form: the
   /// server-provided [occurrenceDate] for expanded recurring rows, falling
   /// back to [scheduledDate] / [scheduledAt] for rows that predate expansion.
@@ -185,6 +255,14 @@ class ClientChore {
 
   String get normalizedKind => normalizeChoreKind(kind);
   String get normalizedSection => normalizeChoreSection(section);
+
+  /// True when this row represents a completion rather than outstanding work.
+  /// `history` counts: it is a completion the backend filed under an earlier
+  /// day, not an active occurrence.
+  bool get isCompleted =>
+      completedToday ||
+      normalizedSection == 'doneToday' ||
+      normalizedSection == 'history';
 
   bool get isCompletionLog => normalizedKind == 'completionLog';
   bool get isBaseChore => normalizedKind == 'baseChore';
