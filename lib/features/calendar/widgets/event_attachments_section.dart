@@ -86,6 +86,115 @@ class _AttachmentLoadFailure {
   final bool blocksAdd;
 }
 
+/// Where the attachment list stands, as one value rather than as an
+/// inference over `_attachments == null`.
+///
+/// That nullable list was the whole state model, and it could not express
+/// the difference between the two situations it was being asked about.
+/// "Null" meant BOTH "the first request has not answered yet" and "there is
+/// no list", and nothing at all distinguished "loading for the first time"
+/// from "refreshing a list I already have". So the editor could show
+///
+///     Loading attachments…
+///     Add attachment
+///
+/// with Add fully enabled -- because Add was gated on the calendar's
+/// capabilities and the pending upload, never on whether the list had come
+/// back. Tapping it opened the picker, staged the file, and started an
+/// upload against an event whose attachments were still unknown; the screen
+/// could then show a spinner and a failed upload for the same event at the
+/// same time, which is not a state that means anything.
+///
+/// Three fields, from which every question the section asks is derived:
+///
+///  * [baseline] -- the last list Hub actually returned. Non-null is the
+///    definition of "a successful list result exists", and an EMPTY list is
+///    a perfectly good one: an event with no attachments is a fact, not a
+///    missing answer.
+///  * [isRequestActive] -- a list request owns the section right now.
+///    Combined with [baseline] this separates initial loading from
+///    refreshing without a second flag that could disagree with it.
+///  * [failure] -- how the last request ended, when it failed. Kept
+///    ALONGSIDE [baseline] rather than instead of it, which is what lets a
+///    failed refresh report itself without discarding a list that is still
+///    perfectly valid.
+@immutable
+class _AttachmentListState {
+  const _AttachmentListState({
+    this.baseline,
+    this.isRequestActive = false,
+    this.failure,
+  });
+
+  /// Nothing loaded, nothing running, nothing failed: the state the section
+  /// is in for the instant between construction and its first request.
+  static const initial = _AttachmentListState();
+
+  final List<CalendarAttachment>? baseline;
+  final bool isRequestActive;
+  final _AttachmentLoadFailure? failure;
+
+  /// A list request has succeeded at least once.
+  bool get hasBaseline => baseline != null;
+
+  /// The first request is in flight -- no list has ever landed. This is the
+  /// only state that shows the "Loading attachments…" row.
+  bool get isInitialLoading => isRequestActive && !hasBaseline;
+
+  /// A later request is in flight over a list that is already on screen.
+  /// Deliberately NOT a loading state: the existing rows stay visible.
+  bool get isRefreshing => isRequestActive && hasBaseline;
+
+  /// A request failed before any list ever landed.
+  bool get hasInitialFailure => !hasBaseline && failure != null;
+
+  /// The single answer to "may the user choose a file right now?".
+  ///
+  /// Every clause earns its place:
+  ///  * [hasBaseline] -- the defect this exists to close. No file may be
+  ///    selected for an event whose attachments have never been read.
+  ///  * `!isRequestActive` -- including during a refresh. An upload started
+  ///    against a list that is being replaced would be racing the very
+  ///    answer that decides whether it is allowed (limits, capability).
+  ///  * `!failure.blocksAdd` -- an unsupported calendar or a missing event
+  ///    is terminal whether or not a baseline was loaded first.
+  bool get allowsAdd =>
+      hasBaseline && !isRequestActive && !(failure?.blocksAdd ?? false);
+
+  /// Entering a request. A previous failure is cleared here so a stale
+  /// error row cannot sit under a live spinner; [baseline] is deliberately
+  /// KEPT, which is what makes a refresh non-destructive.
+  _AttachmentListState starting() =>
+      _AttachmentListState(baseline: baseline, isRequestActive: true);
+
+  /// A request succeeded. Replaces the baseline wholesale (including with
+  /// an empty list) and clears any failure.
+  _AttachmentListState withBaseline(List<CalendarAttachment> attachments) =>
+      _AttachmentListState(baseline: attachments, isRequestActive: false);
+
+  /// A request failed. The previous baseline -- if there was one -- SURVIVES
+  /// this: a background refresh that could not reach Hub says nothing about
+  /// the attachments the user is already looking at, and blanking them
+  /// would destroy known-good information to report a transient failure.
+  _AttachmentListState withFailure(_AttachmentLoadFailure failure) =>
+      _AttachmentListState(
+        baseline: baseline,
+        isRequestActive: false,
+        failure: failure,
+      );
+
+  /// The list changed locally, from an operation whose result is
+  /// authoritative (an upload that completed, a detach that returned the
+  /// new list). Only meaningful once a baseline exists.
+  _AttachmentListState withLocalAttachments(
+    List<CalendarAttachment> attachments,
+  ) => _AttachmentListState(
+    baseline: attachments,
+    isRequestActive: isRequestActive,
+    failure: failure,
+  );
+}
+
 /// What the attachments section is currently doing, as far as anything
 /// outside it needs to care.
 ///
@@ -260,6 +369,7 @@ class _AttachmentPickFailed extends _AttachmentPickResult {
 class EventAttachmentsSection extends StatefulWidget {
   const EventAttachmentsSection({
     required this.eventId,
+    required this.calendarId,
     required this.hubClient,
     required this.accessToken,
     required this.canAdd,
@@ -275,6 +385,26 @@ class EventAttachmentsSection extends StatefulWidget {
   });
 
   final String eventId;
+
+  /// The calendar THIS EVENT belongs to, sent with every attachment
+  /// operation so Hub can go straight to it instead of searching the
+  /// account's calendars for the event's UID.
+  ///
+  /// It must be the event's own `calendarId`, not whichever calendar the
+  /// editor currently has selected. Those are the same value right up until
+  /// the user picks a different calendar in the middle of editing -- at
+  /// which point the selection describes where the event is being MOVED TO,
+  /// while its attachments still live where the event actually is. Sending
+  /// the selection would point every attachment call at a calendar the
+  /// event is not in yet, and the honest answer to that is "event not
+  /// found".
+  ///
+  /// A locator only. Hub still derives what this account may see from the
+  /// bearer token and the event id; this cannot grant access to anything,
+  /// and a value that does not resolve fails closed rather than widening
+  /// the search.
+  final String calendarId;
+
   final CaleeHubClient hubClient;
   final String accessToken;
   final bool canAdd;
@@ -359,8 +489,30 @@ class EventAttachmentsSection extends StatefulWidget {
 }
 
 class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
-  List<CalendarAttachment>? _attachments;
-  _AttachmentLoadFailure? _loadFailure;
+  _AttachmentListState _listState = _AttachmentListState.initial;
+
+  /// Identifies the list request that currently speaks for this section.
+  ///
+  /// Bumped whenever a running request is DISOWNED -- by disposal, or by the
+  /// section being rebuilt for a different event or calendar. Every
+  /// completion re-checks its own generation before it writes anything, so
+  /// a response that was asked for on behalf of a previous event cannot
+  /// land in the list of the current one, and a response that arrives after
+  /// this screen is gone cannot call setState at all.
+  ///
+  /// A counter, not a timer: nothing here waits a plausible interval and
+  /// hopes. Whether a result is stale is decided by whether the section
+  /// still wants it, which is knowable exactly.
+  int _listGeneration = 0;
+
+  /// True while a list request owns the section. This is the single-flight
+  /// lock, and it is the reason two Retry taps produce one request rather
+  /// than two: the second call returns before it can start anything.
+  ///
+  /// Distinct from [_AttachmentListState.isRequestActive], which is what
+  /// the UI renders. This is the lock; that is the picture.
+  bool _listRequestInFlight = false;
+
   bool _isUploading = false;
   double? _uploadProgress;
   AttachmentTransferCancelToken? _uploadCancelToken;
@@ -435,11 +587,46 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
   /// Set when Hub says attachments are unsupported for this calendar.
   bool _attachmentsDisabled = false;
 
-  bool get _effectiveCanAdd =>
+  /// Whether attaching a file to THIS EVENT is possible in principle: the
+  /// calendar accepts attachments, this is not an occurrence-scoped view,
+  /// and nothing has told us otherwise.
+  ///
+  /// Says nothing about whether it may happen right now -- that is
+  /// [_effectiveCanAdd]. The two are separate because they answer different
+  /// questions: this one decides whether the affordance EXISTS (an event
+  /// whose calendar cannot take attachments should not show an Add row at
+  /// all, and a pending upload must stay resolvable whatever the list is
+  /// doing), while the other decides whether it is live.
+  bool get _canAddCapability =>
       widget.canAdd &&
       !widget.isSeriesScoped &&
       !_attachmentsDisabled &&
-      !(_loadFailure?.blocksAdd ?? false);
+      !(_listState.failure?.blocksAdd ?? false);
+
+  /// Whether "Add attachment" may be used AT ALL right now.
+  ///
+  /// [_AttachmentListState.allowsAdd] is the clause this defect was about:
+  /// nothing may be attached to an event whose attachment list has never
+  /// successfully loaded, and nothing may be started while a list request
+  /// is in flight.
+  bool get _effectiveCanAdd => _canAddCapability && _listState.allowsAdd;
+
+  /// Whether the Add row is tappable.
+  ///
+  /// [_effectiveCanAdd] answers "is attaching allowed at all right now";
+  /// the rest is about work this section is already doing -- a transfer in
+  /// progress, an attempt holding the pending operation (the preflight
+  /// window a second tap used to slip through), an unresolved upload the
+  /// user must answer for first, or a teardown under way.
+  ///
+  /// Both this and the guards inside [_addAttachment] exist on purpose:
+  /// this one is for taps, those are for races and programmatic calls.
+  bool get _addRowEnabled =>
+      _effectiveCanAdd &&
+      !_isUploading &&
+      !_uploadAttemptInProgress &&
+      !_pendingUploadNeedsAction &&
+      !_stoppingAttachmentWork;
   bool get _effectiveCanRemove => widget.canRemove && !widget.isSeriesScoped;
 
   /// True when a pending upload is waiting on the user to retry or discard
@@ -472,6 +659,39 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
         discardUnresolvedUpload: _discardPendingUpload,
       );
     }
+
+    // The section is now being shown for a DIFFERENT event, or for the same
+    // event on a different calendar. Everything on screen describes the old
+    // one, and so does any request still in flight for it.
+    //
+    // Disowning that request is the point. Without it, a slow list call for
+    // the previous event could return after this one's has already
+    // succeeded and overwrite it -- the user would be looking at one
+    // event's attachments under another event's name, and Add would be
+    // gated on a baseline that belongs to neither.
+    if (oldWidget.eventId != widget.eventId ||
+        oldWidget.calendarId != widget.calendarId) {
+      _invalidateListRequest();
+      setState(() {
+        _listState = _AttachmentListState.initial;
+        // A capability answer is a property of the calendar it came from,
+        // so it does not carry over to a different one.
+        _attachmentsDisabled = false;
+      });
+      _load();
+    }
+  }
+
+  /// Disowns whatever list request is running, so its result can no longer
+  /// be applied and a new one may start immediately.
+  ///
+  /// Releases the single-flight lock as well as bumping the generation: the
+  /// disowned request's own `finally` is generation-guarded and will not
+  /// touch the lock again, so leaving it held would refuse every later load
+  /// for the lifetime of the section.
+  void _invalidateListRequest() {
+    _listGeneration++;
+    _listRequestInFlight = false;
   }
 
   /// Teardown, in the only order that closes the cache-lifecycle race:
@@ -486,6 +706,10 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
     // Stops any in-flight status poll from continuing past this screen: the
     // generation check runs before every attempt and before every setState.
     _pollGeneration++;
+    // Same for the attachment list: a request still on the wire is disowned
+    // here, so its completion finds a generation that has moved on and
+    // returns without touching a disposed State.
+    _invalidateListRequest();
     _cancelActiveTransferTokens();
     // Uncancellable actions (a viewer opening, the share sheet, a detach
     // already sent) are simply let go: nothing here can stop them, and this
@@ -639,21 +863,47 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
     }
   }
 
+  /// Loads (or reloads) the attachment list. The ONE entry point: initial
+  /// load, Retry, and every post-operation refresh all come through here, so
+  /// there is exactly one place that can start a list request.
+  ///
+  /// Single-flight, by returning early rather than by cancelling: a second
+  /// call while one is running is not a different question, so the honest
+  /// answer is the one already on its way. That is what makes two quick
+  /// Retry taps produce one request -- and it matters beyond tidiness,
+  /// because two overlapping requests could complete out of order and leave
+  /// the older answer on screen.
+  ///
+  /// Nothing here waits a fixed interval or races a delay. Ownership is
+  /// decided by [_listGeneration], which is exact.
   Future<void> _load() async {
-    setState(() => _loadFailure = null);
+    // A teardown or an in-progress transfer cancellation is not the moment
+    // to start a request whose result nothing will be able to apply.
+    if (_listRequestInFlight || _stoppingAttachmentWork || !mounted) return;
+
+    final generation = _listGeneration;
+    _listRequestInFlight = true;
+    // Add goes inert for the duration of the request -- initial or refresh.
+    setState(() => _listState = _listState.starting());
+
     try {
       final attachments = await widget.hubClient.listAttachments(
         accessToken: widget.accessToken,
         eventId: widget.eventId,
+        calendarId: widget.calendarId,
       );
-      if (!mounted) return;
-      setState(() => _attachments = attachments);
+      // The generation check is what makes a stale result harmless: this
+      // request no longer speaks for the section, so its answer -- however
+      // successful -- is discarded rather than applied over a newer one.
+      if (!mounted || generation != _listGeneration) return;
+      setState(() => _listState = _listState.withBaseline(attachments));
     } catch (error) {
       _debugLogAttachmentFailure('list', error);
-      if (!mounted) return;
+      if (!mounted || generation != _listGeneration) return;
       final failure = _classifyLoadFailure(error);
       setState(() {
-        _loadFailure = failure;
+        // Keeps any existing baseline: see _AttachmentListState.withFailure.
+        _listState = _listState.withFailure(failure);
         // A calendar that does not support attachments is a property of the
         // calendar, not of this request -- it stays disabled until the
         // section is rebuilt for a different one.
@@ -662,6 +912,11 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
           _attachmentsDisabled = true;
         }
       });
+    } finally {
+      // Only the owning request releases the lock. A disowned one must not,
+      // or it would unlock the section on behalf of the request that
+      // replaced it.
+      if (generation == _listGeneration) _listRequestInFlight = false;
     }
   }
 
@@ -670,9 +925,30 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
   /// generic branch.
   ///
   /// The default is deliberately the forgiving one: an unrecognised failure
-  /// keeps Retry and keeps Add, because refusing to let someone attach a
-  /// file over a code this build has never heard of is the worse mistake.
+  /// keeps Retry, because refusing a retry over a code this build has never
+  /// heard of is the worse mistake. It does NOT keep Add: with no
+  /// successful list there is no baseline, and `_effectiveCanAdd` refuses
+  /// on that alone regardless of what is decided here.
   static _AttachmentLoadFailure _classifyLoadFailure(Object error) {
+    final failure = _classifyLoadFailureKind(error);
+    final reference = error is CaleeHubException
+        ? attachmentSupportReference(error)
+        : null;
+    if (reference == null) return failure;
+
+    // On its own line, under whatever the row already said -- and only when
+    // Hub actually sent an id, so no row ever reads "Reference: null".
+    return _AttachmentLoadFailure(
+      title: failure.title,
+      subtitle: failure.subtitle == null
+          ? 'Reference: $reference'
+          : '${failure.subtitle}\nReference: $reference',
+      canRetry: failure.canRetry,
+      blocksAdd: failure.blocksAdd,
+    );
+  }
+
+  static _AttachmentLoadFailure _classifyLoadFailureKind(Object error) {
     if (error is! CaleeHubException) {
       return const _AttachmentLoadFailure(
         title: 'Could not load attachments',
@@ -783,7 +1059,11 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
   /// asynchronous error with no message and no recovery, which is precisely
   /// what a failing picker used to do.
   Future<void> _addAttachment() async {
-    if (_stoppingAttachmentWork || _uploadAttemptInProgress) return;
+    if (!_effectiveCanAdd ||
+        _stoppingAttachmentWork ||
+        _uploadAttemptInProgress) {
+      return;
+    }
     try {
       await _runAddAttachment();
     } catch (error) {
@@ -812,12 +1092,27 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
   /// programmatic calls: a selection accepted here would replace the very
   /// operation an in-flight preflight is about to send, and then be refused
   /// by the single-flight guard and left with nothing to send it.
+  ///
+  /// [_effectiveCanAdd] joins them at every one of those points, and is the
+  /// guard this method exists to hold. The row being disabled stops taps;
+  /// it does not stop a call that arrives from anywhere else, and it does
+  /// not help at all across the two long awaits below -- the source sheet
+  /// and the OS picker are both open for as long as the user takes, and the
+  /// initial list request can fail terminally (unsupported calendar,
+  /// deleted event) at any point during them. Re-reading it after each
+  /// await is what stops a file picked before that answer arrived from
+  /// being staged and queued afterwards.
   Future<void> _runAddAttachment() async {
-    if (_stoppingAttachmentWork || _uploadAttemptInProgress) return;
+    if (!_effectiveCanAdd ||
+        _stoppingAttachmentWork ||
+        _uploadAttemptInProgress) {
+      return;
+    }
 
     final source = await _pickSource();
     if (source == null ||
         !mounted ||
+        !_effectiveCanAdd ||
         _stoppingAttachmentWork ||
         _uploadAttemptInProgress) {
       return;
@@ -827,7 +1122,12 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
     // Re-checked after the picker await: a cancellation (or a teardown) can
     // begin while the OS picker is up, and the file that comes back must not
     // start an upload into either.
-    if (!mounted || _stoppingAttachmentWork || _uploadAttemptInProgress) return;
+    if (!mounted ||
+        !_effectiveCanAdd ||
+        _stoppingAttachmentWork ||
+        _uploadAttemptInProgress) {
+      return;
+    }
 
     switch (result) {
       // A normal cancellation is not an error and says nothing to the user.
@@ -1254,6 +1554,7 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
       final attachment = await widget.hubClient.uploadAttachment(
         accessToken: widget.accessToken,
         eventId: widget.eventId,
+        calendarId: widget.calendarId,
         // The STAGED copy, never the picker's path -- see
         // [PendingAttachmentUpload]. The name on the wire still comes from
         // originalFilename, so the generated staging basename is not
@@ -1343,7 +1644,15 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
   ) async {
     pending.state = AttachmentUploadState.completed;
     setState(() {
-      _attachments = [...?_attachments, attachment];
+      // Appended to the baseline. `?? const []` rather than `...?` on a
+      // nullable list because a completed upload PROVES a list exists: an
+      // event that just accepted an attachment has at least this one, so
+      // recording it must also establish the baseline if -- through some
+      // path that bypassed the Add gate -- there somehow is not one yet.
+      _listState = _listState.withLocalAttachments([
+        ...?_listState.baseline,
+        attachment,
+      ]);
       // Only clears the operation that actually completed: a discard while
       // this was in flight already replaced it with null, and must not be
       // undone here.
@@ -1488,7 +1797,10 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
       if (decision.action == AttachmentErrorAction.disableAttachments) {
         setState(() => _attachmentsDisabled = true);
       }
-      await _finalizePendingUploadAsFailed(pending, message: decision.message);
+      await _finalizePendingUploadAsFailed(
+        pending,
+        message: attachmentErrorMessageWithReference(decision.message, e),
+      );
       if (decision.action == AttachmentErrorAction.disableAttachments ||
           decision.action == AttachmentErrorAction.refreshList) {
         unawaited(_load());
@@ -1497,7 +1809,7 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
     }
 
     if (decision.message.isNotEmpty) {
-      _showMessage(decision.message);
+      _showMessage(attachmentErrorMessageWithReference(decision.message, e));
     }
 
     switch (decision.action) {
@@ -1587,6 +1899,7 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
         status = await widget.hubClient.attachmentUploadStatus(
           accessToken: widget.accessToken,
           eventId: widget.eventId,
+          calendarId: widget.calendarId,
           idempotencyKey: pending.idempotencyKey,
         );
       } on CaleeHubException catch (e) {
@@ -1746,10 +2059,13 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
       final updated = await widget.hubClient.detachAttachment(
         accessToken: widget.accessToken,
         eventId: widget.eventId,
+        calendarId: widget.calendarId,
         attachmentId: attachment.id,
       );
       if (!mounted) return;
-      setState(() => _attachments = updated);
+      // Hub's own post-detach list, which is authoritative -- it replaces
+      // the baseline rather than being a second, weaker source beside it.
+      setState(() => _listState = _listState.withLocalAttachments(updated));
       unawaited(_cache.evict(attachment.id));
     } on CaleeHubException catch (e) {
       if (!mounted) return;
@@ -1803,6 +2119,7 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
         await widget.hubClient.downloadAttachment(
           accessToken: widget.accessToken,
           eventId: widget.eventId,
+          calendarId: widget.calendarId,
           attachmentId: attachment.id,
           destinationFile: destination,
           cancelToken: token,
@@ -1939,7 +2256,22 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
     );
   }
 
+  /// The user-facing wording for [e], with Hub's request ID appended as a
+  /// support reference when the response carried one.
+  ///
+  /// The reference is added HERE, once, rather than at each of the six call
+  /// sites that show one of these messages -- and the full
+  /// [CaleeHubException.debugSummary] (endpoint, Hub's raw message) still
+  /// goes only to the debug log, never here.
   String _friendlyErrorMessage(
+    CaleeHubException e, {
+    required String fallback,
+  }) => attachmentErrorMessageWithReference(
+    _friendlyErrorText(e, fallback: fallback),
+    e,
+  );
+
+  static String _friendlyErrorText(
     CaleeHubException e, {
     required String fallback,
   }) {
@@ -1965,12 +2297,14 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
 
   @override
   Widget build(BuildContext context) {
-    final attachments = _attachments;
-    final loadFailure = _loadFailure;
+    final listState = _listState;
+    final attachments = listState.baseline;
+    final loadFailure = listState.failure;
     final hasNothingToShow =
         attachments != null &&
         attachments.isEmpty &&
-        !_effectiveCanAdd &&
+        !_canAddCapability &&
+        !listState.isRequestActive &&
         loadFailure == null;
 
     if (hasNothingToShow) return const SizedBox.shrink();
@@ -1981,8 +2315,14 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
           ? 'Applies to all events in this series'
           : null,
       children: [
-        if (attachments == null && loadFailure == null)
+        // Only ever the INITIAL load. A refresh over an existing list
+        // deliberately shows no spinner row here: replacing rows the user
+        // is reading with "Loading attachments…" would hide known-good
+        // information to report progress on a request that may well change
+        // nothing. The refresh is instead expressed by Add going inert.
+        if (listState.isInitialLoading)
           const CaleeListRow(
+            key: Key('attachment_loading_row'),
             title: 'Loading attachments…',
             leading: SizedBox(
               width: 20,
@@ -1993,7 +2333,13 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
         if (loadFailure != null)
           CaleeListRow(
             key: const Key('attachment_load_error_row'),
-            title: loadFailure.title,
+            // A failure over an existing list is a REFRESH failure, and
+            // saying so is the difference between "your attachments are
+            // gone" and "this list may be a moment out of date" -- the rows
+            // below it are still there and still usable.
+            title: listState.hasBaseline
+                ? 'Could not refresh attachments'
+                : loadFailure.title,
             subtitle: loadFailure.subtitle,
             leading: const Icon(
               Icons.error_outline,
@@ -2001,8 +2347,13 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
             ),
             // A terminal calendar/event failure is not tappable at all:
             // offering a retry that provably cannot change the answer is
-            // what made these failures indistinguishable in the first place.
-            onTap: loadFailure.canRetry ? _load : null,
+            // what made these failures indistinguishable in the first
+            // place. Nor is anything tappable while a request is already
+            // running -- _load() would refuse it anyway, and a live-looking
+            // control that does nothing is worse than a quiet one.
+            onTap: loadFailure.canRetry && !listState.isRequestActive
+                ? _load
+                : null,
           ),
         if (attachments != null)
           for (final attachment in attachments)
@@ -2019,7 +2370,13 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
         // explicit user resolution -- retrying reuses the SAME idempotency
         // key, discarding is the only thing that lets a later pick mint a
         // new one (Part G).
-        if (_effectiveCanAdd && !_isUploading && _pendingUploadNeedsAction)
+        // Gated on the CAPABILITY, not on list readiness: an upload the
+        // user still owes an answer on must stay resolvable while a list
+        // refresh happens to be in flight. Hiding Retry/Discard for the
+        // duration would strand it behind a request that has nothing to do
+        // with it. (It cannot appear during the INITIAL load at all -- Add
+        // was never available, so no operation can exist yet.)
+        if (_canAddCapability && !_isUploading && _pendingUploadNeedsAction)
           CaleeListRow(
             key: const Key('pending_upload_row'),
             title: _pendingUpload!.isUncertain
@@ -2057,7 +2414,12 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
               ],
             ),
           ),
-        if (_effectiveCanAdd)
+        // Shown whenever this event COULD take an attachment, and disabled
+        // when it cannot take one right now -- rather than disappearing and
+        // reappearing as the list loads. The affordance staying put, greyed,
+        // beneath "Loading attachments…" is the honest picture: attaching is
+        // possible here, just not yet.
+        if (_canAddCapability)
           CaleeListRow(
             key: const Key('add_attachment_row'),
             title: _isUploading ? 'Uploading…' : 'Add attachment',
@@ -2070,9 +2432,14 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
                       value: _uploadProgress,
                     ),
                   )
-                : const Icon(Icons.add, color: CaleeColors.primary),
+                : Icon(
+                    Icons.add,
+                    color: _addRowEnabled
+                        ? CaleeColors.primary
+                        : CaleeColors.textTertiary,
+                  ),
             titleStyle: TextStyle(
-              color: _isUploading
+              color: (_isUploading || !_addRowEnabled)
                   ? CaleeColors.textSecondary
                   : CaleeColors.primary,
               fontWeight: FontWeight.w600,
@@ -2083,24 +2450,7 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
                     child: const Text('Cancel'),
                   )
                 : null,
-            // Disabled while attachment work is stopping, so a normal tap
-            // cannot even reach the guard in _addAttachment. Both layers
-            // exist on purpose: this one is for users, that one is for
-            // races and programmatic calls.
-            //
-            // _uploadAttemptInProgress is the one that closes the preflight
-            // window. A freshly selected operation is neither uploading nor
-            // "needing action", so during its staged-file check every other
-            // condition here was false and the row stayed tappable -- a
-            // second Add could replace the operation the first was about to
-            // send.
-            onTap:
-                (_isUploading ||
-                    _uploadAttemptInProgress ||
-                    _pendingUploadNeedsAction ||
-                    _stoppingAttachmentWork)
-                ? null
-                : _addAttachment,
+            onTap: _addRowEnabled ? _addAttachment : null,
           ),
       ],
     );

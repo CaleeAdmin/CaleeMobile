@@ -46,6 +46,52 @@ class _StubHub extends CaleeHubClient {
   final List<String> uploadIdempotencyKeys = [];
   final List<String> uploadOriginalFilenames = [];
 
+  /// Every calendar locator seen, per operation, in call order. The section
+  /// must send the EVENT's calendar on all five, and the same one each time.
+  final List<String?> listCalendarIds = [];
+  final List<String?> uploadCalendarIds = [];
+  final List<String?> statusCalendarIds = [];
+  final List<String?> downloadCalendarIds = [];
+  final List<String?> detachCalendarIds = [];
+
+  /// Every locator this stub was given, whatever the operation.
+  List<String?> get allCalendarIds => [
+    ...listCalendarIds,
+    ...uploadCalendarIds,
+    ...statusCalendarIds,
+    ...downloadCalendarIds,
+    ...detachCalendarIds,
+  ];
+
+  /// The event id each list call carried, so a result can be attributed to
+  /// the event it was actually asked for.
+  final List<String> listEventIds = [];
+
+  /// When true, every list call parks on a fresh completer instead of
+  /// answering. The test resolves them by hand, in whatever order it likes
+  /// -- which is how an out-of-order completion is produced deterministically
+  /// rather than by racing delays.
+  bool gateListCalls = false;
+  final List<Completer<List<CalendarAttachment>>> listGates = [];
+
+  /// When set (and the call is not gated), the list call throws this.
+  Object? listThrows;
+
+  /// When set, the detach call throws this. A 409 here is the section's own
+  /// documented "this event changed elsewhere -- refreshing" path, and so is
+  /// the realistic way to start a REFRESH over an already-successful
+  /// baseline without reaching into the widget's internals.
+  Object? detachThrows;
+
+  /// Completes the [index]-th GATED list call. Note that [listGates] counts
+  /// only calls made while [gateListCalls] was on, so its indices line up
+  /// with [listAttachmentsCallCount] only when gating was on from the start.
+  void completeList(List<CalendarAttachment> attachments, {int index = 0}) =>
+      listGates[index].complete(attachments);
+
+  void failList(Object error, {int index = 0}) =>
+      listGates[index].completeError(error);
+
   /// Every key the widget asked Hub about, in order. Reconciliation MUST go
   /// through here and not through the attachment list.
   final List<String> statusQueriedKeys = [];
@@ -65,8 +111,17 @@ class _StubHub extends CaleeHubClient {
   Future<List<CalendarAttachment>> listAttachments({
     required String accessToken,
     required String eventId,
+    String? calendarId,
   }) async {
     listAttachmentsCallCount++;
+    listCalendarIds.add(calendarId);
+    listEventIds.add(eventId);
+    if (gateListCalls) {
+      final gate = Completer<List<CalendarAttachment>>();
+      listGates.add(gate);
+      return gate.future;
+    }
+    if (listThrows != null) throw listThrows!;
     return List.of(_attachments);
   }
 
@@ -75,7 +130,9 @@ class _StubHub extends CaleeHubClient {
     required String accessToken,
     required String eventId,
     required String idempotencyKey,
+    String? calendarId,
   }) async {
+    statusCalendarIds.add(calendarId);
     statusQueriedKeys.add(idempotencyKey);
     final held = statusGate;
     if (held != null) await held.future;
@@ -97,9 +154,11 @@ class _StubHub extends CaleeHubClient {
     required File file,
     required String originalFilename,
     required String idempotencyKey,
+    String? calendarId,
     void Function(int sent, int total)? onProgress,
     AttachmentTransferCancelToken? cancelToken,
   }) async {
+    uploadCalendarIds.add(calendarId);
     uploadIdempotencyKeys.add(idempotencyKey);
     uploadOriginalFilenames.add(originalFilename);
     final attachment = await _onUpload!(onProgress);
@@ -113,9 +172,11 @@ class _StubHub extends CaleeHubClient {
     required String eventId,
     required String attachmentId,
     required File destinationFile,
+    String? calendarId,
     void Function(int received, int? total)? onProgress,
     AttachmentTransferCancelToken? cancelToken,
   }) async {
+    downloadCalendarIds.add(calendarId);
     downloadedPaths.add(destinationFile.path);
     await destinationFile.writeAsBytes([1, 2, 3, 4]);
   }
@@ -125,7 +186,10 @@ class _StubHub extends CaleeHubClient {
     required String accessToken,
     required String eventId,
     required String attachmentId,
+    String? calendarId,
   }) async {
+    detachCalendarIds.add(calendarId);
+    if (detachThrows != null) throw detachThrows!;
     _onDetach?.call(attachmentId);
     _attachments = _attachments.where((a) => a.id != attachmentId).toList();
     return List.of(_attachments);
@@ -256,11 +320,19 @@ class _GatedStagingManager extends AttachmentUploadStagingManager {
   }
 }
 
+/// The calendar every attachment call in these tests must carry. Deliberately
+/// in the public `serviceId:rawId` form, with a character that has to be
+/// percent-encoded, so a call site that hand-built a query string would be
+/// visible.
+const kTestCalendarId = 'portal:cal 1';
+
 Future<void> pumpSection(
   WidgetTester tester, {
   required CaleeHubClient hub,
   required bool canAdd,
   required bool canRemove,
+  String eventId = 'portal:evt-1',
+  String calendarId = kTestCalendarId,
   bool isSeriesScoped = false,
   TextScaler? textScaler,
   Future<OpenResult> Function(String path) openFile = _fakeOpenFile,
@@ -281,7 +353,8 @@ Future<void> pumpSection(
       home: Scaffold(
         body: SingleChildScrollView(
           child: EventAttachmentsSection(
-            eventId: 'portal:evt-1',
+            eventId: eventId,
+            calendarId: calendarId,
             hubClient: hub,
             accessToken: 'tok',
             canAdd: canAdd,
@@ -316,6 +389,79 @@ bool retryButtonEnabled(WidgetTester tester) =>
         .widget<TextButton>(find.byKey(const Key('retry_pending_upload')))
         .onPressed !=
     null;
+
+/// Calls the Add row's handler DIRECTLY, bypassing the disabled state a tap
+/// would respect.
+///
+/// This is the whole point of the test that uses it: `onTap: null` stops a
+/// finger, and nothing else. The guards inside `_addAttachment` are what
+/// stop a call that arrives some other way, and the only way to prove they
+/// are there is to make that call.
+void invokeAddHandlerDirectly(WidgetTester tester) {
+  final row = tester.widget<CaleeListRow>(
+    find.byKey(const Key('add_attachment_row')),
+  );
+  // A disabled row genuinely has no handler to invoke; that alone is not
+  // proof the guard beneath it works, so the test asserts on the effect
+  // (no picker, no upload), not on this.
+  row.onTap?.call();
+}
+
+/// The error row's rendered subtitle, or null when there is no error row.
+String? loadErrorSubtitle(WidgetTester tester) {
+  final finder = find.byKey(const Key('attachment_load_error_row'));
+  if (finder.evaluate().isEmpty) return null;
+  return tester.widget<CaleeListRow>(finder).subtitle;
+}
+
+CaleeHubException hubError(
+  String? code, {
+  int statusCode = 500,
+  String? requestId,
+}) => CaleeHubException(
+  statusCode: statusCode,
+  message: 'boom',
+  code: code,
+  requestId: requestId,
+);
+
+/// Pumps a bounded number of frames, draining microtasks each time.
+///
+/// The alternative, pumpAndSettle(), cannot be used while any indeterminate
+/// CircularProgressIndicator is on screen -- the "Loading attachments…" row
+/// and a busy attachment row both have one, and an indeterminate spinner
+/// never stops scheduling frames, so pumpAndSettle waits out its whole
+/// timeout and fails. (The same constraint is already recorded above the
+/// dropped cache-lifecycle group.) Bounded pumping is not a sleep: every
+/// response these tests wait on is a Completer the test itself resolves, so
+/// the work has already been queued by the time this runs.
+Future<void> pumpFrames(WidgetTester tester, {int frames = 6}) async {
+  for (var i = 0; i < frames; i++) {
+    await tester.pump(const Duration(milliseconds: 50));
+  }
+}
+
+/// Drives a REFRESH over an already-successful baseline, through the
+/// section's own documented path for it: a detach that comes back 409, which
+/// the section reports as "this event changed elsewhere" and follows with a
+/// re-read of the list.
+///
+/// Deliberately a real user interaction rather than a poke at private state
+/// -- the question these tests ask is what the user sees while a refresh is
+/// in flight, and a refresh nobody could have started would not answer it.
+/// Requires the stub's `detachThrows` to be a 409 and `gateListCalls` to be
+/// on, so the refresh parks and can be inspected mid-flight.
+Future<void> startRefreshViaConflictingDetach(
+  WidgetTester tester,
+  String filename,
+) async {
+  await tester.tap(find.byTooltip('Remove $filename from event'));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text('Remove'));
+  // Not pumpAndSettle: the row is marked busy for the whole of the refresh
+  // this starts, and its spinner would never settle.
+  await pumpFrames(tester, frames: 10);
+}
 
 void main() {
   setUp(() async {
@@ -1726,5 +1872,511 @@ void main() {
         expect(tester.takeException(), isNull);
       },
     );
+  });
+
+  // ── Attachment-list lifecycle ─────────────────────────────────────────────
+  //
+  // The defect these are about: the section started its list request on
+  // mount and gated "Add attachment" on the calendar's capabilities alone,
+  // so during the initial load Add was fully live. A file picked in that
+  // window was staged and uploaded against an event whose attachments were
+  // still unknown, and the editor could end up showing
+  //
+  //     Loading attachments…
+  //     Could not attach "19.png"        [Retry] [Discard]
+  //
+  // at the same time -- a spinner for a list that has never arrived, next to
+  // a failed upload for it.
+  //
+  // Every asynchronous list response below is driven by a Completer the test
+  // resolves by hand (see _StubHub.gateListCalls). Nothing here waits out a
+  // duration and hopes.
+  group('attachment list lifecycle', () {
+    testWidgets('initial loading shows a spinner and disables Add', (
+      tester,
+    ) async {
+      final hub = _StubHub()..gateListCalls = true;
+      await pumpSection(tester, hub: hub, canAdd: true, canRemove: true);
+
+      expect(find.text('Loading attachments…'), findsOneWidget);
+      expect(
+        addRowEnabled(tester),
+        isFalse,
+        reason: 'no file may be chosen for an event whose list has not loaded',
+      );
+
+      hub.completeList(const []);
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets(
+      'a programmatic Add during initial loading opens nothing and uploads '
+      'nothing',
+      (tester) async {
+        final hub = _StubHub(
+          onUpload: (_) async => throw StateError('must not upload'),
+        )..gateListCalls = true;
+        await pumpSection(tester, hub: hub, canAdd: true, canRemove: true);
+
+        // The row is disabled, so this is reaching past the UI on purpose:
+        // the guards inside _addAttachment are what a race or a
+        // programmatic call meets, and they are what is under test.
+        invokeAddHandlerDirectly(tester);
+        await pumpFrames(tester);
+
+        expect(
+          find.text('Add attachment'),
+          findsOneWidget,
+          reason: 'the source sheet must not have opened over the editor',
+        );
+        expect(
+          find.text('Choose photo'),
+          findsNothing,
+          reason: 'no picker may open before the list has ever loaded',
+        );
+        expect(hub.uploadIdempotencyKeys, isEmpty);
+        expect(
+          find.byKey(const Key('pending_upload_row')),
+          findsNothing,
+          reason:
+              'the invalid state this closes: a spinner and a pending upload '
+              'for the same event at the same time',
+        );
+        expect(find.text('Loading attachments…'), findsOneWidget);
+
+        hub.completeList(const []);
+        await pumpFrames(tester);
+      },
+    );
+
+    testWidgets('an initial EMPTY list is a successful baseline and enables '
+        'Add', (tester) async {
+      final hub = _StubHub()..gateListCalls = true;
+      await pumpSection(tester, hub: hub, canAdd: true, canRemove: true);
+      expect(addRowEnabled(tester), isFalse);
+
+      // An event with no attachments is an answer, not a missing one.
+      hub.completeList(const []);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Loading attachments…'), findsNothing);
+      expect(addRowEnabled(tester), isTrue);
+    });
+
+    testWidgets(
+      'an initial network failure stops the spinner, offers Retry and keeps '
+      'Add disabled',
+      (tester) async {
+        final hub = _StubHub()..gateListCalls = true;
+        await pumpSection(tester, hub: hub, canAdd: true, canRemove: true);
+
+        hub.failList(hubError('NETWORK_ERROR', statusCode: 0));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Loading attachments…'), findsNothing);
+        final errorRow = tester.widget<CaleeListRow>(
+          find.byKey(const Key('attachment_load_error_row')),
+        );
+        expect(errorRow.title, 'Could not load attachments');
+        expect(errorRow.onTap, isNotNull, reason: 'a retry could still work');
+        expect(
+          addRowEnabled(tester),
+          isFalse,
+          reason: 'still no baseline, so still nothing may be attached',
+        );
+      },
+    );
+
+    testWidgets('Retry after an initial failure loads a baseline and enables '
+        'Add', (tester) async {
+      final hub = _StubHub()..gateListCalls = true;
+      await pumpSection(tester, hub: hub, canAdd: true, canRemove: true);
+      hub.failList(hubError('NETWORK_ERROR', statusCode: 0));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('attachment_load_error_row')));
+      await tester.pump();
+      expect(hub.listAttachmentsCallCount, 2);
+      expect(
+        find.byKey(const Key('attachment_load_error_row')),
+        findsNothing,
+        reason:
+            'the error row is replaced by the spinner for the duration of the '
+            'retry, so a second tap is not even reachable',
+      );
+
+      hub.completeList([_attachment()], index: 1);
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('attachment_load_error_row')), findsNothing);
+      expect(find.text('doc.pdf'), findsOneWidget);
+      expect(addRowEnabled(tester), isTrue);
+    });
+
+    testWidgets('an unsupported calendar is terminal: no Retry, and Add never '
+        'enables', (tester) async {
+      final hub = _StubHub()..gateListCalls = true;
+      await pumpSection(tester, hub: hub, canAdd: true, canRemove: true);
+
+      hub.failList(
+        hubError('ATTACHMENTS_NOT_SUPPORTED_FOR_CALENDAR', statusCode: 409),
+      );
+      await tester.pumpAndSettle();
+
+      final errorRow = tester.widget<CaleeListRow>(
+        find.byKey(const Key('attachment_load_error_row')),
+      );
+      expect(
+        errorRow.title,
+        'Attachments are not supported for this calendar.',
+      );
+      expect(
+        errorRow.onTap,
+        isNull,
+        reason: 'tapping cannot change a calendar capability',
+      );
+      expect(
+        find.byKey(const Key('add_attachment_row')),
+        findsNothing,
+        reason: 'the affordance itself is withdrawn, not merely disabled',
+      );
+    });
+
+    testWidgets(
+      'EVENT_NOT_FOUND is terminal: no Retry, and Add never enables',
+      (tester) async {
+        final hub = _StubHub()..gateListCalls = true;
+        await pumpSection(tester, hub: hub, canAdd: true, canRemove: true);
+
+        hub.failList(hubError('EVENT_NOT_FOUND', statusCode: 404));
+        await tester.pumpAndSettle();
+
+        final errorRow = tester.widget<CaleeListRow>(
+          find.byKey(const Key('attachment_load_error_row')),
+        );
+        expect(errorRow.title, 'This event is no longer available.');
+        expect(errorRow.onTap, isNull);
+        expect(find.byKey(const Key('add_attachment_row')), findsNothing);
+      },
+    );
+
+    testWidgets('two Retry taps produce exactly one active list request', (
+      tester,
+    ) async {
+      // Over a baseline, a failed refresh leaves the error row on screen --
+      // which is the only case where tapping Retry twice is physically
+      // possible at all, since an initial failure's row is replaced by the
+      // spinner the moment the first tap lands.
+      final hub = _StubHub(initialAttachments: [_attachment()]);
+      await pumpSection(tester, hub: hub, canAdd: true, canRemove: true);
+      await tester.pumpAndSettle();
+
+      hub
+        ..gateListCalls = true
+        ..detachThrows = hubError(null, statusCode: 409);
+      await startRefreshViaConflictingDetach(tester, 'doc.pdf');
+      hub.failList(hubError('NETWORK_ERROR', statusCode: 0));
+      await pumpFrames(tester);
+
+      final errorRowFinder = find.byKey(const Key('attachment_load_error_row'));
+      expect(errorRowFinder, findsOneWidget);
+
+      // Both taps land in the SAME frame, with no pump between them, so the
+      // second one meets a row that is still on screen and a handler that is
+      // still attached -- exactly the double-tap a real finger produces, and
+      // the only arrangement in which the single-flight guard is what
+      // refuses the second call rather than the widget tree having moved on.
+      await tester.tap(errorRowFinder);
+      await tester.tap(errorRowFinder);
+      await tester.pump();
+
+      expect(
+        hub.listAttachmentsCallCount,
+        3,
+        reason:
+            'the initial load, the refresh that failed, and exactly ONE retry '
+            'for two taps',
+      );
+      expect(
+        errorRowFinder,
+        findsNothing,
+        reason: 'and nothing invites a third while that retry is running',
+      );
+
+      // Gate 0 was the failed refresh; gate 1 is the retry still running.
+      hub.completeList(const [], index: 1);
+      await pumpFrames(tester);
+    });
+
+    testWidgets(
+      'a list result for the previous event cannot replace the current '
+      "event's",
+      (tester) async {
+        final hub = _StubHub()..gateListCalls = true;
+        await pumpSection(
+          tester,
+          hub: hub,
+          canAdd: true,
+          canRemove: true,
+          eventId: 'portal:evt-OLD',
+        );
+        expect(hub.listEventIds, ['portal:evt-OLD']);
+
+        // The editor is rebuilt for a different event while the first
+        // request is still on the wire. That request is disowned here.
+        await pumpSection(
+          tester,
+          hub: hub,
+          canAdd: true,
+          canRemove: true,
+          eventId: 'portal:evt-NEW',
+        );
+        expect(hub.listEventIds, ['portal:evt-OLD', 'portal:evt-NEW']);
+
+        // The NEW event answers first...
+        hub.completeList([
+          _attachment(id: 'new', filename: 'new.pdf'),
+        ], index: 1);
+        await tester.pumpAndSettle();
+        expect(find.text('new.pdf'), findsOneWidget);
+
+        // ...and only then does the OLD one, with different contents. It
+        // must be discarded: it was asked on behalf of an event this
+        // section no longer shows.
+        hub.completeList([_attachment(id: 'old', filename: 'old.pdf')]);
+        await tester.pumpAndSettle();
+
+        expect(find.text('new.pdf'), findsOneWidget);
+        expect(
+          find.text('old.pdf'),
+          findsNothing,
+          reason: 'a stale answer must never overwrite a newer one',
+        );
+        expect(tester.takeException(), isNull);
+      },
+    );
+
+    testWidgets(
+      'a refresh keeps the existing list visible and disables Add only while '
+      'it runs',
+      (tester) async {
+        // The refresh is started the way the section really starts one: a
+        // detach that comes back 409 ("this event changed elsewhere") and
+        // re-reads the list.
+        final hub = _StubHub(
+          initialAttachments: [_attachment(filename: 'baseline.pdf')],
+        );
+        await pumpSection(tester, hub: hub, canAdd: true, canRemove: true);
+        await tester.pumpAndSettle();
+        expect(addRowEnabled(tester), isTrue);
+
+        hub
+          ..gateListCalls = true
+          ..detachThrows = hubError(null, statusCode: 409);
+        await startRefreshViaConflictingDetach(tester, 'baseline.pdf');
+
+        expect(
+          find.text('baseline.pdf'),
+          findsOneWidget,
+          reason: 'a refresh must not blank the list the user is reading',
+        );
+        expect(
+          find.text('Loading attachments…'),
+          findsNothing,
+          reason: 'that row is for a list that has NEVER loaded, not this',
+        );
+        expect(
+          addRowEnabled(tester),
+          isFalse,
+          reason: 'Add is inert while the refresh that may change it is live',
+        );
+
+        hub.completeList([_attachment(id: 'att-2', filename: 'refreshed.pdf')]);
+        await tester.pumpAndSettle();
+
+        expect(find.text('refreshed.pdf'), findsOneWidget);
+        expect(find.text('baseline.pdf'), findsNothing);
+        expect(
+          addRowEnabled(tester),
+          isTrue,
+          reason: 'eligibility returns the moment the request ends',
+        );
+      },
+    );
+
+    testWidgets(
+      'a failed refresh preserves the baseline, reports itself, and restores '
+      'Add',
+      (tester) async {
+        final hub = _StubHub(
+          initialAttachments: [_attachment(filename: 'baseline.pdf')],
+        );
+        await pumpSection(tester, hub: hub, canAdd: true, canRemove: true);
+        await tester.pumpAndSettle();
+
+        hub
+          ..gateListCalls = true
+          ..detachThrows = hubError(null, statusCode: 409);
+        await startRefreshViaConflictingDetach(tester, 'baseline.pdf');
+
+        hub.failList(hubError('NETWORK_ERROR', statusCode: 0));
+        await tester.pumpAndSettle();
+
+        expect(
+          find.text('baseline.pdf'),
+          findsOneWidget,
+          reason: 'a transient refresh failure says nothing about the list',
+        );
+        expect(
+          tester
+              .widget<CaleeListRow>(
+                find.byKey(const Key('attachment_load_error_row')),
+              )
+              .title,
+          'Could not refresh attachments',
+          reason:
+              'and it must say so, rather than "could not load" over a list '
+              'that plainly did load',
+        );
+        expect(
+          addRowEnabled(tester),
+          isTrue,
+          reason:
+              'the baseline is still valid, so attaching is still allowed once '
+              'the request is over',
+        );
+      },
+    );
+  });
+
+  // ── Calendar locator ──────────────────────────────────────────────────────
+
+  group('calendar locator', () {
+    late ImagePickerPlatform originalImagePickerPlatform;
+
+    setUp(() {
+      originalImagePickerPlatform = ImagePickerPlatform.instance;
+    });
+
+    tearDown(() {
+      ImagePickerPlatform.instance = originalImagePickerPlatform;
+    });
+
+    testWidgets(
+      'list, upload and detach all carry the same event calendar id',
+      (tester) async {
+        // Download is proven at the client layer instead
+        // (calee_hub_client_attachments_test.dart asserts the request URI of
+        // all five endpoints): tapping a row to drive a download leaves an
+        // indeterminate spinner that makes settling impossible here -- the
+        // same constraint recorded above the dropped cache-lifecycle group.
+        final sourceFile = File('${tempDir.path}/locator_pick.jpg');
+        await tester.runAsync(
+          () => sourceFile.writeAsBytes(List<int>.filled(1024, 7)),
+        );
+        ImagePickerPlatform.instance = _FakeImagePickerPlatform(
+          XFile(sourceFile.path),
+        );
+
+        final hub = _StubHub(
+          initialAttachments: [_attachment()],
+          onUpload: (_) async => _attachment(
+            id: 'new-1',
+            filename: 'locator_pick.jpg',
+            size: 1024,
+          ),
+        );
+        await pumpSection(tester, hub: hub, canAdd: true, canRemove: true);
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byKey(const Key('add_attachment_row')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Choose photo'));
+        await tester.pump();
+        await settleWithFileIo(tester);
+
+        await tester.tap(find.byTooltip('Remove doc.pdf from event'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Remove'));
+        await tester.pumpAndSettle();
+
+        expect(hub.listCalendarIds, isNotEmpty);
+        expect(hub.uploadCalendarIds, isNotEmpty);
+        expect(hub.detachCalendarIds, isNotEmpty);
+        expect(
+          hub.allCalendarIds,
+          everyElement(kTestCalendarId),
+          reason: 'one section, one calendar, on every operation it performs',
+        );
+      },
+    );
+
+    testWidgets('the occurrence event id is passed through unchanged', (
+      tester,
+    ) async {
+      // The editor deliberately passes initialEvent.id, which keeps its
+      // RECURRENCE-ID suffix, rather than collapsing to the series id --
+      // adding a calendar locator must not have quietly changed that.
+      const occurrenceId = 'portal:evt-1:20260101T000000Z';
+      final hub = _StubHub();
+      await pumpSection(
+        tester,
+        hub: hub,
+        canAdd: true,
+        canRemove: true,
+        eventId: occurrenceId,
+      );
+      await tester.pumpAndSettle();
+
+      expect(hub.listEventIds, [occurrenceId]);
+      expect(hub.listCalendarIds, [kTestCalendarId]);
+    });
+  });
+
+  // ── Support reference ─────────────────────────────────────────────────────
+
+  group('support reference', () {
+    testWidgets("a list failure shows Hub's request id as a reference", (
+      tester,
+    ) async {
+      final hub = _StubHub()..gateListCalls = true;
+      await pumpSection(tester, hub: hub, canAdd: true, canRemove: true);
+
+      hub.failList(
+        hubError('NETWORK_ERROR', statusCode: 0, requestId: 'A1B2C3D4'),
+      );
+      await tester.pumpAndSettle();
+
+      expect(loadErrorSubtitle(tester), contains('Reference: A1B2C3D4'));
+    });
+
+    testWidgets('a list failure without a request id shows no reference line', (
+      tester,
+    ) async {
+      final hub = _StubHub()..gateListCalls = true;
+      await pumpSection(tester, hub: hub, canAdd: true, canRemove: true);
+
+      hub.failList(hubError('NETWORK_ERROR', statusCode: 0));
+      await tester.pumpAndSettle();
+
+      final subtitle = loadErrorSubtitle(tester);
+      expect(subtitle, isNotNull);
+      expect(subtitle, isNot(contains('Reference')));
+      expect(
+        subtitle,
+        isNot(contains('null')),
+        reason: 'never "Reference: null"',
+      );
+    });
+
+    testWidgets('a successful load shows no reference anywhere', (
+      tester,
+    ) async {
+      final hub = _StubHub(initialAttachments: [_attachment()]);
+      await pumpSection(tester, hub: hub, canAdd: true, canRemove: true);
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('Reference:'), findsNothing);
+    });
   });
 }

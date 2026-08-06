@@ -15,7 +15,9 @@ import 'package:calee_mobile/features/calendar/attachment_upload_staging_manager
 import 'package:calee_mobile/features/calendar/pending_attachment_upload.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-CaleeHubException error(String code, {int statusCode = 409}) =>
+/// [code] is nullable so a response that carried no stable code -- the case
+/// the status-class rules exist for -- can be expressed.
+CaleeHubException error(String? code, {int statusCode = 409}) =>
     CaleeHubException(statusCode: statusCode, code: code, message: 'x');
 
 /// A PendingAttachmentUpload now owns its staged copy rather than a bare
@@ -261,4 +263,216 @@ void main() {
       expect(upload.isActive, isFalse);
     });
   });
+
+  // ── Upload-failure classes ────────────────────────────────────────────────
+  //
+  // ATTACHMENT_UPLOAD_FAILED and UPSTREAM_ERROR used to fall through to one
+  // generic tail that made every one of them "please try again" with the
+  // operation kept. That is right for a service that is briefly down, wrong
+  // for a full disk (the same wording tells the user nothing about what to
+  // do), and outright harmful for a rejected request, which fails
+  // identically however many times it is re-sent.
+  group('upload failure classes are told apart by status', () {
+    test('507 says storage, and keeps the file and the key', () {
+      final d = decideAttachmentError(
+        error('ATTACHMENT_UPLOAD_FAILED', statusCode: 507),
+      );
+      expect(
+        d.message,
+        'There is not enough storage available for this attachment.',
+      );
+      expect(d.nextUploadState, AttachmentUploadState.retryable);
+      expect(
+        d.keepsIdempotencyKey,
+        isTrue,
+        reason: 'a retry after freeing space is the SAME upload',
+      );
+      expect(
+        d.autoRetryAllowed,
+        isFalse,
+        reason: 'nothing may re-send this on its own -- the disk is still full',
+      );
+      expect(d.action, AttachmentErrorAction.showMessageOnly);
+    });
+
+    for (final status in [502, 503, 504]) {
+      test(
+        '$status is a retryable service failure that keeps file and key',
+        () {
+          for (final code in ['ATTACHMENT_UPLOAD_FAILED', 'UPSTREAM_ERROR']) {
+            final d = decideAttachmentError(error(code, statusCode: status));
+            expect(
+              d.message,
+              'The calendar service could not store this file. Try again '
+              'shortly.',
+              reason: '$code/$status',
+            );
+            expect(d.nextUploadState, AttachmentUploadState.retryable);
+            expect(d.keepsIdempotencyKey, isTrue, reason: '$code/$status');
+            expect(
+              d.autoRetryAllowed,
+              isFalse,
+              reason: 'the retry is the user\'s to make: $code/$status',
+            );
+          }
+        },
+      );
+    }
+
+    test('an unknown 5xx stays retryable and keeps the operation whole', () {
+      final d = decideAttachmentError(error('SOMETHING_NEW', statusCode: 500));
+      expect(d.nextUploadState, AttachmentUploadState.retryable);
+      expect(d.keepsIdempotencyKey, isTrue);
+      expect(d.autoRetryAllowed, isFalse);
+    });
+
+    test('an unknown 4xx is TERMINAL, not an endless retry', () {
+      final d = decideAttachmentError(error('SOMETHING_NEW', statusCode: 400));
+      expect(
+        d.nextUploadState,
+        AttachmentUploadState.failedFinal,
+        reason:
+            're-sending the same rejected request produces the same rejection',
+      );
+      expect(d.action, AttachmentErrorAction.discardOperation);
+      expect(
+        d.keepsIdempotencyKey,
+        isFalse,
+        reason: 'the operation is over; there is no retry to recognise',
+      );
+    });
+
+    test('a bare 409 is still the stale-event refresh, not the 4xx tail', () {
+      final d = decideAttachmentError(error(null, statusCode: 409));
+      expect(d.action, AttachmentErrorAction.refreshList);
+      expect(d.nextUploadState, AttachmentUploadState.retryable);
+      expect(d.keepsIdempotencyKey, isTrue);
+    });
+
+    test('every explicit 4xx code keeps its own decision', () {
+      // The unknown-4xx rule must be the DEFAULT, never an override: these
+      // all carry 4xx statuses and must still answer as themselves.
+      expect(
+        decideAttachmentError(error('ATTACHMENT_LIMIT_REACHED')).message,
+        'This event has reached its attachment limit.',
+      );
+      expect(
+        decideAttachmentError(
+          error('ATTACHMENT_TOO_LARGE', statusCode: 413),
+        ).message,
+        'This file is too large to attach.',
+      );
+      expect(
+        decideAttachmentError(
+          error('ATTACHMENT_TYPE_NOT_ALLOWED', statusCode: 415),
+        ).message,
+        'This file type cannot be attached.',
+      );
+      expect(
+        decideAttachmentError(
+          error('EVENT_NOT_FOUND', statusCode: 404),
+        ).message,
+        'This event is no longer available.',
+      );
+      expect(
+        decideAttachmentError(error('ATTACHMENT_UPLOAD_IN_PROGRESS')).action,
+        AttachmentErrorAction.reconcile,
+      );
+      expect(
+        decideAttachmentError(
+          error('ATTACHMENTS_NOT_SUPPORTED_FOR_CALENDAR'),
+        ).action,
+        AttachmentErrorAction.disableAttachments,
+      );
+    });
+
+    test('a transport failure (status 0) is not treated as a 4xx', () {
+      final d = decideAttachmentError(error('NETWORK_ERROR', statusCode: 0));
+      expect(d.nextUploadState, AttachmentUploadState.retryable);
+      expect(d.keepsIdempotencyKey, isTrue);
+    });
+  });
+
+  // ── Support reference ─────────────────────────────────────────────────────
+
+  group('support reference', () {
+    test('a request id becomes a reference on its own line', () {
+      final decorated = attachmentErrorMessageWithReference(
+        'The calendar service could not store this file. Try again shortly.',
+        error(
+          'ATTACHMENT_UPLOAD_FAILED',
+          statusCode: 502,
+        ).withRequestId('A1B2C3D4'),
+      );
+      expect(
+        decorated,
+        'The calendar service could not store this file. Try again shortly.\n'
+        'Reference: A1B2C3D4',
+      );
+    });
+
+    test('no request id means no reference line at all', () {
+      final decorated = attachmentErrorMessageWithReference(
+        'Something went wrong.',
+        error('ATTACHMENT_UPLOAD_FAILED', statusCode: 502),
+      );
+      expect(decorated, 'Something went wrong.');
+      expect(decorated, isNot(contains('Reference')));
+      expect(decorated, isNot(contains('null')));
+    });
+
+    test('an empty request id is treated as absent', () {
+      expect(
+        attachmentSupportReference(
+          error('X', statusCode: 500).withRequestId('   '),
+        ),
+        isNull,
+      );
+    });
+
+    test('a deliberately empty message stays empty', () {
+      // Cancellation says nothing to the user, and must not start saying
+      // something just because Hub attached a trace id.
+      expect(
+        attachmentErrorMessageWithReference(
+          '',
+          error('CANCELLED', statusCode: 0).withRequestId('A1B2C3D4'),
+        ),
+        '',
+      );
+    });
+
+    test('a non-Hub failure carries no reference', () {
+      expect(
+        attachmentErrorMessageWithReference('Local trouble.', StateError('x')),
+        'Local trouble.',
+      );
+    });
+
+    test('the reference never exposes the endpoint or Hub\'s raw message', () {
+      const e = CaleeHubException(
+        statusCode: 502,
+        code: 'ATTACHMENT_UPLOAD_FAILED',
+        message: 'upstream said something internal',
+        requestId: 'A1B2C3D4',
+        endpoint: '/client/v1/events/portal%3Aevt-1/attachments',
+      );
+      final decorated = attachmentErrorMessageWithReference('Try again.', e);
+      expect(decorated, 'Try again.\nReference: A1B2C3D4');
+      expect(decorated, isNot(contains('/client/v1')));
+      expect(decorated, isNot(contains('upstream said')));
+      // The full detail still exists for the debug log, just not on screen.
+      expect(e.debugSummary, contains('/client/v1'));
+    });
+  });
+}
+
+extension on CaleeHubException {
+  CaleeHubException withRequestId(String requestId) => CaleeHubException(
+    statusCode: statusCode,
+    message: message,
+    code: code,
+    requestId: requestId,
+    endpoint: endpoint,
+  );
 }

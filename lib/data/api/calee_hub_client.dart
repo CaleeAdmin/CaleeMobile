@@ -38,6 +38,19 @@ class CaleeHubClient {
   static const _kImageAiTimeout = Duration(seconds: 90);
   static const _kAttachmentTransferTimeout = Duration(seconds: 120);
 
+  /// The attachment LIST's own budget, deliberately shorter than the general
+  /// [_kTimeout] because a person is watching this one.
+  ///
+  /// Listing is the request the event editor blocks its "Add attachment"
+  /// affordance on, so its duration is a spinner someone is sitting in front
+  /// of -- unlike the background GETs [_kTimeout] was sized for. Paired with
+  /// `retryTransientTransport: false` at the call site, the worst case a
+  /// user waits before being offered Retry is one attempt: on the general
+  /// path a dropped keep-alive silently costs a second full attempt, so a
+  /// stalled network could hold that spinner for two 25-second waits with no
+  /// way out.
+  static const _kAttachmentListTimeout = Duration(seconds: 15);
+
   /// How long a timed-out transfer is given to actually unwind (abort the
   /// request, close the sink, delete a partial file) before `TIMEOUT` is
   /// surfaced regardless. Bounded so a wedged teardown can never turn a
@@ -1412,14 +1425,65 @@ class CaleeHubClient {
 
   // ── Calendar event attachments ──────────────────────────────────────────────────────────────────
 
+  /// Builds an attachment endpoint from an already-encoded [path], adding
+  /// the event's calendar as a `calendarId` query parameter.
+  ///
+  /// The calendar is a LOCATOR: it tells Hub which of the account's
+  /// calendars this event lives in, so it can query that one instead of
+  /// walking every calendar until the UID turns up. It is never
+  /// authorization -- Hub re-derives what the account may see from the
+  /// bearer token and the event id exactly as it did before, and an id that
+  /// does not belong to the account simply resolves to nothing.
+  ///
+  /// It goes in the QUERY STRING, not the event id. The event id's
+  /// `<serviceId>:<uid>[:<recurrence>]` shape is a parsed contract on both
+  /// sides; folding a second identifier into it would change what every
+  /// existing event id means. The path is passed through untouched (it
+  /// already carries its own `Uri.encodeComponent`-escaped segments) and
+  /// only the query is added here, so this cannot alter the wire form of an
+  /// event or attachment id.
+  ///
+  /// [Uri] does the escaping, not string concatenation: a calendar id may
+  /// contain `:` (the public form is `serviceId:rawId`) and, through the
+  /// display name a raw CalDAV id can be derived from, spaces, `/`, `&`,
+  /// `#` or non-ASCII. Hand-assembling `?calendarId=$calendarId` would send
+  /// several of those unescaped and truncate or corrupt the value at the
+  /// server.
+  ///
+  /// An absent or blank calendar id yields the bare path, with no trailing
+  /// `?` -- byte-for-byte the request older builds send, which is the shape
+  /// Hub's legacy resolver still answers.
+  static String _attachmentEndpoint(String path, String? calendarId) {
+    final locator = calendarId?.trim() ?? '';
+    if (locator.isEmpty) return path;
+
+    return Uri(path: path, queryParameters: {'calendarId': locator}).toString();
+  }
+
   Future<List<CalendarAttachment>> listAttachments({
     required String accessToken,
     required String eventId,
+    String? calendarId,
   }) async {
     final encodedEventId = Uri.encodeComponent(eventId);
     final json = await _getJson(
-      '/client/v1/events/$encodedEventId/attachments',
+      _attachmentEndpoint(
+        '/client/v1/events/$encodedEventId/attachments',
+        calendarId,
+      ),
       accessToken: accessToken,
+      // Someone is watching a spinner on this request -- see
+      // [_kAttachmentListTimeout].
+      timeout: _kAttachmentListTimeout,
+      // One attempt, then hand the decision back. The general GET path
+      // silently re-sends a request that failed at the transport level,
+      // which is right for a background refresh and wrong here: it doubles
+      // the time the editor sits on "Loading attachments…" before the user
+      // is offered a Retry they could have taken immediately. Only the
+      // TRANSPORT retry is dropped -- the 401 refresh-and-retry inside
+      // _withRetry is untouched, so an expired token is still repaired
+      // without troubling anyone.
+      retryTransientTransport: false,
     );
 
     final attachments = _data(json)['attachments'];
@@ -1450,11 +1514,15 @@ class CaleeHubClient {
     required String accessToken,
     required String eventId,
     required String idempotencyKey,
+    String? calendarId,
   }) async {
     final encodedEventId = Uri.encodeComponent(eventId);
     final encodedKey = Uri.encodeComponent(idempotencyKey);
     final json = await _getJson(
-      '/client/v1/events/$encodedEventId/attachment-uploads/$encodedKey',
+      _attachmentEndpoint(
+        '/client/v1/events/$encodedEventId/attachment-uploads/$encodedKey',
+        calendarId,
+      ),
       accessToken: accessToken,
     );
     return AttachmentUploadStatus.fromJson(_data(json));
@@ -1477,11 +1545,15 @@ class CaleeHubClient {
     required File file,
     required String originalFilename,
     required String idempotencyKey,
+    String? calendarId,
     void Function(int sent, int total)? onProgress,
     AttachmentTransferCancelToken? cancelToken,
   }) async {
     final encodedEventId = Uri.encodeComponent(eventId);
-    final path = '/client/v1/events/$encodedEventId/attachments';
+    final path = _attachmentEndpoint(
+      '/client/v1/events/$encodedEventId/attachments',
+      calendarId,
+    );
 
     final raw = await _withRetry(
       (token) => _doUploadAttachment(
@@ -1661,13 +1733,16 @@ class CaleeHubClient {
     required String eventId,
     required String attachmentId,
     required File destinationFile,
+    String? calendarId,
     void Function(int received, int? total)? onProgress,
     AttachmentTransferCancelToken? cancelToken,
   }) async {
     final encodedEventId = Uri.encodeComponent(eventId);
     final encodedAttachmentId = Uri.encodeComponent(attachmentId);
-    final path =
-        '/client/v1/events/$encodedEventId/attachments/$encodedAttachmentId/content';
+    final path = _attachmentEndpoint(
+      '/client/v1/events/$encodedEventId/attachments/$encodedAttachmentId/content',
+      calendarId,
+    );
 
     try {
       await _withRetryGeneric<void>(
@@ -1803,11 +1878,15 @@ class CaleeHubClient {
     required String accessToken,
     required String eventId,
     required String attachmentId,
+    String? calendarId,
   }) async {
     final encodedEventId = Uri.encodeComponent(eventId);
     final encodedAttachmentId = Uri.encodeComponent(attachmentId);
     final json = await _deleteJson(
-      '/client/v1/events/$encodedEventId/attachments/$encodedAttachmentId',
+      _attachmentEndpoint(
+        '/client/v1/events/$encodedEventId/attachments/$encodedAttachmentId',
+        calendarId,
+      ),
       accessToken: accessToken,
     );
 
@@ -2478,17 +2557,30 @@ class CaleeHubClient {
 
   // GET with one safe retry on transient transport failures (stale keep-alive).
   // POST/PUT/PATCH/DELETE are not retried here; only idempotent GETs are safe.
+  //
+  // [timeout] overrides the general per-attempt budget, and
+  // [retryTransientTransport] turns the second attempt off, for the few
+  // endpoints a user is actively waiting on. Both default to today's
+  // behaviour, so every existing caller is unaffected: this is a per-call
+  // option, NOT a change to the shared GET policy. Silently re-sending a
+  // dropped background GET is genuinely worth doing; the only thing wrong
+  // with it is doing it while somebody watches a spinner.
+  //
+  // Neither option touches _withRetry, so the 401 refresh-and-retry stays
+  // in force on every path.
   Future<Map<String, dynamic>> _getJson(
     String path, {
     required String accessToken,
+    Duration? timeout,
+    bool retryTransientTransport = true,
   }) async {
     try {
       return await _withRetry(
-        (token) => _doGetJson(path, accessToken: token),
+        (token) => _doGetJson(path, accessToken: token, timeout: timeout),
         accessToken,
       );
     } catch (error) {
-      if (_isTransientTransportError(error)) {
+      if (retryTransientTransport && _isTransientTransportError(error)) {
         if (kDebugMode) {
           debugPrint(
             'CaleeHubClient: transient GET transport error for $path; '
@@ -2497,7 +2589,7 @@ class CaleeHubClient {
         }
         resetTransport();
         return await _withRetry(
-          (token) => _doGetJson(path, accessToken: token),
+          (token) => _doGetJson(path, accessToken: token, timeout: timeout),
           accessToken,
         );
       }
@@ -2523,6 +2615,7 @@ class CaleeHubClient {
   Future<Map<String, dynamic>> _doGetJson(
     String path, {
     required String accessToken,
+    Duration? timeout,
   }) {
     return _executeRequest(() async {
       final request = await _httpClient.getUrl(baseUri.resolve(path));
@@ -2533,15 +2626,18 @@ class CaleeHubClient {
       );
 
       return _readJsonResponse(await request.close(), endpoint: path);
-    });
+    }, timeout: timeout);
   }
 
-  // Wraps a request with a timeout and converts network errors to friendly messages.
+  // Wraps a request with a timeout and converts network errors to friendly
+  // messages. [timeout] overrides the general budget for the one call that
+  // asks for it; everything else keeps _kTimeout.
   Future<Map<String, dynamic>> _executeRequest(
-    Future<Map<String, dynamic>> Function() fn,
-  ) async {
+    Future<Map<String, dynamic>> Function() fn, {
+    Duration? timeout,
+  }) async {
     try {
-      return await fn().timeout(_kTimeout);
+      return await fn().timeout(timeout ?? _kTimeout);
     } on CaleeHubException {
       rethrow;
     } on TimeoutException {
