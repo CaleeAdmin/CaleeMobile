@@ -667,12 +667,21 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
       !(_listState.failure?.blocksMutations ?? false) &&
       !_stoppingAttachmentWork;
 
-  /// Whether attaching a file to THIS EVENT is possible in principle: the
-  /// mutation gate, plus the calendar's own add capability.
+  /// The COMPLETE permission needed to submit an upload to Hub -- a new one
+  /// from the picker, or a retry of the pending operation. The shared server
+  /// gate plus the calendar's own add capability.
   ///
-  /// Says nothing about whether it may happen right NOW -- that is
-  /// [_effectiveCanAdd].
-  bool get _canAddCapability => _serverMutationsAllowed && widget.canAdd;
+  /// One name for one question, because both submission paths must ask it
+  /// and must keep asking it across their awaits. Staging a picked file and
+  /// verifying a staged one are both slow enough for a refresh already in
+  /// flight to come back terminal -- or for the editor to rebuild this
+  /// section with [EventAttachmentsSection.canAdd] false -- and a permission
+  /// that was only read before the await would submit an upload the section
+  /// has since been told cannot succeed.
+  ///
+  /// Says nothing about whether a NEW upload may start right now -- that is
+  /// [_effectiveCanAdd], which additionally requires a settled list.
+  bool get _uploadMutationsAllowed => _serverMutationsAllowed && widget.canAdd;
 
   /// Whether "Add attachment" may be used AT ALL right now.
   ///
@@ -680,7 +689,7 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
   /// about: nothing may be attached to an event whose attachment list has
   /// never successfully loaded, and nothing may be started while a list
   /// request is in flight.
-  bool get _effectiveCanAdd => _canAddCapability && _listState.allowsAdd;
+  bool get _effectiveCanAdd => _uploadMutationsAllowed && _listState.allowsAdd;
 
   /// Whether the Add row is tappable.
   ///
@@ -1272,10 +1281,22 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
           return;
         }
 
-        // Re-checked after the copy: a cancellation or teardown can land
-        // while bytes are being written, and the staged file must not
-        // outlive a section that will never upload it.
-        if (!mounted || _stoppingAttachmentWork) {
+        // Re-checked after the copy, and against the COMPLETE upload
+        // permission, not just teardown. Staging is real file I/O and takes
+        // as long as it takes; a refresh already in flight can come back
+        // during it with an expired session, a deleted event or an
+        // unsupported calendar, and the editor can rebuild this section
+        // with canAdd false. Every one of those must stop the operation
+        // HERE -- before a pending upload exists, before an idempotency key
+        // is minted, before anything is published to the editor -- because
+        // one instant later this becomes an unresolved operation the user
+        // has to notice and discard by hand.
+        //
+        // The freshly staged copy is the one thing that already exists, so
+        // it is discarded on this path; nothing else was created. The
+        // terminal list message, if that is what stopped us, stays exactly
+        // as the failure left it.
+        if (!mounted || !_uploadMutationsAllowed) {
           unawaited(_staging.discard(staged));
           return;
         }
@@ -1578,7 +1599,10 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
   /// SAME operation to Hub rather than a new one that could duplicate.
   Future<void> _sendPendingUpload() async {
     final pending = _pendingUpload;
-    if (pending == null || !mounted || _stoppingAttachmentWork) return;
+    // The COMPLETE upload permission, before anything is claimed: a send
+    // that is not allowed to reach Hub must not take the attempt slot,
+    // flip Retry inert, or otherwise pretend to be in progress.
+    if (pending == null || !mounted || !_uploadMutationsAllowed) return;
     // Single-flight. An attempt already owns this operation -- still
     // preflighting it, sending it, or settling its outcome -- so a second
     // Add, a second Retry tap or a programmatic re-entry is refused here,
@@ -1604,6 +1628,18 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
       // calling Hub, showing a message, touching the attachment rows or
       // deleting a file another path now owns.
       if (!_ownsUploadAttempt(attempt)) return;
+
+      // Ownership surviving is NOT permission surviving. The staged-file
+      // check is real file I/O, and a refresh already in flight can come
+      // back during it with an expired session, a deleted event or an
+      // unsupported calendar -- none of which void this attempt's claim,
+      // all of which mean the upload must no longer be sent. The operation
+      // is deliberately kept exactly as it is: the pending row stays
+      // visible, its Retry is inert (it reads the same gate), Discard stays
+      // live, and the staged file is NOT deleted -- the user resolves this
+      // explicitly, and the file must still exist when they do. Only the
+      // transient attempt claim is released, by the finally below.
+      if (!_uploadMutationsAllowed) return;
 
       if (!intact) {
         if (kDebugMode) {
@@ -1655,6 +1691,14 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
     _UploadAttempt attempt,
     PendingAttachmentUpload pending,
   ) async {
+    // The last word before transport. Nothing awaits between the caller's
+    // own permission check and this one today, but this method is the one
+    // that actually publishes transfer state and puts bytes on the wire, so
+    // the check belongs to it rather than to the distance from the caller.
+    // Returning here leaves the operation retryable-in-principle and its
+    // staged file intact; the caller's finally releases the attempt.
+    if (!_uploadMutationsAllowed) return;
+
     final cancelToken = AttachmentTransferCancelToken();
     var bytesLeftTheApp = false;
     pending.state = AttachmentUploadState.uploading;
@@ -2451,7 +2495,7 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
     final hasNothingToShow =
         attachments != null &&
         attachments.isEmpty &&
-        !_canAddCapability &&
+        !_uploadMutationsAllowed &&
         !listState.isRequestActive &&
         loadFailure == null;
 
@@ -2567,8 +2611,13 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
                   // what the user must still be able to do, and is the only
                   // thing that releases the staged file and unblocks the
                   // editor.
+                  // The COMPLETE upload permission, not just the generic
+                  // server gate: a retry is an upload, so a calendar whose
+                  // canAdd capability is gone -- or an editor rebuild that
+                  // turned canAdd off -- disables Retry exactly as it
+                  // disables Add. Discard below is unaffected.
                   onPressed:
-                      (_uploadAttemptInProgress || !_serverMutationsAllowed)
+                      (_uploadAttemptInProgress || !_uploadMutationsAllowed)
                       ? null
                       : _retryPendingUpload,
                   child: const Text('Retry'),
@@ -2593,7 +2642,7 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
         // reappearing as the list loads. The affordance staying put, greyed,
         // beneath "Loading attachments…" is the honest picture: attaching is
         // possible here, just not yet.
-        if (_canAddCapability)
+        if (_uploadMutationsAllowed)
           CaleeListRow(
             key: const Key('add_attachment_row'),
             title: _isUploading ? 'Uploading…' : 'Add attachment',

@@ -299,8 +299,28 @@ class _GatedStagingManager extends AttachmentUploadStagingManager {
   /// While non-null, [isIntact] waits on it before answering.
   Completer<void>? gate;
 
+  /// While non-null, [stage] waits on it AFTER the real copy has been made,
+  /// so the staged file genuinely exists on disk while the hold is open --
+  /// which is exactly the orphan the post-staging permission check exists
+  /// to prevent.
+  Completer<void>? stageGate;
+
   int isIntactCalls = 0;
   int discardCalls = 0;
+
+  @override
+  Future<StagedAttachmentFile> stage({
+    required File source,
+    required String originalFilename,
+  }) async {
+    final staged = await super.stage(
+      source: source,
+      originalFilename: originalFilename,
+    );
+    final held = stageGate;
+    if (held != null) await held.future;
+    return staged;
+  }
 
   @override
   Future<bool> isIntact(StagedAttachmentFile staged) async {
@@ -3105,6 +3125,316 @@ void main() {
           reason: 'and the parent editor is told it is no longer blocked',
         );
         expect(reported.last.blocksEditorClose, isFalse);
+      },
+    );
+  });
+
+  // ── Permission is re-read after every asynchronous preflight boundary ─────
+  //
+  // Two awaits sit between "the user may upload" and "bytes reach Hub":
+  // staging the picked file, and verifying the staged file before a retry.
+  // Both are real file I/O and take as long as they take -- long enough for
+  // a refresh already in flight to come back terminal, or for the editor to
+  // rebuild this section with canAdd false. A permission that was only read
+  // BEFORE the await would submit an upload the section has since been told
+  // cannot succeed.
+  group('permission is re-read after async preflight boundaries', () {
+    late ImagePickerPlatform originalImagePickerPlatform;
+
+    setUp(() {
+      originalImagePickerPlatform = ImagePickerPlatform.instance;
+    });
+
+    tearDown(() {
+      ImagePickerPlatform.instance = originalImagePickerPlatform;
+    });
+
+    /// Points the picker fake at a real file on disk.
+    Future<void> installPickerFile(WidgetTester tester, String name) async {
+      final sourceFile = File('${tempDir.path}/$name');
+      await tester.runAsync(
+        () => sourceFile.writeAsBytes(List<int>.filled(1024, 7)),
+      );
+      ImagePickerPlatform.instance = _FakeImagePickerPlatform(
+        XFile(sourceFile.path),
+      );
+    }
+
+    /// Establishes a RETRYABLE pending upload: the first send comes back as
+    /// a stale-event conflict, whose decision keeps the operation (same key,
+    /// retryable) and re-reads the list. The list stub is left ungated, so
+    /// that refresh completes cleanly and the section settles with a good
+    /// baseline plus a pending operation awaiting the user.
+    Future<({_StubHub hub, _GatedStagingManager staging})>
+    establishRetryablePending(WidgetTester tester) async {
+      await installPickerFile(tester, 'preflight_pick.jpg');
+      final hub = _StubHub(
+        initialAttachments: [_attachment(filename: 'baseline.pdf')],
+        onUpload: (_) async =>
+            throw hubError('CALENDAR_OBJECT_CONFLICT', statusCode: 409),
+      );
+      final staging = _GatedStagingManager(
+        stagingDirectoryProvider: () async => tempDir,
+      );
+      await pumpSection(
+        tester,
+        hub: hub,
+        canAdd: true,
+        canRemove: true,
+        stagingManager: staging,
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('add_attachment_row')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Choose photo'));
+      await tester.pump();
+      await settleWithFileIo(tester);
+
+      expect(hub.uploadIdempotencyKeys, hasLength(1));
+      expect(find.byKey(const Key('pending_upload_row')), findsOneWidget);
+      expect(retryButtonEnabled(tester), isTrue);
+      return (hub: hub, staging: staging);
+    }
+
+    testWidgets(
+      'a final 401 arriving while a picked file is being staged starts '
+      'nothing and leaves no orphaned file',
+      (tester) async {
+        await installPickerFile(tester, 'staging_race_pick.jpg');
+        final reported = <AttachmentOperationState>[];
+        final hub = _StubHub(
+          initialAttachments: [_attachment(filename: 'baseline.pdf')],
+          onUpload: (_) async => throw StateError('must never upload'),
+        );
+        final staging = _GatedStagingManager(
+          stagingDirectoryProvider: () async => tempDir,
+        )..stageGate = Completer<void>();
+        await pumpSection(
+          tester,
+          hub: hub,
+          canAdd: true,
+          canRemove: true,
+          stagingManager: staging,
+          onOperationStateChanged: reported.add,
+        );
+        await tester.pumpAndSettle();
+        expect(addRowEnabled(tester), isTrue);
+
+        // The user picks a file; the copy into Calee-owned storage is made
+        // and then HELD, so the file genuinely exists on disk while
+        // everything below happens.
+        await tester.tap(find.byKey(const Key('add_attachment_row')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Choose photo'));
+        await tester.pump();
+        await settleWithFileIo(tester);
+
+        // While staging is held, a refresh -- started the way the section
+        // really starts one -- comes back with an expired session.
+        hub
+          ..gateListCalls = true
+          ..detachThrows = hubError(null, statusCode: 409);
+        await startRefreshViaConflictingDetach(tester, 'baseline.pdf');
+        hub.failList(hubError(null, statusCode: 401));
+        await pumpFrames(tester, frames: 12);
+        expect(loadErrorTitle(tester), 'Your session has expired');
+
+        // Staging finishes -- into a section that may no longer upload.
+        staging.stageGate!.complete();
+        await settleWithFileIo(tester);
+
+        expect(
+          find.byKey(const Key('pending_upload_row')),
+          findsNothing,
+          reason:
+              'no pending operation may be created after the terminal '
+              'result',
+        );
+        expect(hub.uploadIdempotencyKeys, isEmpty, reason: 'no Hub upload');
+        expect(
+          staging.discardCalls,
+          1,
+          reason: 'the freshly staged copy is discarded, not orphaned',
+        );
+        expect(
+          find.byKey(const Key('add_attachment_row')),
+          findsNothing,
+          reason: 'Add stays withdrawn under the terminal failure',
+        );
+        expect(
+          loadErrorTitle(tester),
+          'Your session has expired',
+          reason: 'and the terminal message is preserved',
+        );
+        expect(
+          reported.any((s) => s.hasUnresolvedUpload),
+          isFalse,
+          reason: 'the editor is never told about an operation it cannot see',
+        );
+        expect(
+          reported.isEmpty || reported.last == AttachmentOperationState.idle,
+          isTrue,
+          reason: 'and ends unblocked',
+        );
+      },
+    );
+
+    testWidgets(
+      'EVENT_NOT_FOUND arriving during staging also starts nothing and '
+      'discards the staged copy',
+      (tester) async {
+        await installPickerFile(tester, 'staging_race_pick2.jpg');
+        final hub = _StubHub(
+          initialAttachments: [_attachment(filename: 'baseline.pdf')],
+          onUpload: (_) async => throw StateError('must never upload'),
+        );
+        final staging = _GatedStagingManager(
+          stagingDirectoryProvider: () async => tempDir,
+        )..stageGate = Completer<void>();
+        await pumpSection(
+          tester,
+          hub: hub,
+          canAdd: true,
+          canRemove: true,
+          stagingManager: staging,
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byKey(const Key('add_attachment_row')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Choose photo'));
+        await tester.pump();
+        await settleWithFileIo(tester);
+
+        hub
+          ..gateListCalls = true
+          ..detachThrows = hubError(null, statusCode: 409);
+        await startRefreshViaConflictingDetach(tester, 'baseline.pdf');
+        hub.failList(hubError('EVENT_NOT_FOUND', statusCode: 404));
+        await pumpFrames(tester, frames: 12);
+
+        staging.stageGate!.complete();
+        await settleWithFileIo(tester);
+
+        expect(find.byKey(const Key('pending_upload_row')), findsNothing);
+        expect(hub.uploadIdempotencyKeys, isEmpty);
+        expect(staging.discardCalls, 1);
+      },
+    );
+
+    testWidgets(
+      'a final 401 arriving during retry preflight never reaches Hub, and '
+      'the operation stays resolvable',
+      (tester) async {
+        final fixture = await establishRetryablePending(tester);
+
+        // The conflict's own refresh already ran ungated; gate the NEXT list
+        // call so a fresh refresh can be held open across the retry.
+        fixture.hub
+          ..gateListCalls = true
+          ..detachThrows = hubError(null, statusCode: 409);
+        await startRefreshViaConflictingDetach(tester, 'baseline.pdf');
+
+        // Retry claims its attempt, then parks inside the staged-file check.
+        fixture.staging.gate = Completer<void>();
+        await tester.tap(find.byKey(const Key('retry_pending_upload')));
+        await tester.pump();
+
+        // The session expires while the check is running. Attempt ownership
+        // is untouched by this -- which is exactly why ownership alone must
+        // not be the last check before transport.
+        fixture.hub.failList(hubError(null, statusCode: 401));
+        await pumpFrames(tester, frames: 12);
+
+        fixture.staging.gate!.complete();
+        await settleWithFileIo(tester);
+
+        expect(
+          fixture.hub.uploadIdempotencyKeys,
+          hasLength(1),
+          reason: 'the retry must not reach Hub after the terminal result',
+        );
+        expect(
+          find.byKey(const Key('pending_upload_row')),
+          findsOneWidget,
+          reason: 'the operation stays visible for the user to resolve',
+        );
+        expect(retryButtonEnabled(tester), isFalse);
+        expect(discardButtonEnabled(tester), isTrue);
+        expect(
+          fixture.staging.discardCalls,
+          0,
+          reason:
+              'the staged file is kept until the user explicitly discards it',
+        );
+      },
+    );
+
+    testWidgets('canAdd turning false disables Retry as well as Add, and a '
+        'programmatic retry cannot call Hub', (tester) async {
+      final fixture = await establishRetryablePending(tester);
+
+      // The editor rebuilds this section with canAdd false.
+      await pumpSection(
+        tester,
+        hub: fixture.hub,
+        canAdd: false,
+        canRemove: true,
+        stagingManager: fixture.staging,
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const Key('pending_upload_row')),
+        findsOneWidget,
+        reason: 'the pending operation is not hidden by a capability change',
+      );
+      expect(retryButtonEnabled(tester), isFalse);
+      expect(discardButtonEnabled(tester), isTrue);
+
+      // Reaching past the disabled control changes nothing either.
+      tester
+          .widget<TextButton>(find.byKey(const Key('retry_pending_upload')))
+          .onPressed
+          ?.call();
+      await settleWithFileIo(tester);
+      expect(fixture.hub.uploadIdempotencyKeys, hasLength(1));
+    });
+
+    testWidgets(
+      'canAdd turning false during retry preflight stops the send after '
+      'attempt ownership was already established',
+      (tester) async {
+        final fixture = await establishRetryablePending(tester);
+
+        // Retry claims its attempt (permission is valid at this instant),
+        // then parks inside the staged-file check.
+        fixture.staging.gate = Completer<void>();
+        await tester.tap(find.byKey(const Key('retry_pending_upload')));
+        await tester.pump();
+
+        // Permission changes AFTER ownership, BEFORE transport.
+        await pumpSection(
+          tester,
+          hub: fixture.hub,
+          canAdd: false,
+          canRemove: true,
+          stagingManager: fixture.staging,
+        );
+
+        fixture.staging.gate!.complete();
+        await settleWithFileIo(tester);
+
+        expect(
+          fixture.hub.uploadIdempotencyKeys,
+          hasLength(1),
+          reason: 'ownership survived, permission did not -- no Hub call',
+        );
+        expect(find.byKey(const Key('pending_upload_row')), findsOneWidget);
+        expect(retryButtonEnabled(tester), isFalse);
+        expect(discardButtonEnabled(tester), isTrue);
+        expect(fixture.staging.discardCalls, 0);
       },
     );
   });
