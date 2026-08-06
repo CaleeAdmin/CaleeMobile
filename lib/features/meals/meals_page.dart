@@ -2,10 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../../data/api/calee_hub_client.dart';
 import '../../data/models/client_meal.dart';
-import '../../data/models/client_shopping_list.dart';
 import '../../shared/meal_icon.dart';
 import '../../ui/calee_design.dart';
 import '../shopping/shopping_page.dart';
+import 'meal_suggestion_resolver.dart';
 import 'meals_controller.dart';
 import 'meals_repository.dart';
 import 'saved_meals_page.dart';
@@ -327,6 +327,7 @@ class _MealsPageState extends State<MealsPage> {
 
   void _openSearchSheet() {
     final allMeals = _controller.mealList?.meals ?? const <ClientMeal>[];
+    final suggestions = MealSuggestionResolver(_controller.repository).load();
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -338,9 +339,26 @@ class _MealsPageState extends State<MealsPage> {
       ),
       builder: (sheetContext) => _MealSearchSheet(
         meals: allMeals,
+        suggestions: suggestions,
         onTapMeal: (meal) {
           Navigator.of(sheetContext).pop();
           _openSheet(date: meal.mealDate, mealType: meal.mealType, meal: meal);
+        },
+        onTapSuggestion: (suggestion) {
+          Navigator.of(sheetContext).pop();
+          if (suggestion.savedTemplate != null) {
+            ManageSavedMealSheet.show(
+              context: context,
+              template: suggestion.savedTemplate!,
+              controller: _controller,
+            );
+          } else {
+            QuickDinnerIdeaSheet.show(
+              context: context,
+              template: suggestion.starterTemplate!,
+              controller: _controller,
+            );
+          }
         },
       ),
     );
@@ -882,6 +900,8 @@ class _AddMealSheetState extends State<AddMealSheet> {
   final _notesController = TextEditingController();
   late DateTime _date;
   String _mealType = 'dinner';
+  late Future<MealSuggestionGroups> _suggestions;
+  MealSuggestion? _selectedSuggestion;
   bool _isSaving = false;
   String? _saveError;
 
@@ -889,6 +909,7 @@ class _AddMealSheetState extends State<AddMealSheet> {
   void initState() {
     super.initState();
     _date = DateTime.now();
+    _suggestions = _loadSuggestions();
   }
 
   @override
@@ -910,6 +931,36 @@ class _AddMealSheetState extends State<AddMealSheet> {
     }
   }
 
+  Future<MealSuggestionGroups> _loadSuggestions() {
+    return MealSuggestionResolver(
+      widget.controller.repository,
+    ).load(mealType: _mealType);
+  }
+
+  void _changeMealType(String value) {
+    setState(() {
+      _mealType = value;
+      _selectedSuggestion = null;
+      _suggestions = _loadSuggestions();
+    });
+  }
+
+  void _selectSuggestion(MealSuggestion suggestion) {
+    setState(() {
+      _selectedSuggestion = suggestion;
+      _titleController.text = suggestion.name;
+      _notesController.text = suggestion.notes ?? '';
+    });
+  }
+
+  void _createNewMeal() {
+    setState(() {
+      _selectedSuggestion = null;
+      _titleController.clear();
+      _notesController.clear();
+    });
+  }
+
   Future<void> _save() async {
     if (_isSaving || !(_formKey.currentState?.validate() ?? false)) return;
     final title = _titleController.text.trim();
@@ -926,6 +977,8 @@ class _AddMealSheetState extends State<AddMealSheet> {
         mealType: _mealType,
         title: title,
         notes: notes.isEmpty ? null : notes,
+        templateId: _selectedSuggestion?.templateId,
+        starterTemplateId: _selectedSuggestion?.starterTemplateId,
       );
       if (mounted) Navigator.of(context).pop();
     } catch (e) {
@@ -968,10 +1021,15 @@ class _AddMealSheetState extends State<AddMealSheet> {
                       )
                       .toList(),
                   onChanged: (value) {
-                    if (value != null) setState(() => _mealType = value);
+                    if (value != null) _changeMealType(value);
                   },
                 ),
               ],
+            ),
+            const SizedBox(height: CaleeSpacing.md),
+            FutureBuilder<MealSuggestionGroups>(
+              future: _suggestions,
+              builder: (context, snapshot) => _buildSuggestionPicker(snapshot),
             ),
             const SizedBox(height: CaleeSpacing.md),
             CaleeSection(
@@ -1031,6 +1089,107 @@ class _AddMealSheetState extends State<AddMealSheet> {
       ),
     );
   }
+
+  Widget _buildSuggestionPicker(AsyncSnapshot<MealSuggestionGroups> snapshot) {
+    if (snapshot.connectionState != ConnectionState.done) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    final groups = snapshot.data ?? MealSuggestionGroups.empty;
+    final sections = <Widget>[
+      if (snapshot.hasError)
+        const Padding(
+          padding: EdgeInsets.only(bottom: CaleeSpacing.sm),
+          child: Text(
+            'Could not load saved meal choices. You can still create a new meal.',
+            style: TextStyle(fontSize: 13, color: CaleeColors.textSecondary),
+          ),
+        ),
+      _suggestionSection(
+        key: const Key('meal_suggestions_family_favourites_section'),
+        title: MealSuggestionLabels.familyFavourites,
+        suggestions: groups.familyFavourites,
+        emptyText: 'No family favourites yet',
+      ),
+      const SizedBox(height: CaleeSpacing.md),
+      _suggestionSection(
+        key: const Key('meal_suggestions_recently_used_section'),
+        title: MealSuggestionLabels.recentlyUsed,
+        suggestions: groups.recentlyUsed,
+        emptyText: 'No recently used meals yet',
+      ),
+      if (_mealType == 'dinner') ...[
+        const SizedBox(height: CaleeSpacing.md),
+        _suggestionSection(
+          key: const Key('meal_suggestions_quick_dinner_ideas_section'),
+          title: MealSuggestionLabels.quickDinnerIdeas,
+          suggestions: groups.quickDinnerIdeas,
+          emptyText: 'No quick dinner ideas yet',
+        ),
+      ],
+      const SizedBox(height: CaleeSpacing.md),
+      OutlinedButton.icon(
+        key: const Key('meal_suggestions_create_new'),
+        onPressed: _isSaving ? null : _createNewMeal,
+        icon: const Icon(Icons.add),
+        label: const Text(MealSuggestionLabels.createNewMeal),
+      ),
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: sections,
+    );
+  }
+
+  Widget _suggestionSection({
+    required Key key,
+    required String title,
+    required List<MealSuggestion> suggestions,
+    required String emptyText,
+  }) {
+    return CaleeSection(
+      key: key,
+      title: title,
+      children: suggestions.isEmpty
+          ? [
+              CaleeListRow(
+                title: emptyText,
+                titleStyle: const TextStyle(
+                  fontSize: 14,
+                  color: CaleeColors.textSecondary,
+                ),
+              ),
+            ]
+          : suggestions
+                .map(
+                  (suggestion) => CaleeListRow(
+                    key: ValueKey(
+                      'meal_suggestion_${suggestion.source.name}_${suggestion.id}',
+                    ),
+                    leading: Text(
+                      mealIconEmoji(
+                        icon: suggestion.icon,
+                        title: suggestion.name,
+                        mealType: suggestion.defaultMealType,
+                      ),
+                      style: const TextStyle(fontSize: 18),
+                    ),
+                    title: suggestion.name,
+                    subtitle: suggestion.savedTemplate == null
+                        ? null
+                        : savedMealMetadata(suggestion.savedTemplate!),
+                    trailing:
+                        _selectedSuggestion?.source == suggestion.source &&
+                            _selectedSuggestion?.id == suggestion.id
+                        ? const Icon(Icons.check, color: CaleeColors.primary)
+                        : null,
+                    enabled: !_isSaving,
+                    onTap: () => _selectSuggestion(suggestion),
+                  ),
+                )
+                .toList(),
+    );
+  }
 }
 
 // ─────────────────────────────────────────────
@@ -1038,9 +1197,9 @@ class _AddMealSheetState extends State<AddMealSheet> {
 // ─────────────────────────────────────────────
 
 /// Bottom sheet shown when tapping a missing dinner row in the Meals page.
-/// Offers the household's own meal templates ("Family favourites"), starter
-/// templates from the shared library ("Quick dinner ideas"), and a way to
-/// create a brand-new meal from scratch.
+/// Offers the household's explicitly favourited and recently used meals,
+/// starter templates from the shared library, and a way to create a brand-new
+/// meal from scratch.
 class PickDinnerSheet extends StatefulWidget {
   const PickDinnerSheet({
     required this.date,
@@ -1070,18 +1229,8 @@ class PickDinnerSheet extends StatefulWidget {
   State<PickDinnerSheet> createState() => _PickDinnerSheetState();
 }
 
-class _PickDinnerOptions {
-  const _PickDinnerOptions({
-    required this.favourites,
-    required this.quickIdeas,
-  });
-
-  final List<ClientMealTemplate> favourites;
-  final List<ClientStarterMealTemplate> quickIdeas;
-}
-
 class _PickDinnerSheetState extends State<PickDinnerSheet> {
-  late Future<_PickDinnerOptions> _future;
+  late Future<MealSuggestionGroups> _future;
   bool _isCreating = false;
   Object? _createError;
 
@@ -1091,17 +1240,9 @@ class _PickDinnerSheetState extends State<PickDinnerSheet> {
     _future = _load();
   }
 
-  Future<_PickDinnerOptions> _load() async {
-    final repository = widget.controller.repository;
-    final results = await Future.wait([
-      repository.mealTemplates(mealType: 'dinner'),
-      repository.mealStarterTemplates(mealType: 'dinner'),
-    ]);
-    return _PickDinnerOptions(
-      favourites: (results[0] as ClientMealTemplateList).templates,
-      quickIdeas: results[1] as List<ClientStarterMealTemplate>,
-    );
-  }
+  Future<MealSuggestionGroups> _load() => MealSuggestionResolver(
+    widget.controller.repository,
+  ).load(mealType: 'dinner');
 
   Future<void> _selectTemplate(
     String name,
@@ -1137,7 +1278,7 @@ class _PickDinnerSheetState extends State<PickDinnerSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<_PickDinnerOptions>(
+    return FutureBuilder<MealSuggestionGroups>(
       future: _future,
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
@@ -1157,17 +1298,27 @@ class _PickDinnerSheetState extends State<PickDinnerSheet> {
             mainAxisSize: MainAxisSize.min,
             children: [
               CaleeSection(
-                title: 'Family favourites',
-                children: options.favourites.isEmpty
+                key: const Key('meal_suggestions_family_favourites_section'),
+                title: MealSuggestionLabels.familyFavourites,
+                children: options.familyFavourites.isEmpty
                     ? [_mutedRow('No family favourites yet')]
-                    : options.favourites.map(_favouriteRow).toList(),
+                    : options.familyFavourites.map(_savedRow).toList(),
               ),
               const SizedBox(height: CaleeSpacing.md),
               CaleeSection(
-                title: 'Quick dinner ideas',
-                children: options.quickIdeas.isEmpty
+                key: const Key('meal_suggestions_recently_used_section'),
+                title: MealSuggestionLabels.recentlyUsed,
+                children: options.recentlyUsed.isEmpty
+                    ? [_mutedRow('No recently used meals yet')]
+                    : options.recentlyUsed.map(_savedRow).toList(),
+              ),
+              const SizedBox(height: CaleeSpacing.md),
+              CaleeSection(
+                key: const Key('meal_suggestions_quick_dinner_ideas_section'),
+                title: MealSuggestionLabels.quickDinnerIdeas,
+                children: options.quickDinnerIdeas.isEmpty
                     ? [_mutedRow('No quick dinner ideas yet')]
-                    : options.quickIdeas.map(_quickIdeaRow).toList(),
+                    : options.quickDinnerIdeas.map(_quickIdeaRow).toList(),
               ),
               if (_createError != null) ...[
                 const SizedBox(height: CaleeSpacing.sm),
@@ -1182,11 +1333,12 @@ class _PickDinnerSheetState extends State<PickDinnerSheet> {
               ],
               const SizedBox(height: CaleeSpacing.md),
               OutlinedButton.icon(
+                key: const Key('meal_suggestions_create_new'),
                 onPressed: _isCreating
                     ? null
                     : () => Navigator.of(context).pop('create_new'),
                 icon: const Icon(Icons.add),
-                label: const Text('Create new meal'),
+                label: const Text(MealSuggestionLabels.createNewMeal),
               ),
             ],
           ),
@@ -1195,19 +1347,20 @@ class _PickDinnerSheetState extends State<PickDinnerSheet> {
     );
   }
 
-  Widget _favouriteRow(ClientMealTemplate template) {
+  Widget _savedRow(MealSuggestion suggestion) {
     return CaleeListRow(
+      key: ValueKey('meal_suggestion_saved_${suggestion.id}'),
       leading: Text(
         mealIconEmoji(
-          icon: template.icon,
-          title: template.name,
+          icon: suggestion.icon,
+          title: suggestion.name,
           mealType: 'dinner',
         ),
         style: const TextStyle(fontSize: 18),
       ),
-      title: template.name,
-      subtitle: savedMealMetadata(template),
-      trailing: template.isFavourite
+      title: suggestion.name,
+      subtitle: savedMealMetadata(suggestion.savedTemplate!),
+      trailing: suggestion.isFavourite
           ? const Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -1223,29 +1376,30 @@ class _PickDinnerSheetState extends State<PickDinnerSheet> {
           : null,
       enabled: !_isCreating,
       onTap: () => _selectTemplate(
-        template.name,
-        template.notes,
-        templateId: template.id,
+        suggestion.name,
+        suggestion.notes,
+        templateId: suggestion.id,
       ),
     );
   }
 
-  Widget _quickIdeaRow(ClientStarterMealTemplate template) {
+  Widget _quickIdeaRow(MealSuggestion suggestion) {
     return CaleeListRow(
+      key: ValueKey('meal_suggestion_starter_${suggestion.id}'),
       leading: Text(
         mealIconEmoji(
-          icon: template.icon,
-          title: template.name,
+          icon: suggestion.icon,
+          title: suggestion.name,
           mealType: 'dinner',
         ),
         style: const TextStyle(fontSize: 18),
       ),
-      title: template.name,
+      title: suggestion.name,
       enabled: !_isCreating,
       onTap: () => _selectTemplate(
-        template.name,
-        template.notes,
-        starterTemplateId: template.id,
+        suggestion.name,
+        suggestion.notes,
+        starterTemplateId: suggestion.id,
       ),
     );
   }
@@ -1280,6 +1434,12 @@ class _PickDinnerSheetState extends State<PickDinnerSheet> {
           TextButton(
             onPressed: () => setState(() => _future = _load()),
             child: const Text('Try again'),
+          ),
+          OutlinedButton.icon(
+            key: const Key('meal_suggestions_create_new_failed'),
+            onPressed: () => Navigator.of(context).pop('create_new'),
+            icon: const Icon(Icons.add),
+            label: const Text(MealSuggestionLabels.createNewMeal),
           ),
         ],
       ),
@@ -1374,10 +1534,17 @@ class _CopyWeekSheetState extends State<_CopyWeekSheet> {
 // ─────────────────────────────────────────────
 
 class _MealSearchSheet extends StatefulWidget {
-  const _MealSearchSheet({required this.meals, required this.onTapMeal});
+  const _MealSearchSheet({
+    required this.meals,
+    required this.suggestions,
+    required this.onTapMeal,
+    required this.onTapSuggestion,
+  });
 
   final List<ClientMeal> meals;
+  final Future<MealSuggestionGroups> suggestions;
   final ValueChanged<ClientMeal> onTapMeal;
+  final ValueChanged<MealSuggestion> onTapSuggestion;
 
   @override
   State<_MealSearchSheet> createState() => _MealSearchSheetState();
@@ -1385,7 +1552,7 @@ class _MealSearchSheet extends StatefulWidget {
 
 class _MealSearchSheetState extends State<_MealSearchSheet> {
   final _controller = TextEditingController();
-  List<ClientMeal> _results = [];
+  List<ClientMeal> _plannedResults = [];
 
   @override
   void initState() {
@@ -1402,7 +1569,7 @@ class _MealSearchSheetState extends State<_MealSearchSheet> {
   void _onQueryChanged() {
     final q = _controller.text.trim().toLowerCase();
     setState(() {
-      _results = q.isEmpty
+      _plannedResults = q.isEmpty
           ? []
           : widget.meals
                 .where(
@@ -1461,7 +1628,7 @@ class _MealSearchSheetState extends State<_MealSearchSheet> {
                     children: [
                       Expanded(
                         child: Text(
-                          'Search this week',
+                          'Search meals',
                           style: theme.textTheme.titleMedium?.copyWith(
                             fontWeight: FontWeight.w600,
                             color: CaleeColors.textPrimary,
@@ -1476,11 +1643,12 @@ class _MealSearchSheetState extends State<_MealSearchSheet> {
                   ),
                   const SizedBox(height: CaleeSpacing.sm),
                   TextField(
+                    key: const Key('meal_search_field'),
                     controller: _controller,
                     autofocus: true,
                     textInputAction: TextInputAction.search,
                     decoration: InputDecoration(
-                      hintText: 'Search this week by meal title…',
+                      hintText: 'Search saved meals, notes and quick ideas…',
                       prefixIcon: const Icon(Icons.search_outlined),
                       suffixIcon: _controller.text.isNotEmpty
                           ? IconButton(
@@ -1505,49 +1673,146 @@ class _MealSearchSheetState extends State<_MealSearchSheet> {
             ),
             const Divider(height: 1),
             Expanded(
-              child: _controller.text.trim().isEmpty
-                  ? Center(
-                      child: Text(
-                        'Type to search',
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: CaleeColors.textTertiary,
-                        ),
-                      ),
-                    )
-                  : _results.isEmpty
-                  ? Center(
-                      child: Text(
-                        'No meals found',
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: CaleeColors.textTertiary,
-                        ),
-                      ),
-                    )
-                  : ListView.builder(
-                      controller: scrollController,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: CaleeSpacing.pagePadding,
-                        vertical: CaleeSpacing.sm,
-                      ),
-                      itemCount: _results.length,
-                      itemBuilder: (context, index) {
-                        final meal = _results[index];
-                        final emoji = _kMealTypeEmoji[meal.mealType] ?? '';
-                        return CaleeListRow(
-                          leading: Text(
-                            emoji,
-                            style: const TextStyle(fontSize: 18),
-                          ),
-                          title: meal.title,
-                          subtitle: _resultSubtitle(meal),
-                          onTap: () => widget.onTapMeal(meal),
-                        );
-                      },
-                    ),
+              child: FutureBuilder<MealSuggestionGroups>(
+                future: widget.suggestions,
+                builder: (context, snapshot) => _buildResults(
+                  snapshot: snapshot,
+                  scrollController: scrollController,
+                  theme: theme,
+                ),
+              ),
             ),
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildResults({
+    required AsyncSnapshot<MealSuggestionGroups> snapshot,
+    required ScrollController scrollController,
+    required ThemeData theme,
+  }) {
+    final query = _controller.text.trim();
+    if (query.isEmpty) {
+      return Center(
+        child: Text(
+          'Type to search',
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: CaleeColors.textTertiary,
+          ),
+        ),
+      );
+    }
+    if (snapshot.connectionState != ConnectionState.done) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    final suggestionResults = (snapshot.data ?? MealSuggestionGroups.empty)
+        .search(query);
+    if (suggestionResults.isEmpty && _plannedResults.isEmpty) {
+      return Center(
+        child: Text(
+          'No meals found',
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: CaleeColors.textTertiary,
+          ),
+        ),
+      );
+    }
+
+    final children = <Widget>[];
+    void addSuggestionSection(String title, List<MealSuggestion> suggestions) {
+      if (suggestions.isEmpty) return;
+      if (children.isNotEmpty) {
+        children.add(const SizedBox(height: CaleeSpacing.md));
+      }
+      children.add(
+        CaleeSection(
+          title: title,
+          children: suggestions
+              .map(
+                (suggestion) => CaleeListRow(
+                  key: ValueKey(
+                    'meal_search_suggestion_${suggestion.source.name}_${suggestion.id}',
+                  ),
+                  leading: Text(
+                    mealIconEmoji(
+                      icon: suggestion.icon,
+                      title: suggestion.name,
+                      mealType: suggestion.defaultMealType,
+                    ),
+                    style: const TextStyle(fontSize: 18),
+                  ),
+                  title: suggestion.name,
+                  subtitle: suggestion.savedTemplate == null
+                      ? null
+                      : savedMealMetadata(suggestion.savedTemplate!),
+                  onTap: () => widget.onTapSuggestion(suggestion),
+                ),
+              )
+              .toList(),
+        ),
+      );
+    }
+
+    addSuggestionSection(
+      MealSuggestionLabels.familyFavourites,
+      suggestionResults.familyFavourites,
+    );
+    addSuggestionSection(
+      MealSuggestionLabels.recentlyUsed,
+      suggestionResults.recentlyUsed,
+    );
+    addSuggestionSection(
+      MealSuggestionLabels.savedMeals,
+      suggestionResults.savedMeals,
+    );
+    addSuggestionSection(
+      MealSuggestionLabels.quickDinnerIdeas,
+      suggestionResults.quickDinnerIdeas,
+    );
+
+    if (_plannedResults.isNotEmpty) {
+      if (children.isNotEmpty) {
+        children.add(const SizedBox(height: CaleeSpacing.md));
+      }
+      children.add(
+        CaleeSection(
+          title: 'Planned this week',
+          children: _plannedResults.map((meal) {
+            final emoji = _kMealTypeEmoji[meal.mealType] ?? '';
+            return CaleeListRow(
+              key: ValueKey('meal_search_planned_${meal.id}'),
+              leading: Text(emoji, style: const TextStyle(fontSize: 18)),
+              title: meal.title,
+              subtitle: _resultSubtitle(meal),
+              onTap: () => widget.onTapMeal(meal),
+            );
+          }).toList(),
+        ),
+      );
+    }
+
+    if (snapshot.hasError) {
+      children.insert(
+        0,
+        const Padding(
+          padding: EdgeInsets.only(bottom: CaleeSpacing.sm),
+          child: Text(
+            'Saved meals could not be loaded. Showing planned meals only.',
+            style: TextStyle(color: CaleeColors.textSecondary),
+          ),
+        ),
+      );
+    }
+    return ListView(
+      controller: scrollController,
+      padding: const EdgeInsets.symmetric(
+        horizontal: CaleeSpacing.pagePadding,
+        vertical: CaleeSpacing.sm,
+      ),
+      children: children,
     );
   }
 }

@@ -47,11 +47,13 @@ class _StubHub extends CaleeHubClient {
     this._meals = const [],
     this._favourites = const [],
     this._quickIdeas = const [],
+    this.failSuggestions = false,
   }) : super();
 
   final List<ClientMeal> _meals;
   final List<ClientMealTemplate> _favourites;
   final List<ClientStarterMealTemplate> _quickIdeas;
+  final bool failSuggestions;
 
   bool updateCalled = false;
   String? lastUpdateNotes = 'NOT_CALLED';
@@ -149,14 +151,20 @@ class _StubHub extends CaleeHubClient {
   Future<ClientMealTemplateList> mealTemplates({
     required String accessToken,
     String? mealType,
-  }) async => ClientMealTemplateList(templates: _favourites);
+  }) async {
+    if (failSuggestions) throw StateError('suggestions unavailable');
+    return ClientMealTemplateList(templates: _favourites);
+  }
 
   @override
   Future<List<ClientStarterMealTemplate>> mealStarterTemplates({
     required String accessToken,
     String? mealType,
     String? pack,
-  }) async => _quickIdeas;
+  }) async {
+    if (failSuggestions) throw StateError('suggestions unavailable');
+    return _quickIdeas;
+  }
 
   @override
   Future<ClientShoppingList> generateShoppingList({
@@ -197,6 +205,9 @@ ClientMealTemplate _favourite({
   required String name,
   String? icon,
   String? notes,
+  bool isFavourite = true,
+  int usageCount = 0,
+  String? lastUsedAt,
 }) => ClientMealTemplate(
   id: id,
   householdId: 'h1',
@@ -207,20 +218,23 @@ ClientMealTemplate _favourite({
   kidFriendly: false,
   freezerFriendly: false,
   lunchboxFriendly: false,
-  isFavourite: true,
-  usageCount: 0,
+  isFavourite: isFavourite,
+  usageCount: usageCount,
+  lastUsedAt: lastUsedAt,
 );
 
 ClientStarterMealTemplate _quickIdea({
   required int id,
   required String name,
   String? icon,
+  String? notes,
 }) => ClientStarterMealTemplate(
   id: id,
   slug: name.toLowerCase().replaceAll(' ', '-'),
   name: name,
   defaultMealType: 'dinner',
   icon: icon,
+  notes: notes,
   kidFriendly: false,
   freezerFriendly: false,
   lunchboxFriendly: false,
@@ -403,11 +417,20 @@ void main() {
 
   group('MealsPage — Pick dinner sheet', () {
     testWidgets(
-      'tapping "Add dinner" opens favourites and quick dinner ideas',
+      'tapping "Add dinner" opens favourites, recents and quick ideas',
       (tester) async {
         _useTallViewport(tester);
         final hub = _StubHub(
-          favourites: [_favourite(id: 1, name: 'Taco Night', icon: 'taco')],
+          favourites: [
+            _favourite(id: 1, name: 'Taco Night', icon: 'taco'),
+            _favourite(
+              id: 3,
+              name: 'Sunday Roast',
+              isFavourite: false,
+              usageCount: 4,
+              lastUsedAt: '2026-08-01T00:00:00Z',
+            ),
+          ],
           quickIdeas: [
             _quickIdea(id: 2, name: 'Butter Chicken', icon: 'curry'),
           ],
@@ -422,8 +445,10 @@ void main() {
         expect(find.text('Pick dinner'), findsOneWidget);
         // CaleeSection upper-cases its title.
         expect(find.text('FAMILY FAVOURITES'), findsOneWidget);
+        expect(find.text('RECENTLY USED'), findsOneWidget);
         expect(find.text('QUICK DINNER IDEAS'), findsOneWidget);
         expect(find.text('Taco Night'), findsOneWidget);
+        expect(find.text('Sunday Roast'), findsOneWidget);
         expect(find.text('Butter Chicken'), findsOneWidget);
         expect(find.text('Create new meal'), findsOneWidget);
       },
@@ -492,6 +517,26 @@ void main() {
       await tester.tap(find.text('Create new meal'));
       await tester.pumpAndSettle();
 
+      expect(find.text('Add Dinner'), findsOneWidget);
+    });
+
+    testWidgets('failed suggestions still offer Create new meal', (
+      tester,
+    ) async {
+      _useTallViewport(tester);
+      final hub = _StubHub(failSuggestions: true);
+      await tester.pumpWidget(_buildMealsPage(hub));
+      await tester.pump();
+      await tester.pump();
+
+      await tester.tap(find.text('Add dinner').first);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Could not load dinner ideas'), findsOneWidget);
+      await tester.tap(
+        find.byKey(const Key('meal_suggestions_create_new_failed')),
+      );
+      await tester.pumpAndSettle();
       expect(find.text('Add Dinner'), findsOneWidget);
     });
   });
@@ -689,6 +734,69 @@ void main() {
 
       expect(hub.createCalled, isTrue);
       expect(hub.lastCreateTitle, 'Pancakes');
+    });
+
+    testWidgets('+ sheet preserves saved-meal linkage when reusing a meal', (
+      tester,
+    ) async {
+      _useTallViewport(tester);
+      final hub = _StubHub(
+        favourites: [_favourite(id: 42, name: 'Family curry', notes: 'Mild')],
+      );
+      await tester.pumpWidget(_buildMealsPage(hub));
+      await tester.pump();
+      await tester.pump();
+
+      await tester.tap(find.byTooltip('Add meal'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('meal_suggestion_saved_42')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('meal_save_button')));
+      await tester.pump();
+      await tester.pump();
+
+      expect(hub.lastCreateTitle, 'Family curry');
+      expect(hub.lastCreateNotes, 'Mild');
+      expect(hub.lastCreateTemplateId, 42);
+      expect(hub.lastCreateStarterTemplateId, isNull);
+    });
+
+    testWidgets('search finds unplanned saved notes and quick ideas', (
+      tester,
+    ) async {
+      _useTallViewport(tester);
+      final hub = _StubHub(
+        favourites: [
+          _favourite(
+            id: 7,
+            name: 'Unplanned family meal',
+            notes: 'Tahini sauce',
+            isFavourite: false,
+          ),
+        ],
+        quickIdeas: [_quickIdea(id: 8, name: 'Fast tacos')],
+      );
+      await tester.pumpWidget(_buildMealsPage(hub));
+      await tester.pump();
+      await tester.pump();
+
+      await tester.tap(find.byTooltip('Search meals'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('meal_search_field')),
+        'tahini',
+      );
+      await tester.pump();
+      expect(find.text('Unplanned family meal'), findsOneWidget);
+      expect(find.text('SAVED MEALS'), findsOneWidget);
+
+      await tester.enterText(
+        find.byKey(const Key('meal_search_field')),
+        'tacos',
+      );
+      await tester.pump();
+      expect(find.text('Fast tacos'), findsOneWidget);
+      expect(find.text('QUICK DINNER IDEAS'), findsOneWidget);
     });
   });
 }

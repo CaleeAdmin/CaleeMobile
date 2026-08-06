@@ -21,12 +21,14 @@ class _StubHub extends CaleeHubClient {
   _StubHub({
     this._templates = const [],
     this._quickIdeas = const [],
+    this.failSuggestions = false,
     Map<int, List<ClientTemplateIngredient>>? ingredientsByTemplateId,
   }) : _ingredientsByTemplateId = ingredientsByTemplateId ?? {},
        super();
 
   List<ClientMealTemplate> _templates;
   final List<ClientStarterMealTemplate> _quickIdeas;
+  final bool failSuggestions;
   final Map<int, List<ClientTemplateIngredient>> _ingredientsByTemplateId;
   int _nextIngredientId = 1000;
 
@@ -73,14 +75,20 @@ class _StubHub extends CaleeHubClient {
   Future<ClientMealTemplateList> mealTemplates({
     required String accessToken,
     String? mealType,
-  }) async => ClientMealTemplateList(templates: _templates);
+  }) async {
+    if (failSuggestions) throw StateError('suggestions unavailable');
+    return ClientMealTemplateList(templates: _templates);
+  }
 
   @override
   Future<List<ClientStarterMealTemplate>> mealStarterTemplates({
     required String accessToken,
     String? mealType,
     String? pack,
-  }) async => _quickIdeas;
+  }) async {
+    if (failSuggestions) throw StateError('suggestions unavailable');
+    return _quickIdeas;
+  }
 
   @override
   Future<ClientMeal> createMeal({
@@ -354,7 +362,7 @@ void main() {
       expect(find.text('Spaghetti Bolognese'), findsOneWidget);
       expect(find.text('Used 4 times'), findsOneWidget);
 
-      expect(find.text('RECENT MEALS'), findsOneWidget);
+      expect(find.text('RECENTLY USED'), findsOneWidget);
       expect(find.text('Pizza Night'), findsOneWidget);
 
       expect(find.text('QUICK DINNER IDEAS'), findsOneWidget);
@@ -373,6 +381,55 @@ void main() {
       expect(find.text('No family favourites yet'), findsOneWidget);
       expect(find.text('No recent meals yet'), findsOneWidget);
       expect(find.text('No quick dinner ideas yet'), findsOneWidget);
+      expect(find.text('Create new meal'), findsOneWidget);
+    });
+
+    testWidgets('search includes saved meal notes and quick dinner ideas', (
+      tester,
+    ) async {
+      final hub = _StubHub(
+        templates: [
+          _template(
+            id: 1,
+            name: 'Hidden family recipe',
+            notes: 'Tahini dressing',
+          ),
+        ],
+        quickIdeas: [_quickIdea(id: 10, name: 'Quick tacos')],
+      );
+      await tester.pumpWidget(_buildSavedMealsPage(hub, _controllerFor(hub)));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Search saved meals'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('saved_meals_search_field')),
+        'tahini',
+      );
+      await tester.pump();
+      expect(find.text('Hidden family recipe'), findsOneWidget);
+
+      await tester.enterText(
+        find.byKey(const Key('saved_meals_search_field')),
+        'tacos',
+      );
+      await tester.pump();
+      expect(find.text('QUICK DINNER IDEAS'), findsWidgets);
+      expect(
+        find.byKey(const Key('meal_search_suggestion_starter_10')),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('failed loading still offers Create new meal', (tester) async {
+      final hub = _StubHub(failSuggestions: true);
+      await tester.pumpWidget(_buildSavedMealsPage(hub, _controllerFor(hub)));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Could not load saved meals'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('saved_meals_create_new_failed')));
+      await tester.pumpAndSettle();
+      expect(find.text('Create saved meal'), findsWidgets);
     });
   });
 
