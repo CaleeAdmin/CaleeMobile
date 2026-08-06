@@ -260,6 +260,33 @@ jobs:
 
           echo "Verified signed APK and AAB artifacts."
 
+      # bundletool is required to decode the AAB's compiled manifest for the
+      # permission gate below. Pinned version + checksum verification live in
+      # scripts/fetch_bundletool.sh; the cache only saves the re-download and
+      # the jar is checksum-verified again on every run before use.
+      - name: Cache bundletool
+        uses: actions/cache@v4
+        with:
+          path: build/bundletool
+          key: bundletool-1.18.1
+
+      # Release-blocker gate: Google Play rejected Calee 0.0.29 for undeclared
+      # broad media permissions merged in from a plugin manifest. Inspect the
+      # final signed artifacts (the AAB is what Play receives) and fail BEFORE
+      # any artifact is uploaded if a prohibited storage/media permission has
+      # returned. The prohibited list lives only in
+      # scripts/check_android_release_permissions.sh, shared with normal PR CI.
+      - name: Inspect final release permissions
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUNDLETOOL_JAR="$(scripts/fetch_bundletool.sh)"
+          export BUNDLETOOL_JAR
+          scripts/check_android_release_permissions.sh selftest
+          scripts/check_android_release_permissions.sh check \
+            --apk "build/app/outputs/flutter-apk/calee-mobile-${{ steps.build_meta.outputs.sanitized_build_name }}.apk" \
+            --aab "build/app/outputs/bundle/release/calee-mobile-${{ steps.build_meta.outputs.sanitized_build_name }}.aab"
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
