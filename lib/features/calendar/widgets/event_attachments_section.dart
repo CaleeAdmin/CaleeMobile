@@ -72,7 +72,7 @@ class _AttachmentLoadFailure {
     required this.title,
     required this.subtitle,
     required this.canRetry,
-    required this.blocksAdd,
+    required this.blocksMutations,
   });
 
   final String title;
@@ -81,9 +81,22 @@ class _AttachmentLoadFailure {
   /// Whether tapping the row could plausibly produce a different result.
   final bool canRetry;
 
-  /// Whether the failure means no file may be selected for this event at
-  /// all -- true only for the terminal calendar/event failures.
-  final bool blocksAdd;
+  /// Whether the failure means no attachment may be CHANGED on this event
+  /// at all -- adding, retrying an upload, or removing. True only for the
+  /// terminal calendar/event/session failures.
+  ///
+  /// Named for mutations rather than for Add, which is what it used to say
+  /// and what it used to do. Add was gated on it and Remove was not, so
+  /// after an expired session or a deleted event the user could still tap
+  /// the delete control on an existing row and send a DELETE that could
+  /// only fail -- or, worse, succeed against something the section could no
+  /// longer read. Every server mutation is one decision, and this is it.
+  ///
+  /// Read-only actions are deliberately NOT covered: viewing filenames,
+  /// opening, downloading and sharing an attachment already listed remain
+  /// available, because a list that loaded before the failure is still an
+  /// accurate list of what is attached.
+  final bool blocksMutations;
 }
 
 /// Where the attachment list stands, as one value rather than as an
@@ -175,10 +188,10 @@ class _AttachmentListState {
   ///  * `!isRequestActive` -- including during a refresh. An upload started
   ///    against a list that is being replaced would be racing the very
   ///    answer that decides whether it is allowed (limits, capability).
-  ///  * `!failure.blocksAdd` -- an unsupported calendar or a missing event
+  ///  * `!failure.blocksMutations` -- an unsupported calendar or a missing event
   ///    is terminal whether or not a baseline was loaded first.
   bool get allowsAdd =>
-      hasBaseline && !isRequestActive && !(failure?.blocksAdd ?? false);
+      hasBaseline && !isRequestActive && !(failure?.blocksMutations ?? false);
 
   /// Entering a request. A previous failure is cleared here so a stale
   /// error row cannot sit under a live spinner; [baseline] is deliberately
@@ -617,37 +630,56 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
   /// Set when Hub says attachments are unsupported for this calendar.
   bool _attachmentsDisabled = false;
 
-  /// Whether this section deals in uploads at all: the calendar accepts
-  /// attachments, this is not an occurrence-scoped view, and Hub has not
-  /// said the calendar cannot take them.
+  /// THE gate for every attachment change that reaches Hub: adding a file,
+  /// retrying a pending upload, and removing an existing attachment.
   ///
-  /// Deliberately does NOT consider the list's failure state. An upload the
-  /// user still owes an answer on has to stay resolvable even when the list
-  /// has failed terminally -- an expired session must not swallow the
-  /// Discard button and leave a staged file and a blocked editor behind it.
-  bool get _sectionSupportsAttaching =>
-      widget.canAdd && !widget.isSeriesScoped && !_attachmentsDisabled;
+  /// One decision, because they are one question -- "can a change to this
+  /// event's attachments succeed right now?" -- and answering it in three
+  /// places is what let them disagree. Add was gated on the list's terminal
+  /// failures; Remove was gated on `canRemove && !isSeriesScoped` alone. So
+  /// after a final 401, an unsupported calendar or a deleted event, the Add
+  /// row correctly went away while the delete control on every existing row
+  /// stayed live, and tapping it sent a DELETE for an event the section had
+  /// just been told it could not read.
+  ///
+  /// False when any of these hold:
+  ///
+  ///  * the list failed terminally -- expired session,
+  ///    ATTACHMENTS_NOT_SUPPORTED_FOR_CALENDAR, EVENT_NOT_FOUND, or any
+  ///    other failure the policy classifies as `blocksMutations`;
+  ///  * Hub has told us this calendar does not support attachments at all;
+  ///  * this is an occurrence-scoped view, where attachments belong to the
+  ///    series and neither add nor remove applies;
+  ///  * a teardown or transfer cancellation is under way.
+  ///
+  /// Deliberately NOT false for a transient refresh failure over a good
+  /// baseline: a dropped connection says nothing about whether the event
+  /// can be changed, and `canRetry` failures leave `blocksMutations` false
+  /// precisely so a network hiccup cannot lock the section.
+  ///
+  /// Read-only actions are outside this entirely. Viewing a filename,
+  /// opening, downloading and sharing stay available through all of the
+  /// above, because a list that loaded before the failure is still an
+  /// accurate list of what is attached.
+  bool get _serverMutationsAllowed =>
+      !widget.isSeriesScoped &&
+      !_attachmentsDisabled &&
+      !(_listState.failure?.blocksMutations ?? false) &&
+      !_stoppingAttachmentWork;
 
-  /// Whether attaching a file to THIS EVENT is possible in principle.
-  ///
-  /// [_sectionSupportsAttaching] plus "nothing terminal has happened to the
-  /// list": an unsupported calendar, a deleted event or an expired session
-  /// each make every attachment mutation pointless, however capable the
-  /// calendar is.
+  /// Whether attaching a file to THIS EVENT is possible in principle: the
+  /// mutation gate, plus the calendar's own add capability.
   ///
   /// Says nothing about whether it may happen right NOW -- that is
-  /// [_effectiveCanAdd]. The three are separate because they answer
-  /// different questions: whether uploads exist here at all, whether one
-  /// could be started at all, and whether one may be started this instant.
-  bool get _canAddCapability =>
-      _sectionSupportsAttaching && !(_listState.failure?.blocksAdd ?? false);
+  /// [_effectiveCanAdd].
+  bool get _canAddCapability => _serverMutationsAllowed && widget.canAdd;
 
   /// Whether "Add attachment" may be used AT ALL right now.
   ///
-  /// [_AttachmentListState.allowsAdd] is the clause this defect was about:
-  /// nothing may be attached to an event whose attachment list has never
-  /// successfully loaded, and nothing may be started while a list request
-  /// is in flight.
+  /// [_AttachmentListState.allowsAdd] is the clause the original defect was
+  /// about: nothing may be attached to an event whose attachment list has
+  /// never successfully loaded, and nothing may be started while a list
+  /// request is in flight.
   bool get _effectiveCanAdd => _canAddCapability && _listState.allowsAdd;
 
   /// Whether the Add row is tappable.
@@ -655,8 +687,8 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
   /// [_effectiveCanAdd] answers "is attaching allowed at all right now";
   /// the rest is about work this section is already doing -- a transfer in
   /// progress, an attempt holding the pending operation (the preflight
-  /// window a second tap used to slip through), an unresolved upload the
-  /// user must answer for first, or a teardown under way.
+  /// window a second tap used to slip through), or an unresolved upload the
+  /// user must answer for first.
   ///
   /// Both this and the guards inside [_addAttachment] exist on purpose:
   /// this one is for taps, those are for races and programmatic calls.
@@ -664,9 +696,12 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
       _effectiveCanAdd &&
       !_isUploading &&
       !_uploadAttemptInProgress &&
-      !_pendingUploadNeedsAction &&
-      !_stoppingAttachmentWork;
-  bool get _effectiveCanRemove => widget.canRemove && !widget.isSeriesScoped;
+      !_pendingUploadNeedsAction;
+
+  /// Whether an existing attachment may be removed. Same gate as Add, plus
+  /// the calendar's own remove capability -- a detach is a server mutation
+  /// like any other.
+  bool get _effectiveCanRemove => _serverMutationsAllowed && widget.canRemove;
 
   /// True when a pending upload is waiting on the user to retry or discard
   /// it. Deliberately excludes states the app is still resolving on its
@@ -1011,7 +1046,7 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
           ? 'Reference: $reference'
           : '${failure.subtitle}\nReference: $reference',
       canRetry: failure.canRetry,
-      blocksAdd: failure.blocksAdd,
+      blocksMutations: failure.blocksMutations,
     );
   }
 
@@ -1021,7 +1056,7 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
         title: 'Could not load attachments',
         subtitle: 'Tap to try again',
         canRetry: true,
-        blocksAdd: false,
+        blocksMutations: false,
       );
     }
 
@@ -1033,7 +1068,7 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
           title: 'Attachments are not supported for this calendar.',
           subtitle: null,
           canRetry: false,
-          blocksAdd: true,
+          blocksMutations: true,
         );
 
       case 'EVENT_NOT_FOUND':
@@ -1044,7 +1079,7 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
           title: 'This event is no longer available.',
           subtitle: null,
           canRetry: false,
-          blocksAdd: true,
+          blocksMutations: true,
         );
 
       case 'NETWORK_ERROR':
@@ -1055,7 +1090,7 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
           title: 'Could not load attachments',
           subtitle: 'Check your connection and tap to try again.',
           canRetry: true,
-          blocksAdd: false,
+          blocksMutations: false,
         );
     }
 
@@ -1080,7 +1115,7 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
         title: 'Your session has expired',
         subtitle: 'Please sign out and sign in again.',
         canRetry: false,
-        blocksAdd: true,
+        blocksMutations: true,
       );
     }
 
@@ -1088,7 +1123,7 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
       title: 'Could not load attachments',
       subtitle: 'Tap to try again',
       canRetry: true,
-      blocksAdd: false,
+      blocksMutations: false,
     );
   }
 
@@ -2117,8 +2152,30 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
 
   // ── Remove ───────────────────────────────────────────────────────────────
 
+  /// Removes [attachment] from the event, after confirming with the user.
+  ///
+  /// [_serverMutationsAllowed] is checked at THREE points, and all three are
+  /// required:
+  ///
+  ///  1. before the dialog opens -- a disabled control does not stop a
+  ///     programmatic call, and this method must be safe from anywhere;
+  ///  2. after the dialog closes -- the destructive dialog is modal and
+  ///     stays open for as long as the user takes to read it, which is
+  ///     easily long enough for a refresh already in flight to come back
+  ///     with an expired session, a deleted event, or a calendar that no
+  ///     longer supports attachments;
+  ///  3. immediately before the request leaves -- nothing awaits between (2)
+  ///     and here today, but a detach cannot be recalled once sent, so the
+  ///     check sits against the call itself rather than trusting the
+  ///     distance to it.
+  ///
+  /// The sequence this exists for: baseline visible, Remove confirmation
+  /// opens, a held refresh returns a final 401, the user taps Remove -- and
+  /// no DELETE is sent.
   Future<void> _removeAttachment(CalendarAttachment attachment) async {
-    if (_stoppingAttachmentWork || _busyAttachmentIds.contains(attachment.id)) {
+    if (!_effectiveCanRemove ||
+        _stoppingAttachmentWork ||
+        _busyAttachmentIds.contains(attachment.id)) {
       return;
     }
     final confirmed = await CaleeDestructiveDialog.show(
@@ -2130,13 +2187,21 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
       confirmLabel: 'Remove',
     );
     // Re-checked after the confirmation: a detach cannot be recalled once
-    // sent, so it must not be started into a teardown or a cancellation.
-    if (!confirmed || !mounted || _stoppingAttachmentWork) return;
+    // sent, so it must not be started into a teardown, a cancellation, or a
+    // terminal list result that landed while the dialog was up.
+    if (!confirmed ||
+        !mounted ||
+        !_effectiveCanRemove ||
+        _stoppingAttachmentWork) {
+      return;
+    }
 
     // A detach request that has left cannot be recalled, so the editor is
     // told an action is running for exactly as long as it is in flight.
     _markAttachmentBusy(attachment.id);
     try {
+      // Last check, against the call itself.
+      if (!_effectiveCanRemove) return;
       final updated = await widget.hubClient.detachAttachment(
         accessToken: widget.accessToken,
         eventId: widget.eventId,
@@ -2453,18 +2518,24 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
         // explicit user resolution -- retrying reuses the SAME idempotency
         // key, discarding is the only thing that lets a later pick mint a
         // new one (Part G).
-        // Gated on whether this section deals in uploads at all -- not on
-        // list readiness, and not on the list's failure state. An upload the
-        // user still owes an answer on must stay resolvable while a refresh
-        // is in flight AND after the list has failed terminally: hiding
-        // Retry/Discard would strand the operation, keep its staged file on
-        // disk, and leave the editor blocked on an unresolved upload with
-        // nothing on screen to resolve it. (It cannot appear during the
-        // INITIAL load at all -- Add was never available, so no operation
-        // can exist yet.)
-        if (_sectionSupportsAttaching &&
-            !_isUploading &&
-            _pendingUploadNeedsAction)
+        //
+        // Gated on THE OPERATION ITSELF, and on nothing else. Not on the
+        // calendar's capability, not on `_attachmentsDisabled`, not on the
+        // list's failure state, not on list readiness. Those all describe
+        // whether a NEW upload could start; this row is about one that
+        // already did, and whose staged file is on disk right now.
+        //
+        // The case that forced this: a refresh returns
+        // ATTACHMENTS_NOT_SUPPORTED_FOR_CALENDAR, the section sets
+        // `_attachmentsDisabled`, and the whole row vanished -- taking
+        // Discard with it. The staged file stayed on disk, the operation
+        // stayed unresolved, and the editor stayed blocked on it with
+        // nothing on screen the user could press. A terminal result must
+        // never strand a staged file behind an invisible control.
+        //
+        // (It cannot appear during the INITIAL load at all -- Add was never
+        // available, so no operation can exist yet.)
+        if (_pendingUploadNeedsAction && !_isUploading)
           CaleeListRow(
             key: const Key('pending_upload_row'),
             title: _pendingUpload!.isUncertain
@@ -2496,13 +2567,21 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
                   // what the user must still be able to do, and is the only
                   // thing that releases the staged file and unblocks the
                   // editor.
-                  onPressed: (_uploadAttemptInProgress || !_canAddCapability)
+                  onPressed:
+                      (_uploadAttemptInProgress || !_serverMutationsAllowed)
                       ? null
                       : _retryPendingUpload,
                   child: const Text('Retry'),
                 ),
                 TextButton(
                   key: const Key('discard_pending_upload'),
+                  // NEVER conditional. Discarding sends nothing to Hub: it
+                  // detaches the operation, deletes the staged file through
+                  // the existing cleanup lifecycle, and reports the section
+                  // idle so the editor stops blocking on it. That is exactly
+                  // what the user needs MOST when everything else has failed
+                  // terminally, so it is the one control that cannot be
+                  // taken away.
                   onPressed: _discardPendingUpload,
                   child: const Text('Discard'),
                 ),

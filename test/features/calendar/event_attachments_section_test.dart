@@ -83,6 +83,13 @@ class _StubHub extends CaleeHubClient {
   /// baseline without reaching into the widget's internals.
   Object? detachThrows;
 
+  /// How many detach requests actually reached this stub.
+  ///
+  /// Recorded on ENTRY, before `detachThrows` is consulted, so a test that
+  /// asserts "no DELETE was sent" is asserting the request never left --
+  /// not merely that it failed once it had.
+  int get detachCallCount => detachCalendarIds.length;
+
   /// Completes the [index]-th GATED list call. Note that [listGates] counts
   /// only calls made while [gateListCalls] was on, so its indices line up
   /// with [listAttachmentsCallCount] only when gating was on from the start.
@@ -2777,6 +2784,327 @@ void main() {
               'discarding is the only thing that releases the staged file and '
               'unblocks the editor, so it must stay available',
         );
+      },
+    );
+  });
+
+  // ── One gate for every server mutation ────────────────────────────────────
+  //
+  // A terminal list failure used to block Add and nothing else. Remove was
+  // gated on `canRemove && !isSeriesScoped` alone, so after a final 401, an
+  // unsupported calendar or a deleted event the Add row correctly went away
+  // while the delete control on every existing row stayed live -- and tapping
+  // it sent a DELETE for an event the section had just been told it could not
+  // read. Adding, retrying an upload and removing are one question, and are
+  // now answered in one place.
+  //
+  // Read-only actions are deliberately still available throughout: a list
+  // that loaded before the failure is still an accurate list of what is
+  // attached.
+  group('terminal list failures block every server mutation', () {
+    /// Loads a baseline, starts a refresh through the section's own
+    /// conflicting-detach path, and resolves it with [terminal].
+    Future<_StubHub> baselineThenTerminalRefresh(
+      WidgetTester tester,
+      Object terminal,
+    ) async {
+      final hub = _StubHub(
+        initialAttachments: [_attachment(filename: 'baseline.pdf')],
+      );
+      await pumpSection(tester, hub: hub, canAdd: true, canRemove: true);
+      await tester.pumpAndSettle();
+      expect(addRowEnabled(tester), isTrue);
+      expect(find.byTooltip('Remove baseline.pdf from event'), findsOneWidget);
+
+      hub
+        ..gateListCalls = true
+        ..detachThrows = hubError(null, statusCode: 409);
+      await startRefreshViaConflictingDetach(tester, 'baseline.pdf');
+      final detachesBefore = hub.detachCallCount;
+
+      hub
+        ..detachThrows = null
+        ..failList(terminal);
+      await pumpFrames(tester, frames: 12);
+
+      // The conflicting detach that started the refresh is the only one that
+      // may have been sent; nothing after it counts.
+      expect(hub.detachCallCount, detachesBefore);
+      return hub;
+    }
+
+    void expectNoMutationAffordances(WidgetTester tester) {
+      expect(
+        find.text('baseline.pdf'),
+        findsOneWidget,
+        reason: 'the list itself is still accurate and stays readable',
+      );
+      expect(
+        find.byKey(const Key('add_attachment_row')),
+        findsNothing,
+        reason: 'Add is unavailable',
+      );
+      expect(
+        find.byTooltip('Remove baseline.pdf from event'),
+        findsNothing,
+        reason: 'and so is Remove -- this is the gate that used to disagree',
+      );
+      expect(
+        find.byTooltip('Share baseline.pdf'),
+        findsOneWidget,
+        reason: 'while read-only actions are untouched',
+      );
+    }
+
+    testWidgets('a final 401 blocks Add and Remove but keeps the list', (
+      tester,
+    ) async {
+      final hub = await baselineThenTerminalRefresh(
+        tester,
+        hubError(null, statusCode: 401),
+      );
+      final detaches = hub.detachCallCount;
+
+      expectNoMutationAffordances(tester);
+      expect(loadErrorTitle(tester), 'Your session has expired');
+
+      // Reaching past the withdrawn control changes nothing either.
+      await tester.pumpAndSettle();
+      expect(hub.detachCallCount, detaches, reason: 'no detach was sent');
+    });
+
+    testWidgets('an unsupported calendar blocks Add and Remove', (
+      tester,
+    ) async {
+      final hub = await baselineThenTerminalRefresh(
+        tester,
+        hubError('ATTACHMENTS_NOT_SUPPORTED_FOR_CALENDAR', statusCode: 409),
+      );
+      expectNoMutationAffordances(tester);
+      expect(
+        loadErrorTitle(tester),
+        'Attachments are not supported for this calendar.',
+      );
+      expect(hub.detachCallCount, 1, reason: 'only the conflicting one');
+    });
+
+    testWidgets('EVENT_NOT_FOUND blocks Add and Remove', (tester) async {
+      final hub = await baselineThenTerminalRefresh(
+        tester,
+        hubError('EVENT_NOT_FOUND', statusCode: 404),
+      );
+      expectNoMutationAffordances(tester);
+      expect(loadErrorTitle(tester), 'This event is no longer available.');
+      expect(hub.detachCallCount, 1, reason: 'only the conflicting one');
+    });
+
+    testWidgets(
+      'a terminal result arriving while the Remove dialog is open prevents '
+      'the DELETE',
+      (tester) async {
+        // The destructive dialog is modal and stays open for as long as the
+        // user takes to read it -- easily long enough for a refresh already
+        // in flight to come back with an expired session. A disabled control
+        // cannot help here: the control was live when it was tapped.
+        final hub = _StubHub(
+          initialAttachments: [
+            _attachment(id: 'att-A', filename: 'A.pdf'),
+            _attachment(id: 'att-B', filename: 'B.pdf'),
+          ],
+        );
+        await pumpSection(tester, hub: hub, canAdd: true, canRemove: true);
+        await tester.pumpAndSettle();
+
+        // A held refresh, started the way the section really starts one.
+        hub
+          ..gateListCalls = true
+          ..detachThrows = hubError(null, statusCode: 409);
+        await startRefreshViaConflictingDetach(tester, 'B.pdf');
+        hub.detachThrows = null;
+        final detachesBefore = hub.detachCallCount;
+
+        // The user opens the confirmation for A while that refresh is still
+        // in flight -- at which point removing A is entirely legitimate.
+        await tester.tap(find.byTooltip('Remove A.pdf from event'));
+        await pumpFrames(tester, frames: 10);
+        expect(find.text('Remove attachment?'), findsOneWidget);
+
+        // The session expires while they are reading it.
+        hub.failList(hubError(null, statusCode: 401));
+        await pumpFrames(tester, frames: 12);
+
+        // They confirm anyway.
+        await tester.tap(find.text('Remove'));
+        await pumpFrames(tester, frames: 12);
+
+        expect(
+          hub.detachCallCount,
+          detachesBefore,
+          reason:
+              'the post-confirmation guard must stop a DELETE for an event '
+              'the section can no longer reach',
+        );
+        expect(
+          find.text('A.pdf'),
+          findsOneWidget,
+          reason:
+              'and the attachment is still listed, because nothing removed it',
+        );
+      },
+    );
+  });
+
+  // ── An unresolved upload is never stranded ───────────────────────────────
+  //
+  // The pending row used to be gated on the section's attach capability,
+  // which includes `_attachmentsDisabled`. A refresh returning
+  // ATTACHMENTS_NOT_SUPPORTED_FOR_CALENDAR therefore hid the entire row --
+  // taking Discard with it -- while the staged file stayed on disk, the
+  // operation stayed unresolved, and the editor stayed blocked on it with
+  // nothing on screen the user could press.
+  group('an unresolved upload survives every terminal result', () {
+    late ImagePickerPlatform originalImagePickerPlatform;
+
+    setUp(() {
+      originalImagePickerPlatform = ImagePickerPlatform.instance;
+    });
+
+    tearDown(() {
+      ImagePickerPlatform.instance = originalImagePickerPlatform;
+    });
+
+    /// Leaves a retryable pending upload on screen and a held refresh in
+    /// flight, then resolves that refresh with [terminal].
+    Future<({_StubHub hub, _GatedStagingManager staging})>
+    pendingUploadThenTerminal(
+      WidgetTester tester,
+      Object terminal, {
+      ValueChanged<AttachmentOperationState>? onOperationStateChanged,
+    }) async {
+      final sourceFile = File('${tempDir.path}/stranded_pick.jpg');
+      await tester.runAsync(
+        () => sourceFile.writeAsBytes(List<int>.filled(1024, 4)),
+      );
+      ImagePickerPlatform.instance = _FakeImagePickerPlatform(
+        XFile(sourceFile.path),
+      );
+
+      final hub = _StubHub(
+        initialAttachments: [_attachment(filename: 'baseline.pdf')],
+        // A stale-event conflict leaves the operation RETRYABLE and starts a
+        // list refresh -- the section's own documented behaviour, and the
+        // realistic way to arrive at "pending upload plus in-flight list".
+        onUpload: (_) async =>
+            throw hubError('CALENDAR_OBJECT_CONFLICT', statusCode: 409),
+      );
+      final staging = _GatedStagingManager(
+        stagingDirectoryProvider: () async => tempDir,
+      );
+      await pumpSection(
+        tester,
+        hub: hub,
+        canAdd: true,
+        canRemove: true,
+        stagingManager: staging,
+        onOperationStateChanged: onOperationStateChanged,
+      );
+      await tester.pumpAndSettle();
+
+      hub.gateListCalls = true;
+      await tester.tap(find.byKey(const Key('add_attachment_row')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Choose photo'));
+      await tester.pump();
+      await settleWithFileIo(tester);
+      expect(find.byKey(const Key('pending_upload_row')), findsOneWidget);
+
+      hub.failList(terminal);
+      await settleWithFileIo(tester);
+
+      return (hub: hub, staging: staging);
+    }
+
+    void expectPendingRowUsable(WidgetTester tester, String reason) {
+      expect(
+        find.byKey(const Key('pending_upload_row')),
+        findsOneWidget,
+        reason: 'the pending row must survive $reason',
+      );
+      expect(
+        retryButtonEnabled(tester),
+        isFalse,
+        reason: 'Retry is an upload, and no mutation may start after $reason',
+      );
+      expect(
+        discardButtonEnabled(tester),
+        isTrue,
+        reason:
+            'Discard sends nothing to Hub and is the only way to release the '
+            'staged file, so it survives $reason',
+      );
+    }
+
+    testWidgets('an unsupported calendar does not hide it', (tester) async {
+      // The exact case: this sets _attachmentsDisabled, which used to take
+      // the whole row -- and Discard with it.
+      await pendingUploadThenTerminal(
+        tester,
+        hubError('ATTACHMENTS_NOT_SUPPORTED_FOR_CALENDAR', statusCode: 409),
+      );
+      expectPendingRowUsable(tester, 'an unsupported calendar');
+      expect(
+        find.byKey(const Key('add_attachment_row')),
+        findsNothing,
+        reason: 'while Add is correctly gone',
+      );
+    });
+
+    testWidgets('a final 401 does not hide it', (tester) async {
+      await pendingUploadThenTerminal(tester, hubError(null, statusCode: 401));
+      expectPendingRowUsable(tester, 'an expired session');
+    });
+
+    testWidgets('EVENT_NOT_FOUND does not hide it', (tester) async {
+      await pendingUploadThenTerminal(
+        tester,
+        hubError('EVENT_NOT_FOUND', statusCode: 404),
+      );
+      expectPendingRowUsable(tester, 'a deleted event');
+    });
+
+    testWidgets(
+      'Discard after a terminal failure releases the staged file and unblocks '
+      'the editor',
+      (tester) async {
+        final reported = <AttachmentOperationState>[];
+        final fixture = await pendingUploadThenTerminal(
+          tester,
+          hubError('ATTACHMENTS_NOT_SUPPORTED_FOR_CALENDAR', statusCode: 409),
+          onOperationStateChanged: reported.add,
+        );
+
+        expect(
+          reported.last.blocksEditorClose,
+          isTrue,
+          reason: 'the editor is blocked on the unresolved upload',
+        );
+        final discardsBefore = fixture.staging.discardCalls;
+
+        await tester.tap(find.byKey(const Key('discard_pending_upload')));
+        await settleWithFileIo(tester);
+
+        expect(find.byKey(const Key('pending_upload_row')), findsNothing);
+        expect(
+          fixture.staging.discardCalls,
+          discardsBefore + 1,
+          reason: 'the staged file goes through the existing cleanup lifecycle',
+        );
+        expect(
+          reported.last,
+          AttachmentOperationState.idle,
+          reason: 'and the parent editor is told it is no longer blocked',
+        );
+        expect(reported.last.blocksEditorClose, isFalse);
       },
     );
   });
