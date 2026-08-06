@@ -1098,6 +1098,23 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
                             // second, independent backstop. writableEventId
                             // would collapse to the series id and lose that.
                             eventId: widget.initialEvent!.id,
+                            // The EVENT's own calendar, never
+                            // _selectedCalendar. They agree until the user
+                            // changes the calendar dropdown mid-edit, and
+                            // then they mean different things: the selection
+                            // is where this event is about to be MOVED,
+                            // while its attachments are still on the
+                            // calendar it is currently in. Sending the
+                            // selection would send every attachment request
+                            // to a calendar that does not hold this event
+                            // yet, and Hub would correctly answer "not
+                            // found" for a file the user can see on screen.
+                            //
+                            // Keyed on the event id above, so the section is
+                            // rebuilt (and re-loads) for a different event
+                            // rather than carrying one event's list into
+                            // another's.
+                            calendarId: widget.initialEvent!.calendarId,
                             hubClient: widget.hubClient,
                             accessToken: widget.accessToken,
                             canAdd: _selectedCalendar
