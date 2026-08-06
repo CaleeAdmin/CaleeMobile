@@ -27,6 +27,34 @@ enum _AttachmentSource { camera, gallery, file }
 const _kStagedFileGoneMessage =
     'This file is no longer available. Choose it again.';
 
+/// One attempt to send one [PendingAttachmentUpload]: the exclusive right to
+/// preflight it and then upload it.
+///
+/// It exists because "is an upload running?" could not be answered honestly
+/// during preflight. `_sendPendingUpload` verifies the staged file before it
+/// builds a request, and across that await `_isUploading` was still false,
+/// no other flag was set, and an initial `selected` operation shows no
+/// pending row -- so Add stayed enabled, Retry stayed tappable, and a second
+/// invocation could enter the same window. Whichever one arrived second then
+/// uploaded a discarded or superseded operation, competed over
+/// `_uploadCancelToken`, and let one invocation's terminal state overwrite
+/// another's.
+///
+/// The claim is a single slot ([_EventAttachmentsSectionState._uploadAttempt])
+/// taken SYNCHRONOUSLY before the first await and held until the invocation
+/// that took it returns -- through preflight, through the transfer, and
+/// through the settlement that follows a failure. Every check is by object
+/// identity, never by a boolean, so a stale invocation can only ever release
+/// or clear the attempt it owns itself.
+class _UploadAttempt {
+  _UploadAttempt(this.operation);
+
+  /// The operation this attempt was claimed for. An attempt is void the
+  /// moment this stops being the section's current pending operation --
+  /// which is exactly what Discard and editor-close do.
+  final PendingAttachmentUpload operation;
+}
+
 /// Why the attachment list could not be loaded, in the only terms the UI
 /// needs: what to say, and whether anything the user does from here can
 /// change the answer.
@@ -388,6 +416,22 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
   /// [PendingAttachmentUpload].
   PendingAttachmentUpload? _pendingUpload;
 
+  /// The one attempt currently allowed to send [_pendingUpload], or null when
+  /// no send is in progress. See [_UploadAttempt] for what this fixes.
+  ///
+  /// Non-null covers the WHOLE of a send, not just the transfer: the
+  /// preflight before any bytes move, the transfer itself, and the
+  /// settlement afterwards (a failure is handled across awaits, during which
+  /// `_isUploading` is already false). A second send is refused for all of
+  /// it, which is what makes a stale invocation's `finally` structurally
+  /// unable to clear a newer attempt's state -- a newer attempt cannot exist
+  /// yet.
+  _UploadAttempt? _uploadAttempt;
+
+  /// True while any attempt owns the pending operation. Add and Retry are
+  /// both inert while this holds.
+  bool get _uploadAttemptInProgress => _uploadAttempt != null;
+
   /// Set when Hub says attachments are unsupported for this calendar.
   bool _attachmentsDisabled = false;
 
@@ -739,7 +783,7 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
   /// asynchronous error with no message and no recovery, which is precisely
   /// what a failing picker used to do.
   Future<void> _addAttachment() async {
-    if (_stoppingAttachmentWork) return;
+    if (_stoppingAttachmentWork || _uploadAttemptInProgress) return;
     try {
       await _runAddAttachment();
     } catch (error) {
@@ -761,17 +805,29 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
   /// editor open but already marked as closing. The guard lives here rather
   /// than only in [_addAttachment] because this method owns the modal, and
   /// must stay safe if it is ever called from somewhere else.
+  ///
+  /// [_uploadAttemptInProgress] is checked alongside the teardown flag at
+  /// each of those points. The Add row is already inert while an attempt
+  /// owns the pending operation, so this is the layer for races and
+  /// programmatic calls: a selection accepted here would replace the very
+  /// operation an in-flight preflight is about to send, and then be refused
+  /// by the single-flight guard and left with nothing to send it.
   Future<void> _runAddAttachment() async {
-    if (_stoppingAttachmentWork) return;
+    if (_stoppingAttachmentWork || _uploadAttemptInProgress) return;
 
     final source = await _pickSource();
-    if (source == null || !mounted || _stoppingAttachmentWork) return;
+    if (source == null ||
+        !mounted ||
+        _stoppingAttachmentWork ||
+        _uploadAttemptInProgress) {
+      return;
+    }
 
     final result = await _pickAttachmentFile(source);
     // Re-checked after the picker await: a cancellation (or a teardown) can
     // begin while the OS picker is up, and the file that comes back must not
     // start an upload into either.
-    if (!mounted || _stoppingAttachmentWork) return;
+    if (!mounted || _stoppingAttachmentWork || _uploadAttemptInProgress) return;
 
     switch (result) {
       // A normal cancellation is not an error and says nothing to the user.
@@ -1108,27 +1164,82 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
   Future<void> _sendPendingUpload() async {
     final pending = _pendingUpload;
     if (pending == null || !mounted || _stoppingAttachmentWork) return;
+    // Single-flight. An attempt already owns this operation -- still
+    // preflighting it, sending it, or settling its outcome -- so a second
+    // Add, a second Retry tap or a programmatic re-entry is refused here,
+    // silently and before anything is claimed or mutated.
+    if (_uploadAttempt != null || _isUploading) return;
 
-    // Before a request is built, not halfway through streaming one: a staged
-    // file that is missing, unreadable or the wrong size can never be
-    // uploaded, so Hub is not asked and the operation ends here rather than
-    // being offered as a retry that cannot succeed.
-    if (!await _staging.isIntact(pending.staged)) {
-      if (!mounted || !identical(_pendingUpload, pending)) return;
-      if (kDebugMode) {
-        debugPrint(
-          'EventAttachmentsSection: upload aborted -- staged file missing or '
-          'size-mismatched (expected ${pending.size} bytes)',
+    // Claimed SYNCHRONOUSLY, before the first await, so no other invocation
+    // can reach the window this used to leave open. The setState is what
+    // makes Add and Retry inert for the duration -- see
+    // [_uploadAttemptInProgress].
+    final attempt = _UploadAttempt(pending);
+    setState(() => _uploadAttempt = attempt);
+
+    try {
+      // Before a request is built, not halfway through streaming one: a
+      // staged file that is missing, unreadable or the wrong size can never
+      // be uploaded, so Hub is not asked and the operation ends here rather
+      // than being offered as a retry that cannot succeed.
+      final intact = await _staging.isIntact(pending.staged);
+
+      // Discard, editor-close or a teardown may have landed while that ran.
+      // Any of them makes this attempt void: return silently, without
+      // calling Hub, showing a message, touching the attachment rows or
+      // deleting a file another path now owns.
+      if (!_ownsUploadAttempt(attempt)) return;
+
+      if (!intact) {
+        if (kDebugMode) {
+          debugPrint(
+            'EventAttachmentsSection: upload aborted -- staged file missing '
+            'or size-mismatched (expected ${pending.size} bytes)',
+          );
+        }
+        await _finalizePendingUploadAsFailed(
+          pending,
+          message: _kStagedFileGoneMessage,
         );
+        return;
       }
-      await _finalizePendingUploadAsFailed(
-        pending,
-        message: _kStagedFileGoneMessage,
-      );
-      return;
-    }
-    if (!mounted || _stoppingAttachmentWork) return;
 
+      await _runUploadAttempt(attempt, pending);
+    } finally {
+      // Identity-guarded: an attempt only ever releases its own claim.
+      _releaseUploadAttempt(attempt);
+    }
+  }
+
+  /// True while [attempt] is still the section's live attempt AND still
+  /// speaks for the section's current pending operation.
+  ///
+  /// Both halves matter. The first fails if the section moved on to another
+  /// attempt; the second fails the instant Discard or editor-close clears
+  /// [_pendingUpload], which is how a preflight that is already in flight is
+  /// invalidated without having to reach into it.
+  bool _ownsUploadAttempt(_UploadAttempt attempt) =>
+      mounted &&
+      !_stoppingAttachmentWork &&
+      identical(_uploadAttempt, attempt) &&
+      identical(_pendingUpload, attempt.operation);
+
+  void _releaseUploadAttempt(_UploadAttempt attempt) {
+    if (!identical(_uploadAttempt, attempt)) return;
+    if (mounted) {
+      setState(() => _uploadAttempt = null);
+    } else {
+      _uploadAttempt = null;
+    }
+  }
+
+  /// The transfer half of one attempt. Only the invocation still holding the
+  /// claim gets here, so exactly one cancel token, one `_isUploading` and one
+  /// set of progress callbacks exist at a time.
+  Future<void> _runUploadAttempt(
+    _UploadAttempt attempt,
+    PendingAttachmentUpload pending,
+  ) async {
     final cancelToken = AttachmentTransferCancelToken();
     var bytesLeftTheApp = false;
     pending.state = AttachmentUploadState.uploading;
@@ -1153,7 +1264,9 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
         cancelToken: cancelToken,
         onProgress: (sent, total) {
           if (sent > 0) bytesLeftTheApp = true;
-          if (!mounted) return;
+          // A progress callback from an attempt the section has moved past
+          // must not drive the spinner for whatever owns it now.
+          if (!mounted || !identical(_uploadAttempt, attempt)) return;
           setState(() => _uploadProgress = total > 0 ? sent / total : null);
         },
       );
@@ -1162,7 +1275,7 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
       // not after the awaited cleanup inside _completePendingUpload, is what
       // keeps a screen waiting on this upload from sitting through a
       // filesystem delete before it can close.
-      _markUploadStopped();
+      _markUploadStopped(attempt);
       if (!mounted) return;
       await _completePendingUpload(pending, attachment);
     } on CaleeHubException catch (e) {
@@ -1170,13 +1283,20 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
       // "transferring" state ends HERE -- not after the reconciliation that
       // may follow. Otherwise a screen waiting on an upload to stop would
       // sit through the whole status poll before it could close.
-      _markUploadStopped();
+      _markUploadStopped(attempt);
       if (!mounted) return;
+      // _applyUploadFailure re-checks operation identity itself before it
+      // writes anything back.
       await _handleUploadFailure(e, pending, bytesLeftTheApp);
     } catch (error) {
-      _markUploadStopped();
+      _markUploadStopped(attempt);
       if (!mounted) return;
       _debugLogAttachmentFailure('upload', error);
+      // The user discarded this operation while it was failing. Reporting it
+      // now would put a late error on screen for something they dropped, and
+      // finalizing it would delete a staged file the discard path already
+      // owns.
+      if (!identical(_pendingUpload, pending)) return;
       // A local file failure is not a transient network failure, and must
       // not borrow its Retry: the same missing file cannot be sent by
       // asking again. Everything else keeps the operation and its key.
@@ -1190,7 +1310,7 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
         _showMessage('Could not upload this attachment. Please try again.');
       }
     } finally {
-      _markUploadStopped();
+      _markUploadStopped(attempt);
     }
   }
 
@@ -1273,7 +1393,17 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
   /// own fate is usually decided BETWEEN the two calls (cleared, finalized,
   /// or left retryable), and an early return here would strand the parent
   /// on the state as it stood before that decision.
-  void _markUploadStopped() {
+  void _markUploadStopped(_UploadAttempt attempt) {
+    // Scoped to the attempt that owns the transfer fields. A stale
+    // invocation unwinding after its operation was discarded must not clear
+    // the spinner, progress or cancel token of whatever holds them now.
+    //
+    // This is deliberately identity-only, and does NOT go through
+    // [_ownsUploadAttempt]: an attempt whose operation was discarded
+    // mid-transfer still has to put its own transfer state away, or the
+    // upload row would stay stuck on "Uploading…" for good.
+    if (!identical(_uploadAttempt, attempt)) return;
+
     final wasTransferring =
         _isUploading || _uploadCancelToken != null || _uploadProgress != null;
     if (wasTransferring) {
@@ -1557,6 +1687,13 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
   /// [_handleUploadFailure] and [_sendPendingUpload] stop a late upload
   /// callback from restoring it. The upload token is cancelled too, so
   /// discarding from the close path does not leave bytes on the wire.
+  ///
+  /// Clearing [_pendingUpload] is also what voids an attempt that is
+  /// mid-preflight: [_ownsUploadAttempt] compares the attempt's operation
+  /// against the current one, so a staged-file check still in flight comes
+  /// back to find it no longer speaks for anything and returns without
+  /// calling Hub. Nothing here waits for that check -- the attempt releases
+  /// its own claim when it unwinds.
   ///
   /// Stays SYNCHRONOUS. It is the editor's close path
   /// ([EventAttachmentsController.discardUnresolvedUpload]), and closing a
@@ -1900,7 +2037,16 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
               children: [
                 TextButton(
                   key: const Key('retry_pending_upload'),
-                  onPressed: _retryPendingUpload,
+                  // Inert while an attempt already owns this operation --
+                  // during the staged-file preflight of a retry, and while
+                  // a previous attempt is still settling. Tapping through
+                  // that window used to start a duplicate send of the same
+                  // key. Discard beside it stays live throughout: abandoning
+                  // the operation is exactly what the user must still be
+                  // able to do.
+                  onPressed: _uploadAttemptInProgress
+                      ? null
+                      : _retryPendingUpload,
                   child: const Text('Retry'),
                 ),
                 TextButton(
@@ -1941,8 +2087,16 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
             // cannot even reach the guard in _addAttachment. Both layers
             // exist on purpose: this one is for users, that one is for
             // races and programmatic calls.
+            //
+            // _uploadAttemptInProgress is the one that closes the preflight
+            // window. A freshly selected operation is neither uploading nor
+            // "needing action", so during its staged-file check every other
+            // condition here was false and the row stayed tappable -- a
+            // second Add could replace the operation the first was about to
+            // send.
             onTap:
                 (_isUploading ||
+                    _uploadAttemptInProgress ||
                     _pendingUploadNeedsAction ||
                     _stoppingAttachmentWork)
                 ? null

@@ -56,6 +56,11 @@ class _StubHub extends CaleeHubClient {
   /// When set, the status call throws this instead of answering.
   Object? statusThrows;
 
+  /// When set, the status call waits on it before answering. Used to hold a
+  /// send inside its own post-failure settlement, which is the other window
+  /// in which a second send must be refused.
+  Completer<void>? statusGate;
+
   @override
   Future<List<CalendarAttachment>> listAttachments({
     required String accessToken,
@@ -72,6 +77,8 @@ class _StubHub extends CaleeHubClient {
     required String idempotencyKey,
   }) async {
     statusQueriedKeys.add(idempotencyKey);
+    final held = statusGate;
+    if (held != null) await held.future;
     if (statusThrows != null) throw statusThrows!;
     if (statusResponses.isEmpty) {
       return const AttachmentUploadStatus(
@@ -203,6 +210,52 @@ Future<void> settleWithFileIo(WidgetTester tester) async {
 /// would reach for path_provider's platform channel.
 late Directory tempDir;
 
+/// A real staging manager whose [isIntact] can be held open at will.
+///
+/// This is the seam the upload-preflight race tests need. `isIntact` is the
+/// one await between "the user asked for a send" and "bytes start moving",
+/// and every ordering the single-flight claim exists to survive is decided
+/// inside it. Holding it on a Completer pins each race at exactly that
+/// boundary, with no sleeps and nothing timing-dependent: the test decides
+/// when preflight finishes.
+///
+/// Everything else -- staging, verification, discard -- is the real
+/// implementation, so these tests exercise production behaviour rather than
+/// a stand-in for it.
+class _GatedStagingManager extends AttachmentUploadStagingManager {
+  _GatedStagingManager({required super.stagingDirectoryProvider});
+
+  /// While non-null, [isIntact] waits on it before answering.
+  Completer<void>? gate;
+
+  int isIntactCalls = 0;
+  int discardCalls = 0;
+
+  @override
+  Future<bool> isIntact(StagedAttachmentFile staged) async {
+    isIntactCalls++;
+    final held = gate;
+    if (held == null) return super.isIntact(staged);
+    // The verdict is computed BEFORE the hold, so releasing the gate delivers
+    // the answer the check would have produced at the moment it ran.
+    //
+    // This matters: Discard deletes the staged file, so a check that re-read
+    // the file after being held would come back "gone" and be refused for
+    // that reason instead of by the claim. The race under test would then
+    // never actually happen -- it would be masked by whichever of the two
+    // filesystem operations happened to win.
+    final verdict = await super.isIntact(staged);
+    await held.future;
+    return verdict;
+  }
+
+  @override
+  Future<void> discard(StagedAttachmentFile staged) {
+    discardCalls++;
+    return super.discard(staged);
+  }
+}
+
 Future<void> pumpSection(
   WidgetTester tester, {
   required CaleeHubClient hub,
@@ -212,6 +265,9 @@ Future<void> pumpSection(
   TextScaler? textScaler,
   Future<OpenResult> Function(String path) openFile = _fakeOpenFile,
   List<Duration>? statusPollSchedule,
+  AttachmentUploadStagingManager? stagingManager,
+  EventAttachmentsController? controller,
+  ValueChanged<AttachmentOperationState>? onOperationStateChanged,
 }) {
   return tester.pumpWidget(
     MaterialApp(
@@ -232,16 +288,34 @@ Future<void> pumpSection(
             canRemove: canRemove,
             isSeriesScoped: isSeriesScoped,
             openFile: openFile,
-            stagingManager: AttachmentUploadStagingManager(
-              stagingDirectoryProvider: () async => tempDir,
-            ),
+            stagingManager:
+                stagingManager ??
+                AttachmentUploadStagingManager(
+                  stagingDirectoryProvider: () async => tempDir,
+                ),
             statusPollSchedule: statusPollSchedule,
+            controller: controller,
+            onOperationStateChanged: onOperationStateChanged,
           ),
         ),
       ),
     ),
   );
 }
+
+/// Whether the Add row is currently tappable.
+bool addRowEnabled(WidgetTester tester) =>
+    tester
+        .widget<CaleeListRow>(find.byKey(const Key('add_attachment_row')))
+        .onTap !=
+    null;
+
+/// Whether the pending row's Retry button is currently tappable.
+bool retryButtonEnabled(WidgetTester tester) =>
+    tester
+        .widget<TextButton>(find.byKey(const Key('retry_pending_upload')))
+        .onPressed !=
+    null;
 
 void main() {
   setUp(() async {
@@ -1175,6 +1249,481 @@ void main() {
               'XFile.name is what the picker reported for this pick; the API '
               'receives it verbatim rather than re-deriving it downstream',
         );
+      },
+    );
+  });
+
+  // ── Upload preflight is single-flight ──────────────────────────────────────
+  //
+  // Every case here pins the section at the ONE await between "a send was
+  // asked for" and "bytes start moving": the staged-file check. That window
+  // used to be completely unguarded -- `_isUploading` was still false, a
+  // freshly selected operation shows no pending row, and nothing else marked
+  // the operation as claimed -- so Add stayed tappable, Retry stayed
+  // tappable, and a second invocation could enter it and upload an operation
+  // the first one was already sending, or one the user had since discarded.
+  //
+  // _GatedStagingManager holds that await on a Completer, so each ordering is
+  // decided by the test rather than by timing.
+  group('upload preflight single-flight claim', () {
+    late ImagePickerPlatform originalImagePickerPlatform;
+    late _GatedStagingManager staging;
+
+    setUp(() {
+      originalImagePickerPlatform = ImagePickerPlatform.instance;
+      staging = _GatedStagingManager(
+        stagingDirectoryProvider: () async => tempDir,
+      );
+    });
+
+    tearDown(() {
+      ImagePickerPlatform.instance = originalImagePickerPlatform;
+    });
+
+    Future<File> writeSource(WidgetTester tester, String name) async {
+      final file = File('${tempDir.path}/$name');
+      await tester.runAsync(() => file.writeAsBytes(List<int>.filled(2048, 1)));
+      ImagePickerPlatform.instance = _FakeImagePickerPlatform(XFile(file.path));
+      return file;
+    }
+
+    /// Taps Add -> Choose photo and settles up to (and including) staging,
+    /// leaving the section held inside the gated preflight when [staging.gate]
+    /// is set.
+    Future<void> pickAndHold(WidgetTester tester) async {
+      await tester.tap(find.byKey(const Key('add_attachment_row')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Choose photo'));
+      await tester.pump();
+      await settleWithFileIo(tester);
+    }
+
+    testWidgets(
+      'an initial Add cannot start a second selection while its preflight is '
+      'still running',
+      (tester) async {
+        final hub = _StubHub(
+          onUpload: (onProgress) async =>
+              _attachment(id: 'new-1', filename: 'first.jpg'),
+        );
+        await writeSource(tester, 'first.jpg');
+        staging.gate = Completer<void>();
+
+        await pumpSection(
+          tester,
+          hub: hub,
+          canAdd: true,
+          canRemove: true,
+          stagingManager: staging,
+        );
+        await tester.pumpAndSettle();
+        await pickAndHold(tester);
+
+        expect(
+          staging.isIntactCalls,
+          1,
+          reason: 'the send reached preflight and is being held there',
+        );
+        expect(
+          hub.uploadIdempotencyKeys,
+          isEmpty,
+          reason: 'no bytes may move until preflight has answered',
+        );
+        expect(
+          addRowEnabled(tester),
+          isFalse,
+          reason:
+              'the claim is what closes this window: Add must not be tappable '
+              'while an attempt already owns the pending operation',
+        );
+        expect(
+          find.text('Uploading…'),
+          findsNothing,
+          reason: 'preflight must not claim that bytes are transferring',
+        );
+        expect(
+          find.widgetWithText(TextButton, 'Cancel'),
+          findsNothing,
+          reason: 'there is no transfer to cancel yet',
+        );
+
+        // A tap on the disabled row, and a second source-sheet attempt, must
+        // both be inert.
+        await tester.tap(
+          find.byKey(const Key('add_attachment_row')),
+          warnIfMissed: false,
+        );
+        await tester.pumpAndSettle();
+        expect(
+          find.text('Take photo'),
+          findsNothing,
+          reason: 'no second picker may be opened during preflight',
+        );
+
+        staging.gate!.complete();
+        await settleWithFileIo(tester);
+
+        expect(
+          hub.uploadIdempotencyKeys,
+          hasLength(1),
+          reason: 'exactly one upload, from the one attempt that held a claim',
+        );
+        expect(
+          staging.isIntactCalls,
+          1,
+          reason: 'no second preflight was ever started',
+        );
+        expect(find.text('first.jpg'), findsOneWidget);
+        expect(
+          find.byKey(const Key('pending_upload_row')),
+          findsNothing,
+          reason: 'the single operation completed and left nothing unresolved',
+        );
+        expect(addRowEnabled(tester), isTrue);
+      },
+    );
+
+    testWidgets(
+      'Retry cannot start a duplicate send while its own preflight is still '
+      'running, and the original key survives',
+      (tester) async {
+        final hub = _StubHub(
+          onUpload: (onProgress) async {
+            throw const CaleeHubException(
+              statusCode: 0,
+              code: 'NETWORK_ERROR',
+              message: 'Check your connection and try again.',
+            );
+          },
+        );
+        await writeSource(tester, 'retry_race.jpg');
+
+        await pumpSection(
+          tester,
+          hub: hub,
+          canAdd: true,
+          canRemove: true,
+          stagingManager: staging,
+        );
+        await tester.pumpAndSettle();
+        // First attempt runs ungated and fails retryably.
+        await pickAndHold(tester);
+
+        expect(hub.uploadIdempotencyKeys, hasLength(1));
+        expect(find.byKey(const Key('retry_pending_upload')), findsOneWidget);
+        expect(
+          retryButtonEnabled(tester),
+          isTrue,
+          reason: 'no attempt owns the operation once the first one returned',
+        );
+        final originalKey = hub.uploadIdempotencyKeys.single;
+
+        // Now hold the retry's preflight open.
+        staging.gate = Completer<void>();
+        await tester.tap(find.byKey(const Key('retry_pending_upload')));
+        await tester.pump();
+        await settleWithFileIo(tester);
+
+        expect(
+          staging.isIntactCalls,
+          2,
+          reason: 'the retry reached preflight and is being held there',
+        );
+        expect(
+          hub.uploadIdempotencyKeys,
+          hasLength(1),
+          reason: 'the retry has not sent anything yet',
+        );
+        expect(
+          retryButtonEnabled(tester),
+          isFalse,
+          reason:
+              'a second Retry tap during preflight is exactly the duplicate '
+              'send this claim prevents',
+        );
+        expect(
+          addRowEnabled(tester),
+          isFalse,
+          reason: 'Add is inert while an attempt owns the operation',
+        );
+
+        await tester.tap(
+          find.byKey(const Key('retry_pending_upload')),
+          warnIfMissed: false,
+        );
+        await tester.pumpAndSettle();
+        expect(
+          staging.isIntactCalls,
+          2,
+          reason: 'the ignored tap did not start a second preflight',
+        );
+
+        staging.gate!.complete();
+        await settleWithFileIo(tester);
+
+        expect(
+          hub.uploadIdempotencyKeys,
+          hasLength(2),
+          reason: 'exactly one additional send, from the retry that held it',
+        );
+        expect(
+          hub.uploadIdempotencyKeys[1],
+          originalKey,
+          reason:
+              'a retry is the SAME logical upload -- preflight must not mint '
+              'a new key',
+        );
+      },
+    );
+
+    testWidgets(
+      'Discard during preflight wins: the held attempt returns without ever '
+      'calling Hub',
+      (tester) async {
+        final hub = _StubHub(
+          onUpload: (onProgress) async {
+            throw const CaleeHubException(
+              statusCode: 0,
+              code: 'NETWORK_ERROR',
+              message: 'Check your connection and try again.',
+            );
+          },
+        );
+        await writeSource(tester, 'discard_race.jpg');
+
+        await pumpSection(
+          tester,
+          hub: hub,
+          canAdd: true,
+          canRemove: true,
+          stagingManager: staging,
+        );
+        await tester.pumpAndSettle();
+        await pickAndHold(tester);
+
+        expect(hub.uploadIdempotencyKeys, hasLength(1));
+        final discardsBefore = staging.discardCalls;
+
+        // Hold the retry's preflight, then discard underneath it.
+        staging.gate = Completer<void>();
+        await tester.tap(find.byKey(const Key('retry_pending_upload')));
+        await tester.pump();
+        await settleWithFileIo(tester);
+        expect(staging.isIntactCalls, 2);
+
+        await tester.tap(find.byKey(const Key('discard_pending_upload')));
+        await tester.pumpAndSettle();
+
+        expect(
+          find.byKey(const Key('pending_upload_row')),
+          findsNothing,
+          reason:
+              'Discard clears the operation synchronously, as it always did',
+        );
+
+        staging.gate!.complete();
+        await settleWithFileIo(tester);
+
+        expect(
+          hub.uploadIdempotencyKeys,
+          hasLength(1),
+          reason:
+              'the held attempt no longer speaks for the pending operation, '
+              'so it must return without sending a discarded file',
+        );
+        expect(
+          staging.discardCalls,
+          greaterThan(discardsBefore),
+          reason: 'the staged file is released by the discard path',
+        );
+        expect(
+          find.byKey(const Key('pending_upload_row')),
+          findsNothing,
+          reason: 'a discarded operation must not be resurrected',
+        );
+        expect(
+          find.text('discard_race.jpg'),
+          findsNothing,
+          reason: 'nothing was uploaded, so no attachment row may appear',
+        );
+        expect(
+          find.byType(SnackBar),
+          findsNothing,
+          reason: 'a discarded operation must not produce a late error',
+        );
+        expect(
+          addRowEnabled(tester),
+          isTrue,
+          reason: 'the claim was released, so Add is usable again',
+        );
+      },
+    );
+
+    testWidgets(
+      'editor-close discard during preflight wins, and leaves the controller '
+      'idle',
+      (tester) async {
+        final hub = _StubHub(
+          onUpload: (onProgress) async =>
+              _attachment(id: 'never', filename: 'closed.jpg'),
+        );
+        await writeSource(tester, 'closed.jpg');
+        staging.gate = Completer<void>();
+
+        final controller = EventAttachmentsController();
+        final reported = <AttachmentOperationState>[];
+
+        await pumpSection(
+          tester,
+          hub: hub,
+          canAdd: true,
+          canRemove: true,
+          stagingManager: staging,
+          controller: controller,
+          onOperationStateChanged: reported.add,
+        );
+        await tester.pumpAndSettle();
+        await pickAndHold(tester);
+
+        expect(staging.isIntactCalls, 1);
+        expect(hub.uploadIdempotencyKeys, isEmpty);
+
+        // The editor's own close policy: stop what can be stopped, then
+        // abandon the unresolved operation. Both are synchronous from the
+        // editor's point of view and must not wait on the filesystem.
+        await controller.cancelActiveTransfers();
+        controller.discardUnresolvedUpload();
+        await tester.pumpAndSettle();
+
+        staging.gate!.complete();
+        await settleWithFileIo(tester);
+
+        expect(
+          hub.uploadIdempotencyKeys,
+          isEmpty,
+          reason:
+              'a preflight the editor already abandoned must never reach Hub',
+        );
+        expect(
+          find.byKey(const Key('pending_upload_row')),
+          findsNothing,
+          reason: 'the abandoned operation must not come back',
+        );
+        expect(
+          find.text('closed.jpg'),
+          findsNothing,
+          reason: 'no attachment may be appended for an abandoned operation',
+        );
+        expect(
+          staging.discardCalls,
+          greaterThan(0),
+          reason: 'the staged file cleanup was requested by the discard path',
+        );
+        expect(
+          reported.last,
+          AttachmentOperationState.idle,
+          reason:
+              'the editor is owed nothing once the operation is abandoned, so '
+              'it may close',
+        );
+        expect(tester.takeException(), isNull);
+      },
+    );
+
+    testWidgets(
+      'a send still settling a failure keeps its claim, so no second attempt '
+      'can exist for a stale teardown to clear',
+      (tester) async {
+        // This is the invariant that makes the trailing teardown in
+        // _runUploadAttempt safe. A timed-out upload hands off to
+        // reconciliation, which the send AWAITS -- and only after that does
+        // its `finally` clear the transfer fields and release the claim.
+        // Before the claim existed, `_isUploading` was already false by then
+        // and the pending row already offered Retry, so a tap during that
+        // window started a second send whose `_isUploading` the first send's
+        // trailing teardown then wiped. Holding the status call pins the
+        // section inside exactly that window.
+        final hub = _StubHub(
+          onUpload: (onProgress) async {
+            throw const CaleeHubException(
+              statusCode: 0,
+              code: 'TIMEOUT',
+              message: 'Check your connection and try again.',
+            );
+          },
+        );
+        hub.statusGate = Completer<void>();
+        hub.statusResponses = const [
+          AttachmentUploadStatus(
+            kind: AttachmentUploadStatusKind.retryable,
+            retryable: true,
+          ),
+        ];
+        await writeSource(tester, 'settling.jpg');
+
+        await pumpSection(
+          tester,
+          hub: hub,
+          canAdd: true,
+          canRemove: true,
+          stagingManager: staging,
+          statusPollSchedule: const [Duration.zero, Duration.zero],
+        );
+        await tester.pumpAndSettle();
+        await pickAndHold(tester);
+
+        // The send is now inside its own reconciliation: bytes have stopped,
+        // the row is back, but the send has NOT returned.
+        expect(hub.uploadIdempotencyKeys, hasLength(1));
+        expect(hub.statusQueriedKeys, hasLength(1));
+        expect(find.text('Uploading…'), findsNothing);
+        expect(find.byKey(const Key('pending_upload_row')), findsOneWidget);
+        expect(
+          retryButtonEnabled(tester),
+          isFalse,
+          reason:
+              'the first send still owns the operation while it settles, so a '
+              'second one cannot begin for its teardown to clobber',
+        );
+        expect(addRowEnabled(tester), isFalse);
+
+        await tester.tap(
+          find.byKey(const Key('retry_pending_upload')),
+          warnIfMissed: false,
+        );
+        await tester.pumpAndSettle();
+        expect(
+          hub.uploadIdempotencyKeys,
+          hasLength(1),
+          reason: 'the tap during settlement started nothing',
+        );
+
+        hub.statusGate!.complete();
+        await settleWithFileIo(tester);
+
+        // The owner released its own claim on the way out, leaving the
+        // operation exactly as retryable as Hub said it was.
+        expect(
+          retryButtonEnabled(tester),
+          isTrue,
+          reason: 'the claim is released once its owner returns',
+        );
+
+        await tester.tap(find.byKey(const Key('retry_pending_upload')));
+        await tester.pump();
+        await settleWithFileIo(tester);
+
+        expect(
+          hub.uploadIdempotencyKeys,
+          hasLength(2),
+          reason: 'a Retry after settlement is allowed, and starts exactly one',
+        );
+        expect(
+          hub.uploadIdempotencyKeys[1],
+          hub.uploadIdempotencyKeys[0],
+          reason: 'and it is still the same logical upload',
+        );
+        expect(tester.takeException(), isNull);
       },
     );
   });
