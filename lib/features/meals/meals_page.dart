@@ -327,7 +327,7 @@ class _MealsPageState extends State<MealsPage> {
 
   void _openSearchSheet() {
     final allMeals = _controller.mealList?.meals ?? const <ClientMeal>[];
-    final suggestions = MealSuggestionResolver(_controller.repository).load();
+    final resolver = MealSuggestionResolver(_controller.repository);
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -339,7 +339,11 @@ class _MealsPageState extends State<MealsPage> {
       ),
       builder: (sheetContext) => _MealSearchSheet(
         meals: allMeals,
-        suggestions: suggestions,
+        loadSuggestions: resolver.load,
+        onCreateNewMeal: () {
+          Navigator.of(sheetContext).pop();
+          _openAddMealSheet();
+        },
         onTapMeal: (meal) {
           Navigator.of(sheetContext).pop();
           _openSheet(date: meal.mealDate, mealType: meal.mealType, meal: meal);
@@ -1536,13 +1540,15 @@ class _CopyWeekSheetState extends State<_CopyWeekSheet> {
 class _MealSearchSheet extends StatefulWidget {
   const _MealSearchSheet({
     required this.meals,
-    required this.suggestions,
+    required this.loadSuggestions,
+    required this.onCreateNewMeal,
     required this.onTapMeal,
     required this.onTapSuggestion,
   });
 
   final List<ClientMeal> meals;
-  final Future<MealSuggestionGroups> suggestions;
+  final Future<MealSuggestionGroups> Function() loadSuggestions;
+  final VoidCallback onCreateNewMeal;
   final ValueChanged<ClientMeal> onTapMeal;
   final ValueChanged<MealSuggestion> onTapSuggestion;
 
@@ -1552,11 +1558,13 @@ class _MealSearchSheet extends StatefulWidget {
 
 class _MealSearchSheetState extends State<_MealSearchSheet> {
   final _controller = TextEditingController();
+  late final Future<MealSuggestionGroups> _suggestions;
   List<ClientMeal> _plannedResults = [];
 
   @override
   void initState() {
     super.initState();
+    _suggestions = Future<MealSuggestionGroups>.sync(widget.loadSuggestions);
     _controller.addListener(_onQueryChanged);
   }
 
@@ -1674,7 +1682,7 @@ class _MealSearchSheetState extends State<_MealSearchSheet> {
             const Divider(height: 1),
             Expanded(
               child: FutureBuilder<MealSuggestionGroups>(
-                future: widget.suggestions,
+                future: _suggestions,
                 builder: (context, snapshot) => _buildResults(
                   snapshot: snapshot,
                   scrollController: scrollController,
@@ -1695,30 +1703,26 @@ class _MealSearchSheetState extends State<_MealSearchSheet> {
   }) {
     final query = _controller.text.trim();
     if (query.isEmpty) {
-      return Center(
-        child: Text(
-          'Type to search',
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: CaleeColors.textTertiary,
-          ),
-        ),
-      );
+      return _buildSearchState(message: 'Type to search', theme: theme);
     }
     if (snapshot.connectionState != ConnectionState.done) {
-      return const Center(child: CircularProgressIndicator());
+      return _buildSearchState(
+        message: 'Loading saved meals…',
+        theme: theme,
+        showProgress: true,
+      );
     }
 
     final suggestionResults = (snapshot.data ?? MealSuggestionGroups.empty)
         .search(query);
-    if (suggestionResults.isEmpty && _plannedResults.isEmpty) {
-      return Center(
-        child: Text(
-          'No meals found',
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: CaleeColors.textTertiary,
-          ),
-        ),
+    if (snapshot.hasError && _plannedResults.isEmpty) {
+      return _buildSearchState(
+        message: 'Saved meals could not be loaded.',
+        theme: theme,
       );
+    }
+    if (suggestionResults.isEmpty && _plannedResults.isEmpty) {
+      return _buildSearchState(message: 'No meals found', theme: theme);
     }
 
     final children = <Widget>[];
@@ -1806,6 +1810,8 @@ class _MealSearchSheetState extends State<_MealSearchSheet> {
         ),
       );
     }
+    children.add(const SizedBox(height: CaleeSpacing.md));
+    children.add(_createNewMealButton());
     return ListView(
       controller: scrollController,
       padding: const EdgeInsets.symmetric(
@@ -1813,6 +1819,46 @@ class _MealSearchSheetState extends State<_MealSearchSheet> {
         vertical: CaleeSpacing.sm,
       ),
       children: children,
+    );
+  }
+
+  Widget _buildSearchState({
+    required String message,
+    required ThemeData theme,
+    bool showProgress = false,
+  }) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(CaleeSpacing.xl),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (showProgress) ...[
+              const Center(child: CircularProgressIndicator()),
+              const SizedBox(height: CaleeSpacing.md),
+            ],
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: CaleeColors.textTertiary,
+              ),
+            ),
+            const SizedBox(height: CaleeSpacing.md),
+            _createNewMealButton(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _createNewMealButton() {
+    return OutlinedButton.icon(
+      key: const Key('meal_search_create_new'),
+      onPressed: widget.onCreateNewMeal,
+      icon: const Icon(Icons.add),
+      label: const Text(MealSuggestionLabels.createNewMeal),
     );
   }
 }

@@ -798,5 +798,44 @@ void main() {
       expect(find.text('Fast tacos'), findsOneWidget);
       expect(find.text('QUICK DINNER IDEAS'), findsOneWidget);
     });
+
+    testWidgets('search empty state offers Create new meal', (tester) async {
+      _useTallViewport(tester);
+      final hub = _StubHub();
+      await tester.pumpWidget(_buildMealsPage(hub));
+      await tester.pump();
+      await tester.pump();
+
+      await tester.tap(find.byTooltip('Search meals'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Type to search'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('meal_search_create_new')));
+      await tester.pumpAndSettle();
+      expect(find.text('Add meal'), findsOneWidget);
+    });
+
+    testWidgets('search failed state still offers Create new meal', (
+      tester,
+    ) async {
+      _useTallViewport(tester);
+      final hub = _StubHub(failSuggestions: true);
+      await tester.pumpWidget(_buildMealsPage(hub));
+      await tester.pump();
+      await tester.pump();
+
+      await tester.tap(find.byTooltip('Search meals'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('meal_search_field')),
+        'family dinner',
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Saved meals could not be loaded.'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('meal_search_create_new')));
+      await tester.pumpAndSettle();
+      expect(find.text('Add meal'), findsOneWidget);
+    });
   });
 }
