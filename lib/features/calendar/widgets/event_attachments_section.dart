@@ -14,32 +14,77 @@ import '../../../data/models/client_calendar.dart';
 import '../../../ui/calee_design.dart';
 import '../attachment_cache_manager.dart';
 import '../attachment_error_policy.dart';
+import '../attachment_upload_staging_manager.dart';
 import '../attachment_upload_status.dart';
 import '../pending_attachment_upload.dart';
 
-/// Conservative client-side pre-check mirroring calee-hub-core's default
-/// allowlist (core_attachments_cfg.php). Server-side content inspection
-/// remains authoritative for every upload; this only gives fast feedback
-/// before a network round trip (Phase 6: "show validation failures before
-/// network upload where possible").
-const kAttachmentMaxBytes = 10 * 1024 * 1024;
-const kAttachmentAllowedExtensions = {
-  'jpg',
-  'jpeg',
-  'png',
-  'heic',
-  'heif',
-  'pdf',
-  'txt',
-  'doc',
-  'docx',
-  'xls',
-  'xlsx',
-  'ppt',
-  'pptx',
-};
-
 enum _AttachmentSource { camera, gallery, file }
+
+/// Shown whenever a staged file is gone: at the pre-send check, on a retry,
+/// and if the filesystem gives way mid-upload. One wording, because it is
+/// one situation, and the only thing the user can do about it is pick the
+/// file again.
+const _kStagedFileGoneMessage =
+    'This file is no longer available. Choose it again.';
+
+/// One attempt to send one [PendingAttachmentUpload]: the exclusive right to
+/// preflight it and then upload it.
+///
+/// It exists because "is an upload running?" could not be answered honestly
+/// during preflight. `_sendPendingUpload` verifies the staged file before it
+/// builds a request, and across that await `_isUploading` was still false,
+/// no other flag was set, and an initial `selected` operation shows no
+/// pending row -- so Add stayed enabled, Retry stayed tappable, and a second
+/// invocation could enter the same window. Whichever one arrived second then
+/// uploaded a discarded or superseded operation, competed over
+/// `_uploadCancelToken`, and let one invocation's terminal state overwrite
+/// another's.
+///
+/// The claim is a single slot ([_EventAttachmentsSectionState._uploadAttempt])
+/// taken SYNCHRONOUSLY before the first await and held until the invocation
+/// that took it returns -- through preflight, through the transfer, and
+/// through the settlement that follows a failure. Every check is by object
+/// identity, never by a boolean, so a stale invocation can only ever release
+/// or clear the attempt it owns itself.
+class _UploadAttempt {
+  _UploadAttempt(this.operation);
+
+  /// The operation this attempt was claimed for. An attempt is void the
+  /// moment this stops being the section's current pending operation --
+  /// which is exactly what Discard and editor-close do.
+  final PendingAttachmentUpload operation;
+}
+
+/// Why the attachment list could not be loaded, in the only terms the UI
+/// needs: what to say, and whether anything the user does from here can
+/// change the answer.
+///
+/// The section used to catch every load failure as a bare `Object` and give
+/// all of them the same "Could not load attachments / Tap to try again" row.
+/// That was wrong in both directions. An unsupported calendar and a deleted
+/// event cannot be fixed by tapping, so inviting a retry is a lie -- and
+/// worse, Add stayed enabled, so the user could pick a file for an event
+/// that would reject every upload. A dropped connection, meanwhile, really
+/// is worth another tap and must not disable anything.
+@immutable
+class _AttachmentLoadFailure {
+  const _AttachmentLoadFailure({
+    required this.title,
+    required this.subtitle,
+    required this.canRetry,
+    required this.blocksAdd,
+  });
+
+  final String title;
+  final String? subtitle;
+
+  /// Whether tapping the row could plausibly produce a different result.
+  final bool canRetry;
+
+  /// Whether the failure means no file may be selected for this event at
+  /// all -- true only for the terminal calendar/event failures.
+  final bool blocksAdd;
+}
 
 /// What the attachments section is currently doing, as far as anything
 /// outside it needs to care.
@@ -222,6 +267,7 @@ class EventAttachmentsSection extends StatefulWidget {
     required this.isSeriesScoped,
     this.openFile = OpenFilex.open,
     this.cacheManager,
+    this.stagingManager,
     this.statusPollSchedule,
     this.onOperationStateChanged,
     this.controller,
@@ -254,6 +300,14 @@ class EventAttachmentsSection extends StatefulWidget {
   /// channel; defaults to a manager backed by the real application cache
   /// directory.
   final AttachmentCacheManager? cacheManager;
+
+  /// Owns the on-disk lifecycle of the file going the other way: the picker
+  /// selection copied into Calee-controlled storage before it is uploaded.
+  /// Deliberately a separate manager from [cacheManager] -- see
+  /// [AttachmentUploadStagingManager] for why downloaded copies and staged
+  /// uploads cannot share one lifecycle. Injected on the same terms, for the
+  /// same reason.
+  final AttachmentUploadStagingManager? stagingManager;
 
   /// The status-polling schedule, as the wait BEFORE each attempt:
   ///
@@ -306,13 +360,15 @@ class EventAttachmentsSection extends StatefulWidget {
 
 class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
   List<CalendarAttachment>? _attachments;
-  Object? _loadError;
+  _AttachmentLoadFailure? _loadFailure;
   bool _isUploading = false;
   double? _uploadProgress;
   AttachmentTransferCancelToken? _uploadCancelToken;
   final Set<String> _busyAttachmentIds = {};
   late final AttachmentCacheManager _cache =
       widget.cacheManager ?? AttachmentCacheManager();
+  late final AttachmentUploadStagingManager _staging =
+      widget.stagingManager ?? AttachmentUploadStagingManager();
 
   /// One cancel token per in-flight download, keyed by attachment ID, so
   /// several attachments can be opened or shared at once and each stays
@@ -360,11 +416,30 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
   /// [PendingAttachmentUpload].
   PendingAttachmentUpload? _pendingUpload;
 
+  /// The one attempt currently allowed to send [_pendingUpload], or null when
+  /// no send is in progress. See [_UploadAttempt] for what this fixes.
+  ///
+  /// Non-null covers the WHOLE of a send, not just the transfer: the
+  /// preflight before any bytes move, the transfer itself, and the
+  /// settlement afterwards (a failure is handled across awaits, during which
+  /// `_isUploading` is already false). A second send is refused for all of
+  /// it, which is what makes a stale invocation's `finally` structurally
+  /// unable to clear a newer attempt's state -- a newer attempt cannot exist
+  /// yet.
+  _UploadAttempt? _uploadAttempt;
+
+  /// True while any attempt owns the pending operation. Add and Retry are
+  /// both inert while this holds.
+  bool get _uploadAttemptInProgress => _uploadAttempt != null;
+
   /// Set when Hub says attachments are unsupported for this calendar.
   bool _attachmentsDisabled = false;
 
   bool get _effectiveCanAdd =>
-      widget.canAdd && !widget.isSeriesScoped && !_attachmentsDisabled;
+      widget.canAdd &&
+      !widget.isSeriesScoped &&
+      !_attachmentsDisabled &&
+      !(_loadFailure?.blocksAdd ?? false);
   bool get _effectiveCanRemove => widget.canRemove && !widget.isSeriesScoped;
 
   /// True when a pending upload is waiting on the user to retry or discard
@@ -422,8 +497,11 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
     _completeTransfersSettled();
     // Cached copies are only meant to live as long as the editor screen --
     // confidential family documents must not accumulate in the cache
-    // directory across sessions.
+    // directory across sessions. The staged upload, if any, goes with them:
+    // this screen was the only thing that could ever have finished it, and
+    // an editor closing is the end of the operation it belonged to.
     unawaited(_cache.close());
+    unawaited(_staging.close());
     // Last word to the parent: whatever it was blocking on is over.
     widget.controller?._unbind(this);
     if (_reportedOperationState != AttachmentOperationState.idle) {
@@ -562,7 +640,7 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
   }
 
   Future<void> _load() async {
-    setState(() => _loadError = null);
+    setState(() => _loadFailure = null);
     try {
       final attachments = await widget.hubClient.listAttachments(
         accessToken: widget.accessToken,
@@ -571,9 +649,91 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
       if (!mounted) return;
       setState(() => _attachments = attachments);
     } catch (error) {
+      _debugLogAttachmentFailure('list', error);
       if (!mounted) return;
-      setState(() => _loadError = error);
+      final failure = _classifyLoadFailure(error);
+      setState(() {
+        _loadFailure = failure;
+        // A calendar that does not support attachments is a property of the
+        // calendar, not of this request -- it stays disabled until the
+        // section is rebuilt for a different one.
+        if (error is CaleeHubException &&
+            error.code == 'ATTACHMENTS_NOT_SUPPORTED_FOR_CALENDAR') {
+          _attachmentsDisabled = true;
+        }
+      });
     }
+  }
+
+  /// Turns a list failure into the row the user sees, and into whether Add
+  /// survives it. See [_AttachmentLoadFailure] for why this is not one
+  /// generic branch.
+  ///
+  /// The default is deliberately the forgiving one: an unrecognised failure
+  /// keeps Retry and keeps Add, because refusing to let someone attach a
+  /// file over a code this build has never heard of is the worse mistake.
+  static _AttachmentLoadFailure _classifyLoadFailure(Object error) {
+    if (error is! CaleeHubException) {
+      return const _AttachmentLoadFailure(
+        title: 'Could not load attachments',
+        subtitle: 'Tap to try again',
+        canRetry: true,
+        blocksAdd: false,
+      );
+    }
+
+    switch (error.code) {
+      case 'ATTACHMENTS_NOT_SUPPORTED_FOR_CALENDAR':
+        // Tapping cannot change a calendar's capabilities, and adding is
+        // guaranteed to be rejected the same way.
+        return const _AttachmentLoadFailure(
+          title: 'Attachments are not supported for this calendar.',
+          subtitle: null,
+          canRetry: false,
+          blocksAdd: true,
+        );
+
+      case 'EVENT_NOT_FOUND':
+        // The event is gone or this editor is holding a stale ID. Letting
+        // the user choose a file for it would stage and queue an upload
+        // that cannot land.
+        return const _AttachmentLoadFailure(
+          title: 'This event is no longer available.',
+          subtitle: null,
+          canRetry: false,
+          blocksAdd: true,
+        );
+
+      case 'NETWORK_ERROR':
+      case 'TIMEOUT':
+        // Says nothing about the calendar or the event: capability is
+        // untouched and Add stays available.
+        return const _AttachmentLoadFailure(
+          title: 'Could not load attachments',
+          subtitle: 'Check your connection and tap to try again.',
+          canRetry: true,
+          blocksAdd: false,
+        );
+    }
+
+    // CaleeHubClient has already refreshed the token and retried once by the
+    // time a 401 reaches here, so this is a session the app cannot repair on
+    // the user's behalf.
+    if (error.statusCode == 401) {
+      return const _AttachmentLoadFailure(
+        title: 'Your session has expired',
+        subtitle: 'Please sign out and sign in again.',
+        canRetry: true,
+        blocksAdd: false,
+      );
+    }
+
+    return const _AttachmentLoadFailure(
+      title: 'Could not load attachments',
+      subtitle: 'Tap to try again',
+      canRetry: true,
+      blocksAdd: false,
+    );
   }
 
   void _showMessage(String message) {
@@ -623,7 +783,7 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
   /// asynchronous error with no message and no recovery, which is precisely
   /// what a failing picker used to do.
   Future<void> _addAttachment() async {
-    if (_stoppingAttachmentWork) return;
+    if (_stoppingAttachmentWork || _uploadAttemptInProgress) return;
     try {
       await _runAddAttachment();
     } catch (error) {
@@ -645,17 +805,29 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
   /// editor open but already marked as closing. The guard lives here rather
   /// than only in [_addAttachment] because this method owns the modal, and
   /// must stay safe if it is ever called from somewhere else.
+  ///
+  /// [_uploadAttemptInProgress] is checked alongside the teardown flag at
+  /// each of those points. The Add row is already inert while an attempt
+  /// owns the pending operation, so this is the layer for races and
+  /// programmatic calls: a selection accepted here would replace the very
+  /// operation an in-flight preflight is about to send, and then be refused
+  /// by the single-flight guard and left with nothing to send it.
   Future<void> _runAddAttachment() async {
-    if (_stoppingAttachmentWork) return;
+    if (_stoppingAttachmentWork || _uploadAttemptInProgress) return;
 
     final source = await _pickSource();
-    if (source == null || !mounted || _stoppingAttachmentWork) return;
+    if (source == null ||
+        !mounted ||
+        _stoppingAttachmentWork ||
+        _uploadAttemptInProgress) {
+      return;
+    }
 
     final result = await _pickAttachmentFile(source);
     // Re-checked after the picker await: a cancellation (or a teardown) can
     // begin while the OS picker is up, and the file that comes back must not
     // start an upload into either.
-    if (!mounted || _stoppingAttachmentWork) return;
+    if (!mounted || _stoppingAttachmentWork || _uploadAttemptInProgress) return;
 
     switch (result) {
       // A normal cancellation is not an error and says nothing to the user.
@@ -663,14 +835,40 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
         return;
       case _AttachmentPickFailed(:final message):
         _showMessage(message);
-      case _AttachmentReady(:final file, :final originalFilename, :final size):
+      case _AttachmentReady(:final file, :final originalFilename):
+        // Copy into storage Calee owns BEFORE anything else knows about the
+        // selection. Both pickers hand back a path in an OS-managed
+        // temporary directory; from here on the operation reads only its own
+        // staged copy, so the OS reclaiming that temporary file -- or
+        // Android killing the app behind the camera -- can no longer turn a
+        // queued upload into a permanent failure.
+        final StagedAttachmentFile staged;
+        try {
+          staged = await _staging.stage(
+            source: file,
+            originalFilename: originalFilename,
+          );
+        } on AttachmentStagingClosedException {
+          // Teardown won the race. The screen is going; say nothing.
+          return;
+        } on AttachmentStagingException catch (error) {
+          _debugLogStagingFailure(error);
+          if (mounted) _showMessage(error.message);
+          return;
+        }
+
+        // Re-checked after the copy: a cancellation or teardown can land
+        // while bytes are being written, and the staged file must not
+        // outlive a section that will never upload it.
+        if (!mounted || _stoppingAttachmentWork) {
+          unawaited(_staging.discard(staged));
+          return;
+        }
+
         // One logical operation begins here -- and with it, ONE idempotency
-        // key that will survive every timeout and retry below.
-        final pending = PendingAttachmentUpload(
-          file: file,
-          originalFilename: originalFilename,
-          size: size,
-        );
+        // key that will survive every timeout and retry below, and ONE
+        // staged file that outlives all of them too.
+        final pending = PendingAttachmentUpload(staged: staged);
         setState(() => _pendingUpload = pending);
         _notifyOperationState();
         await _sendPendingUpload();
@@ -909,16 +1107,56 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
     return 'Could not open the file picker. Please try again.';
   }
 
-  /// Debug-only and deliberately category-level: an exception's type -- plus
-  /// a platform exception's own code -- is enough to tell these failures
-  /// apart. File contents, filenames, paths and tokens are never logged.
+  /// Debug-only, and deliberately the most specific SAFE detail available
+  /// for each kind of failure.
+  ///
+  /// A Hub failure logs [CaleeHubException.debugSummary] -- status, stable
+  /// code, Hub's own user-safe message, request ID and endpoint, all already
+  /// parsed by CaleeHubClient from `x-calee-request-id` / `x-request-id` /
+  /// `meta.requestId`. That request ID is the one thing that makes a
+  /// production report traceable to a Hub log line, and reducing every list
+  /// failure to "CaleeHubException" is what made the original defect
+  /// undiagnosable from the client side. Everything else stays
+  /// category-level: an exception's type, plus a platform exception's own
+  /// code, is enough to tell those apart.
+  ///
+  /// Never logged, on any path: access or refresh tokens, file contents,
+  /// multipart bodies, user filenames, or local file paths.
   static void _debugLogAttachmentFailure(String stage, Object error) {
     if (!kDebugMode) return;
-    final detail = error is PlatformException
-        ? 'PlatformException(${error.code})'
-        : error.runtimeType.toString();
+    final String detail;
+    if (error is CaleeHubException) {
+      detail = error.debugSummary;
+    } else if (error is PlatformException) {
+      detail = 'PlatformException(${error.code})';
+    } else {
+      detail = error.runtimeType.toString();
+    }
     debugPrint('EventAttachmentsSection: $stage failed -- $detail');
   }
+
+  /// Local-file failures get their own record: the stage that failed and the
+  /// reason slug the staging manager classified it as. Deliberately no path
+  /// and no filename -- the slug already says whether the file was missing,
+  /// unreadable, empty, too large, of a rejected type, or failed
+  /// verification after the copy.
+  static void _debugLogStagingFailure(AttachmentStagingException error) {
+    if (!kDebugMode) return;
+    debugPrint(
+      'EventAttachmentsSection: staging failed -- reason: ${error.reason}',
+    );
+  }
+
+  /// A failure raised by the local filesystem rather than by Hub.
+  ///
+  /// This is the distinction the generic `catch` in [_sendPendingUpload] did
+  /// not make. `uploadAttachment` reads the staged file itself (`length()`,
+  /// then `openRead()`), and CaleeHubClient converts only socket, handshake,
+  /// timeout and HTTP failures into a CaleeHubException -- a
+  /// FileSystemException travels out raw. Treated as a generic failure it
+  /// became `retryable`, offering a Retry against a file that is not there,
+  /// which fails identically every time it is tapped.
+  static bool _isLocalFileFailure(Object error) => error is FileSystemException;
 
   /// Sends (or re-sends) [_pendingUpload], always with its original
   /// idempotency key. Retrying via this method is what makes a retry the
@@ -926,7 +1164,82 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
   Future<void> _sendPendingUpload() async {
     final pending = _pendingUpload;
     if (pending == null || !mounted || _stoppingAttachmentWork) return;
+    // Single-flight. An attempt already owns this operation -- still
+    // preflighting it, sending it, or settling its outcome -- so a second
+    // Add, a second Retry tap or a programmatic re-entry is refused here,
+    // silently and before anything is claimed or mutated.
+    if (_uploadAttempt != null || _isUploading) return;
 
+    // Claimed SYNCHRONOUSLY, before the first await, so no other invocation
+    // can reach the window this used to leave open. The setState is what
+    // makes Add and Retry inert for the duration -- see
+    // [_uploadAttemptInProgress].
+    final attempt = _UploadAttempt(pending);
+    setState(() => _uploadAttempt = attempt);
+
+    try {
+      // Before a request is built, not halfway through streaming one: a
+      // staged file that is missing, unreadable or the wrong size can never
+      // be uploaded, so Hub is not asked and the operation ends here rather
+      // than being offered as a retry that cannot succeed.
+      final intact = await _staging.isIntact(pending.staged);
+
+      // Discard, editor-close or a teardown may have landed while that ran.
+      // Any of them makes this attempt void: return silently, without
+      // calling Hub, showing a message, touching the attachment rows or
+      // deleting a file another path now owns.
+      if (!_ownsUploadAttempt(attempt)) return;
+
+      if (!intact) {
+        if (kDebugMode) {
+          debugPrint(
+            'EventAttachmentsSection: upload aborted -- staged file missing '
+            'or size-mismatched (expected ${pending.size} bytes)',
+          );
+        }
+        await _finalizePendingUploadAsFailed(
+          pending,
+          message: _kStagedFileGoneMessage,
+        );
+        return;
+      }
+
+      await _runUploadAttempt(attempt, pending);
+    } finally {
+      // Identity-guarded: an attempt only ever releases its own claim.
+      _releaseUploadAttempt(attempt);
+    }
+  }
+
+  /// True while [attempt] is still the section's live attempt AND still
+  /// speaks for the section's current pending operation.
+  ///
+  /// Both halves matter. The first fails if the section moved on to another
+  /// attempt; the second fails the instant Discard or editor-close clears
+  /// [_pendingUpload], which is how a preflight that is already in flight is
+  /// invalidated without having to reach into it.
+  bool _ownsUploadAttempt(_UploadAttempt attempt) =>
+      mounted &&
+      !_stoppingAttachmentWork &&
+      identical(_uploadAttempt, attempt) &&
+      identical(_pendingUpload, attempt.operation);
+
+  void _releaseUploadAttempt(_UploadAttempt attempt) {
+    if (!identical(_uploadAttempt, attempt)) return;
+    if (mounted) {
+      setState(() => _uploadAttempt = null);
+    } else {
+      _uploadAttempt = null;
+    }
+  }
+
+  /// The transfer half of one attempt. Only the invocation still holding the
+  /// claim gets here, so exactly one cancel token, one `_isUploading` and one
+  /// set of progress callbacks exist at a time.
+  Future<void> _runUploadAttempt(
+    _UploadAttempt attempt,
+    PendingAttachmentUpload pending,
+  ) async {
     final cancelToken = AttachmentTransferCancelToken();
     var bytesLeftTheApp = false;
     pending.state = AttachmentUploadState.uploading;
@@ -941,42 +1254,134 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
       final attachment = await widget.hubClient.uploadAttachment(
         accessToken: widget.accessToken,
         eventId: widget.eventId,
-        file: pending.file,
+        // The STAGED copy, never the picker's path -- see
+        // [PendingAttachmentUpload]. The name on the wire still comes from
+        // originalFilename, so the generated staging basename is not
+        // exposed here or anywhere else.
+        file: pending.stagedFile,
         originalFilename: pending.originalFilename,
         idempotencyKey: pending.idempotencyKey,
         cancelToken: cancelToken,
         onProgress: (sent, total) {
           if (sent > 0) bytesLeftTheApp = true;
-          if (!mounted) return;
+          // A progress callback from an attempt the section has moved past
+          // must not drive the spinner for whatever owns it now.
+          if (!mounted || !identical(_uploadAttempt, attempt)) return;
           setState(() => _uploadProgress = total > 0 ? sent / total : null);
         },
       );
+      // Bytes have stopped moving the moment the call returns -- exactly as
+      // on the failure path below. Ending the transferring state here, and
+      // not after the awaited cleanup inside _completePendingUpload, is what
+      // keeps a screen waiting on this upload from sitting through a
+      // filesystem delete before it can close.
+      _markUploadStopped(attempt);
       if (!mounted) return;
-      pending.state = AttachmentUploadState.completed;
-      setState(() {
-        _attachments = [...?_attachments, attachment];
-        // Only clears the operation that actually completed: a discard
-        // while this was in flight already replaced it with null, and
-        // must not be undone here.
-        if (identical(_pendingUpload, pending)) _pendingUpload = null;
-      });
+      await _completePendingUpload(pending, attachment);
     } on CaleeHubException catch (e) {
       // Bytes have stopped moving the moment the call returns, so the
       // "transferring" state ends HERE -- not after the reconciliation that
       // may follow. Otherwise a screen waiting on an upload to stop would
       // sit through the whole status poll before it could close.
-      _markUploadStopped();
+      _markUploadStopped(attempt);
       if (!mounted) return;
+      // _applyUploadFailure re-checks operation identity itself before it
+      // writes anything back.
       await _handleUploadFailure(e, pending, bytesLeftTheApp);
     } catch (error) {
-      _markUploadStopped();
+      _markUploadStopped(attempt);
       if (!mounted) return;
       _debugLogAttachmentFailure('upload', error);
-      pending.state = AttachmentUploadState.retryable;
-      _showMessage('Could not upload this attachment. Please try again.');
+      // The user discarded this operation while it was failing. Reporting it
+      // now would put a late error on screen for something they dropped, and
+      // finalizing it would delete a staged file the discard path already
+      // owns.
+      if (!identical(_pendingUpload, pending)) return;
+      // A local file failure is not a transient network failure, and must
+      // not borrow its Retry: the same missing file cannot be sent by
+      // asking again. Everything else keeps the operation and its key.
+      if (_isLocalFileFailure(error)) {
+        await _finalizePendingUploadAsFailed(
+          pending,
+          message: _kStagedFileGoneMessage,
+        );
+      } else {
+        pending.state = AttachmentUploadState.retryable;
+        _showMessage('Could not upload this attachment. Please try again.');
+      }
     } finally {
-      _markUploadStopped();
+      _markUploadStopped(attempt);
     }
+  }
+
+  // ── Pending-operation lifecycle ──────────────────────────────────────────
+  //
+  // Every end of an upload operation goes through exactly one of the three
+  // helpers below, so the staged file has exactly one owner and exactly one
+  // deletion point. Scattering File.delete() across the branches is how a
+  // confidential document ends up either leaked in the cache directory or
+  // deleted out from under an operation that could still have finished.
+  //
+  // The rule is about KNOWLEDGE, not about success: the staged file is
+  // deleted once the operation's outcome is decided (it landed, the user
+  // dropped it, or it failed in a way retrying cannot fix), and kept while
+  // the outcome is still open (uploading, retryable, reconciling, cancelled
+  // with an unknown server-side result). A single timed-out request decides
+  // nothing, and must never take the file with it.
+
+  /// The upload landed. Adds the attachment, clears the operation and
+  /// releases its staged file.
+  ///
+  /// Everything the user and the owning editor can observe happens
+  /// synchronously; only the deletion is awaited, and nothing is gated on
+  /// it. A cleanup that is slow -- or that fails outright, which
+  /// [AttachmentUploadStagingManager.discard] absorbs -- must not hold a
+  /// finished upload on screen.
+  Future<void> _completePendingUpload(
+    PendingAttachmentUpload pending,
+    CalendarAttachment attachment,
+  ) async {
+    pending.state = AttachmentUploadState.completed;
+    setState(() {
+      _attachments = [...?_attachments, attachment];
+      // Only clears the operation that actually completed: a discard while
+      // this was in flight already replaced it with null, and must not be
+      // undone here.
+      if (identical(_pendingUpload, pending)) _pendingUpload = null;
+    });
+    _notifyOperationState();
+    await _staging.discard(pending.staged);
+  }
+
+  /// The operation failed in a way retrying cannot fix. Clears it, deletes
+  /// its staged file, and shows [message] -- which must tell the user what
+  /// to do instead, because no Retry will be offered.
+  ///
+  /// Clearing is what makes this terminal in the UI as well as in the state
+  /// machine: a `failedFinal` operation left in place shows no Retry (its
+  /// [PendingAttachmentUpload.canRetryWithSameKey] is false) but keeps the
+  /// user's file on disk with nothing left to claim it.
+  Future<void> _finalizePendingUploadAsFailed(
+    PendingAttachmentUpload pending, {
+    required String message,
+  }) async {
+    pending.state = AttachmentUploadState.failedFinal;
+    // Any in-flight status poll for this operation is over too -- its answer
+    // could only reinstate something the user has already been told is done.
+    _pollGeneration++;
+    if (mounted) {
+      setState(() {
+        if (identical(_pendingUpload, pending)) _pendingUpload = null;
+      });
+      if (message.isNotEmpty) _showMessage(message);
+    } else if (identical(_pendingUpload, pending)) {
+      _pendingUpload = null;
+    }
+    // Reported before the deletion, for the same reason as
+    // _completePendingUpload: the editor's "may I close?" answer is already
+    // decided, and must not wait on the filesystem to hear it.
+    _notifyOperationState();
+    await _staging.discard(pending.staged);
   }
 
   /// Ends the "an upload is sending bytes" state. Idempotent, and safe after
@@ -988,7 +1393,17 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
   /// own fate is usually decided BETWEEN the two calls (cleared, finalized,
   /// or left retryable), and an early return here would strand the parent
   /// on the state as it stood before that decision.
-  void _markUploadStopped() {
+  void _markUploadStopped(_UploadAttempt attempt) {
+    // Scoped to the attempt that owns the transfer fields. A stale
+    // invocation unwinding after its operation was discarded must not clear
+    // the spinner, progress or cancel token of whatever holds them now.
+    //
+    // This is deliberately identity-only, and does NOT go through
+    // [_ownsUploadAttempt]: an attempt whose operation was discarded
+    // mid-transfer still has to put its own transfer state away, or the
+    // upload row would stay stuck on "Uploading…" for good.
+    if (!identical(_uploadAttempt, attempt)) return;
+
     final wasTransferring =
         _isUploading || _uploadCancelToken != null || _uploadProgress != null;
     if (wasTransferring) {
@@ -1041,22 +1456,48 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
       // have reached Hub. If bytes went out, the server-side outcome is
       // unknown and must be reconciled before the operation is dropped.
       if (bytesLeftTheApp) {
+        // The staged file is KEPT: the server-side outcome is unknown, and
+        // the reconciliation below may well end in a retry of this same
+        // operation, with this same key, from this same file.
         pending.state = AttachmentUploadState.cancelledUncertain;
         setState(() {});
         await _reconcilePendingUpload();
       } else {
+        // Nothing reached Hub, so nothing is owed to anyone. The operation
+        // is dropped outright and its staged file goes with it.
         pending.state = AttachmentUploadState.cancelledBeforeSend;
         setState(() => _pendingUpload = null);
+        await _staging.discard(pending.staged);
       }
       return;
     }
 
     final decision = decideAttachmentError(e);
-    if (decision.message.isNotEmpty) {
-      _showMessage(decision.message);
-    }
     if (decision.nextUploadState != null) {
       pending.state = decision.nextUploadState!;
+    }
+
+    // Terminal is terminal, whatever else the policy asks for. Every code
+    // whose decision is failedFinal ends the operation here -- cleared, with
+    // its staged file deleted -- rather than only the two actions that
+    // happened to null it out. ATTACHMENT_LIMIT_REACHED and
+    // ATTACHMENT_OCCURRENCE_NOT_SUPPORTED are showMessageOnly precisely so
+    // their own wording survives, and they used to leave a dead operation
+    // holding the user's file on disk indefinitely.
+    if (decision.nextUploadState == AttachmentUploadState.failedFinal) {
+      if (decision.action == AttachmentErrorAction.disableAttachments) {
+        setState(() => _attachmentsDisabled = true);
+      }
+      await _finalizePendingUploadAsFailed(pending, message: decision.message);
+      if (decision.action == AttachmentErrorAction.disableAttachments ||
+          decision.action == AttachmentErrorAction.refreshList) {
+        unawaited(_load());
+      }
+      return;
+    }
+
+    if (decision.message.isNotEmpty) {
+      _showMessage(decision.message);
     }
 
     switch (decision.action) {
@@ -1065,14 +1506,20 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
       case AttachmentErrorAction.refreshList:
         unawaited(_load());
       case AttachmentErrorAction.discardOperation:
+        // Non-terminal discards keep no claim on the file either.
         setState(() => _pendingUpload = null);
+        await _staging.discard(pending.staged);
       case AttachmentErrorAction.disableAttachments:
         setState(() {
           _attachmentsDisabled = true;
           _pendingUpload = null;
         });
+        await _staging.discard(pending.staged);
         unawaited(_load());
       case AttachmentErrorAction.showMessageOnly:
+        // Retryable, reconciling or uncertain: the outcome is still open, so
+        // the staged file and the idempotency key both stay exactly as they
+        // are.
         setState(() {});
     }
   }
@@ -1144,7 +1591,8 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
         );
       } on CaleeHubException catch (e) {
         if (!mounted || generation != _pollGeneration) return;
-        _applyStatusCheckFailure(pending, e);
+        _debugLogAttachmentFailure('upload status', e);
+        await _applyStatusCheckFailure(pending, e);
         return;
       } catch (_) {
         if (!mounted || generation != _pollGeneration) return;
@@ -1160,11 +1608,9 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
       if (!mounted || generation != _pollGeneration) return;
 
       if (status.isUsableCompletion) {
-        setState(() {
-          _attachments = [...?_attachments, status.attachment!];
-          pending.state = AttachmentUploadState.completed;
-          _pendingUpload = null;
-        });
+        // Hub confirmed this operation landed. That is as decided as an
+        // outcome gets, so the staged file is released here too.
+        await _completePendingUpload(pending, status.attachment!);
         // Re-read the list so ordering and any server-side normalization are
         // reflected, but the COMPLETION itself is already decided.
         unawaited(_load());
@@ -1172,9 +1618,9 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
       }
 
       if (status.kind.isFinalFailure) {
-        setState(() => pending.state = AttachmentUploadState.failedFinal);
-        _showMessage(
-          status.kind == AttachmentUploadStatusKind.expired
+        await _finalizePendingUploadAsFailed(
+          pending,
+          message: status.kind == AttachmentUploadStatusKind.expired
               ? 'That upload can no longer be confirmed. Please choose the file again.'
               : 'That upload did not complete. Please choose the file again.',
         );
@@ -1208,20 +1654,23 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
     );
   }
 
-  void _applyStatusCheckFailure(
+  Future<void> _applyStatusCheckFailure(
     PendingAttachmentUpload pending,
     CaleeHubException e,
-  ) {
+  ) async {
     // Hub does not know this key. That is NOT success -- and it is not a
     // reason to re-upload silently either, since the operation may have been
     // deliberately detached. Require an explicit decision from the user.
     if (e.statusCode == 404 || e.statusCode == 410) {
-      setState(() => pending.state = AttachmentUploadState.failedFinal);
-      _showMessage(
-        'That upload could not be confirmed. Please choose the file again.',
+      await _finalizePendingUploadAsFailed(
+        pending,
+        message:
+            'That upload could not be confirmed. Please choose the file again.',
       );
       return;
     }
+    // Hub could not answer, which says nothing about the upload. The
+    // operation, its key and its staged file all stay.
     setState(() => pending.state = AttachmentUploadState.retryable);
     _showMessage('Could not check on that upload just now. You can try again.');
   }
@@ -1238,13 +1687,32 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
   /// [_handleUploadFailure] and [_sendPendingUpload] stop a late upload
   /// callback from restoring it. The upload token is cancelled too, so
   /// discarding from the close path does not leave bytes on the wire.
+  ///
+  /// Clearing [_pendingUpload] is also what voids an attempt that is
+  /// mid-preflight: [_ownsUploadAttempt] compares the attempt's operation
+  /// against the current one, so a staged-file check still in flight comes
+  /// back to find it no longer speaks for anything and returns without
+  /// calling Hub. Nothing here waits for that check -- the attempt releases
+  /// its own claim when it unwinds.
+  ///
+  /// Stays SYNCHRONOUS. It is the editor's close path
+  /// ([EventAttachmentsController.discardUnresolvedUpload]), and closing a
+  /// screen must not wait on the filesystem: the operation is detached and
+  /// invalidated here and now, and only the deletion of its staged file --
+  /// which nothing is waiting for and which handles its own failures -- is
+  /// left to run unawaited.
   void _discardPendingUpload() {
+    final pending = _pendingUpload;
     _pollGeneration++;
     _uploadCancelToken?.cancel();
     if (mounted) {
       setState(() => _pendingUpload = null);
     } else {
       _pendingUpload = null;
+    }
+    if (pending != null) {
+      pending.state = AttachmentUploadState.failedFinal;
+      unawaited(_staging.discard(pending.staged));
     }
     _notifyOperationState();
   }
@@ -1498,11 +1966,12 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
   @override
   Widget build(BuildContext context) {
     final attachments = _attachments;
+    final loadFailure = _loadFailure;
     final hasNothingToShow =
         attachments != null &&
         attachments.isEmpty &&
         !_effectiveCanAdd &&
-        _loadError == null;
+        loadFailure == null;
 
     if (hasNothingToShow) return const SizedBox.shrink();
 
@@ -1512,7 +1981,7 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
           ? 'Applies to all events in this series'
           : null,
       children: [
-        if (attachments == null && _loadError == null)
+        if (attachments == null && loadFailure == null)
           const CaleeListRow(
             title: 'Loading attachments…',
             leading: SizedBox(
@@ -1521,15 +1990,19 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
               child: CircularProgressIndicator(strokeWidth: 2),
             ),
           ),
-        if (_loadError != null)
+        if (loadFailure != null)
           CaleeListRow(
-            title: 'Could not load attachments',
-            subtitle: 'Tap to try again',
+            key: const Key('attachment_load_error_row'),
+            title: loadFailure.title,
+            subtitle: loadFailure.subtitle,
             leading: const Icon(
               Icons.error_outline,
               color: CaleeColors.destructive,
             ),
-            onTap: _load,
+            // A terminal calendar/event failure is not tappable at all:
+            // offering a retry that provably cannot change the answer is
+            // what made these failures indistinguishable in the first place.
+            onTap: loadFailure.canRetry ? _load : null,
           ),
         if (attachments != null)
           for (final attachment in attachments)
@@ -1564,7 +2037,16 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
               children: [
                 TextButton(
                   key: const Key('retry_pending_upload'),
-                  onPressed: _retryPendingUpload,
+                  // Inert while an attempt already owns this operation --
+                  // during the staged-file preflight of a retry, and while
+                  // a previous attempt is still settling. Tapping through
+                  // that window used to start a duplicate send of the same
+                  // key. Discard beside it stays live throughout: abandoning
+                  // the operation is exactly what the user must still be
+                  // able to do.
+                  onPressed: _uploadAttemptInProgress
+                      ? null
+                      : _retryPendingUpload,
                   child: const Text('Retry'),
                 ),
                 TextButton(
@@ -1605,8 +2087,16 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
             // cannot even reach the guard in _addAttachment. Both layers
             // exist on purpose: this one is for users, that one is for
             // races and programmatic calls.
+            //
+            // _uploadAttemptInProgress is the one that closes the preflight
+            // window. A freshly selected operation is neither uploading nor
+            // "needing action", so during its staged-file check every other
+            // condition here was false and the row stayed tappable -- a
+            // second Add could replace the operation the first was about to
+            // send.
             onTap:
                 (_isUploading ||
+                    _uploadAttemptInProgress ||
                     _pendingUploadNeedsAction ||
                     _stoppingAttachmentWork)
                 ? null

@@ -139,6 +139,20 @@ AttachmentErrorDecision decideAttachmentError(CaleeHubException e) {
         nextUploadState: AttachmentUploadState.failedFinal,
       );
 
+    case 'EVENT_NOT_FOUND':
+      // The event this upload belongs to is gone -- deleted elsewhere, or
+      // this editor is holding a stale ID. Retrying cannot conjure it back,
+      // and the same file re-sent against the same missing event fails
+      // identically every time, so this is terminal rather than retryable.
+      // Without this branch it fell through to the generic tail below and
+      // came back as "please try again" with a Retry button that could never
+      // succeed.
+      return const AttachmentErrorDecision(
+        message: 'This event is no longer available.',
+        action: AttachmentErrorAction.discardOperation,
+        nextUploadState: AttachmentUploadState.failedFinal,
+      );
+
     case 'ATTACHMENT_OCCURRENCE_NOT_SUPPORTED':
       return const AttachmentErrorDecision(
         message:

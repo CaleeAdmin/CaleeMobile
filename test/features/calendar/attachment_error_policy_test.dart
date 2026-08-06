@@ -11,11 +11,21 @@ import 'dart:io';
 
 import 'package:calee_mobile/data/api/calee_hub_client.dart';
 import 'package:calee_mobile/features/calendar/attachment_error_policy.dart';
+import 'package:calee_mobile/features/calendar/attachment_upload_staging_manager.dart';
 import 'package:calee_mobile/features/calendar/pending_attachment_upload.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 CaleeHubException error(String code, {int statusCode = 409}) =>
     CaleeHubException(statusCode: statusCode, code: code, message: 'x');
+
+/// A PendingAttachmentUpload now owns its staged copy rather than a bare
+/// File; these key-stability tests never touch the filesystem, so the record
+/// is built directly. No path is read or written by anything below.
+StagedAttachmentFile stagedStub() => StagedAttachmentFile(
+  file: File('/tmp/x.pdf'),
+  originalFilename: 'x.pdf',
+  size: 10,
+);
 
 void main() {
   group('every documented code gets a distinct, deliberate decision', () {
@@ -198,11 +208,7 @@ void main() {
 
   group('PendingAttachmentUpload key stability', () {
     test('the key is minted once and survives state changes', () {
-      final upload = PendingAttachmentUpload(
-        file: File('/tmp/x.pdf'),
-        originalFilename: 'x.pdf',
-        size: 10,
-      );
+      final upload = PendingAttachmentUpload(staged: stagedStub());
       final original = upload.idempotencyKey;
 
       final reconciling = upload.copyWith(
@@ -217,16 +223,8 @@ void main() {
     });
 
     test('a separate operation gets a different key', () {
-      final a = PendingAttachmentUpload(
-        file: File('/tmp/x.pdf'),
-        originalFilename: 'x.pdf',
-        size: 10,
-      );
-      final b = PendingAttachmentUpload(
-        file: File('/tmp/x.pdf'),
-        originalFilename: 'x.pdf',
-        size: 10,
-      );
+      final a = PendingAttachmentUpload(staged: stagedStub());
+      final b = PendingAttachmentUpload(staged: stagedStub());
       expect(a.idempotencyKey, isNot(b.idempotencyKey));
     });
 
@@ -236,9 +234,7 @@ void main() {
         AttachmentUploadState.cancelledUncertain,
       ]) {
         final upload = PendingAttachmentUpload(
-          file: File('/tmp/x.pdf'),
-          originalFilename: 'x.pdf',
-          size: 10,
+          staged: stagedStub(),
           state: state,
         );
         expect(upload.isUncertain, isTrue, reason: '$state must be uncertain');
@@ -248,9 +244,7 @@ void main() {
 
     test('a cancel before send is NOT uncertain and needs no reconcile', () {
       final upload = PendingAttachmentUpload(
-        file: File('/tmp/x.pdf'),
-        originalFilename: 'x.pdf',
-        size: 10,
+        staged: stagedStub(),
         state: AttachmentUploadState.cancelledBeforeSend,
       );
       expect(upload.isUncertain, isFalse);
@@ -260,9 +254,7 @@ void main() {
 
     test('a conclusively failed operation cannot be silently retried', () {
       final upload = PendingAttachmentUpload(
-        file: File('/tmp/x.pdf'),
-        originalFilename: 'x.pdf',
-        size: 10,
+        staged: stagedStub(),
         state: AttachmentUploadState.failedFinal,
       );
       expect(upload.canRetryWithSameKey, isFalse);
