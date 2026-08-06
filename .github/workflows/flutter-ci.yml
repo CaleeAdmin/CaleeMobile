@@ -163,6 +163,18 @@ jobs:
           python3 .github/scripts/check_notification_release_apk.py check \
             build/app/outputs/flutter-apk/app-release.apk
 
+      # Same gating as the release smoke build above: verify the packaged
+      # release APK carries no broad storage/media permission (the Google
+      # Play 0.0.29 release blocker). Shares the single prohibited-permission
+      # policy in scripts/check_android_release_permissions.sh with the PR
+      # AAB gate below and the signed-build workflow.
+      - name: Inspect release APK permissions
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && contains(fromJSON('["stage","main"]'), github.ref_name)
+        run: |
+          scripts/check_android_release_permissions.sh selftest
+          scripts/check_android_release_permissions.sh check \
+            --apk build/app/outputs/flutter-apk/app-release.apk
+
   # Required, non-publishing platform-build gate: compiles the Android app so
   # a change that builds green in analyze/test but breaks the platform build
   # (a manifest-merge conflict, a plugin's minSdk requirement, a Gradle/Kotlin
@@ -215,3 +227,58 @@ jobs:
 
       - name: Build Android APK (debug)
         run: flutter build apk --debug
+
+      # --- Broad-media-permission regression gate (runs on every PR) --------
+      # Google Play rejected the 0.0.29 AAB because a plugin's library
+      # manifest merged READ_MEDIA_IMAGES/READ_MEDIA_VIDEO (and friends) into
+      # the release artifact. The app manifest now strips them with
+      # tools:node="remove"; the steps below rebuild the actual release AAB —
+      # the artifact type Google Play receives — and fail the PR if any
+      # prohibited permission ever merges back in (e.g. via a dependency
+      # bump). Policy list lives in
+      # scripts/check_android_release_permissions.sh, shared with the
+      # signed-build workflow so the two gates can never drift apart.
+
+      # Release Gradle builds hard-require signing inputs, so use the same
+      # ephemeral CI-only keystore pattern as the stage/main release smoke
+      # build in the job above: generated fresh in $RUNNER_TEMP, never cached,
+      # never uploaded, unrelated to any production signing secret.
+      - name: Generate temporary CI keystore
+        run: |
+          keytool -genkeypair \
+            -keystore "$RUNNER_TEMP/calee-ci-release.jks" \
+            -storepass "ci-temporary-password" \
+            -keypass "ci-temporary-password" \
+            -alias "calee-ci" \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 1 \
+            -dname "CN=Calee CI, OU=CI, O=Calee, L=Perth, ST=WA, C=AU"
+
+      # This AAB is a permission-inspection product only — never uploaded as
+      # an artifact, never published.
+      - name: Build Android App Bundle (release)
+        run: flutter build appbundle --release
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/calee-ci-release.jks
+          ANDROID_KEYSTORE_PASSWORD: ci-temporary-password
+          ANDROID_KEY_ALIAS: calee-ci
+          ANDROID_KEY_PASSWORD: ci-temporary-password
+
+      # bundletool decodes the AAB's compiled manifest for the check below.
+      # Pinned version + checksum verification live in
+      # scripts/fetch_bundletool.sh; the cache only saves the re-download and
+      # the jar is checksum-verified again on every run before use.
+      - name: Cache bundletool
+        uses: actions/cache@v4
+        with:
+          path: build/bundletool
+          key: bundletool-1.18.1
+
+      - name: Inspect release AAB permissions
+        run: |
+          BUNDLETOOL_JAR="$(scripts/fetch_bundletool.sh)"
+          export BUNDLETOOL_JAR
+          scripts/check_android_release_permissions.sh selftest
+          scripts/check_android_release_permissions.sh check \
+            --aab build/app/outputs/bundle/release/app-release.aab
