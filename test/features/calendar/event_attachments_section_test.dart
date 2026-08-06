@@ -463,6 +463,35 @@ Future<void> startRefreshViaConflictingDetach(
   await pumpFrames(tester, frames: 10);
 }
 
+/// Confirms a remove without ever calling pumpAndSettle.
+///
+/// The sibling row left busy by a held refresh keeps an indeterminate
+/// spinner on screen, so settling is impossible for the rest of the test --
+/// including for the confirmation dialog's own entrance animation.
+Future<void> confirmRemoveWithoutSettling(
+  WidgetTester tester,
+  String filename,
+) async {
+  await tester.tap(find.byTooltip('Remove $filename from event'));
+  await pumpFrames(tester, frames: 10);
+  await tester.tap(find.text('Remove'));
+  await pumpFrames(tester, frames: 10);
+}
+
+/// The load/refresh error row's rendered title, or null when there is none.
+String? loadErrorTitle(WidgetTester tester) {
+  final finder = find.byKey(const Key('attachment_load_error_row'));
+  if (finder.evaluate().isEmpty) return null;
+  return tester.widget<CaleeListRow>(finder).title;
+}
+
+/// Whether the pending row's Discard button is currently tappable.
+bool discardButtonEnabled(WidgetTester tester) =>
+    tester
+        .widget<TextButton>(find.byKey(const Key('discard_pending_upload')))
+        .onPressed !=
+    null;
+
 void main() {
   setUp(() async {
     tempDir = await Directory.systemTemp.createTemp(
@@ -2378,5 +2407,377 @@ void main() {
 
       expect(find.textContaining('Reference:'), findsNothing);
     });
+  });
+
+  // ── Refresh versus mutation ───────────────────────────────────────────────
+  //
+  // A list request that STARTED before a mutation is carrying older server
+  // state, and used to be applied anyway when it happened to finish second:
+  //
+  //   1. a baseline is on screen;
+  //   2. a refresh starts and reads the server as it was then;
+  //   3. an upload or detach completes and its result is applied;
+  //   4. the refresh returns, still carrying the older state;
+  //   5. it overwrites the newer one.
+  //
+  // The user watches the attachment they just added disappear, or the one
+  // they just removed come back. Both refreshes below are held open on a
+  // Completer and resolved by hand after the mutation, so the ordering is
+  // exact rather than raced.
+  group('refresh versus mutation ordering', () {
+    late ImagePickerPlatform originalImagePickerPlatform;
+
+    setUp(() {
+      originalImagePickerPlatform = ImagePickerPlatform.instance;
+    });
+
+    tearDown(() {
+      ImagePickerPlatform.instance = originalImagePickerPlatform;
+    });
+
+    testWidgets('a stale refresh cannot erase a just-uploaded attachment', (
+      tester,
+    ) async {
+      final sourceFile = File('${tempDir.path}/race_pick.jpg');
+      await tester.runAsync(
+        () => sourceFile.writeAsBytes(List<int>.filled(1024, 3)),
+      );
+      ImagePickerPlatform.instance = _FakeImagePickerPlatform(
+        XFile(sourceFile.path),
+      );
+
+      // The first send comes back as a stale-event conflict, which is the
+      // section's own documented reason to re-read the list -- so the
+      // refresh under test is one production really starts, at the moment it
+      // really starts one, with a retryable upload still pending.
+      var uploadCalls = 0;
+      final hub = _StubHub(
+        initialAttachments: [_attachment(filename: 'baseline.pdf')],
+        onUpload: (_) async {
+          uploadCalls++;
+          if (uploadCalls == 1) {
+            throw hubError('CALENDAR_OBJECT_CONFLICT', statusCode: 409);
+          }
+          return _attachment(id: 'new-1', filename: 'uploaded.png', size: 1024);
+        },
+      );
+      await pumpSection(tester, hub: hub, canAdd: true, canRemove: true);
+      await tester.pumpAndSettle();
+
+      hub.gateListCalls = true;
+      await tester.tap(find.byKey(const Key('add_attachment_row')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Choose photo'));
+      await tester.pump();
+      await settleWithFileIo(tester);
+
+      expect(
+        hub.listGates,
+        hasLength(1),
+        reason: 'the conflict started exactly one refresh, and it is held',
+      );
+
+      // The retry lands while that refresh is still in flight.
+      await tester.tap(find.byKey(const Key('retry_pending_upload')));
+      await tester.pump();
+      await settleWithFileIo(tester);
+      expect(find.text('uploaded.png'), findsOneWidget);
+
+      // Now the older refresh answers, with the list as it was BEFORE the
+      // upload. It must be discarded, not applied.
+      hub.completeList([_attachment(filename: 'baseline.pdf')]);
+      await settleWithFileIo(tester);
+
+      expect(
+        find.text('uploaded.png'),
+        findsOneWidget,
+        reason:
+            'a list response that started before the upload must not erase it',
+      );
+      expect(find.text('baseline.pdf'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a stale refresh cannot resurrect a just-detached attachment', (
+      tester,
+    ) async {
+      final hub = _StubHub(
+        initialAttachments: [
+          _attachment(id: 'att-A', filename: 'A.pdf'),
+          _attachment(id: 'att-B', filename: 'B.pdf'),
+        ],
+      );
+      await pumpSection(tester, hub: hub, canAdd: true, canRemove: true);
+      await tester.pumpAndSettle();
+
+      // Detaching B comes back 409, which re-reads the list. That refresh is
+      // held open for the rest of the test.
+      hub
+        ..gateListCalls = true
+        ..detachThrows = hubError(null, statusCode: 409);
+      await startRefreshViaConflictingDetach(tester, 'B.pdf');
+      expect(hub.listGates, hasLength(1));
+
+      // A is detached successfully while that refresh is still in flight.
+      hub.detachThrows = null;
+      await confirmRemoveWithoutSettling(tester, 'A.pdf');
+      expect(find.text('A.pdf'), findsNothing);
+
+      // The older refresh answers with the list as it was BEFORE the detach.
+      hub.completeList([
+        _attachment(id: 'att-A', filename: 'A.pdf'),
+        _attachment(id: 'att-B', filename: 'B.pdf'),
+      ]);
+      await pumpFrames(tester, frames: 12);
+
+      expect(
+        find.text('A.pdf'),
+        findsNothing,
+        reason:
+            'a list response that started before the detach must not bring it '
+            'back',
+      );
+      expect(find.text('B.pdf'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  // ── A confirmed mutation clears a stale refresh failure ──────────────────
+  //
+  // The list state used to carry `failure` through a successful mutation, so
+  // "Could not refresh attachments" stayed on screen above a list the server
+  // had just confirmed -- an error about information that is no longer the
+  // information being shown.
+  group('a confirmed mutation clears a stale refresh failure', () {
+    late ImagePickerPlatform originalImagePickerPlatform;
+
+    setUp(() {
+      originalImagePickerPlatform = ImagePickerPlatform.instance;
+    });
+
+    tearDown(() {
+      ImagePickerPlatform.instance = originalImagePickerPlatform;
+    });
+
+    testWidgets('a successful upload clears it', (tester) async {
+      final sourceFile = File('${tempDir.path}/clears_pick.jpg');
+      await tester.runAsync(
+        () => sourceFile.writeAsBytes(List<int>.filled(1024, 5)),
+      );
+      ImagePickerPlatform.instance = _FakeImagePickerPlatform(
+        XFile(sourceFile.path),
+      );
+
+      var uploadCalls = 0;
+      final hub = _StubHub(
+        initialAttachments: [_attachment(filename: 'baseline.pdf')],
+        onUpload: (_) async {
+          uploadCalls++;
+          if (uploadCalls == 1) {
+            throw hubError('CALENDAR_OBJECT_CONFLICT', statusCode: 409);
+          }
+          return _attachment(id: 'new-1', filename: 'uploaded.png', size: 1024);
+        },
+      );
+      await pumpSection(tester, hub: hub, canAdd: true, canRemove: true);
+      await tester.pumpAndSettle();
+
+      hub.gateListCalls = true;
+      await tester.tap(find.byKey(const Key('add_attachment_row')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Choose photo'));
+      await tester.pump();
+      await settleWithFileIo(tester);
+
+      hub.failList(hubError('NETWORK_ERROR', statusCode: 0));
+      await settleWithFileIo(tester);
+      expect(loadErrorTitle(tester), 'Could not refresh attachments');
+
+      await tester.tap(find.byKey(const Key('retry_pending_upload')));
+      await tester.pump();
+      await settleWithFileIo(tester);
+
+      expect(find.text('uploaded.png'), findsOneWidget);
+      expect(
+        find.byKey(const Key('attachment_load_error_row')),
+        findsNothing,
+        reason:
+            'the refresh error is about a list that has just been superseded '
+            'by one the server confirmed',
+      );
+      expect(
+        addRowEnabled(tester),
+        isTrue,
+        reason: 'and eligibility derives from the new, valid state',
+      );
+    });
+
+    testWidgets('a successful detach clears it', (tester) async {
+      final hub = _StubHub(
+        initialAttachments: [
+          _attachment(id: 'att-A', filename: 'A.pdf'),
+          _attachment(id: 'att-B', filename: 'B.pdf'),
+        ],
+      );
+      await pumpSection(tester, hub: hub, canAdd: true, canRemove: true);
+      await tester.pumpAndSettle();
+
+      hub
+        ..gateListCalls = true
+        ..detachThrows = hubError(null, statusCode: 409);
+      await startRefreshViaConflictingDetach(tester, 'B.pdf');
+      hub.failList(hubError('NETWORK_ERROR', statusCode: 0));
+      await pumpFrames(tester, frames: 12);
+      expect(loadErrorTitle(tester), 'Could not refresh attachments');
+
+      hub.detachThrows = null;
+      await confirmRemoveWithoutSettling(tester, 'A.pdf');
+
+      expect(find.text('A.pdf'), findsNothing);
+      expect(
+        find.byKey(const Key('attachment_load_error_row')),
+        findsNothing,
+        reason: 'a confirmed detach supersedes the failed refresh',
+      );
+      expect(addRowEnabled(tester), isTrue);
+    });
+  });
+
+  // ── A final 401 is terminal ───────────────────────────────────────────────
+  //
+  // CaleeHubClient has already refreshed the token and retried once by the
+  // time a 401 reaches the section, so this is a session the app cannot
+  // repair. It used to offer a Retry that re-sent the same request under the
+  // same dead session, and left Add live so a file could be picked, staged
+  // and queued against it.
+  group('a final 401 is terminal for the attachment section', () {
+    testWidgets('on the initial list: no Retry, no Add, clear wording', (
+      tester,
+    ) async {
+      final hub = _StubHub()..gateListCalls = true;
+      await pumpSection(tester, hub: hub, canAdd: true, canRemove: true);
+
+      hub.failList(hubError(null, statusCode: 401));
+      await tester.pumpAndSettle();
+
+      final errorRow = tester.widget<CaleeListRow>(
+        find.byKey(const Key('attachment_load_error_row')),
+      );
+      expect(errorRow.title, 'Your session has expired');
+      expect(errorRow.subtitle, 'Please sign out and sign in again.');
+      expect(
+        errorRow.onTap,
+        isNull,
+        reason: 'a retry re-sends the same request under the same dead session',
+      );
+      expect(
+        find.byKey(const Key('add_attachment_row')),
+        findsNothing,
+        reason: 'and nothing may be staged for an event nothing can reach',
+      );
+    });
+
+    testWidgets(
+      'on a refresh over a baseline: rows stay, but no Retry and no Add',
+      (tester) async {
+        final hub = _StubHub(
+          initialAttachments: [_attachment(filename: 'baseline.pdf')],
+        );
+        await pumpSection(tester, hub: hub, canAdd: true, canRemove: true);
+        await tester.pumpAndSettle();
+        expect(addRowEnabled(tester), isTrue);
+
+        hub
+          ..gateListCalls = true
+          ..detachThrows = hubError(null, statusCode: 409);
+        await startRefreshViaConflictingDetach(tester, 'baseline.pdf');
+        hub.failList(hubError(null, statusCode: 401));
+        await pumpFrames(tester, frames: 12);
+
+        expect(
+          find.text('baseline.pdf'),
+          findsOneWidget,
+          reason:
+              'a list loaded before the session expired is still an accurate '
+              'list of what is attached, and is worth reading',
+        );
+        expect(
+          loadErrorTitle(tester),
+          'Your session has expired',
+          reason:
+              'and it keeps its own wording -- "could not refresh" would be a '
+              'poor way to say the session is gone',
+        );
+        expect(
+          tester
+              .widget<CaleeListRow>(
+                find.byKey(const Key('attachment_load_error_row')),
+              )
+              .onTap,
+          isNull,
+        );
+        expect(find.byKey(const Key('add_attachment_row')), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'an unresolved upload stays discardable, but cannot be retried',
+      (tester) async {
+        // The pending row is gated on whether this section deals in uploads at
+        // all, NOT on the list's failure state -- otherwise a terminal failure
+        // would swallow Discard and strand the operation, keeping its staged
+        // file on disk and the editor blocked with nothing on screen to
+        // resolve it.
+        final sourceFile = File('${tempDir.path}/stranded_pick.jpg');
+        await tester.runAsync(
+          () => sourceFile.writeAsBytes(List<int>.filled(1024, 9)),
+        );
+        final originalPicker = ImagePickerPlatform.instance;
+        ImagePickerPlatform.instance = _FakeImagePickerPlatform(
+          XFile(sourceFile.path),
+        );
+        addTearDown(() => ImagePickerPlatform.instance = originalPicker);
+
+        final hub = _StubHub(
+          initialAttachments: [_attachment(filename: 'baseline.pdf')],
+          onUpload: (_) async =>
+              throw hubError('CALENDAR_OBJECT_CONFLICT', statusCode: 409),
+        );
+        await pumpSection(tester, hub: hub, canAdd: true, canRemove: true);
+        await tester.pumpAndSettle();
+
+        hub.gateListCalls = true;
+        await tester.tap(find.byKey(const Key('add_attachment_row')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Choose photo'));
+        await tester.pump();
+        await settleWithFileIo(tester);
+
+        // The conflict left a retryable operation; the refresh it started now
+        // comes back with an expired session.
+        hub.failList(hubError(null, statusCode: 401));
+        await settleWithFileIo(tester);
+
+        expect(
+          find.byKey(const Key('pending_upload_row')),
+          findsOneWidget,
+          reason:
+              'the operation the user still owes an answer on stays visible',
+        );
+        expect(
+          retryButtonEnabled(tester),
+          isFalse,
+          reason:
+              'a retry is an upload, and no upload may start on a dead session',
+        );
+        expect(
+          discardButtonEnabled(tester),
+          isTrue,
+          reason:
+              'discarding is the only thing that releases the staged file and '
+              'unblocks the editor, so it must stay available',
+        );
+      },
+    );
   });
 }

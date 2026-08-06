@@ -143,11 +143,18 @@ class _AttachmentListState {
   /// rows the user is reading stay visible through it.
   bool get isInitialLoading => isRequestActive && !hasBaseline;
 
-  /// The last request failed but a good list is still on screen -- i.e. a
-  /// REFRESH failed, which is a different sentence to the user than a load
-  /// failing: their attachments are not gone, this view may just be a moment
-  /// out of date.
-  bool get hasRefreshFailure => hasBaseline && failure != null;
+  /// A RECOVERABLE refresh failed over a list that is still on screen --
+  /// which is a different sentence to the user than a load failing: their
+  /// attachments are not gone, this view may just be a moment out of date.
+  ///
+  /// Deliberately excludes terminal failures. "Could not refresh
+  /// attachments" would be a poor way to say that the calendar no longer
+  /// supports attachments, that the event has been deleted, or that the
+  /// session has expired -- those keep their own wording whether or not a
+  /// baseline happens to be on screen, because they are not about this
+  /// request being out of date.
+  bool get hasRecoverableRefreshFailure =>
+      hasBaseline && failure != null && failure!.canRetry;
 
   /// These four -- [hasBaseline], [isRequestActive], [isInitialLoading] and
   /// [failure] (with its own `canRetry`) -- separate every state this section
@@ -195,16 +202,27 @@ class _AttachmentListState {
         failure: failure,
       );
 
-  /// The list changed locally, from an operation whose result is
-  /// authoritative (an upload that completed, a detach that returned the
-  /// new list). Only meaningful once a baseline exists.
-  _AttachmentListState withLocalAttachments(
+  /// The list after an operation whose result Hub has CONFIRMED: an upload
+  /// that completed, or a detach that returned the event's new list.
+  ///
+  /// This is the newest truth there is, so it displaces everything the
+  /// section previously believed:
+  ///
+  ///  * the baseline is replaced, obviously;
+  ///  * [isRequestActive] goes false, because the caller disowns whatever
+  ///    list request was in flight at the same moment (see
+  ///    `_applyAuthoritativeAttachments`). A refresh that started before
+  ///    this mutation was reading older server state, and letting it land
+  ///    afterwards would make a just-uploaded attachment vanish or a
+  ///    just-detached one come back;
+  ///  * [failure] is CLEARED. It used to be carried over, so a refresh that
+  ///    had failed a moment earlier left "Could not refresh attachments" on
+  ///    screen above a list that had just been confirmed by the server --
+  ///    an error about information that is no longer the information being
+  ///    shown.
+  _AttachmentListState withAuthoritativeAttachments(
     List<CalendarAttachment> attachments,
-  ) => _AttachmentListState(
-    baseline: attachments,
-    isRequestActive: isRequestActive,
-    failure: failure,
-  );
+  ) => _AttachmentListState(baseline: attachments);
 }
 
 /// What the attachments section is currently doing, as far as anything
@@ -599,21 +617,30 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
   /// Set when Hub says attachments are unsupported for this calendar.
   bool _attachmentsDisabled = false;
 
-  /// Whether attaching a file to THIS EVENT is possible in principle: the
-  /// calendar accepts attachments, this is not an occurrence-scoped view,
-  /// and nothing has told us otherwise.
+  /// Whether this section deals in uploads at all: the calendar accepts
+  /// attachments, this is not an occurrence-scoped view, and Hub has not
+  /// said the calendar cannot take them.
   ///
-  /// Says nothing about whether it may happen right now -- that is
-  /// [_effectiveCanAdd]. The two are separate because they answer different
-  /// questions: this one decides whether the affordance EXISTS (an event
-  /// whose calendar cannot take attachments should not show an Add row at
-  /// all, and a pending upload must stay resolvable whatever the list is
-  /// doing), while the other decides whether it is live.
+  /// Deliberately does NOT consider the list's failure state. An upload the
+  /// user still owes an answer on has to stay resolvable even when the list
+  /// has failed terminally -- an expired session must not swallow the
+  /// Discard button and leave a staged file and a blocked editor behind it.
+  bool get _sectionSupportsAttaching =>
+      widget.canAdd && !widget.isSeriesScoped && !_attachmentsDisabled;
+
+  /// Whether attaching a file to THIS EVENT is possible in principle.
+  ///
+  /// [_sectionSupportsAttaching] plus "nothing terminal has happened to the
+  /// list": an unsupported calendar, a deleted event or an expired session
+  /// each make every attachment mutation pointless, however capable the
+  /// calendar is.
+  ///
+  /// Says nothing about whether it may happen right NOW -- that is
+  /// [_effectiveCanAdd]. The three are separate because they answer
+  /// different questions: whether uploads exist here at all, whether one
+  /// could be started at all, and whether one may be started this instant.
   bool get _canAddCapability =>
-      widget.canAdd &&
-      !widget.isSeriesScoped &&
-      !_attachmentsDisabled &&
-      !(_listState.failure?.blocksAdd ?? false);
+      _sectionSupportsAttaching && !(_listState.failure?.blocksAdd ?? false);
 
   /// Whether "Add attachment" may be used AT ALL right now.
   ///
@@ -704,6 +731,34 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
   void _invalidateListRequest() {
     _listGeneration++;
     _listRequestInFlight = false;
+  }
+
+  /// Adopts a list Hub has CONFIRMED -- the attachment an upload returned,
+  /// or the list a detach returned -- as the section's new truth.
+  ///
+  /// The disown is the point, and it must happen in the same breath as the
+  /// write. Without it:
+  ///
+  ///   1. a baseline is on screen;
+  ///   2. a refresh starts, and reads the server's state as it was THEN;
+  ///   3. an upload (or detach) completes, and its result is applied;
+  ///   4. the refresh returns, still carrying the older state;
+  ///   5. it overwrites the newer one.
+  ///
+  /// The user watches the attachment they just added disappear, or the one
+  /// they just removed come back. Nothing about that is slow enough to be
+  /// unlikely -- the upload and the refresh are both in flight together, and
+  /// a list request that started first can easily finish second.
+  ///
+  /// Bumping the generation makes the in-flight request stale by definition,
+  /// so its completion returns without touching state, and its `finally`
+  /// (guarded on the same generation) cannot release the lock this method
+  /// just cleared on behalf of whatever comes next. Serializing mutations
+  /// against refreshes would also work, but would make an upload wait on a
+  /// request whose answer it is about to supersede.
+  void _applyAuthoritativeAttachments(List<CalendarAttachment> attachments) {
+    _invalidateListRequest();
+    _listState = _listState.withAuthoritativeAttachments(attachments);
   }
 
   /// Teardown, in the only order that closes the cache-lifecycle race:
@@ -1006,13 +1061,26 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
 
     // CaleeHubClient has already refreshed the token and retried once by the
     // time a 401 reaches here, so this is a session the app cannot repair on
-    // the user's behalf.
+    // the user's behalf -- and that makes it TERMINAL for this section, not
+    // retryable.
+    //
+    // It used to offer both a Retry and a live Add. Neither could work: the
+    // retry re-sends the same request under the same dead session and comes
+    // back 401 every time, and Add would let the user pick a file, stage it
+    // and start an upload that is refused the same way -- with the staged
+    // file then waiting on a Retry that also cannot succeed. Attaching
+    // anything has to wait for the session to be repaired somewhere else.
+    //
+    // Existing rows are deliberately left alone: a baseline loaded before
+    // the session expired is still an accurate list of what is attached, and
+    // is worth reading even though nothing can be changed. Signing the user
+    // out from here is out of scope.
     if (error.statusCode == 401) {
       return const _AttachmentLoadFailure(
         title: 'Your session has expired',
         subtitle: 'Please sign out and sign in again.',
-        canRetry: true,
-        blocksAdd: false,
+        canRetry: false,
+        blocksAdd: true,
       );
     }
 
@@ -1656,15 +1724,16 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
   ) async {
     pending.state = AttachmentUploadState.completed;
     setState(() {
-      // Appended to the baseline. `?? const []` rather than `...?` on a
-      // nullable list because a completed upload PROVES a list exists: an
-      // event that just accepted an attachment has at least this one, so
-      // recording it must also establish the baseline if -- through some
-      // path that bypassed the Add gate -- there somehow is not one yet.
-      _listState = _listState.withLocalAttachments([
-        ...?_listState.baseline,
-        attachment,
-      ]);
+      // Appended to the baseline, and adopted as AUTHORITATIVE: Hub
+      // confirmed this attachment exists on this event, which is newer than
+      // anything a list request already in flight can be carrying. That
+      // request is disowned here -- see _applyAuthoritativeAttachments.
+      //
+      // `...?` on a nullable baseline because a completed upload PROVES a
+      // list exists: an event that just accepted an attachment has at least
+      // this one, so recording it establishes the baseline if -- through
+      // some path that bypassed the Add gate -- there somehow is not one.
+      _applyAuthoritativeAttachments([...?_listState.baseline, attachment]);
       // Only clears the operation that actually completed: a discard while
       // this was in flight already replaced it with null, and must not be
       // undone here.
@@ -2076,8 +2145,10 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
       );
       if (!mounted) return;
       // Hub's own post-detach list, which is authoritative -- it replaces
-      // the baseline rather than being a second, weaker source beside it.
-      setState(() => _listState = _listState.withLocalAttachments(updated));
+      // the baseline rather than being a second, weaker source beside it,
+      // and disowns any refresh still in flight, which would otherwise be
+      // able to put the detached attachment back.
+      setState(() => _applyAuthoritativeAttachments(updated));
       unawaited(_cache.evict(attachment.id));
     } on CaleeHubException catch (e) {
       if (!mounted) return;
@@ -2349,7 +2420,7 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
             // saying so is the difference between "your attachments are
             // gone" and "this list may be a moment out of date" -- the rows
             // below it are still there and still usable.
-            title: listState.hasRefreshFailure
+            title: listState.hasRecoverableRefreshFailure
                 ? 'Could not refresh attachments'
                 : loadFailure.title,
             subtitle: loadFailure.subtitle,
@@ -2382,13 +2453,18 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
         // explicit user resolution -- retrying reuses the SAME idempotency
         // key, discarding is the only thing that lets a later pick mint a
         // new one (Part G).
-        // Gated on the CAPABILITY, not on list readiness: an upload the
-        // user still owes an answer on must stay resolvable while a list
-        // refresh happens to be in flight. Hiding Retry/Discard for the
-        // duration would strand it behind a request that has nothing to do
-        // with it. (It cannot appear during the INITIAL load at all -- Add
-        // was never available, so no operation can exist yet.)
-        if (_canAddCapability && !_isUploading && _pendingUploadNeedsAction)
+        // Gated on whether this section deals in uploads at all -- not on
+        // list readiness, and not on the list's failure state. An upload the
+        // user still owes an answer on must stay resolvable while a refresh
+        // is in flight AND after the list has failed terminally: hiding
+        // Retry/Discard would strand the operation, keep its staged file on
+        // disk, and leave the editor blocked on an unresolved upload with
+        // nothing on screen to resolve it. (It cannot appear during the
+        // INITIAL load at all -- Add was never available, so no operation
+        // can exist yet.)
+        if (_sectionSupportsAttaching &&
+            !_isUploading &&
+            _pendingUploadNeedsAction)
           CaleeListRow(
             key: const Key('pending_upload_row'),
             title: _pendingUpload!.isUncertain
@@ -2410,10 +2486,17 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
                   // during the staged-file preflight of a retry, and while
                   // a previous attempt is still settling. Tapping through
                   // that window used to start a duplicate send of the same
-                  // key. Discard beside it stays live throughout: abandoning
-                  // the operation is exactly what the user must still be
-                  // able to do.
-                  onPressed: _uploadAttemptInProgress
+                  // key.
+                  //
+                  // Also inert after a terminal list failure: a retry is an
+                  // upload, and no attachment mutation may start against a
+                  // calendar that cannot take them, an event that is gone,
+                  // or an expired session. Discard beside it stays live
+                  // through all of it -- abandoning the operation is exactly
+                  // what the user must still be able to do, and is the only
+                  // thing that releases the staged file and unblocks the
+                  // editor.
+                  onPressed: (_uploadAttemptInProgress || !_canAddCapability)
                       ? null
                       : _retryPendingUpload,
                   child: const Text('Retry'),
