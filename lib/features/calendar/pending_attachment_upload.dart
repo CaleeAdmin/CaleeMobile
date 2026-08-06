@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'dart:math';
 
+import 'attachment_upload_staging_manager.dart';
+
 /// Where a single logical "attach this file" operation currently stands.
 ///
 /// The states exist to separate outcomes that are genuinely different but
@@ -56,24 +58,39 @@ String generateAttachmentIdempotencyKey() {
 /// A new key is minted only by constructing a NEW instance, which happens
 /// exactly when the user selects a different file or deliberately discards
 /// this operation.
+///
+/// The bytes it sends are equally deliberate. [staged] is a copy in storage
+/// Calee owns, made the moment the picker returned -- never the picker's own
+/// path, which both plugins place in an OS-managed temporary directory that
+/// the platform may reclaim while an upload is still queued or awaiting a
+/// retry. Every send and every retry reads [stagedFile]; the operation owns
+/// that file for as long as its outcome is undecided, and exactly one place
+/// deletes it (see EventAttachmentsSection's completion/discard/finalize
+/// helpers).
 class PendingAttachmentUpload {
   PendingAttachmentUpload({
-    required this.file,
-    required this.originalFilename,
-    required this.size,
+    required this.staged,
     String? idempotencyKey,
     DateTime? createdAt,
     this.state = AttachmentUploadState.selected,
   }) : idempotencyKey = idempotencyKey ?? generateAttachmentIdempotencyKey(),
        createdAt = createdAt ?? DateTime.now();
 
-  final File file;
+  /// The Calee-owned staging copy this operation uploads, and the only file
+  /// it may read. See the class doc.
+  final StagedAttachmentFile staged;
+
+  /// The staged file itself -- what goes on the wire.
+  File get stagedFile => staged.file;
 
   /// The name the user knows this document by (from the platform picker),
-  /// never derived from [file]'s cache/temp path.
-  final String originalFilename;
+  /// never derived from [stagedFile]'s generated staging path.
+  String get originalFilename => staged.originalFilename;
 
-  final int size;
+  /// The verified size of [stagedFile] when it was staged. Re-checked before
+  /// every send, so a file that disappeared underneath the operation fails
+  /// terminally instead of being retried against nothing.
+  int get size => staged.size;
 
   /// Stable for the lifetime of this operation -- see the class doc.
   final String idempotencyKey;
@@ -105,10 +122,9 @@ class PendingAttachmentUpload {
 
   PendingAttachmentUpload copyWith({AttachmentUploadState? state}) {
     return PendingAttachmentUpload(
-      file: file,
-      originalFilename: originalFilename,
-      size: size,
-      // Deliberately carried over: a state change is never a new operation.
+      // Deliberately carried over: a state change is never a new operation,
+      // so it neither re-stages the file nor mints a new key.
+      staged: staged,
       idempotencyKey: idempotencyKey,
       createdAt: createdAt,
       state: state ?? this.state,
