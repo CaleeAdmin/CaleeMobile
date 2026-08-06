@@ -138,15 +138,27 @@ class _AttachmentListState {
   bool get hasBaseline => baseline != null;
 
   /// The first request is in flight -- no list has ever landed. This is the
-  /// only state that shows the "Loading attachments…" row.
+  /// only state that shows the "Loading attachments…" row; a later request
+  /// over an existing list is deliberately NOT a loading state, because the
+  /// rows the user is reading stay visible through it.
   bool get isInitialLoading => isRequestActive && !hasBaseline;
 
-  /// A later request is in flight over a list that is already on screen.
-  /// Deliberately NOT a loading state: the existing rows stay visible.
-  bool get isRefreshing => isRequestActive && hasBaseline;
+  /// The last request failed but a good list is still on screen -- i.e. a
+  /// REFRESH failed, which is a different sentence to the user than a load
+  /// failing: their attachments are not gone, this view may just be a moment
+  /// out of date.
+  bool get hasRefreshFailure => hasBaseline && failure != null;
 
-  /// A request failed before any list ever landed.
-  bool get hasInitialFailure => !hasBaseline && failure != null;
+  /// These four -- [hasBaseline], [isRequestActive], [isInitialLoading] and
+  /// [failure] (with its own `canRetry`) -- separate every state this section
+  /// has to act differently in, with no state expressible two ways:
+  ///
+  ///   idle, nothing loaded    !hasBaseline && !isRequestActive && no failure
+  ///   initial loading         isInitialLoading
+  ///   baseline loaded          hasBaseline && !isRequestActive
+  ///   refreshing a baseline    hasBaseline &&  isRequestActive
+  ///   retryable initial fail  !hasBaseline && failure!.canRetry
+  ///   terminal failure         failure != null && !failure!.canRetry
 
   /// The single answer to "may the user choose a file right now?".
   ///
@@ -2337,7 +2349,7 @@ class _EventAttachmentsSectionState extends State<EventAttachmentsSection> {
             // saying so is the difference between "your attachments are
             // gone" and "this list may be a moment out of date" -- the rows
             // below it are still there and still usable.
-            title: listState.hasBaseline
+            title: listState.hasRefreshFailure
                 ? 'Could not refresh attachments'
                 : loadFailure.title,
             subtitle: loadFailure.subtitle,
