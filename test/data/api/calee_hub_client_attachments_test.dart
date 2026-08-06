@@ -1347,4 +1347,308 @@ void main() {
       }
     });
   });
+
+  // ── The event-calendar locator ────────────────────────────────────────────
+  //
+  // Hub used to be told only the event id, so it had to walk every calendar
+  // in the account looking for that UID -- one CalDAV query per calendar, on
+  // every list, upload, status check, download and detach, for information
+  // the app already had. These prove the locator now goes out on all five,
+  // that it is escaped by Uri rather than pasted into a string, and that
+  // omitting it produces byte-for-byte the request an older build sends.
+  group('calendar locator on every attachment endpoint', () {
+    /// Every request the server saw, so both the path and the query can be
+    /// asserted separately -- a locator folded into the path would pass a
+    /// naive "the URL contains the calendar id" check.
+    late List<Uri> capturedUris;
+
+    Future<CaleeHubClient> startCapturingServer({
+      int statusCode = 200,
+      Map<String, dynamic>? body,
+      List<int>? rawBody,
+    }) async {
+      capturedUris = [];
+      server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      server.listen((req) async {
+        capturedUris.add(req.uri);
+        // The upload path streams a body; draining it keeps the connection
+        // from being torn down before the response is written.
+        await req.drain<void>();
+        req.response.statusCode = statusCode;
+        if (rawBody != null) {
+          req.response.headers.contentType = ContentType.binary;
+          req.response.add(rawBody);
+        } else {
+          req.response.headers.contentType = ContentType.json;
+          req.response.write(jsonEncode(body ?? const {}));
+        }
+        await req.response.close();
+      });
+      return CaleeHubClient(
+        baseUri: Uri.parse('http://127.0.0.1:${server.port}'),
+      );
+    }
+
+    test(
+      'list, upload, status, download and detach all carry calendarId',
+      () async {
+        const calendarId = 'portal:cal-1';
+        final client = await startCapturingServer(
+          body: {
+            'data': {
+              'attachments': [attachmentJson()],
+              'attachment': attachmentJson(),
+              'upload': {
+                'status': 'completed',
+                'attachment': attachmentJson(),
+                'retryable': false,
+              },
+            },
+            'meta': {},
+          },
+        );
+        final file = File('${tempDir.path}/up.pdf');
+        await file.writeAsBytes([1, 2, 3]);
+
+        await client.listAttachments(
+          accessToken: 'tok',
+          eventId: 'portal:evt-1',
+          calendarId: calendarId,
+        );
+        await client.uploadAttachment(
+          accessToken: 'tok',
+          eventId: 'portal:evt-1',
+          file: file,
+          originalFilename: 'up.pdf',
+          idempotencyKey: 'idem-1',
+          calendarId: calendarId,
+        );
+        await client.attachmentUploadStatus(
+          accessToken: 'tok',
+          eventId: 'portal:evt-1',
+          idempotencyKey: 'idem-1',
+          calendarId: calendarId,
+        );
+        await client.downloadAttachment(
+          accessToken: 'tok',
+          eventId: 'portal:evt-1',
+          attachmentId: 'att-1',
+          destinationFile: File('${tempDir.path}/down.bin'),
+          calendarId: calendarId,
+        );
+        await client.detachAttachment(
+          accessToken: 'tok',
+          eventId: 'portal:evt-1',
+          attachmentId: 'att-1',
+          calendarId: calendarId,
+        );
+
+        expect(capturedUris, hasLength(5));
+        for (final uri in capturedUris) {
+          expect(
+            uri.queryParameters['calendarId'],
+            calendarId,
+            reason: 'every attachment endpoint must carry the locator: $uri',
+          );
+          expect(
+            uri.path,
+            startsWith('/client/v1/events/portal%3Aevt-1/'),
+            reason:
+                'the locator belongs in the query, and the event id keeps its '
+                'existing encoding: $uri',
+          );
+        }
+      },
+    );
+
+    test(
+      'a calendar id needing escapes is percent-encoded, not pasted in',
+      () async {
+        // A public calendar id is "serviceId:rawId", and a raw id can carry
+        // spaces, slashes and non-ASCII. String concatenation would send
+        // several of these unescaped and truncate the value at the server.
+        const awkward = 'portal:My Files/Cal&x=1#frag ü';
+        final client = await startCapturingServer(
+          body: {
+            'data': {'attachments': <Map<String, dynamic>>[]},
+            'meta': {},
+          },
+        );
+
+        await client.listAttachments(
+          accessToken: 'tok',
+          eventId: 'portal:evt-1',
+          calendarId: awkward,
+        );
+
+        // Decoded server-side back to exactly what was sent -- nothing lost at
+        // the '&', the '#' or the non-ASCII character.
+        expect(capturedUris.single.queryParameters['calendarId'], awkward);
+        final raw = capturedUris.single.toString();
+        expect(raw, contains('%2F'), reason: 'the slash is escaped');
+        expect(raw, contains('%26'), reason: 'the ampersand is escaped');
+        expect(raw, contains('%23'), reason: 'the fragment marker is escaped');
+        expect(
+          raw.split('?').last,
+          isNot(contains('#')),
+          reason: 'an unescaped # would truncate the query at the server',
+        );
+      },
+    );
+
+    test(
+      'an occurrence event id is sent unchanged alongside the locator',
+      () async {
+        // The editor deliberately keeps the RECURRENCE-ID suffix rather than
+        // collapsing to the series id; adding a locator must not have folded
+        // anything into the event id.
+        const occurrenceId = 'portal:evt-1:20260101T000000Z';
+        final client = await startCapturingServer(
+          body: {
+            'data': {'attachments': <Map<String, dynamic>>[]},
+            'meta': {},
+          },
+        );
+
+        await client.listAttachments(
+          accessToken: 'tok',
+          eventId: occurrenceId,
+          calendarId: 'portal:cal-1',
+        );
+
+        expect(capturedUris.single.pathSegments, [
+          'client',
+          'v1',
+          'events',
+          occurrenceId,
+          'attachments',
+        ]);
+      },
+    );
+
+    test(
+      'omitting the locator sends the legacy request, with no query at all',
+      () async {
+        // Backward compatibility in the other direction: Hub's legacy resolver
+        // answers a request with no calendarId, and a stray "?" or an empty
+        // parameter is not that request.
+        final client = await startCapturingServer(
+          body: {
+            'data': {'attachments': <Map<String, dynamic>>[]},
+            'meta': {},
+          },
+        );
+
+        await client.listAttachments(
+          accessToken: 'tok',
+          eventId: 'portal:evt-1',
+        );
+        await client.listAttachments(
+          accessToken: 'tok',
+          eventId: 'portal:evt-1',
+          calendarId: '   ',
+        );
+
+        for (final uri in capturedUris) {
+          expect(uri.query, isEmpty, reason: 'no query string at all: $uri');
+          expect(uri.toString(), isNot(contains('?')));
+        }
+      },
+    );
+  });
+
+  // ── The attachment list's own transport policy (Part 5) ──────────────────
+
+  group('listAttachments transport policy', () {
+    test('a transport failure is NOT silently retried a second time', () async {
+      // The general GET path re-sends a request that failed at the transport
+      // level, which is right for a background refresh and wrong for the one
+      // request a user watches a spinner on: it doubles the wait before they
+      // are offered the Retry they could have taken immediately.
+      //
+      // A raw ServerSocket that closes before sending any HTTP headers is
+      // the established way to reproduce a stale keep-alive here -- see
+      // calee_hub_client_retry_test.dart, which proves the general GET path
+      // really does make a second attempt against exactly this fixture.
+      // tearDown closes the shared handle, so an unused one is bound.
+      server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+
+      var connections = 0;
+      final serverSocket = await ServerSocket.bind(
+        InternetAddress.loopbackIPv4,
+        0,
+      );
+      final sub = serverSocket.listen((socket) async {
+        connections++;
+        await socket.close();
+      });
+      final client = CaleeHubClient(
+        baseUri: Uri.parse('http://127.0.0.1:${serverSocket.port}'),
+      );
+
+      await expectLater(
+        client.listAttachments(accessToken: 'tok', eventId: 'portal:evt-1'),
+        throwsA(anything),
+      );
+
+      expect(
+        connections,
+        1,
+        reason:
+            'one attempt, then the decision goes back to the user -- the '
+            'general GET path would have made two',
+      );
+
+      await sub.cancel();
+      await serverSocket.close();
+    });
+
+    test('a 401 is still refreshed and retried', () async {
+      // Only the TRANSPORT retry is dropped. An expired token must still be
+      // repaired without troubling anyone.
+      var attempts = 0;
+      final seenTokens = <String>[];
+      server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      server.listen((req) async {
+        attempts++;
+        seenTokens.add(
+          req.headers.value(HttpHeaders.authorizationHeader) ?? '',
+        );
+        req.response.headers.contentType = ContentType.json;
+        if (attempts == 1) {
+          req.response.statusCode = 401;
+          req.response.write(
+            jsonEncode({
+              'error': {'code': 'UNAUTHORIZED', 'message': 'expired'},
+              'meta': {},
+            }),
+          );
+        } else {
+          req.response.statusCode = 200;
+          req.response.write(
+            jsonEncode({
+              'data': {
+                'attachments': [attachmentJson()],
+              },
+              'meta': {},
+            }),
+          );
+        }
+        await req.response.close();
+      });
+      final client = CaleeHubClient(
+        baseUri: Uri.parse('http://127.0.0.1:${server.port}'),
+      )..onUnauthorized = () async => 'fresh-token';
+
+      final attachments = await client.listAttachments(
+        accessToken: 'stale-token',
+        eventId: 'portal:evt-1',
+        calendarId: 'portal:cal-1',
+      );
+
+      expect(attachments, hasLength(1));
+      expect(attempts, 2);
+      expect(seenTokens, ['Bearer stale-token', 'Bearer fresh-token']);
+    });
+  });
 }
