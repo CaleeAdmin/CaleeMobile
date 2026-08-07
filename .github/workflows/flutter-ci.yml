@@ -97,6 +97,17 @@ jobs:
           python3 .github/scripts/check_notification_platform_config.py selftest
           python3 .github/scripts/check_notification_platform_config.py check
 
+      # Keep the release tooling honest on every change: the preflight's own
+      # selftest proves its checks still fail for a broken configuration, and
+      # the repository-only checks catch app-identity/version-drift regressions
+      # (a hardcoded versionName, a changed bundle id, missing release notes)
+      # at PR time rather than when a release is being cut. No secrets are
+      # involved — --require-secrets is deliberately not passed here.
+      - name: Release preflight (repository checks)
+        run: |
+          scripts/release_preflight.sh selftest
+          scripts/release_preflight.sh check
+
       - name: Check formatting
         run: dart format --set-exit-if-changed lib test
 

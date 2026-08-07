@@ -1,11 +1,42 @@
 name: Build Signed Android Artifacts
 
+# Produces the signed APK/AAB that the Release Operator uploads to Google Play.
+#
+# This workflow does NOT upload to Google Play. Distribution is a deliberate
+# manual step, so no CI run can publish a build. See docs/RELEASE_OPERATIONS.md
+# for the release path and docs/RELEASE_CREDENTIALS.md for the signing secrets.
+
 on:
   workflow_dispatch:
 
 jobs:
+  # Cheap gate: a missing signing secret, a version/identity inconsistency or
+  # absent release notes fails here in under a minute, before the NDK install,
+  # the test suite and two release builds are paid for.
+  preflight:
+    name: Release preflight (Android)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run release preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          scripts/release_preflight.sh selftest
+          scripts/release_preflight.sh check --platform android --require-secrets
+        env:
+          # Presence-only check. The preflight script reads whether these are
+          # non-empty and reports only their NAMES; it never prints a value.
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
   build-signed-android:
     name: Generate calee-mobile signed release APK and AAB
+    needs: preflight
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -352,6 +383,47 @@ jobs:
             --apk "build/app/outputs/flutter-apk/calee-mobile-${{ steps.build_meta.outputs.sanitized_build_name }}.apk" \
             --aab "build/app/outputs/bundle/release/calee-mobile-${{ steps.build_meta.outputs.sanitized_build_name }}.aab"
 
+      # Traceability: bind the exact artifacts to the source SHA, version,
+      # workflow run and their SHA-256 checksums so a store build can always be
+      # traced back to what produced it. The signing identity recorded here is
+      # the certificate's public distinguished name and SHA-256 fingerprint —
+      # public information printed by apksigner, never key material.
+      - name: Generate release manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          apk="build/app/outputs/flutter-apk/calee-mobile-${{ steps.build_meta.outputs.sanitized_build_name }}.apk"
+          aab="build/app/outputs/bundle/release/calee-mobile-${{ steps.build_meta.outputs.sanitized_build_name }}.aab"
+
+          latest_build_tools="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -n1)"
+          apksigner_bin="$ANDROID_HOME/build-tools/$latest_build_tools/apksigner"
+
+          certs="$("$apksigner_bin" verify --print-certs "$apk")"
+          signer_dn="$(sed -n 's/^Signer #1 certificate DN: //p' <<<"$certs" | head -n1)"
+          signer_sha256="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' <<<"$certs" | head -n1)"
+
+          if [[ -z "$signer_dn" || -z "$signer_sha256" ]]; then
+            echo "Could not read the signing certificate identity from apksigner output" >&2
+            exit 1
+          fi
+
+          scripts/generate_release_manifest.sh \
+            --platform android \
+            --build-name "${{ steps.build_meta.outputs.build_name }}" \
+            --build-number "${{ steps.build_meta.outputs.build_number }}" \
+            --artifact "$apk" \
+            --artifact "$aab" \
+            --signing-identity "$signer_dn (certificate SHA-256 $signer_sha256)" \
+            --output "build/release-manifest-android.json"
+
+      - name: Upload release manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: calee-mobile-android-release-manifest-${{ steps.build_meta.outputs.sanitized_build_name }}
+          path: build/release-manifest-android.json
+          if-no-files-found: error
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
@@ -379,6 +451,11 @@ jobs:
           name: calee-mobile-dart-symbols-${{ steps.build_meta.outputs.sanitized_build_name }}
           path: build/symbols
           if-no-files-found: error
+
+      - name: Release readiness reminder
+        shell: bash
+        run: |
+          echo "::notice::A signed AAB is not a released app. Complete docs/STORE_RELEASE_CHECKLIST.md, obtain Release Approver sign-off, then upload to Google Play internal testing manually (docs/RELEASE_OPERATIONS.md section 6)."
 
       - name: Clean up signing files
         if: always()
