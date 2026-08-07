@@ -32,6 +32,8 @@ class LocalSubscriberCalendarPage extends StatefulWidget {
     required this.onSubscriptionsChanged,
     this.icsService,
     this.promotionPreferences,
+    this.openCalendarsSheetOnStart = false,
+    this.onCalendarsSheetClosed,
     super.key,
   });
 
@@ -56,6 +58,20 @@ class LocalSubscriberCalendarPage extends StatefulWidget {
   /// Overrideable for tests; defaults to [LocalSubscriberPromotionPreferences].
   final LocalSubscriberPromotionPreferences? promotionPreferences;
 
+  /// Opens the "Calendars on this phone" management sheet as soon as the
+  /// page appears. Used by the sixth-calendar limit screen's "Manage my
+  /// calendars" action so the user lands directly where a calendar can be
+  /// removed to make room.
+  final bool openCalendarsSheetOnStart;
+
+  /// Called when the management sheet is dismissed, however it was dismissed
+  /// (close button, drag, barrier tap, or the discovery row).
+  ///
+  /// This is the "finished managing my calendars" signal: the owner uses it to
+  /// end a management session opened for a pending calendar-follow attempt and
+  /// hand the user back to that follow flow.
+  final VoidCallback? onCalendarsSheetClosed;
+
   @override
   State<LocalSubscriberCalendarPage> createState() =>
       _LocalSubscriberCalendarPageState();
@@ -74,6 +90,12 @@ class _LocalSubscriberCalendarPageState
   final Map<String, List<LocalCalendarEvent>> _eventsBySubscription = {};
   final Map<String, String?> _errorsBySubscription = {};
   final Set<String> _loadingIds = {};
+
+  // Bumped whenever the stored subscriptions change while the management
+  // sheet is open. The sheet is a separate route built from a snapshot, so
+  // without this a removal would leave it showing the removed calendar and a
+  // stale "N of 5" allowance.
+  final ValueNotifier<int> _calendarsSheetRevision = ValueNotifier(0);
 
   // Tri-state: null while the saved preference is loading (nothing rendered,
   // so a previously dismissed promotion never flashes in and out), then the
@@ -94,6 +116,19 @@ class _LocalSubscriberCalendarPageState
     _subscriptions = List.of(widget.subscriptions);
     _refreshAll();
     unawaited(_loadInlinePromoPreference());
+    if (widget.openCalendarsSheetOnStart) {
+      // After the first frame so the sheet is presented over a built page.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        unawaited(_openCalendarsSheet());
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _calendarsSheetRevision.dispose();
+    super.dispose();
   }
 
   Future<void> _loadInlinePromoPreference() async {
@@ -184,6 +219,9 @@ class _LocalSubscriberCalendarPageState
       _errorsBySubscription.remove(sub.id);
       _loadingIds.remove(sub.id);
     });
+    // Re-render the management sheet if it is still open, so the removed
+    // calendar and the freed allowance slot are reflected immediately.
+    _calendarsSheetRevision.value++;
     widget.onSubscriptionsChanged(updated);
   }
 
@@ -221,12 +259,15 @@ class _LocalSubscriberCalendarPageState
           top: Radius.circular(CaleeRadius.sheet),
         ),
       ),
-      builder: (_) => _CalendarsSheet(
-        subscriptions: _subscriptions,
-        loadingIds: Set.of(_loadingIds),
-        errorsBySubscription: Map.of(_errorsBySubscription),
-        onRefresh: _refreshOne,
-        onRemove: _removeSubscription,
+      builder: (_) => ValueListenableBuilder<int>(
+        valueListenable: _calendarsSheetRevision,
+        builder: (_, _, _) => _CalendarsSheet(
+          subscriptions: _subscriptions,
+          loadingIds: Set.of(_loadingIds),
+          errorsBySubscription: Map.of(_errorsBySubscription),
+          onRefresh: _refreshOne,
+          onRemove: _removeSubscription,
+        ),
       ),
     );
     if (!mounted) return;
@@ -236,6 +277,10 @@ class _LocalSubscriberCalendarPageState
     if (action == _CalendarsSheetAction.learnAboutHome) {
       widget.onLearnAboutHome();
     }
+    // Fires however the sheet was dismissed. When this page was opened to
+    // make room for a pending calendar-follow attempt, this is what hands the
+    // user back to that follow flow.
+    widget.onCalendarsSheetClosed?.call();
   }
 
   @override
@@ -525,15 +570,36 @@ class _CalendarsSheet extends StatelessWidget {
               child: Row(
                 children: [
                   Expanded(
-                    child: Text(
-                      'Calendars on this phone',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'Calendars on this phone',
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        // Informational allowance, shown where it is
+                        // relevant. Not an upgrade wall: the conversion
+                        // experience only appears if a sixth unique calendar
+                        // is actually attempted.
+                        Text(
+                          '${subscriptions.length} of '
+                          '$kMaxLocalCalendarSubscriptions calendars',
+                          key: const Key('local_calendars_sheet_allowance'),
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                   IconButton(
+                    key: const Key('local_calendars_sheet_close'),
                     icon: const Icon(Icons.close),
+                    tooltip: 'Done',
                     onPressed: () => Navigator.of(context).maybePop(),
                   ),
                 ],
