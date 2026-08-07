@@ -23,6 +23,71 @@ jobs:
           flutter-version: "3.44.1"
           cache: true
 
+      # Gradle can auto-install the pinned NDK, but a corrupt SDK archive then
+      # fails the whole signed release with no retry. Install it explicitly so
+      # transient/corrupt NDK downloads are cleaned up and retried before the
+      # release build starts.
+      - name: Ensure pinned Android NDK
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ndk_version="$(sed -nE 's/^[[:space:]]*ndkVersion[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' android/app/build.gradle.kts | head -n1)"
+          if [[ -z "$ndk_version" ]]; then
+            echo "Could not resolve ndkVersion from android/app/build.gradle.kts" >&2
+            exit 1
+          fi
+
+          sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          if [[ -z "$sdk_root" ]]; then
+            echo "ANDROID_SDK_ROOT/ANDROID_HOME is not configured" >&2
+            exit 1
+          fi
+
+          sdkmanager_bin="$(command -v sdkmanager || true)"
+          if [[ -z "$sdkmanager_bin" ]]; then
+            sdkmanager_bin="$sdk_root/cmdline-tools/latest/bin/sdkmanager"
+          fi
+          if [[ ! -x "$sdkmanager_bin" ]]; then
+            echo "Android sdkmanager was not found" >&2
+            exit 1
+          fi
+
+          ndk_dir="$sdk_root/ndk/$ndk_version"
+          ndk_is_valid() {
+            [[ -f "$ndk_dir/source.properties" && -x "$ndk_dir/ndk-build" ]]
+          }
+
+          if ndk_is_valid; then
+            echo "NDK $ndk_version is already installed."
+            exit 0
+          fi
+
+          for attempt in 1 2 3; do
+            echo "Installing NDK $ndk_version (attempt $attempt/3)..."
+
+            # Remove any partial install and SDK-manager download cache left by
+            # a previous failed/corrupt archive before retrying.
+            rm -rf "$ndk_dir" "$sdk_root/.temp" "$HOME/.android/cache"
+
+            if "$sdkmanager_bin" --sdk_root="$sdk_root" --install "ndk;$ndk_version"; then
+              if ndk_is_valid; then
+                echo "NDK $ndk_version installed and verified."
+                exit 0
+              fi
+              echo "sdkmanager reported success but NDK validation failed." >&2
+            else
+              echo "NDK install attempt $attempt failed." >&2
+            fi
+
+            if (( attempt < 3 )); then
+              sleep $((attempt * 15))
+            fi
+          done
+
+          echo "Failed to install NDK $ndk_version after 3 attempts." >&2
+          exit 1
+
       - name: Install dependencies
         run: flutter pub get
 
