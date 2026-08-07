@@ -26,68 +26,77 @@ class WelcomePage extends StatelessWidget {
     return Scaffold(
       body: SafeArea(
         minimum: const EdgeInsets.all(24),
-        // Scrollable so the added recovery guidance cannot push the account
-        // actions off a short screen (or off a screen using large
-        // accessibility text). Layout is unchanged whenever the content
-        // fits, which is the normal case.
-        child: SingleChildScrollView(
-          child: Center(
+        // Scrollable, but still vertically centred whenever the content fits.
+        //
+        // A bare SingleChildScrollView gives its child unbounded height, which
+        // would collapse the Center below and pin everything to the top of the
+        // screen. Handing the viewport height down as a *minimum* keeps the
+        // established centred layout on a normal phone, and lets the content
+        // grow past it — scrolling instead of overflowing — on a short screen
+        // or at large accessibility text sizes.
+        child: LayoutBuilder(
+          builder: (context, viewport) => SingleChildScrollView(
             child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 420),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const Icon(Icons.tv_outlined, size: 48),
-                  const SizedBox(height: 24),
-                  Text(
-                    'Welcome to Calee',
-                    textAlign: TextAlign.center,
-                    style: theme.textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    'Connect a Calee display and bring your calendars, tasks and reminders together.',
-                    textAlign: TextAlign.center,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                  const SizedBox(height: 40),
-                  FilledButton(
-                    onPressed: onCreateAccount,
-                    child: const Text('Create account'),
-                  ),
-                  const SizedBox(height: 12),
-                  TextButton(
-                    onPressed: onSignIn,
-                    child: const Text('I already have an account'),
-                  ),
-                  const SizedBox(height: 24),
-                  const _SharedCalendarRecoveryNote(),
-                  const SizedBox(height: 8),
-                  Center(
-                    child: TextButton(
-                      onPressed: _openTerms,
-                      style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 4,
-                        ),
-                        minimumSize: const Size(0, 36),
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
-                      child: Text(
-                        'Terms and Conditions',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.primary,
+              constraints: BoxConstraints(minHeight: viewport.maxHeight),
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 420),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const Icon(Icons.tv_outlined, size: 48),
+                      const SizedBox(height: 24),
+                      Text(
+                        'Welcome to Calee',
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.headlineSmall?.copyWith(
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
-                    ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Connect a Calee display and bring your calendars, tasks and reminders together.',
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: 40),
+                      FilledButton(
+                        onPressed: onCreateAccount,
+                        child: const Text('Create account'),
+                      ),
+                      const SizedBox(height: 12),
+                      TextButton(
+                        onPressed: onSignIn,
+                        child: const Text('I already have an account'),
+                      ),
+                      const SizedBox(height: 24),
+                      const _SharedCalendarRecoveryNote(),
+                      const SizedBox(height: 8),
+                      Center(
+                        child: TextButton(
+                          onPressed: _openTerms,
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            minimumSize: const Size(0, 36),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          child: Text(
+                            'Terms and Conditions',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.primary,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                ],
+                ),
               ),
             ),
           ),

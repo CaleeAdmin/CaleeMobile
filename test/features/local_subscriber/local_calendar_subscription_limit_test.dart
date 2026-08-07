@@ -104,6 +104,42 @@ void main() {
     });
 
     test(
+      'the limit condition never renders the subscription URL in toString',
+      () async {
+        // Subscription URLs can carry a private access token, so the
+        // exception's diagnostic string — the thing that reaches crash
+        // reports and log sinks — must not be able to leak one.
+        const secret = 's3cret-access-token';
+        const tokenisedUrl = 'https://example.com/private/$secret/cal.ics';
+
+        final repo = LocalCalendarSubscriptionRepository();
+        await _fillToLimit(repo);
+
+        try {
+          await repo.add(
+            title: 'Private Calendar',
+            url: tokenisedUrl,
+            source: 'example.com',
+          );
+          fail('expected LocalCalendarSubscriptionLimitException');
+        } on LocalCalendarSubscriptionLimitException catch (e) {
+          final rendered = e.toString();
+          expect(rendered, isNot(contains(secret)));
+          expect(rendered, isNot(contains(tokenisedUrl)));
+          expect(rendered, isNot(contains('example.com')));
+          expect(rendered, isNot(contains('attemptedUrl')));
+
+          // Still useful for diagnosis, and the URL remains available as
+          // structured state for callers that genuinely need the target.
+          expect(rendered, contains('Private Calendar'));
+          expect(rendered, contains('currentCount: 5'));
+          expect(rendered, contains('limit: 5'));
+          expect(e.attemptedUrl, tokenisedUrl);
+        }
+      },
+    );
+
+    test(
       'the limit condition is distinguishable from other repository failures',
       () async {
         final repo = LocalCalendarSubscriptionRepository();

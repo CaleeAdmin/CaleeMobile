@@ -246,28 +246,33 @@ void main() {
   );
 
   testWidgets(
-    'Manage my calendars reaches the local-calendar management sheet with '
-    'the allowance shown, and removing one frees a slot',
+    'Manage my calendars keeps the attempted calendar through the whole '
+    'journey: manage, remove one, close, then confirm the add',
     (tester) async {
-      final (_, follow, repo) = await _pumpToLimitScreen(tester);
+      final (session, follow, repo) = await _pumpToLimitScreen(tester);
 
+      // ── Manage my calendars → the existing management sheet ──────────────
       await tester.tap(find.byKey(_kManageCalendars));
       await tester.pumpAndSettle();
 
-      // The existing local-calendar management UI, with its sheet already
-      // open on the calendars stored on this phone.
       expect(find.byType(LocalSubscriberCalendarPage), findsOneWidget);
       expect(
         find.byKey(const Key('local_calendars_sheet_list')),
         findsOneWidget,
       );
       expect(find.text('5 of 5 calendars'), findsOneWidget);
-      expect(follow.pendingIntent, isNull);
 
-      // Nothing was removed by navigating here.
+      // The attempted calendar is still live: the pending intent — the single
+      // source of truth for what the user was trying to follow — was not
+      // consumed by stepping into calendar management.
+      expect(follow.pendingIntent, isNotNull);
+      expect(follow.pendingIntent!.url, _url(6));
+      expect(follow.pendingIntent!.title, 'Swim Club');
+
+      // Navigating here changed nothing on the phone.
       expect((await repo.list()).length, 5);
 
-      // Removing a calendar from the existing sheet frees capacity.
+      // ── Remove one existing calendar ─────────────────────────────────────
       await tester.tap(find.byType(PopupMenuButton<String>).first);
       await tester.pumpAndSettle();
       await tester.tap(find.text('Remove').last);
@@ -276,12 +281,71 @@ void main() {
       await tester.pumpAndSettle();
 
       expect((await repo.list()).length, 4);
-      final added = await repo.add(
-        title: 'Swim Club',
-        url: _url(6),
-        source: 'example.com',
+      // The still-open sheet reflects the freed slot rather than a stale count.
+      expect(find.text('4 of 5 calendars'), findsOneWidget);
+      // Still nothing auto-added: making room does not follow the calendar.
+      expect(await repo.containsUrl(_url(6)), isFalse);
+
+      // ── Close management → back to the original follow flow ──────────────
+      await tester.tap(find.byKey(const Key('local_calendars_sheet_close')));
+      await tester.pumpAndSettle();
+
+      // The user lands on the decision page for the calendar they originally
+      // opened — not on a bare calendar page, and not on a re-shown limit
+      // screen. They confirm the add themselves.
+      expect(find.byType(FollowCalendarPage), findsOneWidget);
+      expect(find.byType(LocalCalendarLimitPage), findsNothing);
+      expect(find.text('Add this calendar'), findsOneWidget);
+      expect(find.text('Swim Club'), findsOneWidget);
+      expect(await repo.containsUrl(_url(6)), isFalse);
+
+      // ── Confirm the add ──────────────────────────────────────────────────
+      await tester.tap(find.byKey(_kAddToPhone));
+      await tester.pump();
+      await tester.pump();
+
+      final stored = await repo.list();
+      expect(await repo.containsUrl(_url(6)), isTrue);
+      expect(stored.length, 5);
+      expect(stored.length, lessThanOrEqualTo(kMaxLocalCalendarSubscriptions));
+      // The attempt is complete, so the intent is finally consumed, and no
+      // account was ever created.
+      expect(follow.pendingIntent, isNull);
+      expect(session.isSignedIn, isFalse);
+    },
+  );
+
+  testWidgets(
+    'a newer follow intent arriving during calendar management supersedes '
+    'the older attempt and dismisses the sheet',
+    (tester) async {
+      final (_, follow, repo) = await _pumpToLimitScreen(tester);
+
+      await tester.tap(find.byKey(_kManageCalendars));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const Key('local_calendars_sheet_list')),
+        findsOneWidget,
       );
-      expect(added.url, _url(6));
+
+      // A second calendar link arrives mid-management.
+      follow.injectResolvedIntent(title: 'Netball Fixtures', url: _url(7));
+      await tester.pumpAndSettle();
+
+      // The management session ends and its sheet is torn down rather than
+      // being left floating over the new decision page.
+      expect(find.byKey(const Key('local_calendars_sheet_list')), findsNothing);
+      expect(find.text('Calendars on this phone'), findsNothing);
+      expect(find.byType(LocalCalendarLimitPage), findsNothing);
+
+      // The newer attempt owns the flow now.
+      expect(find.byType(FollowCalendarPage), findsOneWidget);
+      expect(find.text('Netball Fixtures'), findsOneWidget);
+      expect(find.text('Swim Club'), findsNothing);
+      expect(follow.pendingIntent!.url, _url(7));
+
+      // Superseding is not destructive to what is stored.
+      expect((await repo.list()).length, 5);
     },
   );
 

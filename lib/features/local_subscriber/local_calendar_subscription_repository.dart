@@ -31,6 +31,11 @@ class LocalCalendarSubscriptionLimitException implements Exception {
   final String attemptedTitle;
 
   /// Normalized URL of the calendar the user tried to follow.
+  ///
+  /// Subscription URLs can carry a private access token, so this is structured
+  /// state for callers that genuinely need the target — it is deliberately
+  /// **not** included in [toString], which is what ends up in crash reports
+  /// and log sinks.
   final String attemptedUrl;
 
   /// How many calendars were already stored when the attempt was rejected.
@@ -39,10 +44,17 @@ class LocalCalendarSubscriptionLimitException implements Exception {
   /// The allowance that was reached.
   final int limit;
 
+  /// Diagnostic description.
+  ///
+  /// Carries only what is useful for diagnosing the limit condition. The
+  /// subscription URL is never rendered here — an uncaught throw, a
+  /// `debugPrint`, or any future logging of this exception must not be able to
+  /// leak a tokenised calendar URL. Read [attemptedUrl] directly if a caller
+  /// really needs it.
   @override
   String toString() =>
       'LocalCalendarSubscriptionLimitException('
-      'attemptedTitle: $attemptedTitle, attemptedUrl: $attemptedUrl, '
+      'attemptedTitle: $attemptedTitle, '
       'currentCount: $currentCount, limit: $limit)';
 }
 
