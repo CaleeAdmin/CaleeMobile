@@ -16,6 +16,17 @@ Release being checked:
 > Completing this checklist is what establishes **store readiness**. A green
 > build workflow does not. See section 11 of
 > [`RELEASE_OPERATIONS.md`](RELEASE_OPERATIONS.md).
+>
+> **Record the outcome in `docs/release_evidence/<version>.json`.** This
+> checklist is the instructions; that file is the machine-checkable attestation
+> that a named operator completed them for this specific build. The signed
+> release workflows refuse to build without it, so a release cannot skip this
+> page by accident. Copy `docs/release_evidence/TEMPLATE.json` to start, and
+> verify it with:
+>
+> ```bash
+> scripts/release_preflight.sh check --require-store-readiness
+> ```
 
 ---
 
@@ -35,6 +46,8 @@ Release being checked:
 - [ ] Device qualification complete on a physical iOS device (model/OS recorded)
 - [ ] Regression evidence recorded against this build number
 - [ ] Release Approver has explicitly approved this `build_name+build_number`
+- [ ] `docs/release_evidence/<version>.json` created from the template, completed
+      and committed on the branch being released
 
 ---
 
@@ -167,3 +180,5 @@ camera for QR/event scanning.
 - [ ] Any incident, halt or corrective release documented
 - [ ] Credential expiry dates in `RELEASE_CREDENTIALS.md` still in the future;
       renewal reminders set if within 30 days
+- [ ] `docs/release_evidence/<version>.json` reflects what actually happened
+      (amend it if the release deviated from plan)

@@ -57,17 +57,23 @@ environment switch exists.
 
 | Surface | Role | Named owner |
 | --- | --- | --- |
-| App Store Connect (listing, submissions) | Credential Owner — Apple | _Operator decision required_ |
-| Apple Developer signing assets | Credential Owner — Apple | _Operator decision required_ |
-| Google Play Console (listing, releases) | Credential Owner — Google | _Operator decision required_ |
-| Android signing credentials | Credential Owner — Android | _Operator decision required_ |
-| Approving a production release | Release Approver | _Operator decision required_ |
-| Executing a release | Release Operator | _Operator decision required_ |
+| App Store Connect (listing, submissions) | Credential Owner — Apple | `REQUIRED — NOT SUPPLIED` |
+| Apple Developer signing assets | Credential Owner — Apple | `REQUIRED — NOT SUPPLIED` |
+| Google Play Console (listing, releases) | Credential Owner — Google | `REQUIRED — NOT SUPPLIED` |
+| Android signing credentials | Credential Owner — Android | `REQUIRED — NOT SUPPLIED` |
+| Approving a production release | Release Approver | `REQUIRED — NOT SUPPLIED` |
+| Executing a release | Release Operator | `REQUIRED — NOT SUPPLIED` |
 
 The named individuals are not recorded anywhere in this repository and were not
 available when this document was written. Fill the table in before the next
 production release; the roles themselves are used throughout this document and
 do not change.
+
+This is not merely an unfilled table. The per-release evidence file (section
+3.1) requires the Release Operator to name the approver, the operator and the
+relevant credential owner for the specific build being released, and rejects
+placeholder text — so a production-signed build cannot be produced while these
+are unanswered. See `docs/RELEASE_CREDENTIALS.md` section 1.
 
 ---
 
@@ -118,16 +124,26 @@ strict monotonicity.
 `scripts/release_preflight.sh` runs **before** any expensive signing/build job
 and fails fast, naming the exact item that is missing or inconsistent.
 
+It has **two deliberately separate levels**, because "the repository is
+consistent" and "this release may be submitted to a store" are different claims:
+
+| Level | Invocation | Who runs it | What it proves |
+| --- | --- | --- | --- |
+| Repository correctness | `check` | Flutter CI, every PR | The repository is internally consistent: identity, version wiring, tooling, docs, release notes. **Not** release approval, **not** store readiness. |
+| Store submission readiness | `check --require-secrets --require-store-readiness --allow-ref-name stage --allow-ref-name main` | The signed release workflows only | Additionally: an authorised release branch, the signing secrets are configured, and a named operator has recorded completed store-readiness evidence for exactly this build. |
+
 ```bash
-# Everything checkable from the repository alone
+# Repository correctness — safe anywhere, needs no secrets
 scripts/release_preflight.sh check
 
-# What CI runs for a platform release
-scripts/release_preflight.sh check --platform ios --require-secrets \
+# Exactly what the signed Android workflow runs
+scripts/release_preflight.sh check --platform android \
+  --require-secrets --require-store-readiness \
   --allow-ref-name stage --allow-ref-name main
 
-# Prove the checks themselves still work (both directions)
+# Prove the checks themselves still work (both directions, 48 cases)
 scripts/release_preflight.sh selftest
+scripts/generate_release_manifest.sh selftest
 ```
 
 It validates:
@@ -145,12 +161,43 @@ It validates:
   given
 - **presence** of the platform's signing secrets, when `--require-secrets` is
   given
+- completed store-readiness evidence, when `--require-store-readiness` is given
+  (section 3.1)
 
 Preflight reports only secret **names**. It never reads, prints, exports or logs
 a secret value; `selftest` includes an explicit no-leak assertion.
 
 `--skip-release-notes` exists for rehearsal/dry-run builds only. Never use it for
 a build that will be uploaded to a store.
+
+### 3.1 Store-readiness evidence
+
+`STORE_RELEASE_CHECKLIST.md` says what to do. **`docs/release_evidence/<version>.json`
+is where the Release Operator records that it was actually done**, for one
+specific build, in a form the release workflows can verify. A checklist file
+existing in the repository proves nothing; this file is the attestation.
+
+```bash
+cp docs/release_evidence/TEMPLATE.json docs/release_evidence/0.0.31.json
+# complete it, then check it before dispatching a signed build:
+scripts/release_preflight.sh check --require-store-readiness
+```
+
+A release **fails** if the file is missing, if its `version`/`build_number` do
+not match the build (so last release's file cannot be reused), if any required
+review item is `false`, missing or a placeholder string, if the approver /
+operator / credential-owner fields are empty or hold placeholder text, if device
+qualification is missing, failed, or was recorded against a different build
+number, or if the recorded Apple certificate/profile expiry has lapsed.
+
+Full field reference: [`docs/release_evidence/README.md`](release_evidence/README.md).
+
+Commit the evidence on the branch being released so it reaches `stage`/`main`
+with the code it describes.
+
+> There is intentionally **no** evidence file for the current version in the
+> repository today. Nobody has performed those reviews, so a signed release
+> attempt fails closed — which is the correct state, not a gap.
 
 ---
 
@@ -172,6 +219,35 @@ feature branch ──PR──▶ dev ──PR──▶ stage ──PR──▶ m
 Branch protection for all three branches must require both Flutter CI job names
 (`Format, Analyze & Test`, `Android debug build`) — see the administrator note at
 the top of `.github/workflows/flutter-ci.yml`.
+
+### Only `stage` and `main` may produce production-signed artifacts
+
+Both signed-build workflows are manually dispatchable, so the branch restriction
+is **enforced in the workflow, not merely documented**, in two independent
+places:
+
+1. A `Verify release ref` job runs first and fails the whole run when
+   `github.ref_name` is anything other than `stage` or `main`, with an error
+   naming the offending ref.
+2. The preflight job independently runs with
+   `--allow-ref-name stage --allow-ref-name main`, so removing or misconfiguring
+   the guard job does not silently re-open the hole.
+
+Dispatching either signed workflow from `dev`, a feature branch or a `claude/*`
+branch therefore fails in seconds, before any signing material is decoded. There
+is no override. If you need a signed build of work in progress, promote it to
+`stage` first — that is what `stage` is for.
+
+What each level actually gates:
+
+| Level | What passing it means | What it does **not** mean |
+| --- | --- | --- |
+| PR CI green on `dev` | The change is internally consistent and testable | Not release approval; nothing has been qualified on a device |
+| Promotion to `stage` | The change is in a release candidate | Not approved for production |
+| Signed build green on `stage`/`main` | Artifacts compiled, signed, verified, traceable | **Not** store readiness — no listing, privacy or review work is implied |
+| Store-readiness evidence complete | A named operator attests the listing, privacy, screenshots, review notes and device qualification are done for this build | **Not** store approval — neither store has seen it |
+| Submitted and approved | The store accepted the build | **Not** rollout completion — users do not have it yet |
+| Rollout at 100% / phased release complete | Distribution finished | Not "healthy" — monitoring continues (sections 6.3, 7.3) |
 
 ### Required gates before promoting `stage` → `main`
 
@@ -196,8 +272,11 @@ the top of `.github/workflows/flutter-ci.yml`.
    the specific `build_name+build_number` on the release issue or PR. No
    approval, no submission.
 9. **Signed artifacts** — produced by the workflows in section 5, with the
-   release manifest attached.
-10. **Store submission** — sections 6 (Android) and 7 (Apple), after
+   release manifest attached. These may only be built from `stage` or `main`.
+10. **Store-readiness evidence** — `docs/release_evidence/<version>.json`
+    completed and committed (section 3.1). The signed workflows refuse to build
+    without it, so this is a hard gate, not a reminder.
+11. **Store submission** — sections 6 (Android) and 7 (Apple), after
     `STORE_RELEASE_CHECKLIST.md` is complete.
 
 Emergency/corrective releases follow the same path. The path is never bypassed;
@@ -208,14 +287,30 @@ only the calendar is compressed.
 ## 5. Producing signed artifacts
 
 Both signed-build workflows are `workflow_dispatch` only — nothing is built or
-signed automatically on a push, and neither workflow uploads to a store.
+signed automatically on a push, and neither workflow uploads to a store. Both
+refuse to run from any ref other than `stage` or `main` (section 4).
+
+Every signed run performs the same ordered sequence:
+
+1. validate the release ref (`stage`/`main` only)
+2. derive the version from `pubspec.yaml`
+3. run release preflight, including its own selftests
+4. require the platform's signing secrets to be configured
+5. require completed store-readiness evidence for this exact version
+6. build and sign
+7. verify the resulting artifacts
+8. generate the complete release manifest
+9. upload the artifacts and the manifest
+10. destroy all signing material, even when an earlier step failed
 
 ### Android — `.github/workflows/build-signed-apk.yml`
 
 Actions → **Build Signed Android Artifacts** → Run workflow → select `main`
 (or `stage` for a qualification build).
 
-The workflow: runs preflight → installs the pinned NDK → runs the test suite →
+The workflow: verifies the release ref → runs preflight (selftests, repository
+correctness, secret presence, store-readiness evidence) → installs the pinned NDK
+→ runs the test suite →
 validates the signing secrets are present → decodes and verifies the keystore →
 derives the version → builds an obfuscated signed APK and AAB → verifies both
 signatures → **inspects the final artifacts' permissions and fails the release if
@@ -224,21 +319,24 @@ release manifest → uploads artifacts, symbols and manifest → deletes the
 keystore (`if: always()`).
 
 Artifacts: signed APK, signed AAB (this is what Play receives), native debug
-symbols, Dart obfuscation symbols, release manifest.
+symbols, Dart obfuscation symbols, release manifest. **All four artifacts are
+recorded in the manifest**, not just the store binary.
 
 ### iOS — `.github/workflows/build-signed-ios.yml`
 
 Actions → **Build Signed iOS Artifacts** → Run workflow → select `main`.
 
-The workflow: runs preflight with `--require-secrets` → runs the test suite →
+The workflow: verifies the release ref → runs preflight with `--require-secrets`
+and `--require-store-readiness` → runs the test suite →
 creates a **temporary, job-scoped keychain** → imports the Apple Distribution
 `.p12` → installs the provisioning profile → resolves the profile's UUID/name and
 the signing identity → writes `ExportOptions.plist` (from
 `IOS_EXPORT_OPTIONS_PLIST_BASE64` if supplied, otherwise generated from
 repository-controlled non-secret values) → `flutter build ipa` with manual
 signing → **verifies the exported IPA is actually signed by the expected team**
-→ generates the release manifest → uploads the IPA, archive and manifest →
-deletes the keychain, profile and all signing material (`if: always()`).
+→ generates the release manifest covering both the IPA and the xcarchive (which
+carries the dSYMs) → uploads the IPA, archive and manifest → deletes the
+keychain, profile and all signing material (`if: always()`).
 
 If the Apple signing secrets are absent, the job fails at preflight in under a
 minute with the exact missing secret names, before any macOS build time is spent.
@@ -375,16 +473,35 @@ alongside every signed build:
 
 ```json
 {
-  "schema": "calee-mobile-release-manifest/1",
+  "schema": "calee-mobile-release-manifest/2",
   "app": { "display_name": "Calee", "android_application_id": "au.com.calee.mobile", "ios_bundle_id": "au.com.calee.mobile" },
   "platform": "android",
   "version": { "build_name": "0.0.30", "build_number": "30" },
   "source": { "repository": "CaleeAdmin/CaleeMobile", "git_sha": "...", "git_ref": "main" },
   "ci": { "workflow": "...", "run_id": "...", "run_attempt": "1", "run_url": "https://github.com/..." },
-  "artifacts": [ { "name": "calee-mobile-0.0.30.aab", "size_bytes": 0, "sha256": "..." } ],
+  "artifacts": [
+    { "name": "calee-mobile-0.0.30.aab", "kind": "file", "role": "app_bundle", "size_bytes": 0, "sha256": "..." },
+    { "name": "calee-mobile-0.0.30.apk", "kind": "file", "role": "apk", "size_bytes": 0, "sha256": "..." },
+    { "name": "native-debug-symbols.zip", "kind": "file", "role": "native_debug_symbols", "size_bytes": 0, "sha256": "..." },
+    { "name": "symbols", "kind": "directory", "role": "dart_debug_symbols", "file_count": 0, "total_size_bytes": 0, "tree_sha256": "..." }
+  ],
   "signing_identity": "non-secret identity summary"
 }
 ```
+
+**Every artifact the workflow uploads is recorded**, not only the store binary:
+
+| Platform | Recorded artifacts |
+| --- | --- |
+| Android | signed AAB, signed APK, native debug symbols zip, Dart obfuscation symbols directory |
+| iOS | signed IPA, xcarchive (contains the dSYMs) |
+
+Directory artifacts (the Dart symbols directory, the xcarchive) are recorded with
+a file count, a total size, and a `tree_sha256` — a digest over every contained
+file's relative path and SHA-256 — so a directory is as verifiable as a single
+file. The generator **fails closed**: if any artifact passed to it is missing, or
+is not the kind declared, no manifest is produced and the release run fails.
+
 
 To trace a store build back to source: take the version/build number shown in the
 store, find the release manifest with that version, and read its `git_sha` and
@@ -432,20 +549,40 @@ dedicated issue for each; do not attempt them as part of a release cut.
 
 ## 11. Build success is not store readiness
 
-A green signed-build workflow means exactly this: the code compiled, was signed
-with the configured identity, passed the automated test suite, and passed the
-Android permission gate.
+There are four distinct milestones, and each one is routinely mistaken for the
+next. They are not the same thing and never happen at the same time:
 
-It does **not** mean:
+```
+  PR CI green   ─▶  signed build green  ─▶  store readiness  ─▶  store approval  ─▶  rollout complete
+  (code is             (artifacts exist,      (listing/privacy/    (Apple/Google      (users actually
+   consistent)          signed, traceable)     device work done)    accepted it)       have it)
+```
 
-- store metadata (descriptions, screenshots, privacy disclosures) is complete or
-  current
-- review requirements (App Privacy, Data Safety, export compliance, review notes,
-  test accounts) are satisfied
-- the store has approved anything
-- any rollout has started
-- the release is healthy in production
+**1. PR CI success is not release approval.** Flutter CI proves the code formats,
+analyses, tests and builds. It runs the release preflight at the *repository
+correctness* level only — no secrets, no store-readiness evidence. It says
+nothing about whether this change should be released.
 
-Store readiness is established only by completing
-`STORE_RELEASE_CHECKLIST.md`, obtaining Release Approver sign-off, and observing
-the monitoring windows in sections 6 and 7.
+**2. A successful signed build is not store readiness.** A green signed-build
+workflow means exactly this: the code compiled, was signed with the configured
+identity, passed the automated test suite, passed the Android permission gate,
+and produced traceable artifacts. It does **not** mean store metadata
+(descriptions, screenshots, privacy disclosures) is complete or current, that
+review requirements (App Privacy, Data Safety, export compliance, review notes,
+test accounts) are satisfied, or that anyone has looked at the build on a device.
+
+**3. Store readiness is not store approval.** Store readiness is established by
+completing `STORE_RELEASE_CHECKLIST.md` and recording it in
+`docs/release_evidence/<version>.json` with Release Approver sign-off. That is an
+internal statement. Neither Apple nor Google has seen the build at that point,
+and either can still reject it.
+
+**4. Publication is not rollout completion, and rollout completion is not
+health.** An approved App Store version still has to go through phased release; a
+Play production release still has to climb 10% → 50% → 100%. Until then most
+users do not have the build. Even at 100%, the release is not "done" until the
+monitoring windows in sections 6.3 and 7.3 have passed without triggering a halt.
+
+The tooling enforces the boundary between 1 and 2 (separate preflight levels),
+and between 2 and 3 (the evidence file the signed workflows require). Steps 3→4
+and 4→completion are human and store-side; no repository check can assert them.

@@ -14,17 +14,48 @@ Related: [`RELEASE_OPERATIONS.md`](RELEASE_OPERATIONS.md),
 
 ---
 
-## 1. Roles
+## 1. Roles and operator-supplied records
+
+> ### ⚠ OPERATOR CONFIGURATION REQUIRED — NOT YET SUPPLIED
+>
+> Every row marked **`REQUIRED — NOT SUPPLIED`** below is unresolved. These
+> values are not knowable from the repository. Issue #513 must not be closed
+> while any of them is unfilled.
 
 | Role | Responsibility | Named holder |
 | --- | --- | --- |
-| **Credential Owner — Android** | Holds the upload keystore and its passwords; performs rotation | _Operator decision required_ |
-| **Credential Owner — Apple** | Holds the Apple Developer account, distribution certificate and profiles | _Operator decision required_ |
-| **Release Operator** | Runs the signed-build workflows and uploads to the stores | _Operator decision required_ |
-| **Release Approver** | Authorises a production release and any rollout acceleration | _Operator decision required_ |
+| **Credential Owner — Android** | Holds the upload keystore and its passwords; performs rotation | `REQUIRED — NOT SUPPLIED` |
+| **Credential Owner — Apple** | Holds the Apple Developer account, distribution certificate and profiles | `REQUIRED — NOT SUPPLIED` |
+| **Release Operator** | Runs the signed-build workflows and uploads to the stores | `REQUIRED — NOT SUPPLIED` |
+| **Release Approver** | Authorises a production release and any rollout acceleration | `REQUIRED — NOT SUPPLIED` |
 
-Named holders were not available when this document was written. Fill them in
-before the next production release.
+| Record | Value | Why it is needed |
+| --- | --- | --- |
+| Apple Distribution certificate expiry | `REQUIRED — NOT SUPPLIED` | Signing stops working the day it lapses |
+| App Store provisioning profile expiry | `REQUIRED — NOT SUPPLIED` | Same, and it lapses with its certificate |
+| Apple Developer Program renewal date | `REQUIRED — NOT SUPPLIED` | Membership lapse affects signing *and* the listing |
+| Renewal reminder date (30 days before the earliest above) | `REQUIRED — NOT SUPPLIED` | Calendar reminder owned by Credential Owner — Apple |
+| Play App Signing enabled? | `REQUIRED — NOT SUPPLIED` | Determines whether a lost upload key is recoverable (section 2) |
+| Keystore backup location (vault/password-manager entry name, not the secret) | `REQUIRED — NOT SUPPLIED` | Recovery depends on it existing |
+
+### These records are enforced, not just documented
+
+The per-release evidence file (`docs/release_evidence/<version>.json`, see
+[`RELEASE_OPERATIONS.md`](RELEASE_OPERATIONS.md) section 3.1) requires the
+operator to name, for the build being released:
+
+- `release_approver`, `release_operator`
+- `credential_owner_android` (Android releases), `credential_owner_apple` (iOS)
+- `apple_certificate_expiry` and `apple_provisioning_profile_expiry` (iOS),
+  which **must still be in the future** or the release fails
+
+Placeholder text such as `TODO`, `TBD`, `UNKNOWN` or `Operator decision
+required` in any of those fields fails the release preflight. So a release
+cannot be built while the ownership questions above are unanswered — the
+answers are recorded per release rather than assumed from this table.
+
+Keep this table current as well: it is the standing answer, the evidence file is
+the per-release attestation.
 
 ---
 
@@ -57,7 +88,7 @@ each annual credential review.
 - If Play App Signing is **not** enabled, losing the signing key means the
   existing listing can never be updated again. Confirm which of these applies and
   record it here:
-  **Play App Signing status: _Operator decision required — confirm in Play Console._**
+  **Play App Signing status: `REQUIRED — NOT SUPPLIED` (confirm in Play Console and record it here).**
 
 **Backup.** The Credential Owner — Android keeps an offline, encrypted backup of
 the keystore and its passwords in the organisation's password manager or secure
@@ -134,13 +165,23 @@ signed iOS workflow on `main` to confirm. Record the new expiry dates below.
 
 | Asset | Expiry date | Reviewed on |
 | --- | --- | --- |
-| Apple Distribution certificate | _Operator decision required_ | _Operator decision required_ |
-| App Store provisioning profile | _Operator decision required_ | _Operator decision required_ |
-| Apple Developer Program membership | _Operator decision required_ | _Operator decision required_ |
+| Apple Distribution certificate | `REQUIRED — NOT SUPPLIED` | `REQUIRED — NOT SUPPLIED` |
+| App Store provisioning profile | `REQUIRED — NOT SUPPLIED` | `REQUIRED — NOT SUPPLIED` |
+| Apple Developer Program membership | `REQUIRED — NOT SUPPLIED` | `REQUIRED — NOT SUPPLIED` |
 
 Set a calendar reminder for each date, owned by the Credential Owner — Apple.
 Nothing in this repository can observe an Apple expiry date, so an unmaintained
 table here is the failure mode to guard against.
+
+Two automated backstops exist for exactly that failure mode, and neither
+replaces the calendar reminder:
+
+- The signed iOS workflow reads the expiry out of the provisioning profile it
+  was given, fails the build if it has already lapsed, and emits a warning when
+  fewer than 30 days remain.
+- The per-release evidence file must carry `apple_certificate_expiry` and
+  `apple_provisioning_profile_expiry`, and preflight fails the release if either
+  date is not in the future.
 
 **Rotation / compromise.** On suspected exposure of the `.p12` or its password:
 revoke the certificate in the Apple Developer portal (this invalidates dependent

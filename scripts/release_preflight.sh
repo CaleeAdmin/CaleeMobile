@@ -14,6 +14,20 @@
 #   * required release tooling
 #   * presence (never the value) of the signing secrets the platform needs
 #   * the branch/release context the release is being cut from
+#   * per-release store-readiness evidence, when a real release is being built
+#
+# Two distinct levels of validation, deliberately separated:
+#
+#   repository correctness  (default)
+#       Everything checkable from the repository alone. Safe to run on every
+#       pull request. Passing this does NOT mean a release may be submitted.
+#
+#   store submission readiness  (--require-store-readiness)
+#       Additionally requires docs/release_evidence/<version>.json, in which
+#       the Release Operator records that the listing, screenshots, privacy
+#       disclosures, review notes, device qualification and approver are
+#       actually done for THIS version. Only the signed release workflows ask
+#       for this level.
 #
 # Usage:
 #   scripts/release_preflight.sh selftest
@@ -24,6 +38,8 @@
 #                                  repository containing this script)
 #     --require-secrets            also require the platform signing secrets to
 #                                  be present in the environment
+#     --require-store-readiness    also require valid per-release store-readiness
+#                                  evidence for the current version
 #     --allow-ref-name NAME        allowed release branch/ref name; repeatable.
 #                                  When given at least once, the current ref
 #                                  ($GITHUB_REF_NAME, else the checked-out
@@ -355,6 +371,303 @@ check_release_metadata() {
   fi
 }
 
+# Per-release store-readiness evidence.
+#
+# The checklist in docs/STORE_RELEASE_CHECKLIST.md tells an operator what to do;
+# this file is where the operator records that they actually did it, for one
+# specific version. Existence of the checklist proves nothing, so a real release
+# build requires this evidence and fails closed without it.
+check_store_readiness() {
+  section "Store-readiness evidence"
+
+  if (( ! REQUIRE_STORE_READINESS )); then
+    printf '  SKIP  store readiness: not required for this run (--require-store-readiness not given)\n'
+    printf '        Repository correctness alone is NOT store readiness.\n'
+    return 0
+  fi
+
+  if [[ -z "${BUILD_NAME:-}" ]]; then
+    fail "store readiness: cannot locate release evidence because the version could not be derived"
+    return 0
+  fi
+
+  local evidence="$REPO_ROOT/docs/release_evidence/$BUILD_NAME.json"
+  if [[ ! -f "$evidence" ]]; then
+    fail "store readiness: release evidence for $BUILD_NAME is missing — create docs/release_evidence/$BUILD_NAME.json from docs/release_evidence/TEMPLATE.json and complete it"
+    return 0
+  fi
+
+  local report status=0
+  report="$(
+    PREFLIGHT_PLATFORM="$PLATFORM" \
+    PREFLIGHT_BUILD_NAME="$BUILD_NAME" \
+    PREFLIGHT_BUILD_NUMBER="$BUILD_NUMBER" \
+    python3 - "$evidence" <<'PY' 2>&1
+import json
+import os
+import re
+import sys
+from datetime import date, datetime
+
+path = sys.argv[1]
+platform = os.environ["PREFLIGHT_PLATFORM"]
+expected_version = os.environ["PREFLIGHT_BUILD_NAME"]
+expected_build_number = os.environ["PREFLIGHT_BUILD_NUMBER"]
+
+EXPECTED_SCHEMA = "calee-mobile-release-evidence/1"
+
+# An operator who leaves a template value in place has not reviewed anything.
+PLACEHOLDER = re.compile(
+    r"(^|[^A-Za-z])("
+    r"TODO|TBD|TBC|FIXME|XXX|PLACEHOLDER|CHANGEME|UNKNOWN|UNCONFIRMED"
+    r"|NAME HERE|OPERATOR DECISION REQUIRED|TO BE (RECORDED|CONFIRMED|DECIDED)"
+    r")([^A-Za-z]|$)",
+    re.IGNORECASE,
+)
+
+SHARED_CHECKS = {
+    "release_notes_reviewed": "release notes / What's New agreed",
+    "screenshots_reviewed": "screenshots checked against current product behaviour",
+    "privacy_disclosures_reviewed": "privacy disclosures reviewed",
+    "support_url_reviewed": "support URL reachable and correct",
+    "privacy_policy_url_reviewed": "privacy policy URL reachable and current",
+    "age_rating_reviewed": "age/content rating reviewed",
+    "review_notes_prepared": "store review notes prepared",
+    "test_account_verified": "reviewer test account verified against this build",
+}
+ANDROID_CHECKS = {
+    "android_listing_reviewed": "Google Play listing text reviewed",
+    "google_play_data_safety_reviewed": "Google Play Data Safety declaration reviewed",
+}
+IOS_CHECKS = {
+    "ios_listing_reviewed": "App Store listing text reviewed",
+    "apple_app_privacy_reviewed": "Apple App Privacy declaration reviewed",
+}
+
+failures = []
+groups = {}
+
+
+def bad(message):
+    failures.append(message)
+
+
+def group(name, okay):
+    groups[name] = groups.get(name, True) and okay
+
+
+try:
+    with open(path, encoding="utf-8") as handle:
+        data = json.load(handle)
+except (OSError, ValueError) as exc:
+    print(f"FAIL\tstore readiness: {os.path.basename(path)} is not valid JSON: {exc}")
+    sys.exit(0)
+
+if not isinstance(data, dict):
+    print("FAIL\tstore readiness: release evidence must be a JSON object")
+    sys.exit(0)
+
+
+def text_field(key, label, group_name):
+    value = data.get(key)
+    if not isinstance(value, str) or not value.strip():
+        bad(f"store readiness: '{key}' ({label}) is missing or empty")
+        group(group_name, False)
+        return None
+    if PLACEHOLDER.search(value):
+        bad(f"store readiness: '{key}' ({label}) still holds a placeholder value — it must name a real person or record")
+        group(group_name, False)
+        return None
+    group(group_name, True)
+    return value.strip()
+
+
+def date_field(key, label, group_name, must_be_future=False, allow_future=True):
+    raw = data.get(key)
+    if not isinstance(raw, str) or not raw.strip():
+        bad(f"store readiness: '{key}' ({label}) is missing or empty")
+        group(group_name, False)
+        return None
+    try:
+        value = datetime.strptime(raw.strip(), "%Y-%m-%d").date()
+    except ValueError:
+        bad(f"store readiness: '{key}' ({label}) must be an ISO date (YYYY-MM-DD), got '{raw}'")
+        group(group_name, False)
+        return None
+    today = date.today()
+    if must_be_future and value <= today:
+        bad(f"store readiness: '{key}' ({label}) is {raw}, which is not in the future — renew it before releasing (docs/RELEASE_CREDENTIALS.md)")
+        group(group_name, False)
+        return None
+    if not allow_future and value > today:
+        bad(f"store readiness: '{key}' ({label}) is {raw}, which is in the future")
+        group(group_name, False)
+        return None
+    group(group_name, True)
+    return value
+
+
+# --- identity of the evidence itself ---------------------------------------
+schema = data.get("schema")
+if schema != EXPECTED_SCHEMA:
+    bad(f"store readiness: 'schema' must be '{EXPECTED_SCHEMA}', got {schema!r}")
+    group("identity", False)
+else:
+    group("identity", True)
+
+version = data.get("version")
+if not isinstance(version, str) or version.strip() != expected_version:
+    bad(
+        f"store readiness: evidence 'version' is {version!r} but this build is "
+        f"{expected_version} — the evidence does not belong to this release"
+    )
+    group("identity", False)
+else:
+    group("identity", True)
+
+evidence_build_number = data.get("build_number")
+if str(evidence_build_number).strip() != str(expected_build_number):
+    bad(
+        f"store readiness: evidence 'build_number' is {evidence_build_number!r} but this "
+        f"build is {expected_build_number}"
+    )
+    group("identity", False)
+else:
+    group("identity", True)
+
+date_field("reviewed_at", "date the evidence was completed", "identity", allow_future=False)
+
+# --- accountable people -----------------------------------------------------
+text_field("release_approver", "who approved this production release", "people")
+text_field("release_operator", "who is performing this release", "people")
+if platform in ("android", "all"):
+    text_field("credential_owner_android", "owner of the Android signing credentials", "people")
+if platform in ("ios", "all"):
+    text_field("credential_owner_apple", "owner of the Apple signing credentials", "people")
+
+# --- review checks ----------------------------------------------------------
+required_checks = dict(SHARED_CHECKS)
+if platform in ("android", "all"):
+    required_checks.update(ANDROID_CHECKS)
+if platform in ("ios", "all"):
+    required_checks.update(IOS_CHECKS)
+
+checks = data.get("checks")
+if not isinstance(checks, dict):
+    bad("store readiness: 'checks' object is missing from the release evidence")
+    group("checks", False)
+else:
+    for key in sorted(required_checks):
+        label = required_checks[key]
+        if key not in checks:
+            bad(f"store readiness: 'checks.{key}' ({label}) is missing")
+            group("checks", False)
+        elif checks[key] is True:
+            group("checks", True)
+        elif checks[key] is False:
+            bad(f"store readiness: 'checks.{key}' ({label}) is not confirmed")
+            group("checks", False)
+        else:
+            bad(
+                f"store readiness: 'checks.{key}' ({label}) must be the boolean true, "
+                f"got {checks[key]!r}"
+            )
+            group("checks", False)
+
+# --- device qualification ---------------------------------------------------
+def qualification(key, label):
+    record = data.get(key)
+    if not isinstance(record, dict):
+        bad(f"store readiness: '{key}' ({label}) is missing")
+        group("qualification", False)
+        return
+
+    for sub, sub_label in (("device", "device model"), ("os_version", "OS version")):
+        value = record.get(sub)
+        if not isinstance(value, str) or not value.strip():
+            bad(f"store readiness: '{key}.{sub}' ({sub_label}) is missing or empty")
+            group("qualification", False)
+        elif PLACEHOLDER.search(value):
+            bad(f"store readiness: '{key}.{sub}' ({sub_label}) still holds a placeholder value")
+            group("qualification", False)
+        else:
+            group("qualification", True)
+
+    outcome = record.get("outcome")
+    if not isinstance(outcome, str) or outcome.strip().lower() != "pass":
+        bad(
+            f"store readiness: '{key}.outcome' must be 'pass'; got {outcome!r} — "
+            "a release cannot proceed on an unqualified build"
+        )
+        group("qualification", False)
+    else:
+        group("qualification", True)
+
+    qualified_build = record.get("build_number")
+    if str(qualified_build).strip() != str(expected_build_number):
+        bad(
+            f"store readiness: '{key}.build_number' is {qualified_build!r} but this build is "
+            f"{expected_build_number} — qualification must be against the build being released"
+        )
+        group("qualification", False)
+    else:
+        group("qualification", True)
+
+
+if platform in ("android", "all"):
+    qualification("android_device_qualification", "Android device qualification")
+if platform in ("ios", "all"):
+    qualification("ios_device_qualification", "iOS device qualification")
+
+# --- credential expiry ------------------------------------------------------
+# Nothing in the repository can observe an Apple expiry date, so the operator
+# records it here and the release fails if it has lapsed.
+if platform in ("ios", "all"):
+    date_field(
+        "apple_certificate_expiry",
+        "Apple Distribution certificate expiry",
+        "credentials",
+        must_be_future=True,
+    )
+    date_field(
+        "apple_provisioning_profile_expiry",
+        "App Store provisioning profile expiry",
+        "credentials",
+        must_be_future=True,
+    )
+
+for message in failures:
+    print(f"FAIL\t{message}")
+
+labels = {
+    "identity": f"store readiness: evidence matches this release ({expected_version}+{expected_build_number})",
+    "people": "store readiness: approver, operator and credential owner recorded",
+    "checks": f"store readiness: {len(required_checks)} required review item(s) confirmed",
+    "qualification": "store readiness: device qualification recorded against this build",
+    "credentials": "store readiness: Apple credential expiry dates are in the future",
+}
+for name, okay in groups.items():
+    if okay:
+        print(f"PASS\t{labels[name]}")
+PY
+  )" || status=$?
+
+  if (( status != 0 )); then
+    fail "store readiness: release evidence inspection failed to run (python3 available?)"
+    return 0
+  fi
+
+  local verdict message
+  while IFS=$'\t' read -r verdict message; do
+    [[ -z "${verdict:-}" ]] && continue
+    if [[ "$verdict" == "PASS" ]]; then
+      pass "$message"
+    else
+      fail "$message"
+    fi
+  done <<<"$report"
+}
+
 check_ref_context() {
   section "Release context"
 
@@ -433,6 +746,7 @@ cmd_check() {
   PLATFORM="all"
   REPO_ROOT=""
   REQUIRE_SECRETS=0
+  REQUIRE_STORE_READINESS=0
   SKIP_RELEASE_NOTES=0
   ALLOWED_REF_NAMES=()
 
@@ -455,6 +769,10 @@ cmd_check() {
         ;;
       --require-secrets)
         REQUIRE_SECRETS=1
+        shift
+        ;;
+      --require-store-readiness)
+        REQUIRE_STORE_READINESS=1
         shift
         ;;
       --skip-release-notes)
@@ -493,6 +811,11 @@ cmd_check() {
   printf 'CaleeMobile release preflight\n'
   printf '  repository root : %s\n' "$REPO_ROOT"
   printf '  platform        : %s\n' "$PLATFORM"
+  if (( REQUIRE_STORE_READINESS )); then
+    printf '  validation level: repository correctness + store submission readiness\n'
+  else
+    printf '  validation level: repository correctness only (NOT store readiness)\n'
+  fi
 
   check_version
   if [[ "$PLATFORM" == "android" || "$PLATFORM" == "all" ]]; then
@@ -505,6 +828,7 @@ cmd_check() {
   check_release_metadata
   check_ref_context
   check_secrets
+  check_store_readiness
 
   printf '\n'
   if (( ${#FAILURES[@]} > 0 )); then
@@ -517,9 +841,16 @@ cmd_check() {
     return 1
   fi
 
-  printf 'Release preflight passed.\n'
-  printf 'NOTE: a passing preflight and a successful build do NOT mean the release is\n'
-  printf '      store-ready. Work through docs/STORE_RELEASE_CHECKLIST.md before submitting.\n'
+  if (( REQUIRE_STORE_READINESS )); then
+    printf 'Release preflight passed (repository correctness + store submission readiness).\n'
+    printf 'NOTE: store readiness is still not store APPROVAL, and approval is not rollout\n'
+    printf '      completion. See docs/RELEASE_OPERATIONS.md section 11.\n'
+  else
+    printf 'Release preflight passed (repository correctness).\n'
+    printf 'NOTE: this level does NOT establish store readiness. A real release build must\n'
+    printf '      run with --require-store-readiness, which requires completed evidence in\n'
+    printf '      docs/release_evidence/<version>.json.\n'
+  fi
   return 0
 }
 
@@ -559,6 +890,93 @@ cmd_selftest() {
       fi
     done
     printf '%s\n' "$dest"
+  }
+
+  # fixture_version <fixture-root> -> prints "build_name build_number"
+  fixture_version() {
+    sed -nE 's/^version: ([0-9]+\.[0-9]+\.[0-9]+)\+([0-9]+)$/\1 \2/p' "$1/pubspec.yaml"
+  }
+
+  # write_valid_evidence <fixture-root>
+  # Produces complete, internally consistent store-readiness evidence for the
+  # fixture's own version, so the negative cases below differ from a passing
+  # file by exactly one mutation.
+  write_valid_evidence() {
+    local root="$1" version build_number
+    read -r version build_number <<<"$(fixture_version "$root")"
+    mkdir -p "$root/docs/release_evidence"
+
+    EVIDENCE_VERSION="$version" EVIDENCE_BUILD_NUMBER="$build_number" \
+      python3 - "$root/docs/release_evidence/$version.json" <<'PY'
+import json
+import os
+import sys
+from datetime import date, timedelta
+
+version = os.environ["EVIDENCE_VERSION"]
+build_number = os.environ["EVIDENCE_BUILD_NUMBER"]
+future = (date.today() + timedelta(days=180)).isoformat()
+
+checks = [
+    "release_notes_reviewed",
+    "screenshots_reviewed",
+    "privacy_disclosures_reviewed",
+    "support_url_reviewed",
+    "privacy_policy_url_reviewed",
+    "age_rating_reviewed",
+    "review_notes_prepared",
+    "test_account_verified",
+    "android_listing_reviewed",
+    "google_play_data_safety_reviewed",
+    "ios_listing_reviewed",
+    "apple_app_privacy_reviewed",
+]
+
+qualification = {
+    "device": "Selftest Device",
+    "os_version": "1.0",
+    "build_number": build_number,
+    "outcome": "pass",
+}
+
+data = {
+    "schema": "calee-mobile-release-evidence/1",
+    "version": version,
+    "build_number": build_number,
+    "reviewed_at": date.today().isoformat(),
+    "release_approver": "Selftest Approver",
+    "release_operator": "Selftest Operator",
+    "credential_owner_android": "Selftest Android Owner",
+    "credential_owner_apple": "Selftest Apple Owner",
+    "checks": {name: True for name in checks},
+    "android_device_qualification": dict(qualification),
+    "ios_device_qualification": dict(qualification),
+    "apple_certificate_expiry": future,
+    "apple_provisioning_profile_expiry": future,
+}
+
+with open(sys.argv[1], "w", encoding="utf-8") as handle:
+    json.dump(data, handle, indent=2)
+    handle.write("\n")
+PY
+  }
+
+  # mutate_evidence <fixture-root> <python statements operating on `data`>
+  mutate_evidence() {
+    local root="$1" code="$2" version
+    read -r version _ <<<"$(fixture_version "$root")"
+    python3 - "$root/docs/release_evidence/$version.json" "$code" <<'PY'
+import json
+import sys
+
+path, code = sys.argv[1], sys.argv[2]
+with open(path, encoding="utf-8") as handle:
+    data = json.load(handle)
+exec(code)  # noqa: S102 - selftest fixture mutation
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(data, handle, indent=2)
+    handle.write("\n")
+PY
   }
 
   # expect_status <expected|nonzero> <name> <fixture-root> [extra args...]
@@ -651,22 +1069,173 @@ cmd_selftest() {
   rm -f "$fixture/scripts/generate_release_manifest.sh"
   expect_status nonzero missing-release-manifest-script "$fixture"
 
-  echo "selftest: an unexpected release branch must fail"
-  (
-    export GITHUB_REF_NAME="not-a-release-branch"
-    status=0
-    bash "$self_path" check --repo-root "$repo_root" \
-      --allow-ref-name main --allow-ref-name stage >/dev/null 2>&1 || status=$?
-    exit "$status"
-  ) && { echo "  FAIL: wrong-ref-name (expected non-zero, got 0)"; failures=$((failures + 1)); } \
-    || echo "  PASS: wrong-ref-name"
+  # --- release-branch enforcement -------------------------------------------
+  # Production-signed artifacts may only be built from stage or main. These
+  # cases run the real entry point with GITHUB_REF_NAME set the way GitHub
+  # Actions sets it.
 
+  # expect_ref <expected|nonzero> <name> <ref-name> [extra args...]
+  expect_ref() {
+    local expected="$1" name="$2" ref="$3"
+    shift 3
+
+    local status=0
+    (
+      export GITHUB_REF_NAME="$ref"
+      bash "$self_path" check --repo-root "$repo_root" \
+        --allow-ref-name stage --allow-ref-name main "$@" >/dev/null 2>&1
+    ) || status=$?
+
+    local ok=0
+    if [[ "$expected" == "nonzero" ]]; then
+      (( status != 0 )) && ok=1
+    elif (( status == expected )); then
+      ok=1
+    fi
+
+    if (( ok )); then
+      echo "  PASS: $name (ref '$ref', exit $status)"
+    else
+      echo "  FAIL: $name (ref '$ref', expected $expected, got $status)"
+      failures=$((failures + 1))
+    fi
+  }
+
+  echo "selftest: release branches stage/main are accepted"
+  expect_ref 0 release-branch-stage stage
+  expect_ref 0 release-branch-main main
+
+  echo "selftest: every other branch must be rejected for a production release"
+  expect_ref nonzero release-branch-dev dev
+  expect_ref nonzero release-branch-feature feature/some-work
+  expect_ref nonzero release-branch-claude claude/formalize-app-store-play-releases-15450z
+  expect_ref nonzero release-branch-empty ""
+  expect_ref nonzero release-branch-lookalike stage-2
+  expect_ref nonzero release-branch-lookalike-main mainline
+
+  # --- store-readiness evidence ---------------------------------------------
+  # Repository correctness and store submission readiness are separate levels;
+  # the evidence file is what turns "the checklist exists" into "the checklist
+  # was completed for THIS build by a named person".
+
+  echo "selftest: complete store-readiness evidence is accepted"
+  fixture="$(make_fixture evidence-valid)"
+  write_valid_evidence "$fixture"
+  expect_status 0 evidence-valid "$fixture" --require-store-readiness
+  expect_status 0 evidence-valid-android "$fixture" --platform android --require-store-readiness
+  expect_status 0 evidence-valid-ios "$fixture" --platform ios --require-store-readiness
+
+  echo "selftest: store readiness is not claimed when it was not requested"
+  fixture="$(make_fixture evidence-absent)"
+  expect_status 0 evidence-not-required-by-default "$fixture"
+  expect_status nonzero evidence-missing "$fixture" --require-store-readiness
+
+  echo "selftest: evidence that does not match this build must fail"
+  fixture="$(make_fixture evidence-version-mismatch)"
+  write_valid_evidence "$fixture"
+  mutate_evidence "$fixture" "data['version'] = '9.9.9'"
+  expect_status nonzero evidence-version-mismatch "$fixture" --require-store-readiness
+
+  fixture="$(make_fixture evidence-build-number-mismatch)"
+  write_valid_evidence "$fixture"
+  mutate_evidence "$fixture" "data['build_number'] = '999'"
+  expect_status nonzero evidence-build-number-mismatch "$fixture" --require-store-readiness
+
+  fixture="$(make_fixture evidence-bad-schema)"
+  write_valid_evidence "$fixture"
+  mutate_evidence "$fixture" "data['schema'] = 'something-else/1'"
+  expect_status nonzero evidence-bad-schema "$fixture" --require-store-readiness
+
+  echo "selftest: an unconfirmed store-readiness item must fail"
+  fixture="$(make_fixture evidence-false-check)"
+  write_valid_evidence "$fixture"
+  mutate_evidence "$fixture" "data['checks']['screenshots_reviewed'] = False"
+  expect_status nonzero evidence-false-check "$fixture" --require-store-readiness
+
+  fixture="$(make_fixture evidence-missing-check)"
+  write_valid_evidence "$fixture"
+  mutate_evidence "$fixture" "del data['checks']['google_play_data_safety_reviewed']"
+  expect_status nonzero evidence-missing-check "$fixture" --platform android --require-store-readiness
+
+  fixture="$(make_fixture evidence-placeholder-check)"
+  write_valid_evidence "$fixture"
+  mutate_evidence "$fixture" "data['checks']['age_rating_reviewed'] = 'TODO'"
+  expect_status nonzero evidence-placeholder-check "$fixture" --require-store-readiness
+
+  echo "selftest: unidentified approver/operator must fail"
+  fixture="$(make_fixture evidence-placeholder-approver)"
+  write_valid_evidence "$fixture"
+  mutate_evidence "$fixture" "data['release_approver'] = 'TBD'"
+  expect_status nonzero evidence-placeholder-approver "$fixture" --require-store-readiness
+
+  fixture="$(make_fixture evidence-empty-operator)"
+  write_valid_evidence "$fixture"
+  mutate_evidence "$fixture" "data['release_operator'] = ''"
+  expect_status nonzero evidence-empty-operator "$fixture" --require-store-readiness
+
+  fixture="$(make_fixture evidence-placeholder-credential-owner)"
+  write_valid_evidence "$fixture"
+  mutate_evidence "$fixture" "data['credential_owner_apple'] = 'Operator decision required'"
+  expect_status nonzero evidence-placeholder-credential-owner "$fixture" \
+    --platform ios --require-store-readiness
+
+  echo "selftest: device qualification must be against this build and must pass"
+  fixture="$(make_fixture evidence-qualification-failed)"
+  write_valid_evidence "$fixture"
+  mutate_evidence "$fixture" "data['android_device_qualification']['outcome'] = 'fail'"
+  expect_status nonzero evidence-qualification-failed "$fixture" \
+    --platform android --require-store-readiness
+
+  fixture="$(make_fixture evidence-qualification-other-build)"
+  write_valid_evidence "$fixture"
+  mutate_evidence "$fixture" "data['ios_device_qualification']['build_number'] = '1'"
+  expect_status nonzero evidence-qualification-other-build "$fixture" \
+    --platform ios --require-store-readiness
+
+  fixture="$(make_fixture evidence-qualification-placeholder-device)"
+  write_valid_evidence "$fixture"
+  mutate_evidence "$fixture" "data['android_device_qualification']['device'] = 'TBD'"
+  expect_status nonzero evidence-qualification-placeholder-device "$fixture" \
+    --platform android --require-store-readiness
+
+  echo "selftest: expired Apple signing material must fail the release"
+  fixture="$(make_fixture evidence-expired-certificate)"
+  write_valid_evidence "$fixture"
+  mutate_evidence "$fixture" "data['apple_certificate_expiry'] = '2000-01-01'"
+  expect_status nonzero evidence-expired-certificate "$fixture" \
+    --platform ios --require-store-readiness
+
+  fixture="$(make_fixture evidence-expired-profile)"
+  write_valid_evidence "$fixture"
+  mutate_evidence "$fixture" "data['apple_provisioning_profile_expiry'] = '2000-01-01'"
+  expect_status nonzero evidence-expired-profile "$fixture" \
+    --platform ios --require-store-readiness
+
+  echo "selftest: malformed evidence must fail rather than be ignored"
+  fixture="$(make_fixture evidence-malformed-json)"
+  write_valid_evidence "$fixture"
+  printf 'not json at all\n' > "$fixture/docs/release_evidence/$(fixture_version "$fixture" | cut -d' ' -f1).json"
+  expect_status nonzero evidence-malformed-json "$fixture" --require-store-readiness
+
+  fixture="$(make_fixture evidence-future-review-date)"
+  write_valid_evidence "$fixture"
+  mutate_evidence "$fixture" "data['reviewed_at'] = '2099-01-01'"
+  expect_status nonzero evidence-future-review-date "$fixture" --require-store-readiness
+
+  echo "selftest: a real release must satisfy branch, secrets and evidence together"
+  fixture="$(make_fixture evidence-release-shape)"
+  write_valid_evidence "$fixture"
   (
-    export GITHUB_REF_NAME="stage"
-    bash "$self_path" check --repo-root "$repo_root" \
-      --allow-ref-name main --allow-ref-name stage >/dev/null 2>&1
-  ) && echo "  PASS: allowed-ref-name" \
-    || { echo "  FAIL: allowed-ref-name (expected exit 0)"; failures=$((failures + 1)); }
+    export GITHUB_REF_NAME="main"
+    export ANDROID_KEYSTORE_BASE64="fixture-value-aaa"
+    export ANDROID_KEYSTORE_PASSWORD="fixture-value-bbb"
+    export ANDROID_KEY_ALIAS="fixture-value-ccc"
+    export ANDROID_KEY_PASSWORD="fixture-value-ddd"
+    bash "$self_path" check --repo-root "$fixture" --platform android \
+      --require-secrets --require-store-readiness \
+      --allow-ref-name stage --allow-ref-name main >/dev/null 2>&1
+  ) && echo "  PASS: full-release-gate-passes" \
+    || { echo "  FAIL: full-release-gate-passes (expected exit 0)"; failures=$((failures + 1)); }
 
   echo "selftest: absent signing secrets must fail when --require-secrets is given"
   (

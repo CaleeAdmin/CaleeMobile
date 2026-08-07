@@ -10,11 +10,44 @@ on:
   workflow_dispatch:
 
 jobs:
-  # Cheap gate: a missing signing secret, a version/identity inconsistency or
-  # absent release notes fails here in under a minute, before the NDK install,
-  # the test suite and two release builds are paid for.
+  # First line of defence. This workflow is manually dispatchable, so without an
+  # explicit guard an operator could produce a production-signed artifact from
+  # any branch. Fail immediately, with an actionable message, before anything
+  # else runs. The preflight below independently enforces the same rule.
+  release-ref-guard:
+    name: Verify release ref
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reject non-release refs
+        shell: bash
+        run: |
+          set -euo pipefail
+          ref="${GITHUB_REF_NAME:-}"
+          case "$ref" in
+            stage|main)
+              echo "Release ref '$ref' is authorised for production-signed builds."
+              ;;
+            *)
+              echo "::error::Production-signed Calee release artifacts may only be built from 'stage' or 'main'. This run targets '${ref:-<unknown>}'."
+              {
+                echo "Refusing to produce production-signed artifacts from '${ref:-<unknown>}'."
+                echo
+                echo "Production-signed release artifacts may only be built from 'stage' or 'main'."
+                echo "Promote the change through dev -> stage -> main, then dispatch this"
+                echo "workflow again with 'stage' or 'main' selected as the branch."
+                echo "See docs/RELEASE_OPERATIONS.md section 4 (release path)."
+              } >&2
+              exit 1
+              ;;
+          esac
+
+  # Cheap gate: a missing signing secret, a version/identity inconsistency,
+  # absent release notes or incomplete store-readiness evidence fails here in
+  # under a minute, before the NDK install, the test suite and two release
+  # builds are paid for.
   preflight:
     name: Release preflight (Android)
+    needs: release-ref-guard
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -25,7 +58,16 @@ jobs:
         run: |
           set -euo pipefail
           scripts/release_preflight.sh selftest
-          scripts/release_preflight.sh check --platform android --require-secrets
+          scripts/generate_release_manifest.sh selftest
+          # A real production build must satisfy every level: authorised release
+          # branch, repository correctness, signing secrets, and completed
+          # store-readiness evidence for exactly this version.
+          scripts/release_preflight.sh check \
+            --platform android \
+            --require-secrets \
+            --require-store-readiness \
+            --allow-ref-name stage \
+            --allow-ref-name main
         env:
           # Presence-only check. The preflight script reads whether these are
           # non-empty and reports only their NAMES; it never prints a value.
@@ -36,7 +78,7 @@ jobs:
 
   build-signed-android:
     name: Generate calee-mobile signed release APK and AAB
-    needs: preflight
+    needs: [release-ref-guard, preflight]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -383,11 +425,12 @@ jobs:
             --apk "build/app/outputs/flutter-apk/calee-mobile-${{ steps.build_meta.outputs.sanitized_build_name }}.apk" \
             --aab "build/app/outputs/bundle/release/calee-mobile-${{ steps.build_meta.outputs.sanitized_build_name }}.aab"
 
-      # Traceability: bind the exact artifacts to the source SHA, version,
-      # workflow run and their SHA-256 checksums so a store build can always be
-      # traced back to what produced it. The signing identity recorded here is
-      # the certificate's public distinguished name and SHA-256 fingerprint —
-      # public information printed by apksigner, never key material.
+      # Traceability: bind EVERY artifact this workflow uploads — not just the
+      # store binary — to the source SHA, version, workflow run and its SHA-256,
+      # so anything downloaded from this run can be proven to be what CI built.
+      # The signing identity recorded here is the certificate's public
+      # distinguished name and SHA-256 fingerprint, printed by apksigner; it is
+      # public information, never key material.
       - name: Generate release manifest
         shell: bash
         run: |
@@ -395,6 +438,7 @@ jobs:
 
           apk="build/app/outputs/flutter-apk/calee-mobile-${{ steps.build_meta.outputs.sanitized_build_name }}.apk"
           aab="build/app/outputs/bundle/release/calee-mobile-${{ steps.build_meta.outputs.sanitized_build_name }}.aab"
+          native_symbols="${{ steps.native_symbols.outputs.zip_path }}"
 
           latest_build_tools="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -n1)"
           apksigner_bin="$ANDROID_HOME/build-tools/$latest_build_tools/apksigner"
@@ -408,12 +452,17 @@ jobs:
             exit 1
           fi
 
+          # Every --artifact/--artifact-dir below corresponds to an upload step
+          # further down. The generator fails closed if any of them is missing,
+          # so an uploaded-but-unrecorded artifact cannot slip through.
           scripts/generate_release_manifest.sh \
             --platform android \
             --build-name "${{ steps.build_meta.outputs.build_name }}" \
             --build-number "${{ steps.build_meta.outputs.build_number }}" \
-            --artifact "$apk" \
-            --artifact "$aab" \
+            --artifact "app_bundle=$aab" \
+            --artifact "apk=$apk" \
+            --artifact "native_debug_symbols=$native_symbols" \
+            --artifact-dir "dart_debug_symbols=build/symbols" \
             --signing-identity "$signer_dn (certificate SHA-256 $signer_sha256)" \
             --output "build/release-manifest-android.json"
 

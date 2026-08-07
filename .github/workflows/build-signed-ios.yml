@@ -33,11 +33,43 @@ env:
   APPLE_TEAM_ID: WQ3JPT4U3H
 
 jobs:
+  # First line of defence. This workflow is manually dispatchable, so without an
+  # explicit guard an operator could produce a production-signed IPA from any
+  # branch. Fail immediately, with an actionable message, before anything else
+  # runs. The preflight below independently enforces the same rule.
+  release-ref-guard:
+    name: Verify release ref
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reject non-release refs
+        shell: bash
+        run: |
+          set -euo pipefail
+          ref="${GITHUB_REF_NAME:-}"
+          case "$ref" in
+            stage|main)
+              echo "Release ref '$ref' is authorised for production-signed builds."
+              ;;
+            *)
+              echo "::error::Production-signed Calee release artifacts may only be built from 'stage' or 'main'. This run targets '${ref:-<unknown>}'."
+              {
+                echo "Refusing to produce production-signed artifacts from '${ref:-<unknown>}'."
+                echo
+                echo "Production-signed release artifacts may only be built from 'stage' or 'main'."
+                echo "Promote the change through dev -> stage -> main, then dispatch this"
+                echo "workflow again with 'stage' or 'main' selected as the branch."
+                echo "See docs/RELEASE_OPERATIONS.md section 4 (release path)."
+              } >&2
+              exit 1
+              ;;
+          esac
+
   # Cheap gate on a Linux runner: catches a missing secret, a version/identity
-  # inconsistency or absent release notes in under a minute, before any macOS
-  # build minutes are spent.
+  # inconsistency, absent release notes or incomplete store-readiness evidence
+  # in under a minute, before any macOS build minutes are spent.
   preflight:
     name: Release preflight (iOS)
+    needs: release-ref-guard
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -48,7 +80,16 @@ jobs:
         run: |
           set -euo pipefail
           scripts/release_preflight.sh selftest
-          scripts/release_preflight.sh check --platform ios --require-secrets
+          scripts/generate_release_manifest.sh selftest
+          # A real production build must satisfy every level: authorised release
+          # branch, repository correctness, signing secrets, and completed
+          # store-readiness evidence for exactly this version.
+          scripts/release_preflight.sh check \
+            --platform ios \
+            --require-secrets \
+            --require-store-readiness \
+            --allow-ref-name stage \
+            --allow-ref-name main
         env:
           # Presence-only check. The preflight script reads whether these are
           # non-empty and reports only their NAMES; it never prints a value.
@@ -59,7 +100,7 @@ jobs:
 
   build-signed-ios:
     name: Generate calee-mobile signed iOS archive and IPA
-    needs: preflight
+    needs: [release-ref-guard, preflight]
     runs-on: macos-latest
 
     steps:
@@ -464,16 +505,26 @@ jobs:
           echo "signing_summary=$authority (team $APPLE_TEAM_ID, profile ${{ steps.profile.outputs.profile_name }})" >> "$GITHUB_OUTPUT"
           echo "Signed IPA verified."
 
+      # Traceability: bind EVERY artifact this workflow uploads — the IPA and the
+      # xcarchive (which carries the dSYMs used to symbolicate crash reports) —
+      # to the source SHA, version, workflow run and its SHA-256. The archive is
+      # a directory, so it is recorded with a file count and a tree digest over
+      # every contained file.
       - name: Generate release manifest
         id: manifest
         shell: bash
         run: |
           set -euo pipefail
+
+          # Every --artifact/--artifact-dir below corresponds to an upload step
+          # further down. The generator fails closed if any of them is missing,
+          # so an uploaded-but-unrecorded artifact cannot slip through.
           scripts/generate_release_manifest.sh \
             --platform ios \
             --build-name "${{ steps.build_meta.outputs.build_name }}" \
             --build-number "${{ steps.build_meta.outputs.build_number }}" \
-            --artifact "${{ steps.ipa.outputs.ipa_path }}" \
+            --artifact "ipa=${{ steps.ipa.outputs.ipa_path }}" \
+            --artifact-dir "xcarchive=build/ios/archive/Runner.xcarchive" \
             --signing-identity "${{ steps.verify.outputs.signing_summary }}" \
             --output "build/release-manifest-ios.json"
 

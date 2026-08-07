@@ -63,10 +63,18 @@ Store releases are documented in the repository, not in chat history:
   per-release store metadata and submission checklist.
 - [`docs/release_notes/`](docs/release_notes/) — one file per version; required
   by preflight.
+- [`docs/release_evidence/`](docs/release_evidence/) — per-release store-readiness
+  attestation; required by the signed release workflows.
 
 Before cutting a release:
 
-    scripts/release_preflight.sh check
+    scripts/release_preflight.sh check                          # repository correctness
+    scripts/release_preflight.sh check --require-store-readiness # + store submission readiness
 
-A successful build is not a release. Store readiness is established by the
-checklist and Release Approver sign-off, not by a green workflow.
+Production-signed artifacts can only be built from `stage` or `main`; the signed
+workflows fail closed on any other branch.
+
+A successful build is not a release. PR CI success is not release approval, a
+signed build is not store readiness, store readiness is not store approval, and
+publication is not rollout completion — see section 11 of
+`docs/RELEASE_OPERATIONS.md`.
