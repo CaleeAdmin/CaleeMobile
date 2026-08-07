@@ -32,6 +32,8 @@ class LocalSubscriberCalendarPage extends StatefulWidget {
     required this.onSubscriptionsChanged,
     this.icsService,
     this.promotionPreferences,
+    this.openCalendarsSheetOnStart = false,
+    this.onCalendarsSheetOpened,
     super.key,
   });
 
@@ -55,6 +57,16 @@ class LocalSubscriberCalendarPage extends StatefulWidget {
 
   /// Overrideable for tests; defaults to [LocalSubscriberPromotionPreferences].
   final LocalSubscriberPromotionPreferences? promotionPreferences;
+
+  /// Opens the "Calendars on this phone" management sheet as soon as the
+  /// page appears. Used by the sixth-calendar limit screen's "Manage my
+  /// calendars" action so the user lands directly where a calendar can be
+  /// removed to make room.
+  final bool openCalendarsSheetOnStart;
+
+  /// Called once [openCalendarsSheetOnStart] has been honoured, so the owner
+  /// can clear its one-shot request.
+  final VoidCallback? onCalendarsSheetOpened;
 
   @override
   State<LocalSubscriberCalendarPage> createState() =>
@@ -94,6 +106,14 @@ class _LocalSubscriberCalendarPageState
     _subscriptions = List.of(widget.subscriptions);
     _refreshAll();
     unawaited(_loadInlinePromoPreference());
+    if (widget.openCalendarsSheetOnStart) {
+      // After the first frame so the sheet is presented over a built page.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        widget.onCalendarsSheetOpened?.call();
+        unawaited(_openCalendarsSheet());
+      });
+    }
   }
 
   Future<void> _loadInlinePromoPreference() async {
@@ -525,11 +545,30 @@ class _CalendarsSheet extends StatelessWidget {
               child: Row(
                 children: [
                   Expanded(
-                    child: Text(
-                      'Calendars on this phone',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'Calendars on this phone',
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        // Informational allowance, shown where it is
+                        // relevant. Not an upgrade wall: the conversion
+                        // experience only appears if a sixth unique calendar
+                        // is actually attempted.
+                        Text(
+                          '${subscriptions.length} of '
+                          '$kMaxLocalCalendarSubscriptions calendars',
+                          key: const Key('local_calendars_sheet_allowance'),
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                   IconButton(
