@@ -787,6 +787,7 @@ if mode == "submission":
         seen_candidates[platform_name] = {
             "git_sha": git_sha.lower() if git_sha else None,
             "run_id": run_id,
+            "run_attempt": run_attempt,
             "manifest_sha": manifest_sha.lower() if manifest_sha else None,
         }
 
@@ -922,6 +923,11 @@ if mode == "submission":
             mismatches.append(f"git_sha {manifest_source.get('git_sha')!r}")
         if str(manifest_ci.get("run_id", "")) != (recorded["run_id"] or ""):
             mismatches.append(f"run_id {manifest_ci.get('run_id')!r}")
+        # A re-run produces a new attempt of the same run id, with its own
+        # artifacts — so the attempt is part of the candidate's identity, not
+        # decoration.
+        if str(manifest_ci.get("run_attempt", "")) != (recorded["run_attempt"] or ""):
+            mismatches.append(f"run_attempt {manifest_ci.get('run_attempt')!r}")
         if str(manifest_version.get("build_name", "")) != expected_version:
             mismatches.append(f"build_name {manifest_version.get('build_name')!r}")
         if str(manifest_version.get("build_number", "")) != str(expected_build_number):
@@ -1812,6 +1818,16 @@ print(hashlib.sha256(open(sys.argv[1], 'rb').read()).hexdigest())
   mutate_evidence "$fixture" \
     "c = data['submission_readiness']['android_candidate']; c['release_manifest_sha256'] = '$cm_digest'; c['workflow_run_id'] = '424242'"
   expect_status nonzero candidate-right-build-number-wrong-run "$fixture" \
+    --platform android --require-store-readiness --candidate-manifest "android=$cm_manifest"
+
+  # Everything correct EXCEPT the run attempt. A re-run of the same workflow
+  # run produces a different attempt with its own artifacts, so an attempt
+  # mismatch means the evidence describes a different candidate.
+  fixture="$(make_fixture candidate-wrong-run-attempt)"
+  write_valid_evidence "$fixture" submission
+  mutate_evidence "$fixture" \
+    "c = data['submission_readiness']['android_candidate']; c['release_manifest_sha256'] = '$cm_digest'; c['workflow_run_attempt'] = '2'"
+  expect_status nonzero candidate-right-run-wrong-attempt "$fixture" \
     --platform android --require-store-readiness --candidate-manifest "android=$cm_manifest"
 
   # A manifest for the other platform must not satisfy an Android candidate.
