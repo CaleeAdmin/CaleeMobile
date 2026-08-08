@@ -124,26 +124,37 @@ strict monotonicity.
 `scripts/release_preflight.sh` runs **before** any expensive signing/build job
 and fails fast, naming the exact item that is missing or inconsistent.
 
-It has **two deliberately separate levels**, because "the repository is
-consistent" and "this release may be submitted to a store" are different claims:
+It has **three deliberately separate levels**, because "the repository is
+consistent", "a signed candidate may be built" and "this candidate may be
+submitted to a store" are different claims made at different times:
 
 | Level | Invocation | Who runs it | What it proves |
 | --- | --- | --- | --- |
-| Repository correctness | `check` | Flutter CI, every PR | The repository is internally consistent: identity, version wiring, tooling, docs, release notes. **Not** release approval, **not** store readiness. |
-| Store submission readiness | `check --require-secrets --require-store-readiness --allow-ref-name stage --allow-ref-name main` | The signed release workflows only | Additionally: an authorised release branch, the signing secrets are configured, and a named operator has recorded completed store-readiness evidence for exactly this build. |
+| Repository correctness | `check` | Flutter CI, every PR | The repository is internally consistent: identity, version wiring, tooling, docs, release notes. **Not** release approval. |
+| Build/sign readiness | `check --require-secrets --require-build-readiness --allow-branch stage --allow-branch main` | The signed release workflows | Additionally: an authorised release **branch**, signing secrets configured, and the `build_readiness` evidence completed by a named operator. Everything knowable *before* the candidate exists. |
+| Store submission readiness | `check --require-store-readiness` | The Release Operator, after qualifying the candidate | Everything above **plus** `submission_readiness`: physical-device qualification of this exact build, final listing/screenshot review against the candidate, Release Approver sign-off. |
+
+Build readiness deliberately does **not** require device qualification. The
+artifact to be qualified is the one the signed workflow is about to produce, so
+requiring it earlier would be circular. Qualification is not dropped — it is
+moved to the phase where it can honestly be performed.
 
 ```bash
 # Repository correctness — safe anywhere, needs no secrets
 scripts/release_preflight.sh check
 
-# Exactly what the signed Android workflow runs
+# Exactly what the signed Android workflow runs before building
 scripts/release_preflight.sh check --platform android \
-  --require-secrets --require-store-readiness \
-  --allow-ref-name stage --allow-ref-name main
+  --require-secrets --require-build-readiness \
+  --allow-branch stage --allow-branch main
 
-# Prove the checks themselves still work (both directions, 48 cases)
-scripts/release_preflight.sh selftest
-scripts/generate_release_manifest.sh selftest
+# What the operator runs AFTER qualifying the candidate, before uploading
+scripts/release_preflight.sh check --platform ios --require-store-readiness
+
+# Prove the checks themselves still work (both directions)
+scripts/release_preflight.sh selftest            # 86 cases
+scripts/generate_release_manifest.sh selftest    # 12 cases
+scripts/verify_release_ref.sh selftest           # 24 cases
 ```
 
 It validates:
@@ -157,12 +168,11 @@ It validates:
 - required release documentation exists
 - release notes exist for the current `build_name`, with no `TODO`/`TBD`
   placeholder left in them
-- the release is being cut from an allowed branch, when `--allow-ref-name` is
-  given
+- that the run is on an authorised release **branch** (never a tag), when
+  `--allow-branch` is given
 - **presence** of the platform's signing secrets, when `--require-secrets` is
   given
-- completed store-readiness evidence, when `--require-store-readiness` is given
-  (section 3.1)
+- the readiness evidence for the phase being checked (section 3.1)
 
 Preflight reports only secret **names**. It never reads, prints, exports or logs
 a secret value; `selftest` includes an explicit no-leak assertion.
@@ -170,25 +180,38 @@ a secret value; `selftest` includes an explicit no-leak assertion.
 `--skip-release-notes` exists for rehearsal/dry-run builds only. Never use it for
 a build that will be uploaded to a store.
 
-### 3.1 Store-readiness evidence
+### 3.1 Release readiness evidence
 
 `STORE_RELEASE_CHECKLIST.md` says what to do. **`docs/release_evidence/<version>.json`
 is where the Release Operator records that it was actually done**, for one
-specific build, in a form the release workflows can verify. A checklist file
-existing in the repository proves nothing; this file is the attestation.
+specific build, in a form the release tooling verifies. A checklist file existing
+in the repository proves nothing; this file is the attestation.
+
+It has two sections, completed at two different times:
+
+| Section | Completed | Required by |
+| --- | --- | --- |
+| `build_readiness` | Before dispatching a signed release workflow | `--require-build-readiness` — the signed workflows |
+| `submission_readiness` | After the candidate is on Internal Testing / TestFlight and has been qualified on a physical device | `--require-store-readiness` — the operator, before uploading for review |
 
 ```bash
 cp docs/release_evidence/TEMPLATE.json docs/release_evidence/0.0.31.json
-# complete it, then check it before dispatching a signed build:
-scripts/release_preflight.sh check --require-store-readiness
+# fill in build_readiness, then:
+scripts/release_preflight.sh check --require-build-readiness
+# ... signed workflow ... qualify the candidate on a device ...
+# fill in submission_readiness, then:
+scripts/release_preflight.sh check --platform ios --require-store-readiness
 ```
 
 A release **fails** if the file is missing, if its `version`/`build_number` do
 not match the build (so last release's file cannot be reused), if any required
-review item is `false`, missing or a placeholder string, if the approver /
-operator / credential-owner fields are empty or hold placeholder text, if device
-qualification is missing, failed, or was recorded against a different build
-number, or if the recorded Apple certificate/profile expiry has lapsed.
+item is `false`, missing or placeholder text, if the operator / credential-owner
+/ approver fields are empty or still hold a template `REPLACE …` marker, if
+device qualification is missing, failed, or was recorded against a different
+build number, or if the recorded Apple certificate/profile expiry has lapsed.
+
+Copying `TEMPLATE.json` and editing only the version cannot pass — every
+`REPLACE …` marker is rejected, and that is an explicit test case.
 
 Full field reference: [`docs/release_evidence/README.md`](release_evidence/README.md).
 
@@ -198,8 +221,6 @@ with the code it describes.
 > There is intentionally **no** evidence file for the current version in the
 > repository today. Nobody has performed those reviews, so a signed release
 > attempt fails closed — which is the correct state, not a gap.
-
----
 
 ## 4. Release path: `dev` → `stage` → `main`
 
@@ -226,12 +247,30 @@ Both signed-build workflows are manually dispatchable, so the branch restriction
 is **enforced in the workflow, not merely documented**, in two independent
 places:
 
-1. A `Verify release ref` job runs first and fails the whole run when
-   `github.ref_name` is anything other than `stage` or `main`, with an error
-   naming the offending ref.
-2. The preflight job independently runs with
-   `--allow-ref-name stage --allow-ref-name main`, so removing or misconfiguring
-   the guard job does not silently re-open the hole.
+1. A `Verify release ref` job runs first and fails the whole run unless the
+   **fully-qualified** ref is `refs/heads/stage` or `refs/heads/main` *and* the
+   ref type is `branch`. It runs `scripts/verify_release_ref.sh`, which has its
+   own 24-case selftest.
+2. The preflight job independently applies the same rule through a separate
+   implementation (`--allow-branch stage --allow-branch main`), so removing or
+   misconfiguring the guard job does not silently re-open the hole.
+
+**A tag is never an authorised release ref.** `workflow_dispatch` can target a
+branch *or* a tag, and `GITHUB_REF_NAME` is the short name for both — so a tag
+named `main` would otherwise be indistinguishable from the `main` branch. Both
+layers check `GITHUB_REF` and `GITHUB_REF_TYPE`, reject a ref/type
+contradiction rather than resolving it, and fail closed when `GITHUB_REF` is
+absent. The error names the supplied ref, its type, and the allowed refs:
+
+```
+Reason      : the release ref is a tag, not a branch
+Current ref : refs/tags/main
+Ref type    : tag
+
+Production-signed artifacts may only be built from:
+  refs/heads/stage  (branch)
+  refs/heads/main   (branch)
+```
 
 Dispatching either signed workflow from `dev`, a feature branch or a `claude/*`
 branch therefore fails in seconds, before any signing material is decoded. There
@@ -244,8 +283,9 @@ What each level actually gates:
 | --- | --- | --- |
 | PR CI green on `dev` | The change is internally consistent and testable | Not release approval; nothing has been qualified on a device |
 | Promotion to `stage` | The change is in a release candidate | Not approved for production |
-| Signed build green on `stage`/`main` | Artifacts compiled, signed, verified, traceable | **Not** store readiness — no listing, privacy or review work is implied |
-| Store-readiness evidence complete | A named operator attests the listing, privacy, screenshots, review notes and device qualification are done for this build | **Not** store approval — neither store has seen it |
+| Build readiness complete | A named operator attests listing/privacy/review preparation is done and credentials are valid | Not permission to submit; the candidate does not exist yet |
+| Signed build green on `stage`/`main` | Artifacts compiled, signed, verified, traceable | **Not** store readiness — the candidate has not been run on a device |
+| Submission readiness complete | The same operator attests this exact candidate was qualified on a physical device, the listing/screenshots were re-checked against it, and the Release Approver signed off | **Not** store approval — neither store has seen it |
 | Submitted and approved | The store accepted the build | **Not** rollout completion — users do not have it yet |
 | Rollout at 100% / phased release complete | Distribution finished | Not "healthy" — monitoring continues (sections 6.3, 7.3) |
 
@@ -258,25 +298,32 @@ What each level actually gates:
 3. **Version bump** — `pubspec.yaml` bumped, `docs/release_notes/<version>.md`
    written.
 4. **Preflight** — `scripts/release_preflight.sh check` green locally.
-5. **Device qualification** — the release candidate installed and exercised on at
-   least one physical Android device and one physical iOS device. Record device
-   model, OS version, build number and outcome in the release notes or the
-   release issue. `docs/CALENDAR_REMINDER_DEVICE_TEST.md` covers the
-   notification/reminder path, which cannot be validated in CI.
-6. **Regression evidence** — the outcome of the regression pass
-   (`scripts/calee_client_regression.py` and/or the CaleeMobile-Regression
-   selector-contract run) recorded against the candidate build number.
-7. **Release notes** — customer-facing "What's New" text agreed; this is the same
+5. **Release notes** — customer-facing "What's New" text agreed; this is the same
    text submitted to both stores.
-8. **Approval** — the **Release Approver** records explicit approval to release
-   the specific `build_name+build_number` on the release issue or PR. No
-   approval, no submission.
-9. **Signed artifacts** — produced by the workflows in section 5, with the
-   release manifest attached. These may only be built from `stage` or `main`.
-10. **Store-readiness evidence** — `docs/release_evidence/<version>.json`
-    completed and committed (section 3.1). The signed workflows refuse to build
-    without it, so this is a hard gate, not a reminder.
-11. **Store submission** — sections 6 (Android) and 7 (Apple), after
+6. **Build readiness evidence** — the `build_readiness` section of
+   `docs/release_evidence/<version>.json` completed and committed (section 3.1),
+   naming the Release Operator and Credential Owner. The signed workflows refuse
+   to build without it, so this is a hard gate, not a reminder.
+7. **Signed candidate** — produced by the workflows in section 5, with the
+   release manifest attached. These may only be built from the `stage` or `main`
+   **branch**.
+8. **Candidate distribution** — the signed candidate uploaded to Google Play
+   Internal Testing and/or TestFlight. This is the first point at which the
+   build can be installed.
+9. **Device qualification** — the candidate installed *from that track* and
+   exercised on at least one physical Android device and one physical iOS
+   device. Record device model, OS version, build number and outcome.
+   `docs/CALENDAR_REMINDER_DEVICE_TEST.md` covers the notification/reminder
+   path, which cannot be validated in CI.
+10. **Regression evidence** — the outcome of the regression pass
+    (`scripts/calee_client_regression.py` and/or the CaleeMobile-Regression
+    selector-contract run) recorded against the candidate build number.
+11. **Approval** — the **Release Approver** records explicit approval to release
+    the specific `build_name+build_number`. No approval, no submission.
+12. **Submission readiness evidence** — the `submission_readiness` section
+    completed, then verified with
+    `scripts/release_preflight.sh check --platform <platform> --require-store-readiness`.
+13. **Store submission** — sections 6 (Android) and 7 (Apple), after
     `STORE_RELEASE_CHECKLIST.md` is complete.
 
 Emergency/corrective releases follow the same path. The path is never bypassed;
@@ -292,16 +339,24 @@ refuse to run from any ref other than `stage` or `main` (section 4).
 
 Every signed run performs the same ordered sequence:
 
-1. validate the release ref (`stage`/`main` only)
-2. derive the version from `pubspec.yaml`
-3. run release preflight, including its own selftests
+1. prove the run is on an authorised release **branch** (never a tag)
+2. run the release-tooling selftests
+3. run repository-correctness preflight
 4. require the platform's signing secrets to be configured
-5. require completed store-readiness evidence for this exact version
-6. build and sign
-7. verify the resulting artifacts
-8. generate the complete release manifest
-9. upload the artifacts and the manifest
-10. destroy all signing material, even when an earlier step failed
+5. require completed **build readiness** evidence for this exact version
+6. derive the version from `pubspec.yaml` and run the test suite
+7. build and sign the candidate
+8. cryptographically verify the candidate
+9. generate the complete release manifest
+10. upload the candidate, its artifacts and the manifest
+11. destroy all signing material, even when an earlier step failed
+12. print the exact remaining sequence — distribute, qualify on a device,
+    complete submission readiness — before any store upload
+
+The workflow does **not** validate submission readiness, because the candidate
+it is about to build is the thing that must be qualified. A green run therefore
+states plainly: *signed candidate produced; store submission is still blocked
+until submission-readiness validation passes.*
 
 ### Android — `.github/workflows/build-signed-apk.yml`
 
@@ -365,15 +420,44 @@ credentials, so no CI run can publish a build by accident.
 
 ### 6.2 Standard production release
 
-1. Upload the signed AAB to **Internal testing**; confirm the version code and
-   name shown by Play match the release manifest.
-2. Install from the internal track on a physical device and complete device
-   qualification (section 4, gate 5).
-3. Complete `STORE_RELEASE_CHECKLIST.md` (Google column).
-4. Promote to **Production** with a staged rollout, starting at **10%**.
-5. Monitor (section 6.3) for at least 24 hours at 10%.
-6. Increase to **50%**; monitor for at least 24 hours.
-7. Increase to **100%**.
+The full Android sequence, in order. Do not reorder it — each step produces what
+the next one needs.
+
+```
+signed AAB (stage/main)
+  → Play Internal Testing
+    → install the candidate on a physical device
+      → device qualification against this exact build number
+        → submission_readiness evidence completed
+          → --require-store-readiness passes
+            → Production 10% → 50% → 100%
+              → monitoring
+```
+
+1. **Build readiness** — complete `build_readiness` in
+   `docs/release_evidence/<version>.json` and verify it:
+   `scripts/release_preflight.sh check --platform android --require-build-readiness`
+2. **Signed candidate** — dispatch **Build Signed Android Artifacts** from the
+   `stage` or `main` branch. Download the AAB, APK, symbols and release
+   manifest.
+3. **Internal testing** — upload the signed AAB to **Internal testing**; confirm
+   the version code and name Play shows match the release manifest.
+4. **Install the candidate** — install it *from the internal track* on a
+   physical Android device. This is the first point at which the build can be
+   exercised.
+5. **Device qualification** — work through the app's real paths, including the
+   notification/reminder path in `docs/CALENDAR_REMINDER_DEVICE_TEST.md`. Record
+   device, OS version, build number and outcome.
+6. **Submission readiness** — complete the `submission_readiness` section
+   (qualification record, final listing/screenshot review against this
+   candidate, reviewer test account verified on it, Release Approver) and the
+   Google column of `STORE_RELEASE_CHECKLIST.md`. Verify:
+   `scripts/release_preflight.sh check --platform android --require-store-readiness`
+7. **Production, staged** — only once step 6 passes, promote to **Production**
+   with a staged rollout starting at **10%**.
+8. Monitor (section 6.3) for at least 24 hours at 10%.
+9. Increase to **50%**; monitor for at least 24 hours.
+10. Increase to **100%**.
 
 Faster progression is a **Release Approver** decision, recorded on the release
 issue.
@@ -420,16 +504,47 @@ Halting alone is not a fix; a corrective release is always required.
 
 ### 7.1 Standard release
 
-1. Produce a signed IPA (section 5).
-2. Upload to App Store Connect; wait for processing to complete.
-3. Distribute the build to **TestFlight** internal testers.
-4. Install from TestFlight on a physical iOS device and complete device
-   qualification (section 4, gate 5).
-5. Complete `STORE_RELEASE_CHECKLIST.md` (Apple column), including App Privacy,
-   export-compliance and review notes.
-6. Attach the build to the App Store version and **Submit for Review**.
-7. On approval, release using **phased release** (7 days, automatic daily
-   increments) rather than immediate full release.
+The full Apple sequence, in order. TestFlight is what makes the candidate
+installable, so qualification necessarily comes after it — never before.
+
+```
+signed IPA (stage/main)
+  → upload to App Store Connect → processing
+    → TestFlight
+      → install the candidate on a physical device
+        → device qualification against this exact build number
+          → submission_readiness evidence completed
+            → --require-store-readiness passes
+              → Submit for Review
+                → App Review
+                  → phased release
+                    → monitoring
+```
+
+1. **Build readiness** — complete `build_readiness` in
+   `docs/release_evidence/<version>.json`, including the Apple certificate and
+   provisioning-profile expiry dates, and verify it:
+   `scripts/release_preflight.sh check --platform ios --require-build-readiness`
+2. **Signed candidate** — dispatch **Build Signed iOS Artifacts** from the
+   `stage` or `main` branch. Download the IPA and the release manifest.
+3. **Upload** — upload the IPA to App Store Connect (Transporter, Xcode
+   Organizer or `xcrun altool`); wait for processing to complete.
+4. **TestFlight** — distribute the processed build to TestFlight internal
+   testers.
+5. **Install the candidate** — install it *from TestFlight* on a physical iOS
+   device. This is the first point at which the build can be exercised.
+6. **Device qualification** — work through the app's real paths, including the
+   notification/reminder path in `docs/CALENDAR_REMINDER_DEVICE_TEST.md`. Record
+   device, OS version, build number and outcome.
+7. **Submission readiness** — complete the `submission_readiness` section
+   (qualification record, final listing/screenshot review against this
+   candidate, reviewer test account verified on it, export compliance, Release
+   Approver) and the Apple column of `STORE_RELEASE_CHECKLIST.md`. Verify:
+   `scripts/release_preflight.sh check --platform ios --require-store-readiness`
+8. **Submit** — only once step 7 passes, attach the build to the App Store
+   version and **Submit for Review**.
+9. **Phased release** — on approval, release using **phased release** (7 days,
+   automatic daily increments) rather than immediate full release.
 
 ### 7.2 App Review
 
@@ -535,8 +650,10 @@ For every production release, the release issue/PR should end up carrying:
 The following are real, known items that are **not** part of release operations
 and must be tracked as their own product work, not folded into a release:
 
-- Google Play's requirement to raise the Android target API level by
-  **31 August 2026** (the app currently sets `targetSdk = 35`).
+- Google Play's Android target API level requirement. This was addressed
+  separately in #538, which raised the app to `targetSdk = 36` (Android 16); the
+  deadline was 31 August 2026. Nothing further is needed here, but a future
+  deadline will again be its own product change, not a release-process change.
 - Google Play's report that two deep links may fail because the associated web
   domains are not correctly associated with the app
   (`hub.calee.com.au`, `calembed.calee.com.au` — Digital Asset Links /
@@ -553,9 +670,15 @@ There are four distinct milestones, and each one is routinely mistaken for the
 next. They are not the same thing and never happen at the same time:
 
 ```
-  PR CI green   ─▶  signed build green  ─▶  store readiness  ─▶  store approval  ─▶  rollout complete
-  (code is             (artifacts exist,      (listing/privacy/    (Apple/Google      (users actually
-   consistent)          signed, traceable)     device work done)    accepted it)       have it)
+  PR CI green ─▶ build readiness ─▶ signed candidate ─▶ qualified on a device
+   (code is       (prep done,        (artifacts exist,   (it actually works
+    consistent)    operator named)    signed, traceable)   on real hardware)
+                                                             │
+                        ┌────────────────────────────────────┘
+                        ▼
+  submission readiness ─▶ store approval ─▶ rollout complete
+   (approver signed off,   (Apple/Google      (users actually
+    listing re-checked)     accepted it)       have it)
 ```
 
 **1. PR CI success is not release approval.** Flutter CI proves the code formats,
@@ -566,16 +689,19 @@ nothing about whether this change should be released.
 **2. A successful signed build is not store readiness.** A green signed-build
 workflow means exactly this: the code compiled, was signed with the configured
 identity, passed the automated test suite, passed the Android permission gate,
-and produced traceable artifacts. It does **not** mean store metadata
-(descriptions, screenshots, privacy disclosures) is complete or current, that
-review requirements (App Privacy, Data Safety, export compliance, review notes,
-test accounts) are satisfied, or that anyone has looked at the build on a device.
+and produced traceable artifacts — with **build readiness** validated
+beforehand. It does **not** mean anyone has run the build on a device, that
+screenshots match it, or that the reviewer test account works on it. Those
+claims cannot honestly be made before the candidate exists, which is precisely
+why they live in the submission phase.
 
-**3. Store readiness is not store approval.** Store readiness is established by
-completing `STORE_RELEASE_CHECKLIST.md` and recording it in
-`docs/release_evidence/<version>.json` with Release Approver sign-off. That is an
-internal statement. Neither Apple nor Google has seen the build at that point,
-and either can still reject it.
+**3. Store readiness is not store approval.** Submission readiness is
+established by distributing the candidate to Internal Testing / TestFlight,
+qualifying it on physical hardware, completing
+`STORE_RELEASE_CHECKLIST.md`, and recording all of it in the
+`submission_readiness` section of `docs/release_evidence/<version>.json` with
+Release Approver sign-off. That is an internal statement. Neither Apple nor
+Google has seen the build at that point, and either can still reject it.
 
 **4. Publication is not rollout completion, and rollout completion is not
 health.** An approved App Store version still has to go through phased release; a
@@ -583,6 +709,8 @@ Play production release still has to climb 10% → 50% → 100%. Until then most
 users do not have the build. Even at 100%, the release is not "done" until the
 monitoring windows in sections 6.3 and 7.3 have passed without triggering a halt.
 
-The tooling enforces the boundary between 1 and 2 (separate preflight levels),
-and between 2 and 3 (the evidence file the signed workflows require). Steps 3→4
-and 4→completion are human and store-side; no repository check can assert them.
+The tooling enforces the boundary between 1 and 2 (separate preflight levels
+plus the `build_readiness` evidence the signed workflows require), and between 2
+and 3 (the `submission_readiness` evidence, which requires device qualification
+against the exact candidate build number). Steps 3→4 and 4→completion are human
+and store-side; no repository check can assert them.

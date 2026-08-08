@@ -68,13 +68,15 @@ Store releases are documented in the repository, not in chat history:
 
 Before cutting a release:
 
-    scripts/release_preflight.sh check                          # repository correctness
-    scripts/release_preflight.sh check --require-store-readiness # + store submission readiness
+    scripts/release_preflight.sh check                            # repository correctness
+    scripts/release_preflight.sh check --require-build-readiness  # + may build a signed candidate
+    scripts/release_preflight.sh check --require-store-readiness  # + may submit to a store
 
-Production-signed artifacts can only be built from `stage` or `main`; the signed
-workflows fail closed on any other branch.
+Production-signed artifacts can only be built from the `stage` or `main`
+**branch**; the signed workflows fail closed on any other branch, and on a tag
+of any name.
 
 A successful build is not a release. PR CI success is not release approval, a
-signed build is not store readiness, store readiness is not store approval, and
-publication is not rollout completion — see section 11 of
-`docs/RELEASE_OPERATIONS.md`.
+signed build is not store readiness (the candidate still has to be qualified on
+a physical device), store readiness is not store approval, and publication is not
+rollout completion — see section 11 of `docs/RELEASE_OPERATIONS.md`.

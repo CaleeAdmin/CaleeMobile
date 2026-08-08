@@ -19,35 +19,63 @@ Release being checked:
 >
 > **Record the outcome in `docs/release_evidence/<version>.json`.** This
 > checklist is the instructions; that file is the machine-checkable attestation
-> that a named operator completed them for this specific build. The signed
-> release workflows refuse to build without it, so a release cannot skip this
-> page by accident. Copy `docs/release_evidence/TEMPLATE.json` to start, and
-> verify it with:
+> that a named operator completed them for this specific build. Copy
+> `docs/release_evidence/TEMPLATE.json` to start.
+>
+> It is completed in **two passes**, matching the sections below:
 >
 > ```bash
-> scripts/release_preflight.sh check --require-store-readiness
+> # Pass 1 — before dispatching a signed build (sections 1a, 2, 3, 4)
+> scripts/release_preflight.sh check --require-build-readiness
+>
+> # Pass 2 — after the candidate is qualified on a device (sections 1b, 5)
+> scripts/release_preflight.sh check --platform ios --require-store-readiness
 > ```
+>
+> The signed workflows refuse to build without pass 1, and the documented
+> process forbids submitting without pass 2.
 
 ---
 
-## 1. Pre-submission engineering gates
+## 1a. Before the signed build (build readiness)
+
+Nothing here depends on the candidate existing.
 
 - [ ] `pubspec.yaml` version bumped; `build_number` is higher than every number
       previously submitted to either store
 - [ ] `docs/release_notes/<build_name>.md` written, no `TODO`/`TBD` left
 - [ ] `scripts/release_preflight.sh check` passes
-- [ ] Flutter CI green on `main` (format, analyze, test, Android debug build)
-- [ ] Signed Android build workflow green; AAB, APK, symbols and release
+- [ ] Flutter CI green on the branch being released
+- [ ] Sections 2, 3 and 4 below worked through (listing text, privacy
+      disclosures, age rating, review notes prepared)
+- [ ] `docs/release_evidence/<version>.json` created from the template, with the
+      **`build_readiness`** section completed and committed — Release Operator
+      and Credential Owner named, Apple expiry dates recorded
+- [ ] `scripts/release_preflight.sh check --require-build-readiness` passes
+
+## 1b. After the signed candidate exists (submission readiness)
+
+Every item here is about the specific candidate that was built.
+
+- [ ] Signed Android build workflow green from `stage`/`main`; AAB, APK, symbols
+      and release manifest downloaded
+- [ ] Signed iOS build workflow green from `stage`/`main`; IPA and release
       manifest downloaded
-- [ ] Signed iOS build workflow green; IPA and release manifest downloaded
-- [ ] Release manifest `git_sha` matches the SHA on `main` being released
-- [ ] Device qualification complete on a physical Android device (model/OS
-      recorded)
-- [ ] Device qualification complete on a physical iOS device (model/OS recorded)
+- [ ] Release manifest `git_sha` matches the SHA being released
+- [ ] Candidate uploaded to Google Play **Internal testing**
+- [ ] Candidate uploaded and processed in App Store Connect, distributed to
+      **TestFlight**
+- [ ] Candidate installed from the internal track and qualified on a physical
+      Android device (model/OS/build number/outcome recorded)
+- [ ] Candidate installed from TestFlight and qualified on a physical iOS device
+      (model/OS/build number/outcome recorded)
+- [ ] Screenshots and listing text re-checked **against this candidate**
+- [ ] Reviewer test account verified **on this candidate**
 - [ ] Regression evidence recorded against this build number
 - [ ] Release Approver has explicitly approved this `build_name+build_number`
-- [ ] `docs/release_evidence/<version>.json` created from the template, completed
-      and committed on the branch being released
+- [ ] **`submission_readiness`** section of the evidence completed and committed
+- [ ] `scripts/release_preflight.sh check --platform <android|ios> --require-store-readiness`
+      passes
 
 ---
 

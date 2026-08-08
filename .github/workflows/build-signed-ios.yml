@@ -33,36 +33,26 @@ env:
   APPLE_TEAM_ID: WQ3JPT4U3H
 
 jobs:
-  # First line of defence. This workflow is manually dispatchable, so without an
-  # explicit guard an operator could produce a production-signed IPA from any
-  # branch. Fail immediately, with an actionable message, before anything else
-  # runs. The preflight below independently enforces the same rule.
+  # First line of defence: prove the run targets an authorised release BRANCH.
+  # workflow_dispatch can also target a TAG, and GITHUB_REF_NAME is the short
+  # name for both — so a tag named `main` would otherwise look exactly like the
+  # `main` branch. scripts/verify_release_ref.sh checks the fully-qualified ref
+  # and the ref type, and has its own selftest. The preflight job below applies
+  # the same rule through a separate implementation (`--allow-branch`), so a
+  # mistake in one layer does not silently re-open the hole.
   release-ref-guard:
     name: Verify release ref
     runs-on: ubuntu-latest
     steps:
-      - name: Reject non-release refs
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify the release ref is an authorised release branch
         shell: bash
         run: |
           set -euo pipefail
-          ref="${GITHUB_REF_NAME:-}"
-          case "$ref" in
-            stage|main)
-              echo "Release ref '$ref' is authorised for production-signed builds."
-              ;;
-            *)
-              echo "::error::Production-signed Calee release artifacts may only be built from 'stage' or 'main'. This run targets '${ref:-<unknown>}'."
-              {
-                echo "Refusing to produce production-signed artifacts from '${ref:-<unknown>}'."
-                echo
-                echo "Production-signed release artifacts may only be built from 'stage' or 'main'."
-                echo "Promote the change through dev -> stage -> main, then dispatch this"
-                echo "workflow again with 'stage' or 'main' selected as the branch."
-                echo "See docs/RELEASE_OPERATIONS.md section 4 (release path)."
-              } >&2
-              exit 1
-              ;;
-          esac
+          scripts/verify_release_ref.sh selftest
+          scripts/verify_release_ref.sh check
 
   # Cheap gate on a Linux runner: catches a missing secret, a version/identity
   # inconsistency, absent release notes or incomplete store-readiness evidence
@@ -81,15 +71,20 @@ jobs:
           set -euo pipefail
           scripts/release_preflight.sh selftest
           scripts/generate_release_manifest.sh selftest
-          # A real production build must satisfy every level: authorised release
-          # branch, repository correctness, signing secrets, and completed
-          # store-readiness evidence for exactly this version.
+          scripts/verify_release_ref.sh selftest
+          # BUILD readiness, not submission readiness. A signed candidate
+          # must not be built from an unauthorised branch, without signing
+          # secrets, or before the listing/privacy/review preparation is
+          # done and a Release Operator is named. It must NOT require
+          # physical-device qualification: the artifact being qualified is
+          # what this run is about to produce. Submission readiness is
+          # validated separately by the operator after qualification.
           scripts/release_preflight.sh check \
             --platform ios \
             --require-secrets \
-            --require-store-readiness \
-            --allow-ref-name stage \
-            --allow-ref-name main
+            --require-build-readiness \
+            --allow-branch stage \
+            --allow-branch main
         env:
           # Presence-only check. The preflight script reads whether these are
           # non-empty and reports only their NAMES; it never prints a value.
@@ -549,10 +544,47 @@ jobs:
           path: build/release-manifest-ios.json
           if-no-files-found: error
 
-      - name: Release readiness reminder
+      # The candidate exists; store submission does NOT. Spell out the exact
+      # remaining sequence so a new operator cannot mistake a green run for
+      # permission to submit.
+      - name: Next steps for the Release Operator
         shell: bash
         run: |
-          echo "::notice::A signed IPA is not a released app. Complete docs/STORE_RELEASE_CHECKLIST.md, obtain Release Approver sign-off, then upload to TestFlight manually (docs/RELEASE_OPERATIONS.md section 7)."
+          set -euo pipefail
+          version="${{ steps.build_meta.outputs.build_name }}+${{ steps.build_meta.outputs.build_number }}"
+
+          echo "::notice::Signed iOS candidate $version produced. App Store submission is still BLOCKED until submission-readiness validation passes."
+
+          cat <<EOF
+          ============================================================
+          Signed candidate produced successfully.
+
+          This is NOT store readiness, and this run has NOT submitted
+          anything. Only build readiness was validated before the build.
+
+          Remaining sequence for the Release Operator:
+
+            1. Download the IPA and the release manifest from this run.
+            2. Upload the IPA to App Store Connect and wait for processing.
+            3. Distribute it to TESTFLIGHT.
+            4. Install it from TestFlight on a physical iOS device and
+               qualify it. Record it against build number $version.
+            5. Complete the submission_readiness section of
+               docs/release_evidence/${{ steps.build_meta.outputs.build_name }}.json
+               (device, OS version, build_number, outcome, final listing and
+               screenshot review against this candidate, export compliance,
+               Release Approver).
+            6. Verify it:
+
+                 scripts/release_preflight.sh check \\
+                   --platform ios \\
+                   --require-store-readiness
+
+            7. Only once that passes: attach the build to the App Store
+               version and Submit for Review, then use phased release
+               (docs/RELEASE_OPERATIONS.md section 7).
+          ============================================================
+          EOF
 
       # Destroy every piece of signing material, whether the build succeeded,
       # failed or was cancelled.

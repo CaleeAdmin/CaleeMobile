@@ -44,13 +44,19 @@ The per-release evidence file (`docs/release_evidence/<version>.json`, see
 [`RELEASE_OPERATIONS.md`](RELEASE_OPERATIONS.md) section 3.1) requires the
 operator to name, for the build being released:
 
-- `release_approver`, `release_operator`
-- `credential_owner_android` (Android releases), `credential_owner_apple` (iOS)
-- `apple_certificate_expiry` and `apple_provisioning_profile_expiry` (iOS),
-  which **must still be in the future** or the release fails
+- `build_readiness.release_operator` — required before a signed candidate can be
+  built at all
+- `build_readiness.credential_owner_android` (Android), `credential_owner_apple`
+  (iOS)
+- `build_readiness.apple_certificate_expiry` and
+  `apple_provisioning_profile_expiry` (iOS), which **must still be in the
+  future** or the build fails
+- `submission_readiness.release_approver` — required before the candidate may be
+  submitted to a store
 
-Placeholder text such as `TODO`, `TBD`, `UNKNOWN` or `Operator decision
-required` in any of those fields fails the release preflight. So a release
+Placeholder text — including the template's own `REPLACE …` markers, and
+`TODO`, `TBD`, `UNKNOWN`, `REQUIRED — NOT SUPPLIED` or `Operator decision
+required` — in any of those fields fails the release preflight. So a release
 cannot be built while the ownership questions above are unanswered — the
 answers are recorded per release rather than assumed from this table.
 
@@ -214,6 +220,50 @@ If automated upload is adopted later, the credentials required would be:
 Adopting either is a deliberate decision that widens the blast radius of a CI
 compromise from "can build" to "can publish". It should be its own change, with
 its own review.
+
+---
+
+## 4b. Recommended follow-up hardening: a `production-release` Environment
+
+**Not implemented in this change, and deliberately so.** Recorded here as the
+next hardening step for whoever owns repository settings.
+
+Today the Android and Apple signing secrets are **repository** secrets. Any
+workflow in the repository that an authorised user can dispatch could read them.
+The release workflows restrict *where* a signed build can be produced (the
+`stage`/`main` branch only, enforced twice), but they cannot restrict *who* may
+dispatch them beyond normal repository write access.
+
+Scoping the signing secrets to a GitHub **Environment** named
+`production-release` would add:
+
+- **Required reviewers** — a named approver must approve the run before the job
+  starts, which is a natural home for the Release Approver role that currently
+  exists only as an evidence field.
+- **Deployment branch restrictions** — a third, settings-level enforcement of
+  the `stage`/`main` rule.
+- **Environment-scoped secrets** — a workflow that does not declare
+  `environment: production-release` cannot read the signing secrets at all.
+
+Sketch of the change (both signed workflows):
+
+```yaml
+  build-signed-android:
+    environment: production-release   # gates the job on the environment's rules
+```
+
+Doing this safely requires repository settings that must be created **before**
+the workflow references them, and requires moving the secrets from repository
+scope to environment scope. If the environment does not exist, or the secrets
+are not present in it, the workflows break — which is why it is not being done
+blind.
+
+**Verification limitation.** This session could not inspect the repository's
+Environments, secret scoping, or branch-protection rules: the available GitHub
+API surface here does not expose them, and guessing would be worse than saying
+so. Whoever has repository admin access should confirm the current state before
+adopting this. Nothing above is asserted as fact about the repository's present
+configuration.
 
 ---
 
