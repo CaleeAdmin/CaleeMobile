@@ -82,7 +82,10 @@ android {
     defaultConfig {
         applicationId = "au.com.calee.mobile"
         minSdk = flutter.minSdkVersion
-        targetSdk = 35
+        // Android 16 / API 36. Required by the Google Play target-API policy
+        // taking effect 31 August 2026. Kept in lockstep with compileSdk above
+        // and guarded by test/platform/android_target_sdk_test.dart.
+        targetSdk = 36
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
