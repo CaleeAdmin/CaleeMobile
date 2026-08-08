@@ -38,6 +38,10 @@ class ConnectDisplayPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
+      // Stable selector for the post-registration "connect your display" step
+      // (CaleeMobile-Regression onboarding contract). Identifies the state
+      // itself rather than its copy, so wording can change freely.
+      key: const Key('connect_display_root'),
       appBar: AppBar(title: const Text('Connect display')),
       body: SafeArea(
         minimum: const EdgeInsets.all(24),
@@ -67,11 +71,13 @@ class ConnectDisplayPage extends StatelessWidget {
                 ),
                 const SizedBox(height: 40),
                 FilledButton(
+                  key: const Key('connect_display_scan_button'),
                   onPressed: () => _scanDisplayQr(context),
                   child: const Text('Scan display QR'),
                 ),
                 const SizedBox(height: 12),
                 TextButton(
+                  key: const Key('connect_display_skip_button'),
                   onPressed: onDone,
                   child: const Text('Skip for now'),
                 ),
