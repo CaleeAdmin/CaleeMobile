@@ -62,6 +62,11 @@ Every item here is about the specific candidate that was built.
 - [ ] Signed iOS build workflow green from `stage`/`main`; IPA and release
       manifest downloaded
 - [ ] Release manifest `git_sha` matches the SHA being released
+- [ ] **Candidate identity captured for each platform** — `git_sha`,
+      `workflow_run_id`, `workflow_run_attempt`, `release_manifest_sha256` —
+      from the run's "Print candidate identity for release evidence" step or
+      `scripts/generate_release_manifest.sh checksum <release-manifest.json>`.
+      A build number alone does not identify a candidate.
 - [ ] Candidate uploaded to Google Play **Internal testing**
 - [ ] Candidate uploaded and processed in App Store Connect, distributed to
       **TestFlight**
@@ -73,9 +78,12 @@ Every item here is about the specific candidate that was built.
 - [ ] Reviewer test account verified **on this candidate**
 - [ ] Regression evidence recorded against this build number
 - [ ] Release Approver has explicitly approved this `build_name+build_number`
-- [ ] **`submission_readiness`** section of the evidence completed and committed
+- [ ] **`submission_readiness`** section of the evidence completed and committed,
+      with each platform's qualification nested inside its `*_candidate` block
 - [ ] `scripts/release_preflight.sh check --platform <android|ios> --require-store-readiness`
-      passes
+      passes (optionally with
+      `--candidate-manifest <platform>=<release-manifest.json>` to prove the
+      evidence describes the downloaded manifest)
 
 ---
 

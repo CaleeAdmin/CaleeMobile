@@ -152,8 +152,8 @@ scripts/release_preflight.sh check --platform android \
 scripts/release_preflight.sh check --platform ios --require-store-readiness
 
 # Prove the checks themselves still work (both directions)
-scripts/release_preflight.sh selftest            # 86 cases
-scripts/generate_release_manifest.sh selftest    # 12 cases
+scripts/release_preflight.sh selftest            # 119 cases
+scripts/generate_release_manifest.sh selftest    # 17 cases
 scripts/verify_release_ref.sh selftest           # 24 cases
 ```
 
@@ -208,10 +208,55 @@ not match the build (so last release's file cannot be reused), if any required
 item is `false`, missing or placeholder text, if the operator / credential-owner
 / approver fields are empty or still hold a template `REPLACE …` marker, if
 device qualification is missing, failed, or was recorded against a different
-build number, or if the recorded Apple certificate/profile expiry has lapsed.
+build number, if the tested candidate is not identified exactly (section 3.2),
+or if the recorded Apple certificate/profile expiry has lapsed.
 
 Copying `TEMPLATE.json` and editing only the version cannot pass — every
 `REPLACE …` marker is rejected, and that is an explicit test case.
+
+### 3.2 "Same build number" is not "same signed candidate"
+
+The build number lives in `pubspec.yaml`, so **two signed workflow runs built
+from two different commits can carry the same build number.** Recording device
+qualification against a build number alone would therefore permit testing one
+candidate and submitting another, with nothing to detect it.
+
+`submission_readiness` records the **exact candidate** each platform tested:
+
+```json
+"android_candidate": {
+  "git_sha": "<40-char commit the workflow built>",
+  "workflow_run_id": "<GitHub Actions run id>",
+  "workflow_run_attempt": "<run attempt>",
+  "release_manifest_sha256": "<SHA-256 of that run's release manifest>",
+  "device_qualification": { "device": "...", "os_version": "...", "build_number": "...", "outcome": "pass" }
+}
+```
+
+The qualification is **nested inside** the candidate, so it cannot be detached
+from the artifact it describes. Android and iOS are separate blocks — they come
+from different workflows and different runs — and preflight requires them to
+share a commit while refusing a shared run id or manifest digest (which would
+mean one was copied from the other).
+
+**Where the values come from.** The signed workflow prints them in its
+*"Print candidate identity for release evidence"* step, and the same block can be
+regenerated at any time from the downloaded manifest:
+
+```bash
+scripts/generate_release_manifest.sh checksum <release-manifest.json>
+```
+
+To prove the recorded identity really describes the manifest you hold:
+
+```bash
+scripts/release_preflight.sh check --platform android --require-store-readiness \
+  --candidate-manifest android=<release-manifest.json>
+```
+
+This compares the digest and the manifest's commit, run id, version and build
+number against the evidence. It is entirely local — preflight never downloads a
+GitHub artifact.
 
 Full field reference: [`docs/release_evidence/README.md`](release_evidence/README.md).
 
@@ -312,7 +357,9 @@ What each level actually gates:
    build can be installed.
 9. **Device qualification** — the candidate installed *from that track* and
    exercised on at least one physical Android device and one physical iOS
-   device. Record device model, OS version, build number and outcome.
+   device. Record device model, OS version, build number and outcome **inside
+   the candidate block** that identifies the exact artifact tested (section
+   3.2).
    `docs/CALENDAR_REMINDER_DEVICE_TEST.md` covers the notification/reminder
    path, which cannot be validated in CI.
 10. **Regression evidence** — the outcome of the regression pass
@@ -424,14 +471,15 @@ The full Android sequence, in order. Do not reorder it — each step produces wh
 the next one needs.
 
 ```
-signed AAB (stage/main)
-  → Play Internal Testing
-    → install the candidate on a physical device
-      → device qualification against this exact build number
-        → submission_readiness evidence completed
-          → --require-store-readiness passes
-            → Production 10% → 50% → 100%
-              → monitoring
+signed AAB (stage/main) + release manifest
+  → record the EXACT candidate identity (commit, run id/attempt, manifest digest)
+    → Play Internal Testing
+      → install THAT candidate on a physical device
+        → device qualification, recorded inside the candidate block
+          → submission_readiness evidence completed
+            → --require-store-readiness passes
+              → Production 10% → 50% → 100%
+                → monitoring
 ```
 
 1. **Build readiness** — complete `build_readiness` in
@@ -440,6 +488,11 @@ signed AAB (stage/main)
 2. **Signed candidate** — dispatch **Build Signed Android Artifacts** from the
    `stage` or `main` branch. Download the AAB, APK, symbols and release
    manifest.
+2a. **Record the candidate identity** — copy the block printed by the run's
+   *"Print candidate identity for release evidence"* step, or regenerate it with
+   `scripts/generate_release_manifest.sh checksum <release-manifest.json>`. This
+   is what ties everything below to *this* candidate; the build number cannot
+   (section 3.2).
 3. **Internal testing** — upload the signed AAB to **Internal testing**; confirm
    the version code and name Play shows match the release manifest.
 4. **Install the candidate** — install it *from the internal track* on a
@@ -448,11 +501,14 @@ signed AAB (stage/main)
 5. **Device qualification** — work through the app's real paths, including the
    notification/reminder path in `docs/CALENDAR_REMINDER_DEVICE_TEST.md`. Record
    device, OS version, build number and outcome.
-6. **Submission readiness** — complete the `submission_readiness` section
-   (qualification record, final listing/screenshot review against this
-   candidate, reviewer test account verified on it, Release Approver) and the
-   Google column of `STORE_RELEASE_CHECKLIST.md`. Verify:
+6. **Submission readiness** — complete the `submission_readiness` section: paste
+   the `android_candidate` identity from step 2a, nest the qualification record
+   inside it, and record the final listing/screenshot review against this
+   candidate, the reviewer test account verified on it, and the Release
+   Approver. Work the Google column of `STORE_RELEASE_CHECKLIST.md`. Verify:
    `scripts/release_preflight.sh check --platform android --require-store-readiness`
+   (add `--candidate-manifest android=<release-manifest.json>` to also prove the
+   evidence describes the manifest you downloaded).
 7. **Production, staged** — only once step 6 passes, promote to **Production**
    with a staged rollout starting at **10%**.
 8. Monitor (section 6.3) for at least 24 hours at 10%.
@@ -508,17 +564,18 @@ The full Apple sequence, in order. TestFlight is what makes the candidate
 installable, so qualification necessarily comes after it — never before.
 
 ```
-signed IPA (stage/main)
-  → upload to App Store Connect → processing
-    → TestFlight
-      → install the candidate on a physical device
-        → device qualification against this exact build number
-          → submission_readiness evidence completed
-            → --require-store-readiness passes
-              → Submit for Review
-                → App Review
-                  → phased release
-                    → monitoring
+signed IPA (stage/main) + release manifest
+  → record the EXACT candidate identity (commit, run id/attempt, manifest digest)
+    → upload to App Store Connect → processing
+      → TestFlight
+        → install THAT candidate on a physical device
+          → device qualification, recorded inside the candidate block
+            → submission_readiness evidence completed
+              → --require-store-readiness passes
+                → Submit for Review
+                  → App Review
+                    → phased release
+                      → monitoring
 ```
 
 1. **Build readiness** — complete `build_readiness` in
@@ -527,6 +584,11 @@ signed IPA (stage/main)
    `scripts/release_preflight.sh check --platform ios --require-build-readiness`
 2. **Signed candidate** — dispatch **Build Signed iOS Artifacts** from the
    `stage` or `main` branch. Download the IPA and the release manifest.
+2a. **Record the candidate identity** — copy the block printed by the run's
+   *"Print candidate identity for release evidence"* step, or regenerate it with
+   `scripts/generate_release_manifest.sh checksum <release-manifest.json>`. This
+   is what ties everything below to *this* candidate; the build number cannot
+   (section 3.2).
 3. **Upload** — upload the IPA to App Store Connect (Transporter, Xcode
    Organizer or `xcrun altool`); wait for processing to complete.
 4. **TestFlight** — distribute the processed build to TestFlight internal
@@ -536,11 +598,15 @@ signed IPA (stage/main)
 6. **Device qualification** — work through the app's real paths, including the
    notification/reminder path in `docs/CALENDAR_REMINDER_DEVICE_TEST.md`. Record
    device, OS version, build number and outcome.
-7. **Submission readiness** — complete the `submission_readiness` section
-   (qualification record, final listing/screenshot review against this
-   candidate, reviewer test account verified on it, export compliance, Release
-   Approver) and the Apple column of `STORE_RELEASE_CHECKLIST.md`. Verify:
+7. **Submission readiness** — complete the `submission_readiness` section: paste
+   the `ios_candidate` identity from step 2a, nest the qualification record
+   inside it, and record the final listing/screenshot review against this
+   candidate, the reviewer test account verified on it, export compliance and
+   the Release Approver. Work the Apple column of
+   `STORE_RELEASE_CHECKLIST.md`. Verify:
    `scripts/release_preflight.sh check --platform ios --require-store-readiness`
+   (add `--candidate-manifest ios=<release-manifest.json>` to also prove the
+   evidence describes the manifest you downloaded).
 8. **Submit** — only once step 7 passes, attach the build to the App Store
    version and **Submit for Review**.
 9. **Phased release** — on approval, release using **phased release** (7 days,
@@ -622,6 +688,12 @@ To trace a store build back to source: take the version/build number shown in th
 store, find the release manifest with that version, and read its `git_sha` and
 `run_url`. The `sha256` of each artifact lets you prove that the file you hold is
 the file CI produced.
+
+The link runs the other way too. `submission_readiness` in
+`docs/release_evidence/<version>.json` records the SHA-256 of the manifest for
+the candidate that was actually installed and qualified, so device evidence,
+CI run, source commit and uploaded artifacts form one chain that a build number
+alone could not (section 3.2).
 
 `signing_identity` carries **non-secret** identity information only — a
 certificate common name, a certificate fingerprint, a provisioning profile name.

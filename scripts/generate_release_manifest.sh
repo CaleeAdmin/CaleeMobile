@@ -23,7 +23,13 @@
 #     [--signing-identity "non-secret summary"] \
 #     [--output PATH]
 #
+#   scripts/generate_release_manifest.sh checksum <release-manifest.json>
 #   scripts/generate_release_manifest.sh selftest
+#
+# `checksum` is the operator helper: it prints the manifest's SHA-256 and the
+# ready-to-paste candidate-identity block for
+# docs/release_evidence/<version>.json, so device qualification can be bound to
+# the exact signed candidate rather than to a build number.
 #
 # --artifact takes a file. --artifact-dir takes a directory artifact (an
 # .xcarchive, a split-debug-info directory): it is recorded with a file count,
@@ -189,6 +195,55 @@ PY
   expect_failure invalid-platform --platform windows --build-name 0.0.30 --build-number 30 \
     --artifact "$tmp_dir/calee-mobile-0.0.30.aab" --output "$tmp_dir/m10.json"
 
+  echo "selftest: the checksum helper reports the manifest identity"
+  local checksum_output
+  checksum_output="$(bash "$self_path" checksum "$manifest" 2>&1)" || checksum_output="FAILED"
+  local expected_digest
+  expected_digest="$(python3 -c "
+import hashlib,sys
+print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())
+" "$manifest")"
+
+  if grep -q "$expected_digest" <<<"$checksum_output" \
+    && grep -q '"android_candidate"' <<<"$checksum_output" \
+    && grep -q '"git_sha": "0123456789abcdef0123456789abcdef01234567"' <<<"$checksum_output" \
+    && grep -q '"workflow_run_id": "12345"' <<<"$checksum_output" \
+    && grep -q '"workflow_run_attempt": "1"' <<<"$checksum_output" \
+    && grep -q '"release_manifest_sha256": "'"$expected_digest"'"' <<<"$checksum_output"; then
+    echo "  PASS: checksum-emits-candidate-identity"
+  else
+    echo "  FAIL: checksum-emits-candidate-identity"
+    failures=$((failures + 1))
+  fi
+
+  # The emitted block must be valid JSON once wrapped back into an object, so
+  # an operator pasting it cannot produce a malformed evidence file.
+  if python3 - "$checksum_output" <<'PYCHECK'
+import json
+import sys
+
+text = sys.argv[1]
+start = text.index('"android_candidate"')
+block = "{" + text[start:] + "}"
+data = json.loads(block)
+candidate = data["android_candidate"]
+assert len(candidate["git_sha"]) == 40, candidate
+assert len(candidate["release_manifest_sha256"]) == 64, candidate
+assert candidate["device_qualification"]["build_number"] == "30", candidate
+PYCHECK
+  then
+    echo "  PASS: checksum-block-is-valid-json"
+  else
+    echo "  FAIL: checksum-block-is-valid-json"
+    failures=$((failures + 1))
+  fi
+
+  expect_failure checksum-missing-file checksum "$tmp_dir/no-such-manifest.json"
+  printf 'not json\n' > "$tmp_dir/bad-manifest.json"
+  expect_failure checksum-invalid-json checksum "$tmp_dir/bad-manifest.json"
+  printf '{"schema":"something-else/1"}\n' > "$tmp_dir/foreign-manifest.json"
+  expect_failure checksum-foreign-schema checksum "$tmp_dir/foreign-manifest.json"
+
   echo
   if (( failures > 0 )); then
     echo "generate_release_manifest selftest FAILED ($failures failing case(s))" >&2
@@ -198,10 +253,98 @@ PY
   return 0
 }
 
-if [[ "${1:-}" == "selftest" ]]; then
-  cmd_selftest
-  exit $?
-fi
+# --- checksum -----------------------------------------------------------------
+#
+# Operator helper. Given a release manifest downloaded from a signed workflow
+# run, print its SHA-256 and the candidate-identity block to paste into
+# docs/release_evidence/<version>.json.
+#
+# The manifest is the canonical machine-generated description of one signed
+# candidate, so its digest is what binds device qualification to that exact
+# candidate — a build number alone cannot, because two runs from different
+# commits can share one.
+cmd_checksum() {
+  local manifest_path="${1:-}"
+  if [[ -z "$manifest_path" ]]; then
+    err "usage: scripts/generate_release_manifest.sh checksum <release-manifest.json>"
+    return 2
+  fi
+  if [[ ! -f "$manifest_path" ]]; then
+    err "Release manifest not found: $manifest_path"
+    return 1
+  fi
+
+  python3 - "$manifest_path" <<'PY'
+import hashlib
+import json
+import sys
+
+path = sys.argv[1]
+
+with open(path, "rb") as handle:
+    digest = hashlib.sha256(handle.read()).hexdigest()
+
+try:
+    with open(path, encoding="utf-8") as handle:
+        manifest = json.load(handle)
+except ValueError as exc:
+    print(f"{path} is not valid JSON: {exc}", file=sys.stderr)
+    sys.exit(1)
+
+if not str(manifest.get("schema", "")).startswith("calee-mobile-release-manifest/"):
+    print(
+        f"{path} is not a Calee release manifest (schema={manifest.get('schema')!r})",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+platform = manifest.get("platform", "")
+source = manifest.get("source", {}) or {}
+ci = manifest.get("ci", {}) or {}
+version = manifest.get("version", {}) or {}
+
+print(f"Release manifest : {path}")
+print(f"Platform         : {platform}")
+print(f"Version          : {version.get('build_name')}+{version.get('build_number')}")
+print(f"Git SHA          : {source.get('git_sha')}")
+print(f"Git ref          : {source.get('git_ref')}")
+print(f"Workflow run     : {ci.get('run_id')} (attempt {ci.get('run_attempt')})")
+print(f"Run URL          : {ci.get('run_url')}")
+print(f"SHA-256          : {digest}")
+print()
+print("Candidate identity — paste into the submission_readiness section of")
+print(f"docs/release_evidence/{version.get('build_name')}.json:")
+print()
+
+block = {
+    "git_sha": source.get("git_sha"),
+    "workflow_run_id": str(ci.get("run_id")),
+    "workflow_run_attempt": str(ci.get("run_attempt")),
+    "release_manifest_sha256": digest,
+    "device_qualification": {
+        "device": "<device model>",
+        "os_version": "<OS version>",
+        "build_number": str(version.get("build_number")),
+        "outcome": "<pass, only if it actually passed>",
+    },
+}
+rendered = json.dumps({f"{platform}_candidate": block}, indent=2)
+# Strip the outer braces so the result drops straight into the existing object.
+print("\n".join(rendered.split("\n")[1:-1]))
+PY
+}
+
+case "${1:-}" in
+  selftest)
+    cmd_selftest
+    exit $?
+    ;;
+  checksum)
+    shift
+    cmd_checksum "$@"
+    exit $?
+    ;;
+esac
 
 platform=""
 build_name=""

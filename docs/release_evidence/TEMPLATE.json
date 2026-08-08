@@ -1,5 +1,5 @@
 {
-  "schema": "calee-mobile-release-evidence/2",
+  "schema": "calee-mobile-release-evidence/3",
   "version": "REPLACE-WITH-VERSION",
   "build_number": "REPLACE-WITH-BUILD-NUMBER",
 
@@ -30,7 +30,7 @@
   },
 
   "submission_readiness": {
-    "_comment": "Complete this AFTER the signed candidate has been distributed to Play Internal Testing / TestFlight and qualified on a physical device. Do not fill it in ahead of time.",
+    "_comment": "Complete this AFTER the signed candidate has been distributed to Play Internal Testing / TestFlight and qualified on a physical device. Do not fill it in ahead of time. Each *_candidate block identifies ONE exact signed candidate; get its values from `scripts/generate_release_manifest.sh checksum <release-manifest.json>` or from the signed workflow's run log.",
     "reviewed_at": "YYYY-MM-DD",
     "release_approver": "REPLACE — the person who approved this production release",
 
@@ -46,18 +46,34 @@
       "export_compliance_answered": false
     },
 
-    "android_device_qualification": {
-      "device": "REPLACE — device model",
-      "os_version": "REPLACE — Android version",
-      "build_number": "REPLACE-WITH-BUILD-NUMBER",
-      "outcome": "REPLACE — pass only if the candidate actually passed"
+    "android_candidate": {
+      "_comment": "The exact signed Android candidate that was installed and tested. A build number alone does not identify a candidate.",
+      "git_sha": "REPLACE-WITH-40-CHARACTER-GIT-SHA",
+      "workflow_run_id": "REPLACE-WITH-WORKFLOW-RUN-ID",
+      "workflow_run_attempt": "REPLACE-WITH-RUN-ATTEMPT",
+      "release_manifest_sha256": "REPLACE-WITH-64-CHARACTER-MANIFEST-SHA256",
+
+      "device_qualification": {
+        "device": "REPLACE — device model",
+        "os_version": "REPLACE — Android version",
+        "build_number": "REPLACE-WITH-BUILD-NUMBER",
+        "outcome": "REPLACE — pass only if the candidate actually passed"
+      }
     },
 
-    "ios_device_qualification": {
-      "device": "REPLACE — device model",
-      "os_version": "REPLACE — iOS version",
-      "build_number": "REPLACE-WITH-BUILD-NUMBER",
-      "outcome": "REPLACE — pass only if the candidate actually passed"
+    "ios_candidate": {
+      "_comment": "The exact signed iOS candidate that was installed from TestFlight and tested. This is a different workflow run from the Android one, with its own manifest.",
+      "git_sha": "REPLACE-WITH-40-CHARACTER-GIT-SHA",
+      "workflow_run_id": "REPLACE-WITH-WORKFLOW-RUN-ID",
+      "workflow_run_attempt": "REPLACE-WITH-RUN-ATTEMPT",
+      "release_manifest_sha256": "REPLACE-WITH-64-CHARACTER-MANIFEST-SHA256",
+
+      "device_qualification": {
+        "device": "REPLACE — device model",
+        "os_version": "REPLACE — iOS version",
+        "build_number": "REPLACE-WITH-BUILD-NUMBER",
+        "outcome": "REPLACE — pass only if the candidate actually passed"
+      }
     }
   },
 

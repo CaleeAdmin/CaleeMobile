@@ -53,6 +53,10 @@
 #                                  the current version's release evidence
 #     --require-store-readiness    also require BOTH readiness sections (implies
 #                                  --require-build-readiness)
+#     --candidate-manifest P=PATH  optionally cross-verify the recorded candidate
+#                                  identity against a downloaded release manifest
+#                                  file (P is android or ios); repeatable. Purely
+#                                  local — preflight never fetches an artifact
 #     --allow-branch NAME          allowed release BRANCH name; repeatable. When
 #                                  given at least once, the run must be on
 #                                  refs/heads/<NAME> with ref type "branch" —
@@ -447,7 +451,9 @@ check_release_evidence() {
     PREFLIGHT_BUILD_NAME="$BUILD_NAME" \
     PREFLIGHT_BUILD_NUMBER="$BUILD_NUMBER" \
     PREFLIGHT_EVIDENCE_MODE="$mode" \
+    PREFLIGHT_CANDIDATE_MANIFESTS="$(IFS=';'; echo "${CANDIDATE_MANIFESTS[*]:-}")" \
     python3 - "$evidence" <<'PY' 2>&1
+import hashlib
 import json
 import os
 import re
@@ -459,8 +465,10 @@ platform = os.environ["PREFLIGHT_PLATFORM"]
 expected_version = os.environ["PREFLIGHT_BUILD_NAME"]
 expected_build_number = os.environ["PREFLIGHT_BUILD_NUMBER"]
 mode = os.environ["PREFLIGHT_EVIDENCE_MODE"]
+# "PLATFORM=PATH;PLATFORM=PATH" — optional local manifest cross-verification.
+CANDIDATE_MANIFESTS = os.environ.get("PREFLIGHT_CANDIDATE_MANIFESTS", "")
 
-EXPECTED_SCHEMA = "calee-mobile-release-evidence/2"
+EXPECTED_SCHEMA = "calee-mobile-release-evidence/3"
 
 # An operator who leaves a template value in place has not reviewed anything.
 # REPLACE covers the TEMPLATE's own markers: "REPLACE", "REPLACE-WITH-VERSION",
@@ -695,55 +703,238 @@ if mode == "submission":
         required_submission_checks.update(SUBMISSION_CHECKS_IOS)
     boolean_checks(submission, required_submission_checks, "submission", "submission_readiness")
 
-    def qualification(key, label):
-        record = submission.get(key)
-        if not isinstance(record, dict):
+    # --- exact signed candidate -------------------------------------------
+    # A build number does NOT identify a candidate: two signed runs from
+    # different commits can carry the same pubspec build number. Each platform
+    # therefore records the exact candidate that was installed and tested —
+    # source commit, CI run identity, and the SHA-256 of that run's release
+    # manifest — with the device qualification nested INSIDE it, so a
+    # qualification cannot be detached from the candidate it describes.
+    #
+    # Android and iOS come from separate workflow runs with separate manifests,
+    # so they are separate candidate records that must agree on the commit.
+    HEX40 = re.compile(r"^[0-9a-fA-F]{40}$")
+    HEX64 = re.compile(r"^[0-9a-fA-F]{64}$")
+    DIGITS = re.compile(r"^[0-9]+$")
+
+    seen_candidates = {}
+
+    def identity_field(record, key, label, where, pattern, syntax_hint):
+        value = record.get(key)
+        if not isinstance(value, str) or not value.strip():
+            bad(f"readiness: '{where}.{key}' ({label}) is missing or empty")
+            group("candidate", False)
+            return None
+        value = value.strip()
+        if PLACEHOLDER.search(value):
             bad(
-                f"readiness: 'submission_readiness.{key}' ({label}) is missing — install the "
-                "signed candidate on a physical device and record the result"
+                f"readiness: '{where}.{key}' ({label}) still holds a template placeholder "
+                f"({value[:44]!r}) — take the real value from the signed workflow run"
+            )
+            group("candidate", False)
+            return None
+        if not pattern.match(value):
+            bad(f"readiness: '{where}.{key}' ({label}) is not {syntax_hint}: {value[:44]!r}")
+            group("candidate", False)
+            return None
+        group("candidate", True)
+        return value
+
+    def candidate(key, platform_name, label):
+        where = f"submission_readiness.{key}"
+        record = submission.get(key)
+
+        if not isinstance(record, dict):
+            # Point at the pre-v3 shape explicitly, since that is the likely
+            # cause and its fix is not obvious from a bare "missing" message.
+            legacy = f"{platform_name}_device_qualification"
+            hint = ""
+            if isinstance(submission.get(legacy), dict):
+                hint = (
+                    f" — '{legacy}' identifies the build by number only; replace it with a "
+                    f"'{key}' block carrying git_sha, workflow_run_id, workflow_run_attempt, "
+                    "release_manifest_sha256 and the nested device_qualification"
+                )
+            bad(
+                f"readiness: '{where}' ({label}) is missing{hint}. Run "
+                "'scripts/generate_release_manifest.sh checksum <release-manifest.json>' "
+                "to produce it."
+            )
+            group("candidate", False)
+            group("qualification", False)
+            return
+
+        group("candidate", True)
+
+        git_sha = identity_field(
+            record, "git_sha", "source commit of the tested candidate", where,
+            HEX40, "a 40-character hexadecimal Git SHA")
+        run_id = identity_field(
+            record, "workflow_run_id", "GitHub Actions run that built the candidate", where,
+            DIGITS, "a numeric GitHub Actions run id")
+        run_attempt = identity_field(
+            record, "workflow_run_attempt", "GitHub Actions run attempt", where,
+            DIGITS, "a numeric run attempt")
+        manifest_sha = identity_field(
+            record, "release_manifest_sha256",
+            "SHA-256 of the release manifest for the tested candidate", where,
+            HEX64, "a 64-character hexadecimal SHA-256")
+
+        if run_attempt is not None and int(run_attempt) < 1:
+            bad(f"readiness: '{where}.workflow_run_attempt' must be 1 or greater, got {run_attempt!r}")
+            group("candidate", False)
+
+        seen_candidates[platform_name] = {
+            "git_sha": git_sha.lower() if git_sha else None,
+            "run_id": run_id,
+            "manifest_sha": manifest_sha.lower() if manifest_sha else None,
+        }
+
+        qualification = record.get("device_qualification")
+        if not isinstance(qualification, dict):
+            bad(
+                f"readiness: '{where}.device_qualification' is missing — install THIS candidate "
+                "on a physical device and record the result inside its candidate block"
             )
             group("qualification", False)
             return
 
         for sub, sub_label in (("device", "device model"), ("os_version", "OS version")):
-            value = record.get(sub)
+            value = qualification.get(sub)
             if not isinstance(value, str) or not value.strip():
-                bad(f"readiness: 'submission_readiness.{key}.{sub}' ({sub_label}) is missing or empty")
+                bad(f"readiness: '{where}.device_qualification.{sub}' ({sub_label}) is missing or empty")
                 group("qualification", False)
             elif PLACEHOLDER.search(value):
                 bad(
-                    f"readiness: 'submission_readiness.{key}.{sub}' ({sub_label}) still holds a "
+                    f"readiness: '{where}.device_qualification.{sub}' ({sub_label}) still holds a "
                     "template placeholder"
                 )
                 group("qualification", False)
             else:
                 group("qualification", True)
 
-        outcome = record.get("outcome")
+        outcome = qualification.get("outcome")
         if not isinstance(outcome, str) or outcome.strip().lower() != "pass":
             bad(
-                f"readiness: 'submission_readiness.{key}.outcome' must be 'pass'; got {outcome!r} — "
-                "a release cannot proceed on an unqualified candidate"
+                f"readiness: '{where}.device_qualification.outcome' must be 'pass'; got "
+                f"{outcome!r} — a release cannot proceed on an unqualified candidate"
             )
             group("qualification", False)
         else:
             group("qualification", True)
 
-        qualified_build = record.get("build_number")
+        qualified_build = qualification.get("build_number")
         if str(qualified_build).strip() != str(expected_build_number):
             bad(
-                f"readiness: 'submission_readiness.{key}.build_number' is {qualified_build!r} but "
-                f"this build is {expected_build_number} — qualification must be against the exact "
-                "candidate being submitted"
+                f"readiness: '{where}.device_qualification.build_number' is {qualified_build!r} "
+                f"but this build is {expected_build_number} — qualification must be against the "
+                "exact candidate being submitted"
             )
             group("qualification", False)
         else:
             group("qualification", True)
 
     if platform in ("android", "all"):
-        qualification("android_device_qualification", "Android device qualification")
+        candidate("android_candidate", "android", "the exact signed Android candidate tested")
     if platform in ("ios", "all"):
-        qualification("ios_device_qualification", "iOS/TestFlight device qualification")
+        candidate("ios_candidate", "ios", "the exact signed iOS candidate tested")
+
+    # Cross-checks between the two platform candidates.
+    android_candidate = seen_candidates.get("android")
+    ios_candidate = seen_candidates.get("ios")
+    if android_candidate and ios_candidate:
+        a_sha, i_sha = android_candidate["git_sha"], ios_candidate["git_sha"]
+        if a_sha and i_sha and a_sha != i_sha:
+            bad(
+                f"readiness: the Android candidate was built from {a_sha} but the iOS candidate "
+                f"from {i_sha} — both platforms of one release must ship the same commit"
+            )
+            group("candidate", False)
+
+        a_manifest, i_manifest = android_candidate["manifest_sha"], ios_candidate["manifest_sha"]
+        if a_manifest and i_manifest and a_manifest == i_manifest:
+            bad(
+                "readiness: the Android and iOS candidates record the same "
+                "release_manifest_sha256 — they are produced by different workflow runs and "
+                "cannot share a manifest, so one of them was copied from the other"
+            )
+            group("candidate", False)
+
+        if android_candidate["run_id"] and android_candidate["run_id"] == ios_candidate["run_id"]:
+            bad(
+                "readiness: the Android and iOS candidates record the same workflow_run_id — "
+                "they are built by different workflows, so one was copied from the other"
+            )
+            group("candidate", False)
+
+    # Optional local cross-verification against the downloaded manifest files.
+    # Deliberately offline: preflight never fetches an artifact from GitHub.
+    for spec in [s for s in CANDIDATE_MANIFESTS.split(";") if s.strip()]:
+        if "=" not in spec:
+            bad(f"readiness: --candidate-manifest expects PLATFORM=PATH, got {spec!r}")
+            group("manifest", False)
+            continue
+        spec_platform, spec_path = spec.split("=", 1)
+        spec_platform = spec_platform.strip().lower()
+        spec_path = spec_path.strip()
+
+        recorded = seen_candidates.get(spec_platform)
+        if recorded is None:
+            bad(
+                f"readiness: --candidate-manifest names platform {spec_platform!r}, which has no "
+                "candidate record in this evidence"
+            )
+            group("manifest", False)
+            continue
+
+        try:
+            with open(spec_path, "rb") as handle:
+                raw = handle.read()
+        except OSError as exc:
+            bad(f"readiness: cannot read release manifest {spec_path!r}: {exc}")
+            group("manifest", False)
+            continue
+
+        actual_digest = hashlib.sha256(raw).hexdigest()
+        if recorded["manifest_sha"] != actual_digest:
+            bad(
+                f"readiness: '{spec_path}' has SHA-256 {actual_digest} but the {spec_platform} "
+                f"candidate records {recorded['manifest_sha']} — the evidence does not describe "
+                "this manifest"
+            )
+            group("manifest", False)
+            continue
+
+        try:
+            manifest_json = json.loads(raw.decode("utf-8"))
+        except ValueError as exc:
+            bad(f"readiness: '{spec_path}' is not valid JSON: {exc}")
+            group("manifest", False)
+            continue
+
+        manifest_source = manifest_json.get("source", {}) or {}
+        manifest_ci = manifest_json.get("ci", {}) or {}
+        manifest_version = manifest_json.get("version", {}) or {}
+        mismatches = []
+        if str(manifest_json.get("platform", "")).lower() != spec_platform:
+            mismatches.append(f"platform {manifest_json.get('platform')!r}")
+        if str(manifest_source.get("git_sha", "")).lower() != (recorded["git_sha"] or ""):
+            mismatches.append(f"git_sha {manifest_source.get('git_sha')!r}")
+        if str(manifest_ci.get("run_id", "")) != (recorded["run_id"] or ""):
+            mismatches.append(f"run_id {manifest_ci.get('run_id')!r}")
+        if str(manifest_version.get("build_name", "")) != expected_version:
+            mismatches.append(f"build_name {manifest_version.get('build_name')!r}")
+        if str(manifest_version.get("build_number", "")) != str(expected_build_number):
+            mismatches.append(f"build_number {manifest_version.get('build_number')!r}")
+
+        if mismatches:
+            bad(
+                f"readiness: '{spec_path}' disagrees with the {spec_platform} candidate record on: "
+                + ", ".join(mismatches)
+            )
+            group("manifest", False)
+        else:
+            group("manifest", True)
 
 for message in failures:
     print(f"FAIL\t{message}")
@@ -754,6 +945,8 @@ labels = {
     "credentials": "readiness: Apple credential expiry dates are in the future",
     "submission": "readiness: submission readiness complete (approver, final listing review against the candidate)",
     "qualification": "readiness: physical-device qualification recorded against this exact build",
+    "candidate": "readiness: each tested candidate identified by commit, CI run and release-manifest digest",
+    "manifest": "readiness: recorded candidate identity verified against the downloaded release manifest",
 }
 for name, okay in groups.items():
     if okay:
@@ -922,6 +1115,7 @@ cmd_check() {
   REQUIRE_STORE_READINESS=0
   SKIP_RELEASE_NOTES=0
   ALLOWED_BRANCHES=()
+  CANDIDATE_MANIFESTS=()
 
   while (( $# > 0 )); do
     case "$1" in
@@ -947,6 +1141,11 @@ cmd_check() {
       --require-build-readiness)
         REQUIRE_BUILD_READINESS=1
         shift
+        ;;
+      --candidate-manifest)
+        [[ $# -ge 2 ]] || { err "--candidate-manifest requires PLATFORM=PATH"; return 2; }
+        CANDIDATE_MANIFESTS+=("$2")
+        shift 2
         ;;
       --require-store-readiness)
         # Submission readiness is a superset of build readiness.
@@ -1141,8 +1340,26 @@ qualification = {
     "outcome": "pass",
 }
 
+# A realistic exact-candidate record. Android and iOS come from different
+# workflow runs with different manifests, so only the commit is shared.
+GIT_SHA = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+
+
+def candidate(run_id, manifest_sha):
+    return {
+        "git_sha": GIT_SHA,
+        "workflow_run_id": run_id,
+        "workflow_run_attempt": "1",
+        "release_manifest_sha256": manifest_sha,
+        "device_qualification": dict(qualification),
+    }
+
+
+ANDROID_MANIFEST_SHA = "1" * 64
+IOS_MANIFEST_SHA = "2" * 64
+
 data = {
-    "schema": "calee-mobile-release-evidence/2",
+    "schema": "calee-mobile-release-evidence/3",
     "version": version,
     "build_number": build_number,
     "build_readiness": {
@@ -1161,8 +1378,8 @@ if phase == "submission":
         "reviewed_at": date.today().isoformat(),
         "release_approver": "Selftest Approver",
         "checks": {name: True for name in submission_checks},
-        "android_device_qualification": dict(qualification),
-        "ios_device_qualification": dict(qualification),
+        "android_candidate": candidate("111111", ANDROID_MANIFEST_SHA),
+        "ios_candidate": candidate("222222", IOS_MANIFEST_SHA),
     }
 
 with open(sys.argv[1], "w", encoding="utf-8") as handle:
@@ -1387,17 +1604,17 @@ PY
   echo "selftest: qualification must be against the exact candidate build"
   fixture="$(make_fixture readiness-other-build)"
   write_valid_evidence "$fixture" submission
-  mutate_evidence "$fixture" "data['submission_readiness']['ios_device_qualification']['build_number'] = '1'"
+  mutate_evidence "$fixture" "data['submission_readiness']['ios_candidate']['device_qualification']['build_number'] = '1'"
   expect_status nonzero qualification-other-build "$fixture" --platform ios --require-store-readiness
 
   fixture="$(make_fixture readiness-qualification-failed)"
   write_valid_evidence "$fixture" submission
-  mutate_evidence "$fixture" "data['submission_readiness']['android_device_qualification']['outcome'] = 'fail'"
+  mutate_evidence "$fixture" "data['submission_readiness']['android_candidate']['device_qualification']['outcome'] = 'fail'"
   expect_status nonzero qualification-failed "$fixture" --platform android --require-store-readiness
 
   fixture="$(make_fixture readiness-qualification-missing)"
   write_valid_evidence "$fixture" submission
-  mutate_evidence "$fixture" "del data['submission_readiness']['ios_device_qualification']"
+  mutate_evidence "$fixture" "del data['submission_readiness']['ios_candidate']['device_qualification']"
   expect_status nonzero qualification-missing "$fixture" --platform ios --require-store-readiness
 
   echo "selftest: readiness is not claimed when it was not requested"
@@ -1419,7 +1636,7 @@ PY
 
   fixture="$(make_fixture readiness-bad-schema)"
   write_valid_evidence "$fixture" submission
-  mutate_evidence "$fixture" "data['schema'] = 'calee-mobile-release-evidence/1'"
+  mutate_evidence "$fixture" "data['schema'] = 'calee-mobile-release-evidence/2'"
   expect_status nonzero readiness-stale-schema "$fixture" --require-build-readiness
 
   fixture="$(make_fixture readiness-missing-build-section)"
@@ -1443,6 +1660,198 @@ PY
   write_valid_evidence "$fixture" submission
   mutate_evidence "$fixture" "data['submission_readiness']['checks']['screenshots_reviewed_against_candidate'] = False"
   expect_status nonzero readiness-false-submission-check "$fixture" --require-store-readiness
+
+
+  # --- exact-candidate identity ---------------------------------------------
+  # A build number does not identify a candidate: two signed runs from
+  # different commits can share one. Submission readiness must therefore bind
+  # qualification to the exact candidate — commit, CI run, manifest digest.
+
+  # expect_candidate <name> <python mutation> [args...]
+  expect_candidate() {
+    local name="$1" code="$2"
+    shift 2
+    local fixture
+    fixture="$(make_fixture "candidate-$name")"
+    write_valid_evidence "$fixture" submission
+    mutate_evidence "$fixture" "$code"
+    expect_status nonzero "candidate-$name" "$fixture" "$@"
+  }
+
+  echo "selftest: a complete candidate record is accepted"
+  fixture="$(make_fixture candidate-valid)"
+  write_valid_evidence "$fixture" submission
+  expect_status 0 candidate-valid "$fixture" --require-store-readiness
+  expect_status 0 candidate-valid-android "$fixture" --platform android --require-store-readiness
+  expect_status 0 candidate-valid-ios "$fixture" --platform ios --require-store-readiness
+
+  echo "selftest: a missing or build-number-only candidate record must fail"
+  expect_candidate missing-android-block \
+    "del data['submission_readiness']['android_candidate']" \
+    --platform android --require-store-readiness
+  expect_candidate missing-ios-block \
+    "del data['submission_readiness']['ios_candidate']" \
+    --platform ios --require-store-readiness
+  # The pre-v3 shape: qualification identified only by build number.
+  expect_candidate legacy-build-number-only \
+    "sr = data['submission_readiness']; sr['android_device_qualification'] = sr.pop('android_candidate')['device_qualification']" \
+    --platform android --require-store-readiness
+
+  echo "selftest: candidate git SHA must be present, real and well-formed"
+  expect_candidate missing-git-sha \
+    "del data['submission_readiness']['android_candidate']['git_sha']" \
+    --platform android --require-store-readiness
+  expect_candidate empty-git-sha \
+    "data['submission_readiness']['android_candidate']['git_sha'] = ''" \
+    --platform android --require-store-readiness
+  expect_candidate placeholder-git-sha \
+    "data['submission_readiness']['android_candidate']['git_sha'] = 'REPLACE-WITH-40-CHARACTER-GIT-SHA'" \
+    --platform android --require-store-readiness
+  expect_candidate todo-git-sha \
+    "data['submission_readiness']['ios_candidate']['git_sha'] = 'TODO'" \
+    --platform ios --require-store-readiness
+  expect_candidate short-git-sha \
+    "data['submission_readiness']['android_candidate']['git_sha'] = 'a1b2c3d'" \
+    --platform android --require-store-readiness
+  expect_candidate non-hex-git-sha \
+    "data['submission_readiness']['android_candidate']['git_sha'] = 'z' * 40" \
+    --platform android --require-store-readiness
+
+  echo "selftest: candidate CI run identity must be present and numeric"
+  expect_candidate missing-run-id \
+    "del data['submission_readiness']['android_candidate']['workflow_run_id']" \
+    --platform android --require-store-readiness
+  expect_candidate placeholder-run-id \
+    "data['submission_readiness']['android_candidate']['workflow_run_id'] = 'REPLACE-WITH-WORKFLOW-RUN-ID'" \
+    --platform android --require-store-readiness
+  expect_candidate non-numeric-run-id \
+    "data['submission_readiness']['ios_candidate']['workflow_run_id'] = 'run-42'" \
+    --platform ios --require-store-readiness
+  expect_candidate missing-run-attempt \
+    "del data['submission_readiness']['ios_candidate']['workflow_run_attempt']" \
+    --platform ios --require-store-readiness
+  expect_candidate placeholder-run-attempt \
+    "data['submission_readiness']['ios_candidate']['workflow_run_attempt'] = 'REPLACE-WITH-RUN-ATTEMPT'" \
+    --platform ios --require-store-readiness
+  expect_candidate zero-run-attempt \
+    "data['submission_readiness']['android_candidate']['workflow_run_attempt'] = '0'" \
+    --platform android --require-store-readiness
+
+  echo "selftest: candidate release-manifest digest must be present and well-formed"
+  expect_candidate missing-manifest-sha \
+    "del data['submission_readiness']['android_candidate']['release_manifest_sha256']" \
+    --platform android --require-store-readiness
+  expect_candidate placeholder-manifest-sha \
+    "data['submission_readiness']['android_candidate']['release_manifest_sha256'] = 'REPLACE-WITH-64-CHARACTER-MANIFEST-SHA256'" \
+    --platform android --require-store-readiness
+  expect_candidate short-manifest-sha \
+    "data['submission_readiness']['ios_candidate']['release_manifest_sha256'] = 'abc123'" \
+    --platform ios --require-store-readiness
+  expect_candidate non-hex-manifest-sha \
+    "data['submission_readiness']['ios_candidate']['release_manifest_sha256'] = 'g' * 64" \
+    --platform ios --require-store-readiness
+
+  echo "selftest: qualification must live inside the candidate it describes"
+  expect_candidate qualification-detached \
+    "sr = data['submission_readiness']; sr['device_qualification'] = sr['android_candidate'].pop('device_qualification')" \
+    --platform android --require-store-readiness
+
+  echo "selftest: Android and iOS candidates must agree on the commit and differ as runs"
+  expect_candidate platforms-disagree-on-commit \
+    "data['submission_readiness']['ios_candidate']['git_sha'] = 'b' * 40" \
+    --require-store-readiness
+  expect_candidate platforms-share-a-manifest \
+    "sr = data['submission_readiness']; sr['ios_candidate']['release_manifest_sha256'] = sr['android_candidate']['release_manifest_sha256']" \
+    --require-store-readiness
+  expect_candidate platforms-share-a-run-id \
+    "sr = data['submission_readiness']; sr['ios_candidate']['workflow_run_id'] = sr['android_candidate']['workflow_run_id']" \
+    --require-store-readiness
+
+  echo "selftest: recorded identity is verified against a downloaded release manifest"
+  fixture="$(make_fixture candidate-manifest-crosscheck)"
+  write_valid_evidence "$fixture" submission
+  read -r cm_version cm_build_number <<<"$(fixture_version "$fixture")"
+  cm_manifest="$tmp_dir/release-manifest-android.json"
+
+  # Build a real manifest with the generator, then bind the evidence to it.
+  (
+    export GITHUB_SHA="a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+    export GITHUB_REF_NAME="main" GITHUB_REF="refs/heads/main" GITHUB_REF_TYPE="branch"
+    export GITHUB_REPOSITORY="CaleeAdmin/CaleeMobile"
+    export GITHUB_WORKFLOW="Build Signed Android Artifacts"
+    export GITHUB_RUN_ID="111111" GITHUB_RUN_ATTEMPT="1"
+    printf 'fake-aab\n' > "$tmp_dir/candidate.aab"
+    bash "$repo_root/scripts/generate_release_manifest.sh" \
+      --platform android --build-name "$cm_version" --build-number "$cm_build_number" \
+      --artifact "app_bundle=$tmp_dir/candidate.aab" \
+      --output "$cm_manifest" >/dev/null 2>&1
+  )
+
+  cm_digest="$(python3 -c "
+import hashlib, sys
+print(hashlib.sha256(open(sys.argv[1], 'rb').read()).hexdigest())
+" "$cm_manifest")"
+  mutate_evidence "$fixture" \
+    "data['submission_readiness']['android_candidate']['release_manifest_sha256'] = '$cm_digest'"
+
+  expect_status 0 candidate-manifest-matches "$fixture" \
+    --platform android --require-store-readiness --candidate-manifest "android=$cm_manifest"
+
+  # The exact failure this whole mechanism exists to catch: the right version
+  # and build number, but a candidate from a different commit or a different
+  # workflow run than the manifest that was actually qualified.
+  fixture="$(make_fixture candidate-wrong-commit)"
+  write_valid_evidence "$fixture" submission
+  mutate_evidence "$fixture" \
+    "c = data['submission_readiness']['android_candidate']; c['release_manifest_sha256'] = '$cm_digest'; c['git_sha'] = 'f' * 40"
+  expect_status nonzero candidate-right-build-number-wrong-commit "$fixture" \
+    --platform android --require-store-readiness --candidate-manifest "android=$cm_manifest"
+
+  fixture="$(make_fixture candidate-wrong-run)"
+  write_valid_evidence "$fixture" submission
+  mutate_evidence "$fixture" \
+    "c = data['submission_readiness']['android_candidate']; c['release_manifest_sha256'] = '$cm_digest'; c['workflow_run_id'] = '424242'"
+  expect_status nonzero candidate-right-build-number-wrong-run "$fixture" \
+    --platform android --require-store-readiness --candidate-manifest "android=$cm_manifest"
+
+  # A manifest for the other platform must not satisfy an Android candidate.
+  expect_status nonzero candidate-manifest-platform-mismatch "$fixture" \
+    --platform android --require-store-readiness --candidate-manifest "ios=$cm_manifest"
+
+  # Tamper with the manifest: the recorded digest no longer describes it.
+  printf '\n' >> "$cm_manifest"
+  expect_status nonzero candidate-manifest-tampered "$fixture" \
+    --platform android --require-store-readiness --candidate-manifest "android=$cm_manifest"
+
+  expect_status nonzero candidate-manifest-missing-file "$fixture" \
+    --platform android --require-store-readiness \
+    --candidate-manifest "android=$tmp_dir/no-such-manifest.json"
+
+  # Stale evidence: a manifest from a different candidate (different run/commit)
+  # whose digest the operator recorded, but which is not this release.
+  cm_stale="$tmp_dir/release-manifest-android-stale.json"
+  (
+    export GITHUB_SHA="0000000000000000000000000000000000000000"
+    export GITHUB_REPOSITORY="CaleeAdmin/CaleeMobile"
+    export GITHUB_RUN_ID="999999" GITHUB_RUN_ATTEMPT="1"
+    bash "$repo_root/scripts/generate_release_manifest.sh" \
+      --platform android --build-name "$cm_version" --build-number "$cm_build_number" \
+      --artifact "app_bundle=$tmp_dir/candidate.aab" \
+      --output "$cm_stale" >/dev/null 2>&1
+  )
+  cm_stale_digest="$(python3 -c "
+import hashlib, sys
+print(hashlib.sha256(open(sys.argv[1], 'rb').read()).hexdigest())
+" "$cm_stale")"
+
+  fixture="$(make_fixture candidate-stale-evidence)"
+  write_valid_evidence "$fixture" submission
+  mutate_evidence "$fixture" \
+    "data['submission_readiness']['android_candidate']['release_manifest_sha256'] = '$cm_stale_digest'"
+  # The digest matches the stale manifest, but its commit/run do not match what
+  # the evidence claims was tested.
+  expect_status nonzero candidate-stale-manifest "$fixture" \
+    --platform android --require-store-readiness --candidate-manifest "android=$cm_stale"
 
   # --- template placeholder rejection ---------------------------------------
   # The strings below are copied verbatim from docs/release_evidence/TEMPLATE.json.
@@ -1475,16 +1884,16 @@ PY
     "data['build_readiness']['credential_owner_apple'] = 'REPLACE — owner of the Apple signing credentials'" \
     --platform ios --require-build-readiness
   expect_placeholder template-device-model \
-    "data['submission_readiness']['android_device_qualification']['device'] = 'REPLACE — device model'" \
+    "data['submission_readiness']['android_candidate']['device_qualification']['device'] = 'REPLACE — device model'" \
     --platform android --require-store-readiness
   expect_placeholder template-ios-os-version \
-    "data['submission_readiness']['ios_device_qualification']['os_version'] = 'REPLACE — iOS version'" \
+    "data['submission_readiness']['ios_candidate']['device_qualification']['os_version'] = 'REPLACE — iOS version'" \
     --platform ios --require-store-readiness
   expect_placeholder template-android-os-version \
-    "data['submission_readiness']['android_device_qualification']['os_version'] = 'REPLACE — Android version'" \
+    "data['submission_readiness']['android_candidate']['device_qualification']['os_version'] = 'REPLACE — Android version'" \
     --platform android --require-store-readiness
   expect_placeholder template-qualification-outcome \
-    "data['submission_readiness']['ios_device_qualification']['outcome'] = 'REPLACE — pass only if the candidate actually passed'" \
+    "data['submission_readiness']['ios_candidate']['device_qualification']['outcome'] = 'REPLACE — pass only if the candidate actually passed'" \
     --platform ios --require-store-readiness
   expect_placeholder template-bare-replace \
     "data['build_readiness']['release_operator'] = 'REPLACE'" \
@@ -1508,7 +1917,7 @@ PY
   echo "selftest: legitimate names containing placeholder letters must NOT be rejected"
   fixture="$(make_fixture placeholder-false-positives)"
   write_valid_evidence "$fixture" submission
-  mutate_evidence "$fixture" "data['build_readiness']['release_operator'] = 'Sam Replaced-Jones'; data['submission_readiness']['release_approver'] = 'Toby Xxavier'; data['submission_readiness']['android_device_qualification']['device'] = 'Pixel 8 Pro (replacement unit)'"
+  mutate_evidence "$fixture" "data['build_readiness']['release_operator'] = 'Sam Replaced-Jones'; data['submission_readiness']['release_approver'] = 'Toby Xxavier'; data['submission_readiness']['android_candidate']['device_qualification']['device'] = 'Pixel 8 Pro (replacement unit)'"
   expect_status 0 placeholder-no-false-positives "$fixture" --require-store-readiness
 
   echo "selftest: copying TEMPLATE.json and only fixing the version must still fail"

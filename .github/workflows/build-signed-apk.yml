@@ -461,6 +461,17 @@ jobs:
             --signing-identity "$signer_dn (certificate SHA-256 $signer_sha256)" \
             --output "build/release-manifest-android.json"
 
+      # Print the exact-candidate identity the Release Operator must record in
+      # docs/release_evidence/<version>.json. A build number does not identify a
+      # candidate — two runs from different commits can share one — so the
+      # commit, this run, and the digest of this run's release manifest are what
+      # bind device qualification to the artifact that was actually tested.
+      - name: Print candidate identity for release evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          scripts/generate_release_manifest.sh checksum "build/release-manifest-android.json"
+
       - name: Upload release manifest
         uses: actions/upload-artifact@v4
         with:
@@ -517,19 +528,28 @@ jobs:
           Remaining sequence for the Release Operator:
 
             1. Download the AAB and the release manifest from this run.
+            1a. Copy the candidate-identity block printed by the
+                "Print candidate identity for release evidence" step above
+                (git_sha, workflow_run_id, workflow_run_attempt,
+                release_manifest_sha256). A build number alone does NOT
+                identify this candidate.
             2. Upload the AAB to Google Play INTERNAL TESTING.
             3. Install it from the internal track on a physical Android
                device and qualify it. Record it against build number
                $version.
             4. Complete the submission_readiness section of
-               docs/release_evidence/${{ steps.build_meta.outputs.build_name }}.json
-               (device, OS version, build_number, outcome, final listing and
-               screenshot review against this candidate, Release Approver).
-            5. Verify it:
+               docs/release_evidence/${{ steps.build_meta.outputs.build_name }}.json:
+               paste the android_candidate identity from step 1a, nest the
+               device_qualification (device, OS version, build_number,
+               outcome) inside it, and record the final listing/screenshot
+               review against this candidate plus the Release Approver.
+            5. Verify it — optionally cross-checking the manifest you
+               downloaded, which proves the evidence describes THIS candidate:
 
                  scripts/release_preflight.sh check \\
                    --platform android \\
-                   --require-store-readiness
+                   --require-store-readiness \\
+                   --candidate-manifest android=<path to downloaded manifest>
 
             6. Only once that passes: promote to Production at a 10% staged
                rollout (docs/RELEASE_OPERATIONS.md section 6).

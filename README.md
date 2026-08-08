@@ -63,8 +63,9 @@ Store releases are documented in the repository, not in chat history:
   per-release store metadata and submission checklist.
 - [`docs/release_notes/`](docs/release_notes/) — one file per version; required
   by preflight.
-- [`docs/release_evidence/`](docs/release_evidence/) — per-release store-readiness
-  attestation; required by the signed release workflows.
+- [`docs/release_evidence/`](docs/release_evidence/) — per-release readiness
+  attestation, including the exact signed candidate that was device-qualified;
+  required by the signed release workflows.
 
 Before cutting a release:
 
