@@ -1,7 +1,7 @@
 name: Trigger selector contract
 
 # Cross-repository trigger (Workstream 1.4 / Priority 2): after a successful push
-# to an integration branch (dev/stage/main), fire CaleeMobile-Regression's
+# to a release branch (stage/main), fire CaleeMobile-Regression's
 # selector contract against THIS exact CaleeMobile commit, so a selector break is
 # caught immediately rather than only on the daily schedule or the next
 # CaleeMobile-Regression change.
@@ -37,16 +37,16 @@ name: Trigger selector contract
 #
 # BRANCH COVERAGE (Priority 2/3): for a push to a given branch to fire this
 # trigger, THIS workflow file must EXIST on that branch. A workflow living only
-# on `dev` cannot fire on a later independent push to `main`. The trigger lists
-# every integration branch this file should live on; `stage` is listed so that,
-# IF a stage branch is ever created and this file is present there, pushes to it
-# also fire. As of this change no `stage` branch exists in CaleeMobile (only
-# `dev` and `main`), so stage coverage is not claimed until such a branch and
-# this file on it exist.
+# on `dev` cannot fire on a later independent push to `main`. `dev`, `stage`
+# and `main` all exist as real branches. Only the release branches `stage` and
+# `main` are listed below: CaleeMobile-Regression's DAILY scheduled selector
+# run already checks CaleeMobile/dev (drift caught within a day), so a
+# per-dev-push dispatch adds no coverage while REGRESSION_DISPATCH_TOKEN
+# remains unconfigured (the dispatch job skips) — and even once configured,
+# the daily dev fallback plus stage/main dispatch is the intended tiering.
 on:
   push:
     branches:
-      - dev
       - stage
       - main
 

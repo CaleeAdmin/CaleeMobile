@@ -14,16 +14,50 @@ name: Flutter CI
 # pass before merging, for each of `dev`, `stage`, and `main`, so no pull
 # request can merge into an integration branch without a green run of each.
 #
-# Release-build scope: both required jobs run on every trigger below. The
+# TIERED EXECUTION POLICY (CI-cost optimisation, 2026-08):
+#
+#   1. Development/hotfix PR (any head branch except the standard promotions
+#      below, targeting dev, stage or main): format/analyze/test + the debug
+#      Android build always run. The release-AAB permission build in the
+#      "Android debug build" job additionally runs ONLY when the change
+#      touches permission/native/dependency-sensitive inputs (android/**,
+#      pubspec.yaml, pubspec.lock, the permission/bundletool scripts, or this
+#      workflow itself) — a Dart-only change cannot alter the packaged
+#      manifest, so rebuilding the release bundle for it proves nothing new.
+#
+#   2. Standard promotion PR (head `dev` -> base `stage`, or head `stage` ->
+#      base `main`): both heavy jobs are SKIPPED. Every commit being promoted
+#      already passed full PR CI into dev (and a stage push run for
+#      stage->main), and the destination-branch push run below immediately
+#      re-verifies the release build on the exact merged commit. Skipped
+#      required checks are reported with conclusion "skipped", which GitHub
+#      branch protection treats as satisfying a required status check, so
+#      promotion PRs are never left permanently pending. A PR from any OTHER
+#      head branch into stage/main (a direct hotfix) is NOT a promotion and
+#      receives full tier-1 CI.
+#
+#   3. Push to stage/main: release verification (release APK smoke +
+#      notification/permission inspection in "Format, Analyze & Test", and
+#      the release-AAB permission build in "Android debug build") runs; the
+#      debug APK build is skipped — a debug artifact adds no information once
+#      the release build itself is verified on the same commit.
+#
+# The "change-scope" job below computes the promotion/sensitivity facts from
+# the PR base/head refs and a base-SHA-anchored git diff (no untrusted PR
+# data is ever shell-expanded; refs/SHAs are passed via env). Job and check
+# names are deliberately unchanged from the pre-tiered workflow.
+#
+# Release-build scope: the release-verification steps run as before. The
 # release-APK build/sign/notification-config steps near the bottom of the
 # "Format, Analyze & Test" job are gated to only execute on a push to `stage`
 # or `main` (i.e. a merge/promotion into those branches) or a manual
 # workflow_dispatch targeting one of them — never on a `dev` push or on any
 # pull_request, including PRs targeting stage/main. See the `if:` conditions
 # on those individual steps for the exact rule. The debug Android build in
-# the separate job below is not gated this way: it runs on every pull
-# request, so a platform build broken by a change that still passes
-# format/analyze/test is caught before merge, not only at stage/main
+# the separate job below runs on every development/hotfix pull request (all
+# PRs except the standard dev->stage / stage->main promotions — see the
+# tiered policy above), so a platform build broken by a change that still
+# passes format/analyze/test is caught before merge, not only at stage/main
 # promotion.
 on:
   pull_request:
@@ -48,8 +82,81 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # Computes the two facts the tiered policy (header comment) needs:
+  #   promotion — is this PR the standard dev->stage or stage->main promotion?
+  #   sensitive — did the change touch permission/native/dependency-sensitive
+  #               inputs that can alter the packaged release manifest?
+  # Non-PR events report promotion=false and sensitive=true so push/dispatch
+  # runs always take the full release-verification path. Seconds of runtime;
+  # never builds anything.
+  change-scope:
+    name: Classify change scope
+    runs-on: ubuntu-latest
+    outputs:
+      promotion: ${{ steps.scope.outputs.promotion }}
+      sensitive: ${{ steps.scope.outputs.sensitive }}
+    steps:
+      # Full history so the base...head diff below is computed from the real
+      # PR base SHA, not a shallow guess.
+      - uses: actions/checkout@v4
+        if: github.event_name == 'pull_request'
+        with:
+          fetch-depth: 0
+
+      - id: scope
+        # Branch names and SHAs enter ONLY via env (never interpolated into
+        # the script text), so an attacker-controlled branch name cannot
+        # inject shell.
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          promotion=false
+          sensitive=true
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            if { [ "$HEAD_REF" = "dev" ] && [ "$BASE_REF" = "stage" ]; } || \
+               { [ "$HEAD_REF" = "stage" ] && [ "$BASE_REF" = "main" ]; }; then
+              promotion=true
+            fi
+            # Changed files anchored to the PR base SHA (three-dot semantics
+            # via merge-base) — reliable even when base has advanced.
+            merge_base="$(git merge-base "$BASE_SHA" "$HEAD_SHA")"
+            git diff --name-only "$merge_base" "$HEAD_SHA" > "$RUNNER_TEMP/changed-files.txt"
+            sensitive=false
+            while IFS= read -r f; do
+              [ -n "$f" ] || continue
+              case "$f" in
+                android/*|pubspec.yaml|pubspec.lock|scripts/check_android_release_permissions.sh|scripts/fetch_bundletool.sh|.github/workflows/flutter-ci.yml)
+                  sensitive=true
+                  ;;
+              esac
+            done < "$RUNNER_TEMP/changed-files.txt"
+          fi
+          {
+            echo "promotion=$promotion"
+            echo "sensitive=$sensitive"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "### Change-scope classification"
+            echo "- event: \`$EVENT_NAME\` (head \`${HEAD_REF:-n/a}\` -> base \`${BASE_REF:-n/a}\`)"
+            echo "- standard promotion PR: \`$promotion\`"
+            echo "- permission/native/dependency-sensitive: \`$sensitive\`"
+            if [ "$promotion" = "true" ]; then
+              echo "- heavy CI skipped: the promoted commits already passed full PR CI into the head branch, and the destination-branch push run re-verifies the release build on the merged commit."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
   analyze-and-test:
     name: Format, Analyze & Test
+    needs: change-scope
+    # Skipped only for a standard dev->stage / stage->main promotion PR (see
+    # the tiered policy in the header). A skipped run reports conclusion
+    # "skipped", which branch protection accepts for a required check.
+    if: github.event_name != 'pull_request' || needs.change-scope.outputs.promotion != 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -199,8 +306,17 @@ jobs:
   # Debug only: uses the Flutter/Gradle auto-generated debug keystore, no
   # repository or organization signing secret; produces no artifact that is
   # uploaded, published, or deployed anywhere.
+  # Tiered execution (see header): on a development/hotfix PR this job builds
+  # the debug APK always and the release-AAB permission gate only when the
+  # change-scope job classified the change as permission/native/dependency-
+  # sensitive; on a stage/main push it skips the debug APK (the same run's
+  # release APK + AAB verification covers the commit) and keeps the AAB
+  # permission gate; on a standard promotion PR the whole job is skipped.
+  # The job/check name is unchanged.
   android-debug-build:
     name: Android debug build
+    needs: change-scope
+    if: github.event_name != 'pull_request' || needs.change-scope.outputs.promotion != 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -242,7 +358,13 @@ jobs:
       - name: Get dependencies
         run: flutter pub get
 
+      # Skipped on stage/main pushes: those runs verify the release APK and
+      # release AAB on the same commit, so a debug APK adds no signal there.
+      # `push` only triggers this workflow for stage/main, so event-name alone
+      # is the exact gate. Still runs on every development/hotfix PR and on
+      # manual dispatch.
       - name: Build Android APK (debug)
+        if: github.event_name != 'push'
         run: flutter build apk --debug
 
       # --- Broad-media-permission regression gate (runs on every PR) --------
@@ -260,7 +382,18 @@ jobs:
       # ephemeral CI-only keystore pattern as the stage/main release smoke
       # build in the job above: generated fresh in $RUNNER_TEMP, never cached,
       # never uploaded, unrelated to any production signing secret.
+      #
+      # This and the three steps below (the release-AAB permission gate) run
+      # on every push/dispatch, but on a pull request only when the change
+      # touched permission/native/dependency-sensitive inputs (see the
+      # change-scope job). A Dart-only change cannot alter the packaged
+      # manifest, so the ~10-minute release bundle build proves nothing for
+      # it. The prohibited-permission POLICY itself
+      # (scripts/check_android_release_permissions.sh) is unchanged and still
+      # enforced on every sensitive PR, every stage/main push, and the signed
+      # release workflow.
       - name: Generate temporary CI keystore
+        if: github.event_name != 'pull_request' || needs.change-scope.outputs.sensitive == 'true'
         run: |
           keytool -genkeypair \
             -keystore "$RUNNER_TEMP/calee-ci-release.jks" \
@@ -275,6 +408,7 @@ jobs:
       # This AAB is a permission-inspection product only — never uploaded as
       # an artifact, never published.
       - name: Build Android App Bundle (release)
+        if: github.event_name != 'pull_request' || needs.change-scope.outputs.sensitive == 'true'
         run: flutter build appbundle --release
         env:
           ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/calee-ci-release.jks
@@ -287,12 +421,14 @@ jobs:
       # scripts/fetch_bundletool.sh; the cache only saves the re-download and
       # the jar is checksum-verified again on every run before use.
       - name: Cache bundletool
+        if: github.event_name != 'pull_request' || needs.change-scope.outputs.sensitive == 'true'
         uses: actions/cache@v4
         with:
           path: build/bundletool
           key: bundletool-1.18.1
 
       - name: Inspect release AAB permissions
+        if: github.event_name != 'pull_request' || needs.change-scope.outputs.sensitive == 'true'
         run: |
           BUNDLETOOL_JAR="$(scripts/fetch_bundletool.sh)"
           export BUNDLETOOL_JAR
