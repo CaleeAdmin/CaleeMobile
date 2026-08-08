@@ -326,6 +326,25 @@ jobs:
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.change-scope.result != 'success' || needs.change-scope.outputs.promotion != 'true') }}
     runs-on: ubuntu-latest
 
+    # RUNNER-MEMORY GUARD (CI-only). android/gradle.properties asks for
+    # `-Xmx8G -XX:MaxMetaspaceSize=4G` — sized for developer machines. On a
+    # 16 GB GitHub-hosted runner that single daemon can reserve ~12 GB, and
+    # this job runs the debug APK build and then the release AAB build back
+    # to back, so the Kotlin/R8 workers and a still-resident daemon from the
+    # first build compete for what is left. That is a marginal fit: the same
+    # step completed in 7m29s on run 31239976355 but was killed mid-
+    # `bundleRelease` on three attempts of run 31240263655, twice with
+    # "The runner has received a shutdown signal" / exit 143 (SIGTERM) and
+    # once with "The hosted runner lost communication with the server" —
+    # runner-level termination, never a Gradle build error.
+    #
+    # GRADLE_OPTS overrides org.gradle.jvmargs for CI ONLY; the checked-in
+    # android/gradle.properties is untouched, so local developer builds keep
+    # their larger heap. Nothing about the build output, the release AAB, or
+    # the permission gate changes — only the JVM ceiling this runner grants.
+    env:
+      GRADLE_OPTS: -Dorg.gradle.jvmargs="-Xmx4G -XX:MaxMetaspaceSize=1G -XX:ReservedCodeCacheSize=256m -XX:+HeapDumpOnOutOfMemoryError"
+
     steps:
       # Same rationale as the equivalent step in analyze-and-test above: the
       # default ubuntu-latest image doesn't reliably leave enough free space
@@ -373,6 +392,25 @@ jobs:
       - name: Build Android APK (debug)
         if: github.event_name != 'push'
         run: flutter build apk --debug
+
+      # Diagnostics + daemon reclaim between the two Android builds. The
+      # debug build leaves a Gradle daemon (and Kotlin compile daemon)
+      # resident holding its whole heap; the release AAB build that follows
+      # would otherwise start under that pressure on a 16 GB runner. Stopping
+      # the daemon costs a few seconds of re-warm and returns gigabytes.
+      # The `free`/`df` output makes the next occurrence diagnosable from the
+      # log instead of only from a runner-termination message. Never fails
+      # the job — `|| true` here hides no build result, only the reclaim
+      # itself (the builds around it are ungated).
+      - name: Reclaim runner memory between Android builds
+        if: ${{ always() }}
+        run: |
+          echo "--- memory/disk after the debug build ---"
+          free -h || true
+          df -h / || true
+          (cd android && ./gradlew --stop) || true
+          echo "--- after stopping the Gradle daemon ---"
+          free -h || true
 
       # --- Broad-media-permission regression gate (runs on every PR) --------
       # Google Play rejected the 0.0.29 AAB because a plugin's library
