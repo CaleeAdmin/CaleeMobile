@@ -5,14 +5,18 @@ name: Flutter CI
 # normal CaleeMobile pull request (which targets `dev`) now receives this same
 # check; `stage` and `main` keep it for the promotion path.
 #
-# Branch-protection note for administrators: the required status checks to
-# enforce on `dev` (and `stage`/`main`) are the two job names below,
-#   "Format, Analyze & Test"
-#   "Android debug build"
-# reported under this "Flutter CI" workflow. Add both under
-# Settings -> Branches -> Branch protection rules -> Require status checks to
-# pass before merging, for each of `dev`, `stage`, and `main`, so no pull
-# request can merge into an integration branch without a green run of each.
+# Branch-protection note for administrators: require the single aggregate
+# check
+#   "Flutter CI gate"
+# (the always-resolved final job below) on each of `dev`, `stage` and `main`
+# under Settings -> Branches -> Require status checks to pass before merging.
+# It runs on every event, distinguishes intentional tier skips from
+# failures/unexpected skips, and FAILS whenever the classifier fails — so it
+# can neither be left pending nor satisfied by an accidental skip. The two
+# job names "Format, Analyze & Test" and "Android debug build" are unchanged
+# and may remain required as well; on an intentional promotion fast path
+# they report conclusion "skipped", which branch protection treats as
+# satisfied, with the gate still providing the authoritative verdict.
 #
 # TIERED EXECUTION POLICY (CI-cost optimisation, 2026-08):
 #
@@ -21,12 +25,14 @@ name: Flutter CI
 #      Android build always run. The release-AAB permission build in the
 #      "Android debug build" job additionally runs ONLY when the change
 #      touches permission/native/dependency-sensitive inputs (android/**,
-#      pubspec.yaml, pubspec.lock, the permission/bundletool scripts, or this
-#      workflow itself) — a Dart-only change cannot alter the packaged
-#      manifest, so rebuilding the release bundle for it proves nothing new.
+#      pubspec.yaml, pubspec.lock, the permission/bundletool scripts, this
+#      workflow, or the tiering script) — a Dart-only change cannot alter the
+#      packaged manifest, so rebuilding the release bundle proves nothing new.
 #
 #   2. Standard promotion PR (head `dev` -> base `stage`, or head `stage` ->
-#      base `main`): both heavy jobs are SKIPPED. Every commit being promoted
+#      base `main`, and ONLY when the head branch lives in this repository —
+#      a fork branch named dev/stage never qualifies): both heavy jobs are
+#      SKIPPED. Every commit being promoted
 #      already passed full PR CI into dev (and a stage push run for
 #      stage->main), and the destination-branch push run below immediately
 #      re-verifies the release build on the exact merged commit. Skipped
@@ -89,6 +95,16 @@ jobs:
   # Non-PR events report promotion=false and sensitive=true so push/dispatch
   # runs always take the full release-verification path. Seconds of runtime;
   # never builds anything.
+  # FAIL-CLOSED CONTRACT: classification lives in
+  # .github/scripts/flutter_ci_tiering.py (stdlib-only, with its own selftest
+  # and a workflow-contract check, both executed here). If ANY part of this
+  # job fails — checkout, selftest, contract, merge-base, diff, classify —
+  # the job fails, the two heavy jobs below RUN ANYWAY (their `if:` treats a
+  # non-success classifier as "full validation"), and the "Flutter CI gate"
+  # job fails regardless. A classification failure can therefore never
+  # reduce validation. The promotion fast path additionally requires the PR
+  # head to live in THIS repository — a fork branch named dev/stage is never
+  # a trusted promotion.
   change-scope:
     name: Classify change scope
     runs-on: ubuntu-latest
@@ -99,64 +115,53 @@ jobs:
       # Full history so the base...head diff below is computed from the real
       # PR base SHA, not a shallow guess.
       - uses: actions/checkout@v4
-        if: github.event_name == 'pull_request'
         with:
           fetch-depth: 0
 
+      # The classifier and gate share one unit-tested decision table; prove
+      # it (and the workflow wiring) before trusting its classification.
+      - name: Selftest the tiering decision table and workflow contract
+        run: |
+          python3 .github/scripts/flutter_ci_tiering.py selftest
+          python3 .github/scripts/flutter_ci_tiering.py contract
+
       - id: scope
-        # Branch names and SHAs enter ONLY via env (never interpolated into
-        # the script text), so an attacker-controlled branch name cannot
-        # inject shell.
+        # Branch names, repo names and SHAs enter ONLY via env (never
+        # interpolated into the script text), so an attacker-controlled
+        # branch name cannot inject shell.
         env:
           EVENT_NAME: ${{ github.event_name }}
           BASE_REF: ${{ github.base_ref }}
           HEAD_REF: ${{ github.head_ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPOSITORY: ${{ github.repository }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          promotion=false
-          sensitive=true
           if [ "$EVENT_NAME" = "pull_request" ]; then
-            if { [ "$HEAD_REF" = "dev" ] && [ "$BASE_REF" = "stage" ]; } || \
-               { [ "$HEAD_REF" = "stage" ] && [ "$BASE_REF" = "main" ]; }; then
-              promotion=true
-            fi
             # Changed files anchored to the PR base SHA (three-dot semantics
-            # via merge-base) — reliable even when base has advanced.
+            # via merge-base) — reliable even when base has advanced. Any
+            # git failure here fails this job => fail closed.
             merge_base="$(git merge-base "$BASE_SHA" "$HEAD_SHA")"
             git diff --name-only "$merge_base" "$HEAD_SHA" > "$RUNNER_TEMP/changed-files.txt"
-            sensitive=false
-            while IFS= read -r f; do
-              [ -n "$f" ] || continue
-              case "$f" in
-                android/*|pubspec.yaml|pubspec.lock|scripts/check_android_release_permissions.sh|scripts/fetch_bundletool.sh|.github/workflows/flutter-ci.yml)
-                  sensitive=true
-                  ;;
-              esac
-            done < "$RUNNER_TEMP/changed-files.txt"
+            export CHANGED_FILES_PATH="$RUNNER_TEMP/changed-files.txt"
           fi
-          {
-            echo "promotion=$promotion"
-            echo "sensitive=$sensitive"
-          } >> "$GITHUB_OUTPUT"
+          python3 .github/scripts/flutter_ci_tiering.py classify
           {
             echo "### Change-scope classification"
-            echo "- event: \`$EVENT_NAME\` (head \`${HEAD_REF:-n/a}\` -> base \`${BASE_REF:-n/a}\`)"
-            echo "- standard promotion PR: \`$promotion\`"
-            echo "- permission/native/dependency-sensitive: \`$sensitive\`"
-            if [ "$promotion" = "true" ]; then
-              echo "- heavy CI skipped: the promoted commits already passed full PR CI into the head branch, and the destination-branch push run re-verifies the release build on the merged commit."
-            fi
+            echo "- event: \`$EVENT_NAME\` (head \`${HEAD_REF:-n/a}\` @ \`${HEAD_REPO:-n/a}\` -> base \`${BASE_REF:-n/a}\`)"
           } >> "$GITHUB_STEP_SUMMARY"
 
   analyze-and-test:
     name: Format, Analyze & Test
     needs: change-scope
-    # Skipped only for a standard dev->stage / stage->main promotion PR (see
-    # the tiered policy in the header). A skipped run reports conclusion
-    # "skipped", which branch protection accepts for a required check.
-    if: github.event_name != 'pull_request' || needs.change-scope.outputs.promotion != 'true'
+    # Skipped ONLY for a classifier-confirmed standard promotion PR. FAIL
+    # CLOSED: if change-scope failed (result != success), this job RUNS the
+    # full validation anyway — `!cancelled()` is required because a plain
+    # `if:` on a failed needs-chain would silently skip the job. The gate
+    # additionally fails whenever the classifier did not succeed.
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.change-scope.result != 'success' || needs.change-scope.outputs.promotion != 'true') }}
     runs-on: ubuntu-latest
 
     steps:
@@ -316,7 +321,9 @@ jobs:
   android-debug-build:
     name: Android debug build
     needs: change-scope
-    if: github.event_name != 'pull_request' || needs.change-scope.outputs.promotion != 'true'
+    # Same fail-closed rule as analyze-and-test above: a non-success
+    # classifier forces this job to run in full.
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.change-scope.result != 'success' || needs.change-scope.outputs.promotion != 'true') }}
     runs-on: ubuntu-latest
 
     steps:
@@ -393,7 +400,7 @@ jobs:
       # enforced on every sensitive PR, every stage/main push, and the signed
       # release workflow.
       - name: Generate temporary CI keystore
-        if: github.event_name != 'pull_request' || needs.change-scope.outputs.sensitive == 'true'
+        if: ${{ github.event_name != 'pull_request' || needs.change-scope.result != 'success' || needs.change-scope.outputs.sensitive == 'true' }}
         run: |
           keytool -genkeypair \
             -keystore "$RUNNER_TEMP/calee-ci-release.jks" \
@@ -408,7 +415,7 @@ jobs:
       # This AAB is a permission-inspection product only — never uploaded as
       # an artifact, never published.
       - name: Build Android App Bundle (release)
-        if: github.event_name != 'pull_request' || needs.change-scope.outputs.sensitive == 'true'
+        if: ${{ github.event_name != 'pull_request' || needs.change-scope.result != 'success' || needs.change-scope.outputs.sensitive == 'true' }}
         run: flutter build appbundle --release
         env:
           ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/calee-ci-release.jks
@@ -421,17 +428,53 @@ jobs:
       # scripts/fetch_bundletool.sh; the cache only saves the re-download and
       # the jar is checksum-verified again on every run before use.
       - name: Cache bundletool
-        if: github.event_name != 'pull_request' || needs.change-scope.outputs.sensitive == 'true'
+        if: ${{ github.event_name != 'pull_request' || needs.change-scope.result != 'success' || needs.change-scope.outputs.sensitive == 'true' }}
         uses: actions/cache@v4
         with:
           path: build/bundletool
           key: bundletool-1.18.1
 
       - name: Inspect release AAB permissions
-        if: github.event_name != 'pull_request' || needs.change-scope.outputs.sensitive == 'true'
+        if: ${{ github.event_name != 'pull_request' || needs.change-scope.result != 'success' || needs.change-scope.outputs.sensitive == 'true' }}
         run: |
           BUNDLETOOL_JAR="$(scripts/fetch_bundletool.sh)"
           export BUNDLETOOL_JAR
           scripts/check_android_release_permissions.sh selftest
           scripts/check_android_release_permissions.sh check \
             --aab build/app/outputs/bundle/release/app-release.aab
+
+  # Always-resolved aggregate verdict — the single stable required status
+  # check for branch protection on dev/stage/main. Runs on every event
+  # (if: always()), so it can never be left grey/pending, and produces an
+  # explicit PASS/FAIL from the unit-tested decision table in
+  # .github/scripts/flutter_ci_tiering.py:
+  #   PASS  — all applicable validation succeeded, or a classifier-confirmed
+  #           standard promotion PR intentionally fast-pathed.
+  #   FAIL  — the classifier failed or emitted missing/unrecognised outputs,
+  #           any required job failed or was cancelled, or a job was skipped
+  #           when the classification did not permit it.
+  # No continue-on-error anywhere: a real failure can never be turned green.
+  flutter-ci-gate:
+    name: Flutter CI gate
+    needs: [change-scope, analyze-and-test, android-debug-build]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Prove the decision table + workflow wiring before trusting a verdict
+      # from them.
+      - name: Selftest the gate decision table and workflow contract
+        run: |
+          python3 .github/scripts/flutter_ci_tiering.py selftest
+          python3 .github/scripts/flutter_ci_tiering.py contract
+
+      - name: Decide the aggregate CI verdict
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          CHANGE_SCOPE_RESULT: ${{ needs.change-scope.result }}
+          PROMOTION: ${{ needs.change-scope.outputs.promotion }}
+          SENSITIVE: ${{ needs.change-scope.outputs.sensitive }}
+          ANALYZE_RESULT: ${{ needs.analyze-and-test.result }}
+          ANDROID_RESULT: ${{ needs.android-debug-build.result }}
+        run: python3 .github/scripts/flutter_ci_tiering.py decide
