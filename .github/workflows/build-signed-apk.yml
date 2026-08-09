@@ -1,11 +1,79 @@
 name: Build Signed Android Artifacts
 
+# Produces the signed APK/AAB that the Release Operator uploads to Google Play.
+#
+# This workflow does NOT upload to Google Play. Distribution is a deliberate
+# manual step, so no CI run can publish a build. See docs/RELEASE_OPERATIONS.md
+# for the release path and docs/RELEASE_CREDENTIALS.md for the signing secrets.
+
 on:
   workflow_dispatch:
 
 jobs:
+  # First line of defence: prove the run targets an authorised release BRANCH.
+  # workflow_dispatch can also target a TAG, and GITHUB_REF_NAME is the short
+  # name for both — so a tag named `main` would otherwise look exactly like the
+  # `main` branch. scripts/verify_release_ref.sh checks the fully-qualified ref
+  # and the ref type, and has its own selftest. The preflight job below applies
+  # the same rule through a separate implementation (`--allow-branch`), so a
+  # mistake in one layer does not silently re-open the hole.
+  release-ref-guard:
+    name: Verify release ref
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify the release ref is an authorised release branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          scripts/verify_release_ref.sh selftest
+          scripts/verify_release_ref.sh check
+
+  # Cheap gate: a missing signing secret, a version/identity inconsistency,
+  # absent release notes or incomplete store-readiness evidence fails here in
+  # under a minute, before the NDK install, the test suite and two release
+  # builds are paid for.
+  preflight:
+    name: Release preflight (Android)
+    needs: release-ref-guard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run release preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          scripts/release_preflight.sh selftest
+          scripts/generate_release_manifest.sh selftest
+          scripts/verify_release_ref.sh selftest
+          # BUILD readiness, not submission readiness. A signed candidate
+          # must not be built from an unauthorised branch, without signing
+          # secrets, or before the listing/privacy/review preparation is
+          # done and a Release Operator is named. It must NOT require
+          # physical-device qualification: the artifact being qualified is
+          # what this run is about to produce. Submission readiness is
+          # validated separately by the operator after qualification.
+          scripts/release_preflight.sh check \
+            --platform android \
+            --require-secrets \
+            --require-build-readiness \
+            --allow-branch stage \
+            --allow-branch main
+        env:
+          # Presence-only check. The preflight script reads whether these are
+          # non-empty and reports only their NAMES; it never prints a value.
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
   build-signed-android:
     name: Generate calee-mobile signed release APK and AAB
+    needs: [release-ref-guard, preflight]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -22,6 +90,71 @@ jobs:
         with:
           flutter-version: "3.44.1"
           cache: true
+
+      # Gradle can auto-install the pinned NDK, but a corrupt SDK archive then
+      # fails the whole signed release with no retry. Install it explicitly so
+      # transient/corrupt NDK downloads are cleaned up and retried before the
+      # release build starts.
+      - name: Ensure pinned Android NDK
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ndk_version="$(sed -nE 's/^[[:space:]]*ndkVersion[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' android/app/build.gradle.kts | head -n1)"
+          if [[ -z "$ndk_version" ]]; then
+            echo "Could not resolve ndkVersion from android/app/build.gradle.kts" >&2
+            exit 1
+          fi
+
+          sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          if [[ -z "$sdk_root" ]]; then
+            echo "ANDROID_SDK_ROOT/ANDROID_HOME is not configured" >&2
+            exit 1
+          fi
+
+          sdkmanager_bin="$(command -v sdkmanager || true)"
+          if [[ -z "$sdkmanager_bin" ]]; then
+            sdkmanager_bin="$sdk_root/cmdline-tools/latest/bin/sdkmanager"
+          fi
+          if [[ ! -x "$sdkmanager_bin" ]]; then
+            echo "Android sdkmanager was not found" >&2
+            exit 1
+          fi
+
+          ndk_dir="$sdk_root/ndk/$ndk_version"
+          ndk_is_valid() {
+            [[ -f "$ndk_dir/source.properties" && -x "$ndk_dir/ndk-build" ]]
+          }
+
+          if ndk_is_valid; then
+            echo "NDK $ndk_version is already installed."
+            exit 0
+          fi
+
+          for attempt in 1 2 3; do
+            echo "Installing NDK $ndk_version (attempt $attempt/3)..."
+
+            # Remove any partial install and SDK-manager download cache left by
+            # a previous failed/corrupt archive before retrying.
+            rm -rf "$ndk_dir" "$sdk_root/.temp" "$HOME/.android/cache"
+
+            if "$sdkmanager_bin" --sdk_root="$sdk_root" --install "ndk;$ndk_version"; then
+              if ndk_is_valid; then
+                echo "NDK $ndk_version installed and verified."
+                exit 0
+              fi
+              echo "sdkmanager reported success but NDK validation failed." >&2
+            else
+              echo "NDK install attempt $attempt failed." >&2
+            fi
+
+            if (( attempt < 3 )); then
+              sleep $((attempt * 15))
+            fi
+          done
+
+          echo "Failed to install NDK $ndk_version after 3 attempts." >&2
+          exit 1
 
       - name: Install dependencies
         run: flutter pub get
@@ -287,6 +420,65 @@ jobs:
             --apk "build/app/outputs/flutter-apk/calee-mobile-${{ steps.build_meta.outputs.sanitized_build_name }}.apk" \
             --aab "build/app/outputs/bundle/release/calee-mobile-${{ steps.build_meta.outputs.sanitized_build_name }}.aab"
 
+      # Traceability: bind EVERY artifact this workflow uploads — not just the
+      # store binary — to the source SHA, version, workflow run and its SHA-256,
+      # so anything downloaded from this run can be proven to be what CI built.
+      # The signing identity recorded here is the certificate's public
+      # distinguished name and SHA-256 fingerprint, printed by apksigner; it is
+      # public information, never key material.
+      - name: Generate release manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          apk="build/app/outputs/flutter-apk/calee-mobile-${{ steps.build_meta.outputs.sanitized_build_name }}.apk"
+          aab="build/app/outputs/bundle/release/calee-mobile-${{ steps.build_meta.outputs.sanitized_build_name }}.aab"
+          native_symbols="${{ steps.native_symbols.outputs.zip_path }}"
+
+          latest_build_tools="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -n1)"
+          apksigner_bin="$ANDROID_HOME/build-tools/$latest_build_tools/apksigner"
+
+          certs="$("$apksigner_bin" verify --print-certs "$apk")"
+          signer_dn="$(sed -n 's/^Signer #1 certificate DN: //p' <<<"$certs" | head -n1)"
+          signer_sha256="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' <<<"$certs" | head -n1)"
+
+          if [[ -z "$signer_dn" || -z "$signer_sha256" ]]; then
+            echo "Could not read the signing certificate identity from apksigner output" >&2
+            exit 1
+          fi
+
+          # Every --artifact/--artifact-dir below corresponds to an upload step
+          # further down. The generator fails closed if any of them is missing,
+          # so an uploaded-but-unrecorded artifact cannot slip through.
+          scripts/generate_release_manifest.sh \
+            --platform android \
+            --build-name "${{ steps.build_meta.outputs.build_name }}" \
+            --build-number "${{ steps.build_meta.outputs.build_number }}" \
+            --artifact "app_bundle=$aab" \
+            --artifact "apk=$apk" \
+            --artifact "native_debug_symbols=$native_symbols" \
+            --artifact-dir "dart_debug_symbols=build/symbols" \
+            --signing-identity "$signer_dn (certificate SHA-256 $signer_sha256)" \
+            --output "build/release-manifest-android.json"
+
+      # Print the exact-candidate identity the Release Operator must record in
+      # docs/release_evidence/<version>.json. A build number does not identify a
+      # candidate — two runs from different commits can share one — so the
+      # commit, this run, and the digest of this run's release manifest are what
+      # bind device qualification to the artifact that was actually tested.
+      - name: Print candidate identity for release evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          scripts/generate_release_manifest.sh checksum "build/release-manifest-android.json"
+
+      - name: Upload release manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: calee-mobile-android-release-manifest-${{ steps.build_meta.outputs.sanitized_build_name }}
+          path: build/release-manifest-android.json
+          if-no-files-found: error
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
@@ -314,6 +506,55 @@ jobs:
           name: calee-mobile-dart-symbols-${{ steps.build_meta.outputs.sanitized_build_name }}
           path: build/symbols
           if-no-files-found: error
+
+      # The candidate exists; store submission does NOT. Spell out the exact
+      # remaining sequence so a new operator cannot mistake a green run for
+      # permission to publish.
+      - name: Next steps for the Release Operator
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ steps.build_meta.outputs.build_name }}+${{ steps.build_meta.outputs.build_number }}"
+
+          echo "::notice::Signed Android candidate $version produced. Store submission is still BLOCKED until submission-readiness validation passes."
+
+          cat <<EOF
+          ============================================================
+          Signed candidate produced successfully.
+
+          This is NOT store readiness, and this run has NOT published
+          anything. Only build readiness was validated before the build.
+
+          Remaining sequence for the Release Operator:
+
+            1. Download the AAB and the release manifest from this run.
+            1a. Copy the candidate-identity block printed by the
+                "Print candidate identity for release evidence" step above
+                (git_sha, workflow_run_id, workflow_run_attempt,
+                release_manifest_sha256). A build number alone does NOT
+                identify this candidate.
+            2. Upload the AAB to Google Play INTERNAL TESTING.
+            3. Install it from the internal track on a physical Android
+               device and qualify it. Record it against build number
+               $version.
+            4. Complete the submission_readiness section of
+               docs/release_evidence/${{ steps.build_meta.outputs.build_name }}.json:
+               paste the android_candidate identity from step 1a, nest the
+               device_qualification (device, OS version, build_number,
+               outcome) inside it, and record the final listing/screenshot
+               review against this candidate plus the Release Approver.
+            5. Verify it — optionally cross-checking the manifest you
+               downloaded, which proves the evidence describes THIS candidate:
+
+                 scripts/release_preflight.sh check \\
+                   --platform android \\
+                   --require-store-readiness \\
+                   --candidate-manifest android=<path to downloaded manifest>
+
+            6. Only once that passes: promote to Production at a 10% staged
+               rollout (docs/RELEASE_OPERATIONS.md section 6).
+          ============================================================
+          EOF
 
       - name: Clean up signing files
         if: always()

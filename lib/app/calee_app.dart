@@ -34,6 +34,7 @@ import '../features/display_setup/display_setup_intent.dart';
 import '../features/display_setup/display_setup_landing_page.dart';
 import '../features/display_setup/display_setup_repository.dart';
 import '../features/display_setup/display_setup_link_controller.dart';
+import '../features/local_subscriber/local_calendar_limit_page.dart';
 import '../features/local_subscriber/local_calendar_subscription.dart';
 import '../features/notifications/calendar_notification_candidates.dart';
 import '../features/notifications/calendar_reminder_coordinator.dart';
@@ -127,6 +128,30 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
   // Calendar follow state
   bool _showingFollowSignIn = false;
   bool _processingFollowLink = false;
+
+  // Non-null while the sixth-unique-calendar conversion experience is shown.
+  // Set only from the typed LocalCalendarSubscriptionLimitException, never
+  // from a parser/storage/network failure, and never itself a mutation: the
+  // five stored calendars are untouched for as long as it is set. The pending
+  // follow intent deliberately stays pending underneath, so opening the
+  // marketing page and returning restores this same screen.
+  LocalCalendarSubscriptionLimitException? _localCalendarLimit;
+
+  // True while the user is managing their local calendars *as a step inside*
+  // a pending calendar-follow attempt — entered from the limit screen's
+  // "Manage my calendars" action.
+  //
+  // The pending follow intent deliberately stays pending for the whole
+  // session: it remains the single source of truth for which calendar the
+  // user was trying to follow, so no second copy of the URL exists. Closing
+  // the management sheet ends the session and hands the user back to the
+  // decision page for that same calendar, where they confirm the add
+  // themselves — nothing is ever added behind their back.
+  //
+  // Only meaningful while a follow intent is pending; every path that
+  // releases the intent also clears this (see _abandonPendingFollowAttempt
+  // and _onFollowLinkChanged).
+  bool _managingLocalCalendarsForFollowIntent = false;
 
   // Sign-in initiated from the local-calendar page's app-bar action.
   // Deliberately distinct from _showingFollowSignIn: there is no pending
@@ -556,7 +581,24 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
           _followLinkController.clearPending();
           _openSubscribeFlowForIntent(intent);
         } else {
-          setState(() => _showingFollowSignIn = false);
+          // A newly arrived intent supersedes any attempt still in progress.
+          // The controller has already replaced pendingIntent, so the old
+          // attempt's screens must not be left standing over the new one:
+          // both the limit screen (which would show a stale calendar name)
+          // and any open calendar-management session are ended here, and the
+          // new intent gets its own decision page.
+          final wasManagingCalendars = _managingLocalCalendarsForFollowIntent;
+          setState(() {
+            _showingFollowSignIn = false;
+            _localCalendarLimit = null;
+            _managingLocalCalendarsForFollowIntent = false;
+          });
+          if (wasManagingCalendars) {
+            // The management sheet is a route pushed over the declarative
+            // home, so rebuilding home does not remove it. Dismiss it
+            // explicitly, or it would sit on top of the new decision page.
+            _dismissRoutesAboveHome();
+          }
         }
       }
     } finally {
@@ -1146,6 +1188,35 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
     });
   }
 
+  /// Pops anything sitting above the declarative home route (the calendar
+  /// management sheet, and any dialog over it).
+  ///
+  /// `_buildHome` swaps the *content* of the home route, which leaves pushed
+  /// routes untouched — so a state change that replaces the screen underneath
+  /// an open sheet has to dismiss that sheet itself. Deferred to after the
+  /// frame because this runs from controller notifications, which can arrive
+  /// mid-build.
+  void _dismissRoutesAboveHome() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _navigatorKey.currentState?.popUntil((route) => route.isFirst);
+    });
+  }
+
+  /// Abandons the sixth-calendar attempt entirely: drops the limit screen,
+  /// ends any calendar-management session opened for it, and releases the
+  /// pending follow intent.
+  ///
+  /// Never touches stored subscriptions — the calendars already on the phone
+  /// are exactly as they were.
+  void _abandonPendingFollowAttempt() {
+    setState(() {
+      _localCalendarLimit = null;
+      _managingLocalCalendarsForFollowIntent = false;
+    });
+    _followLinkController.clearPending();
+  }
+
   Future<void> _handleFollowLocally(ResolvedCalendarFollowIntent intent) async {
     try {
       await _localSubscriptionRepo.add(
@@ -1153,6 +1224,15 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
         url: intent.url,
         source: intent.source,
       );
+    } on LocalCalendarSubscriptionLimitException catch (limit) {
+      // The local allowance is full and this is a genuinely new calendar —
+      // a product condition, not a failure, so it gets the contextual
+      // conversion experience instead of the error snackbar. Nothing was
+      // stored, nothing was removed, and the pending intent is deliberately
+      // left in place.
+      if (!mounted) return;
+      setState(() => _localCalendarLimit = limit);
+      return;
     } catch (_) {
       if (!mounted) return;
       _showSnackBar('This calendar could not be added on this phone.');
@@ -1350,6 +1430,53 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
 
       // ── Calendar follow flows ─────────────────────────────────────────────────────────────────────
 
+      // Sixth unique calendar attempted while the local allowance is full.
+      // Checked ahead of the decision page because the pending intent is
+      // still pending underneath: leaving the marketing site returns the
+      // user to this same screen rather than silently re-adding anything.
+      final localCalendarLimit = _localCalendarLimit;
+      if (localCalendarLimit != null) {
+        return LocalCalendarLimitPage(
+          limit: localCalendarLimit,
+          // Marketing only: no intent consumed, no sign-in, no change to the
+          // stored calendars.
+          onSeeCaleeForHome: () => unawaited(_openCaleeForHome()),
+          // Into the existing local-calendar management UI with its
+          // "Calendars on this phone" sheet already open, so a calendar can
+          // be removed to make room. The attempt is *not* abandoned: the
+          // pending intent stays pending, and closing the sheet returns the
+          // user to this calendar's decision page to confirm the add.
+          onManageCalendars: () => setState(() {
+            _localCalendarLimit = null;
+            _managingLocalCalendarsForFollowIntent = true;
+          }),
+          // "Not now": abandon the attempt and return to the calendars
+          // already on this phone, all five untouched.
+          onDismiss: _abandonPendingFollowAttempt,
+        );
+      }
+
+      // Managing local calendars as a step inside a pending follow attempt.
+      // Sits ahead of the decision page for as long as the session lasts, and
+      // is guarded on the intent so it can never outlive it. Closing the
+      // sheet ends the session and falls through to the decision page below,
+      // for the same calendar the user was originally trying to follow.
+      if (_managingLocalCalendarsForFollowIntent &&
+          _followLinkController.pendingIntent != null) {
+        return LocalSubscriberCalendarPage(
+          subscriptions: _localSubscriptions,
+          repository: _localSubscriptionRepo,
+          onSignIn: () => setState(() => _showingLocalCalendarSignIn = true),
+          onLearnAboutHome: () => unawaited(_openCaleeForHome()),
+          onSubscriptionsChanged: (updated) {
+            setState(() => _localSubscriptions = updated);
+          },
+          openCalendarsSheetOnStart: true,
+          onCalendarsSheetClosed: () =>
+              setState(() => _managingLocalCalendarsForFollowIntent = false),
+        );
+      }
+
       // User chose "Already have Calee at home? Sign in" → show login. The
       // pending follow intent stays untouched so the account-backed
       // subscription flow can process it after authentication.
@@ -1381,14 +1508,14 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
           alreadyFollowed: alreadyFollowed,
           onAddToPhone: () =>
               unawaited(_handleFollowLocally(pendingFollowIntent)),
-          // Clearing the pending intent reveals the existing local calendar
+          // Releasing the pending intent reveals the existing local calendar
           // page; the repository already de-duplicates, so no second
           // subscription can be created from this state.
-          onOpenLocalCalendar: _followLinkController.clearPending,
+          onOpenLocalCalendar: _abandonPendingFollowAttempt,
           onLearnAboutHome: () => unawaited(_openCaleeForHome()),
           onExistingCustomerSignIn: () =>
               setState(() => _showingFollowSignIn = true),
-          onCancel: _followLinkController.clearPending,
+          onCancel: _abandonPendingFollowAttempt,
         );
       }
 
