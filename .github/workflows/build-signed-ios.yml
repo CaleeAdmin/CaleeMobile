@@ -1,19 +1,101 @@
-name: Build Unsigned iOS Artifacts
+name: Build Signed iOS Artifacts
 
-# Note: This workflow builds an UNSIGNED IPA using --no-codesign.
-# To produce a properly signed TestFlight / App Store IPA, the following
-# secrets must be added and the codesign steps below must be enabled:
-#   IOS_CERTIFICATE_BASE64        – base64-encoded .p12 distribution certificate
-#   IOS_CERTIFICATE_PASSWORD      – password for the .p12 certificate
-#   IOS_PROVISIONING_PROFILE_BASE64 – base64-encoded .mobileprovision profile
-#   IOS_EXPORT_OPTIONS_PLIST_BASE64 – base64-encoded ExportOptions.plist
+# Produces a properly signed App Store / TestFlight IPA for Calee.
+#
+# This workflow previously built an UNSIGNED IPA (`--no-codesign`) despite its
+# name. It now signs for real, and every step that could otherwise produce a
+# silently-unsigned artifact fails the run instead.
+#
+# Required GitHub Secrets (NAMES only — values are never printed or logged):
+#   IOS_CERTIFICATE_BASE64          base64 of the Apple Distribution .p12
+#   IOS_CERTIFICATE_PASSWORD        password for that .p12
+#   IOS_PROVISIONING_PROFILE_BASE64 base64 of the App Store .mobileprovision
+# Optional:
+#   IOS_EXPORT_OPTIONS_PLIST_BASE64 base64 of an ExportOptions.plist; when
+#                                   absent, one is generated from the
+#                                   repository-controlled, non-secret values
+#                                   below.
+#
+# See docs/RELEASE_CREDENTIALS.md for how to create and rotate these, and
+# docs/RELEASE_OPERATIONS.md for the release path around this workflow.
+#
+# This workflow does NOT upload to App Store Connect. Distribution is a
+# deliberate manual step performed by the Release Operator, so no CI run can
+# publish a build.
 
 on:
   workflow_dispatch:
 
+env:
+  # Non-secret app identity. Kept in step with scripts/release_preflight.sh,
+  # which fails the run if the project no longer matches these.
+  IOS_BUNDLE_ID: au.com.calee.mobile
+  APPLE_TEAM_ID: WQ3JPT4U3H
+
 jobs:
-  build-unsigned-ios:
-    name: Generate calee-mobile unsigned iOS archive and IPA
+  # First line of defence: prove the run targets an authorised release BRANCH.
+  # workflow_dispatch can also target a TAG, and GITHUB_REF_NAME is the short
+  # name for both — so a tag named `main` would otherwise look exactly like the
+  # `main` branch. scripts/verify_release_ref.sh checks the fully-qualified ref
+  # and the ref type, and has its own selftest. The preflight job below applies
+  # the same rule through a separate implementation (`--allow-branch`), so a
+  # mistake in one layer does not silently re-open the hole.
+  release-ref-guard:
+    name: Verify release ref
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify the release ref is an authorised release branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          scripts/verify_release_ref.sh selftest
+          scripts/verify_release_ref.sh check
+
+  # Cheap gate on a Linux runner: catches a missing secret, a version/identity
+  # inconsistency, absent release notes or incomplete store-readiness evidence
+  # in under a minute, before any macOS build minutes are spent.
+  preflight:
+    name: Release preflight (iOS)
+    needs: release-ref-guard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run release preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          scripts/release_preflight.sh selftest
+          scripts/generate_release_manifest.sh selftest
+          scripts/verify_release_ref.sh selftest
+          # BUILD readiness, not submission readiness. A signed candidate
+          # must not be built from an unauthorised branch, without signing
+          # secrets, or before the listing/privacy/review preparation is
+          # done and a Release Operator is named. It must NOT require
+          # physical-device qualification: the artifact being qualified is
+          # what this run is about to produce. Submission readiness is
+          # validated separately by the operator after qualification.
+          scripts/release_preflight.sh check \
+            --platform ios \
+            --require-secrets \
+            --require-build-readiness \
+            --allow-branch stage \
+            --allow-branch main
+        env:
+          # Presence-only check. The preflight script reads whether these are
+          # non-empty and reports only their NAMES; it never prints a value.
+          IOS_CERTIFICATE_BASE64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+          IOS_EXPORT_OPTIONS_PLIST_BASE64: ${{ secrets.IOS_EXPORT_OPTIONS_PLIST_BASE64 }}
+
+  build-signed-ios:
+    name: Generate calee-mobile signed iOS archive and IPA
+    needs: [release-ref-guard, preflight]
     runs-on: macos-latest
 
     steps:
@@ -44,34 +126,408 @@ jobs:
             echo "$key=$value" >> "$GITHUB_OUTPUT"
           done < <(scripts/derive_release_version.sh)
 
-      - name: Build unsigned iOS archive with shared version metadata
+      # --- signing material ---------------------------------------------------
+      # Everything below lives in $RUNNER_TEMP (job-scoped) and is destroyed by
+      # the "Clean up signing material" step, which runs with if: always().
+
+      - name: Create temporary keychain
         shell: bash
         run: |
           set -euo pipefail
-          flutter build ipa --release --no-codesign \
+
+          # Random, job-local keychain password. Not a secret of the project:
+          # it protects a keychain that exists only for this job and is deleted
+          # at the end of it.
+          keychain_password="$(openssl rand -base64 24)"
+          keychain_path="$RUNNER_TEMP/calee-signing.keychain-db"
+
+          security create-keychain -p "$keychain_password" "$keychain_path"
+          security set-keychain-settings -lut 3600 "$keychain_path"
+          security unlock-keychain -p "$keychain_password" "$keychain_path"
+
+          # Keep the login keychain in the search list so system anchors remain
+          # available, with ours first.
+          security list-keychains -d user -s "$keychain_path" $(security list-keychains -d user | tr -d '"')
+
+          echo "KEYCHAIN_PATH=$keychain_path" >> "$GITHUB_ENV"
+          echo "::add-mask::$keychain_password"
+          echo "KEYCHAIN_PASSWORD=$keychain_password" >> "$GITHUB_ENV"
+
+          echo "Temporary keychain created."
+
+      - name: Import Apple Distribution certificate
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "$IOS_CERTIFICATE_BASE64" =~ [[:space:]] ]]; then
+            echo "Certificate decode failed; re-create IOS_CERTIFICATE_BASE64 as single-line base64" >&2
+            exit 1
+          fi
+
+          cert_path="$RUNNER_TEMP/apple-distribution.p12"
+          printf '%s' "$IOS_CERTIFICATE_BASE64" | base64 --decode > "$cert_path"
+
+          if [[ ! -s "$cert_path" ]]; then
+            echo "Certificate decode failed; decoded .p12 is missing or empty" >&2
+            exit 1
+          fi
+
+          # -A is deliberately NOT used; only codesign/security are allowed to
+          # use the key, and the partition list below authorises them without a
+          # UI prompt.
+          security import "$cert_path" \
+            -k "$KEYCHAIN_PATH" \
+            -P "$IOS_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/security \
+            -f pkcs12
+
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" >/dev/null
+
+          rm -f "$cert_path"
+          echo "Distribution certificate imported."
+        env:
+          IOS_CERTIFICATE_BASE64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+
+      - name: Verify a distribution signing identity is available
+        id: identity
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          identities="$(security find-identity -v -p codesigning "$KEYCHAIN_PATH")"
+          echo "$identities"
+
+          # Certificate common names and SHA-1 hashes are public identity
+          # information, not secrets.
+          identity_name="$(sed -nE 's/^[[:space:]]*[0-9]+\)[[:space:]]+[0-9A-F]+[[:space:]]+"(Apple Distribution[^"]*)".*/\1/p' <<<"$identities" | head -n1)"
+          if [[ -z "$identity_name" ]]; then
+            identity_name="$(sed -nE 's/^[[:space:]]*[0-9]+\)[[:space:]]+[0-9A-F]+[[:space:]]+"(iPhone Distribution[^"]*)".*/\1/p' <<<"$identities" | head -n1)"
+          fi
+
+          if [[ -z "$identity_name" ]]; then
+            echo "No Apple Distribution signing identity was found in the temporary keychain." >&2
+            echo "IOS_CERTIFICATE_BASE64 must contain an Apple Distribution certificate exported with its private key." >&2
+            exit 1
+          fi
+
+          if [[ "$identity_name" != *"$APPLE_TEAM_ID"* ]]; then
+            echo "Signing identity '$identity_name' does not belong to team $APPLE_TEAM_ID." >&2
+            exit 1
+          fi
+
+          echo "identity_name=$identity_name" >> "$GITHUB_OUTPUT"
+          echo "Using signing identity: $identity_name"
+
+      - name: Install provisioning profile
+        id: profile
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "$IOS_PROVISIONING_PROFILE_BASE64" =~ [[:space:]] ]]; then
+            echo "Profile decode failed; re-create IOS_PROVISIONING_PROFILE_BASE64 as single-line base64" >&2
+            exit 1
+          fi
+
+          profile_path="$RUNNER_TEMP/calee-appstore.mobileprovision"
+          printf '%s' "$IOS_PROVISIONING_PROFILE_BASE64" | base64 --decode > "$profile_path"
+
+          if [[ ! -s "$profile_path" ]]; then
+            echo "Profile decode failed; decoded .mobileprovision is missing or empty" >&2
+            exit 1
+          fi
+
+          # The profile is a CMS-signed plist. Its contents (name, UUID, team,
+          # entitlements, expiry) are not secret.
+          plist_path="$RUNNER_TEMP/calee-appstore-profile.plist"
+          security cms -D -i "$profile_path" > "$plist_path"
+
+          profile_uuid="$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$plist_path")"
+          profile_name="$(/usr/libexec/PlistBuddy -c 'Print :Name' "$plist_path")"
+          profile_team="$(/usr/libexec/PlistBuddy -c 'Print :TeamIdentifier:0' "$plist_path")"
+          profile_expiry="$(/usr/libexec/PlistBuddy -c 'Print :ExpirationDate' "$plist_path")"
+          profile_app_id="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$plist_path")"
+
+          echo "Profile name   : $profile_name"
+          echo "Profile UUID   : $profile_uuid"
+          echo "Profile team   : $profile_team"
+          echo "Profile expiry : $profile_expiry"
+          echo "Profile app id : $profile_app_id"
+
+          if [[ "$profile_team" != "$APPLE_TEAM_ID" ]]; then
+            echo "Provisioning profile belongs to team '$profile_team', expected '$APPLE_TEAM_ID'." >&2
+            exit 1
+          fi
+
+          if [[ "$profile_app_id" != "$APPLE_TEAM_ID.$IOS_BUNDLE_ID" ]]; then
+            echo "Provisioning profile is for '$profile_app_id', expected '$APPLE_TEAM_ID.$IOS_BUNDLE_ID'." >&2
+            exit 1
+          fi
+
+          # An expired profile cannot sign; fail here rather than deep inside
+          # xcodebuild. Dates come from the profile in "Www Mmm DD HH:MM:SS TZ YYYY"
+          # form; compare as epoch seconds.
+          expiry_epoch="$(date -j -f "%a %b %d %T %Z %Y" "$profile_expiry" "+%s" 2>/dev/null || echo "")"
+          if [[ -n "$expiry_epoch" ]]; then
+            now_epoch="$(date "+%s")"
+            if (( expiry_epoch <= now_epoch )); then
+              echo "Provisioning profile expired on $profile_expiry. Renew it (docs/RELEASE_CREDENTIALS.md)." >&2
+              exit 1
+            fi
+            days_left=$(( (expiry_epoch - now_epoch) / 86400 ))
+            echo "Provisioning profile expires in $days_left day(s)."
+            if (( days_left < 30 )); then
+              echo "::warning::The App Store provisioning profile expires in $days_left day(s); schedule renewal (docs/RELEASE_CREDENTIALS.md)."
+            fi
+          else
+            echo "::warning::Could not parse the provisioning profile expiry date; check it manually."
+          fi
+
+          # Install where both modern and older Xcode versions look for it.
+          for dir in "$HOME/Library/MobileDevice/Provisioning Profiles" \
+                     "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"; do
+            mkdir -p "$dir"
+            cp "$profile_path" "$dir/$profile_uuid.mobileprovision"
+          done
+
+          {
+            echo "profile_uuid=$profile_uuid"
+            echo "profile_name=$profile_name"
+          } >> "$GITHUB_OUTPUT"
+        env:
+          IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+
+      - name: Prepare ExportOptions.plist
+        id: export_options
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          export_options_path="$RUNNER_TEMP/ExportOptions.plist"
+
+          if [[ -n "${IOS_EXPORT_OPTIONS_PLIST_BASE64:-}" ]]; then
+            printf '%s' "$IOS_EXPORT_OPTIONS_PLIST_BASE64" | base64 --decode > "$export_options_path"
+            if [[ ! -s "$export_options_path" ]]; then
+              echo "IOS_EXPORT_OPTIONS_PLIST_BASE64 decode failed; the decoded plist is empty" >&2
+              exit 1
+            fi
+            echo "Using ExportOptions.plist supplied via IOS_EXPORT_OPTIONS_PLIST_BASE64."
+          else
+            # Generated from repository-controlled, non-secret values so the
+            # workflow works without an extra secret to keep in step. Built with
+            # plutil/PlistBuddy rather than a heredoc because the bundle
+            # identifier is used as a dictionary key (PlistBuddy's ':' key paths
+            # handle the dots in it correctly).
+            plutil -create xml1 "$export_options_path"
+            /usr/libexec/PlistBuddy \
+              -c "Add :method string app-store-connect" \
+              -c "Add :teamID string $APPLE_TEAM_ID" \
+              -c "Add :signingStyle string manual" \
+              -c "Add :signingCertificate string Apple Distribution" \
+              -c "Add :stripSwiftSymbols bool true" \
+              -c "Add :uploadSymbols bool true" \
+              -c "Add :destination string export" \
+              -c "Add :provisioningProfiles dict" \
+              -c "Add :provisioningProfiles:$IOS_BUNDLE_ID string $PROFILE_NAME" \
+              "$export_options_path"
+            echo "Generated ExportOptions.plist from repository-controlled values."
+            # Safe to echo: generated purely from the non-secret team id, bundle
+            # id and profile name. A plist supplied through
+            # IOS_EXPORT_OPTIONS_PLIST_BASE64 is deliberately NOT printed, since
+            # its contents are operator-supplied and may carry identifiers that
+            # should not appear in logs.
+            cat "$export_options_path"
+          fi
+
+          plutil -lint "$export_options_path"
+          echo "export_options_path=$export_options_path" >> "$GITHUB_OUTPUT"
+        env:
+          IOS_EXPORT_OPTIONS_PLIST_BASE64: ${{ secrets.IOS_EXPORT_OPTIONS_PLIST_BASE64 }}
+          PROFILE_NAME: ${{ steps.profile.outputs.profile_name }}
+
+      # --- build --------------------------------------------------------------
+
+      # Compile the Flutter side and generate the Xcode build configuration
+      # (FLUTTER_BUILD_NAME / FLUTTER_BUILD_NUMBER reach Info.plist from here).
+      # Signing is applied by the archive step below, which passes the signing
+      # settings on the xcodebuild command line — the highest-precedence level,
+      # so no project file has to be modified in CI.
+      - name: Compile Flutter iOS release
+        shell: bash
+        run: |
+          set -euo pipefail
+          flutter build ios --release --no-codesign \
             --build-name="${{ steps.build_meta.outputs.build_name }}" \
             --build-number="${{ steps.build_meta.outputs.build_number }}"
 
-      - name: List generated iOS artifacts
+      - name: Archive signed app
         shell: bash
         run: |
           set -euo pipefail
-          find build/ios -maxdepth 8 -type f \( -name "*.xcarchive" -o -name "*.ipa" \) -print
 
-      - name: Rename IPA with build name (unsigned)
+          rm -rf build/ios/archive
+          mkdir -p build/ios/archive
+
+          xcodebuild archive \
+            -workspace ios/Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Release \
+            -archivePath "$GITHUB_WORKSPACE/build/ios/archive/Runner.xcarchive" \
+            -destination "generic/platform=iOS" \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="$SIGNING_IDENTITY" \
+            PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            OTHER_CODE_SIGN_FLAGS="--keychain=$KEYCHAIN_PATH"
+        env:
+          SIGNING_IDENTITY: ${{ steps.identity.outputs.identity_name }}
+          PROFILE_NAME: ${{ steps.profile.outputs.profile_name }}
+
+      - name: Export signed IPA
         shell: bash
         run: |
           set -euo pipefail
-          src="build/ios/ipa/Runner.ipa"
-          dst="build/ios/ipa/calee-mobile-unsigned-${{ steps.build_meta.outputs.sanitized_build_name }}.ipa"
-          mv "$src" "$dst"
-          echo "Renamed IPA to $dst"
 
-      - name: Upload iOS IPA artifact (unsigned)
+          rm -rf build/ios/ipa
+          xcodebuild -exportArchive \
+            -archivePath "$GITHUB_WORKSPACE/build/ios/archive/Runner.xcarchive" \
+            -exportOptionsPlist "$EXPORT_OPTIONS_PATH" \
+            -exportPath "$GITHUB_WORKSPACE/build/ios/ipa"
+
+          find build/ios/ipa -maxdepth 2 -type f -name "*.ipa" -print
+        env:
+          EXPORT_OPTIONS_PATH: ${{ steps.export_options.outputs.export_options_path }}
+
+      - name: Rename IPA with build name
+        id: ipa
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          src="$(find build/ios/ipa -maxdepth 1 -type f -name "*.ipa" | head -n1)"
+          if [[ -z "$src" ]]; then
+            echo "No IPA was exported." >&2
+            exit 1
+          fi
+
+          dst="build/ios/ipa/calee-mobile-${{ steps.build_meta.outputs.sanitized_build_name }}.ipa"
+          if [[ "$src" != "$dst" ]]; then
+            mv "$src" "$dst"
+          fi
+          echo "ipa_path=$dst" >> "$GITHUB_OUTPUT"
+          echo "Exported IPA: $dst"
+
+      # Release-blocker gate: prove the exported IPA is genuinely signed by the
+      # expected team, with an embedded provisioning profile. Without this, a
+      # signing regression could reproduce the old behaviour of this workflow —
+      # a file named like a signed release that is not signed at all.
+      - name: Verify IPA signing identity
+        id: verify
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ipa_path="${{ steps.ipa.outputs.ipa_path }}"
+          work_dir="$RUNNER_TEMP/ipa-verify"
+          rm -rf "$work_dir"
+          mkdir -p "$work_dir"
+          unzip -q "$ipa_path" -d "$work_dir"
+
+          app_path="$(find "$work_dir/Payload" -maxdepth 1 -type d -name "*.app" | head -n1)"
+          if [[ -z "$app_path" ]]; then
+            echo "No .app found inside the exported IPA." >&2
+            exit 1
+          fi
+
+          if [[ ! -f "$app_path/embedded.mobileprovision" ]]; then
+            echo "The exported IPA contains no embedded provisioning profile; it is not a distributable build." >&2
+            exit 1
+          fi
+
+          # codesign writes its report to stderr.
+          codesign_output="$(codesign -dv --verbose=4 "$app_path" 2>&1)"
+          echo "$codesign_output"
+
+          if ! grep -q "^TeamIdentifier=$APPLE_TEAM_ID$" <<<"$codesign_output"; then
+            echo "Exported IPA is not signed by team $APPLE_TEAM_ID." >&2
+            exit 1
+          fi
+
+          if grep -q "^Signature=adhoc$" <<<"$codesign_output"; then
+            echo "Exported IPA is ad-hoc signed; a distribution-signed build is required." >&2
+            exit 1
+          fi
+
+          authority="$(sed -nE 's/^Authority=(Apple Distribution.*|iPhone Distribution.*)$/\1/p' <<<"$codesign_output" | head -n1)"
+          if [[ -z "$authority" ]]; then
+            echo "Exported IPA is not signed with an Apple Distribution certificate." >&2
+            exit 1
+          fi
+
+          codesign --verify --strict --verbose=2 "$app_path"
+
+          bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app_path/Info.plist")"
+          short_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app_path/Info.plist")"
+          bundle_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app_path/Info.plist")"
+
+          echo "Bundle identifier        : $bundle_id"
+          echo "CFBundleShortVersionString: $short_version"
+          echo "CFBundleVersion          : $bundle_version"
+
+          if [[ "$bundle_id" != "$IOS_BUNDLE_ID" ]]; then
+            echo "Built bundle identifier '$bundle_id' does not match '$IOS_BUNDLE_ID'." >&2
+            exit 1
+          fi
+
+          # Version-drift gate against the single source of truth (pubspec.yaml).
+          if [[ "$short_version" != "${{ steps.build_meta.outputs.build_name }}" ]]; then
+            echo "CFBundleShortVersionString '$short_version' does not match pubspec build name '${{ steps.build_meta.outputs.build_name }}'." >&2
+            exit 1
+          fi
+          if [[ "$bundle_version" != "${{ steps.build_meta.outputs.build_number }}" ]]; then
+            echo "CFBundleVersion '$bundle_version' does not match pubspec build number '${{ steps.build_meta.outputs.build_number }}'." >&2
+            exit 1
+          fi
+
+          rm -rf "$work_dir"
+
+          # Non-secret identity summary for the release manifest.
+          echo "signing_summary=$authority (team $APPLE_TEAM_ID, profile ${{ steps.profile.outputs.profile_name }})" >> "$GITHUB_OUTPUT"
+          echo "Signed IPA verified."
+
+      # Traceability: bind EVERY artifact this workflow uploads — the IPA and the
+      # xcarchive (which carries the dSYMs used to symbolicate crash reports) —
+      # to the source SHA, version, workflow run and its SHA-256. The archive is
+      # a directory, so it is recorded with a file count and a tree digest over
+      # every contained file.
+      - name: Generate release manifest
+        id: manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Every --artifact/--artifact-dir below corresponds to an upload step
+          # further down. The generator fails closed if any of them is missing,
+          # so an uploaded-but-unrecorded artifact cannot slip through.
+          scripts/generate_release_manifest.sh \
+            --platform ios \
+            --build-name "${{ steps.build_meta.outputs.build_name }}" \
+            --build-number "${{ steps.build_meta.outputs.build_number }}" \
+            --artifact "ipa=${{ steps.ipa.outputs.ipa_path }}" \
+            --artifact-dir "xcarchive=build/ios/archive/Runner.xcarchive" \
+            --signing-identity "${{ steps.verify.outputs.signing_summary }}" \
+            --output "build/release-manifest-ios.json"
+
+      - name: Upload signed IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: calee-mobile-ios-unsigned-ipa-${{ steps.build_meta.outputs.sanitized_build_name }}
-          path: build/ios/ipa/calee-mobile-unsigned-${{ steps.build_meta.outputs.sanitized_build_name }}.ipa
+          name: calee-mobile-ios-signed-ipa-${{ steps.build_meta.outputs.sanitized_build_name }}
+          path: ${{ steps.ipa.outputs.ipa_path }}
           if-no-files-found: error
 
       - name: Upload iOS archive artifact
@@ -80,3 +536,91 @@ jobs:
           name: calee-mobile-ios-xcarchive-${{ steps.build_meta.outputs.sanitized_build_name }}
           path: build/ios/archive/Runner.xcarchive
           if-no-files-found: error
+
+      # Print the exact-candidate identity the Release Operator must record in
+      # docs/release_evidence/<version>.json. A build number does not identify a
+      # candidate — two runs from different commits can share one — so the
+      # commit, this run, and the digest of this run's release manifest are what
+      # bind device qualification to the artifact that was actually tested.
+      - name: Print candidate identity for release evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          scripts/generate_release_manifest.sh checksum "build/release-manifest-ios.json"
+
+      - name: Upload release manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: calee-mobile-ios-release-manifest-${{ steps.build_meta.outputs.sanitized_build_name }}
+          path: build/release-manifest-ios.json
+          if-no-files-found: error
+
+      # The candidate exists; store submission does NOT. Spell out the exact
+      # remaining sequence so a new operator cannot mistake a green run for
+      # permission to submit.
+      - name: Next steps for the Release Operator
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ steps.build_meta.outputs.build_name }}+${{ steps.build_meta.outputs.build_number }}"
+
+          echo "::notice::Signed iOS candidate $version produced. App Store submission is still BLOCKED until submission-readiness validation passes."
+
+          cat <<EOF
+          ============================================================
+          Signed candidate produced successfully.
+
+          This is NOT store readiness, and this run has NOT submitted
+          anything. Only build readiness was validated before the build.
+
+          Remaining sequence for the Release Operator:
+
+            1. Download the IPA and the release manifest from this run.
+            1a. Copy the candidate-identity block printed by the
+                "Print candidate identity for release evidence" step above
+                (git_sha, workflow_run_id, workflow_run_attempt,
+                release_manifest_sha256). A build number alone does NOT
+                identify this candidate.
+            2. Upload the IPA to App Store Connect and wait for processing.
+            3. Distribute it to TESTFLIGHT.
+            4. Install it from TestFlight on a physical iOS device and
+               qualify it. Record it against build number $version.
+            5. Complete the submission_readiness section of
+               docs/release_evidence/${{ steps.build_meta.outputs.build_name }}.json:
+               paste the ios_candidate identity from step 1a, nest the
+               device_qualification (device, OS version, build_number,
+               outcome) inside it, and record the final listing/screenshot
+               review against this candidate, export compliance and the
+               Release Approver.
+            6. Verify it — optionally cross-checking the manifest you
+               downloaded, which proves the evidence describes THIS candidate:
+
+                 scripts/release_preflight.sh check \\
+                   --platform ios \\
+                   --require-store-readiness \\
+                   --candidate-manifest ios=<path to downloaded manifest>
+
+            7. Only once that passes: attach the build to the App Store
+               version and Submit for Review, then use phased release
+               (docs/RELEASE_OPERATIONS.md section 7).
+          ============================================================
+          EOF
+
+      # Destroy every piece of signing material, whether the build succeeded,
+      # failed or was cancelled.
+      - name: Clean up signing material
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          if [[ -n "${KEYCHAIN_PATH:-}" ]]; then
+            security delete-keychain "$KEYCHAIN_PATH"
+          fi
+          rm -f "$RUNNER_TEMP/apple-distribution.p12" \
+                "$RUNNER_TEMP/calee-appstore.mobileprovision" \
+                "$RUNNER_TEMP/calee-appstore-profile.plist" \
+                "$RUNNER_TEMP/ExportOptions.plist"
+          rm -f "$HOME/Library/MobileDevice/Provisioning Profiles/"*.mobileprovision \
+                "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles/"*.mobileprovision
+          echo "Signing material removed."
+          exit 0

@@ -67,6 +67,10 @@ class CalendarOnboardingPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
+      // Stable selector for the post-registration calendar-onboarding step
+      // (CaleeMobile-Regression onboarding contract). Identifies the state
+      // itself rather than its copy, so wording can change freely.
+      key: const Key('calendar_onboarding_root'),
       backgroundColor: CaleeColors.scaffoldBackground,
       body: SafeArea(
         child: Padding(
@@ -106,16 +110,19 @@ class CalendarOnboardingPage extends StatelessWidget {
               const SizedBox(height: CaleeSpacing.sm),
               if (isManual) ...[
                 OutlinedButton(
+                  key: const Key('calendar_onboarding_not_now_button'),
                   onPressed: onDismissed,
                   child: const Text('Not now'),
                 ),
               ] else ...[
                 OutlinedButton(
+                  key: const Key('calendar_onboarding_remind_later_button'),
                   onPressed: () => _remindLater(context),
                   child: const Text('Remind me later'),
                 ),
                 const SizedBox(height: CaleeSpacing.sm),
                 TextButton(
+                  key: const Key('calendar_onboarding_dismiss_forever_button'),
                   onPressed: () => _dismissForever(context),
                   child: const Text("Don't show this again"),
                 ),
