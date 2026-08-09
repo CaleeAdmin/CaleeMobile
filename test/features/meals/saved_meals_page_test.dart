@@ -421,6 +421,27 @@ void main() {
       );
     });
 
+    testWidgets('search no-results state offers Create new meal', (
+      tester,
+    ) async {
+      final hub = _StubHub();
+      await tester.pumpWidget(_buildSavedMealsPage(hub, _controllerFor(hub)));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Search saved meals'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('saved_meals_search_field')),
+        'no matching meal',
+      );
+      await tester.pump();
+
+      expect(find.text('No saved meals found'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('saved_meals_search_create_new')));
+      await tester.pumpAndSettle();
+      expect(find.text('Create saved meal'), findsWidgets);
+    });
+
     testWidgets('failed loading still offers Create new meal', (tester) async {
       final hub = _StubHub(failSuggestions: true);
       await tester.pumpWidget(_buildSavedMealsPage(hub, _controllerFor(hub)));

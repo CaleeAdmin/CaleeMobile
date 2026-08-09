@@ -97,6 +97,10 @@ class _SavedMealsPageState extends State<SavedMealsPage> {
       title: 'Search saved meals',
       child: _SavedMealsSearchSheet(
         suggestions: data,
+        onCreateNewMeal: () {
+          Navigator.of(context).pop();
+          _openCreateSheet();
+        },
         onTapSuggestion: (suggestion) {
           Navigator.of(context).pop();
           if (suggestion.savedTemplate != null) {
@@ -320,10 +324,12 @@ class _SavedMealsPageState extends State<SavedMealsPage> {
 class _SavedMealsSearchSheet extends StatefulWidget {
   const _SavedMealsSearchSheet({
     required this.suggestions,
+    required this.onCreateNewMeal,
     required this.onTapSuggestion,
   });
 
   final MealSuggestionGroups suggestions;
+  final VoidCallback onCreateNewMeal;
   final ValueChanged<MealSuggestion> onTapSuggestion;
 
   @override
@@ -411,6 +417,13 @@ class _SavedMealsSearchSheetState extends State<_SavedMealsSearchSheet> {
                   )
                 else
                   ..._searchSections(_results),
+                const SizedBox(height: CaleeSpacing.md),
+                OutlinedButton.icon(
+                  key: const Key('saved_meals_search_create_new'),
+                  onPressed: widget.onCreateNewMeal,
+                  icon: const Icon(Icons.add),
+                  label: const Text(MealSuggestionLabels.createNewMeal),
+                ),
               ],
             ),
           ),

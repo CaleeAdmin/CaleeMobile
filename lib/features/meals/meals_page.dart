@@ -944,7 +944,6 @@ class _AddMealSheetState extends State<AddMealSheet> {
   void _changeMealType(String value) {
     setState(() {
       _mealType = value;
-      _selectedSuggestion = null;
       _suggestions = _loadSuggestions();
     });
   }

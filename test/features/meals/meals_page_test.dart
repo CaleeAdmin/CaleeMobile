@@ -60,6 +60,7 @@ class _StubHub extends CaleeHubClient {
   bool createCalled = false;
   String? lastCreateTitle;
   String? lastCreateNotes;
+  String? lastCreateMealType;
   int? lastCreateTemplateId;
   int? lastCreateStarterTemplateId;
   bool deleteCalled = false;
@@ -88,6 +89,7 @@ class _StubHub extends CaleeHubClient {
     createCalled = true;
     lastCreateTitle = title;
     lastCreateNotes = notes;
+    lastCreateMealType = mealType;
     lastCreateTemplateId = templateId;
     lastCreateStarterTemplateId = starterTemplateId;
     return ClientMeal(
@@ -760,6 +762,36 @@ void main() {
       expect(hub.lastCreateTemplateId, 42);
       expect(hub.lastCreateStarterTemplateId, isNull);
     });
+
+    testWidgets(
+      '+ sheet preserves saved-meal linkage when the occurrence type changes',
+      (tester) async {
+        _useTallViewport(tester);
+        final hub = _StubHub(
+          favourites: [_favourite(id: 42, name: 'Family curry', notes: 'Mild')],
+        );
+        await tester.pumpWidget(_buildMealsPage(hub));
+        await tester.pump();
+        await tester.pump();
+
+        await tester.tap(find.byTooltip('Add meal'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('meal_suggestion_saved_42')));
+        await tester.pump();
+        await tester.tap(find.byType(DropdownButton<String>));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Lunch').last);
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('meal_save_button')));
+        await tester.pump();
+        await tester.pump();
+
+        expect(hub.lastCreateTitle, 'Family curry');
+        expect(hub.lastCreateMealType, 'lunch');
+        expect(hub.lastCreateTemplateId, 42);
+        expect(hub.lastCreateStarterTemplateId, isNull);
+      },
+    );
 
     testWidgets('search finds unplanned saved notes and quick ideas', (
       tester,
