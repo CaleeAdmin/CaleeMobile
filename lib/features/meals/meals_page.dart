@@ -206,16 +206,6 @@ class _MealsPageState extends State<MealsPage> {
                 color: CaleeColors.primary,
                 tooltip: 'Copy last week',
               ),
-              IconButton(
-                key: const Key('meals_add_button'),
-                onPressed: _openAddMealSheet,
-                icon: const Icon(Icons.add),
-                iconSize: 22,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
-                color: CaleeColors.primary,
-                tooltip: 'Add meal',
-              ),
             ],
           ),
         ),
@@ -294,10 +284,6 @@ class _MealsPageState extends State<MealsPage> {
     );
   }
 
-  void _openAddMealSheet() {
-    AddMealSheet.show(context: context, controller: _controller);
-  }
-
   Future<void> _openSavedMeals() async {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -343,10 +329,6 @@ class _MealsPageState extends State<MealsPage> {
         meals: allMeals,
         loadSuggestions: () =>
             MealSuggestionResolver(_controller.repository).load(),
-        onCreateNewMeal: () {
-          Navigator.of(sheetContext).pop();
-          _openAddMealSheet();
-        },
         onTapMeal: (meal) {
           Navigator.of(sheetContext).pop();
           _openSheet(date: meal.mealDate, mealType: meal.mealType, meal: meal);
@@ -875,260 +857,6 @@ class _MealFormSheetState extends State<MealFormSheet> {
 }
 
 // ─────────────────────────────────────────────
-// AddMealSheet
-// ─────────────────────────────────────────────
-
-/// Bottom sheet opened from the Meals page top-bar "+" button. Lets the user
-/// pick a date and meal type in addition to the title/notes fields that
-/// [MealFormSheet] already offers, then saves through the same
-/// [MealsController.createMeal] path.
-class AddMealSheet extends StatefulWidget {
-  const AddMealSheet({required this.controller, super.key});
-
-  final MealsController controller;
-
-  static Future<void> show({
-    required BuildContext context,
-    required MealsController controller,
-  }) {
-    return CaleeBottomSheet.show<void>(
-      context: context,
-      title: 'Add meal',
-      child: AddMealSheet(controller: controller),
-    );
-  }
-
-  @override
-  State<AddMealSheet> createState() => _AddMealSheetState();
-}
-
-class _AddMealSheetState extends State<AddMealSheet> {
-  final _formKey = GlobalKey<FormState>();
-  final _titleController = TextEditingController();
-  final _notesController = TextEditingController();
-  late DateTime _date;
-  String _mealType = 'dinner';
-  MealSuggestion? _selectedSuggestion;
-  bool _isSaving = false;
-  String? _saveError;
-
-  @override
-  void initState() {
-    super.initState();
-    _date = DateTime.now();
-  }
-
-  @override
-  void dispose() {
-    _titleController.dispose();
-    _notesController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _pickDate() async {
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: _date,
-      firstDate: DateTime(_date.year - 1),
-      lastDate: DateTime(_date.year + 5),
-    );
-    if (picked != null && mounted) {
-      setState(() => _date = picked);
-    }
-  }
-
-  Future<void> _openSuggestionPicker() async {
-    final result = await CaleeBottomSheet.show<Object>(
-      context: context,
-      title: 'Choose meal',
-      child: _MealSuggestionPicker(
-        loadSuggestions: () => MealSuggestionResolver(
-          widget.controller.repository,
-        ).load(mealType: _mealType),
-        onSelect: (suggestion) => Navigator.of(context).pop(suggestion),
-        onCreateNewMeal: () => Navigator.of(context).pop('create_new'),
-      ),
-    );
-    if (!mounted) return;
-    if (result is MealSuggestion) {
-      setState(() {
-        _selectedSuggestion = result;
-        _titleController.text = result.name;
-        _notesController.text = result.notes ?? '';
-      });
-    } else if (result == 'create_new') {
-      final suggestion = _selectedSuggestion;
-      final detailsAreUnchanged =
-          suggestion != null &&
-          _titleController.text == suggestion.name &&
-          _notesController.text == (suggestion.notes ?? '');
-      setState(() {
-        _selectedSuggestion = null;
-        if (detailsAreUnchanged) {
-          _titleController.clear();
-          _notesController.clear();
-        }
-      });
-    }
-  }
-
-  void _changeMealType(String value) {
-    setState(() => _mealType = value);
-  }
-
-  String _selectedSuggestionLabel(MealSuggestion suggestion) {
-    if (suggestion.source == MealSuggestionSource.starter) {
-      return 'Quick dinner idea';
-    }
-    if (suggestion.isFavourite) return 'Family favourite';
-    if (suggestion.usageCount > 0) return 'Recently used';
-    return 'Saved meal';
-  }
-
-  Future<void> _save() async {
-    if (_isSaving || !(_formKey.currentState?.validate() ?? false)) return;
-    final title = _titleController.text.trim();
-    final notes = _notesController.text.trim();
-
-    setState(() {
-      _isSaving = true;
-      _saveError = null;
-    });
-
-    try {
-      await widget.controller.createMeal(
-        mealDate: _fmt(_date),
-        mealType: _mealType,
-        title: title,
-        notes: notes.isEmpty ? null : notes,
-        templateId: _selectedSuggestion?.templateId,
-        starterTemplateId: _selectedSuggestion?.starterTemplateId,
-      );
-      if (mounted) Navigator.of(context).pop();
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _isSaving = false;
-          _saveError = e.toString();
-        });
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Form(
-      key: _formKey,
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            CaleeSection(
-              children: [
-                CaleeSectionPickerRow(
-                  label: 'Date',
-                  value: _formatDateLabel(_fmt(_date)),
-                  onTap: _isSaving ? null : _pickDate,
-                  enabled: !_isSaving,
-                ),
-                CaleeSectionDropdownRow<String>(
-                  label: 'Meal type',
-                  value: _mealType,
-                  enabled: !_isSaving,
-                  items: _kMealTypeOrder
-                      .map(
-                        (type) => DropdownMenuItem(
-                          value: type,
-                          child: Text(_kMealTypeLabels[type] ?? type),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: (value) {
-                    if (value != null) _changeMealType(value);
-                  },
-                ),
-              ],
-            ),
-            const SizedBox(height: CaleeSpacing.md),
-            CaleeSection(
-              children: [
-                CaleeListRow(
-                  key: const Key('meal_choose_suggestion'),
-                  title: _selectedSuggestion == null
-                      ? 'Choose saved or suggested meal'
-                      : 'Change selected meal',
-                  subtitle: _selectedSuggestion == null
-                      ? 'Optional — or enter meal details below'
-                      : '${_selectedSuggestion!.name} · '
-                            '${_selectedSuggestionLabel(_selectedSuggestion!)}',
-                  trailing: const Icon(Icons.chevron_right),
-                  enabled: !_isSaving,
-                  onTap: _openSuggestionPicker,
-                ),
-              ],
-            ),
-            const SizedBox(height: CaleeSpacing.md),
-            CaleeSection(
-              children: [
-                CaleeSectionTextFormField(
-                  key: const Key('meal_title_field'),
-                  controller: _titleController,
-                  hintText: 'Meal title',
-                  enabled: !_isSaving,
-                  autofocus: false,
-                  textInputAction: TextInputAction.next,
-                  validator: (v) {
-                    if (v == null || v.trim().isEmpty) {
-                      return 'Please enter a meal title';
-                    }
-                    return null;
-                  },
-                ),
-                CaleeSectionTextFormField(
-                  controller: _notesController,
-                  hintText: 'Notes (optional)',
-                  enabled: !_isSaving,
-                  maxLines: 3,
-                  minLines: 1,
-                  textInputAction: TextInputAction.done,
-                ),
-              ],
-            ),
-            if (_saveError != null) ...[
-              const SizedBox(height: CaleeSpacing.sm),
-              Text(
-                _saveError!,
-                style: const TextStyle(
-                  fontSize: 13,
-                  color: CaleeColors.destructive,
-                ),
-                textAlign: TextAlign.center,
-              ),
-            ],
-            const SizedBox(height: CaleeSpacing.md),
-            FilledButton(
-              key: const Key('meal_save_button'),
-              onPressed: _isSaving ? null : _save,
-              child: _isSaving
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
-                    )
-                  : const Text('Save'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────
 // PickDinnerSheet
 // ─────────────────────────────────────────────
 
@@ -1583,14 +1311,12 @@ class _MealSearchSheet extends StatefulWidget {
     required this.loadSuggestions,
     required this.onTapMeal,
     required this.onTapSuggestion,
-    required this.onCreateNewMeal,
   });
 
   final List<ClientMeal> meals;
   final Future<MealSuggestionGroups> Function() loadSuggestions;
   final ValueChanged<ClientMeal> onTapMeal;
   final ValueChanged<MealSuggestion> onTapSuggestion;
-  final VoidCallback onCreateNewMeal;
 
   @override
   State<_MealSearchSheet> createState() => _MealSearchSheetState();
@@ -1729,20 +1455,6 @@ class _MealSearchSheetState extends State<_MealSearchSheet> {
                 future: _suggestionsFuture,
                 builder: (context, snapshot) =>
                     _buildResults(snapshot, scrollController, theme),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                CaleeSpacing.pagePadding,
-                CaleeSpacing.xs,
-                CaleeSpacing.pagePadding,
-                CaleeSpacing.sm,
-              ),
-              child: OutlinedButton.icon(
-                key: const Key('meal_search_create_new'),
-                onPressed: widget.onCreateNewMeal,
-                icon: const Icon(Icons.add),
-                label: const Text(MealSuggestionLabels.createNewMeal),
               ),
             ),
           ],

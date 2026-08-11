@@ -1322,8 +1322,7 @@ class AddToWeekResult {
 }
 
 /// Small sheet to pick a date and meal type before adding a saved meal or
-/// quick dinner idea to the current week. Mirrors the date/meal-type pickers
-/// used by [AddMealSheet].
+/// quick dinner idea to the current week.
 class AddSavedMealToWeekSheet extends StatefulWidget {
   const AddSavedMealToWeekSheet({
     required this.title,
