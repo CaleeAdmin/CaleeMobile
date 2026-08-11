@@ -3,8 +3,8 @@
 // Covers: the day-based weekly meal sections (breakfast/lunch/dinner rows
 // per day, with inline notes on planned meals and "Add <meal type>" for
 // empty slots); the compact actions row (grocery list / copy week); the
-// Pick dinner sheet's Family favourites / Quick dinner ideas / Create new
-// meal flows; and the existing MealFormSheet edit/save behaviour.
+// Pick dinner sheet's Family favourites / Recently used / Quick dinner ideas /
+// Create new meal flows; and the existing MealFormSheet edit/save behaviour.
 
 import 'package:calee_mobile/data/api/calee_hub_client.dart';
 import 'package:calee_mobile/data/models/client_meal.dart';
@@ -47,11 +47,13 @@ class _StubHub extends CaleeHubClient {
     this._meals = const [],
     this._favourites = const [],
     this._quickIdeas = const [],
+    this.failSuggestions = false,
   }) : super();
 
   final List<ClientMeal> _meals;
   final List<ClientMealTemplate> _favourites;
   final List<ClientStarterMealTemplate> _quickIdeas;
+  final bool failSuggestions;
 
   bool updateCalled = false;
   String? lastUpdateNotes = 'NOT_CALLED';
@@ -149,7 +151,10 @@ class _StubHub extends CaleeHubClient {
   Future<ClientMealTemplateList> mealTemplates({
     required String accessToken,
     String? mealType,
-  }) async => ClientMealTemplateList(templates: _favourites);
+  }) async {
+    if (failSuggestions) throw StateError('suggestions unavailable');
+    return ClientMealTemplateList(templates: _favourites);
+  }
 
   @override
   Future<List<ClientStarterMealTemplate>> mealStarterTemplates({
@@ -197,6 +202,9 @@ ClientMealTemplate _favourite({
   required String name,
   String? icon,
   String? notes,
+  bool isFavourite = true,
+  int usageCount = 0,
+  String? lastUsedAt,
 }) => ClientMealTemplate(
   id: id,
   householdId: 'h1',
@@ -207,8 +215,9 @@ ClientMealTemplate _favourite({
   kidFriendly: false,
   freezerFriendly: false,
   lunchboxFriendly: false,
-  isFavourite: true,
-  usageCount: 0,
+  isFavourite: isFavourite,
+  usageCount: usageCount,
+  lastUsedAt: lastUsedAt,
 );
 
 ClientStarterMealTemplate _quickIdea({
@@ -428,6 +437,74 @@ void main() {
         expect(find.text('Create new meal'), findsOneWidget);
       },
     );
+
+    testWidgets('shows only explicit favourites and separates recent meals', (
+      tester,
+    ) async {
+      _useTallViewport(tester);
+      final hub = _StubHub(
+        favourites: [
+          _favourite(id: 1, name: 'Taco Night'),
+          _favourite(
+            id: 2,
+            name: 'Recent Pasta',
+            isFavourite: false,
+            usageCount: 2,
+          ),
+          _favourite(id: 3, name: 'Unused Soup', isFavourite: false),
+        ],
+      );
+      await tester.pumpWidget(_buildMealsPage(hub));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Add dinner').first);
+      await tester.pumpAndSettle();
+
+      expect(find.text('FAMILY FAVOURITES'), findsOneWidget);
+      expect(find.text('RECENTLY USED'), findsOneWidget);
+      expect(find.text('Taco Night'), findsOneWidget);
+      expect(find.text('Recent Pasta'), findsOneWidget);
+      expect(find.text('Unused Soup'), findsNothing);
+    });
+
+    testWidgets('shows three choices per group until More is tapped', (
+      tester,
+    ) async {
+      _useTallViewport(tester);
+      final hub = _StubHub(
+        favourites: List.generate(
+          4,
+          (index) => _favourite(id: index + 1, name: 'Favourite ${index + 1}'),
+        ),
+      );
+      await tester.pumpWidget(_buildMealsPage(hub));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Add dinner').first);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Favourite 3'), findsOneWidget);
+      expect(find.text('Favourite 4'), findsNothing);
+      await tester.tap(find.text('More'));
+      await tester.pump();
+      expect(find.text('Favourite 4'), findsOneWidget);
+    });
+
+    testWidgets('load failure still offers Create new meal', (tester) async {
+      _useTallViewport(tester);
+      final hub = _StubHub(failSuggestions: true);
+      await tester.pumpWidget(_buildMealsPage(hub));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Add dinner').first);
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Could not load saved or suggested meals'),
+        findsOneWidget,
+      );
+      expect(find.text('Create new meal'), findsOneWidget);
+    });
 
     testWidgets('selecting a family favourite creates the meal', (
       tester,
@@ -665,6 +742,7 @@ void main() {
 
         expect(find.text('Add meal'), findsOneWidget);
         expect(find.text('Meal type'), findsOneWidget);
+        expect(find.text('Choose saved or suggested meal'), findsOneWidget);
         expect(find.text('Meal title'), findsOneWidget);
         expect(find.text('Notes (optional)'), findsOneWidget);
       },
@@ -689,6 +767,174 @@ void main() {
 
       expect(hub.createCalled, isTrue);
       expect(hub.lastCreateTitle, 'Pancakes');
+    });
+
+    testWidgets('+ can reuse a saved meal without losing template linkage', (
+      tester,
+    ) async {
+      _useTallViewport(tester);
+      final hub = _StubHub(
+        favourites: [
+          _favourite(id: 7, name: 'Family Lasagne', notes: 'Extra vegetables'),
+        ],
+      );
+      await tester.pumpWidget(_buildMealsPage(hub));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Add meal'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Choose saved or suggested meal'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Family Lasagne'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.widgetWithText(TextFormField, 'Family Lasagne'),
+        findsOneWidget,
+      );
+      expect(
+        find.widgetWithText(TextFormField, 'Extra vegetables'),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      expect(hub.lastCreateTemplateId, 7);
+      expect(hub.lastCreateStarterTemplateId, isNull);
+    });
+
+    testWidgets(
+      '+ can reuse a Quick dinner idea without losing starter linkage',
+      (tester) async {
+        _useTallViewport(tester);
+        final hub = _StubHub(
+          quickIdeas: [_quickIdea(id: 11, name: 'Quick Noodles')],
+        );
+        await tester.pumpWidget(_buildMealsPage(hub));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byTooltip('Add meal'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Choose saved or suggested meal'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Quick Noodles'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Save'));
+        await tester.pumpAndSettle();
+
+        expect(hub.lastCreateStarterTemplateId, 11);
+        expect(hub.lastCreateTemplateId, isNull);
+      },
+    );
+
+    testWidgets('+ chooser keeps Create new visible above a long list', (
+      tester,
+    ) async {
+      final hub = _StubHub(
+        favourites: List.generate(
+          4,
+          (index) => _favourite(id: index + 1, name: 'Saved ${index + 1}'),
+        ),
+        quickIdeas: List.generate(
+          4,
+          (index) => _quickIdea(id: index + 10, name: 'Idea ${index + 1}'),
+        ),
+      );
+      await tester.pumpWidget(_buildMealsPage(hub));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Add meal'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Choose saved or suggested meal'));
+      await tester.pumpAndSettle();
+
+      final createNew = find.byKey(const Key('meal_suggestions_create_new'));
+      expect(createNew, findsOneWidget);
+      expect(tester.getRect(createNew).bottom, lessThanOrEqualTo(600));
+    });
+
+    testWidgets('search finds a saved meal by notes outside the visible week', (
+      tester,
+    ) async {
+      _useTallViewport(tester);
+      final hub = _StubHub(
+        favourites: [
+          _favourite(
+            id: 8,
+            name: 'Vegetable Curry',
+            notes: 'Uses coconut milk',
+          ),
+        ],
+      );
+      await tester.pumpWidget(_buildMealsPage(hub));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Search meals'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), 'coconut');
+      await tester.pumpAndSettle();
+
+      expect(find.text('FAMILY FAVOURITES'), findsOneWidget);
+      expect(find.text('Vegetable Curry'), findsOneWidget);
+      expect(find.text('Create new meal'), findsOneWidget);
+    });
+
+    testWidgets('search finds a Quick dinner idea not planned this week', (
+      tester,
+    ) async {
+      _useTallViewport(tester);
+      final hub = _StubHub(
+        quickIdeas: [_quickIdea(id: 9, name: 'Quick Teriyaki')],
+      );
+      await tester.pumpWidget(_buildMealsPage(hub));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Search meals'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), 'teriyaki');
+      await tester.pumpAndSettle();
+
+      expect(find.text('QUICK DINNER IDEAS'), findsOneWidget);
+      expect(find.text('Quick Teriyaki'), findsOneWidget);
+
+      await tester.tap(find.text('Quick Teriyaki'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Quick dinner idea'), findsOneWidget);
+      expect(find.text('Add to this week'), findsOneWidget);
+      expect(find.text('Save'), findsNothing);
+      expect(find.text('Delete'), findsNothing);
+    });
+
+    testWidgets('search keeps existing visible-week meal results', (
+      tester,
+    ) async {
+      _useTallViewport(tester);
+      final monday = _mondayOf(DateTime.now());
+      final hub = _StubHub(
+        meals: [
+          ClientMeal(
+            id: 12,
+            householdId: 'h1',
+            mealDate: _fmt(monday),
+            mealType: 'dinner',
+            title: 'Current Week Pizza',
+            status: 'planned',
+            source: 'manual',
+          ),
+        ],
+      );
+      await tester.pumpWidget(_buildMealsPage(hub));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Search meals'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), 'pizza');
+      await tester.pumpAndSettle();
+
+      expect(find.text('THIS WEEK'), findsOneWidget);
+      expect(find.text('Current Week Pizza'), findsWidgets);
     });
   });
 }
