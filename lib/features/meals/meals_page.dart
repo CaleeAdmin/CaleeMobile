@@ -1209,6 +1209,7 @@ class _PickDinnerSheetState extends State<PickDinnerSheet> {
           ? null
           : 'Could not add this meal. Try again.',
       selectionActionLabel: 'Add',
+      showSearch: true,
     );
   }
 }
@@ -1221,6 +1222,7 @@ class _MealSuggestionPicker extends StatefulWidget {
     this.isBusy = false,
     this.actionError,
     this.selectionActionLabel,
+    this.showSearch = false,
   });
 
   final Future<MealSuggestionGroups> Function() loadSuggestions;
@@ -1229,19 +1231,30 @@ class _MealSuggestionPicker extends StatefulWidget {
   final bool isBusy;
   final String? actionError;
   final String? selectionActionLabel;
+  final bool showSearch;
 
   @override
   State<_MealSuggestionPicker> createState() => _MealSuggestionPickerState();
 }
 
 class _MealSuggestionPickerState extends State<_MealSuggestionPicker> {
+  final _searchController = TextEditingController();
   late Future<MealSuggestionGroups> _future;
 
   @override
   void initState() {
     super.initState();
     _future = widget.loadSuggestions();
+    _searchController.addListener(_onSearchChanged);
   }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _onSearchChanged() => setState(() {});
 
   void _retry() => setState(() => _future = widget.loadSuggestions());
 
@@ -1257,12 +1270,88 @@ class _MealSuggestionPickerState extends State<_MealSuggestionPicker> {
           }
           if (snapshot.hasError) return _buildLoadError();
           final groups = snapshot.data!;
+          final query = _searchController.text.trim();
+          final results = groups.search(query);
           return Column(
             children: [
+              if (widget.showSearch) ...[
+                TextField(
+                  key: const Key('pick_dinner_search_field'),
+                  controller: _searchController,
+                  textInputAction: TextInputAction.search,
+                  decoration: InputDecoration(
+                    hintText: 'Search saved meals and ideas…',
+                    prefixIcon: const Icon(Icons.search_outlined),
+                    suffixIcon: _searchController.text.isNotEmpty
+                        ? IconButton(
+                            tooltip: 'Clear search',
+                            icon: const Icon(Icons.clear),
+                            onPressed: _searchController.clear,
+                          )
+                        : null,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(CaleeRadius.card),
+                      borderSide: BorderSide.none,
+                    ),
+                    filled: true,
+                    fillColor: CaleeColors.groupedBackground,
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: CaleeSpacing.md,
+                      vertical: CaleeSpacing.sm,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: CaleeSpacing.md),
+              ],
               Expanded(
                 child: ListView(
                   children: [
-                    if (groups.familyFavourites.isNotEmpty) ...[
+                    if (query.isNotEmpty &&
+                        results.familyFavourites.isNotEmpty) ...[
+                      _section(
+                        sectionId: 'family_favourites_search',
+                        title: MealSuggestionLabels.familyFavourites,
+                        suggestions: results.familyFavourites,
+                      ),
+                      const SizedBox(height: CaleeSpacing.md),
+                    ],
+                    if (query.isNotEmpty &&
+                        results.recentlyUsed.isNotEmpty) ...[
+                      _section(
+                        sectionId: 'recently_used_search',
+                        title: MealSuggestionLabels.recentlyUsed,
+                        suggestions: results.recentlyUsed,
+                      ),
+                      const SizedBox(height: CaleeSpacing.md),
+                    ],
+                    if (query.isNotEmpty &&
+                        results.quickDinnerIdeas.isNotEmpty) ...[
+                      _section(
+                        sectionId: 'quick_dinner_ideas_search',
+                        title: MealSuggestionLabels.quickDinnerIdeas,
+                        suggestions: results.quickDinnerIdeas,
+                      ),
+                      const SizedBox(height: CaleeSpacing.md),
+                    ],
+                    if (query.isNotEmpty && results.otherSaved.isNotEmpty) ...[
+                      _section(
+                        sectionId: 'saved_meals_search',
+                        title: MealSuggestionLabels.savedMeals,
+                        suggestions: results.otherSaved,
+                      ),
+                      const SizedBox(height: CaleeSpacing.md),
+                    ],
+                    if (query.isNotEmpty && results.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.all(CaleeSpacing.lg),
+                        child: Text(
+                          'No matching meals.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: CaleeColors.textSecondary),
+                        ),
+                      ),
+                    if (query.isEmpty &&
+                        groups.familyFavourites.isNotEmpty) ...[
                       _section(
                         sectionId: 'family_favourites',
                         title: MealSuggestionLabels.familyFavourites,
@@ -1270,7 +1359,7 @@ class _MealSuggestionPickerState extends State<_MealSuggestionPicker> {
                       ),
                       const SizedBox(height: CaleeSpacing.md),
                     ],
-                    if (groups.recentlyUsed.isNotEmpty) ...[
+                    if (query.isEmpty && groups.recentlyUsed.isNotEmpty) ...[
                       _section(
                         sectionId: 'recently_used',
                         title: MealSuggestionLabels.recentlyUsed,
@@ -1278,7 +1367,8 @@ class _MealSuggestionPickerState extends State<_MealSuggestionPicker> {
                       ),
                       const SizedBox(height: CaleeSpacing.md),
                     ],
-                    if (groups.quickDinnerIdeas.isNotEmpty) ...[
+                    if (query.isEmpty &&
+                        groups.quickDinnerIdeas.isNotEmpty) ...[
                       _section(
                         sectionId: 'quick_dinner_ideas',
                         title: MealSuggestionLabels.quickDinnerIdeas,
@@ -1286,7 +1376,8 @@ class _MealSuggestionPickerState extends State<_MealSuggestionPicker> {
                       ),
                       const SizedBox(height: CaleeSpacing.md),
                     ],
-                    if (groups.familyFavourites.isEmpty &&
+                    if (query.isEmpty &&
+                        groups.familyFavourites.isEmpty &&
                         groups.recentlyUsed.isEmpty &&
                         groups.quickDinnerIdeas.isEmpty)
                       const Padding(

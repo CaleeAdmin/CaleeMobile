@@ -501,6 +501,46 @@ void main() {
       expect(find.text('Favourite 4'), findsOneWidget);
     });
 
+    testWidgets('searches reusable dinners by name and notes', (tester) async {
+      _useTallViewport(tester);
+      final hub = _StubHub(
+        favourites: [
+          _favourite(id: 1, name: 'Taco Night'),
+          _favourite(
+            id: 2,
+            name: 'Hidden Soup',
+            isFavourite: false,
+            notes: 'red lentil family recipe',
+          ),
+        ],
+        quickIdeas: [_quickIdea(id: 3, name: 'Butter Chicken')],
+      );
+      await tester.pumpWidget(_buildMealsPage(hub));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Add dinner').first);
+      await tester.pumpAndSettle();
+
+      final search = find.byKey(const Key('pick_dinner_search_field'));
+      expect(search, findsOneWidget);
+
+      await tester.enterText(search, 'lentil');
+      await tester.pump();
+      expect(find.text('SAVED MEALS'), findsOneWidget);
+      expect(find.text('Hidden Soup'), findsOneWidget);
+      expect(find.text('Taco Night'), findsNothing);
+
+      await tester.enterText(search, 'butter');
+      await tester.pump();
+      expect(find.text('QUICK DINNER IDEAS'), findsOneWidget);
+      expect(find.text('Butter Chicken'), findsOneWidget);
+
+      await tester.enterText(search, 'not a real meal');
+      await tester.pump();
+      expect(find.text('No matching meals.'), findsOneWidget);
+      expect(find.text('Create new meal'), findsOneWidget);
+    });
+
     testWidgets('load failure still offers Create new meal', (tester) async {
       _useTallViewport(tester);
       final hub = _StubHub(failSuggestions: true);
