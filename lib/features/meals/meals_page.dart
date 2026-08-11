@@ -957,23 +957,31 @@ class _AddMealSheetState extends State<AddMealSheet> {
         _notesController.text = result.notes ?? '';
       });
     } else if (result == 'create_new') {
-      setState(() => _selectedSuggestion = null);
+      final suggestion = _selectedSuggestion;
+      final detailsAreUnchanged =
+          suggestion != null &&
+          _titleController.text == suggestion.name &&
+          _notesController.text == (suggestion.notes ?? '');
+      setState(() {
+        _selectedSuggestion = null;
+        if (detailsAreUnchanged) {
+          _titleController.clear();
+          _notesController.clear();
+        }
+      });
     }
   }
 
   void _changeMealType(String value) {
-    setState(() {
-      _mealType = value;
-      _selectedSuggestion = null;
-    });
+    setState(() => _mealType = value);
   }
 
   String _selectedSuggestionLabel(MealSuggestion suggestion) {
     if (suggestion.source == MealSuggestionSource.starter) {
-      return MealSuggestionLabels.quickDinnerIdeas;
+      return 'Quick dinner idea';
     }
     if (suggestion.isFavourite) return 'Family favourite';
-    if (suggestion.usageCount > 0) return MealSuggestionLabels.recentlyUsed;
+    if (suggestion.usageCount > 0) return 'Recently used';
     return 'Saved meal';
   }
 
@@ -1047,12 +1055,13 @@ class _AddMealSheetState extends State<AddMealSheet> {
               children: [
                 CaleeListRow(
                   key: const Key('meal_choose_suggestion'),
-                  title:
-                      _selectedSuggestion?.name ??
-                      'Choose saved or suggested meal',
+                  title: _selectedSuggestion == null
+                      ? 'Choose saved or suggested meal'
+                      : 'Change selected meal',
                   subtitle: _selectedSuggestion == null
-                      ? 'Optional — your manual meal details stay available'
-                      : _selectedSuggestionLabel(_selectedSuggestion!),
+                      ? 'Optional — or enter meal details below'
+                      : '${_selectedSuggestion!.name} · '
+                            '${_selectedSuggestionLabel(_selectedSuggestion!)}',
                   trailing: const Icon(Icons.chevron_right),
                   enabled: !_isSaving,
                   onTap: _openSuggestionPicker,
@@ -1199,6 +1208,7 @@ class _PickDinnerSheetState extends State<PickDinnerSheet> {
       actionError: _createError == null
           ? null
           : 'Could not add this meal. Try again.',
+      selectionActionLabel: 'Add',
     );
   }
 }
@@ -1210,6 +1220,7 @@ class _MealSuggestionPicker extends StatefulWidget {
     required this.onCreateNewMeal,
     this.isBusy = false,
     this.actionError,
+    this.selectionActionLabel,
   });
 
   final Future<MealSuggestionGroups> Function() loadSuggestions;
@@ -1217,6 +1228,7 @@ class _MealSuggestionPicker extends StatefulWidget {
   final VoidCallback onCreateNewMeal;
   final bool isBusy;
   final String? actionError;
+  final String? selectionActionLabel;
 
   @override
   State<_MealSuggestionPicker> createState() => _MealSuggestionPickerState();
@@ -1285,17 +1297,18 @@ class _MealSuggestionPickerState extends State<_MealSuggestionPicker> {
                           style: TextStyle(color: CaleeColors.textSecondary),
                         ),
                       ),
-                    if (widget.actionError != null) ...[
-                      Text(
-                        widget.actionError!,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(color: CaleeColors.destructive),
-                      ),
-                      const SizedBox(height: CaleeSpacing.sm),
-                    ],
                   ],
                 ),
               ),
+              if (widget.isBusy) const LinearProgressIndicator(),
+              if (widget.actionError != null) ...[
+                const SizedBox(height: CaleeSpacing.sm),
+                Text(
+                  widget.actionError!,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: CaleeColors.destructive),
+                ),
+              ],
               const SizedBox(height: CaleeSpacing.sm),
               OutlinedButton.icon(
                 key: const Key('meal_suggestions_create_new'),
@@ -1341,9 +1354,17 @@ class _MealSuggestionPickerState extends State<_MealSuggestionPicker> {
       subtitle: suggestion.savedTemplate == null
           ? null
           : savedMealMetadata(suggestion.savedTemplate!),
-      trailing: suggestion.isFavourite
-          ? const Icon(Icons.star, size: 18, color: CaleeColors.primary)
-          : const Icon(Icons.chevron_right),
+      trailing: widget.selectionActionLabel == null
+          ? suggestion.isFavourite
+                ? const Icon(Icons.star, size: 18, color: CaleeColors.primary)
+                : const Icon(Icons.chevron_right)
+          : Text(
+              widget.selectionActionLabel!,
+              style: const TextStyle(
+                color: CaleeColors.primary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
       enabled: !widget.isBusy,
       onTap: () => widget.onSelect(suggestion),
     );
@@ -1574,6 +1595,7 @@ class _MealSearchSheetState extends State<_MealSearchSheet> {
                         ),
                       ),
                       IconButton(
+                        tooltip: 'Close search',
                         icon: const Icon(Icons.close),
                         onPressed: () => Navigator.of(context).maybePop(),
                       ),
@@ -1590,6 +1612,7 @@ class _MealSearchSheetState extends State<_MealSearchSheet> {
                       prefixIcon: const Icon(Icons.search_outlined),
                       suffixIcon: _controller.text.isNotEmpty
                           ? IconButton(
+                              tooltip: 'Clear search',
                               icon: const Icon(Icons.clear),
                               onPressed: _controller.clear,
                             )

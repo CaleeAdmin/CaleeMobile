@@ -48,18 +48,21 @@ class _StubHub extends CaleeHubClient {
     this._favourites = const [],
     this._quickIdeas = const [],
     this.failSuggestions = false,
+    this.failCreate = false,
   }) : super();
 
   final List<ClientMeal> _meals;
   final List<ClientMealTemplate> _favourites;
   final List<ClientStarterMealTemplate> _quickIdeas;
   final bool failSuggestions;
+  final bool failCreate;
 
   bool updateCalled = false;
   String? lastUpdateNotes = 'NOT_CALLED';
   bool createCalled = false;
   String? lastCreateTitle;
   String? lastCreateNotes;
+  String? lastCreateMealType;
   int? lastCreateTemplateId;
   int? lastCreateStarterTemplateId;
   bool deleteCalled = false;
@@ -88,8 +91,15 @@ class _StubHub extends CaleeHubClient {
     createCalled = true;
     lastCreateTitle = title;
     lastCreateNotes = notes;
+    lastCreateMealType = mealType;
     lastCreateTemplateId = templateId;
     lastCreateStarterTemplateId = starterTemplateId;
+    if (failCreate) {
+      throw const CaleeHubException(
+        statusCode: 500,
+        message: 'Could not create meal',
+      );
+    }
     return ClientMeal(
       id: 99,
       householdId: 'h1',
@@ -434,6 +444,7 @@ void main() {
         expect(find.text('QUICK DINNER IDEAS'), findsOneWidget);
         expect(find.text('Taco Night'), findsOneWidget);
         expect(find.text('Butter Chicken'), findsOneWidget);
+        expect(find.text('Add'), findsNWidgets(2));
         expect(find.text('Create new meal'), findsOneWidget);
       },
     );
@@ -554,6 +565,31 @@ void main() {
       expect(hub.lastCreateTitle, 'Butter Chicken');
       expect(hub.lastCreateStarterTemplateId, 5);
       expect(hub.lastCreateTemplateId, isNull);
+    });
+
+    testWidgets('create failure stays visible beside the fixed action', (
+      tester,
+    ) async {
+      _useTallViewport(tester);
+      final hub = _StubHub(
+        favourites: [_favourite(id: 1, name: 'Taco Night')],
+        failCreate: true,
+      );
+      await tester.pumpWidget(_buildMealsPage(hub));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Add dinner').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Taco Night'));
+      await tester.pumpAndSettle();
+
+      final error = find.text('Could not add this meal. Try again.');
+      final createNew = find.byKey(const Key('meal_suggestions_create_new'));
+      expect(error, findsOneWidget);
+      expect(
+        tester.getRect(error).bottom,
+        lessThan(tester.getRect(createNew).top),
+      );
     });
 
     testWidgets('"Create new meal" opens the plain meal form', (tester) async {
@@ -827,6 +863,99 @@ void main() {
         expect(hub.lastCreateTemplateId, isNull);
       },
     );
+
+    testWidgets('+ changing meal type keeps the selected meal linkage', (
+      tester,
+    ) async {
+      _useTallViewport(tester);
+      final hub = _StubHub(
+        quickIdeas: [_quickIdea(id: 11, name: 'Quick Noodles')],
+      );
+      await tester.pumpWidget(_buildMealsPage(hub));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Add meal'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Choose saved or suggested meal'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Quick Noodles'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byType(DropdownButton<String>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Lunch').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      expect(hub.lastCreateMealType, 'lunch');
+      expect(hub.lastCreateStarterTemplateId, 11);
+    });
+
+    testWidgets('+ Create new clears untouched suggestion details', (
+      tester,
+    ) async {
+      _useTallViewport(tester);
+      final hub = _StubHub(
+        quickIdeas: [_quickIdea(id: 11, name: 'Quick Noodles')],
+      );
+      await tester.pumpWidget(_buildMealsPage(hub));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Add meal'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Choose saved or suggested meal'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Quick Noodles'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Change selected meal'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Create new meal'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Choose saved or suggested meal'), findsOneWidget);
+      expect(
+        tester
+            .widget<TextFormField>(find.byType(TextFormField).first)
+            .controller!
+            .text,
+        isEmpty,
+      );
+    });
+
+    testWidgets('+ Create new preserves meal details the user edited', (
+      tester,
+    ) async {
+      _useTallViewport(tester);
+      final hub = _StubHub(
+        quickIdeas: [_quickIdea(id: 11, name: 'Quick Noodles')],
+      );
+      await tester.pumpWidget(_buildMealsPage(hub));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Add meal'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Choose saved or suggested meal'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Quick Noodles'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byType(TextFormField).first,
+        'My Quick Noodles',
+      );
+      await tester.tap(find.text('Change selected meal'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Create new meal'));
+      await tester.pumpAndSettle();
+
+      expect(
+        tester
+            .widget<TextFormField>(find.byType(TextFormField).first)
+            .controller!
+            .text,
+        'My Quick Noodles',
+      );
+    });
 
     testWidgets('+ chooser keeps Create new visible above a long list', (
       tester,
