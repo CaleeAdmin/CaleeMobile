@@ -112,6 +112,7 @@ jobs:
           scripts/release_preflight.sh selftest
           scripts/generate_release_manifest.sh selftest
           scripts/verify_release_ref.sh selftest
+          scripts/read_apk_signing_identity.sh selftest
           scripts/release_preflight.sh check
 
       - name: Check formatting
