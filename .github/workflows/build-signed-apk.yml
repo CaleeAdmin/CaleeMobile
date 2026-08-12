@@ -35,6 +35,7 @@ jobs:
   release-ref-guard:
     name: Verify release ref
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       is_release_branch: ${{ steps.guard.outputs.is_release_branch }}
       release_ref: ${{ steps.guard.outputs.release_ref }}
@@ -58,6 +59,7 @@ jobs:
     name: Release preflight (Android)
     needs: release-ref-guard
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -119,6 +121,10 @@ jobs:
     name: Generate calee-mobile signed release APK and AAB
     needs: [release-ref-guard, preflight]
     runs-on: ubuntu-latest
+    # Headroom over the ~19 minute norm for the NDK install's three
+    # retries and two release builds, without leaving a wedged Gradle
+    # daemon billing against the six-hour default.
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -522,12 +528,22 @@ jobs:
           path: build/release-manifest-android.json
           if-no-files-found: error
 
+      # Retention on the four large artifacts below is tied to what the run
+      # actually produced. A release candidate off stage/main keeps the full 90
+      # days — the symbols in particular must outlive the release long enough to
+      # deobfuscate a crash reported weeks after rollout. A signed TEST build
+      # off any other branch is installed on a device within days and can never
+      # be submitted, so it expires in 14 and stops accumulating against the
+      # repository's 2 GB Actions storage allowance, which is currently full.
+      # The release manifest is deliberately excluded: it is a few hundred bytes
+      # and it is the evidence anchor that binds a candidate to its commit.
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: calee-mobile-signed-apk-${{ steps.build_meta.outputs.sanitized_build_name }}
           path: build/app/outputs/flutter-apk/calee-mobile-${{ steps.build_meta.outputs.sanitized_build_name }}.apk
           if-no-files-found: error
+          retention-days: ${{ needs.release-ref-guard.outputs.is_release_branch == 'true' && 90 || 14 }}
 
       - name: Upload AAB artifact
         uses: actions/upload-artifact@v4
@@ -535,6 +551,7 @@ jobs:
           name: calee-mobile-signed-aab-${{ steps.build_meta.outputs.sanitized_build_name }}
           path: build/app/outputs/bundle/release/calee-mobile-${{ steps.build_meta.outputs.sanitized_build_name }}.aab
           if-no-files-found: error
+          retention-days: ${{ needs.release-ref-guard.outputs.is_release_branch == 'true' && 90 || 14 }}
 
       - name: Upload native debug symbols zip artifact
         uses: actions/upload-artifact@v4
@@ -542,6 +559,7 @@ jobs:
           name: calee-mobile-native-debug-symbols-${{ steps.build_meta.outputs.sanitized_build_name }}
           path: ${{ steps.native_symbols.outputs.zip_path }}
           if-no-files-found: error
+          retention-days: ${{ needs.release-ref-guard.outputs.is_release_branch == 'true' && 90 || 14 }}
 
       - name: Upload Dart obfuscation symbols artifact
         uses: actions/upload-artifact@v4
@@ -549,6 +567,7 @@ jobs:
           name: calee-mobile-dart-symbols-${{ steps.build_meta.outputs.sanitized_build_name }}
           path: build/symbols
           if-no-files-found: error
+          retention-days: ${{ needs.release-ref-guard.outputs.is_release_branch == 'true' && 90 || 14 }}
 
       # A signed build off a non-release branch is a TEST build, not a release
       # candidate: it skipped the readiness evidence, so nobody has attested to

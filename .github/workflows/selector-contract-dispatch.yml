@@ -43,12 +43,35 @@ name: Trigger selector contract
 # also fire. As of this change no `stage` branch exists in CaleeMobile (only
 # `dev` and `main`), so stage coverage is not claimed until such a branch and
 # this file on it exist.
+#
+# TRIGGER, AND WHY IT IS CURRENTLY MANUAL ONLY
+#
+# `REGRESSION_DISPATCH_TOKEN` is not configured on this repository. Every one
+# of the 56 runs this workflow made between 3 and 12 August 2026 therefore
+# concluded the same way: the preflight job below booted a runner, echoed
+# `has_token=false` in about three seconds, and the `dispatch` job — the job
+# that does the actual work — was skipped. Not one selector contract was
+# dispatched, while every push to dev/stage/main still billed the one-minute
+# minimum for the preflight runner.
+#
+# Running on push therefore bought nothing and cost ~56 billable minutes a
+# month, which is why the push trigger is commented out rather than deleted.
+#
+# TO RESTORE FULL COVERAGE: configure the `REGRESSION_DISPATCH_TOKEN` secret
+# (see the REQUIRED SECRET note below), then uncomment the `push:` block. It
+# is preserved verbatim so restoring it is a pure uncomment. Consider folding
+# `dispatch-preflight` into a first step of `dispatch` at the same time — with
+# the token present the preflight job is a whole runner spent reading one
+# secret. Until then, dispatch this workflow by hand from the Actions tab when
+# a selector contract run is wanted; the scheduled + manual runs in
+# CaleeMobile-Regression remain the documented fallback either way.
 on:
-  push:
-    branches:
-      - dev
-      - stage
-      - main
+  workflow_dispatch:
+  # push:
+  #   branches:
+  #     - dev
+  #     - stage
+  #     - main
 
 # The receiver workflow + ref to dispatch. Pinned to the receiver's default
 # branch so the run uses main's ci.yml definition.
@@ -61,6 +84,7 @@ jobs:
   dispatch-preflight:
     name: Check whether REGRESSION_DISPATCH_TOKEN is configured
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     # `secrets` cannot be referenced in a job-level `if:`; resolve the token's
     # presence in a step env and expose it as an output (same pattern
     # CaleeMobile-Regression uses for CALEEMOBILE_CHECKOUT_TOKEN).
@@ -77,6 +101,10 @@ jobs:
     needs: dispatch-preflight
     if: ${{ needs.dispatch-preflight.outputs.has_token == 'true' }}
     runs-on: ubuntu-latest
+    # The two bounded waits below allow ~10 minutes for the receiver run plus
+    # ~1 minute of correlation polling. This cap sits above that so a genuinely
+    # stuck curl loop cannot bill against the six-hour default.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 

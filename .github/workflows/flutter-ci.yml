@@ -14,17 +14,22 @@ name: Flutter CI
 # pass before merging, for each of `dev`, `stage`, and `main`, so no pull
 # request can merge into an integration branch without a green run of each.
 #
-# Release-build scope: both required jobs run on every trigger below. The
-# release-APK build/sign/notification-config steps near the bottom of the
-# "Format, Analyze & Test" job are gated to only execute on a push to `stage`
-# or `main` (i.e. a merge/promotion into those branches) or a manual
-# workflow_dispatch targeting one of them — never on a `dev` push or on any
-# pull_request, including PRs targeting stage/main. See the `if:` conditions
-# on those individual steps for the exact rule. The debug Android build in
-# the separate job below is not gated this way: it runs on every pull
-# request, so a platform build broken by a change that still passes
-# format/analyze/test is caught before merge, not only at stage/main
-# promotion.
+# Release-build scope: the release-APK build/sign/notification-config steps
+# near the bottom of the "Format, Analyze & Test" job are gated to only
+# execute on a push to `stage` or `main` (i.e. a merge/promotion into those
+# branches) or a manual workflow_dispatch targeting one of them — never on a
+# `dev` push or on any pull_request, including PRs targeting stage/main. See
+# the `if:` conditions on those individual steps for the exact rule.
+#
+# Job scope: "Format, Analyze & Test" runs on every trigger. "Android debug
+# build" runs on pull_request only, and only after the checks job passes. It
+# is the pre-merge platform-build gate — a change that passes
+# format/analyze/test but breaks the Android build is caught before merge —
+# so re-running it on the stage/main push that merges that same tree bought
+# nothing but billed 13 minutes a promotion. The Android release path is
+# still exercised on stage/main by the gated release-APK steps in the checks
+# job, and build-signed-apk.yml independently re-checks both the APK and the
+# AAB before any artifact can reach a store.
 on:
   pull_request:
     branches:
@@ -51,6 +56,12 @@ jobs:
   analyze-and-test:
     name: Format, Analyze & Test
     runs-on: ubuntu-latest
+    # Runs 31240263655 (attempt 3) hung in "Build Android App Bundle (release)"
+    # for 48 minutes before the job was terminated — against a ~19 minute norm
+    # for this job on a stage/main push. Without an explicit cap a wedged Gradle
+    # build bills against the six-hour default. 35 leaves headroom over the
+    # measured worst-case release build while still failing fast on a hang.
+    timeout-minutes: 35
 
     steps:
       # Free runner disk space before the toolchain and builds. Runs 429/430
@@ -126,6 +137,35 @@ jobs:
         env:
           TZ: Australia/Perth
 
+      # The release APK build below was the single most expensive step in CI
+      # (12m48s on run 31560260193) and this was the only job running Gradle
+      # without a dependency cache. Restored only when the release build below
+      # actually runs, so a pull_request run — where every Gradle step is
+      # skipped — never saves a near-empty cache under the shared key and
+      # poisons it for the Android job.
+      #
+      # Because this arm only runs on stage/main, the entry it writes is scoped
+      # to a release branch, which is what makes it restorable from every other
+      # branch: GitHub scopes a cache to the branch that wrote it plus that
+      # branch's descendants, so a cache written by a feature branch is
+      # unreadable by any other feature branch. Cache-only: never affects build
+      # output or signing.
+      - name: Cache Gradle
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && contains(fromJSON('["stage","main"]'), github.ref_name)
+        uses: actions/cache@v4
+        with:
+          # Only the downloaded dependency jars and the wrapper distribution.
+          # Caching all of ~/.gradle/caches produced multi-gigabyte entries that
+          # evicted each other against the repository's 10 GB cache budget —
+          # run 31294142412 restored nothing in 1s and then paid 10m50s for a
+          # build that takes 3m49s warm.
+          path: |
+            ~/.gradle/caches/modules-2
+            ~/.gradle/wrapper
+          key: gradle-deps-${{ runner.os }}-${{ hashFiles('android/**/*.gradle*', 'android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-deps-${{ runner.os }}-
+
       # Ephemeral CI-only signing key so the release smoke build below can
       # produce a signed APK without touching production signing secrets.
       # Generated fresh in $RUNNER_TEMP (job-scoped, never cached, never
@@ -197,12 +237,35 @@ jobs:
   # a change that builds green in analyze/test but breaks the platform build
   # (a manifest-merge conflict, a plugin's minSdk requirement, a Gradle/Kotlin
   # incompatibility) is caught on every PR, not only at stage/main promotion.
-  # Debug only: uses the Flutter/Gradle auto-generated debug keystore, no
-  # repository or organization signing secret; produces no artifact that is
-  # uploaded, published, or deployed anywhere.
+  # No repository or organization signing secret is used, and it produces no
+  # artifact that is uploaded, published, or deployed anywhere.
+  #
+  # NOTE FOR ADMINISTRATORS: the job name below, "Android debug build", is a
+  # required status check on dev/stage/main. It is deliberately unchanged even
+  # though the job no longer builds a debug APK (see the release-AAB note
+  # further down) — renaming it would make branch protection wait forever on a
+  # check name that no longer reports. Rename it only together with the branch
+  # protection settings.
   android-debug-build:
     name: Android debug build
     runs-on: ubuntu-latest
+    # Only pull requests. On a push to stage/main this job re-built the exact
+    # tree the pull request had already built minutes earlier — 13 billable
+    # minutes of pure repetition per promotion. The release-build arm of
+    # analyze-and-test still exercises the Android release path on stage/main,
+    # and build-signed-apk.yml re-checks both the APK and the AAB before
+    # anything can reach a store.
+    if: github.event_name == 'pull_request'
+    # Serialised behind the cheap checks. Both jobs used to start together, so
+    # a run that had already failed kept paying for a full Android build: on
+    # run 31294142412 the checks failed after 1m05s and this job billed another
+    # 18 minutes before finishing green. The trade is pull-request latency
+    # (the two jobs no longer overlap), not billable minutes — a passing run
+    # costs the same as before, a failing one stops at the checks.
+    needs: analyze-and-test
+    # ~12 minutes is the warm-cache norm and ~19 the cold-cache worst case
+    # (run 31294142412). See the timeout note on analyze-and-test above.
+    timeout-minutes: 25
 
     steps:
       # Same rationale as the equivalent step in analyze-and-test above: the
@@ -230,27 +293,42 @@ jobs:
       # Bounds build duration on repeat runs (a cold Gradle/AGP/Kotlin +
       # dependency resolution is the dominant cost of this job). Cache-only:
       # never affects build output or signing.
+      #
+      # Scoped to the dependency jars and the wrapper rather than all of
+      # ~/.gradle/caches: the old path produced multi-gigabyte entries that
+      # evicted each other against the repository's 10 GB cache budget, so
+      # restore-keys regularly found nothing (run 31294142412 restored nothing
+      # in 1s and paid 10m50s for a build that takes 3m49s warm, then spent a
+      # further 1m22s saving the oversized entry). Key renamed alongside the
+      # narrowed path so the first run cannot restore a stale wide entry.
       - name: Cache Gradle
         uses: actions/cache@v4
         with:
           path: |
-            ~/.gradle/caches
+            ~/.gradle/caches/modules-2
             ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('android/**/*.gradle*', 'android/gradle/wrapper/gradle-wrapper.properties') }}
+          key: gradle-deps-${{ runner.os }}-${{ hashFiles('android/**/*.gradle*', 'android/gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: |
-            gradle-${{ runner.os }}-
+            gradle-deps-${{ runner.os }}-
 
       - name: Get dependencies
         run: flutter pub get
 
-      - name: Build Android APK (debug)
-        run: flutter build apk --debug
-
-      # --- Broad-media-permission regression gate (runs on every PR) --------
+      # --- Platform build + broad-media-permission gate (every PR) ----------
+      # The release App Bundle below is now the only Android build in this job.
+      # It previously ran after a `flutter build apk --debug`, which cost a
+      # further 3m49s warm (10m50s cold, run 31294142412) and proved a strict
+      # subset of what this build proves: the AAB compiles the same Gradle,
+      # AGP, Kotlin and plugin graph, merges the same library manifests, and
+      # additionally exercises R8 and resource shrinking. The one thing it no
+      # longer covers is a fault unique to the debug manifest or the debug
+      # signing config — accepted deliberately, because such a fault cannot
+      # reach a store artifact.
+      #
       # Google Play rejected the 0.0.29 AAB because a plugin's library
       # manifest merged READ_MEDIA_IMAGES/READ_MEDIA_VIDEO (and friends) into
       # the release artifact. The app manifest now strips them with
-      # tools:node="remove"; the steps below rebuild the actual release AAB —
+      # tools:node="remove"; the steps below build the actual release AAB —
       # the artifact type Google Play receives — and fail the PR if any
       # prohibited permission ever merges back in (e.g. via a dependency
       # bump). Policy list lives in
