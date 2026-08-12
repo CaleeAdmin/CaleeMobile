@@ -35,6 +35,7 @@ jobs:
   release-ref-guard:
     name: Verify release ref
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       is_release_branch: ${{ steps.guard.outputs.is_release_branch }}
       release_ref: ${{ steps.guard.outputs.release_ref }}
@@ -58,6 +59,7 @@ jobs:
     name: Release preflight (Android)
     needs: release-ref-guard
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -119,6 +121,10 @@ jobs:
     name: Generate calee-mobile signed release APK and AAB
     needs: [release-ref-guard, preflight]
     runs-on: ubuntu-latest
+    # Headroom over the ~19 minute norm for the NDK install's three
+    # retries and two release builds, without leaving a wedged Gradle
+    # daemon billing against the six-hour default.
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -470,6 +476,13 @@ jobs:
       # The signing identity recorded here is the certificate's public
       # distinguished name and SHA-256 fingerprint, printed by apksigner; it is
       # public information, never key material.
+      #
+      # apksigner labels those certificate lines differently across build-tools
+      # releases ("Signer #1 certificate DN:" vs "V2 Signer: certificate DN:"),
+      # so the identity is read by scripts/read_apk_signing_identity.sh, which
+      # understands both spellings and fails closed. A hardcoded prefix here
+      # silently stopped matching when the runner image bumped build-tools and
+      # failed the release after the whole build had already run.
       - name: Generate release manifest
         shell: bash
         run: |
@@ -479,17 +492,9 @@ jobs:
           aab="build/app/outputs/bundle/release/calee-mobile-${{ steps.build_meta.outputs.sanitized_build_name }}.aab"
           native_symbols="${{ steps.native_symbols.outputs.zip_path }}"
 
-          latest_build_tools="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -n1)"
-          apksigner_bin="$ANDROID_HOME/build-tools/$latest_build_tools/apksigner"
-
-          certs="$("$apksigner_bin" verify --print-certs "$apk")"
-          signer_dn="$(sed -n 's/^Signer #1 certificate DN: //p' <<<"$certs" | head -n1)"
-          signer_sha256="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' <<<"$certs" | head -n1)"
-
-          if [[ -z "$signer_dn" || -z "$signer_sha256" ]]; then
-            echo "Could not read the signing certificate identity from apksigner output" >&2
-            exit 1
-          fi
+          scripts/read_apk_signing_identity.sh selftest
+          signing_identity="$(scripts/read_apk_signing_identity.sh read "$apk")"
+          echo "Signing identity: $signing_identity"
 
           # Every --artifact/--artifact-dir below corresponds to an upload step
           # further down. The generator fails closed if any of them is missing,
@@ -502,7 +507,7 @@ jobs:
             --artifact "apk=$apk" \
             --artifact "native_debug_symbols=$native_symbols" \
             --artifact-dir "dart_debug_symbols=build/symbols" \
-            --signing-identity "$signer_dn (certificate SHA-256 $signer_sha256)" \
+            --signing-identity "$signing_identity" \
             --output "build/release-manifest-android.json"
 
       # Print the exact-candidate identity the Release Operator must record in
@@ -523,12 +528,22 @@ jobs:
           path: build/release-manifest-android.json
           if-no-files-found: error
 
+      # Retention on the four large artifacts below is tied to what the run
+      # actually produced. A release candidate off stage/main keeps the full 90
+      # days — the symbols in particular must outlive the release long enough to
+      # deobfuscate a crash reported weeks after rollout. A signed TEST build
+      # off any other branch is installed on a device within days and can never
+      # be submitted, so it expires in 14 and stops accumulating against the
+      # repository's 2 GB Actions storage allowance, which is currently full.
+      # The release manifest is deliberately excluded: it is a few hundred bytes
+      # and it is the evidence anchor that binds a candidate to its commit.
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: calee-mobile-signed-apk-${{ steps.build_meta.outputs.sanitized_build_name }}
           path: build/app/outputs/flutter-apk/calee-mobile-${{ steps.build_meta.outputs.sanitized_build_name }}.apk
           if-no-files-found: error
+          retention-days: ${{ needs.release-ref-guard.outputs.is_release_branch == 'true' && 90 || 14 }}
 
       - name: Upload AAB artifact
         uses: actions/upload-artifact@v4
@@ -536,6 +551,7 @@ jobs:
           name: calee-mobile-signed-aab-${{ steps.build_meta.outputs.sanitized_build_name }}
           path: build/app/outputs/bundle/release/calee-mobile-${{ steps.build_meta.outputs.sanitized_build_name }}.aab
           if-no-files-found: error
+          retention-days: ${{ needs.release-ref-guard.outputs.is_release_branch == 'true' && 90 || 14 }}
 
       - name: Upload native debug symbols zip artifact
         uses: actions/upload-artifact@v4
@@ -543,6 +559,7 @@ jobs:
           name: calee-mobile-native-debug-symbols-${{ steps.build_meta.outputs.sanitized_build_name }}
           path: ${{ steps.native_symbols.outputs.zip_path }}
           if-no-files-found: error
+          retention-days: ${{ needs.release-ref-guard.outputs.is_release_branch == 'true' && 90 || 14 }}
 
       - name: Upload Dart obfuscation symbols artifact
         uses: actions/upload-artifact@v4
@@ -550,6 +567,7 @@ jobs:
           name: calee-mobile-dart-symbols-${{ steps.build_meta.outputs.sanitized_build_name }}
           path: build/symbols
           if-no-files-found: error
+          retention-days: ${{ needs.release-ref-guard.outputs.is_release_branch == 'true' && 90 || 14 }}
 
       # A signed build off a non-release branch is a TEST build, not a release
       # candidate: it skipped the readiness evidence, so nobody has attested to

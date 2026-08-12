@@ -163,6 +163,7 @@ scripts/release_preflight.sh check --platform ios --require-store-readiness
 scripts/release_preflight.sh selftest            # 136 cases
 scripts/generate_release_manifest.sh selftest    # 17 cases
 scripts/verify_release_ref.sh selftest           # 50 cases
+scripts/read_apk_signing_identity.sh selftest    # 18 cases
 ```
 
 It validates:
@@ -294,6 +295,17 @@ feature branch ──PR──▶ dev ──PR──▶ stage ──PR──▶ m
 Branch protection for all three branches must require both Flutter CI job names
 (`Format, Analyze & Test`, `Android debug build`) — see the administrator note at
 the top of `.github/workflows/flutter-ci.yml`.
+
+Two things about `Android debug build` are worth knowing, because neither
+matches its name any more. It runs on **pull requests only**, after
+`Format, Analyze & Test` passes: it is the pre-merge platform-build gate, so
+re-running it on the push that merges the same tree only repeated work already
+done. And it builds the **release App Bundle**, not a debug APK — the AAB
+compiles the same Gradle, AGP, Kotlin and plugin graph, merges the same library
+manifests, and additionally exercises R8 and resource shrinking, so it is a
+superset of what the debug build proved. The job name is kept as-is because it
+is a required status check; renaming it means updating branch protection in the
+same change.
 
 ### Only `stage` and `main` may produce a RELEASE CANDIDATE
 
@@ -745,6 +757,19 @@ alone could not (section 3.2).
 `signing_identity` carries **non-secret** identity information only — a
 certificate common name, a certificate fingerprint, a provisioning profile name.
 Never place a password, private key or credential file content in it.
+
+On Android that value is read from the signed APK by
+`scripts/read_apk_signing_identity.sh`, which parses
+`apksigner verify --print-certs` output. apksigner labels its certificate lines
+differently across build-tools releases (`Signer #1 certificate DN:` on older
+build-tools, `V2 Signer: certificate DN:` on newer ones), so the script keys off
+the stable part of the line rather than a fixed prefix — a hardcoded prefix in
+the workflow silently stopped matching when the GitHub runner image bumped
+build-tools and failed a release build after the whole compile had run. It fails
+closed on missing or partial certificate output, records every distinct
+certificate when signing keys have been rotated, and ignores source-stamp
+certificates. Run `scripts/read_apk_signing_identity.sh read <apk>` to print the
+same identity locally.
 
 ---
 
