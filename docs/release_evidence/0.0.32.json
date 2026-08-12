@@ -1,0 +1,81 @@
+{
+  "schema": "calee-mobile-release-evidence/3",
+  "version": "0.0.32",
+  "build_number": "32",
+
+  "build_readiness": {
+    "_comment": "Complete this BEFORE dispatching a signed release workflow. Nothing here depends on the signed candidate existing.",
+    "reviewed_at": "2026-08-12",
+    "release_operator": "CaleeAdmin",
+    "credential_owner_android": "CaleeAdmin",
+    "credential_owner_apple": "REPLACE — owner of the Apple signing credentials",
+
+    "checks": {
+      "release_notes_reviewed": true,
+      "privacy_disclosures_prepared": true,
+      "support_url_reviewed": true,
+      "privacy_policy_url_reviewed": true,
+      "age_rating_reviewed": true,
+      "review_notes_prepared": true,
+
+      "android_listing_prepared": true,
+      "google_play_data_safety_prepared": true,
+
+      "ios_listing_prepared": false,
+      "apple_app_privacy_prepared": false
+    },
+
+    "apple_certificate_expiry": "YYYY-MM-DD",
+    "apple_provisioning_profile_expiry": "YYYY-MM-DD"
+  },
+
+  "submission_readiness": {
+    "_comment": "Complete this AFTER the signed candidate has been distributed to Play Internal Testing / TestFlight and qualified on a physical device. Do not fill it in ahead of time. Each *_candidate block identifies ONE exact signed candidate; get its values from `scripts/generate_release_manifest.sh checksum <release-manifest.json>` or from the signed workflow's run log.",
+    "reviewed_at": "YYYY-MM-DD",
+    "release_approver": "REPLACE — the person who approved this production release",
+
+    "checks": {
+      "listing_final_review_against_candidate": false,
+      "screenshots_reviewed_against_candidate": false,
+      "test_account_verified_against_candidate": false,
+      "regression_evidence_recorded": false,
+
+      "google_play_data_safety_submitted": false,
+
+      "apple_app_privacy_submitted": false,
+      "export_compliance_answered": false
+    },
+
+    "android_candidate": {
+      "_comment": "The exact signed Android candidate that was installed and tested. A build number alone does not identify a candidate.",
+      "git_sha": "REPLACE-WITH-40-CHARACTER-GIT-SHA",
+      "workflow_run_id": "REPLACE-WITH-WORKFLOW-RUN-ID",
+      "workflow_run_attempt": "REPLACE-WITH-RUN-ATTEMPT",
+      "release_manifest_sha256": "REPLACE-WITH-64-CHARACTER-MANIFEST-SHA256",
+
+      "device_qualification": {
+        "device": "REPLACE — device model",
+        "os_version": "REPLACE — Android version",
+        "build_number": "REPLACE-WITH-BUILD-NUMBER",
+        "outcome": "REPLACE — pass only if the candidate actually passed"
+      }
+    },
+
+    "ios_candidate": {
+      "_comment": "The exact signed iOS candidate that was installed from TestFlight and tested. This is a different workflow run from the Android one, with its own manifest.",
+      "git_sha": "REPLACE-WITH-40-CHARACTER-GIT-SHA",
+      "workflow_run_id": "REPLACE-WITH-WORKFLOW-RUN-ID",
+      "workflow_run_attempt": "REPLACE-WITH-RUN-ATTEMPT",
+      "release_manifest_sha256": "REPLACE-WITH-64-CHARACTER-MANIFEST-SHA256",
+
+      "device_qualification": {
+        "device": "REPLACE — device model",
+        "os_version": "REPLACE — iOS version",
+        "build_number": "REPLACE-WITH-BUILD-NUMBER",
+        "outcome": "REPLACE — pass only if the candidate actually passed"
+      }
+    }
+  },
+
+  "notes": "Android build readiness only. The Apple fields (credential owner, certificate and provisioning-profile expiry, iOS listing and App Privacy checks) are deliberately left unfilled — no iOS release of 0.0.32 has been prepared, so an iOS signed build fails closed until the Credential Owner — Apple completes them. submission_readiness is untouched: it is completed only after the signed candidate exists and has been qualified on a physical device."
+}
