@@ -1,7 +1,7 @@
 // Widget tests for SavedMealsPage, ManageSavedMealSheet and
 // QuickDinnerIdeaSheet.
 //
-// Covers: Family favourites / Recent meals / Quick dinner ideas sections;
+// Covers: Family favourites / Recently used / Quick dinner ideas sections;
 // renaming, favouriting and deleting a household saved meal; and adding a
 // saved meal or quick dinner idea to the current week via the existing
 // createMeal(templateId/starterTemplateId) path so grocery ingredient
@@ -21,12 +21,14 @@ class _StubHub extends CaleeHubClient {
   _StubHub({
     this._templates = const [],
     this._quickIdeas = const [],
+    this.failSuggestions = false,
     Map<int, List<ClientTemplateIngredient>>? ingredientsByTemplateId,
   }) : _ingredientsByTemplateId = ingredientsByTemplateId ?? {},
        super();
 
   List<ClientMealTemplate> _templates;
   final List<ClientStarterMealTemplate> _quickIdeas;
+  final bool failSuggestions;
   final Map<int, List<ClientTemplateIngredient>> _ingredientsByTemplateId;
   int _nextIngredientId = 1000;
 
@@ -73,7 +75,10 @@ class _StubHub extends CaleeHubClient {
   Future<ClientMealTemplateList> mealTemplates({
     required String accessToken,
     String? mealType,
-  }) async => ClientMealTemplateList(templates: _templates);
+  }) async {
+    if (failSuggestions) throw StateError('suggestions unavailable');
+    return ClientMealTemplateList(templates: _templates);
+  }
 
   @override
   Future<List<ClientStarterMealTemplate>> mealStarterTemplates({
@@ -285,12 +290,14 @@ ClientMealTemplate _template({
 ClientStarterMealTemplate _quickIdea({
   required int id,
   required String name,
+  String? notes,
   List<ClientTemplateIngredient> ingredients = const [],
 }) => ClientStarterMealTemplate(
   id: id,
   slug: name.toLowerCase().replaceAll(' ', '-'),
   name: name,
   defaultMealType: 'dinner',
+  notes: notes,
   kidFriendly: false,
   freezerFriendly: false,
   lunchboxFriendly: false,
@@ -354,7 +361,7 @@ void main() {
       expect(find.text('Spaghetti Bolognese'), findsOneWidget);
       expect(find.text('Used 4 times'), findsOneWidget);
 
-      expect(find.text('RECENT MEALS'), findsOneWidget);
+      expect(find.text('RECENTLY USED'), findsOneWidget);
       expect(find.text('Pizza Night'), findsOneWidget);
 
       expect(find.text('QUICK DINNER IDEAS'), findsOneWidget);
@@ -371,8 +378,57 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('No family favourites yet'), findsOneWidget);
-      expect(find.text('No recent meals yet'), findsOneWidget);
+      expect(find.text('No recently used meals yet'), findsOneWidget);
       expect(find.text('No quick dinner ideas yet'), findsOneWidget);
+      expect(find.text('Create new meal'), findsOneWidget);
+    });
+
+    testWidgets('load failure still offers Create new meal', (tester) async {
+      final hub = _StubHub(failSuggestions: true);
+      await tester.pumpWidget(_buildSavedMealsPage(hub, _controllerFor(hub)));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Could not load saved meals'), findsOneWidget);
+      expect(find.text('Create new meal'), findsOneWidget);
+    });
+  });
+
+  group('SavedMealsPage — search', () {
+    testWidgets('searches saved-meal notes and Quick dinner ideas', (
+      tester,
+    ) async {
+      final hub = _StubHub(
+        templates: [
+          _template(
+            id: 1,
+            name: 'Vegetable Curry',
+            isFavourite: true,
+            notes: 'Uses coconut milk',
+          ),
+        ],
+        quickIdeas: [
+          _quickIdea(id: 10, name: 'Quick Tacos', notes: 'Twenty minutes'),
+        ],
+      );
+      await tester.pumpWidget(_buildSavedMealsPage(hub, _controllerFor(hub)));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Search saved meals'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), 'coconut');
+      await tester.pump();
+
+      expect(find.text('FAMILY FAVOURITES'), findsWidgets);
+      // The page remains mounted behind the search sheet, so the same saved
+      // meal is visible once in each route.
+      expect(find.text('Vegetable Curry'), findsWidgets);
+
+      await tester.enterText(find.byType(TextField), 'twenty');
+      await tester.pump();
+
+      expect(find.text('QUICK DINNER IDEAS'), findsWidgets);
+      expect(find.text('Quick Tacos'), findsWidgets);
+      expect(find.text('Create new meal'), findsOneWidget);
     });
   });
 
@@ -821,6 +877,10 @@ void main() {
         );
         await tester.pumpWidget(_buildSavedMealsPage(hub, _controllerFor(hub)));
         await tester.pumpAndSettle();
+
+        expect(find.text('Banana Bread'), findsNothing);
+        await tester.tap(find.text('More'));
+        await tester.pump();
 
         final names = tester
             .widgetList<Text>(find.byType(Text))
