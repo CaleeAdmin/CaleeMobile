@@ -124,14 +124,16 @@ strict monotonicity.
 `scripts/release_preflight.sh` runs **before** any expensive signing/build job
 and fails fast, naming the exact item that is missing or inconsistent.
 
-It has **three deliberately separate levels**, because "the repository is
-consistent", "a signed candidate may be built" and "this candidate may be
-submitted to a store" are different claims made at different times:
+It has **deliberately separate levels**, because "the repository is consistent",
+"a signed binary may be built", "a signed *release candidate* may be built" and
+"this candidate may be submitted to a store" are different claims made at
+different times:
 
 | Level | Invocation | Who runs it | What it proves |
 | --- | --- | --- | --- |
 | Repository correctness | `check` | Flutter CI, every PR | The repository is internally consistent: identity, version wiring, tooling, docs, release notes. **Not** release approval. |
-| Build/sign readiness | `check --require-secrets --require-build-readiness --allow-branch stage --allow-branch main` | The signed release workflows | Additionally: an authorised release **branch**, signing secrets configured, and the `build_readiness` evidence completed by a named operator. Everything knowable *before* the candidate exists. |
+| Signed test build | `check --require-secrets --require-branch` | The signed Android workflow, off a non-release branch | Additionally: the run is on a real **branch** (never a tag) and signing secrets are configured. **No** readiness evidence — so the artifacts are a test build, not a release candidate. |
+| Build/sign readiness | `check --require-secrets --require-build-readiness --allow-branch stage --allow-branch main` | The signed release workflows, off `stage`/`main` | Additionally: an authorised release **branch**, signing secrets configured, and the `build_readiness` evidence completed by a named operator. Everything knowable *before* the candidate exists. |
 | Store submission readiness | `check --require-store-readiness` | The Release Operator, after qualifying the candidate | Everything above **plus** `submission_readiness`: physical-device qualification of this exact build, final listing/screenshot review against the candidate, Release Approver sign-off. |
 
 Build readiness deliberately does **not** require device qualification. The
@@ -143,18 +145,24 @@ moved to the phase where it can honestly be performed.
 # Repository correctness — safe anywhere, needs no secrets
 scripts/release_preflight.sh check
 
-# Exactly what the signed Android workflow runs before building
+# Exactly what the signed Android workflow runs before building a RELEASE
+# candidate (dispatched from stage/main)
 scripts/release_preflight.sh check --platform android \
   --require-secrets --require-build-readiness \
   --allow-branch stage --allow-branch main
+
+# ...and what it runs for a signed TEST build off any other branch: same
+# repository and secret checks, no readiness evidence, no release candidate
+scripts/release_preflight.sh check --platform android \
+  --require-secrets --require-branch
 
 # What the operator runs AFTER qualifying the candidate, before uploading
 scripts/release_preflight.sh check --platform ios --require-store-readiness
 
 # Prove the checks themselves still work (both directions)
-scripts/release_preflight.sh selftest            # 119 cases
+scripts/release_preflight.sh selftest            # 136 cases
 scripts/generate_release_manifest.sh selftest    # 17 cases
-scripts/verify_release_ref.sh selftest           # 24 cases
+scripts/verify_release_ref.sh selftest           # 50 cases
 ```
 
 It validates:
@@ -169,7 +177,8 @@ It validates:
 - release notes exist for the current `build_name`, with no `TODO`/`TBD`
   placeholder left in them
 - that the run is on an authorised release **branch** (never a tag), when
-  `--allow-branch` is given
+  `--allow-branch` is given; or on *any* branch but still never a tag, when
+  `--require-branch` is given. Supplying both keeps the stricter allowlist
 - **presence** of the platform's signing secrets, when `--require-secrets` is
   given
 - the readiness evidence for the phase being checked (section 3.1)
@@ -286,26 +295,38 @@ Branch protection for all three branches must require both Flutter CI job names
 (`Format, Analyze & Test`, `Android debug build`) — see the administrator note at
 the top of `.github/workflows/flutter-ci.yml`.
 
-### Only `stage` and `main` may produce production-signed artifacts
+### Only `stage` and `main` may produce a RELEASE CANDIDATE
 
-Both signed-build workflows are manually dispatchable, so the branch restriction
-is **enforced in the workflow, not merely documented**, in two independent
-places:
+The signed **iOS** workflow may only be dispatched from `stage` or `main`. The
+signed **Android** workflow may be dispatched from any branch, so work in
+progress can be installed on a device — but only a run from `stage`/`main`
+produces a *release candidate*. See
+[Signed Android test builds](#signed-android-test-builds-from-any-branch) below.
+
+Both workflows are manually dispatchable, so the rule is **enforced in the
+workflow, not merely documented**, in two independent places:
 
 1. A `Verify release ref` job runs first and fails the whole run unless the
-   **fully-qualified** ref is `refs/heads/stage` or `refs/heads/main` *and* the
-   ref type is `branch`. It runs `scripts/verify_release_ref.sh`, which has its
-   own 24-case selftest.
+   **fully-qualified** ref is a branch of the type it claims to be. It runs
+   `scripts/verify_release_ref.sh`, which has its own 50-case selftest. iOS
+   requires `refs/heads/stage` or `refs/heads/main`; Android runs it with
+   `--any-branch`, which accepts any `refs/heads/*` and reports
+   `is_release_branch=true|false` for the jobs that follow.
 2. The preflight job independently applies the same rule through a separate
-   implementation (`--allow-branch stage --allow-branch main`), so removing or
-   misconfiguring the guard job does not silently re-open the hole.
+   implementation (`--allow-branch stage --allow-branch main` for a release
+   candidate, `--require-branch` for an Android test build), so removing or
+   misconfiguring the guard job does not silently re-open the hole. When the
+   guard reports a release branch, preflight re-checks that claim through the
+   allowlist rather than trusting it.
 
-**A tag is never an authorised release ref.** `workflow_dispatch` can target a
-branch *or* a tag, and `GITHUB_REF_NAME` is the short name for both — so a tag
-named `main` would otherwise be indistinguishable from the `main` branch. Both
-layers check `GITHUB_REF` and `GITHUB_REF_TYPE`, reject a ref/type
-contradiction rather than resolving it, and fail closed when `GITHUB_REF` is
-absent. The error names the supplied ref, its type, and the allowed refs:
+**A tag is never a signing ref — in either workflow, on any branch setting.**
+`workflow_dispatch` can target a branch *or* a tag, and `GITHUB_REF_NAME` is the
+short name for both — so a tag named `main` would otherwise be indistinguishable
+from the `main` branch. Both layers check `GITHUB_REF` and `GITHUB_REF_TYPE`,
+reject a ref/type contradiction rather than resolving it, and fail closed when
+`GITHUB_REF` is absent. Allowing Android builds off any *branch* deliberately
+does not relax this: it widens **which** branch, never **whether** it is one.
+The error names the supplied ref, its type, and what was required:
 
 ```
 Reason      : the release ref is a tag, not a branch
@@ -317,10 +338,33 @@ Production-signed artifacts may only be built from:
   refs/heads/main   (branch)
 ```
 
-Dispatching either signed workflow from `dev`, a feature branch or a `claude/*`
-branch therefore fails in seconds, before any signing material is decoded. There
-is no override. If you need a signed build of work in progress, promote it to
-`stage` first — that is what `stage` is for.
+Dispatching the signed **iOS** workflow from `dev`, a feature branch or a
+`claude/*` branch therefore fails in seconds, before any signing material is
+decoded. There is no override. If you need a signed iOS build of work in
+progress, promote it to `stage` first — that is what `stage` is for.
+
+### Signed Android test builds from any branch
+
+The signed **Android** workflow may be dispatched from any branch, so a change
+can be installed and exercised on a real device before it is promoted. A run
+from a branch other than `stage`/`main`:
+
+- still runs the full test suite, the identity/version wiring checks, the
+  signing-secret checks and the release-permission inspection of the final
+  APK/AAB — these have nothing to do with which branch is being built;
+- **skips the per-release readiness evidence** (section 3.1). That evidence is a
+  named person attesting that *this release's* listing, privacy disclosures and
+  review notes are prepared; the claim is meaningless for a feature branch, and
+  pre-ticking it there would corrode the attestation for real releases;
+- is therefore **not a release candidate**. The run says so in an Actions
+  warning and in a `Signed test build — not a release candidate` step, because
+  the artifacts are indistinguishable from a candidate's by filename.
+
+**Never upload a test build to Google Play.** Its build number consumes a number
+the store will then permanently reject, and nobody has attested to anything
+about it. To produce a real candidate, dispatch from `stage` or `main` with
+`docs/release_evidence/<version>.json` completed — the readiness gate is
+re-applied in full there, in both layers.
 
 What each level actually gates:
 
@@ -329,6 +373,7 @@ What each level actually gates:
 | PR CI green on `dev` | The change is internally consistent and testable | Not release approval; nothing has been qualified on a device |
 | Promotion to `stage` | The change is in a release candidate | Not approved for production |
 | Build readiness complete | A named operator attests listing/privacy/review preparation is done and credentials are valid | Not permission to submit; the candidate does not exist yet |
+| Signed Android build green on any other branch | Artifacts compiled, signed, verified, traceable, installable for testing | **Not** a release candidate — no readiness evidence was required, so nobody has attested to this release's listing or disclosures. Never upload it to a store |
 | Signed build green on `stage`/`main` | Artifacts compiled, signed, verified, traceable | **Not** store readiness — the candidate has not been run on a device |
 | Submission readiness complete | The same operator attests this exact candidate was qualified on a physical device, the listing/screenshots were re-checked against it, and the Release Approver signed off | **Not** store approval — neither store has seen it |
 | Submitted and approved | The store accepted the build | **Not** rollout completion — users do not have it yet |
@@ -468,7 +513,9 @@ credentials, so no CI run can publish a build by accident.
 ### 6.2 Standard production release
 
 The full Android sequence, in order. Do not reorder it — each step produces what
-the next one needs.
+the next one needs. It starts from a candidate built on `stage`/`main`: a signed
+build from any other branch is a test build, never an input to this sequence
+(see [Signed Android test builds](#signed-android-test-builds-from-any-branch)).
 
 ```
 signed AAB (stage/main) + release manifest

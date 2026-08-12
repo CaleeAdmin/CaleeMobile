@@ -64,6 +64,12 @@
 #     --allow-ref-name NAME        deprecated alias for --allow-branch (kept so
 #                                  existing invocations keep working; it now
 #                                  enforces the same branch-only rule)
+#     --require-branch             require a BRANCH of any name (refs/heads/*)
+#                                  rather than a named allowlist. A tag, a
+#                                  detached HEAD or untrustworthy ref data is
+#                                  still rejected. For signed builds that are
+#                                  deliberately allowed off any branch and are
+#                                  therefore NOT release candidates
 #     --skip-release-notes         do not require a release-notes file (for
 #                                  rehearsal/dry-run builds only)
 #
@@ -992,20 +998,36 @@ PY
 # `workflow_dispatch` can target a branch OR a tag, and the short ref name is
 # identical for both — a tag named `main` looks exactly like the `main` branch.
 # The fully-qualified ref and the ref type are therefore what is checked.
+#
+# --allow-branch restricts WHICH branch (a real release). --require-branch only
+# insists it is a branch at all, for signed builds deliberately allowed off any
+# branch. Both reject a tag: relaxing which branch may be built must never
+# relax whether it is a branch.
 check_ref_context() {
   section "Release context"
 
-  if (( ${#ALLOWED_BRANCHES[@]} == 0 )); then
-    printf '  SKIP  context: no --allow-branch given; release branch not enforced\n'
+  if (( ${#ALLOWED_BRANCHES[@]} == 0 )) && (( ! REQUIRE_BRANCH )); then
+    printf '  SKIP  context: no --allow-branch/--require-branch given; release ref not enforced\n'
     return 0
   fi
 
   # Build the authorised fully-qualified refs for the error message and match.
   local -a allowed_refs=()
   local allowed
-  for allowed in "${ALLOWED_BRANCHES[@]}"; do
-    allowed_refs+=("refs/heads/$allowed")
-  done
+  if (( ${#ALLOWED_BRANCHES[@]} > 0 )); then
+    for allowed in "${ALLOWED_BRANCHES[@]}"; do
+      allowed_refs+=("refs/heads/$allowed")
+    done
+  fi
+
+  # What the ref is being held to, quoted in every failure so the operator can
+  # see the rule that rejected them.
+  local expectation
+  if (( ${#allowed_refs[@]} > 0 )); then
+    expectation="allowed: ${allowed_refs[*]}"
+  else
+    expectation="a BRANCH is required (refs/heads/*); a tag is not one"
+  fi
 
   local gh_ref="${GITHUB_REF:-}"
   local gh_ref_type="${GITHUB_REF_TYPE:-}"
@@ -1016,7 +1038,7 @@ check_ref_context() {
   if [[ -n "$gh_ref" || -n "$gh_ref_type" || -n "$gh_ref_name" ]]; then
     # Running under GitHub Actions (or something imitating it).
     if [[ -z "$gh_ref" ]]; then
-      fail "context: GITHUB_REF is not set, so the release ref cannot be proven to be a branch (allowed: ${allowed_refs[*]})"
+      fail "context: GITHUB_REF is not set, so the release ref cannot be proven to be a branch ($expectation)"
       return 0
     fi
 
@@ -1045,7 +1067,7 @@ check_ref_context() {
     local branch
     branch="$(git -C "$REPO_ROOT" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
     if [[ -z "$branch" ]]; then
-      fail "context: HEAD is detached or not a branch, so this is not an authorised release ref (allowed: ${allowed_refs[*]})"
+      fail "context: HEAD is detached or not a branch, so this is not an authorised release ref ($expectation)"
       return 0
     fi
     current_ref="refs/heads/$branch"
@@ -1053,7 +1075,14 @@ check_ref_context() {
   fi
 
   if [[ "$current_type" != "branch" ]]; then
-    fail "context: the release ref '$current_ref' is a $current_type, not a branch. A TAG named like a release branch is not authorised. Allowed: ${allowed_refs[*]}"
+    fail "context: the release ref '$current_ref' is a $current_type, not a branch. A TAG named like a release branch is not authorised. $expectation"
+    return 0
+  fi
+
+  # --require-branch only: it is a branch, which was the whole requirement.
+  # Nothing here says the branch is a release branch, so say what it is not.
+  if (( ${#allowed_refs[@]} == 0 )); then
+    pass "context: building from '$current_ref' (branch); branch name not restricted"
     return 0
   fi
 
@@ -1120,6 +1149,7 @@ cmd_check() {
   REQUIRE_BUILD_READINESS=0
   REQUIRE_STORE_READINESS=0
   SKIP_RELEASE_NOTES=0
+  REQUIRE_BRANCH=0
   ALLOWED_BRANCHES=()
   CANDIDATE_MANIFESTS=()
 
@@ -1139,6 +1169,10 @@ cmd_check() {
         [[ $# -ge 2 ]] || { err "$1 requires a value"; return 2; }
         ALLOWED_BRANCHES+=("$2")
         shift 2
+        ;;
+      --require-branch)
+        REQUIRE_BRANCH=1
+        shift
         ;;
       --require-secrets)
         REQUIRE_SECRETS=1
@@ -1507,20 +1541,22 @@ PY
   # BRANCH. workflow_dispatch can also target a TAG, and the short ref name is
   # identical for both, so these cases drive the full GitHub ref environment.
 
-  # expect_ref <expected|nonzero> <name> <GITHUB_REF> <GITHUB_REF_TYPE> <GITHUB_REF_NAME> [args...]
-  # A literal "-" leaves that variable unset.
-  expect_ref() {
-    local expected="$1" name="$2" ref="$3" ref_type="$4" ref_name="$5"
-    shift 5
-
-    local status=0
+  # run_ref_check <GITHUB_REF> <GITHUB_REF_TYPE> <GITHUB_REF_NAME> [args...]
+  # A literal "-" leaves that variable unset. Returns the real entry point's
+  # exit status; the gate flags under test are supplied by the caller.
+  run_ref_check() {
+    local ref="$1" ref_type="$2" ref_name="$3"
+    shift 3
     (
       if [[ "$ref" == "-" ]]; then unset GITHUB_REF; else export GITHUB_REF="$ref"; fi
       if [[ "$ref_type" == "-" ]]; then unset GITHUB_REF_TYPE; else export GITHUB_REF_TYPE="$ref_type"; fi
       if [[ "$ref_name" == "-" ]]; then unset GITHUB_REF_NAME; else export GITHUB_REF_NAME="$ref_name"; fi
-      bash "$self_path" check --repo-root "$repo_root" \
-        --allow-branch stage --allow-branch main "$@" >/dev/null 2>&1
-    ) || status=$?
+      bash "$self_path" check --repo-root "$repo_root" "$@" >/dev/null 2>&1
+    )
+  }
+
+  record_ref() {
+    local expected="$1" name="$2" status="$3"
 
     local ok=0
     if [[ "$expected" == "nonzero" ]]; then
@@ -1535,6 +1571,28 @@ PY
       echo "  FAIL: $name (expected $expected, got $status)"
       failures=$((failures + 1))
     fi
+  }
+
+  # expect_ref <expected|nonzero> <name> <GITHUB_REF> <GITHUB_REF_TYPE> <GITHUB_REF_NAME> [args...]
+  # Drives the named-allowlist rule: only the stage/main BRANCH is a release.
+  expect_ref() {
+    local expected="$1" name="$2"
+    shift 2
+
+    local status=0
+    run_ref_check "$@" --allow-branch stage --allow-branch main || status=$?
+    record_ref "$expected" "$name" "$status"
+  }
+
+  # expect_any_branch <expected|nonzero> <name> <GITHUB_REF> <GITHUB_REF_TYPE> <GITHUB_REF_NAME> [args...]
+  # Drives --require-branch: any branch is acceptable, a tag is never one.
+  expect_any_branch() {
+    local expected="$1" name="$2"
+    shift 2
+
+    local status=0
+    run_ref_check "$@" --require-branch || status=$?
+    record_ref "$expected" "$name" "$status"
   }
 
   echo "selftest: the stage and main BRANCHES are accepted"
@@ -1577,6 +1635,40 @@ PY
   expect_ref nonzero release-ref-empty "" branch main
   expect_ref nonzero release-ref-name-disagrees refs/heads/dev branch main
   expect_ref nonzero release-ref-unknown-namespace refs/pull/539/merge - 539/merge
+
+  # --- any-branch enforcement (--require-branch) -----------------------------
+  # The signed Android workflow deliberately allows a signed build off any
+  # branch. That relaxes WHICH branch, and nothing else: a tag, a detached
+  # HEAD or contradictory ref data must still fail closed.
+
+  echo "selftest: --require-branch accepts any BRANCH"
+  expect_any_branch 0 any-branch-main refs/heads/main branch main
+  expect_any_branch 0 any-branch-stage refs/heads/stage branch stage
+  expect_any_branch 0 any-branch-dev refs/heads/dev branch dev
+  expect_any_branch 0 any-branch-feature refs/heads/feature/foo branch feature/foo
+  expect_any_branch 0 any-branch-lookalike refs/heads/stage-2 branch stage-2
+  expect_any_branch 0 any-branch-nested refs/heads/release/main branch release/main
+  expect_any_branch 0 any-branch-type-derived refs/heads/dev - dev
+
+  echo "selftest: --require-branch still rejects TAGS and untrustworthy ref data"
+  expect_any_branch nonzero any-branch-tag-main refs/tags/main tag main
+  expect_any_branch nonzero any-branch-tag-version refs/tags/v0.0.30 tag v0.0.30
+  expect_any_branch nonzero any-branch-tag-type-derived refs/tags/main - main
+  expect_any_branch nonzero any-branch-tag-declared-as-branch refs/tags/main branch main
+  expect_any_branch nonzero any-branch-declared-as-tag refs/heads/dev tag dev
+  expect_any_branch nonzero any-branch-empty-ref "" branch dev
+  expect_any_branch nonzero any-branch-name-disagrees refs/heads/dev branch main
+  expect_any_branch nonzero any-branch-unknown-namespace refs/pull/539/merge - 539/merge
+
+  echo "selftest: --require-branch does not weaken a named allowlist"
+  # Given both, the allowlist still decides — otherwise adding --require-branch
+  # to an existing release invocation would silently widen it.
+  (
+    export GITHUB_REF="refs/heads/dev" GITHUB_REF_TYPE="branch" GITHUB_REF_NAME="dev"
+    bash "$self_path" check --repo-root "$repo_root" \
+      --require-branch --allow-branch stage --allow-branch main >/dev/null 2>&1
+  ) && { echo "  FAIL: any-branch-does-not-widen-allowlist (expected nonzero)"; failures=$((failures + 1)); } \
+    || echo "  PASS: any-branch-does-not-widen-allowlist"
 
   # --- release readiness evidence -------------------------------------------
   # Two phases: build readiness is everything knowable before the signed
