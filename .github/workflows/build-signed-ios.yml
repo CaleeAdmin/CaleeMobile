@@ -43,6 +43,7 @@ jobs:
   release-ref-guard:
     name: Verify release ref
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -61,6 +62,7 @@ jobs:
     name: Release preflight (iOS)
     needs: release-ref-guard
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -97,6 +99,10 @@ jobs:
     name: Generate calee-mobile signed iOS archive and IPA
     needs: [release-ref-guard, preflight]
     runs-on: macos-latest
+    # The most important cap in the repository: macOS runners bill at
+    # ten times the Linux rate, so an xcodebuild that wedges here costs
+    # ten minutes of allowance for every minute it hangs.
+    timeout-minutes: 60
 
     steps:
       - name: Checkout

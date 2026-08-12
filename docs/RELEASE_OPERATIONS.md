@@ -296,6 +296,17 @@ Branch protection for all three branches must require both Flutter CI job names
 (`Format, Analyze & Test`, `Android debug build`) — see the administrator note at
 the top of `.github/workflows/flutter-ci.yml`.
 
+Two things about `Android debug build` are worth knowing, because neither
+matches its name any more. It runs on **pull requests only**, after
+`Format, Analyze & Test` passes: it is the pre-merge platform-build gate, so
+re-running it on the push that merges the same tree only repeated work already
+done. And it builds the **release App Bundle**, not a debug APK — the AAB
+compiles the same Gradle, AGP, Kotlin and plugin graph, merges the same library
+manifests, and additionally exercises R8 and resource shrinking, so it is a
+superset of what the debug build proved. The job name is kept as-is because it
+is a required status check; renaming it means updating branch protection in the
+same change.
+
 ### Only `stage` and `main` may produce a RELEASE CANDIDATE
 
 The signed **iOS** workflow may only be dispatched from `stage` or `main`. The
