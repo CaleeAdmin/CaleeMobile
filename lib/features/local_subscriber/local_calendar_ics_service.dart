@@ -111,23 +111,43 @@ class LocalCalendarIcsService {
   List<_VeventComponent> _parseComponents(String icsBody) {
     final components = <_VeventComponent>[];
     _VeventComponent? current;
+    var nested = 0;
     var order = 0;
 
     for (final line in _unfoldLines(icsBody)) {
-      if (line == 'BEGIN:VEVENT') {
-        current = _VeventComponent(order: order++);
+      if (current == null) {
+        // Everything outside a VEVENT is ignored, VTIMEZONE included.
+        if (line == 'BEGIN:VEVENT') {
+          current = _VeventComponent(order: order++);
+          nested = 0;
+        }
+        continue;
+      }
+
+      // A VEVENT may contain sub-components (VALARM). Their properties belong
+      // to them, not to the event: RFC 9074 gives a VALARM its own UID, and a
+      // VALARM also carries SUMMARY and DESCRIPTION. Letting either reach the
+      // event would hand the series an alarm's identity and break every
+      // grouping decision made below.
+      if (nested > 0) {
+        if (_isComponentBoundary(line, 'BEGIN:')) {
+          nested++;
+        } else if (_isComponentBoundary(line, 'END:')) {
+          nested--;
+        }
         continue;
       }
 
       if (line == 'END:VEVENT') {
-        if (current != null && current.dtStart != null) {
-          components.add(current);
-        }
+        if (current.dtStart != null) components.add(current);
         current = null;
         continue;
       }
 
-      if (current == null) continue;
+      if (_isComponentBoundary(line, 'BEGIN:')) {
+        nested++;
+        continue;
+      }
 
       final property = _parseProperty(line);
       if (property == null) continue;
@@ -528,9 +548,12 @@ class LocalCalendarIcsService {
           // Fix 2: COUNT counts generated candidates before EXDATE removes
           // visible instances.
           occurrenceCount++;
-          final identity = _canonicalOccurrenceId(occ, isAllDay);
-          if (!exdateIdentities.contains(identity)) {
-            if (occ.isAfter(windowStart) && !occ.isAfter(windowEnd)) {
+          // Window before EXDATE: an out-of-window candidate is dropped either
+          // way, and this keeps identity formatting off the hot path of a long
+          // unbounded series. COUNT is unaffected — it was incremented above.
+          if (occ.isAfter(windowStart) && !occ.isAfter(windowEnd)) {
+            final identity = _canonicalOccurrenceId(occ, isAllDay);
+            if (!exdateIdentities.contains(identity)) {
               results.add(_Occurrence(occ, identity));
             }
           }
@@ -538,9 +561,9 @@ class LocalCalendarIcsService {
       } else {
         // Fix 2: count before EXDATE filter.
         occurrenceCount++;
-        final identity = _canonicalOccurrenceId(current, isAllDay);
-        if (!exdateIdentities.contains(identity)) {
-          if (current.isAfter(windowStart) && !current.isAfter(windowEnd)) {
+        if (current.isAfter(windowStart) && !current.isAfter(windowEnd)) {
+          final identity = _canonicalOccurrenceId(current, isAllDay);
+          if (!exdateIdentities.contains(identity)) {
             results.add(_Occurrence(current, identity));
           }
         }
@@ -720,6 +743,12 @@ class LocalCalendarIcsService {
     }
 
     return _IcsProperty(name, params, line.substring(colonIdx + 1));
+  }
+
+  /// True when [line] is a `BEGIN:`/`END:` component boundary.
+  bool _isComponentBoundary(String line, String keyword) {
+    return line.length > keyword.length &&
+        line.substring(0, keyword.length).toUpperCase() == keyword;
   }
 
   String _unquoteParam(String value) {

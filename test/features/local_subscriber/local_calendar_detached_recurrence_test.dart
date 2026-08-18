@@ -974,6 +974,64 @@ void main() {
       );
     });
 
+    test('31d a nested VALARM never hijacks the event UID', () {
+      // RFC 9074 gives a VALARM its own UID, and a VALARM also carries SUMMARY.
+      // If either reached the enclosing VEVENT the series would be grouped
+      // under the ALARM's identity and its override would no longer match.
+      final events = parse(
+        ics([
+          'BEGIN:VEVENT',
+          'UID:choir-1@example',
+          'SUMMARY:Choir',
+          'DTSTART;TZID=Australia/Perth:20260804T153000',
+          'RRULE:FREQ=WEEKLY;COUNT=4',
+          'BEGIN:VALARM',
+          'ACTION:DISPLAY',
+          'UID:alarm-uid-1',
+          'SUMMARY:Reminder',
+          'DESCRIPTION:Choir starts soon',
+          'TRIGGER:-PT15M',
+          'END:VALARM',
+          'END:VEVENT',
+          ...perthOverride,
+        ]),
+      );
+
+      expect(events.length, 4);
+      expect(events.map((e) => e.uid), everyElement('choir-1@example'));
+      expect(events.map((e) => e.title), isNot(contains('Reminder')));
+      expect(starts(events), [
+        '20260804T073000Z',
+        '20260811T073000Z',
+        '20260818T080000Z',
+        '20260825T073000Z',
+      ]);
+    });
+
+    test('31e a VTIMEZONE block outside a VEVENT is still ignored', () {
+      final events = parse(
+        ics([
+          'BEGIN:VTIMEZONE',
+          'TZID:Australia/Perth',
+          'BEGIN:STANDARD',
+          'DTSTART:19700101T000000',
+          'TZOFFSETFROM:+0800',
+          'TZOFFSETTO:+0800',
+          'END:STANDARD',
+          'END:VTIMEZONE',
+          'BEGIN:VEVENT',
+          'UID:after-vtimezone@example',
+          'SUMMARY:Real event',
+          'DTSTART;TZID=Australia/Perth:20260818T153000',
+          'END:VEVENT',
+        ]),
+      );
+
+      expect(events.length, 1);
+      expect(events[0].uid, 'after-vtimezone@example');
+      expect(events[0].title, 'Real event');
+    });
+
     test('31c a malformed RECURRENCE-ID never silently deletes an event', () {
       final events = parse(
         ics([
