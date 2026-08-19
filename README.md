@@ -49,6 +49,34 @@ Before committing Dart changes, run:
 
 CI will fail if `dart format --set-exit-if-changed lib test` would modify any files.
 
+## Cross-repository contracts
+
+`contracts/event-occurrence-identity/v1/contract.json` is a **read-only mirror**
+of the canonical event occurrence identity fixture authored in
+[CaleeAdmin/calee-hub-core#424](https://github.com/CaleeAdmin/calee-hub-core/pull/424)
+(SHA-256 `930d09c6760b88bb335c550afa52d100e19b7c888d72f35743653e2b0e1028f3`,
+88,754 bytes). CalEmbed mirrors the identical bytes. An Event Link minted by one
+Calee client is resolved by another, so all three must name one logical
+occurrence the same way; the prose that governs the fixture lives in Hub Core at
+`contracts/event-occurrence-identity/v1/README.md`.
+
+Do not edit, reformat or regenerate the file here. A v1 case only ever changes
+in Hub Core, and then every mirror is re-copied byte for byte.
+
+`test/features/local_subscriber/event_occurrence_identity_contract_test.dart`
+pins the digest and drives the real parser, recurrence engine, reconciler and
+canonical helpers over it. Run it directly, including under a hostile device
+timezone:
+
+    TZ=Australia/Perth  flutter test test/features/local_subscriber/event_occurrence_identity_contract_test.dart
+    TZ=UTC              flutter test test/features/local_subscriber/event_occurrence_identity_contract_test.dart
+    TZ=Pacific/Kiritimati flutter test test/features/local_subscriber/event_occurrence_identity_contract_test.dart
+
+Display parsing and canonical share identity are separate layers on purpose:
+`local_calendar_ics_service.dart` keeps every legacy display fallback, and
+`local_calendar_occurrence_identity.dart` fails closed. They are allowed to
+disagree, and the contract requires that they do.
+
 ## Releasing
 
 Store releases are documented in the repository, not in chat history:

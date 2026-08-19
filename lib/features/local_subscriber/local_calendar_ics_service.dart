@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:timezone/timezone.dart' as tz;
 
 import 'local_calendar_event.dart';
+import 'local_calendar_occurrence_identity.dart';
 import 'local_calendar_subscription.dart';
 
 /// Fetches and parses an ICS feed for a phone-only calendar subscription.
@@ -16,6 +17,17 @@ import 'local_calendar_subscription.dart';
 /// (once at its original time from the master, once at its moved time from the
 /// override) and a detached `STATUS:CANCELLED` component appears as a second
 /// visible event beside the occurrence it was meant to cancel.
+///
+/// Two identity layers run side by side here and are deliberately allowed to
+/// disagree. The DISPLAY layer ([_parseIcsValue] and
+/// [LocalCalendarEvent.recurrenceId]) keeps every legacy fallback, so a feed
+/// naming a timezone this phone has no data for still renders and still
+/// reconciles. The CANONICAL layer
+/// (`local_calendar_occurrence_identity.dart`, surfaced as
+/// [LocalCalendarEvent.canonicalRecurrenceId] and
+/// [LocalCalendarEvent.canonicalStatus]) fails closed instead, because a
+/// cross-client Event Link minted from a local guess resolves to the wrong
+/// occurrence on somebody else's phone.
 class LocalCalendarIcsService {
   const LocalCalendarIcsService();
 
@@ -79,19 +91,43 @@ class LocalCalendarIcsService {
   /// [now] overrides the clock the 30-day-past / 365-day-future window is
   /// derived from. Production leaves it null and uses [DateTime.now]; tests
   /// pass a fixed instant so fixtures do not expire as the real date moves.
+  ///
+  /// [calendarTzid] is the explicitly declared calendar/source timezone
+  /// context — step 4 of the contract's resolution ladder. It is an ARGUMENT,
+  /// never a persisted subscription field and never inferred from the device:
+  /// a signed-out subscription has no such context, production passes none, and
+  /// with none this parser behaves exactly as it always has. When a caller does
+  /// supply one it becomes the last floating fallback ahead of device-local
+  /// time, so a floating feed is displayed on the clock it was declared on and
+  /// its canonical identity is minted on that same clock.
   List<LocalCalendarEvent> parseBody(
     String icsBody,
     LocalCalendarSubscription subscription, {
     DateTime? now,
+    String? calendarTzid,
   }) {
     final reference = now ?? DateTime.now();
     final windowStart = reference.subtract(_windowPast);
     final windowEnd = reference.add(_windowFuture);
 
+    // Resolved through the STRICT gate even for display: an explicit caller
+    // context is only ever honoured when it is a name every Calee client
+    // resolves the same way.
+    final calendarLocation = canonicalTimezone(calendarTzid);
+
     final events = <LocalCalendarEvent>[];
-    for (final group in _groupBySourceUid(_parseComponents(icsBody))) {
+    for (final group in _groupBySourceUid(
+      _parseComponents(icsBody, calendarLocation),
+    )) {
       events.addAll(
-        _reconcileGroup(group, subscription, windowStart, windowEnd),
+        _reconcileGroup(
+          group,
+          subscription,
+          windowStart,
+          windowEnd,
+          calendarTzid,
+          calendarLocation,
+        ),
       );
     }
 
@@ -108,7 +144,10 @@ class LocalCalendarIcsService {
   /// Parses every VEVENT into an internal component. Nothing is emitted here:
   /// a component cannot be turned into events until its whole UID group is
   /// known.
-  List<_VeventComponent> _parseComponents(String icsBody) {
+  List<_VeventComponent> _parseComponents(
+    String icsBody,
+    tz.Location? calendarFallback,
+  ) {
     final components = <_VeventComponent>[];
     _VeventComponent? current;
     var nested = 0;
@@ -154,19 +193,31 @@ class LocalCalendarIcsService {
 
       switch (property.name) {
         case 'UID':
-          // Opaque source identity. trim() decides only whether a UID is
-          // PRESENT — the value kept is the untrimmed original, so ' a' and
-          // 'a' stay distinct series. The historical UI base id keeps its
+          // Opaque source identity. canonicalSourceUid() decides only whether a
+          // UID is PRESENT — the value kept is the untrimmed original, so ' a'
+          // and 'a' stay distinct series. The historical UI base id keeps its
           // trimmed shape, tracked separately.
-          final hasUid = property.value.trim().isNotEmpty;
-          current.uid = hasUid ? property.value : null;
-          current.legacyBaseUid = hasUid ? property.value.trim() : null;
+          final sourceUid = canonicalSourceUid(property.value);
+          current.uid = sourceUid;
+          current.legacyBaseUid = sourceUid?.trim();
         case 'SUMMARY':
           current.summary = _unescapeText(property.value);
         case 'DTSTART':
-          current.dtStart = _parseIcsValue(property.value, property.params);
+          // The raw property is kept alongside the parsed value: the canonical
+          // layer needs the UNRESOLVED source bytes, because by the time the
+          // display parser is done a Windows TZID looks exactly like a real one.
+          current.dtStartProperty = property;
+          current.dtStart = _parseIcsValue(
+            property.value,
+            property.params,
+            calendarFallback: calendarFallback,
+          );
         case 'DTEND':
-          current.dtEnd = _parseIcsValue(property.value, property.params);
+          current.dtEnd = _parseIcsValue(
+            property.value,
+            property.params,
+            calendarFallback: calendarFallback,
+          );
         case 'RRULE':
           current.rrule = property.value;
         case 'EXDATE':
@@ -227,6 +278,8 @@ class LocalCalendarIcsService {
     LocalCalendarSubscription subscription,
     DateTime windowStart,
     DateTime windowEnd,
+    String? calendarTzid,
+    tz.Location? calendarFallback,
   ) {
     final masters = <_VeventComponent>[];
     final detached = <_DetachedComponent>[];
@@ -236,7 +289,9 @@ class LocalCalendarIcsService {
       if (property == null) {
         masters.add(component);
       } else {
-        detached.add(_resolveDetached(component, property));
+        detached.add(
+          _resolveDetached(component, property, calendarTzid, calendarFallback),
+        );
       }
     }
 
@@ -271,6 +326,11 @@ class LocalCalendarIcsService {
       final dtStart = master.dtStart!;
       final baseId = _baseIdFor(master, subscription);
       final duration = master.dtEnd?.value.difference(dtStart.value);
+      // Resolved ONCE per series: every occurrence a wall-clock rule generates
+      // is named on the same zone, and re-resolving it per occurrence is pure
+      // cost on the isolate that draws the calendar.
+      final clock = _canonicalClock(master, calendarTzid);
+      final componentStatus = _componentStatus(master, <String>[clock.status]);
 
       if (master.rrule != null) {
         final occurrences = _expandRrule(
@@ -278,7 +338,8 @@ class LocalCalendarIcsService {
           dtStart: dtStart,
           windowStart: windowStart,
           windowEnd: windowEnd,
-          exdateIdentities: _exdateIdentities(master),
+          exdateIdentities: _exdateIdentities(master, calendarFallback),
+          clock: clock,
         );
         for (final occurrence in occurrences) {
           if (cancelledKeys.contains(occurrence.identity) ||
@@ -299,6 +360,17 @@ class LocalCalendarIcsService {
               sourceUrl: subscription.url,
               uid: master.uid,
               recurrenceId: occurrence.identity,
+              recurring: true,
+              // Gated on the SERIES' own DTSTART, not just on this occurrence:
+              // a malformed DTSTART is silently rolled onto a real date by the
+              // display parser, and the rule then steps from there onto dates
+              // that resolve perfectly well. A malformed value must never name
+              // another valid occurrence. Gated on the UID too, so this field
+              // is never a recurrence identity with nothing to pair it with.
+              canonicalRecurrenceId: master.uid == null
+                  ? null
+                  : occurrence.canonicalIdentity,
+              canonicalStatus: componentStatus,
             ),
           );
         }
@@ -319,7 +391,13 @@ class LocalCalendarIcsService {
             isAllDay: dtStart.isAllDay,
             sourceUrl: subscription.url,
             uid: master.uid,
+            // A one-off event's identity is the calendar reference plus the
+            // source UID. Moving its DTSTART must NOT change it, so the start
+            // is deliberately not part of it.
             recurrenceId: null,
+            recurring: false,
+            canonicalRecurrenceId: null,
+            canonicalStatus: componentStatus,
           ),
         );
       }
@@ -355,6 +433,17 @@ class LocalCalendarIcsService {
           sourceUrl: subscription.url,
           uid: component.uid,
           recurrenceId: override.identity,
+          recurring: true,
+          // RECURRENCE-ID alone names the occurrence: the moved DTSTART only
+          // says where it now happens, so a DTSTART this phone cannot place
+          // must not unname it. Hub Core and CalEmbed resolve exactly this.
+          canonicalRecurrenceId: component.uid == null
+              ? null
+              : override.canonical.canonicalIdentity,
+          canonicalStatus: _componentStatus(component, <String>[
+            _canonicalClock(component, calendarTzid).status,
+            override.canonical.status,
+          ]),
         ),
       );
     }
@@ -376,29 +465,55 @@ class LocalCalendarIcsService {
   _DetachedComponent _resolveDetached(
     _VeventComponent component,
     _IcsProperty property,
+    String? calendarTzid,
+    tz.Location? calendarFallback,
   ) {
     final dtStart = component.dtStart!;
+
+    // The CANONICAL answer, read from the unresolved source bytes. It is
+    // computed whatever the display parser makes of the same property, because
+    // the display parser is allowed to guess and this is not.
+    final canonical = canonicalOccurrenceIdentity(
+      property.value,
+      allDay: dtStart.isAllDay,
+      propertyTzid: property.params['TZID'],
+      componentDtstartTzid: _componentDtstartTzidParameter(component),
+      calendarTzid: calendarTzid,
+    );
+
     final parsed = _parseIcsValue(
       property.value,
       property.params,
       inherited: dtStart.isAllDay ? null : dtStart.location,
+      calendarFallback: dtStart.isAllDay ? null : calendarFallback,
     );
 
     // A shape that disagrees with the component it belongs to (a date-only
     // RECURRENCE-ID on a timed component, say) names no occurrence we can
-    // match.
-    if (parsed == null || parsed.isAllDay != dtStart.isAllDay) {
-      return _DetachedComponent(component, null, null);
+    // match — and neither does a value that is not a real date at all.
+    //
+    // The malformed test is the ONE canonical judgement the display key has to
+    // honour as well. Dart renames 20260230 to 2 March and rolls hour 25 into
+    // the next day, so without it a structurally impossible RECURRENCE-ID
+    // reconciles against, and then replaces or cancels, a genuine occurrence
+    // that other clients keep. It needs no timezone context, so display keeps
+    // every fallback it has for values that ARE dates.
+    if (parsed == null ||
+        parsed.isAllDay != dtStart.isAllDay ||
+        canonical.isMalformed) {
+      return _DetachedComponent(component, null, null, canonical);
     }
 
     return _DetachedComponent(
       component,
       _canonicalOccurrenceId(parsed.value, parsed.isAllDay),
       parsed.value,
+      canonical,
     );
   }
 
-  /// Canonical identity of ONE logical occurrence of a series.
+  /// Identity of ONE logical occurrence of a series, in the contract's key
+  /// space, from an already-resolved instant.
   ///
   /// All-day occurrences are literal calendar dates (`Ymd`) and are NEVER
   /// routed through a timezone conversion — an all-day date has no instant
@@ -407,14 +522,54 @@ class LocalCalendarIcsService {
   /// written as `TZID=Australia/Perth:20260818T153000`, as `20260818T073000Z`,
   /// or in any other zone all reduce to one identity.
   ///
-  /// Deliberately byte-identical to the Hub Core and CalEmbed contracts.
+  /// This is the DISPLAY and reconciliation key, so the instant it is given may
+  /// have come from a fallback. The shared formatters keep it byte-identical in
+  /// shape to the canonical layer, which is what lets the two be compared.
   String _canonicalOccurrenceId(DateTime value, bool isAllDay) {
-    if (isAllDay) {
-      return '${_pad4(value.year)}${_pad2(value.month)}${_pad2(value.day)}';
+    return isAllDay
+        ? canonicalAllDayIdentity(value.year, value.month, value.day)
+        : canonicalTimedIdentity(value);
+  }
+
+  /// The `TZID` PARAMETER on this component's `DTSTART` — step 3 of the
+  /// contract ladder, for `RECURRENCE-ID` and `EXDATE` only.
+  ///
+  /// Only the parameter. A trailing `Z` on the DTSTART VALUE is deliberately
+  /// not turned into the name `UTC` here: Hub Core and CalEmbed both pass the
+  /// parameter alone, and synthesising a zone they do not would make an unzoned
+  /// RECURRENCE-ID on a UTC-anchored master resolve on a different clock in
+  /// each client — two identities for one source occurrence, which is the exact
+  /// failure this contract exists to prevent. The series' own EXPANSION clock
+  /// still reads the `Z` (see [_canonicalClock]); that is a different question.
+  String? _componentDtstartTzidParameter(_VeventComponent component) {
+    final tzid = component.dtStartProperty?.params['TZID'];
+    return (tzid == null || tzid.trim().isEmpty) ? null : tzid.trim();
+  }
+
+  /// The clock this component's occurrences are canonically named on.
+  CanonicalSourceClock _canonicalClock(
+    _VeventComponent component,
+    String? calendarTzid,
+  ) {
+    final property = component.dtStartProperty;
+    return canonicalSourceClock(
+      dtStartValue: property?.value,
+      allDay: component.dtStart?.isAllDay ?? false,
+      propertyTzid: property?.params['TZID'],
+      calendarTzid: calendarTzid,
+    );
+  }
+
+  /// The contract source status of one component.
+  ///
+  /// The UID is checked first, so a component missing both a UID and a
+  /// resolvable zone reports the missing UID — the same order Hub Core uses.
+  String _componentStatus(_VeventComponent component, List<String> statuses) {
+    if (component.uid == null) return CanonicalSourceStatus.noSourceUid;
+    for (final status in statuses) {
+      if (status != CanonicalSourceStatus.ok) return status;
     }
-    final utc = value.toUtc();
-    return '${_pad4(utc.year)}${_pad2(utc.month)}${_pad2(utc.day)}'
-        'T${_pad2(utc.hour)}${_pad2(utc.minute)}${_pad2(utc.second)}Z';
+    return CanonicalSourceStatus.ok;
   }
 
   String _baseIdFor(
@@ -429,8 +584,15 @@ class LocalCalendarIcsService {
         );
   }
 
-  /// Canonical identities excluded by this component's EXDATE lines.
-  Set<String> _exdateIdentities(_VeventComponent component) {
+  /// Identities excluded by this component's EXDATE lines.
+  ///
+  /// Exclusion is by logical identity in the same key space the generated
+  /// occurrences use, never by raw value and never by wall time — a UTC EXDATE
+  /// and a TZID-qualified one naming the same instant are equivalent.
+  Set<String> _exdateIdentities(
+    _VeventComponent component,
+    tz.Location? calendarFallback,
+  ) {
     final dtStart = component.dtStart!;
     final identities = <String>{};
 
@@ -438,11 +600,22 @@ class LocalCalendarIcsService {
       for (final raw in line.value.split(',')) {
         final value = raw.trim();
         if (value.isEmpty) continue;
+        // Same rule as a detached RECURRENCE-ID: an EXDATE that is not a real
+        // date excludes nothing, rather than excluding whichever valid
+        // occurrence Dart's normalisation happens to roll it onto.
+        if (canonicalOccurrenceIdentity(
+          value,
+          allDay: dtStart.isAllDay,
+        ).isMalformed) {
+          continue;
+        }
+
         final parsed = _parseIcsValue(
           value,
           line.params,
           // All-day EXDATEs stay literal dates and are never shifted by a TZID.
           inherited: dtStart.isAllDay ? null : dtStart.location,
+          calendarFallback: dtStart.isAllDay ? null : calendarFallback,
         );
         if (parsed == null) continue;
         identities.add(_canonicalOccurrenceId(parsed.value, parsed.isAllDay));
@@ -466,12 +639,17 @@ class LocalCalendarIcsService {
   /// So the cursor here is a calendar DATE, advanced by the rule, and each
   /// occurrence's instant is rebuilt from that date plus DTSTART's wall-clock
   /// time in DTSTART's own zone.
+  /// [clock] is the zone the series is CANONICALLY named on, resolved once from
+  /// the source `DTSTART` by the strict layer. A series it refuses generates no
+  /// canonical identities at all, so a feed the display parser had to guess a
+  /// zone for mints nothing rather than something plausible and wrong.
   List<_Occurrence> _expandRrule({
     required String rruleValue,
     required _IcsDateTime dtStart,
     required DateTime windowStart,
     required DateTime windowEnd,
     required Set<String> exdateIdentities,
+    required CanonicalSourceClock clock,
   }) {
     final params = _parseRruleParams(rruleValue);
     final freq = (params['FREQ'] ?? '').toUpperCase();
@@ -501,6 +679,12 @@ class LocalCalendarIcsService {
         : <String>[];
 
     final isAllDay = dtStart.isAllDay;
+    // The display parser resolved this series on the very zone the canonical
+    // layer names it on, so the identity formatted below IS the canonical one
+    // and does not need building twice. The else branch stays as defence: if
+    // the two clocks ever diverge, the canonical identity is rebuilt from the
+    // canonical clock rather than inherited from a display fallback.
+    final canonicalTracksDisplay = clock.namesOn(dtStart.location);
     final results = <_Occurrence>[];
     // The cursor is a bare calendar date held in UTC purely so date
     // arithmetic is exact; it is never emitted.
@@ -554,7 +738,25 @@ class LocalCalendarIcsService {
           if (occ.isAfter(windowStart) && !occ.isAfter(windowEnd)) {
             final identity = _canonicalOccurrenceId(occ, isAllDay);
             if (!exdateIdentities.contains(identity)) {
-              results.add(_Occurrence(occ, identity));
+              final date = monday.add(Duration(days: offset));
+              results.add(
+                _Occurrence(
+                  occ,
+                  identity,
+                  !clock.isOk
+                      ? null
+                      : canonicalTracksDisplay
+                      ? identity
+                      : clock.identityAt(
+                          date.year,
+                          date.month,
+                          date.day,
+                          dtStart.hour,
+                          dtStart.minute,
+                          dtStart.second,
+                        ),
+                ),
+              );
             }
           }
         }
@@ -564,7 +766,24 @@ class LocalCalendarIcsService {
         if (current.isAfter(windowStart) && !current.isAfter(windowEnd)) {
           final identity = _canonicalOccurrenceId(current, isAllDay);
           if (!exdateIdentities.contains(identity)) {
-            results.add(_Occurrence(current, identity));
+            results.add(
+              _Occurrence(
+                current,
+                identity,
+                !clock.isOk
+                    ? null
+                    : canonicalTracksDisplay
+                    ? identity
+                    : clock.identityAt(
+                        cursor.year,
+                        cursor.month,
+                        cursor.day,
+                        dtStart.hour,
+                        dtStart.minute,
+                        dtStart.second,
+                      ),
+              ),
+            );
           }
         }
       }
@@ -770,17 +989,26 @@ class LocalCalendarIcsService {
   ///   20240101T120000            → floating timed (device-local semantics)
   ///   20240101                   → date-only (no VALUE=DATE needed)
   ///
-  /// [inherited] is the zone an unzoned value falls back to before device-local
-  /// time. It is how a floating RECURRENCE-ID or EXDATE is read on its
-  /// component's own clock; DTSTART itself passes none.
+  /// [inherited] is the zone an unzoned value falls back to before
+  /// [calendarFallback] and then device-local time. It is how a floating
+  /// RECURRENCE-ID or EXDATE is read on its component's own clock; DTSTART
+  /// itself passes none.
   ///
-  /// An unknown TZID falls through to [inherited] and then to floating local
-  /// time — the parser never fails an event over a zone it does not carry data
-  /// for.
+  /// [calendarFallback] is the caller-supplied calendar timezone context. It is
+  /// null for every production caller, so the historical device-local behaviour
+  /// below is unchanged; a caller that does declare one gets a floating feed
+  /// rendered on the clock it was declared on.
+  ///
+  /// An unknown TZID falls through to [inherited], then [calendarFallback],
+  /// then floating local time — this parser never fails an event over a zone it
+  /// does not carry data for. That permissiveness is deliberate and is exactly
+  /// why the result is NOT a canonical share identity; see
+  /// `local_calendar_occurrence_identity.dart`.
   _IcsDateTime? _parseIcsValue(
     String rawValue,
     Map<String, String> params, {
     tz.Location? inherited,
+    tz.Location? calendarFallback,
   }) {
     final value = rawValue.trim();
     if (value.isEmpty) return null;
@@ -836,6 +1064,7 @@ class LocalCalendarIcsService {
           }
         }
         location ??= inherited;
+        location ??= calendarFallback;
 
         if (location != null) {
           return _IcsDateTime(
@@ -922,10 +1151,6 @@ class LocalCalendarIcsService {
     }
     return url;
   }
-
-  String _pad2(int value) => value.toString().padLeft(2, '0');
-
-  String _pad4(int value) => value.toString().padLeft(4, '0');
 }
 
 /// Which clock a parsed value belongs to, and therefore which clock the
@@ -1000,6 +1225,13 @@ class _VeventComponent {
 
   String? summary;
   _IcsDateTime? dtStart;
+
+  /// The raw, UNRESOLVED `DTSTART` property. The display fields above have
+  /// already been through the legacy fallbacks, by which point a Windows TZID
+  /// looks exactly like a real one, so the canonical layer reads this instead.
+  /// Internal only: never surfaced in a widget model and never persisted.
+  _IcsProperty? dtStartProperty;
+
   _IcsDateTime? dtEnd;
   String? rrule;
   final List<_IcsProperty> exdateLines = [];
@@ -1009,25 +1241,39 @@ class _VeventComponent {
 
 /// A detached component paired with the occurrence identity it names.
 class _DetachedComponent {
-  const _DetachedComponent(this.component, this.identity, this.identityInstant);
+  const _DetachedComponent(
+    this.component,
+    this.identity,
+    this.identityInstant,
+    this.canonical,
+  );
 
   final _VeventComponent component;
 
-  /// Canonical identity of the ORIGINAL occurrence, or null when the
-  /// `RECURRENCE-ID` could not be interpreted.
+  /// Display and reconciliation identity of the ORIGINAL occurrence, or null
+  /// when the `RECURRENCE-ID` could not be interpreted.
   final String? identity;
 
   /// The parsed `RECURRENCE-ID` value behind [identity], used to rebuild the
   /// occurrence's historical UI id.
   final DateTime? identityInstant;
+
+  /// What the STRICT layer makes of the same `RECURRENCE-ID`.
+  final CanonicalValueResolution canonical;
 }
 
 /// One generated occurrence of a recurring master.
 class _Occurrence {
-  const _Occurrence(this.instant, this.identity);
+  const _Occurrence(this.instant, this.identity, this.canonicalIdentity);
 
   final DateTime instant;
+
+  /// Display and reconciliation identity.
   final String identity;
+
+  /// Canonical Event Link recurrence identity, or null when the series cannot
+  /// be canonically named.
+  final String? canonicalIdentity;
 }
 
 class LocalCalendarIcsException implements Exception {

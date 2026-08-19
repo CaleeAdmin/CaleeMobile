@@ -132,8 +132,42 @@ jobs:
       - name: Analyze
         run: flutter analyze --fatal-infos
 
+      # The cross-repository event occurrence identity contract suite
+      # (CaleeAdmin/calee-hub-core#421) runs inside the ordinary `flutter test`
+      # gate below, like every other suite. The two focused invocations first
+      # add the only two things a single run cannot prove:
+      #
+      #  * that the suite really EXECUTED. It prints a deterministic marker only
+      #    after every contract assertion has run, so a rename, a skip, a
+      #    deleted file or a missing fixture leaves the marker absent and this
+      #    step fails — rather than the gate quietly going green on nothing.
+      #  * that canonical identities are INDEPENDENT OF THE DEVICE TIMEZONE.
+      #    That is the whole point of failing closed on a floating source. The
+      #    display parser reads the PROCESS timezone, which a running VM cannot
+      #    change, so proving it needs the process to actually start elsewhere.
+      #    America/New_York is in the list because Australia/Perth, UTC and
+      #    Pacific/Kiritimati all have non-negative UTC offsets, and an all-day
+      #    date that drifted a day would only drift west of UTC.
+      #
+      # The marker carries the ambient zone, and the grep below requires the
+      # zone it asked for: a TZ= override that stopped reaching the test process
+      # would otherwise run the same thing twice and still look green.
+      #
+      # One test file, so each invocation costs seconds. No new job, no new
+      # workflow, and the full-suite run below is unchanged.
       - name: Test
-        run: flutter test
+        run: |
+          set -euo pipefail
+          for zone in UTC Pacific/Kiritimati America/New_York; do
+            echo "== event occurrence identity contract under TZ=$zone =="
+            TZ="$zone" flutter test --reporter expanded \
+              test/features/local_subscriber/event_occurrence_identity_contract_test.dart \
+              | tee "${RUNNER_TEMP:-/tmp}/contract-suite.log"
+            grep -q "event occurrence identity contract tests passed" \
+              "${RUNNER_TEMP:-/tmp}/contract-suite.log"
+            grep -q "ambient TZ=$zone" "${RUNNER_TEMP:-/tmp}/contract-suite.log"
+          done
+          flutter test
         env:
           TZ: Australia/Perth
 
