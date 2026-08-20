@@ -1,0 +1,1823 @@
+{
+  "contract": "calee.event-occurrence-identity",
+  "contractVersion": 1,
+  "documentation": "contracts/event-occurrence-identity/v1/README.md",
+  "issue": "CaleeAdmin/calee-hub-core#421",
+  "formats": {
+    "allDay": { "strftime": "Ymd", "pattern": "^[0-9]{8}$", "length": 8 },
+    "timed": { "strftime": "YmdTHisZ", "pattern": "^[0-9]{8}T[0-9]{6}Z$", "length": 16 }
+  },
+  "sourceStatuses": [
+    "ok",
+    "unsupported_tzid",
+    "floating_without_context",
+    "malformed_value",
+    "no_source_uid"
+  ],
+  "identityStatuses": [
+    "ok",
+    "no_calendar_reference",
+    "no_source_uid",
+    "no_canonical_recurrence_identity"
+  ],
+  "suppressionReasons": ["cancelled", "excluded"],
+  "identityFields": ["calendarRef", "sourceUid", "recurrenceId"],
+  "nonNormativeFields": {
+    "description": "Local identifiers a client may keep for its own API or UI. They are NOT the Event Link identity and MUST NOT be parsed apart to recover one: a UID may legally contain the delimiter (urn:uuid:...), so no delimiter-joined composite is reversible.",
+    "hub": ["id", "seriesId", "occurrenceId"],
+    "calembed": ["order"],
+    "mobile": ["id"]
+  },
+  "resolutionOrder": [
+    "trailing_z_utc",
+    "property_tzid",
+    "component_dtstart_tzid",
+    "calendar_timezone",
+    "refuse"
+  ],
+  "resolutionNotes": {
+    "trailing_z_utc": "A trailing Z designates UTC and OUTRANKS a TZID parameter on the same property (RFC 5545 3.3.5 form 2).",
+    "component_dtstart_tzid": "Applies to RECURRENCE-ID and EXDATE only, so a property with no TZID of its own is read on the clock its series is expanded on. It never applies to DTSTART itself.",
+    "calendar_timezone": "The explicit calendar/source timezone context supplied by the caller. There is no device, process, host or recipient fallback below it.",
+    "refuse": "floating_without_context. An explicit but unresolvable TZID short-circuits to unsupported_tzid at step property_tzid and is NOT retried against the calendar timezone."
+  },
+  "windowSemantics": {
+    "from": "inclusive calendar date",
+    "to": "inclusive calendar date",
+    "note": "Every scenario window is deliberately wider than its occurrences, so windowing edge cases cannot make the three engines disagree. occurrencesAreExhaustive means the listed set is complete for that window."
+  },
+  "timezoneRule": {
+    "accepted": "the literal name UTC, or an IANA Area/Location identifier (one or more '/' separated segments of [A-Za-z0-9_+-]) that the platform timezone database resolves",
+    "acceptedLiterals": ["UTC"],
+    "acceptedPattern": "^[A-Za-z][A-Za-z0-9_+-]*(?:/[A-Za-z0-9_+-]+)+$",
+    "rejected": "everything else, including Windows timezone names, bare abbreviations and numeric UTC offsets",
+    "rejectedStatus": "unsupported_tzid",
+    "note": "The pattern is normative rather than deferring to the platform. Both PHP's DateTimeZone and Dart's tz.getLocation accept several non-IANA spellings, and they do not accept the same ones, so a name that resolves in one engine and not the other must be refused by both. A TZID parameter may be quoted (RFC 5545 3.1); the quotes are part of the parameter syntax, not the zone name, and MUST be stripped before this rule is applied."
+  },
+  "identityCases": [
+    {
+      "id": "utc-timed",
+      "description": "An explicit UTC DATE-TIME is already the canonical timed identity.",
+      "kind": "timed",
+      "value": "20260818T073000Z",
+      "tzid": null,
+      "calendarFallbackTimezone": null,
+      "expected": { "status": "ok", "canonicalIdentity": "20260818T073000Z" }
+    },
+    {
+      "id": "utc-timed-tzid-ignored",
+      "description": "A trailing Z designates UTC and outranks any TZID parameter on the same property.",
+      "kind": "timed",
+      "value": "20260818T073000Z",
+      "tzid": "Australia/Perth",
+      "calendarFallbackTimezone": null,
+      "expected": { "status": "ok", "canonicalIdentity": "20260818T073000Z" }
+    },
+    {
+      "id": "utc-named-timezone",
+      "description": "TZID=UTC is an accepted explicit zone.",
+      "kind": "timed",
+      "value": "20260818T153000",
+      "tzid": "UTC",
+      "calendarFallbackTimezone": null,
+      "expected": { "status": "ok", "canonicalIdentity": "20260818T153000Z" }
+    },
+    {
+      "id": "perth-timed",
+      "description": "Australia/Perth is UTC+8 year round: 15:30 local is 07:30Z.",
+      "kind": "timed",
+      "value": "20260818T153000",
+      "tzid": "Australia/Perth",
+      "calendarFallbackTimezone": null,
+      "expected": { "status": "ok", "canonicalIdentity": "20260818T073000Z" }
+    },
+    {
+      "id": "sydney-aest",
+      "description": "Australia/Sydney before DST begins on 4 October 2026 is AEST (UTC+10).",
+      "kind": "timed",
+      "value": "20260929T100000",
+      "tzid": "Australia/Sydney",
+      "calendarFallbackTimezone": null,
+      "expected": { "status": "ok", "canonicalIdentity": "20260929T000000Z" }
+    },
+    {
+      "id": "sydney-aedt-first",
+      "description": "The first occurrence after the transition is AEDT (UTC+11) and falls on the previous UTC day.",
+      "kind": "timed",
+      "value": "20261006T100000",
+      "tzid": "Australia/Sydney",
+      "calendarFallbackTimezone": null,
+      "expected": { "status": "ok", "canonicalIdentity": "20261005T230000Z" }
+    },
+    {
+      "id": "sydney-aedt-second",
+      "description": "A second AEDT occurrence, proving the offset is not applied only at the boundary.",
+      "kind": "timed",
+      "value": "20261013T100000",
+      "tzid": "Australia/Sydney",
+      "calendarFallbackTimezone": null,
+      "expected": { "status": "ok", "canonicalIdentity": "20261012T230000Z" }
+    },
+    {
+      "id": "sydney-aedt-late-october",
+      "description": "Well inside AEDT.",
+      "kind": "timed",
+      "value": "20261027T100000",
+      "tzid": "Australia/Sydney",
+      "calendarFallbackTimezone": null,
+      "expected": { "status": "ok", "canonicalIdentity": "20261026T230000Z" }
+    },
+    {
+      "id": "sydney-aedt-before-autumn-transition",
+      "description": "Australia/Sydney DST ends on 5 April 2026; 30 March is still AEDT.",
+      "kind": "timed",
+      "value": "20260330T100000",
+      "tzid": "Australia/Sydney",
+      "calendarFallbackTimezone": null,
+      "expected": { "status": "ok", "canonicalIdentity": "20260329T230000Z" }
+    },
+    {
+      "id": "sydney-aest-after-autumn-transition",
+      "description": "6 April 2026 is back on AEST.",
+      "kind": "timed",
+      "value": "20260406T100000",
+      "tzid": "Australia/Sydney",
+      "calendarFallbackTimezone": null,
+      "expected": { "status": "ok", "canonicalIdentity": "20260406T000000Z" }
+    },
+    {
+      "id": "all-day",
+      "description": "A DATE value is a literal calendar date and is never routed through UTC.",
+      "kind": "allDay",
+      "value": "20260818",
+      "tzid": null,
+      "calendarFallbackTimezone": null,
+      "expected": { "status": "ok", "canonicalIdentity": "20260818" }
+    },
+    {
+      "id": "all-day-tzid-ignored",
+      "description": "A TZID parameter is meaningless on a DATE value and must not shift the date.",
+      "kind": "allDay",
+      "value": "20260818",
+      "tzid": "Australia/Sydney",
+      "calendarFallbackTimezone": "Pacific/Kiritimati",
+      "expected": { "status": "ok", "canonicalIdentity": "20260818" }
+    },
+    {
+      "id": "all-day-leap-day",
+      "description": "29 February 2028 is a real date.",
+      "kind": "allDay",
+      "value": "20280229",
+      "tzid": null,
+      "calendarFallbackTimezone": null,
+      "expected": { "status": "ok", "canonicalIdentity": "20280229" }
+    },
+    {
+      "id": "floating-with-calendar-context",
+      "description": "A floating value becomes portable only against an explicit calendar timezone context.",
+      "kind": "timed",
+      "value": "20260818T153000",
+      "tzid": null,
+      "calendarFallbackTimezone": "Australia/Perth",
+      "expected": { "status": "ok", "canonicalIdentity": "20260818T073000Z" }
+    },
+    {
+      "id": "floating-with-calendar-context-across-dst",
+      "description": "The calendar timezone context is a real zone, so it observes DST.",
+      "kind": "timed",
+      "value": "20261006T100000",
+      "tzid": null,
+      "calendarFallbackTimezone": "Australia/Sydney",
+      "expected": { "status": "ok", "canonicalIdentity": "20261005T230000Z" }
+    },
+    {
+      "id": "floating-without-context",
+      "description": "Without a timezone context a floating value has no portable instant. It MUST NOT be resolved against the process, host, device or recipient timezone.",
+      "kind": "timed",
+      "value": "20260818T153000",
+      "tzid": null,
+      "calendarFallbackTimezone": null,
+      "expected": { "status": "floating_without_context", "canonicalIdentity": null }
+    },
+    {
+      "id": "windows-tzid",
+      "description": "Windows timezone names are not in the IANA database and must not be guessed at.",
+      "kind": "timed",
+      "value": "20260818T153000",
+      "tzid": "W. Australia Standard Time",
+      "calendarFallbackTimezone": null,
+      "expected": { "status": "unsupported_tzid", "canonicalIdentity": null }
+    },
+    {
+      "id": "windows-tzid-with-calendar-context",
+      "description": "An explicit but unresolvable TZID fails closed; the calendar fallback timezone MUST NOT rescue it, because the source stated a zone and that zone is unknown.",
+      "kind": "timed",
+      "value": "20260818T153000",
+      "tzid": "W. Australia Standard Time",
+      "calendarFallbackTimezone": "Australia/Perth",
+      "expected": { "status": "unsupported_tzid", "canonicalIdentity": null }
+    },
+    {
+      "id": "unknown-iana-shaped-tzid",
+      "description": "An Area/Location shaped name that no timezone database resolves.",
+      "kind": "timed",
+      "value": "20260818T153000",
+      "tzid": "Mars/Olympus_Mons",
+      "calendarFallbackTimezone": null,
+      "expected": { "status": "unsupported_tzid", "canonicalIdentity": null }
+    },
+    {
+      "id": "offset-tzid",
+      "description": "A numeric UTC offset is not an IANA identifier and does not resolve identically across the PHP and Dart timezone databases.",
+      "kind": "timed",
+      "value": "20260818T153000",
+      "tzid": "+08:00",
+      "calendarFallbackTimezone": null,
+      "expected": { "status": "unsupported_tzid", "canonicalIdentity": null }
+    },
+    {
+      "id": "abbreviation-tzid",
+      "description": "A bare abbreviation is ambiguous and is refused.",
+      "kind": "timed",
+      "value": "20260818T153000",
+      "tzid": "AWST",
+      "calendarFallbackTimezone": null,
+      "expected": { "status": "unsupported_tzid", "canonicalIdentity": null }
+    },
+    {
+      "id": "unresolvable-calendar-fallback-timezone",
+      "description": "A calendar timezone context that cannot be resolved is no context at all.",
+      "kind": "timed",
+      "value": "20260818T153000",
+      "tzid": null,
+      "calendarFallbackTimezone": "W. Australia Standard Time",
+      "expected": { "status": "unsupported_tzid", "canonicalIdentity": null }
+    },
+    {
+      "id": "malformed-hour",
+      "description": "Hour 25 is not a time. It must not roll over into another valid occurrence.",
+      "kind": "timed",
+      "value": "20260818T253000",
+      "tzid": "Australia/Perth",
+      "calendarFallbackTimezone": null,
+      "expected": { "status": "malformed_value", "canonicalIdentity": null }
+    },
+    {
+      "id": "malformed-minute",
+      "description": "Minute 60 is not a time.",
+      "kind": "timed",
+      "value": "20260818T006000",
+      "tzid": "Australia/Perth",
+      "calendarFallbackTimezone": null,
+      "expected": { "status": "malformed_value", "canonicalIdentity": null }
+    },
+    {
+      "id": "malformed-leap-second",
+      "description": "Second 60 is a leap second. It is not portable and is refused rather than rolled into the next minute.",
+      "kind": "timed",
+      "value": "20261231T235960",
+      "tzid": "UTC",
+      "calendarFallbackTimezone": null,
+      "expected": { "status": "malformed_value", "canonicalIdentity": null }
+    },
+    {
+      "id": "malformed-month",
+      "description": "Month 13 is not a month.",
+      "kind": "timed",
+      "value": "20261332T120000",
+      "tzid": "UTC",
+      "calendarFallbackTimezone": null,
+      "expected": { "status": "malformed_value", "canonicalIdentity": null }
+    },
+    {
+      "id": "malformed-day-must-not-roll-over",
+      "description": "30 February 2026 must be refused, NOT silently renamed to 2 March 2026. A malformed value must never name another valid occurrence.",
+      "kind": "allDay",
+      "value": "20260230",
+      "tzid": null,
+      "calendarFallbackTimezone": null,
+      "expected": { "status": "malformed_value", "canonicalIdentity": null }
+    },
+    {
+      "id": "malformed-not-a-date",
+      "description": "Free text is not a date.",
+      "kind": "timed",
+      "value": "not-a-date",
+      "tzid": null,
+      "calendarFallbackTimezone": "Australia/Perth",
+      "expected": { "status": "malformed_value", "canonicalIdentity": null }
+    },
+    {
+      "id": "malformed-empty",
+      "description": "An empty property value carries no occurrence.",
+      "kind": "timed",
+      "value": "",
+      "tzid": "Australia/Perth",
+      "calendarFallbackTimezone": null,
+      "expected": { "status": "malformed_value", "canonicalIdentity": null }
+    },
+    {
+      "id": "malformed-date-in-timed-series",
+      "description": "A DATE value cannot name an occurrence of a timed series; the key spaces are different and guessing one from the other invents an identity.",
+      "kind": "timed",
+      "value": "20260818",
+      "tzid": "Australia/Perth",
+      "calendarFallbackTimezone": null,
+      "expected": { "status": "malformed_value", "canonicalIdentity": null }
+    },
+    {
+      "id": "malformed-datetime-in-all-day-series",
+      "description": "A DATE-TIME value cannot name an occurrence of an all-day series.",
+      "kind": "allDay",
+      "value": "20260818T153000",
+      "tzid": null,
+      "calendarFallbackTimezone": null,
+      "expected": { "status": "malformed_value", "canonicalIdentity": null }
+    }
+  ],
+  "uidCases": [
+    {
+      "id": "uid-plain",
+      "description": "The ordinary case.",
+      "uidPropertyPresent": true,
+      "uidPropertyValue": "series-one",
+      "expected": { "status": "ok", "sourceUid": "series-one" }
+    },
+    {
+      "id": "uid-leading-space",
+      "description": "RFC 5545 makes the bytes after the property colon the value, so a leading space belongs to the UID and MUST NOT be trimmed away.",
+      "uidPropertyPresent": true,
+      "uidPropertyValue": " series-one",
+      "expected": { "status": "ok", "sourceUid": " series-one" }
+    },
+    {
+      "id": "uid-trailing-space",
+      "description": "A trailing space likewise belongs to the UID.",
+      "uidPropertyPresent": true,
+      "uidPropertyValue": "series-one ",
+      "expected": { "status": "ok", "sourceUid": "series-one " }
+    },
+    {
+      "id": "uid-internal-single-space",
+      "description": "Internal whitespace is preserved exactly.",
+      "uidPropertyPresent": true,
+      "uidPropertyValue": "series one",
+      "expected": { "status": "ok", "sourceUid": "series one" }
+    },
+    {
+      "id": "uid-internal-double-space",
+      "description": "Internal whitespace is never collapsed.",
+      "uidPropertyPresent": true,
+      "uidPropertyValue": "series  one",
+      "expected": { "status": "ok", "sourceUid": "series  one" }
+    },
+    {
+      "id": "uid-mixed-case",
+      "description": "UID comparison is case sensitive.",
+      "uidPropertyPresent": true,
+      "uidPropertyValue": "Series-One",
+      "expected": { "status": "ok", "sourceUid": "Series-One" }
+    },
+    {
+      "id": "uid-urn-uuid",
+      "description": "A UID may contain colons. This is why Event Link payloads carry the UID as its own field instead of splitting a composite identifier.",
+      "uidPropertyPresent": true,
+      "uidPropertyValue": "urn:uuid:5b7f0f6e-3b7a-4b02-9f4e-0a6b2f1c8d31",
+      "expected": { "status": "ok", "sourceUid": "urn:uuid:5b7f0f6e-3b7a-4b02-9f4e-0a6b2f1c8d31" }
+    },
+    {
+      "id": "uid-percent-and-plus",
+      "description": "A UID is opaque bytes: no URL decoding, no plus-to-space translation.",
+      "uidPropertyPresent": true,
+      "uidPropertyValue": "a+b%20c",
+      "expected": { "status": "ok", "sourceUid": "a+b%20c" }
+    },
+    {
+      "id": "uid-non-ascii",
+      "description": "UTF-8 is preserved byte for byte.",
+      "uidPropertyPresent": true,
+      "uidPropertyValue": "série-un-événement",
+      "expected": { "status": "ok", "sourceUid": "série-un-événement" }
+    },
+    {
+      "id": "uid-zero",
+      "description": "The literal string \"0\" is a real UID. A language whose emptiness test treats it as falsy MUST NOT discard it and substitute a stand-in.",
+      "uidPropertyPresent": true,
+      "uidPropertyValue": "0",
+      "expected": { "status": "ok", "sourceUid": "0" }
+    },
+    {
+      "id": "uid-blank",
+      "description": "A present but empty UID is no canonical source UID. A stand-in derived from the component body MUST NOT be presented as one.",
+      "uidPropertyPresent": true,
+      "uidPropertyValue": "",
+      "expected": { "status": "no_source_uid", "sourceUid": null }
+    },
+    {
+      "id": "uid-whitespace-only",
+      "description": "A UID made only of whitespace carries no source identity.",
+      "uidPropertyPresent": true,
+      "uidPropertyValue": "   ",
+      "expected": { "status": "no_source_uid", "sourceUid": null }
+    },
+    {
+      "id": "uid-absent",
+      "description": "A component with no UID property has no canonical source UID.",
+      "uidPropertyPresent": false,
+      "uidPropertyValue": null,
+      "expected": { "status": "no_source_uid", "sourceUid": null }
+    }
+  ],
+  "uidDistinctSets": [
+    {
+      "id": "boundary-whitespace",
+      "description": "Trimming the property value would merge three distinct source events into one shareable link.",
+      "caseIds": ["uid-plain", "uid-leading-space", "uid-trailing-space"]
+    },
+    {
+      "id": "internal-whitespace",
+      "description": "Collapsing internal whitespace would merge two distinct source events.",
+      "caseIds": ["uid-internal-single-space", "uid-internal-double-space"]
+    },
+    {
+      "id": "case",
+      "description": "Case folding would merge two distinct source events.",
+      "caseIds": ["uid-plain", "uid-mixed-case"]
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "non-recurring-perth",
+      "description": "A non-recurring event. Identity is the calendar reference plus the source UID; there is no recurrence identity.",
+      "calendarRef": "cal-a",
+      "calendarFallbackTimezone": null,
+      "window": { "from": "2026-08-01", "to": "2026-08-31" },
+      "ics": [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Calee//Event Occurrence Identity Contract v1//EN",
+        "BEGIN:VEVENT",
+        "UID:event-123@contract.example",
+        "SUMMARY:One off",
+        "DTSTART;TZID=Australia/Perth:20260812T090000",
+        "DTEND;TZID=Australia/Perth:20260812T100000",
+        "END:VEVENT",
+        "END:VCALENDAR"
+      ],
+      "expected": {
+        "canonicalStatus": "ok",
+        "occurrencesAreExhaustive": true,
+        "occurrences": [
+          {
+            "sourceUid": "event-123@contract.example",
+            "recurrenceId": null,
+            "startsAt": "20260812T010000Z",
+            "allDay": false,
+            "recurring": false,
+            "title": "One off"
+          }
+        ],
+        "suppressed": [],
+        "forbiddenRecurrenceIds": []
+      }
+    },
+    {
+      "id": "non-recurring-perth-moved",
+      "description": "The same source event an hour later. A DTSTART change MUST NOT change the logical identity, so a link shared before the change still resolves.",
+      "calendarRef": "cal-a",
+      "calendarFallbackTimezone": null,
+      "window": { "from": "2026-08-01", "to": "2026-08-31" },
+      "ics": [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Calee//Event Occurrence Identity Contract v1//EN",
+        "BEGIN:VEVENT",
+        "UID:event-123@contract.example",
+        "SUMMARY:One off",
+        "DTSTART;TZID=Australia/Perth:20260812T100000",
+        "DTEND;TZID=Australia/Perth:20260812T110000",
+        "END:VEVENT",
+        "END:VCALENDAR"
+      ],
+      "expected": {
+        "canonicalStatus": "ok",
+        "occurrencesAreExhaustive": true,
+        "occurrences": [
+          {
+            "sourceUid": "event-123@contract.example",
+            "recurrenceId": null,
+            "startsAt": "20260812T020000Z",
+            "allDay": false,
+            "recurring": false,
+            "title": "One off"
+          }
+        ],
+        "suppressed": [],
+        "forbiddenRecurrenceIds": []
+      }
+    },
+    {
+      "id": "perth-weekly-series",
+      "description": "A four-occurrence Perth series with no overrides.",
+      "calendarRef": "cal-a",
+      "calendarFallbackTimezone": null,
+      "window": { "from": "2026-08-01", "to": "2026-08-31" },
+      "ics": [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Calee//Event Occurrence Identity Contract v1//EN",
+        "BEGIN:VEVENT",
+        "UID:choir-1@contract.example",
+        "SUMMARY:Choir",
+        "DTSTART;TZID=Australia/Perth:20260804T153000",
+        "DTEND;TZID=Australia/Perth:20260804T163000",
+        "RRULE:FREQ=WEEKLY;COUNT=4",
+        "END:VEVENT",
+        "END:VCALENDAR"
+      ],
+      "expected": {
+        "canonicalStatus": "ok",
+        "occurrencesAreExhaustive": true,
+        "occurrences": [
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260804T073000Z", "startsAt": "20260804T073000Z", "allDay": false, "recurring": true, "title": "Choir" },
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260811T073000Z", "startsAt": "20260811T073000Z", "allDay": false, "recurring": true, "title": "Choir" },
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260818T073000Z", "startsAt": "20260818T073000Z", "allDay": false, "recurring": true, "title": "Choir" },
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260825T073000Z", "startsAt": "20260825T073000Z", "allDay": false, "recurring": true, "title": "Choir" }
+        ],
+        "suppressed": [],
+        "forbiddenRecurrenceIds": ["20260804T153000Z", "20260818T153000Z"]
+      }
+    },
+    {
+      "id": "perth-weekly-series-other-calendar",
+      "description": "Byte-identical source data in a different calendar. The calendar reference is part of the identity, so these occurrences are NOT the same logical occurrences as perth-weekly-series.",
+      "calendarRef": "cal-b",
+      "calendarFallbackTimezone": null,
+      "window": { "from": "2026-08-01", "to": "2026-08-31" },
+      "ics": [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Calee//Event Occurrence Identity Contract v1//EN",
+        "BEGIN:VEVENT",
+        "UID:choir-1@contract.example",
+        "SUMMARY:Choir",
+        "DTSTART;TZID=Australia/Perth:20260804T153000",
+        "DTEND;TZID=Australia/Perth:20260804T163000",
+        "RRULE:FREQ=WEEKLY;COUNT=4",
+        "END:VEVENT",
+        "END:VCALENDAR"
+      ],
+      "expected": {
+        "canonicalStatus": "ok",
+        "occurrencesAreExhaustive": true,
+        "occurrences": [
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260804T073000Z", "startsAt": "20260804T073000Z", "allDay": false, "recurring": true, "title": "Choir" },
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260811T073000Z", "startsAt": "20260811T073000Z", "allDay": false, "recurring": true, "title": "Choir" },
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260818T073000Z", "startsAt": "20260818T073000Z", "allDay": false, "recurring": true, "title": "Choir" },
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260825T073000Z", "startsAt": "20260825T073000Z", "allDay": false, "recurring": true, "title": "Choir" }
+        ],
+        "suppressed": [],
+        "forbiddenRecurrenceIds": []
+      }
+    },
+    {
+      "id": "perth-detached-move",
+      "description": "A detached override moved from 15:30 to 16:00 Perth. The identity comes from RECURRENCE-ID and never from the moved DTSTART, and the override REPLACES the generated occurrence rather than joining it.",
+      "calendarRef": "cal-a",
+      "calendarFallbackTimezone": null,
+      "window": { "from": "2026-08-01", "to": "2026-08-31" },
+      "ics": [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Calee//Event Occurrence Identity Contract v1//EN",
+        "BEGIN:VEVENT",
+        "UID:choir-1@contract.example",
+        "SUMMARY:Choir",
+        "DTSTART;TZID=Australia/Perth:20260804T153000",
+        "DTEND;TZID=Australia/Perth:20260804T163000",
+        "RRULE:FREQ=WEEKLY;COUNT=4",
+        "END:VEVENT",
+        "BEGIN:VEVENT",
+        "UID:choir-1@contract.example",
+        "SUMMARY:Choir - changed",
+        "RECURRENCE-ID;TZID=Australia/Perth:20260818T153000",
+        "DTSTART;TZID=Australia/Perth:20260818T160000",
+        "DTEND;TZID=Australia/Perth:20260818T170000",
+        "END:VEVENT",
+        "END:VCALENDAR"
+      ],
+      "expected": {
+        "canonicalStatus": "ok",
+        "occurrencesAreExhaustive": true,
+        "occurrences": [
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260804T073000Z", "startsAt": "20260804T073000Z", "allDay": false, "recurring": true, "title": "Choir" },
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260811T073000Z", "startsAt": "20260811T073000Z", "allDay": false, "recurring": true, "title": "Choir" },
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260818T073000Z", "startsAt": "20260818T080000Z", "allDay": false, "recurring": true, "title": "Choir - changed" },
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260825T073000Z", "startsAt": "20260825T073000Z", "allDay": false, "recurring": true, "title": "Choir" }
+        ],
+        "suppressed": [],
+        "forbiddenRecurrenceIds": ["20260818T080000Z"]
+      }
+    },
+    {
+      "id": "perth-detached-move-utc-recurrence-id",
+      "description": "The same override written with a UTC RECURRENCE-ID. It names the same logical occurrence.",
+      "calendarRef": "cal-a",
+      "calendarFallbackTimezone": null,
+      "window": { "from": "2026-08-01", "to": "2026-08-31" },
+      "ics": [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Calee//Event Occurrence Identity Contract v1//EN",
+        "BEGIN:VEVENT",
+        "UID:choir-1@contract.example",
+        "SUMMARY:Choir",
+        "DTSTART;TZID=Australia/Perth:20260804T153000",
+        "DTEND;TZID=Australia/Perth:20260804T163000",
+        "RRULE:FREQ=WEEKLY;COUNT=4",
+        "END:VEVENT",
+        "BEGIN:VEVENT",
+        "UID:choir-1@contract.example",
+        "SUMMARY:Choir - changed",
+        "RECURRENCE-ID:20260818T073000Z",
+        "DTSTART;TZID=Australia/Perth:20260818T160000",
+        "DTEND;TZID=Australia/Perth:20260818T170000",
+        "END:VEVENT",
+        "END:VCALENDAR"
+      ],
+      "expected": {
+        "canonicalStatus": "ok",
+        "occurrencesAreExhaustive": true,
+        "occurrences": [
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260804T073000Z", "startsAt": "20260804T073000Z", "allDay": false, "recurring": true, "title": "Choir" },
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260811T073000Z", "startsAt": "20260811T073000Z", "allDay": false, "recurring": true, "title": "Choir" },
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260818T073000Z", "startsAt": "20260818T080000Z", "allDay": false, "recurring": true, "title": "Choir - changed" },
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260825T073000Z", "startsAt": "20260825T073000Z", "allDay": false, "recurring": true, "title": "Choir" }
+        ],
+        "suppressed": [],
+        "forbiddenRecurrenceIds": []
+      }
+    },
+    {
+      "id": "perth-detached-move-foreign-tzid-recurrence-id",
+      "description": "The override names its occurrence in a DIFFERENT zone from the master's. 17:30 Australia/Sydney (AEST, UTC+10) is the same instant as 15:30 Australia/Perth (UTC+8), so it names the same logical occurrence. This pins step 2 of the resolution ladder: the property's OWN TZID wins, and an engine that reads only the component's DTSTART zone lands eight hours away.",
+      "calendarRef": "cal-a",
+      "calendarFallbackTimezone": null,
+      "window": { "from": "2026-08-01", "to": "2026-08-31" },
+      "ics": [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Calee//Event Occurrence Identity Contract v1//EN",
+        "BEGIN:VEVENT",
+        "UID:choir-1@contract.example",
+        "SUMMARY:Choir",
+        "DTSTART;TZID=Australia/Perth:20260804T153000",
+        "DTEND;TZID=Australia/Perth:20260804T163000",
+        "RRULE:FREQ=WEEKLY;COUNT=4",
+        "END:VEVENT",
+        "BEGIN:VEVENT",
+        "UID:choir-1@contract.example",
+        "SUMMARY:Choir - foreign zone override",
+        "RECURRENCE-ID;TZID=Australia/Sydney:20260818T173000",
+        "DTSTART;TZID=Australia/Perth:20260818T160000",
+        "DTEND;TZID=Australia/Perth:20260818T170000",
+        "END:VEVENT",
+        "END:VCALENDAR"
+      ],
+      "expected": {
+        "canonicalStatus": "ok",
+        "occurrencesAreExhaustive": true,
+        "occurrences": [
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260804T073000Z", "startsAt": "20260804T073000Z", "allDay": false, "recurring": true, "title": "Choir" },
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260811T073000Z", "startsAt": "20260811T073000Z", "allDay": false, "recurring": true, "title": "Choir" },
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260818T073000Z", "startsAt": "20260818T080000Z", "allDay": false, "recurring": true, "title": "Choir - foreign zone override" },
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260825T073000Z", "startsAt": "20260825T073000Z", "allDay": false, "recurring": true, "title": "Choir" }
+        ],
+        "suppressed": [],
+        "forbiddenRecurrenceIds": ["20260818T093000Z", "20260818T173000Z"],
+        "forbiddenCanonicalIdentities": ["20260818T093000Z", "20260818T173000Z"]
+      }
+    },
+    {
+      "id": "perth-detached-move-inherited-tzid-recurrence-id",
+      "description": "The override's RECURRENCE-ID carries no TZID of its own, so it is read on the clock the series is expanded on -- the master's DTSTART zone. This pins step 3 of the ladder. Reading it as UTC, or against the calendar timezone, names no occurrence of this series.",
+      "calendarRef": "cal-a",
+      "calendarFallbackTimezone": "Pacific/Kiritimati",
+      "window": { "from": "2026-08-01", "to": "2026-08-31" },
+      "ics": [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Calee//Event Occurrence Identity Contract v1//EN",
+        "BEGIN:VEVENT",
+        "UID:choir-1@contract.example",
+        "SUMMARY:Choir",
+        "DTSTART;TZID=Australia/Perth:20260804T153000",
+        "DTEND;TZID=Australia/Perth:20260804T163000",
+        "RRULE:FREQ=WEEKLY;COUNT=4",
+        "END:VEVENT",
+        "BEGIN:VEVENT",
+        "UID:choir-1@contract.example",
+        "SUMMARY:Choir - inherited zone override",
+        "RECURRENCE-ID:20260818T153000",
+        "DTSTART;TZID=Australia/Perth:20260818T160000",
+        "DTEND;TZID=Australia/Perth:20260818T170000",
+        "END:VEVENT",
+        "END:VCALENDAR"
+      ],
+      "expected": {
+        "canonicalStatus": "ok",
+        "occurrencesAreExhaustive": true,
+        "occurrences": [
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260804T073000Z", "startsAt": "20260804T073000Z", "allDay": false, "recurring": true, "title": "Choir" },
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260811T073000Z", "startsAt": "20260811T073000Z", "allDay": false, "recurring": true, "title": "Choir" },
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260818T073000Z", "startsAt": "20260818T080000Z", "allDay": false, "recurring": true, "title": "Choir - inherited zone override" },
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260825T073000Z", "startsAt": "20260825T073000Z", "allDay": false, "recurring": true, "title": "Choir" }
+        ],
+        "suppressed": [],
+        "forbiddenRecurrenceIds": ["20260818T153000Z", "20260818T013000Z"],
+        "forbiddenCanonicalIdentities": ["20260818T153000Z", "20260818T013000Z"]
+      }
+    },
+    {
+      "id": "perth-detached-cancelled",
+      "description": "A detached STATUS:CANCELLED component names the same logical occurrence and suppresses it. The occurrence is unavailable, not a different event; an Event Link resolver MUST be able to answer 'cancelled' for 20260818T073000Z rather than 'not found'.",
+      "calendarRef": "cal-a",
+      "calendarFallbackTimezone": null,
+      "window": { "from": "2026-08-01", "to": "2026-08-31" },
+      "ics": [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Calee//Event Occurrence Identity Contract v1//EN",
+        "BEGIN:VEVENT",
+        "UID:choir-1@contract.example",
+        "SUMMARY:Choir",
+        "DTSTART;TZID=Australia/Perth:20260804T153000",
+        "DTEND;TZID=Australia/Perth:20260804T163000",
+        "RRULE:FREQ=WEEKLY;COUNT=4",
+        "END:VEVENT",
+        "BEGIN:VEVENT",
+        "UID:choir-1@contract.example",
+        "SUMMARY:Choir",
+        "RECURRENCE-ID;TZID=Australia/Perth:20260818T153000",
+        "DTSTART;TZID=Australia/Perth:20260818T153000",
+        "DTEND;TZID=Australia/Perth:20260818T163000",
+        "STATUS:CANCELLED",
+        "END:VEVENT",
+        "END:VCALENDAR"
+      ],
+      "expected": {
+        "canonicalStatus": "ok",
+        "occurrencesAreExhaustive": true,
+        "occurrences": [
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260804T073000Z", "startsAt": "20260804T073000Z", "allDay": false, "recurring": true, "title": "Choir" },
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260811T073000Z", "startsAt": "20260811T073000Z", "allDay": false, "recurring": true, "title": "Choir" },
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260825T073000Z", "startsAt": "20260825T073000Z", "allDay": false, "recurring": true, "title": "Choir" }
+        ],
+        "suppressed": [
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260818T073000Z", "reason": "cancelled" }
+        ],
+        "forbiddenRecurrenceIds": []
+      }
+    },
+    {
+      "id": "sydney-dst-forward",
+      "description": "Australia/Sydney DST begins on 4 October 2026. Weekly expansion advances on the SOURCE wall clock, so 10:00 local stays 10:00 local and the canonical UTC identity legitimately moves by an hour. 20261006T000000Z would be the 11:00-local occurrence a UTC-stepped expansion drifts into and MUST NOT appear.",
+      "calendarRef": "cal-a",
+      "calendarFallbackTimezone": null,
+      "window": { "from": "2026-09-01", "to": "2026-10-31" },
+      "ics": [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Calee//Event Occurrence Identity Contract v1//EN",
+        "BEGIN:VEVENT",
+        "UID:sydney-dst@contract.example",
+        "SUMMARY:Weekly Sydney event",
+        "DTSTART;TZID=Australia/Sydney:20260929T100000",
+        "DTEND;TZID=Australia/Sydney:20260929T110000",
+        "RRULE:FREQ=WEEKLY;COUNT=3",
+        "END:VEVENT",
+        "END:VCALENDAR"
+      ],
+      "expected": {
+        "canonicalStatus": "ok",
+        "occurrencesAreExhaustive": true,
+        "occurrences": [
+          { "sourceUid": "sydney-dst@contract.example", "recurrenceId": "20260929T000000Z", "startsAt": "20260929T000000Z", "allDay": false, "recurring": true, "title": "Weekly Sydney event" },
+          { "sourceUid": "sydney-dst@contract.example", "recurrenceId": "20261005T230000Z", "startsAt": "20261005T230000Z", "allDay": false, "recurring": true, "title": "Weekly Sydney event" },
+          { "sourceUid": "sydney-dst@contract.example", "recurrenceId": "20261012T230000Z", "startsAt": "20261012T230000Z", "allDay": false, "recurring": true, "title": "Weekly Sydney event" }
+        ],
+        "suppressed": [],
+        "forbiddenRecurrenceIds": ["20261006T000000Z", "20261013T000000Z"]
+      }
+    },
+    {
+      "id": "sydney-dst-forward-detached-far-side",
+      "description": "A detached override on the far side of the transition claims the AEDT occurrence it names and keeps that identity after being moved to 14:00 local.",
+      "calendarRef": "cal-a",
+      "calendarFallbackTimezone": null,
+      "window": { "from": "2026-09-01", "to": "2026-10-31" },
+      "ics": [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Calee//Event Occurrence Identity Contract v1//EN",
+        "BEGIN:VEVENT",
+        "UID:sydney-dst@contract.example",
+        "SUMMARY:Weekly Sydney event",
+        "DTSTART;TZID=Australia/Sydney:20260929T100000",
+        "DTEND;TZID=Australia/Sydney:20260929T110000",
+        "RRULE:FREQ=WEEKLY;COUNT=3",
+        "END:VEVENT",
+        "BEGIN:VEVENT",
+        "UID:sydney-dst@contract.example",
+        "SUMMARY:Weekly Sydney event - changed",
+        "RECURRENCE-ID;TZID=Australia/Sydney:20261006T100000",
+        "DTSTART;TZID=Australia/Sydney:20261006T140000",
+        "DTEND;TZID=Australia/Sydney:20261006T150000",
+        "END:VEVENT",
+        "END:VCALENDAR"
+      ],
+      "expected": {
+        "canonicalStatus": "ok",
+        "occurrencesAreExhaustive": true,
+        "occurrences": [
+          { "sourceUid": "sydney-dst@contract.example", "recurrenceId": "20260929T000000Z", "startsAt": "20260929T000000Z", "allDay": false, "recurring": true, "title": "Weekly Sydney event" },
+          { "sourceUid": "sydney-dst@contract.example", "recurrenceId": "20261005T230000Z", "startsAt": "20261006T030000Z", "allDay": false, "recurring": true, "title": "Weekly Sydney event - changed" },
+          { "sourceUid": "sydney-dst@contract.example", "recurrenceId": "20261012T230000Z", "startsAt": "20261012T230000Z", "allDay": false, "recurring": true, "title": "Weekly Sydney event" }
+        ],
+        "suppressed": [],
+        "forbiddenRecurrenceIds": ["20261006T000000Z"]
+      }
+    },
+    {
+      "id": "sydney-dst-forward-byday",
+      "description": "The same transition through a WEEKLY;BYDAY rule. BYDAY expansion is a separate code path in every engine, and an identity minted from one path must equal the identity minted from the other -- otherwise a link shared from a BYDAY series resolves against a differently-expanded one.",
+      "calendarRef": "cal-a",
+      "calendarFallbackTimezone": null,
+      "window": { "from": "2026-09-01", "to": "2026-10-31" },
+      "ics": [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Calee//Event Occurrence Identity Contract v1//EN",
+        "BEGIN:VEVENT",
+        "UID:sydney-dst-byday@contract.example",
+        "SUMMARY:Sydney byday series",
+        "DTSTART;TZID=Australia/Sydney:20260929T100000",
+        "DTEND;TZID=Australia/Sydney:20260929T110000",
+        "RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=3",
+        "END:VEVENT",
+        "BEGIN:VEVENT",
+        "UID:sydney-dst-byday@contract.example",
+        "SUMMARY:Sydney byday moved",
+        "RECURRENCE-ID;TZID=Australia/Sydney:20261006T100000",
+        "DTSTART;TZID=Australia/Sydney:20261006T140000",
+        "DTEND;TZID=Australia/Sydney:20261006T150000",
+        "END:VEVENT",
+        "END:VCALENDAR"
+      ],
+      "expected": {
+        "canonicalStatus": "ok",
+        "occurrencesAreExhaustive": true,
+        "occurrences": [
+          { "sourceUid": "sydney-dst-byday@contract.example", "recurrenceId": "20260929T000000Z", "startsAt": "20260929T000000Z", "allDay": false, "recurring": true, "title": "Sydney byday series" },
+          { "sourceUid": "sydney-dst-byday@contract.example", "recurrenceId": "20261005T230000Z", "startsAt": "20261006T030000Z", "allDay": false, "recurring": true, "title": "Sydney byday moved" },
+          { "sourceUid": "sydney-dst-byday@contract.example", "recurrenceId": "20261012T230000Z", "startsAt": "20261012T230000Z", "allDay": false, "recurring": true, "title": "Sydney byday series" }
+        ],
+        "suppressed": [],
+        "forbiddenRecurrenceIds": ["20261006T000000Z"],
+        "forbiddenCanonicalIdentities": ["20261006T000000Z"]
+      }
+    },
+    {
+      "id": "floating-byday-series-without-timezone",
+      "description": "The BYDAY path must fail closed on a floating source for the same reason the plain weekly path does. Two engines with different device or deployment timezones would otherwise mint two identities for these bytes.",
+      "calendarRef": "cal-a",
+      "calendarFallbackTimezone": null,
+      "window": { "from": "2026-09-01", "to": "2026-10-31" },
+      "ics": [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Calee//Event Occurrence Identity Contract v1//EN",
+        "BEGIN:VEVENT",
+        "UID:floating-byday@contract.example",
+        "SUMMARY:Floating byday series",
+        "DTSTART:20260929T100000",
+        "DTEND:20260929T110000",
+        "RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=3",
+        "END:VEVENT",
+        "END:VCALENDAR"
+      ],
+      "expected": {
+        "canonicalStatus": "floating_without_context",
+        "occurrencesAreExhaustive": false,
+        "occurrences": [],
+        "suppressed": [],
+        "forbiddenRecurrenceIds": [],
+        "forbiddenCanonicalIdentities": ["20260929T100000Z", "20260929T000000Z"],
+        "displayFallback": {
+          "occurrenceCount": 3,
+          "note": "Display parsing is unchanged. Only canonical share identity fails closed."
+        }
+      }
+    },
+    {
+      "id": "sydney-dst-backward",
+      "description": "Australia/Sydney DST ends on 5 April 2026. The reverse transition is covered as well, so the wall-clock rule is not satisfied by an accidental one-way adjustment.",
+      "calendarRef": "cal-a",
+      "calendarFallbackTimezone": null,
+      "window": { "from": "2026-03-01", "to": "2026-04-30" },
+      "ics": [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Calee//Event Occurrence Identity Contract v1//EN",
+        "BEGIN:VEVENT",
+        "UID:sydney-dst-reverse@contract.example",
+        "SUMMARY:Autumn Sydney series",
+        "DTSTART;TZID=Australia/Sydney:20260330T100000",
+        "DTEND;TZID=Australia/Sydney:20260330T110000",
+        "RRULE:FREQ=WEEKLY;COUNT=3",
+        "END:VEVENT",
+        "END:VCALENDAR"
+      ],
+      "expected": {
+        "canonicalStatus": "ok",
+        "occurrencesAreExhaustive": true,
+        "occurrences": [
+          { "sourceUid": "sydney-dst-reverse@contract.example", "recurrenceId": "20260329T230000Z", "startsAt": "20260329T230000Z", "allDay": false, "recurring": true, "title": "Autumn Sydney series" },
+          { "sourceUid": "sydney-dst-reverse@contract.example", "recurrenceId": "20260406T000000Z", "startsAt": "20260406T000000Z", "allDay": false, "recurring": true, "title": "Autumn Sydney series" },
+          { "sourceUid": "sydney-dst-reverse@contract.example", "recurrenceId": "20260413T000000Z", "startsAt": "20260413T000000Z", "allDay": false, "recurring": true, "title": "Autumn Sydney series" }
+        ],
+        "suppressed": [],
+        "forbiddenRecurrenceIds": ["20260405T230000Z", "20260412T230000Z"]
+      }
+    },
+    {
+      "id": "sydney-exdate-across-dst",
+      "description": "A TZID-qualified EXDATE on the far side of the transition removes the occurrence whose canonical identity is 20261005T230000Z, not the literal 20261006T000000Z the local wall time resembles.",
+      "calendarRef": "cal-a",
+      "calendarFallbackTimezone": null,
+      "window": { "from": "2026-09-01", "to": "2026-10-31" },
+      "ics": [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Calee//Event Occurrence Identity Contract v1//EN",
+        "BEGIN:VEVENT",
+        "UID:sydney-dst-exdate@contract.example",
+        "SUMMARY:Weekly Sydney event",
+        "DTSTART;TZID=Australia/Sydney:20260929T100000",
+        "DTEND;TZID=Australia/Sydney:20260929T110000",
+        "RRULE:FREQ=WEEKLY;COUNT=3",
+        "EXDATE;TZID=Australia/Sydney:20261006T100000",
+        "END:VEVENT",
+        "END:VCALENDAR"
+      ],
+      "expected": {
+        "canonicalStatus": "ok",
+        "occurrencesAreExhaustive": true,
+        "occurrences": [
+          { "sourceUid": "sydney-dst-exdate@contract.example", "recurrenceId": "20260929T000000Z", "startsAt": "20260929T000000Z", "allDay": false, "recurring": true, "title": "Weekly Sydney event" },
+          { "sourceUid": "sydney-dst-exdate@contract.example", "recurrenceId": "20261012T230000Z", "startsAt": "20261012T230000Z", "allDay": false, "recurring": true, "title": "Weekly Sydney event" }
+        ],
+        "suppressed": [
+          { "sourceUid": "sydney-dst-exdate@contract.example", "recurrenceId": "20261005T230000Z", "reason": "excluded" }
+        ],
+        "forbiddenRecurrenceIds": ["20261006T000000Z"]
+      }
+    },
+    {
+      "id": "perth-exdate-tzid",
+      "description": "A TZID-qualified EXDATE excludes by logical identity, not by literal wall time.",
+      "calendarRef": "cal-a",
+      "calendarFallbackTimezone": null,
+      "window": { "from": "2026-08-01", "to": "2026-08-31" },
+      "ics": [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Calee//Event Occurrence Identity Contract v1//EN",
+        "BEGIN:VEVENT",
+        "UID:choir-1@contract.example",
+        "SUMMARY:Choir",
+        "DTSTART;TZID=Australia/Perth:20260804T153000",
+        "DTEND;TZID=Australia/Perth:20260804T163000",
+        "RRULE:FREQ=WEEKLY;COUNT=4",
+        "EXDATE;TZID=Australia/Perth:20260818T153000",
+        "END:VEVENT",
+        "END:VCALENDAR"
+      ],
+      "expected": {
+        "canonicalStatus": "ok",
+        "occurrencesAreExhaustive": true,
+        "occurrences": [
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260804T073000Z", "startsAt": "20260804T073000Z", "allDay": false, "recurring": true, "title": "Choir" },
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260811T073000Z", "startsAt": "20260811T073000Z", "allDay": false, "recurring": true, "title": "Choir" },
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260825T073000Z", "startsAt": "20260825T073000Z", "allDay": false, "recurring": true, "title": "Choir" }
+        ],
+        "suppressed": [
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260818T073000Z", "reason": "excluded" }
+        ],
+        "forbiddenRecurrenceIds": []
+      }
+    },
+    {
+      "id": "perth-exdate-utc",
+      "description": "The same exclusion written as a UTC EXDATE removes the same logical occurrence.",
+      "calendarRef": "cal-a",
+      "calendarFallbackTimezone": null,
+      "window": { "from": "2026-08-01", "to": "2026-08-31" },
+      "ics": [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Calee//Event Occurrence Identity Contract v1//EN",
+        "BEGIN:VEVENT",
+        "UID:choir-1@contract.example",
+        "SUMMARY:Choir",
+        "DTSTART;TZID=Australia/Perth:20260804T153000",
+        "DTEND;TZID=Australia/Perth:20260804T163000",
+        "RRULE:FREQ=WEEKLY;COUNT=4",
+        "EXDATE:20260818T073000Z",
+        "END:VEVENT",
+        "END:VCALENDAR"
+      ],
+      "expected": {
+        "canonicalStatus": "ok",
+        "occurrencesAreExhaustive": true,
+        "occurrences": [
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260804T073000Z", "startsAt": "20260804T073000Z", "allDay": false, "recurring": true, "title": "Choir" },
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260811T073000Z", "startsAt": "20260811T073000Z", "allDay": false, "recurring": true, "title": "Choir" },
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260825T073000Z", "startsAt": "20260825T073000Z", "allDay": false, "recurring": true, "title": "Choir" }
+        ],
+        "suppressed": [
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260818T073000Z", "reason": "excluded" }
+        ],
+        "forbiddenRecurrenceIds": []
+      }
+    },
+    {
+      "id": "perth-exdate-multiple-values",
+      "description": "Several comma-separated values on one TZID-qualified EXDATE property are each honoured.",
+      "calendarRef": "cal-a",
+      "calendarFallbackTimezone": null,
+      "window": { "from": "2026-08-01", "to": "2026-08-31" },
+      "ics": [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Calee//Event Occurrence Identity Contract v1//EN",
+        "BEGIN:VEVENT",
+        "UID:choir-1@contract.example",
+        "SUMMARY:Choir",
+        "DTSTART;TZID=Australia/Perth:20260804T153000",
+        "DTEND;TZID=Australia/Perth:20260804T163000",
+        "RRULE:FREQ=WEEKLY;COUNT=4",
+        "EXDATE;TZID=Australia/Perth:20260811T153000,20260818T153000",
+        "END:VEVENT",
+        "END:VCALENDAR"
+      ],
+      "expected": {
+        "canonicalStatus": "ok",
+        "occurrencesAreExhaustive": true,
+        "occurrences": [
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260804T073000Z", "startsAt": "20260804T073000Z", "allDay": false, "recurring": true, "title": "Choir" },
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260825T073000Z", "startsAt": "20260825T073000Z", "allDay": false, "recurring": true, "title": "Choir" }
+        ],
+        "suppressed": [
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260811T073000Z", "reason": "excluded" },
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260818T073000Z", "reason": "excluded" }
+        ],
+        "forbiddenRecurrenceIds": []
+      }
+    },
+    {
+      "id": "exdate-plus-detached-replacement",
+      "description": "The producer pattern where a source excludes an occurrence and then supplies a detached replacement naming the same RECURRENCE-ID. The replacement remains valid and keeps the original logical identity.",
+      "calendarRef": "cal-a",
+      "calendarFallbackTimezone": null,
+      "window": { "from": "2026-08-01", "to": "2026-08-31" },
+      "ics": [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Calee//Event Occurrence Identity Contract v1//EN",
+        "BEGIN:VEVENT",
+        "UID:choir-1@contract.example",
+        "SUMMARY:Choir",
+        "DTSTART;TZID=Australia/Perth:20260804T153000",
+        "DTEND;TZID=Australia/Perth:20260804T163000",
+        "RRULE:FREQ=WEEKLY;COUNT=4",
+        "EXDATE;TZID=Australia/Perth:20260818T153000",
+        "END:VEVENT",
+        "BEGIN:VEVENT",
+        "UID:choir-1@contract.example",
+        "SUMMARY:Choir - replacement",
+        "RECURRENCE-ID;TZID=Australia/Perth:20260818T153000",
+        "DTSTART;TZID=Australia/Perth:20260818T190000",
+        "DTEND;TZID=Australia/Perth:20260818T200000",
+        "END:VEVENT",
+        "END:VCALENDAR"
+      ],
+      "expected": {
+        "canonicalStatus": "ok",
+        "occurrencesAreExhaustive": true,
+        "occurrences": [
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260804T073000Z", "startsAt": "20260804T073000Z", "allDay": false, "recurring": true, "title": "Choir" },
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260811T073000Z", "startsAt": "20260811T073000Z", "allDay": false, "recurring": true, "title": "Choir" },
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260818T073000Z", "startsAt": "20260818T110000Z", "allDay": false, "recurring": true, "title": "Choir - replacement" },
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260825T073000Z", "startsAt": "20260825T073000Z", "allDay": false, "recurring": true, "title": "Choir" }
+        ],
+        "suppressed": [],
+        "forbiddenRecurrenceIds": []
+      }
+    },
+    {
+      "id": "all-day-weekly-series",
+      "description": "All-day identities are literal calendar dates.",
+      "calendarRef": "cal-a",
+      "calendarFallbackTimezone": null,
+      "window": { "from": "2026-08-01", "to": "2026-08-31" },
+      "ics": [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Calee//Event Occurrence Identity Contract v1//EN",
+        "BEGIN:VEVENT",
+        "UID:allday-1@contract.example",
+        "SUMMARY:All day series",
+        "DTSTART;VALUE=DATE:20260804",
+        "DTEND;VALUE=DATE:20260805",
+        "RRULE:FREQ=WEEKLY;COUNT=4",
+        "END:VEVENT",
+        "END:VCALENDAR"
+      ],
+      "expected": {
+        "canonicalStatus": "ok",
+        "occurrencesAreExhaustive": true,
+        "occurrences": [
+          { "sourceUid": "allday-1@contract.example", "recurrenceId": "20260804", "startsAt": "20260804", "allDay": true, "recurring": true, "title": "All day series" },
+          { "sourceUid": "allday-1@contract.example", "recurrenceId": "20260811", "startsAt": "20260811", "allDay": true, "recurring": true, "title": "All day series" },
+          { "sourceUid": "allday-1@contract.example", "recurrenceId": "20260818", "startsAt": "20260818", "allDay": true, "recurring": true, "title": "All day series" },
+          { "sourceUid": "allday-1@contract.example", "recurrenceId": "20260825", "startsAt": "20260825", "allDay": true, "recurring": true, "title": "All day series" }
+        ],
+        "suppressed": [],
+        "forbiddenRecurrenceIds": ["20260803", "20260805", "20260804T000000Z"]
+      }
+    },
+    {
+      "id": "all-day-detached-move",
+      "description": "An all-day override displayed on 19 August still carries the identity 20260818.",
+      "calendarRef": "cal-a",
+      "calendarFallbackTimezone": null,
+      "window": { "from": "2026-08-01", "to": "2026-08-31" },
+      "ics": [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Calee//Event Occurrence Identity Contract v1//EN",
+        "BEGIN:VEVENT",
+        "UID:allday-1@contract.example",
+        "SUMMARY:All day series",
+        "DTSTART;VALUE=DATE:20260804",
+        "DTEND;VALUE=DATE:20260805",
+        "RRULE:FREQ=WEEKLY;COUNT=4",
+        "END:VEVENT",
+        "BEGIN:VEVENT",
+        "UID:allday-1@contract.example",
+        "SUMMARY:All day moved",
+        "RECURRENCE-ID;VALUE=DATE:20260818",
+        "DTSTART;VALUE=DATE:20260819",
+        "DTEND;VALUE=DATE:20260820",
+        "END:VEVENT",
+        "END:VCALENDAR"
+      ],
+      "expected": {
+        "canonicalStatus": "ok",
+        "occurrencesAreExhaustive": true,
+        "occurrences": [
+          { "sourceUid": "allday-1@contract.example", "recurrenceId": "20260804", "startsAt": "20260804", "allDay": true, "recurring": true, "title": "All day series" },
+          { "sourceUid": "allday-1@contract.example", "recurrenceId": "20260811", "startsAt": "20260811", "allDay": true, "recurring": true, "title": "All day series" },
+          { "sourceUid": "allday-1@contract.example", "recurrenceId": "20260818", "startsAt": "20260819", "allDay": true, "recurring": true, "title": "All day moved" },
+          { "sourceUid": "allday-1@contract.example", "recurrenceId": "20260825", "startsAt": "20260825", "allDay": true, "recurring": true, "title": "All day series" }
+        ],
+        "suppressed": [],
+        "forbiddenRecurrenceIds": ["20260819"]
+      }
+    },
+    {
+      "id": "all-day-exdate",
+      "description": "An all-day EXDATE excludes the matching date-only identity.",
+      "calendarRef": "cal-a",
+      "calendarFallbackTimezone": null,
+      "window": { "from": "2026-08-01", "to": "2026-08-31" },
+      "ics": [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Calee//Event Occurrence Identity Contract v1//EN",
+        "BEGIN:VEVENT",
+        "UID:allday-1@contract.example",
+        "SUMMARY:All day series",
+        "DTSTART;VALUE=DATE:20260804",
+        "DTEND;VALUE=DATE:20260805",
+        "RRULE:FREQ=WEEKLY;COUNT=4",
+        "EXDATE;VALUE=DATE:20260818",
+        "END:VEVENT",
+        "END:VCALENDAR"
+      ],
+      "expected": {
+        "canonicalStatus": "ok",
+        "occurrencesAreExhaustive": true,
+        "occurrences": [
+          { "sourceUid": "allday-1@contract.example", "recurrenceId": "20260804", "startsAt": "20260804", "allDay": true, "recurring": true, "title": "All day series" },
+          { "sourceUid": "allday-1@contract.example", "recurrenceId": "20260811", "startsAt": "20260811", "allDay": true, "recurring": true, "title": "All day series" },
+          { "sourceUid": "allday-1@contract.example", "recurrenceId": "20260825", "startsAt": "20260825", "allDay": true, "recurring": true, "title": "All day series" }
+        ],
+        "suppressed": [
+          { "sourceUid": "allday-1@contract.example", "recurrenceId": "20260818", "reason": "excluded" }
+        ],
+        "forbiddenRecurrenceIds": []
+      }
+    },
+    {
+      "id": "floating-series-with-calendar-timezone",
+      "description": "A floating series resolved against an explicit calendar timezone context.",
+      "calendarRef": "cal-a",
+      "calendarFallbackTimezone": "Australia/Perth",
+      "window": { "from": "2026-08-01", "to": "2026-08-31" },
+      "ics": [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Calee//Event Occurrence Identity Contract v1//EN",
+        "BEGIN:VEVENT",
+        "UID:floating-1@contract.example",
+        "SUMMARY:Floating series",
+        "DTSTART:20260804T153000",
+        "DTEND:20260804T163000",
+        "RRULE:FREQ=WEEKLY;COUNT=4",
+        "END:VEVENT",
+        "BEGIN:VEVENT",
+        "UID:floating-1@contract.example",
+        "SUMMARY:Floating moved",
+        "RECURRENCE-ID:20260818T153000",
+        "DTSTART:20260818T160000",
+        "DTEND:20260818T170000",
+        "END:VEVENT",
+        "END:VCALENDAR"
+      ],
+      "expected": {
+        "canonicalStatus": "ok",
+        "occurrencesAreExhaustive": true,
+        "occurrences": [
+          { "sourceUid": "floating-1@contract.example", "recurrenceId": "20260804T073000Z", "startsAt": "20260804T073000Z", "allDay": false, "recurring": true, "title": "Floating series" },
+          { "sourceUid": "floating-1@contract.example", "recurrenceId": "20260811T073000Z", "startsAt": "20260811T073000Z", "allDay": false, "recurring": true, "title": "Floating series" },
+          { "sourceUid": "floating-1@contract.example", "recurrenceId": "20260818T073000Z", "startsAt": "20260818T080000Z", "allDay": false, "recurring": true, "title": "Floating moved" },
+          { "sourceUid": "floating-1@contract.example", "recurrenceId": "20260825T073000Z", "startsAt": "20260825T073000Z", "allDay": false, "recurring": true, "title": "Floating series" }
+        ],
+        "suppressed": [],
+        "forbiddenRecurrenceIds": ["20260818T153000Z"]
+      }
+    },
+    {
+      "id": "floating-series-without-timezone",
+      "description": "The same series with no timezone context anywhere. It still DISPLAYS -- each client keeps its legacy display fallback -- but it MUST NOT mint a canonical Event Link identity, because two clients with different fallbacks would mint different identities for the same source occurrence.",
+      "calendarRef": "cal-a",
+      "calendarFallbackTimezone": null,
+      "window": { "from": "2026-08-01", "to": "2026-08-31" },
+      "ics": [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Calee//Event Occurrence Identity Contract v1//EN",
+        "BEGIN:VEVENT",
+        "UID:floating-1@contract.example",
+        "SUMMARY:Floating series",
+        "DTSTART:20260804T153000",
+        "DTEND:20260804T163000",
+        "RRULE:FREQ=WEEKLY;COUNT=4",
+        "END:VEVENT",
+        "END:VCALENDAR"
+      ],
+      "expected": {
+        "canonicalStatus": "floating_without_context",
+        "occurrencesAreExhaustive": false,
+        "occurrences": [],
+        "suppressed": [],
+        "forbiddenRecurrenceIds": [],
+        "forbiddenCanonicalIdentities": ["20260804T153000Z", "20260804T073000Z"],
+        "displayFallback": {
+          "occurrenceCount": 4,
+          "note": "Display parsing is unchanged. Only canonical share identity fails closed."
+        }
+      }
+    },
+    {
+      "id": "unsupported-tzid-series",
+      "description": "A Windows timezone name. No timezone database is guessed at and no offset is invented, so this source cannot mint a canonical Event Link identity. It still displays under each client's legacy fallback, and the labels that fallback produces (20260804T153000Z here, wall time relabelled UTC) are display keys, NOT canonical identities -- listing them under forbiddenCanonicalIdentities is the difference between the two.",
+      "calendarRef": "cal-a",
+      "calendarFallbackTimezone": null,
+      "window": { "from": "2026-08-01", "to": "2026-08-31" },
+      "ics": [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Calee//Event Occurrence Identity Contract v1//EN",
+        "BEGIN:VEVENT",
+        "UID:badtz-1@contract.example",
+        "SUMMARY:Windows tz series",
+        "DTSTART;TZID=W. Australia Standard Time:20260804T153000",
+        "DTEND;TZID=W. Australia Standard Time:20260804T163000",
+        "RRULE:FREQ=WEEKLY;COUNT=4",
+        "END:VEVENT",
+        "END:VCALENDAR"
+      ],
+      "expected": {
+        "canonicalStatus": "unsupported_tzid",
+        "occurrencesAreExhaustive": false,
+        "occurrences": [],
+        "suppressed": [],
+        "forbiddenRecurrenceIds": [],
+        "forbiddenCanonicalIdentities": ["20260804T153000Z", "20260804T073000Z"],
+        "displayFallback": {
+          "occurrenceCount": 4,
+          "note": "Display parsing is unchanged. Only canonical share identity fails closed."
+        }
+      }
+    },
+    {
+      "id": "no-source-uid-series",
+      "description": "A component with no UID. A stand-in identifier derived from the component body keeps display working but is NOT a canonical source UID and MUST NOT be minted into an Event Link.",
+      "calendarRef": "cal-a",
+      "calendarFallbackTimezone": null,
+      "window": { "from": "2026-08-01", "to": "2026-08-31" },
+      "ics": [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Calee//Event Occurrence Identity Contract v1//EN",
+        "BEGIN:VEVENT",
+        "SUMMARY:No uid series",
+        "DTSTART;TZID=Australia/Perth:20260804T153000",
+        "DTEND;TZID=Australia/Perth:20260804T163000",
+        "RRULE:FREQ=WEEKLY;COUNT=4",
+        "END:VEVENT",
+        "END:VCALENDAR"
+      ],
+      "expected": {
+        "canonicalStatus": "no_source_uid",
+        "occurrencesAreExhaustive": false,
+        "occurrences": [],
+        "suppressed": [],
+        "forbiddenRecurrenceIds": [],
+        "forbiddenCanonicalIdentities": ["20260804T073000Z"],
+        "displayFallback": {
+          "occurrenceCount": 4,
+          "note": "Display parsing is unchanged. Only canonical share identity fails closed."
+        }
+      }
+    },
+    {
+      "id": "malformed-recurrence-id-override",
+      "description": "A structurally impossible RECURRENCE-ID. Parsing MUST NOT fail, the four real occurrences MUST survive intact, and the malformed component MUST NOT claim any of them.",
+      "calendarRef": "cal-a",
+      "calendarFallbackTimezone": null,
+      "window": { "from": "2026-08-01", "to": "2026-08-31" },
+      "ics": [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Calee//Event Occurrence Identity Contract v1//EN",
+        "BEGIN:VEVENT",
+        "UID:choir-1@contract.example",
+        "SUMMARY:Choir",
+        "DTSTART;TZID=Australia/Perth:20260804T153000",
+        "DTEND;TZID=Australia/Perth:20260804T163000",
+        "RRULE:FREQ=WEEKLY;COUNT=4",
+        "END:VEVENT",
+        "BEGIN:VEVENT",
+        "UID:choir-1@contract.example",
+        "SUMMARY:Choir - malformed override",
+        "RECURRENCE-ID;TZID=Australia/Perth:20261332T253000",
+        "DTSTART;TZID=Australia/Perth:20260818T160000",
+        "DTEND;TZID=Australia/Perth:20260818T170000",
+        "END:VEVENT",
+        "END:VCALENDAR"
+      ],
+      "expected": {
+        "canonicalStatus": "ok",
+        "occurrencesAreExhaustive": false,
+        "occurrences": [
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260804T073000Z", "startsAt": "20260804T073000Z", "allDay": false, "recurring": true, "title": "Choir" },
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260811T073000Z", "startsAt": "20260811T073000Z", "allDay": false, "recurring": true, "title": "Choir" },
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260818T073000Z", "startsAt": "20260818T073000Z", "allDay": false, "recurring": true, "title": "Choir" },
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260825T073000Z", "startsAt": "20260825T073000Z", "allDay": false, "recurring": true, "title": "Choir" }
+        ],
+        "suppressed": [],
+        "forbiddenRecurrenceIds": [],
+        "forbiddenCanonicalIdentities": ["20261332T253000Z"],
+        "unidentifiableComponents": [
+          {
+            "recurrenceIdValue": "20261332T253000",
+            "recurrenceIdTzid": "Australia/Perth",
+            "kind": "timed",
+            "expectedStatus": "malformed_value"
+          }
+        ]
+      }
+    },
+    {
+      "id": "quoted-tzid-series",
+      "description": "RFC 5545 3.1 allows a quoted parameter value and 3.2.19 shows TZID=\"America/New_York\" as a legitimate spelling. The quotes are parameter syntax, not part of the zone name. A parser that keeps them fails to resolve the zone and relabels 15:30 Perth as 15:30 UTC -- an eight-hour error with nothing logged, and a recurrence identity no other client agrees with. These identities are byte-identical to perth-weekly-series.",
+      "calendarRef": "cal-a",
+      "calendarFallbackTimezone": null,
+      "window": { "from": "2026-08-01", "to": "2026-08-31" },
+      "ics": [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Calee//Event Occurrence Identity Contract v1//EN",
+        "BEGIN:VEVENT",
+        "UID:quoted-1@contract.example",
+        "SUMMARY:Quoted zone",
+        "DTSTART;TZID=\"Australia/Perth\":20260804T153000",
+        "DTEND;TZID=\"Australia/Perth\":20260804T163000",
+        "RRULE:FREQ=WEEKLY;COUNT=4",
+        "EXDATE;TZID=\"Australia/Perth\":20260811T153000",
+        "END:VEVENT",
+        "BEGIN:VEVENT",
+        "UID:quoted-1@contract.example",
+        "SUMMARY:Quoted zone - changed",
+        "RECURRENCE-ID;TZID=\"Australia/Perth\":20260818T153000",
+        "DTSTART;TZID=\"Australia/Perth\":20260818T160000",
+        "DTEND;TZID=\"Australia/Perth\":20260818T170000",
+        "END:VEVENT",
+        "END:VCALENDAR"
+      ],
+      "expected": {
+        "canonicalStatus": "ok",
+        "occurrencesAreExhaustive": true,
+        "occurrences": [
+          { "sourceUid": "quoted-1@contract.example", "recurrenceId": "20260804T073000Z", "startsAt": "20260804T073000Z", "allDay": false, "recurring": true, "title": "Quoted zone" },
+          { "sourceUid": "quoted-1@contract.example", "recurrenceId": "20260818T073000Z", "startsAt": "20260818T080000Z", "allDay": false, "recurring": true, "title": "Quoted zone - changed" },
+          { "sourceUid": "quoted-1@contract.example", "recurrenceId": "20260825T073000Z", "startsAt": "20260825T073000Z", "allDay": false, "recurring": true, "title": "Quoted zone" }
+        ],
+        "suppressed": [
+          { "sourceUid": "quoted-1@contract.example", "recurrenceId": "20260811T073000Z", "reason": "excluded" }
+        ],
+        "forbiddenRecurrenceIds": ["20260804T153000Z", "20260818T153000Z"],
+        "forbiddenCanonicalIdentities": ["20260804T153000Z", "20260818T153000Z"]
+      }
+    },
+    {
+      "id": "recurrence-id-shape-mismatch",
+      "description": "A DATE-valued RECURRENCE-ID against a TIMED master. The two key spaces are different, so the override names no occurrence of this series. It MUST NOT be converted into one by assuming a time of day, and the four real occurrences MUST survive untouched.",
+      "calendarRef": "cal-a",
+      "calendarFallbackTimezone": null,
+      "window": { "from": "2026-08-01", "to": "2026-08-31" },
+      "ics": [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Calee//Event Occurrence Identity Contract v1//EN",
+        "BEGIN:VEVENT",
+        "UID:choir-1@contract.example",
+        "SUMMARY:Choir",
+        "DTSTART;TZID=Australia/Perth:20260804T153000",
+        "DTEND;TZID=Australia/Perth:20260804T163000",
+        "RRULE:FREQ=WEEKLY;COUNT=4",
+        "END:VEVENT",
+        "BEGIN:VEVENT",
+        "UID:choir-1@contract.example",
+        "SUMMARY:Choir - shape mismatch",
+        "RECURRENCE-ID;VALUE=DATE:20260818",
+        "DTSTART;TZID=Australia/Perth:20260818T160000",
+        "DTEND;TZID=Australia/Perth:20260818T170000",
+        "END:VEVENT",
+        "END:VCALENDAR"
+      ],
+      "expected": {
+        "canonicalStatus": "ok",
+        "occurrencesAreExhaustive": false,
+        "occurrences": [
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260804T073000Z", "startsAt": "20260804T073000Z", "allDay": false, "recurring": true, "title": "Choir" },
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260811T073000Z", "startsAt": "20260811T073000Z", "allDay": false, "recurring": true, "title": "Choir" },
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260818T073000Z", "startsAt": "20260818T073000Z", "allDay": false, "recurring": true, "title": "Choir" },
+          { "sourceUid": "choir-1@contract.example", "recurrenceId": "20260825T073000Z", "startsAt": "20260825T073000Z", "allDay": false, "recurring": true, "title": "Choir" }
+        ],
+        "suppressed": [],
+        "forbiddenRecurrenceIds": [],
+        "forbiddenCanonicalIdentities": ["20260818"],
+        "unidentifiableComponents": [
+          {
+            "recurrenceIdValue": "20260818",
+            "recurrenceIdTzid": null,
+            "kind": "timed",
+            "expectedStatus": "malformed_value"
+          }
+        ]
+      }
+    },
+    {
+      "id": "two-recurring-series-distinct-boundary-whitespace-uids",
+      "description": "Two DIFFERENT source series at the SAME recurrence times, whose UIDs differ only in boundary whitespace, plus a detached override belonging to only one of them. Reconciliation MUST group by the exact source UID. Grouping by a trimmed UID merges the two series, and the override then replaces an occurrence of the OTHER series -- which silently loses an occurrence a link may already have been shared for. Note that two occurrences here legitimately share a recurrenceId: it is the full (calendarRef, sourceUid, recurrenceId) triple that is unique, which is why an adapter MUST index by the triple and not by recurrenceId alone.",
+      "calendarRef": "cal-a",
+      "calendarFallbackTimezone": null,
+      "window": { "from": "2026-08-01", "to": "2026-08-31" },
+      "ics": [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Calee//Event Occurrence Identity Contract v1//EN",
+        "BEGIN:VEVENT",
+        "UID:series-one",
+        "SUMMARY:Plain series",
+        "DTSTART;TZID=Australia/Perth:20260804T153000",
+        "DTEND;TZID=Australia/Perth:20260804T163000",
+        "RRULE:FREQ=WEEKLY;COUNT=4",
+        "END:VEVENT",
+        "BEGIN:VEVENT",
+        "UID: series-one",
+        "SUMMARY:Leading-space series",
+        "DTSTART;TZID=Australia/Perth:20260804T153000",
+        "DTEND;TZID=Australia/Perth:20260804T163000",
+        "RRULE:FREQ=WEEKLY;COUNT=4",
+        "END:VEVENT",
+        "BEGIN:VEVENT",
+        "UID: series-one",
+        "SUMMARY:Leading-space series moved",
+        "RECURRENCE-ID;TZID=Australia/Perth:20260818T153000",
+        "DTSTART;TZID=Australia/Perth:20260818T160000",
+        "DTEND;TZID=Australia/Perth:20260818T170000",
+        "END:VEVENT",
+        "END:VCALENDAR"
+      ],
+      "expected": {
+        "canonicalStatus": "ok",
+        "occurrencesAreExhaustive": true,
+        "occurrences": [
+          { "sourceUid": "series-one", "recurrenceId": "20260804T073000Z", "startsAt": "20260804T073000Z", "allDay": false, "recurring": true, "title": "Plain series" },
+          { "sourceUid": "series-one", "recurrenceId": "20260811T073000Z", "startsAt": "20260811T073000Z", "allDay": false, "recurring": true, "title": "Plain series" },
+          { "sourceUid": "series-one", "recurrenceId": "20260818T073000Z", "startsAt": "20260818T073000Z", "allDay": false, "recurring": true, "title": "Plain series" },
+          { "sourceUid": "series-one", "recurrenceId": "20260825T073000Z", "startsAt": "20260825T073000Z", "allDay": false, "recurring": true, "title": "Plain series" },
+          { "sourceUid": " series-one", "recurrenceId": "20260804T073000Z", "startsAt": "20260804T073000Z", "allDay": false, "recurring": true, "title": "Leading-space series" },
+          { "sourceUid": " series-one", "recurrenceId": "20260811T073000Z", "startsAt": "20260811T073000Z", "allDay": false, "recurring": true, "title": "Leading-space series" },
+          { "sourceUid": " series-one", "recurrenceId": "20260818T073000Z", "startsAt": "20260818T080000Z", "allDay": false, "recurring": true, "title": "Leading-space series moved" },
+          { "sourceUid": " series-one", "recurrenceId": "20260825T073000Z", "startsAt": "20260825T073000Z", "allDay": false, "recurring": true, "title": "Leading-space series" }
+        ],
+        "suppressed": [],
+        "forbiddenRecurrenceIds": ["20260818T153000Z", "20260818T080000Z"],
+        "forbiddenCanonicalIdentities": []
+      }
+    },
+    {
+      "id": "uid-collision-classes-through-reconciliation",
+      "description": "Four source series whose UIDs differ only by case or by internal whitespace, at identical recurrence times. Reconciliation MUST keep all four apart. Testing the UID reader in isolation is not enough -- the collision that matters happens in the grouping step.",
+      "calendarRef": "cal-a",
+      "calendarFallbackTimezone": null,
+      "window": { "from": "2026-08-01", "to": "2026-08-31" },
+      "ics": [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Calee//Event Occurrence Identity Contract v1//EN",
+        "BEGIN:VEVENT",
+        "UID:series one",
+        "SUMMARY:Single space",
+        "DTSTART;TZID=Australia/Perth:20260804T153000",
+        "DTEND;TZID=Australia/Perth:20260804T163000",
+        "RRULE:FREQ=WEEKLY;COUNT=2",
+        "END:VEVENT",
+        "BEGIN:VEVENT",
+        "UID:series  one",
+        "SUMMARY:Double space",
+        "DTSTART;TZID=Australia/Perth:20260804T153000",
+        "DTEND;TZID=Australia/Perth:20260804T163000",
+        "RRULE:FREQ=WEEKLY;COUNT=2",
+        "END:VEVENT",
+        "BEGIN:VEVENT",
+        "UID:Series-One",
+        "SUMMARY:Mixed case",
+        "DTSTART;TZID=Australia/Perth:20260804T153000",
+        "DTEND;TZID=Australia/Perth:20260804T163000",
+        "RRULE:FREQ=WEEKLY;COUNT=2",
+        "END:VEVENT",
+        "BEGIN:VEVENT",
+        "UID:series-one",
+        "SUMMARY:Lower case",
+        "DTSTART;TZID=Australia/Perth:20260804T153000",
+        "DTEND;TZID=Australia/Perth:20260804T163000",
+        "RRULE:FREQ=WEEKLY;COUNT=2",
+        "END:VEVENT",
+        "END:VCALENDAR"
+      ],
+      "expected": {
+        "canonicalStatus": "ok",
+        "occurrencesAreExhaustive": true,
+        "occurrences": [
+          { "sourceUid": "series one", "recurrenceId": "20260804T073000Z", "startsAt": "20260804T073000Z", "allDay": false, "recurring": true, "title": "Single space" },
+          { "sourceUid": "series one", "recurrenceId": "20260811T073000Z", "startsAt": "20260811T073000Z", "allDay": false, "recurring": true, "title": "Single space" },
+          { "sourceUid": "series  one", "recurrenceId": "20260804T073000Z", "startsAt": "20260804T073000Z", "allDay": false, "recurring": true, "title": "Double space" },
+          { "sourceUid": "series  one", "recurrenceId": "20260811T073000Z", "startsAt": "20260811T073000Z", "allDay": false, "recurring": true, "title": "Double space" },
+          { "sourceUid": "Series-One", "recurrenceId": "20260804T073000Z", "startsAt": "20260804T073000Z", "allDay": false, "recurring": true, "title": "Mixed case" },
+          { "sourceUid": "Series-One", "recurrenceId": "20260811T073000Z", "startsAt": "20260811T073000Z", "allDay": false, "recurring": true, "title": "Mixed case" },
+          { "sourceUid": "series-one", "recurrenceId": "20260804T073000Z", "startsAt": "20260804T073000Z", "allDay": false, "recurring": true, "title": "Lower case" },
+          { "sourceUid": "series-one", "recurrenceId": "20260811T073000Z", "startsAt": "20260811T073000Z", "allDay": false, "recurring": true, "title": "Lower case" }
+        ],
+        "suppressed": [],
+        "forbiddenRecurrenceIds": [],
+        "forbiddenCanonicalIdentities": []
+      }
+    },
+    {
+      "id": "falsy-uid-zero-detached-move",
+      "description": "A series whose UID is the literal string \"0\", with a detached override. An implementation whose emptiness test treats \"0\" as absent sends the master and its own override to two different fallback keys, so they never reconcile: the moved occurrence appears BESIDE the stale one it should replace, under a duplicate identity triple.",
+      "calendarRef": "cal-a",
+      "calendarFallbackTimezone": null,
+      "window": { "from": "2026-08-01", "to": "2026-08-31" },
+      "ics": [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Calee//Event Occurrence Identity Contract v1//EN",
+        "BEGIN:VEVENT",
+        "UID:0",
+        "SUMMARY:Zero series",
+        "DTSTART;TZID=Australia/Perth:20260804T153000",
+        "DTEND;TZID=Australia/Perth:20260804T163000",
+        "RRULE:FREQ=WEEKLY;COUNT=4",
+        "END:VEVENT",
+        "BEGIN:VEVENT",
+        "UID:0",
+        "SUMMARY:Zero series moved",
+        "RECURRENCE-ID;TZID=Australia/Perth:20260818T153000",
+        "DTSTART;TZID=Australia/Perth:20260818T160000",
+        "DTEND;TZID=Australia/Perth:20260818T170000",
+        "END:VEVENT",
+        "END:VCALENDAR"
+      ],
+      "expected": {
+        "canonicalStatus": "ok",
+        "occurrencesAreExhaustive": true,
+        "occurrences": [
+          { "sourceUid": "0", "recurrenceId": "20260804T073000Z", "startsAt": "20260804T073000Z", "allDay": false, "recurring": true, "title": "Zero series" },
+          { "sourceUid": "0", "recurrenceId": "20260811T073000Z", "startsAt": "20260811T073000Z", "allDay": false, "recurring": true, "title": "Zero series" },
+          { "sourceUid": "0", "recurrenceId": "20260818T073000Z", "startsAt": "20260818T080000Z", "allDay": false, "recurring": true, "title": "Zero series moved" },
+          { "sourceUid": "0", "recurrenceId": "20260825T073000Z", "startsAt": "20260825T073000Z", "allDay": false, "recurring": true, "title": "Zero series" }
+        ],
+        "suppressed": [],
+        "forbiddenRecurrenceIds": [],
+        "forbiddenCanonicalIdentities": []
+      }
+    },
+    {
+      "id": "falsy-uid-zero-detached-cancelled",
+      "description": "The same UID \"0\" series with a detached cancellation. If the master and the cancellation do not reconcile, the cancellation suppresses nothing and the occurrence stays visible.",
+      "calendarRef": "cal-a",
+      "calendarFallbackTimezone": null,
+      "window": { "from": "2026-08-01", "to": "2026-08-31" },
+      "ics": [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Calee//Event Occurrence Identity Contract v1//EN",
+        "BEGIN:VEVENT",
+        "UID:0",
+        "SUMMARY:Zero series",
+        "DTSTART;TZID=Australia/Perth:20260804T153000",
+        "DTEND;TZID=Australia/Perth:20260804T163000",
+        "RRULE:FREQ=WEEKLY;COUNT=4",
+        "END:VEVENT",
+        "BEGIN:VEVENT",
+        "UID:0",
+        "SUMMARY:Zero series",
+        "RECURRENCE-ID;TZID=Australia/Perth:20260818T153000",
+        "DTSTART;TZID=Australia/Perth:20260818T153000",
+        "DTEND;TZID=Australia/Perth:20260818T163000",
+        "STATUS:CANCELLED",
+        "END:VEVENT",
+        "END:VCALENDAR"
+      ],
+      "expected": {
+        "canonicalStatus": "ok",
+        "occurrencesAreExhaustive": true,
+        "occurrences": [
+          { "sourceUid": "0", "recurrenceId": "20260804T073000Z", "startsAt": "20260804T073000Z", "allDay": false, "recurring": true, "title": "Zero series" },
+          { "sourceUid": "0", "recurrenceId": "20260811T073000Z", "startsAt": "20260811T073000Z", "allDay": false, "recurring": true, "title": "Zero series" },
+          { "sourceUid": "0", "recurrenceId": "20260825T073000Z", "startsAt": "20260825T073000Z", "allDay": false, "recurring": true, "title": "Zero series" }
+        ],
+        "suppressed": [
+          { "sourceUid": "0", "recurrenceId": "20260818T073000Z", "reason": "cancelled" }
+        ],
+        "forbiddenRecurrenceIds": [],
+        "forbiddenCanonicalIdentities": []
+      }
+    },
+    {
+      "id": "orphan-detached-override",
+      "description": "A detached override whose master is absent from the payload keeps its own logical identity rather than being dropped or renamed.",
+      "calendarRef": "cal-a",
+      "calendarFallbackTimezone": null,
+      "window": { "from": "2026-08-01", "to": "2026-08-31" },
+      "ics": [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Calee//Event Occurrence Identity Contract v1//EN",
+        "BEGIN:VEVENT",
+        "UID:orphan-1@contract.example",
+        "SUMMARY:Orphan override",
+        "RECURRENCE-ID;TZID=Australia/Perth:20260818T153000",
+        "DTSTART;TZID=Australia/Perth:20260818T160000",
+        "DTEND;TZID=Australia/Perth:20260818T170000",
+        "END:VEVENT",
+        "END:VCALENDAR"
+      ],
+      "expected": {
+        "canonicalStatus": "ok",
+        "occurrencesAreExhaustive": true,
+        "occurrences": [
+          { "sourceUid": "orphan-1@contract.example", "recurrenceId": "20260818T073000Z", "startsAt": "20260818T080000Z", "allDay": false, "recurring": true, "title": "Orphan override" }
+        ],
+        "suppressed": [],
+        "forbiddenRecurrenceIds": ["20260818T153000Z"]
+      }
+    }
+  ],
+  "logicalIdentityEquivalences": [
+    {
+      "id": "non-recurring-survives-a-dtstart-change",
+      "description": "The identity of a non-recurring event is the calendar reference plus the source UID. Moving it in time MUST NOT break a link shared earlier.",
+      "members": [
+        { "scenario": "non-recurring-perth", "sourceUid": "event-123@contract.example", "recurrenceId": null },
+        { "scenario": "non-recurring-perth-moved", "sourceUid": "event-123@contract.example", "recurrenceId": null }
+      ]
+    },
+    {
+      "id": "detached-move-keeps-the-original-identity",
+      "description": "RECURRENCE-ID names the occurrence; the moved DTSTART only says where it now happens.",
+      "members": [
+        { "scenario": "perth-weekly-series", "sourceUid": "choir-1@contract.example", "recurrenceId": "20260818T073000Z" },
+        { "scenario": "perth-detached-move", "sourceUid": "choir-1@contract.example", "recurrenceId": "20260818T073000Z" },
+        { "scenario": "perth-detached-move-utc-recurrence-id", "sourceUid": "choir-1@contract.example", "recurrenceId": "20260818T073000Z" },
+        { "scenario": "perth-detached-move-foreign-tzid-recurrence-id", "sourceUid": "choir-1@contract.example", "recurrenceId": "20260818T073000Z" },
+        { "scenario": "perth-detached-move-inherited-tzid-recurrence-id", "sourceUid": "choir-1@contract.example", "recurrenceId": "20260818T073000Z" },
+        { "scenario": "exdate-plus-detached-replacement", "sourceUid": "choir-1@contract.example", "recurrenceId": "20260818T073000Z" }
+      ]
+    },
+    {
+      "id": "cancellation-keeps-the-original-identity",
+      "description": "A cancelled occurrence is unavailable, not absent. The resolver must be able to answer 'cancelled' for the identity it names.",
+      "members": [
+        { "scenario": "perth-weekly-series", "sourceUid": "choir-1@contract.example", "recurrenceId": "20260818T073000Z", "availability": "available" },
+        { "scenario": "perth-detached-cancelled", "sourceUid": "choir-1@contract.example", "recurrenceId": "20260818T073000Z", "availability": "unavailable" }
+      ]
+    },
+    {
+      "id": "exclusion-keeps-the-original-identity",
+      "description": "An EXDATE removes an occurrence by naming its logical identity.",
+      "members": [
+        { "scenario": "perth-weekly-series", "sourceUid": "choir-1@contract.example", "recurrenceId": "20260818T073000Z", "availability": "available" },
+        { "scenario": "perth-exdate-tzid", "sourceUid": "choir-1@contract.example", "recurrenceId": "20260818T073000Z", "availability": "unavailable" },
+        { "scenario": "perth-exdate-utc", "sourceUid": "choir-1@contract.example", "recurrenceId": "20260818T073000Z", "availability": "unavailable" }
+      ]
+    },
+    {
+      "id": "all-day-move-keeps-the-original-date-identity",
+      "description": "An all-day override displayed a day later keeps the date it was generated for.",
+      "members": [
+        { "scenario": "all-day-weekly-series", "sourceUid": "allday-1@contract.example", "recurrenceId": "20260818" },
+        { "scenario": "all-day-detached-move", "sourceUid": "allday-1@contract.example", "recurrenceId": "20260818" }
+      ]
+    },
+    {
+      "id": "dst-far-side-override-keeps-its-identity",
+      "members": [
+        { "scenario": "sydney-dst-forward", "sourceUid": "sydney-dst@contract.example", "recurrenceId": "20261005T230000Z" },
+        { "scenario": "sydney-dst-forward-detached-far-side", "sourceUid": "sydney-dst@contract.example", "recurrenceId": "20261005T230000Z" }
+      ]
+    }
+  ],
+  "logicalIdentityDistinctions": [
+    {
+      "id": "calendar-reference-is-part-of-the-identity",
+      "description": "The same UID in a different calendar is a different logical event.",
+      "members": [
+        { "scenario": "perth-weekly-series", "sourceUid": "choir-1@contract.example", "recurrenceId": "20260804T073000Z" },
+        { "scenario": "perth-weekly-series-other-calendar", "sourceUid": "choir-1@contract.example", "recurrenceId": "20260804T073000Z" }
+      ]
+    },
+    {
+      "id": "recurrence-identity-separates-occurrences-of-one-series",
+      "members": [
+        { "scenario": "perth-weekly-series", "sourceUid": "choir-1@contract.example", "recurrenceId": "20260804T073000Z" },
+        { "scenario": "perth-weekly-series", "sourceUid": "choir-1@contract.example", "recurrenceId": "20260811T073000Z" },
+        { "scenario": "perth-weekly-series", "sourceUid": "choir-1@contract.example", "recurrenceId": "20260818T073000Z" },
+        { "scenario": "perth-weekly-series", "sourceUid": "choir-1@contract.example", "recurrenceId": "20260825T073000Z" }
+      ]
+    },
+    {
+      "id": "boundary-whitespace-uids-are-different-logical-occurrences",
+      "description": "Same calendar, same recurrence identity, UIDs differing only in a leading space. Merging these is the defect two-recurring-series-distinct-boundary-whitespace-uids exists to catch.",
+      "members": [
+        { "scenario": "two-recurring-series-distinct-boundary-whitespace-uids", "sourceUid": "series-one", "recurrenceId": "20260818T073000Z" },
+        { "scenario": "two-recurring-series-distinct-boundary-whitespace-uids", "sourceUid": " series-one", "recurrenceId": "20260818T073000Z" }
+      ]
+    },
+    {
+      "id": "uid-collision-classes-stay-four-distinct-series",
+      "members": [
+        { "scenario": "uid-collision-classes-through-reconciliation", "sourceUid": "series one", "recurrenceId": "20260804T073000Z" },
+        { "scenario": "uid-collision-classes-through-reconciliation", "sourceUid": "series  one", "recurrenceId": "20260804T073000Z" },
+        { "scenario": "uid-collision-classes-through-reconciliation", "sourceUid": "Series-One", "recurrenceId": "20260804T073000Z" },
+        { "scenario": "uid-collision-classes-through-reconciliation", "sourceUid": "series-one", "recurrenceId": "20260804T073000Z" }
+      ]
+    },
+    {
+      "id": "an-all-day-series-and-a-timed-series-do-not-share-a-key-space",
+      "members": [
+        { "scenario": "all-day-weekly-series", "sourceUid": "allday-1@contract.example", "recurrenceId": "20260804" },
+        { "scenario": "perth-weekly-series", "sourceUid": "choir-1@contract.example", "recurrenceId": "20260804T073000Z" }
+      ]
+    }
+  ]
+}
