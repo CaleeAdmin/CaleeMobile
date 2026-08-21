@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -8,6 +9,9 @@ import '../../data/auth/calee_preferences.dart';
 import '../../data/models/client_bootstrap.dart';
 import '../../data/models/client_calendar.dart';
 import '../../ui/calee_design.dart';
+import '../local_subscriber/local_event_details_sheet.dart';
+import '../local_subscriber/local_event_link_service.dart';
+import '../local_subscriber/local_event_share_launcher.dart';
 import '../notifications/calendar_reminder_coordinator.dart';
 import '../settings/calendar_collections_page.dart';
 import 'calendar_controller.dart';
@@ -15,6 +19,7 @@ import 'calendar_repository.dart';
 import 'shared/calendar_display_event.dart';
 import 'shared/calendar_display_event_adapters.dart';
 import 'shared/read_only_calendar_view.dart';
+import 'signed_in_event_share.dart';
 import 'widgets/calendar_chooser_sheet.dart';
 import 'widgets/calendar_error_state.dart';
 import 'widgets/calendar_search_sheet.dart';
@@ -29,6 +34,8 @@ class CalendarPage extends StatefulWidget {
     required this.accountId,
     required this.isFamilyUxContext,
     this.reminderCoordinator,
+    this.eventLinkService,
+    this.shareLauncher,
     this.refreshGeneration = 0,
     this.isActive = true,
     super.key,
@@ -47,6 +54,17 @@ class CalendarPage extends StatefulWidget {
   /// manual refreshes trigger an independent upcoming-reminder refresh. Null in
   /// contexts (e.g. some tests) that do not exercise reminders.
   final CalendarReminderCoordinator? reminderCoordinator;
+
+  /// Mints the canonical CalEmbed Event Link for a shared event. The very
+  /// same seam signed-out sharing uses (CaleeAdmin/CaleeMobile#562), not a
+  /// signed-in variant of it: one endpoint, one request shape, one client.
+  /// Overrideable for tests; defaults to [CalEmbedEventLinkService].
+  final LocalEventLinkService? eventLinkService;
+
+  /// Opens the OS share sheet. Overrideable so a widget test can assert which
+  /// URL was shared without a platform channel; defaults to
+  /// [SharePlusEventShareLauncher].
+  final LocalEventShareLauncher? shareLauncher;
 
   // Increment to trigger a refresh of calendars and events from the parent.
   final int refreshGeneration;
@@ -71,6 +89,30 @@ class _CalendarPageState extends State<CalendarPage>
   /// exactly one refresh happens per background→foreground round trip and a
   /// repeated (or duplicated) `resumed` notification cannot queue another.
   bool _wasBackgrounded = false;
+
+  LocalEventLinkService get _eventLinkService =>
+      widget.eventLinkService ?? const CalEmbedEventLinkService();
+
+  LocalEventShareLauncher get _shareLauncher =>
+      widget.shareLauncher ?? const SharePlusEventShareLauncher();
+
+  /// Every rendered [CalendarDisplayEvent] mapped back to the exact
+  /// [ClientEvent] and [ClientCalendar] it was built from, keyed by OBJECT
+  /// IDENTITY.
+  ///
+  /// This replaced a lookup that searched `_controller.events` for
+  /// `e.id == displayEvent.id`. Hub's event `id` is a LOCAL COMPOSITE key that
+  /// `contracts/event-occurrence-identity/v1` declares non-normative, and
+  /// CaleeAdmin/calee-hub-core#421 documents cases where two distinct source
+  /// UIDs produce the same one. Selecting a source by it could therefore edit,
+  /// delete, or mint a public link for a DIFFERENT event from the row the user
+  /// touched. [ReadOnlyCalendarEventRow] hands back the very object it was
+  /// given, so identity is exact and needs no id at all.
+  ///
+  /// Rebuilt in the same pass as the display list (see [_buildDisplayEvents]),
+  /// so a refresh can never leave a tap pointing at a stale source row.
+  final Map<CalendarDisplayEvent, _ClientEventOrigin> _eventOrigins =
+      HashMap<CalendarDisplayEvent, _ClientEventOrigin>.identity();
 
   @override
   void initState() {
@@ -255,8 +297,12 @@ class _CalendarPageState extends State<CalendarPage>
 
   // ── Edit / delete event ───────────────────────────────────────────────────
 
-  void _openEventActions(ClientEvent event) {
-    final calendar = _controller.calendarForEvent(event);
+  /// The existing Edit/Delete and read-only-guidance action sheet, unchanged.
+  ///
+  /// [calendar] is passed in rather than looked up again so this shares the
+  /// caller's already-resolved origin — one resolution per tap, and no chance
+  /// of the two disagreeing.
+  void _openEventActions(ClientEvent event, ClientCalendar? calendar) {
     final isReadOnly =
         calendar == null ||
         calendar.readOnly ||
@@ -505,27 +551,105 @@ class _CalendarPageState extends State<CalendarPage>
 
   // ── Display event conversion ──────────────────────────────────────────────
 
-  List<CalendarDisplayEvent> get _visibleDisplayEvents {
-    return _controller.events
-        .where((e) {
-          final cal = _controller.calendarForEvent(e);
-          return cal == null || _controller.isCalendarVisible(cal.id);
-        })
-        .map(
-          (e) => calendarDisplayEventFromClientEvent(
-            e,
-            calendar: _controller.calendarForEvent(e),
-          ),
-        )
-        .toList();
+  /// Builds the display list AND the source mapping in one pass, so the two
+  /// can never disagree about which [ClientEvent] produced which row.
+  List<CalendarDisplayEvent> _buildDisplayEvents() {
+    _eventOrigins.clear();
+    final all = <CalendarDisplayEvent>[];
+    for (final event in _controller.events) {
+      final calendar = _controller.calendarForEvent(event);
+      if (calendar != null && !_controller.isCalendarVisible(calendar.id)) {
+        continue;
+      }
+      final displayEvent = calendarDisplayEventFromClientEvent(
+        event,
+        calendar: calendar,
+      );
+      _eventOrigins[displayEvent] = _ClientEventOrigin(
+        event: event,
+        calendar: calendar,
+      );
+      all.add(displayEvent);
+    }
+    return all;
   }
 
+  /// Routes one tapped row to the right surface, from its EXACT source event.
+  ///
+  /// Precedence, deliberately in this order:
+  ///
+  ///  1. a WRITABLE event keeps the existing Edit/Delete action sheet, exactly
+  ///     as before — including for the odd case of a writable public
+  ///     subscription. Publication never removes an action the user already
+  ///     had, and V1 does not redesign calendar permissions;
+  ///  2. a read-only event on an already-public Calee subscription opens the
+  ///     shared read-only details sheet, which is where Share event lives;
+  ///  3. everything else — private Google, Outlook, an arbitrary external
+  ///     feed, a Calee-looking URL that fails strict validation — keeps the
+  ///     existing read-only guidance sheet, untouched. Sharing is not
+  ///     mentioned there at all: it is not a property of that kind of calendar.
   void _onDisplayEventTap(CalendarDisplayEvent displayEvent) {
-    final matches = _controller.events
-        .where((e) => e.id == displayEvent.id)
-        .toList();
-    if (matches.isEmpty) return;
-    _openEventActions(matches.first);
+    final origin = _eventOrigins[displayEvent];
+    if (origin == null) return;
+
+    final event = origin.event;
+    final calendar = origin.calendar;
+
+    // Share eligibility and edit permission are computed SEPARATELY and
+    // neither is derived from the other. A private family calendar is writable
+    // and unshareable; a public subscription is read-only and shareable.
+    final isReadOnly =
+        calendar == null ||
+        calendar.readOnly ||
+        calendar.isExternal ||
+        event.isReadOnly;
+
+    if (!isReadOnly) {
+      _openEventActions(event, calendar);
+      return;
+    }
+
+    final shareState = signedInEventShareState(event, calendar);
+    if (shareState.availability ==
+        LocalEventShareAvailability.unsupportedSource) {
+      _openEventActions(event, calendar);
+      return;
+    }
+
+    unawaited(_openPublicEventDetails(displayEvent, shareState));
+  }
+
+  /// Read-only details plus Share event, for one occurrence of an
+  /// already-public Calee subscription.
+  ///
+  /// Reuses [LocalEventDetailsSheet] as-is. Despite the `Local` in its name it
+  /// was built for exactly this seam (CaleeAdmin/CaleeMobile#562) and already
+  /// carries the whole share lifecycle: the synchronous single-attempt claim,
+  /// the iPad anchor captured before the await, the inline retryable failure,
+  /// and the "sheet dismissed mid-mint" guard. Renaming it here would be a
+  /// churn diff over working, tested behaviour.
+  Future<void> _openPublicEventDetails(
+    CalendarDisplayEvent displayEvent,
+    SignedInEventShareState shareState,
+  ) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: CaleeColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(CaleeRadius.sheet),
+        ),
+      ),
+      builder: (_) => LocalEventDetailsSheet(
+        event: displayEvent,
+        availability: shareState.availability,
+        shareTarget: shareState.target,
+        eventLinkService: _eventLinkService,
+        shareLauncher: _shareLauncher,
+        use24h: _use24h(context),
+      ),
+    );
   }
 
   // ── Build ──────────────────────────────────────────────────────────────────
@@ -581,7 +705,7 @@ class _CalendarPageState extends State<CalendarPage>
           selectedDay: _controller.selectedDay,
           today: _controller.today,
           firstDayOfWeek: firstDayOfWeek,
-          events: _visibleDisplayEvents,
+          events: _buildDisplayEvents(),
           viewMode: _viewMode,
           onViewModeChanged: (m) => setState(() => _viewMode = m),
           onPreviousMonth: _controller.previousMonth,
@@ -654,4 +778,21 @@ class _CalendarPageState extends State<CalendarPage>
       },
     );
   }
+}
+
+/// One rendered row's exact source: the [ClientEvent] it was built from and
+/// the [ClientCalendar] that event was read from.
+///
+/// Kept private and kept OFF [CalendarDisplayEvent]. The display model is
+/// shared with the signed-out calendar, and widening it with a source UID and
+/// a recurrence identity just to solve a lookup would put source identity on
+/// every event the app renders — including ones that must never be shared.
+class _ClientEventOrigin {
+  const _ClientEventOrigin({required this.event, required this.calendar});
+
+  final ClientEvent event;
+
+  /// Null when the controller could not resolve the event's calendar. Such an
+  /// event has no provable source, so it can never be shared.
+  final ClientCalendar? calendar;
 }
