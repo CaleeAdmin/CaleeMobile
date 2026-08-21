@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 
 import 'package:flutter/material.dart';
 
@@ -6,10 +7,15 @@ import '../../ui/calee_design.dart';
 import '../calendar/shared/calendar_display_event.dart';
 import '../calendar/shared/calendar_display_event_adapters.dart';
 import '../calendar/shared/read_only_calendar_view.dart';
+import 'calee_public_calendar_source.dart';
 import 'local_calendar_event.dart';
 import 'local_calendar_ics_service.dart';
+import 'local_calendar_occurrence_identity.dart';
 import 'local_calendar_subscription.dart';
 import 'local_calendar_subscription_repository.dart';
+import 'local_event_details_sheet.dart';
+import 'local_event_link_service.dart';
+import 'local_event_share_launcher.dart';
 import 'local_subscriber_promotion_preferences.dart';
 
 // Palette cycled per subscription (index % length).
@@ -32,6 +38,8 @@ class LocalSubscriberCalendarPage extends StatefulWidget {
     required this.onSubscriptionsChanged,
     this.icsService,
     this.promotionPreferences,
+    this.eventLinkService,
+    this.shareLauncher,
     this.openCalendarsSheetOnStart = false,
     this.onCalendarsSheetClosed,
     super.key,
@@ -57,6 +65,15 @@ class LocalSubscriberCalendarPage extends StatefulWidget {
 
   /// Overrideable for tests; defaults to [LocalSubscriberPromotionPreferences].
   final LocalSubscriberPromotionPreferences? promotionPreferences;
+
+  /// Mints the canonical CalEmbed Event Link for a shared event.
+  /// Overrideable for tests; defaults to [CalEmbedEventLinkService].
+  final LocalEventLinkService? eventLinkService;
+
+  /// Opens the OS share sheet. Overrideable for tests so a widget test can
+  /// assert which URL was shared without touching a platform channel;
+  /// defaults to [SharePlusEventShareLauncher].
+  final LocalEventShareLauncher? shareLauncher;
 
   /// Opens the "Calendars on this phone" management sheet as soon as the
   /// page appears. Used by the sixth-calendar limit screen's "Manage my
@@ -86,8 +103,28 @@ class _LocalSubscriberCalendarPageState
       widget.promotionPreferences ??
       const LocalSubscriberPromotionPreferences();
 
+  LocalEventLinkService get _eventLinkService =>
+      widget.eventLinkService ?? const CalEmbedEventLinkService();
+
+  LocalEventShareLauncher get _shareLauncher =>
+      widget.shareLauncher ?? const SharePlusEventShareLauncher();
+
   List<LocalCalendarSubscription> _subscriptions = [];
   final Map<String, List<LocalCalendarEvent>> _eventsBySubscription = {};
+
+  /// Every rendered [CalendarDisplayEvent] mapped back to the exact source row
+  /// it was built from, keyed by OBJECT IDENTITY.
+  ///
+  /// This is the whole event-tap seam. [ReadOnlyCalendarEventRow] hands back
+  /// the very object it was given, so the lookup is exact — and deliberately
+  /// does NOT go through [LocalCalendarEvent.id]. That id is declared
+  /// non-normative by the `calee.event-occurrence-identity` contract, and it is
+  /// known to be able to collide for source UIDs differing only in boundary
+  /// whitespace; selecting a source by it could mint a link naming a DIFFERENT
+  /// event from the one the user tapped. Rebuilt with the display list, so a
+  /// refresh can never leave a tap pointing at a stale source row.
+  final Map<CalendarDisplayEvent, _LocalEventOrigin> _eventOrigins =
+      HashMap<CalendarDisplayEvent, _LocalEventOrigin>.identity();
   final Map<String, String?> _errorsBySubscription = {};
   final Set<String> _loadingIds = {};
 
@@ -230,23 +267,114 @@ class _LocalSubscriberCalendarPageState
   Color _colorForSubscription(int index) =>
       _kSubscriptionColors[index % _kSubscriptionColors.length];
 
-  List<CalendarDisplayEvent> get _displayEvents {
+  /// Builds the display list AND the source mapping in one pass, so the two
+  /// can never disagree about which source row produced which row on screen.
+  List<CalendarDisplayEvent> _buildDisplayEvents() {
+    _eventOrigins.clear();
     final all = <CalendarDisplayEvent>[];
     for (var i = 0; i < _subscriptions.length; i++) {
       final sub = _subscriptions[i];
       final color = _colorForSubscription(i);
       final subEvents = _eventsBySubscription[sub.id] ?? [];
       for (final e in subEvents) {
-        all.add(
-          calendarDisplayEventFromLocalEvent(
-            e,
-            subscription: sub,
-            color: color,
-          ),
+        final displayEvent = calendarDisplayEventFromLocalEvent(
+          e,
+          subscription: sub,
+          color: color,
         );
+        _eventOrigins[displayEvent] = _LocalEventOrigin(
+          event: e,
+          subscription: sub,
+        );
+        all.add(displayEvent);
       }
     }
     return all;
+  }
+
+  /// Whether this event can be shared, and with exactly which values.
+  ///
+  /// Two independent gates, in this order:
+  ///
+  ///  1. the SOURCE must be an already-public Calee calendar, decided from the
+  ///     stored subscription URL by [CaleePublicCalendarSource.tryParse] — never
+  ///     from `subscription.source`, which is descriptive legacy state and not
+  ///     a trust boundary;
+  ///  2. the OCCURRENCE must have a canonical identity, decided by
+  ///     [canonicalEventLinkIdentity].
+  ///
+  /// The second gate is the contract's, not this file's. In particular it is
+  /// NOT `event.canonicalStatus == ok`: a one-off's identity is the calendar
+  /// reference plus its exact `UID`, so an event whose own `DTSTART` names an
+  /// unresolvable timezone is still perfectly shareable, while a recurring
+  /// occurrence with no canonical `RECURRENCE-ID` is not shareable at any
+  /// status.
+  ({LocalEventShareAvailability availability, LocalEventShareTarget? target})
+  _shareStateFor(_LocalEventOrigin origin) {
+    final source = CaleePublicCalendarSource.tryParse(origin.subscription.url);
+    if (source == null) {
+      return (
+        availability: LocalEventShareAvailability.unsupportedSource,
+        target: null,
+      );
+    }
+
+    final identity = canonicalEventLinkIdentity(
+      source.canonicalUrl,
+      origin.event,
+    );
+    if (!identity.isOk) {
+      return (
+        availability: LocalEventShareAvailability.unavailableForEvent,
+        target: null,
+      );
+    }
+
+    return (
+      availability: LocalEventShareAvailability.available,
+      target: LocalEventShareTarget(
+        source: source,
+        // Non-null by construction: the identity only resolves with a source
+        // UID. Sent byte for byte, exactly as the feed wrote it.
+        uid: identity.sourceUid!,
+        // The CANONICAL recurrence identity, or null for a one-off — never the
+        // display recurrence id, and never a value derived from a moved
+        // DTSTART.
+        occurrenceId: identity.recurrenceId,
+      ),
+    );
+  }
+
+  /// Read-only details for the tapped row.
+  ///
+  /// Opening details never touches storage, never calls
+  /// [LocalSubscriberCalendarPage.onSubscriptionsChanged], and never leads to
+  /// sign-in. A followed calendar stays exactly as local as it was.
+  Future<void> _openEventDetails(CalendarDisplayEvent displayEvent) async {
+    final origin = _eventOrigins[displayEvent];
+    if (origin == null) return;
+
+    final shareState = _shareStateFor(origin);
+    final use24h = MediaQuery.alwaysUse24HourFormatOf(context);
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: CaleeColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(CaleeRadius.sheet),
+        ),
+      ),
+      builder: (_) => LocalEventDetailsSheet(
+        event: displayEvent,
+        availability: shareState.availability,
+        shareTarget: shareState.target,
+        eventLinkService: _eventLinkService,
+        shareLauncher: _shareLauncher,
+        use24h: use24h,
+      ),
+    );
   }
 
   Future<void> _openCalendarsSheet() async {
@@ -356,9 +484,10 @@ class _LocalSubscriberCalendarPageState
       selectedDay: _selectedDay,
       today: _today,
       firstDayOfWeek: 0,
-      events: _displayEvents,
+      events: _buildDisplayEvents(),
       viewMode: _viewMode,
       use24h: use24h,
+      onEventTap: _openEventDetails,
       onViewModeChanged: (mode) => setState(() => _viewMode = mode),
       onPreviousMonth: () => setState(() {
         _selectedMonth = DateTime(
@@ -388,6 +517,21 @@ class _LocalSubscriberCalendarPageState
       ],
     );
   }
+}
+
+// ── Rendered event -> source row ──────────────────────────────────────────────
+
+/// The exact source row one rendered [CalendarDisplayEvent] was built from.
+///
+/// Kept private and kept OFF [CalendarDisplayEvent]: the shared display model
+/// is used by the signed-in calendar too, and widening it with a UID and a
+/// recurrence identity just to solve a local lookup would put source identity
+/// on every event the app renders.
+class _LocalEventOrigin {
+  const _LocalEventOrigin({required this.event, required this.subscription});
+
+  final LocalCalendarEvent event;
+  final LocalCalendarSubscription subscription;
 }
 
 // ── Inline Calee-for-home promotion ───────────────────────────────────────────
