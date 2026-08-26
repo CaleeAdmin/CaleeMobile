@@ -408,6 +408,8 @@ class ClientEvent {
     this.seriesId,
     this.recurrenceId,
     this.occurrenceId,
+    this.sourceUid,
+    this.canonicalRecurrenceId,
     this.providerKey,
     this.readOnly = false,
     this.timeZone,
@@ -431,6 +433,13 @@ class ClientEvent {
       seriesId: json['seriesId'] as String?,
       recurrenceId: json['recurrenceId'] as String?,
       occurrenceId: json['occurrenceId'] as String?,
+      // Verbatim, and deliberately NOT normalised. `UID` is opaque source
+      // identity: `0` is a real UID, ` uid ` is a different event from `uid`,
+      // and Hub already collapsed absent/whitespace-only to null (see
+      // client_caldav_source_uid()). Trimming here would silently mint a link
+      // naming another event.
+      sourceUid: json['sourceUid'] as String?,
+      canonicalRecurrenceId: json['canonicalRecurrenceId'] as String?,
       providerKey: json['providerKey'] as String?,
       readOnly: json['readOnly'] as bool? ?? false,
       timeZone: json['timeZone'] as String?,
@@ -453,6 +462,32 @@ class ClientEvent {
   final String? seriesId;
   final String? recurrenceId;
   final String? occurrenceId;
+
+  /// The verbatim source `UID` of the component this event was read from, as
+  /// computed by Hub Core under CaleeAdmin/calee-hub-core#424.
+  ///
+  /// This — never [id], [seriesId], [recurrenceId] or [occurrenceId] — is the
+  /// Event Link source identity. Those four are Hub-local composite keys the
+  /// `calee.event-occurrence-identity` contract declares NON-NORMATIVE, and
+  /// they are known to be able to collide across distinct source UIDs, so a
+  /// link minted from one can name a different source event entirely.
+  ///
+  /// Null on an older Hub that predates the field, and null when the source
+  /// component carries no usable `UID` at all. Both mean "no canonical source
+  /// identity" and must fail closed rather than fall back to a local id.
+  final String? sourceUid;
+
+  /// The canonical recurrence identity of this occurrence (`Ymd` for an
+  /// all-day series, `YmdTHisZ` at its true UTC instant for a timed one), or
+  /// null for a non-recurring event.
+  ///
+  /// Computed by Hub Core under CaleeAdmin/calee-hub-core#420/#421 and only
+  /// consumed here — never rebuilt in Dart, and never derived from
+  /// [startsAt]. For a DETACHED occurrence that was moved, this stays the
+  /// ORIGINAL recurrence identity while [startsAt] shows the new time, which
+  /// is exactly what keeps a link shared before the move resolving after it.
+  final String? canonicalRecurrenceId;
+
   final String? providerKey;
   final bool readOnly;
   final String? timeZone;

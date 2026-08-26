@@ -461,7 +461,7 @@ class ReadOnlyCalendarView extends StatelessWidget {
         for (final event in allDayEvents) {
           items.add(
             ReadOnlyCalendarEventRow(
-              key: ValueKey(event.id),
+              key: ObjectKey(event),
               event: event,
               hideTime: true,
               use24h: use24h,
@@ -475,7 +475,7 @@ class ReadOnlyCalendarView extends StatelessWidget {
         for (final event in timedEvents) {
           items.add(
             ReadOnlyCalendarEventRow(
-              key: ValueKey(event.id),
+              key: ObjectKey(event),
               event: event,
               use24h: use24h,
               onTap: onEventTap != null ? () => onEventTap!(event) : null,
@@ -528,7 +528,7 @@ class ReadOnlyCalendarView extends StatelessWidget {
       for (final event in [...allDay, ...timed]) {
         dayWidgets.add(
           ReadOnlyCalendarEventRow(
-            key: ValueKey(event.id),
+            key: ObjectKey(event),
             event: event,
             hideTime: event.allDay,
             use24h: use24h,
