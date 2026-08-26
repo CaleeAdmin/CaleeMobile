@@ -465,6 +465,108 @@ void main() {
   // The view owns the gesture only; it never fetches. onRefresh is optional so
   // hosts with no refreshable data source keep the previous behaviour.
 
+  // Two DISTINCT events may legitimately arrive carrying the SAME legacy
+  // composite id: Hub's event `id` is a local composite key that
+  // `contracts/event-occurrence-identity/v1` declares non-normative, and
+  // CaleeAdmin/calee-hub-core#421 documents cases where two source UIDs
+  // produce the same one. Keying a row by that id makes two sibling rows
+  // indistinguishable to Flutter, which is both a framework error and a way
+  // for the wrong row to survive a rebuild in the other one's place.
+  group('ReadOnlyCalendarView — colliding legacy event ids', () {
+    final colliding = <CalendarDisplayEvent>[
+      _event(id: 'same-composite-id', title: 'Event A'),
+      _event(
+        id: 'same-composite-id',
+        title: 'Event B',
+        start: DateTime(2026, 6, 15, 14),
+      ),
+    ];
+
+    testWidgets('two same-day rows with one id survive a rebuild', (
+      tester,
+    ) async {
+      await tester.pumpWidget(_buildView(events: colliding));
+      await tester.pumpAndSettle();
+
+      // The rebuild is where duplicate sibling keys are detected.
+      await tester.pumpWidget(_buildView(events: colliding));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('Event A'), findsOneWidget);
+      expect(find.text('Event B'), findsOneWidget);
+    });
+
+    testWidgets('two agenda-mode rows with one id survive a rebuild', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _buildView(events: colliding, viewMode: CalendarDisplayViewMode.agenda),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.pumpWidget(
+        _buildView(events: colliding, viewMode: CalendarDisplayViewMode.agenda),
+      );
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('Event A'), findsOneWidget);
+      expect(find.text('Event B'), findsOneWidget);
+    });
+
+    testWidgets('two all-day rows with one id survive a rebuild', (
+      tester,
+    ) async {
+      final collidingAllDay = <CalendarDisplayEvent>[
+        _event(id: 'same-composite-id', title: 'All Day A', allDay: true),
+        _event(id: 'same-composite-id', title: 'All Day B', allDay: true),
+      ];
+
+      await tester.pumpWidget(_buildView(events: collidingAllDay));
+      await tester.pumpAndSettle();
+      await tester.pumpWidget(_buildView(events: collidingAllDay));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('All Day A'), findsOneWidget);
+      expect(find.text('All Day B'), findsOneWidget);
+    });
+
+    testWidgets('each colliding row hands back ITS OWN event object', (
+      tester,
+    ) async {
+      final tapped = <CalendarDisplayEvent>[];
+      await tester.pumpWidget(
+        _buildView(events: colliding, onEventTap: tapped.add),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Event B'));
+      await tester.tap(find.text('Event A'));
+      await tester.pumpAndSettle();
+
+      expect(tapped, hasLength(2));
+      expect(identical(tapped[0], colliding[1]), isTrue);
+      expect(identical(tapped[1], colliding[0]), isTrue);
+    });
+
+    testWidgets('sibling rows never carry equal keys', (tester) async {
+      await tester.pumpWidget(_buildView(events: colliding));
+      await tester.pumpAndSettle();
+
+      final keys = tester
+          .widgetList<ReadOnlyCalendarEventRow>(
+            find.byType(ReadOnlyCalendarEventRow),
+          )
+          .map((row) => row.key)
+          .toList();
+      expect(keys, hasLength(2));
+      expect(keys.first, isNotNull);
+      expect(keys.first, isNot(keys.last));
+    });
+  });
+
   group('ReadOnlyCalendarView — pull to refresh', () {
     testWidgets('agenda mode invokes onRefresh after a pull', (tester) async {
       final completer = Completer<void>();

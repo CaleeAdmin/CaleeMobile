@@ -9,22 +9,22 @@ import '../../data/auth/calee_preferences.dart';
 import '../../data/models/client_bootstrap.dart';
 import '../../data/models/client_calendar.dart';
 import '../../ui/calee_design.dart';
-import '../local_subscriber/local_event_details_sheet.dart';
 import '../local_subscriber/local_event_link_service.dart';
 import '../local_subscriber/local_event_share_launcher.dart';
 import '../notifications/calendar_reminder_coordinator.dart';
 import '../settings/calendar_collections_page.dart';
 import 'calendar_controller.dart';
 import 'calendar_repository.dart';
+import 'event_capabilities.dart';
 import 'shared/calendar_display_event.dart';
 import 'shared/calendar_display_event_adapters.dart';
 import 'shared/read_only_calendar_view.dart';
-import 'signed_in_event_share.dart';
 import 'widgets/calendar_chooser_sheet.dart';
 import 'widgets/calendar_error_state.dart';
 import 'widgets/calendar_search_sheet.dart';
 import 'widgets/calendar_widget_helpers.dart';
 import 'widgets/create_event_sheet.dart';
+import 'widgets/event_details_sheet.dart';
 
 class CalendarPage extends StatefulWidget {
   const CalendarPage({
@@ -297,65 +297,6 @@ class _CalendarPageState extends State<CalendarPage>
 
   // ── Edit / delete event ───────────────────────────────────────────────────
 
-  /// The existing Edit/Delete and read-only-guidance action sheet, unchanged.
-  ///
-  /// [calendar] is passed in rather than looked up again so this shares the
-  /// caller's already-resolved origin — one resolution per tap, and no chance
-  /// of the two disagreeing.
-  void _openEventActions(ClientEvent event, ClientCalendar? calendar) {
-    final isReadOnly =
-        calendar == null ||
-        calendar.readOnly ||
-        calendar.isExternal ||
-        event.isReadOnly;
-
-    if (isReadOnly) {
-      final isGoogle =
-          event.isGoogleEvent || (calendar?.isGoogleCalendar ?? false);
-      final message = isGoogle
-          ? 'This event comes from Google Calendar. Edit it in Google Calendar.'
-          : event.recurring
-          ? 'This recurring event is from a read-only calendar.\nYou can view it, but changes must be made in the original calendar.'
-          : 'This event is from a read-only calendar.\nYou can view it, but changes must be made in the original calendar.';
-      CaleeActionSheet.show(
-        context: context,
-        title: message,
-        actions: const [],
-      );
-      return;
-    }
-
-    final writeableCalendar = calendar;
-
-    CaleeActionSheet.show(
-      context: context,
-      title: event.title,
-      actions: [
-        CaleeAction(
-          label: event.recurring ? 'Edit…' : 'Edit Event',
-          icon: Icons.edit_outlined,
-          testId: 'calendar_event_action_edit',
-          onTap: () async {
-            final editScope = await _chooseEditScope(event);
-            if (editScope == null || !mounted) return;
-            await _openEditEventSheet(
-              event,
-              writeableCalendar,
-              editScope: editScope,
-            );
-          },
-        ),
-        CaleeAction(
-          label: event.recurring ? 'Delete…' : 'Delete Event',
-          icon: Icons.delete_outline,
-          isDestructive: true,
-          testId: 'calendar_event_action_delete',
-          onTap: () => _confirmDeleteEvent(event),
-        ),
-      ],
-    );
-  }
-
   Future<String?> _chooseEditScope(ClientEvent event) async {
     if (!event.recurring) return 'series';
 
@@ -542,8 +483,16 @@ class _CalendarPageState extends State<CalendarPage>
         eventColor: _eventColor,
         use24h: _use24h(context),
         onResultTap: (event) {
+          // Resolved from the exact ClientEvent Search handed back, BEFORE
+          // the sheet closes and before selectSearchResult() can trigger a
+          // month load that replaces _controller.events. Search deliberately
+          // does not look the event up again by its legacy composite id:
+          // that id can collide, so a re-lookup could open a different event
+          // from the one the user chose.
+          final calendar = _controller.calendarForEvent(event);
           Navigator.of(sheetContext).pop();
           _controller.selectSearchResult(event);
+          unawaited(_openEventDetails(event, calendar));
         },
       ),
     );
@@ -574,65 +523,47 @@ class _CalendarPageState extends State<CalendarPage>
     return all;
   }
 
-  /// Routes one tapped row to the right surface, from its EXACT source event.
+  /// Opens details for one tapped row, from its EXACT source event.
   ///
-  /// Precedence, deliberately in this order:
-  ///
-  ///  1. a WRITABLE event keeps the existing Edit/Delete action sheet, exactly
-  ///     as before — including for the odd case of a writable public
-  ///     subscription. Publication never removes an action the user already
-  ///     had, and V1 does not redesign calendar permissions;
-  ///  2. a read-only event on an already-public Calee subscription opens the
-  ///     shared read-only details sheet, which is where Share event lives;
-  ///  3. everything else — private Google, Outlook, an arbitrary external
-  ///     feed, a Calee-looking URL that fails strict validation — keeps the
-  ///     existing read-only guidance sheet, untouched. Sharing is not
-  ///     mentioned there at all: it is not a property of that kind of calendar.
+  /// There is no routing decision left to make here: every event opens the
+  /// same details surface, and what that surface offers is decided by
+  /// [resolveEventCapabilities] from the exact [ClientEvent] and
+  /// [ClientCalendar]. A tap that resolved to no origin at all is the one
+  /// case that does nothing — there is no event to show.
   void _onDisplayEventTap(CalendarDisplayEvent displayEvent) {
     final origin = _eventOrigins[displayEvent];
     if (origin == null) return;
-
-    final event = origin.event;
-    final calendar = origin.calendar;
-
-    // Share eligibility and edit permission are computed SEPARATELY and
-    // neither is derived from the other. A private family calendar is writable
-    // and unshareable; a public subscription is read-only and shareable.
-    final isReadOnly =
-        calendar == null ||
-        calendar.readOnly ||
-        calendar.isExternal ||
-        event.isReadOnly;
-
-    if (!isReadOnly) {
-      _openEventActions(event, calendar);
-      return;
-    }
-
-    final shareState = signedInEventShareState(event, calendar);
-    if (shareState.availability ==
-        LocalEventShareAvailability.unsupportedSource) {
-      _openEventActions(event, calendar);
-      return;
-    }
-
-    unawaited(_openPublicEventDetails(displayEvent, shareState));
+    unawaited(
+      _openEventDetails(origin.event, origin.calendar, display: displayEvent),
+    );
   }
 
-  /// Read-only details plus Share event, for one occurrence of an
-  /// already-public Calee subscription.
+  /// The ONE signed-in event surface, shared by Month, Agenda and Search.
   ///
-  /// Reuses [LocalEventDetailsSheet] as-is. Despite the `Local` in its name it
-  /// was built for exactly this seam (CaleeAdmin/CaleeMobile#562) and already
-  /// carries the whole share lifecycle: the synchronous single-attempt claim,
-  /// the iPad anchor captured before the await, the inline retryable failure,
-  /// and the "sheet dismissed mid-mint" guard. Renaming it here would be a
-  /// churn diff over working, tested behaviour.
-  Future<void> _openPublicEventDetails(
-    CalendarDisplayEvent displayEvent,
-    SignedInEventShareState shareState,
-  ) async {
-    await showModalBottomSheet<void>(
+  /// [display] is passed when the caller already has the very object a row was
+  /// built from; Search has only the [ClientEvent], so an equivalent display
+  /// model is built from the same adapter the list uses.
+  ///
+  /// The sheet RETURNS an action instead of performing one. By the time the
+  /// await below completes the details route is gone, so the existing edit and
+  /// delete flows run with nothing stale underneath them — and they run
+  /// against [event], the exact object the user tapped, never against an id
+  /// looked up again afterwards.
+  Future<void> _openEventDetails(
+    ClientEvent event,
+    ClientCalendar? calendar, {
+    CalendarDisplayEvent? display,
+  }) async {
+    final details = EventDetailsContext(
+      event: event,
+      calendar: calendar,
+      display:
+          display ??
+          calendarDisplayEventFromClientEvent(event, calendar: calendar),
+      capabilities: resolveEventCapabilities(event: event, calendar: calendar),
+    );
+
+    final action = await showModalBottomSheet<EventDetailsAction>(
       context: context,
       isScrollControlled: true,
       backgroundColor: CaleeColors.surface,
@@ -641,15 +572,29 @@ class _CalendarPageState extends State<CalendarPage>
           top: Radius.circular(CaleeRadius.sheet),
         ),
       ),
-      builder: (_) => LocalEventDetailsSheet(
-        event: displayEvent,
-        availability: shareState.availability,
-        shareTarget: shareState.target,
+      builder: (_) => EventDetailsSheet(
+        details: details,
         eventLinkService: _eventLinkService,
         shareLauncher: _shareLauncher,
         use24h: _use24h(context),
       ),
     );
+
+    if (action == null || !mounted) return;
+
+    switch (action) {
+      case EventDetailsAction.edit:
+        // Re-checked rather than trusted: the sheet only ever offers Edit when
+        // the capability allows it, and a null calendar can never be editable,
+        // but this is the last gate before a write path.
+        if (!details.capabilities.canEdit || calendar == null) return;
+        final editScope = await _chooseEditScope(event);
+        if (editScope == null || !mounted) return;
+        await _openEditEventSheet(event, calendar, editScope: editScope);
+      case EventDetailsAction.delete:
+        if (!details.capabilities.canDelete) return;
+        await _confirmDeleteEvent(event);
+    }
   }
 
   // ── Build ──────────────────────────────────────────────────────────────────

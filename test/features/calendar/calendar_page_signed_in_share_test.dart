@@ -18,6 +18,7 @@ import 'package:calee_mobile/data/models/client_bootstrap.dart';
 import 'package:calee_mobile/data/models/client_calendar.dart';
 import 'package:calee_mobile/features/calendar/calendar_page.dart';
 import 'package:calee_mobile/features/calendar/shared/read_only_calendar_view.dart';
+import 'package:calee_mobile/features/calendar/widgets/event_details_sheet.dart';
 import 'package:calee_mobile/features/local_subscriber/calee_public_calendar_source.dart';
 import 'package:calee_mobile/features/local_subscriber/local_event_details_sheet.dart';
 import 'package:calee_mobile/features/local_subscriber/local_event_link_service.dart';
@@ -354,7 +355,7 @@ void main() {
       await _tapEvent(tester, 'Training');
 
       // Read-only details, with the Share action.
-      expect(find.byKey(kLocalEventDetailsSheetKey), findsOneWidget);
+      expect(find.byKey(kEventDetailsSheetKey), findsOneWidget);
       expect(find.byKey(kLocalEventShareButtonKey), findsOneWidget);
       expect(find.text('Share event'), findsOneWidget);
       // And no Edit/Delete anywhere: a public subscription is not writable.
@@ -483,7 +484,7 @@ void main() {
       await _tapEvent(tester, 'Training');
 
       // Details still usable...
-      expect(find.byKey(kLocalEventDetailsSheetKey), findsOneWidget);
+      expect(find.byKey(kEventDetailsSheetKey), findsOneWidget);
       expect(find.text('Training'), findsWidgets);
       // ...but no link is invented for it.
       expect(find.byKey(kLocalEventShareUnavailableKey), findsOneWidget);
@@ -554,7 +555,7 @@ void main() {
 
       // Tap A → A's own UID.
       await _tapEvent(tester, 'Event A');
-      expect(find.byKey(kLocalEventDetailsSheetKey), findsOneWidget);
+      expect(find.byKey(kEventDetailsSheetKey), findsOneWidget);
       await tester.tap(find.byKey(kLocalEventShareButtonKey));
       await tester.pumpAndSettle();
       expect(link.calls, hasLength(1));
@@ -565,7 +566,7 @@ void main() {
       await tester.pumpAndSettle();
 
       await _tapEvent(tester, 'Event B');
-      expect(find.byKey(kLocalEventDetailsSheetKey), findsOneWidget);
+      expect(find.byKey(kEventDetailsSheetKey), findsOneWidget);
       await tester.tap(find.byKey(kLocalEventShareButtonKey));
       await tester.pumpAndSettle();
       expect(link.calls, hasLength(2));
@@ -608,12 +609,13 @@ void main() {
       await _pumpCalendar(tester, hub: hub);
       await _selectDay(tester, '2026-08-18T05:30:00Z');
 
-      // The writable action sheet is titled with the event's own title, so it
-      // shows which ClientEvent the tap actually resolved to.
+      // Details are titled with the event's own title, so they show which
+      // ClientEvent the tap actually resolved to.
       await _tapEvent(tester, 'Soccer');
+      expect(find.byKey(kEventDetailsSheetKey), findsOneWidget);
       expect(find.text('Edit Event'), findsOneWidget);
       expect(find.text('Delete Event'), findsOneWidget);
-      // Two 'Soccer' texts now: the agenda row behind, and the sheet title.
+      // Two 'Soccer' texts now: the agenda row behind, and the details title.
       expect(find.text('Soccer'), findsNWidgets(2));
     });
   });
@@ -621,7 +623,7 @@ void main() {
   // ── Private read-only sources keep their existing UX ───────────────────────
 
   group('private read-only calendars are untouched', () {
-    testWidgets('Google keeps its provider guidance and offers no Share', (
+    testWidgets('Google shows details, truthful read-only copy and no Share', (
       tester,
     ) async {
       final link = _FakeEventLinkService();
@@ -642,21 +644,26 @@ void main() {
       await _selectDay(tester, '2026-08-18T05:30:00Z');
       await _tapEvent(tester, 'Training');
 
+      // Details open (CaleeAdmin/CaleeMobile#566) and say only what is true:
+      // Calee reads this event and cannot write it. No "edit it in Google"
+      // claim, because CaleeMobile has no per-event Google deep link.
+      expect(find.byKey(kEventDetailsSheetKey), findsOneWidget);
       expect(
         find.text(
-          'This event comes from Google Calendar. '
-          'Edit it in Google Calendar.',
+          'This event is from Google Calendar and is read-only in Calee.',
         ),
         findsOneWidget,
       );
-      expect(find.byKey(kLocalEventDetailsSheetKey), findsNothing);
+      expect(find.textContaining('Edit it in Google Calendar'), findsNothing);
+      expect(find.text('Edit Event'), findsNothing);
+      expect(find.text('Delete Event'), findsNothing);
       expect(find.byKey(kLocalEventShareButtonKey), findsNothing);
       expect(find.text('Share event'), findsNothing);
       expect(link.calls, isEmpty);
     });
 
-    testWidgets('a private ICS subscription keeps read-only guidance and '
-        'offers no Share', (tester) async {
+    testWidgets('a private ICS subscription shows details and offers no '
+        'Share', (tester) async {
       final link = _FakeEventLinkService();
       final hub = _StubHub(
         calendarsPayload: const [_privateIcsCalendar],
@@ -669,11 +676,12 @@ void main() {
       await _selectDay(tester, '2026-08-18T05:30:00Z');
       await _tapEvent(tester, 'Training');
 
-      expect(
-        find.textContaining('This event is from a read-only calendar.'),
-        findsOneWidget,
-      );
-      expect(find.byKey(kLocalEventDetailsSheetKey), findsNothing);
+      expect(find.byKey(kEventDetailsSheetKey), findsOneWidget);
+      // Source-neutral, and permission-neutral: Calee cannot know whether this
+      // subscriber may edit the school's calendar, so it does not tell them to.
+      expect(find.text('This event is read-only in Calee.'), findsOneWidget);
+      expect(find.textContaining('original calendar'), findsNothing);
+      expect(find.text('Edit Event'), findsNothing);
       expect(find.text('Share event'), findsNothing);
       expect(link.calls, isEmpty);
     });
@@ -693,8 +701,8 @@ void main() {
       await _selectDay(tester, '2026-08-18T05:30:00Z');
       await _tapEvent(tester, 'Training');
 
+      expect(find.byKey(kEventDetailsSheetKey), findsOneWidget);
       expect(find.text('Share event'), findsNothing);
-      expect(find.byKey(kLocalEventDetailsSheetKey), findsNothing);
       // The unvalidated URL never reached the mint seam at all.
       expect(link.calls, isEmpty);
     });
@@ -724,11 +732,12 @@ void main() {
         await _selectDay(tester, '2026-08-18T05:30:00Z');
         await _tapEvent(tester, 'Dentist');
 
+        // Details FIRST, then the actions the user already had.
+        expect(find.byKey(kEventDetailsSheetKey), findsOneWidget);
         expect(find.text('Edit Event'), findsOneWidget);
         expect(find.text('Delete Event'), findsOneWidget);
         expect(find.text('Share event'), findsNothing);
-        expect(find.byKey(kLocalEventDetailsSheetKey), findsNothing);
-        // Opening the actions never touches the network.
+        // Opening details never touches the network.
         expect(link.calls, isEmpty);
       },
     );
@@ -823,7 +832,7 @@ void main() {
       // Dismiss while the mint is still in flight.
       await tester.tapAt(const Offset(20, 20));
       await tester.pumpAndSettle();
-      expect(find.byKey(kLocalEventDetailsSheetKey), findsNothing);
+      expect(find.byKey(kEventDetailsSheetKey), findsNothing);
 
       link.gate!.complete();
       await tester.pumpAndSettle();
@@ -860,7 +869,7 @@ void main() {
       expect(find.text(kLocalEventShareFailureMessage), findsOneWidget);
       expect(launcher.urls, isEmpty);
       // The sheet is still open and the button is live again.
-      expect(find.byKey(kLocalEventDetailsSheetKey), findsOneWidget);
+      expect(find.byKey(kEventDetailsSheetKey), findsOneWidget);
 
       // Retry, this time succeeding.
       link.fail = false;
