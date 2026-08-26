@@ -121,8 +121,11 @@ strict monotonicity.
 
 ## 3. Release preflight
 
-`scripts/release_preflight.sh` runs **before** any expensive signing/build job
-and fails fast, naming the exact item that is missing or inconsistent.
+`scripts/release_preflight.sh` fails fast, naming the exact item that is
+missing or inconsistent. Flutter CI runs it on every PR, and the signed **iOS**
+workflow runs it before any expensive signing/build job. The signed **Android**
+workflow no longer runs it at all: for Android the Release Operator must run it
+locally before dispatching, or the run proceeds with none of it checked.
 
 It has **deliberately separate levels**, because "the repository is consistent",
 "a signed binary may be built", "a signed *release candidate* may be built" and
@@ -132,8 +135,8 @@ different times:
 | Level | Invocation | Who runs it | What it proves |
 | --- | --- | --- | --- |
 | Repository correctness | `check` | Flutter CI, every PR | The repository is internally consistent: identity, version wiring, tooling, docs, release notes. **Not** release approval. |
-| Signed test build | `check --require-secrets --require-branch` | The signed Android workflow, off a non-release branch | Additionally: the run is on a real **branch** (never a tag) and signing secrets are configured. **No** readiness evidence — so the artifacts are a test build, not a release candidate. |
-| Build/sign readiness | `check --require-secrets --require-build-readiness --allow-branch stage --allow-branch main` | The signed release workflows, off `stage`/`main` | Additionally: an authorised release **branch**, signing secrets configured, and the `build_readiness` evidence completed by a named operator. Everything knowable *before* the candidate exists. |
+| Signed test build | `check --require-secrets --require-branch` | The Release Operator, before dispatching an Android test build (the Android workflow no longer runs it) | Additionally: the run is on a real **branch** (never a tag) and signing secrets are configured. **No** readiness evidence — so the artifacts are a test build, not a release candidate. |
+| Build/sign readiness | `check --require-secrets --require-build-readiness --allow-branch stage --allow-branch main` | The signed iOS workflow, off `stage`/`main`; for Android, the Release Operator by hand before dispatching | Additionally: an authorised release **branch**, signing secrets configured, and the `build_readiness` evidence completed by a named operator. Everything knowable *before* the candidate exists. |
 | Store submission readiness | `check --require-store-readiness` | The Release Operator, after qualifying the candidate | Everything above **plus** `submission_readiness`: physical-device qualification of this exact build, final listing/screenshot review against the candidate, Release Approver sign-off. |
 
 Build readiness deliberately does **not** require device qualification. The
@@ -324,12 +327,12 @@ workflow, not merely documented**, in two independent places:
    requires `refs/heads/stage` or `refs/heads/main`; Android runs it with
    `--any-branch`, which accepts any `refs/heads/*` and reports
    `is_release_branch=true|false` for the jobs that follow.
-2. The preflight job independently applies the same rule through a separate
-   implementation (`--allow-branch stage --allow-branch main` for a release
-   candidate, `--require-branch` for an Android test build), so removing or
-   misconfiguring the guard job does not silently re-open the hole. When the
-   guard reports a release branch, preflight re-checks that claim through the
-   allowlist rather than trusting it.
+2. On iOS, the preflight job independently applies the same rule through a
+   separate implementation (`--allow-branch stage --allow-branch main`), so
+   removing or misconfiguring the guard job does not silently re-open the
+   hole. **The Android workflow has no preflight job**, so there the guard is
+   the only layer: `is_release_branch` labels the run and nothing re-checks
+   it.
 
 **A tag is never a signing ref — in either workflow, on any branch setting.**
 `workflow_dispatch` can target a branch *or* a tag, and `GITHUB_REF_NAME` is the
@@ -441,7 +444,10 @@ Both signed-build workflows are `workflow_dispatch` only — nothing is built or
 signed automatically on a push, and neither workflow uploads to a store. Both
 refuse to run from any ref other than `stage` or `main` (section 4).
 
-Every signed run performs the same ordered sequence:
+A signed iOS run performs this ordered sequence. **The Android workflow runs
+steps 1 and 6-12 only** — it has no preflight job, so steps 2-5 are the Release
+Operator's to perform locally before dispatching (the build job still validates
+the signing secrets, but later, after the NDK install and the test suite):
 
 1. prove the run is on an authorised release **branch** (never a tag)
 2. run the release-tooling selftests
@@ -467,10 +473,8 @@ until submission-readiness validation passes.*
 Actions → **Build Signed Android Artifacts** → Run workflow → select `main`
 (or `stage` for a qualification build).
 
-The workflow: verifies the release ref → runs preflight (selftests, repository
-correctness, secret presence, store-readiness evidence) → installs the pinned NDK
-→ runs the test suite →
-validates the signing secrets are present → decodes and verifies the keystore →
+The workflow: verifies the release ref → installs the pinned NDK → runs the
+test suite → validates the signing secrets are present → decodes and verifies the keystore →
 derives the version → builds an obfuscated signed APK and AAB → verifies both
 signatures → **inspects the final artifacts' permissions and fails the release if
 a prohibited storage/media permission has merged back in** → generates the
