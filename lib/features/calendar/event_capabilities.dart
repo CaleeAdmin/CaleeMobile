@@ -120,15 +120,20 @@ class EventCapabilities {
 const String kGoogleReadOnlyNote =
     'This event is from Google Calendar and is read-only in Calee.';
 
-/// Source-neutral wording for any other read-only calendar — Outlook, a school
-/// or club feed, an arbitrary subscribed `.ics`.
-const String kExternalReadOnlyNote =
-    'This event is from a read-only calendar. '
-    'Changes must be made in the original calendar.';
-
-/// Wording when the event's calendar could not be resolved at all. Says only
-/// what is known to be true, and invents no provider or publisher.
-const String kUnknownSourceReadOnlyNote = 'This event is read-only in Calee.';
+/// Wording for every other read-only event — Outlook, a school or club feed,
+/// an arbitrary subscribed `.ics`, and an event whose calendar could not be
+/// resolved at all.
+///
+/// It states the ONE fact Calee actually knows: Calee cannot change this
+/// event. It deliberately does NOT say changes must be made in the original
+/// calendar. Calee has no idea whether the person reading it can edit that
+/// calendar — a subscriber to a club fixture list or a school newsletter feed
+/// usually cannot — so directing them there would be an instruction that fails
+/// for most of the people who read it.
+///
+/// Source-neutral by design: no provider is named, and none is invented for an
+/// event whose calendar is unknown.
+const String kReadOnlyInCaleeNote = 'This event is read-only in Calee.';
 
 /// Resolves the complete capability set for [event] as read from [calendar].
 EventCapabilities resolveEventCapabilities({
@@ -155,9 +160,12 @@ EventCapabilities resolveEventCapabilities({
 }
 
 String _readOnlyNote(ClientEvent event, ClientCalendar? calendar) {
+  // Google is named because Calee genuinely knows the provider and users
+  // recognise it. Everything else — including an unresolvable calendar — gets
+  // the same source-neutral sentence rather than a guess at where the event
+  // came from or who may change it.
   if (event.isGoogleEvent || (calendar?.isGoogleCalendar ?? false)) {
     return kGoogleReadOnlyNote;
   }
-  if (calendar == null) return kUnknownSourceReadOnlyNote;
-  return kExternalReadOnlyNote;
+  return kReadOnlyInCaleeNote;
 }

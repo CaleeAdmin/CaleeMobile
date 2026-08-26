@@ -677,10 +677,10 @@ void main() {
       await _tapEvent(tester, 'Training');
 
       expect(find.byKey(kEventDetailsSheetKey), findsOneWidget);
-      expect(
-        find.textContaining('This event is from a read-only calendar.'),
-        findsOneWidget,
-      );
+      // Source-neutral, and permission-neutral: Calee cannot know whether this
+      // subscriber may edit the school's calendar, so it does not tell them to.
+      expect(find.text('This event is read-only in Calee.'), findsOneWidget);
+      expect(find.textContaining('original calendar'), findsNothing);
       expect(find.text('Edit Event'), findsNothing);
       expect(find.text('Share event'), findsNothing);
       expect(link.calls, isEmpty);

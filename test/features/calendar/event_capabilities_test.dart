@@ -267,7 +267,7 @@ void main() {
         calendar: null,
       );
 
-      expect(capabilities.readOnlyNote, kUnknownSourceReadOnlyNote);
+      expect(capabilities.readOnlyNote, kReadOnlyInCaleeNote);
       expect(capabilities.readOnlyNote, isNot(contains('Google')));
     });
   });
@@ -313,8 +313,56 @@ void main() {
         calendar: _calendar(readOnly: true),
       );
 
-      expect(capabilities.readOnlyNote, kExternalReadOnlyNote);
+      expect(capabilities.readOnlyNote, kReadOnlyInCaleeNote);
       expect(capabilities.readOnlyNote, isNot(contains('Google')));
+    });
+
+    test('no read-only note tells the user to change the event somewhere '
+        'else', () {
+      // Calee cannot know whether the person reading this may edit the source
+      // calendar. Most people following a club fixture list or a school feed
+      // cannot, so an instruction to "make changes in the original calendar"
+      // is advice that fails for the majority of its readers.
+      final notes = <String?>[
+        resolveEventCapabilities(
+          event: _event(readOnly: true),
+          calendar: _calendar(readOnly: true),
+        ).readOnlyNote,
+        resolveEventCapabilities(event: _event(), calendar: null).readOnlyNote,
+        resolveEventCapabilities(
+          event: _event(
+            calendarId: 'external:g',
+            source: 'external',
+            providerKey: 'google_calendar',
+            readOnly: true,
+          ),
+          calendar: _calendar(
+            id: 'external:g',
+            source: 'external',
+            readOnly: true,
+            providerKey: 'google_calendar',
+          ),
+        ).readOnlyNote,
+      ];
+
+      for (final note in notes) {
+        expect(note, isNotNull);
+        expect(note, isNot(contains('original calendar')));
+        expect(note, isNot(contains('must be made')));
+        expect(note, isNot(contains('Edit it in')));
+        expect(note, contains('read-only in Calee'));
+      }
+    });
+
+    test('an unresolvable calendar and a known external source say the same '
+        'source-neutral thing', () {
+      expect(
+        resolveEventCapabilities(event: _event(), calendar: null).readOnlyNote,
+        resolveEventCapabilities(
+          event: _event(readOnly: true),
+          calendar: _calendar(readOnly: true),
+        ).readOnlyNote,
+      );
     });
 
     test('an editable event has no read-only note at all', () {
