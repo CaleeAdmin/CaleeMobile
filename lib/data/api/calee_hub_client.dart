@@ -1156,10 +1156,24 @@ class CaleeHubClient {
 
   // ── Events ────────────────────────────────────────────────────────────────
 
+  /// [calendarId] is the OPTIONAL destination calendar for a move.
+  ///
+  /// Supplying it asks Hub to relocate the event to that calendar as part of
+  /// this same mutation -- `PATCH /client/v1/events/{eventId}` owns the move
+  /// server-side, and CaleeMobile never emulates one by creating in the
+  /// destination and deleting the source. It is the calendar's public id
+  /// (`"<serviceId>:<rawCalendarId>"`), which already carries the service, so
+  /// there is no separate destination serviceId in the contract.
+  ///
+  /// The key is omitted from the body entirely when null or blank, which is
+  /// exactly the request an ordinary in-place edit has always sent. Hub also
+  /// treats a destination equal to the event's current calendar as no move at
+  /// all, so an edit that did not touch the Calendar row behaves as before.
   Future<ClientEvent> updateEvent({
     required String accessToken,
     required String eventId,
     required String title,
+    String? calendarId,
     String? startsAt,
     String? endsAt,
     bool? allDay,
@@ -1174,6 +1188,8 @@ class CaleeHubClient {
       'title': title,
       'location': location ?? '',
       'description': description ?? '',
+      if (calendarId != null && calendarId.trim().isNotEmpty)
+        'calendarId': calendarId.trim(),
     };
 
     final hasDateUpdate = startsAt != null || endsAt != null || allDay != null;

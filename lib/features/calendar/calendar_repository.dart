@@ -149,6 +149,16 @@ class CalendarRepository {
     );
   }
 
+  /// [destinationCalendar] is the optional destination for a move. Only its
+  /// public id travels: that id is `"<serviceId>:<rawCalendarId>"`, so it already
+  /// carries the service and Hub needs no separate destination serviceId.
+  ///
+  /// Deliberately NOT sent for an occurrence-scoped edit. A recurring series
+  /// lives in one CalDAV resource, so a single occurrence cannot be relocated
+  /// without splitting the series, and Hub refuses it -- the editor already
+  /// keeps the Calendar row fixed in that scope, and this is the second,
+  /// independent place that guarantees an occurrence edit is never sent as a
+  /// move.
   Future<void> updateEvent({
     required ClientEvent event,
     required String title,
@@ -159,12 +169,14 @@ class CalendarRepository {
     String? description,
     String? recurrence,
     String? editScope,
+    ClientCalendar? destinationCalendar,
   }) async {
     final editOccurrence = event.recurring && editScope == 'occurrence';
 
     await hubClient.updateEvent(
       accessToken: accessToken,
       eventId: editOccurrence ? event.id : event.writableEventId,
+      calendarId: editOccurrence ? null : destinationCalendar?.id,
       title: title,
       startsAt: startsAt == null
           ? null
