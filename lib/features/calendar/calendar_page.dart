@@ -16,6 +16,7 @@ import '../settings/calendar_collections_page.dart';
 import 'calendar_controller.dart';
 import 'calendar_repository.dart';
 import 'event_capabilities.dart';
+import 'event_move_eligibility.dart';
 import 'shared/calendar_display_event.dart';
 import 'shared/calendar_display_event_adapters.dart';
 import 'shared/read_only_calendar_view.dart';
@@ -356,6 +357,25 @@ class _CalendarPageState extends State<CalendarPage>
     // Navigator.pop() directly, which no PopScope can intercept, so dragging
     // is off here; the barrier stays dismissible because that path goes
     // through maybePop() and IS intercepted.
+    // Every calendar this event could actually be MOVED to, not just the one
+    // it is in. That list is what makes the editor's Calendar row a working
+    // control instead of a label -- and it is filtered rather than "all
+    // calendars", so the editor never offers a destination Hub would refuse
+    // (see event_move_eligibility.dart).
+    //
+    // The fallback keeps the pre-existing behaviour exactly for an event whose
+    // own calendar is not a valid destination (read-only, external, a kind
+    // that cannot hold events): the editor is given that one calendar, so it
+    // opens on the right one and the row stays disabled because there is
+    // nowhere to move to.
+    final destinations = eventMoveDestinations(
+      event: event,
+      calendars: _controller.calendars,
+    );
+    final sheetCalendars = destinations.any((c) => c.id == calendar.id)
+        ? destinations
+        : [calendar];
+
     final updated = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
@@ -367,7 +387,7 @@ class _CalendarPageState extends State<CalendarPage>
         ),
       ),
       builder: (context) => CreateEventSheet(
-        calendars: [calendar],
+        calendars: sheetCalendars,
         use24h: _use24h(context),
         // Matches enableDrag above: no handle on a sheet that cannot be
         // dragged.

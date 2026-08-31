@@ -13,6 +13,7 @@ import '../../../shared/recurrence/calee_repeat_picker_sheet.dart';
 import '../../../shared/recurrence/calee_repeat_rule.dart';
 import '../../../ui/calee_design.dart';
 import '../event_draft_image_preparer.dart';
+import '../event_move_eligibility.dart';
 import 'calendar_widget_helpers.dart';
 import 'event_attachments_section.dart';
 
@@ -60,6 +61,15 @@ class CreateEventSheet extends StatefulWidget {
     String? recurrence,
   })
   onCreate;
+
+  /// [destinationCalendar] is where the event should END UP.
+  ///
+  /// Null means "leave it where it is" and is what an editor that could not
+  /// resolve the event's own calendar sends, so such an edit stays an ordinary
+  /// in-place update. Otherwise it is the current selection, which equals the
+  /// event's own calendar until the user changes the Calendar row — Hub treats
+  /// a destination equal to the event's current calendar as no move at all,
+  /// so an untouched row behaves exactly as it always has.
   final Future<void> Function({
     required ClientEvent event,
     required String title,
@@ -70,6 +80,7 @@ class CreateEventSheet extends StatefulWidget {
     String? description,
     String? recurrence,
     String? editScope,
+    ClientCalendar? destinationCalendar,
   })?
   onUpdate;
 
@@ -115,11 +126,41 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
   /// one-way.
   bool _isClosing = false;
 
+  /// The calendar the event being edited is CURRENTLY in, resolved once in
+  /// [initState] from [CreateEventSheet.calendars]. Null while creating, and
+  /// null in the (fail-closed) case where the event's calendar could not be
+  /// identified at all.
+  ///
+  /// Distinct from [_selectedCalendar] as soon as the user changes the
+  /// Calendar row: the selection is where the event is about to be MOVED,
+  /// while this is where it still lives until Save succeeds. Everything that
+  /// addresses the event as it exists right now -- above all its attachments
+  /// -- must use this one.
+  ClientCalendar? _eventCalendar;
+
   bool get _isEditing => widget.initialEvent != null;
   bool get _isEditingSingleOccurrence =>
       _isEditing &&
       widget.initialEvent!.recurring &&
       widget.editScope == 'occurrence';
+
+  /// Whether the Calendar row may be changed.
+  ///
+  /// Creating has always been free to choose. Editing now may too, which is
+  /// what moves the event -- except where a move is genuinely impossible: an
+  /// occurrence-scoped edit, nowhere else to move to, or an event whose own
+  /// calendar could not be resolved (in which case the editor must not be able
+  /// to nominate a destination at all). See event_move_eligibility.dart.
+  bool get _canChangeCalendar {
+    final event = widget.initialEvent;
+    if (event == null) return true;
+    if (_eventCalendar == null) return false;
+    return canChangeEventCalendar(
+      event: event,
+      editScope: widget.editScope,
+      destinations: widget.calendars,
+    );
+  }
 
   bool get _isLocked => _isSubmitting || _isScanningImage;
 
@@ -155,6 +196,24 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
 
     final event = widget.initialEvent;
     if (event != null) {
+      // Editing starts on the event's OWN calendar, never on
+      // widget.calendars.first: now that the editor can be given several
+      // calendars so the event can be moved between them, "first" is very
+      // likely a different calendar, and starting there would silently turn
+      // every edit into a move.
+      //
+      // A null result is a real answer, not a reason to fall back to another
+      // calendar. It leaves _eventCalendar null, which disables the Calendar
+      // row and makes _submit send no destination at all, so the edit stays
+      // an ordinary in-place update.
+      _eventCalendar = currentCalendarForEvent(
+        event: event,
+        destinations: widget.calendars,
+      );
+      if (_eventCalendar != null) {
+        _selectedCalendar = _eventCalendar!;
+      }
+
       _titleController.text = event.title;
       _locationController.text = event.location ?? '';
       _descriptionController.text = event.description ?? '';
@@ -794,6 +853,13 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
           description: description,
           recurrence: _isEditingSingleOccurrence ? null : _recurrenceValue(),
           editScope: widget.editScope,
+          // Only when the event's own calendar was resolved, so a selection
+          // that never had a trustworthy starting point can never be sent as
+          // a destination. Unchanged, this is the calendar the event is
+          // already in, which Hub treats as no move.
+          destinationCalendar: _eventCalendar == null
+              ? null
+              : _selectedCalendar,
         );
       } else {
         await widget.onCreate(
@@ -985,7 +1051,15 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
                                   setState(() => _selectedCalendar = cal);
                                 }
                               },
-                              enabled: !_isLocked && !_isEditing,
+                              // Editing used to disable this outright,
+                              // because changing it did nothing: nothing below
+                              // this sheet carried a destination calendar, so
+                              // the choice was silently discarded. Hub now owns
+                              // the move, so the row is live wherever a move is
+                              // actually possible.
+                              enabled:
+                                  !_isLocked &&
+                                  (!_isEditing || _canChangeCalendar),
                             ),
                           ],
                         ),
@@ -1080,10 +1154,19 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
                         // creating a new event) on a calendar the backend
                         // explicitly reports as attachment-capable -- never
                         // inferred from provider name.
+                        // Gated on the event's OWN calendar, never on
+                        // _selectedCalendar. They agree until the user changes
+                        // the Calendar row mid-edit, and then the selection is
+                        // where the event is GOING -- so gating on it would
+                        // make an existing attachment list appear or vanish
+                        // purely because a destination was picked, before the
+                        // event has moved anywhere. A null _eventCalendar
+                        // fails closed for the same reason the requests below
+                        // do: an event whose calendar is unknown has no
+                        // provable attachment context.
                         if (_isEditing &&
-                            _selectedCalendar
-                                .capabilities
-                                .canViewAttachments) ...[
+                            (_eventCalendar?.capabilities.canViewAttachments ??
+                                false)) ...[
                           const SizedBox(height: CaleeSpacing.sectionSpacing),
                           EventAttachmentsSection(
                             key: ValueKey(
@@ -1110,6 +1193,12 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
                             // yet, and Hub would correctly answer "not
                             // found" for a file the user can see on screen.
                             //
+                            // This is now load-bearing rather than merely
+                            // correct: before moving existed the editor was
+                            // only ever given the event's own calendar, so
+                            // the two could not actually differ. They can
+                            // now.
+                            //
                             // Keyed on the event id above, so the section is
                             // rebuilt (and re-loads) for a different event
                             // rather than carrying one event's list into
@@ -1117,12 +1206,20 @@ class _CreateEventSheetState extends State<CreateEventSheet> {
                             calendarId: widget.initialEvent!.calendarId,
                             hubClient: widget.hubClient,
                             accessToken: widget.accessToken,
-                            canAdd: _selectedCalendar
-                                .capabilities
-                                .canAddAttachments,
-                            canRemove: _selectedCalendar
-                                .capabilities
-                                .canRemoveAttachments,
+                            // Same reasoning as calendarId: what may be added
+                            // to or removed from this event is decided by the
+                            // calendar that HOLDS it, not by a destination it
+                            // has not moved to yet.
+                            canAdd:
+                                _eventCalendar
+                                    ?.capabilities
+                                    .canAddAttachments ??
+                                false,
+                            canRemove:
+                                _eventCalendar
+                                    ?.capabilities
+                                    .canRemoveAttachments ??
+                                false,
                             isSeriesScoped: _isEditingSingleOccurrence,
                             controller: _attachmentsController,
                             onOperationStateChanged:
