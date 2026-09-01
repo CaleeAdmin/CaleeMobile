@@ -474,7 +474,32 @@ mode = os.environ["PREFLIGHT_EVIDENCE_MODE"]
 # "PLATFORM=PATH;PLATFORM=PATH" — optional local manifest cross-verification.
 CANDIDATE_MANIFESTS = os.environ.get("PREFLIGHT_CANDIDATE_MANIFESTS", "")
 
-EXPECTED_SCHEMA = "calee-mobile-release-evidence/3"
+# --- evidence schema ---------------------------------------------------------
+#
+# Schema 4 adds one required field, build_readiness.privacy_policy_url, and
+# pins it to the canonical Calee Privacy Policy (calee-hub-web#107).
+#
+# Why a schema bump rather than a new boolean: the existing
+# privacy_policy_url_reviewed check records only that SOMEBODY reviewed A
+# privacy policy URL. It cannot distinguish the canonical policy from the old
+# Portal one, which is exactly the ambiguity #107 exists to remove -- the store
+# listings must carry https://calee.com.au/privacy/ and nothing else.
+#
+# Backwards compatibility, deliberately narrow. Schema 3 evidence stays valid
+# for the releases that ALREADY SHIPPED under it, and only for those, named
+# explicitly below. Their evidence is a historical record of what those
+# operators actually reviewed; rewriting it to name a URL that did not exist at
+# the time would be falsifying release evidence. Every other version -- every
+# future release -- must use schema 4, so schema 3 cannot be used to dodge the
+# requirement by simply not upgrading the file.
+CURRENT_SCHEMA = "calee-mobile-release-evidence/4"
+LEGACY_SCHEMA = "calee-mobile-release-evidence/3"
+LEGACY_SCHEMA_VERSIONS = frozenset({"0.0.32", "0.0.33"})
+
+# The one canonical Calee Privacy Policy URL. This is the value that must
+# appear in the Apple App Store and Google Play listings. Keep it byte-for-byte
+# identical to kCaleePrivacyUrl in lib/config/calee_links.dart.
+CANONICAL_PRIVACY_POLICY_URL = "https://calee.com.au/privacy/"
 
 # An operator who leaves a template value in place has not reviewed anything.
 # REPLACE covers the TEMPLATE's own markers: "REPLACE", "REPLACE-WITH-VERSION",
@@ -622,11 +647,26 @@ def boolean_checks(container, required, group_name, where):
 
 # --- identity of the evidence itself ---------------------------------------
 schema = data.get("schema")
-if schema != EXPECTED_SCHEMA:
-    bad(f"readiness: 'schema' must be '{EXPECTED_SCHEMA}', got {schema!r}")
-    group("identity", False)
-else:
+legacy_schema_accepted = False
+if schema == CURRENT_SCHEMA:
     group("identity", True)
+elif schema == LEGACY_SCHEMA and expected_version in LEGACY_SCHEMA_VERSIONS:
+    # A release that shipped before calee.com.au became the canonical home for
+    # the Calee legal documents. Accepted as the historical record it is, and
+    # said out loud rather than passing silently.
+    legacy_schema_accepted = True
+    group("identity", True)
+    # Emitted on the report channel (VERDICT<TAB>message) so the exemption is
+    # stated in the operator's output rather than applied silently.
+    print(
+        f"PASS\treadiness: {expected_version} uses the legacy evidence schema "
+        f"'{LEGACY_SCHEMA}', which predates the canonical privacy-policy URL "
+        f"requirement — its evidence is left as the historical record it is. "
+        f"Every other version must use '{CURRENT_SCHEMA}'."
+    )
+else:
+    bad(f"readiness: 'schema' must be '{CURRENT_SCHEMA}', got {schema!r}")
+    group("identity", False)
 
 version = data.get("version")
 if not isinstance(version, str) or version.strip() != expected_version:
@@ -674,6 +714,37 @@ if platform in ("android", "all"):
 if platform in ("ios", "all"):
     required_build_checks.update(BUILD_CHECKS_IOS)
 boolean_checks(build, required_build_checks, "build", "build_readiness")
+
+# The canonical privacy-policy URL (calee-hub-web#107).
+#
+# privacy_policy_url_reviewed above says only that a URL was reviewed. This
+# says WHICH one, so a listing that still carries the retired Portal policy
+# cannot pass. Enforced from schema 4 onward; see the schema note above for why
+# the two already-shipped releases are exempt rather than rewritten.
+if not legacy_schema_accepted:
+    declared_privacy_url = build.get("privacy_policy_url")
+    if declared_privacy_url is None:
+        bad(
+            "readiness: 'build_readiness.privacy_policy_url' is missing — record the "
+            f"privacy policy URL carried by the store listings ({CANONICAL_PRIVACY_POLICY_URL})"
+        )
+        group("build", False)
+    elif not isinstance(declared_privacy_url, str):
+        bad(
+            "readiness: 'build_readiness.privacy_policy_url' must be a string, got "
+            f"{declared_privacy_url!r}"
+        )
+        group("build", False)
+    elif declared_privacy_url.strip() != CANONICAL_PRIVACY_POLICY_URL:
+        bad(
+            "readiness: 'build_readiness.privacy_policy_url' is "
+            f"{declared_privacy_url!r} but the canonical Calee Privacy Policy is "
+            f"{CANONICAL_PRIVACY_POLICY_URL!r} — update the App Store Connect and "
+            "Google Play listings, then record the canonical URL here"
+        )
+        group("build", False)
+    else:
+        group("build", True)
 
 # Nothing in the repository can observe an Apple expiry date, so the operator
 # records it and the release fails once it has lapsed.
@@ -1321,6 +1392,28 @@ cmd_selftest() {
     printf '%s\n' "$dest"
   }
 
+  # set_fixture_version <fixture-root> <x.y.z> <build-number>
+  # Repins a fixture's pubspec version, so a case can be written against a
+  # SPECIFIC version rather than against whatever the repository is on today.
+  # Release notes must already exist for that version in docs/release_notes/.
+  set_fixture_version() {
+    local root="$1" version="$2" build_number="$3"
+    python3 -c '
+import re
+import sys
+
+path, version, build_number = sys.argv[1], sys.argv[2], sys.argv[3]
+with open(path, encoding="utf-8") as handle:
+    text = handle.read()
+text, count = re.subn(
+    r"^version: .*$", "version: %s+%s" % (version, build_number), text, count=1, flags=re.M
+)
+assert count == 1, "no version line in " + path
+with open(path, "w", encoding="utf-8") as handle:
+    handle.write(text)
+' "$root/pubspec.yaml" "$version" "$build_number"
+  }
+
   # fixture_version <fixture-root> -> prints "build_name build_number"
   fixture_version() {
     sed -nE 's/^version: ([0-9]+\.[0-9]+\.[0-9]+)\+([0-9]+)$/\1 \2/p' "$1/pubspec.yaml"
@@ -1399,7 +1492,7 @@ ANDROID_MANIFEST_SHA = "1" * 64
 IOS_MANIFEST_SHA = "2" * 64
 
 data = {
-    "schema": "calee-mobile-release-evidence/3",
+    "schema": "calee-mobile-release-evidence/4",
     "version": version,
     "build_number": build_number,
     "build_readiness": {
@@ -1408,6 +1501,7 @@ data = {
         "credential_owner_android": "Selftest Android Owner",
         "credential_owner_apple": "Selftest Apple Owner",
         "checks": {name: True for name in build_checks},
+        "privacy_policy_url": "https://calee.com.au/privacy/",
         "apple_certificate_expiry": future,
         "apple_provisioning_profile_expiry": future,
     },
@@ -1736,6 +1830,67 @@ PY
   write_valid_evidence "$fixture" submission
   mutate_evidence "$fixture" "data['schema'] = 'calee-mobile-release-evidence/2'"
   expect_status nonzero readiness-stale-schema "$fixture" --require-build-readiness
+
+  # --- canonical privacy-policy URL (calee-hub-web#107) ---------------------
+  #
+  # The pre-existing privacy_policy_url_reviewed boolean says only that SOME
+  # privacy policy URL was reviewed. These cases pin the stronger requirement:
+  # the store listings must carry the canonical calee.com.au policy, and the
+  # evidence must say so by name.
+
+  echo "selftest: the canonical privacy-policy URL is required and pinned"
+
+  fixture="$(make_fixture readiness-privacy-url-missing)"
+  write_valid_evidence "$fixture" submission
+  mutate_evidence "$fixture" "del data['build_readiness']['privacy_policy_url']"
+  expect_status nonzero readiness-privacy-url-missing "$fixture" --require-build-readiness
+
+  # THE case this exists for: the retired Portal policy, which the old boolean
+  # check would have accepted without complaint.
+  fixture="$(make_fixture readiness-privacy-url-portal)"
+  write_valid_evidence "$fixture" submission
+  mutate_evidence "$fixture" \
+    "data['build_readiness']['privacy_policy_url'] = 'https://portal.calee.com.au/privacy'"
+  expect_status nonzero readiness-privacy-url-portal "$fixture" --require-build-readiness
+
+  # A near miss must fail too: no trailing slash is a different URL.
+  fixture="$(make_fixture readiness-privacy-url-near-miss)"
+  write_valid_evidence "$fixture" submission
+  mutate_evidence "$fixture" \
+    "data['build_readiness']['privacy_policy_url'] = 'https://calee.com.au/privacy'"
+  expect_status nonzero readiness-privacy-url-near-miss "$fixture" --require-build-readiness
+
+  fixture="$(make_fixture readiness-privacy-url-not-a-string)"
+  write_valid_evidence "$fixture" submission
+  mutate_evidence "$fixture" "data['build_readiness']['privacy_policy_url'] = True"
+  expect_status nonzero readiness-privacy-url-not-a-string "$fixture" --require-build-readiness
+
+  # Backwards compatibility, and its limit. The legacy schema is accepted for
+  # the releases that ALREADY SHIPPED under it -- their evidence is a
+  # historical record and is not rewritten -- and rejected for anything else,
+  # so it cannot be used to dodge the requirement on a new release. Both sides
+  # are pinned to a SPECIFIC version rather than to whatever the repository is
+  # on today, so neither case silently stops testing anything after a bump.
+  echo "selftest: the legacy evidence schema is accepted only for shipped releases"
+
+  fixture="$(make_fixture readiness-legacy-schema-shipped)"
+  set_fixture_version "$fixture" 0.0.32 32
+  write_valid_evidence "$fixture" submission
+  mutate_evidence "$fixture" "data['schema'] = 'calee-mobile-release-evidence/3'"
+  mutate_evidence "$fixture" "data['build_readiness'].pop('privacy_policy_url', None)"
+  expect_status 0 readiness-legacy-schema-accepted-for-shipped-release "$fixture" \
+    --require-build-readiness
+
+  # A version that never shipped under the legacy schema. Everything else about
+  # the evidence is valid, so only the exemption is under test.
+  fixture="$(make_fixture readiness-legacy-schema-new-version)"
+  set_fixture_version "$fixture" 0.0.99 99
+  cp "$fixture/docs/release_notes/0.0.33.md" "$fixture/docs/release_notes/0.0.99.md"
+  write_valid_evidence "$fixture" submission
+  mutate_evidence "$fixture" "data['schema'] = 'calee-mobile-release-evidence/3'"
+  mutate_evidence "$fixture" "data['build_readiness'].pop('privacy_policy_url', None)"
+  expect_status nonzero readiness-legacy-schema-not-for-new-versions "$fixture" \
+    --require-build-readiness
 
   fixture="$(make_fixture readiness-missing-build-section)"
   write_valid_evidence "$fixture" submission

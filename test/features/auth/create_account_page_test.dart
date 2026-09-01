@@ -110,6 +110,22 @@ Future<void> _tapCreateAccount(WidgetTester tester) async {
   await tester.pump();
 }
 
+// The legal notice sits below the Create account button, past the bottom of
+// the default 800x600 test surface, so it is never built there. Widen the
+// surface rather than simulating a scroll gesture -- same approach as
+// settings_page_content_test.dart.
+Future<_FakeAuthRepository> _pumpTallCreateAccountPage(
+  WidgetTester tester,
+) async {
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+  tester.view.physicalSize = const Size(800, 2400);
+  tester.view.devicePixelRatio = 1.0;
+  final repository = await _pumpCreateAccountPage(tester);
+  await tester.pumpAndSettle();
+  return repository;
+}
+
 void main() {
   testWidgets('CreateAccountPage shows first name and last name', (
     tester,
@@ -285,5 +301,51 @@ void main() {
       ),
       findsOneWidget,
     );
+  });
+
+  // ── Canonical legal links (calee-hub-web#107) ────────────────────────────
+
+  testWidgets('the legal notice states what creating an account means', (
+    tester,
+  ) async {
+    await _pumpTallCreateAccountPage(tester);
+
+    expect(
+      find.text(
+        'By creating a Calee account, you agree to the Calee Terms of Use '
+        'and acknowledge the Privacy Policy.',
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('both canonical documents are reachable from Create account', (
+    tester,
+  ) async {
+    await _pumpTallCreateAccountPage(tester);
+
+    expect(find.byKey(const Key('legal_terms_link')), findsOneWidget);
+    expect(find.byKey(const Key('legal_privacy_link')), findsOneWidget);
+  });
+
+  // #107 explicitly leaves terms acceptance as an open product/legal decision,
+  // and CreateAccountController.register() sends no terms field. Adding a
+  // checkbox here would present recorded consent that neither the app nor the
+  // backend holds.
+  testWidgets('creating an account records no terms acceptance', (
+    tester,
+  ) async {
+    final repository = await _pumpCreateAccountPage(tester);
+    await _enterValidAccountDetails(tester);
+
+    expect(find.byType(Checkbox), findsNothing);
+    expect(find.byType(CheckboxListTile), findsNothing);
+
+    await _tapCreateAccount(tester);
+    await tester.pump();
+
+    // Registration went through with the account fields alone. Nothing about
+    // a terms version or an acceptance timestamp travelled with it.
+    expect(repository.registerCallCount, 1);
   });
 }
