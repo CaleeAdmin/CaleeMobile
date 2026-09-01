@@ -1,12 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../data/models/client_bootstrap.dart';
+import '../../ui/calee_legal_links.dart';
 import 'auth_repository.dart';
 import 'forgot_password_page.dart';
 import 'login_controller.dart';
-
-const _kTermsAndConditionsUrl = 'https://portal.calee.com.au/terms';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({
@@ -59,18 +57,6 @@ class _LoginPageState extends State<LoginPage> {
     if (!mounted || result == null) return;
 
     await widget.onSignedIn(result);
-  }
-
-  Future<void> _openUrl(String url) async {
-    final uri = Uri.tryParse(url);
-    if (uri == null) return;
-    if (!await launchUrl(uri, mode: LaunchMode.platformDefault)) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Could not open link.')));
-      }
-    }
   }
 
   @override
@@ -230,7 +216,7 @@ class _LoginPageState extends State<LoginPage> {
                       //    - "Manage calendars, tasks and displays connected to your Calee account."
                       //    - email/password sign-in
                       //    - "Forgot password?"
-                      //    - Terms and Conditions
+                      //    - Terms of Use / Privacy Policy links
                       //    - future link: "New to Calee? Connect a Calee display"
                       //
                       // 3. When the future setup link is enabled, tapping it should start the
@@ -278,25 +264,10 @@ class _LoginPageState extends State<LoginPage> {
                       // Do not enable the setup link until the Calee Display auth changeover,
                       // Hub/Core mobile handoff endpoint, app link/universal link routing, and
                       // CaleeMobile session exchange are implemented and tested end-to-end.
-                      Center(
-                        child: TextButton(
-                          onPressed: () => _openUrl(_kTermsAndConditionsUrl),
-                          style: TextButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
-                            ),
-                            minimumSize: const Size(0, 36),
-                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          ),
-                          child: Text(
-                            'Terms and Conditions',
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.primary,
-                            ),
-                          ),
-                        ),
-                      ),
+                      // Both canonical documents, from the one shared
+                      // widget. This used to be a single "Terms and
+                      // Conditions" button pointing at the Portal terms.
+                      const CaleeLegalLinks(),
                     ],
                   );
                 },

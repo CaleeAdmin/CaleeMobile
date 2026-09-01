@@ -106,8 +106,17 @@ listing said last release.
 - [ ] **Category** — Productivity
 - [ ] **Support URL** — reachable, and a real support route
 - [ ] **Marketing URL** (optional) — reachable if set
-- [ ] **Privacy policy URL** — reachable, current, and describes what this
-      version actually collects
+- [ ] **Privacy policy URL** — set to the canonical Calee Privacy Policy,
+      exactly `https://calee.com.au/privacy/`, in BOTH store listings; reachable,
+      current, and describes what this version actually collects.
+      The retired `https://portal.calee.com.au/privacy` URL still redirects, but
+      a redirect is not what a store listing should carry.
+      **This is a manual change in App Store Connect and the Google Play
+      Console.** Nothing in this repository can make it for you, and a green
+      preflight does not mean the stores were updated — it means an operator
+      recorded that they were. Record the URL in
+      `docs/release_evidence/<version>.json` under
+      `build_readiness.privacy_policy_url`, where preflight pins it.
 - [ ] **Contact information** — support email/phone monitored by someone
 - [ ] **Localisation** — English (Australia) primary; any additional locales
       complete, not partially translated
@@ -128,7 +137,8 @@ camera for QR/event scanning.
 - [ ] Every data type collected declared, with purpose and linkage/tracking
       answers
 - [ ] Third-party SDK data behaviour accounted for
-- [ ] Privacy policy URL matches the one in the listing
+- [ ] Privacy policy URL matches the one in the listing, and is the canonical
+      `https://calee.com.au/privacy/`
 
 ### Google Play — Data Safety
 
@@ -136,6 +146,8 @@ camera for QR/event scanning.
 - [ ] Encryption-in-transit and deletion-request answers current
 - [ ] Declaration matches the Apple App Privacy answers (they describe the same
       app)
+- [ ] Privacy policy URL in the Play listing is the canonical
+      `https://calee.com.au/privacy/`
 
 ### Permissions
 

@@ -89,10 +89,14 @@ void main() {
       },
     );
 
-    testWidgets('Terms and Conditions button is still present', (tester) async {
+    // The single "Terms and Conditions" button that pointed at the Portal
+    // terms is now the canonical pair (calee-hub-web#107). Both documents
+    // must stay reachable from sign-in.
+    testWidgets('canonical legal links are still present', (tester) async {
       await _pumpLoginPage(tester);
 
-      expect(find.text('Terms and Conditions'), findsOneWidget);
+      expect(find.text('Terms of Use'), findsOneWidget);
+      expect(find.text('Privacy Policy'), findsOneWidget);
     });
   });
 

@@ -3,10 +3,12 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../../config/calee_links.dart';
 import '../../data/api/calee_hub_client.dart';
 import '../../data/auth/calee_preferences.dart';
 import '../../data/models/client_bootstrap.dart';
 import '../../data/models/client_calendar.dart';
+import '../../ui/calee_legal_links.dart';
 import '../../ui/calee_theme.dart';
 import '../../ui/calee_widgets.dart';
 import '../calendar_onboarding/calendar_source_picker_page.dart';
@@ -33,6 +35,7 @@ class SettingsPage extends StatefulWidget {
     this.reminderCoordinator,
     this.onNavigateToCalendar,
     this.preferencesOverride,
+    this.legalLinkLauncher,
     super.key,
   });
 
@@ -55,6 +58,12 @@ class SettingsPage extends StatefulWidget {
   /// where the real [CaleePreferences] is used.
   @visibleForTesting
   final CaleePreferences? preferencesOverride;
+
+  /// Opens a canonical Calee legal document. Injected in widget tests so the
+  /// exact URL each row offers can be asserted without the url_launcher
+  /// platform channel. Null in production, where the external browser is used.
+  @visibleForTesting
+  final LegalLinkLauncher? legalLinkLauncher;
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
@@ -169,6 +178,15 @@ class _SettingsPageState extends State<SettingsPage> {
       return false;
     }
     return true;
+  }
+
+  Future<void> _openLegalUrl(String url) async {
+    final launcher = widget.legalLinkLauncher;
+    if (launcher != null) {
+      await launcher(url);
+      return;
+    }
+    await openCaleeLegalUrl(url);
   }
 
   void _openServiceDetails(ClientService service) {
@@ -627,6 +645,39 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           const SizedBox(height: CaleeSpacing.sectionSpacing),
         ],
+
+        // ── Legal ────────────────────────────────────
+        //
+        // The canonical Calee legal documents, reachable from the signed-in
+        // app for the first time. These open in the external browser and
+        // record nothing: no acceptance, no version, no timestamp.
+        CaleeSection(
+          title: 'Legal',
+          children: [
+            CaleeListRow(
+              key: const Key('settings_privacy_policy_row'),
+              title: 'Privacy Policy',
+              onTap: () => _openLegalUrl(kCaleePrivacyUrl),
+              trailing: const Icon(
+                Icons.open_in_new,
+                size: 18,
+                color: CaleeColors.textTertiary,
+              ),
+            ),
+            CaleeListRow(
+              key: const Key('settings_terms_of_use_row'),
+              title: 'Terms of Use',
+              onTap: () => _openLegalUrl(kCaleeTermsUrl),
+              trailing: const Icon(
+                Icons.open_in_new,
+                size: 18,
+                color: CaleeColors.textTertiary,
+              ),
+            ),
+          ],
+        ),
+
+        const SizedBox(height: CaleeSpacing.sectionSpacing),
 
         // ── Sign out ─────────────────────────────────
         CaleeSection(

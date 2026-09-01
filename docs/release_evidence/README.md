@@ -63,12 +63,13 @@ with the code it describes.
 
 | Field | Rule |
 | --- | --- |
-| `schema` | must be `calee-mobile-release-evidence/3` |
+| `schema` | must be `calee-mobile-release-evidence/4`. `/3` is accepted **only** for 0.0.32 and 0.0.33 — see [Schema 4](#schema-4-the-canonical-privacy-policy-url) |
 | `version`, `build_number` | must match `pubspec.yaml` exactly — evidence from a previous release cannot be reused |
 | `*.reviewed_at` | ISO `YYYY-MM-DD`, not in the future |
 | `build_readiness.release_operator` | non-empty, and **no placeholder text** |
 | `build_readiness.credential_owner_android` / `_apple` | required for the platform being released, same placeholder rule |
 | `build_readiness.checks.*` | every required key must be the literal boolean `true`. `false`, a missing key, or a string such as `"TODO"` fails |
+| `build_readiness.privacy_policy_url` | schema 4: must be exactly `https://calee.com.au/privacy/` |
 | `build_readiness.apple_certificate_expiry`, `apple_provisioning_profile_expiry` | iOS only: ISO dates that must still be **in the future** at build time |
 | `submission_readiness.release_approver` | non-empty, no placeholder text |
 | `submission_readiness.checks.*` | as above |
@@ -82,6 +83,33 @@ with the code it describes.
 Required `checks` keys are platform-scoped: the shared set always applies; the
 `android_*` / `google_play_*` keys apply to Android releases and the `ios_*` /
 `apple_*` keys to iOS releases. A file carrying all of them satisfies both.
+
+### Schema 4: the canonical privacy-policy URL
+
+Schema 4 adds one required field, `build_readiness.privacy_policy_url`, pinned
+to the canonical Calee Privacy Policy at `https://calee.com.au/privacy/`
+(CaleeAdmin/calee-hub-web#107).
+
+**Why a new field rather than another boolean.** The existing
+`privacy_policy_url_reviewed` check records only that somebody reviewed *a*
+privacy policy URL. It cannot tell the canonical policy from the retired
+`https://portal.calee.com.au/privacy` one — which is exactly the ambiguity the
+migration exists to remove. The store listings must carry the canonical URL, so
+the evidence has to name it.
+
+**Backwards compatibility, and its limit.** Schema `/3` is still accepted, but
+only for **0.0.32 and 0.0.33** — the releases that actually shipped under it.
+Their evidence is the historical record of what those operators reviewed at the
+time; rewriting it to name a URL that did not yet exist would be falsifying
+release evidence, so it is left alone and preflight says so explicitly in its
+output. Every other version, including every future release, must use schema 4.
+That deliberately closes the obvious loophole: a new release cannot skip the
+requirement by simply not upgrading its evidence file.
+
+**What this does and does not prove.** A green preflight means an operator
+*recorded* the canonical URL. It does not mean either store listing was
+changed — that is a manual update in App Store Connect and the Google Play
+Console. See [../STORE_RELEASE_CHECKLIST.md](../STORE_RELEASE_CHECKLIST.md).
 
 ### Why a build number is not enough
 
