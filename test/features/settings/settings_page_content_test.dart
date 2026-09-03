@@ -12,6 +12,8 @@ import 'package:calee_mobile/data/api/calee_hub_client.dart';
 import 'package:calee_mobile/data/models/client_bootstrap.dart';
 import 'package:calee_mobile/data/models/client_calendar.dart';
 import 'package:calee_mobile/data/models/client_preferences.dart';
+import 'package:calee_mobile/data/models/external_calendar_connection.dart';
+import 'package:calee_mobile/features/settings/calendar_collections_page.dart';
 import 'package:calee_mobile/features/settings/settings_page.dart';
 import 'package:calee_mobile/ui/calee_theme.dart';
 import 'package:flutter/material.dart';
@@ -25,6 +27,16 @@ class _StubHubClient extends CaleeHubClient {
   @override
   Future<ClientCalendarList> calendars({required String accessToken}) async {
     return const ClientCalendarList(calendars: []);
+  }
+
+  // CalendarCollectionsPage — reached by tapping the "Calendars and lists"
+  // row — loads connected external calendar accounts on open. No account is
+  // connected in these tests.
+  @override
+  Future<List<ExternalCalendarConnection>> externalCalendarConnections({
+    required String accessToken,
+  }) async {
+    return const [];
   }
 
   // Hub preferences are unavailable in these tests; SettingsRepository must
@@ -233,7 +245,29 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Calendars and lists'), findsOneWidget);
+    expect(
+      find.byKey(const Key('settings_calendar_collections_row')),
+      findsOneWidget,
+    );
   });
+
+  // The keyed row is the real navigation control, so this proves the contract
+  // end to end: tapping it pushes the actual CalendarCollectionsPage. Pumped
+  // tall because the row lays out just below the default 600px test surface
+  // and a tap there would silently miss.
+  testWidgets(
+    'settings_calendar_collections_row opens CalendarCollectionsPage',
+    (tester) async {
+      await _pumpTall(tester, _wrap());
+
+      await tester.tap(
+        find.byKey(const Key('settings_calendar_collections_row')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byType(CalendarCollectionsPage), findsOneWidget);
+    },
+  );
 
   testWidgets('Settings shows "Connect a display" row', (tester) async {
     await tester.pumpWidget(_wrap());

@@ -96,6 +96,12 @@ void main() {
 
     expect(find.text('CONNECTED CALENDARS'), findsOneWidget);
     expect(find.text('Google Calendar'), findsOneWidget);
+    expect(
+      find.byKey(
+        const Key('calendar_collections_google_calendar_connection_row'),
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets('shows the connected Google account email when available', (
@@ -127,10 +133,18 @@ void main() {
     await tester.pumpWidget(_wrap(client));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Google Calendar'));
+    await tester.tap(
+      find.byKey(
+        const Key('calendar_collections_google_calendar_connection_row'),
+      ),
+    );
     await tester.pumpAndSettle();
 
     expect(find.byType(GoogleCalendarSelectionPage), findsOneWidget);
+    expect(
+      find.byKey(const Key('google_calendar_selection_page_root')),
+      findsOneWidget,
+    );
   });
 
   testWidgets('disconnect calls disconnectExternalCalendarConnection and '
@@ -141,7 +155,11 @@ void main() {
     await tester.pumpWidget(_wrap(client));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Google Calendar'));
+    await tester.tap(
+      find.byKey(
+        const Key('calendar_collections_google_calendar_connection_row'),
+      ),
+    );
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Disconnect Google Calendar'));
@@ -169,6 +187,12 @@ void main() {
 
     expect(find.text('CONNECTED CALENDARS'), findsOneWidget);
     expect(find.text('No connected calendar accounts'), findsOneWidget);
+    expect(
+      find.byKey(
+        const Key('calendar_collections_google_calendar_connection_row'),
+      ),
+      findsNothing,
+    );
   });
 
   testWidgets(
@@ -186,7 +210,11 @@ void main() {
       await tester.pumpWidget(_wrap(client));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Google Calendar'));
+      await tester.tap(
+        find.byKey(
+          const Key('calendar_collections_google_calendar_connection_row'),
+        ),
+      );
       await tester.pumpAndSettle();
 
       expect(

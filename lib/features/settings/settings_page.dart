@@ -560,6 +560,7 @@ class _SettingsPageState extends State<SettingsPage> {
               },
             ),
             CaleeListRow(
+              key: const Key('settings_calendar_collections_row'),
               title: 'Calendars and lists',
               subtitle: 'Manage calendars, task lists, and chore lists',
               leading: const Icon(
