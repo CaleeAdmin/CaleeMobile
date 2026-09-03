@@ -47,6 +47,36 @@ class _StubHubClient extends CaleeHubClient {
   }
 }
 
+/// Same as [_StubHubClient] but with one active Google Calendar connection, so
+/// the Settings → Calendars and lists → Google Calendar management path can be
+/// exercised end to end.
+class _GoogleConnectedHubClient extends _StubHubClient {
+  @override
+  Future<List<ExternalCalendarConnection>> externalCalendarConnections({
+    required String accessToken,
+  }) async {
+    return [
+      ExternalCalendarConnection.fromJson(const {
+        'id': 'conn1',
+        'providerKey': 'google_calendar',
+        'displayName': 'Google Calendar',
+        'externalAccountEmail': 'user@gmail.com',
+        'connectionStatus': 'active',
+        'accessMode': 'read_only',
+        'sourceOfTruthPolicy': 'external',
+      }),
+    ];
+  }
+
+  @override
+  Future<List<ExternalCalendar>> externalCalendarsForConnection({
+    required String accessToken,
+    required String connectionId,
+  }) async {
+    return const [];
+  }
+}
+
 class _FailThenSucceedHubClient extends CaleeHubClient {
   _FailThenSucceedHubClient() : super(baseUri: Uri.parse('http://localhost'));
 
@@ -119,18 +149,22 @@ ClientBootstrap _businessBootstrap() => ClientBootstrap(
   capabilities: const {},
 );
 
-Widget _wrap({ClientBootstrap? bootstrap, CaleeHubClient? hubClient}) =>
-    MaterialApp(
-      theme: CaleeTheme.buildThemeData(),
-      home: Scaffold(
-        body: SettingsPage(
-          hubClient: hubClient ?? _StubHubClient(),
-          accessToken: 'tok',
-          bootstrap: bootstrap ?? _bootstrap(),
-          onSignOut: () {},
-        ),
-      ),
-    );
+Widget _wrap({
+  ClientBootstrap? bootstrap,
+  CaleeHubClient? hubClient,
+  VoidCallback? onNavigateToCalendar,
+}) => MaterialApp(
+  theme: CaleeTheme.buildThemeData(),
+  home: Scaffold(
+    body: SettingsPage(
+      hubClient: hubClient ?? _StubHubClient(),
+      accessToken: 'tok',
+      bootstrap: bootstrap ?? _bootstrap(),
+      onSignOut: () {},
+      onNavigateToCalendar: onNavigateToCalendar,
+    ),
+  ),
+);
 
 // The "Connected services" section renders below the Account/Preferences/
 // Manage sections in SettingsPage's ListView. The default 800x600 test
@@ -266,6 +300,58 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byType(CalendarCollectionsPage), findsOneWidget);
+    },
+  );
+
+  // End-to-end through the real rows: Settings → Calendars and lists → Google
+  // Calendar → View calendar must ask the host (CaleeHomePage in production)
+  // to select the Calendar tab, not merely pop back to the Home route.
+  testWidgets(
+    'Settings forwards onNavigateToCalendar through Calendars and lists to '
+    'the Google management View calendar button',
+    (tester) async {
+      var navigateToCalendarCount = 0;
+      await _pumpTall(
+        tester,
+        _wrap(
+          hubClient: _GoogleConnectedHubClient(),
+          onNavigateToCalendar: () => navigateToCalendarCount++,
+        ),
+      );
+
+      await tester.tap(
+        find.byKey(const Key('settings_calendar_collections_row')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(CalendarCollectionsPage), findsOneWidget);
+
+      final connectionRow = find.byKey(
+        const Key('calendar_collections_google_calendar_connection_row'),
+      );
+      await tester.ensureVisible(connectionRow);
+      await tester.pumpAndSettle();
+      await tester.tap(connectionRow);
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const Key('google_calendar_selection_page_root')),
+        findsOneWidget,
+      );
+      expect(navigateToCalendarCount, 0);
+
+      final viewCalendar = find.byKey(
+        const Key('google_calendar_view_calendar_button'),
+      );
+      await tester.ensureVisible(viewCalendar);
+      await tester.pumpAndSettle();
+      await tester.tap(viewCalendar);
+      await tester.pumpAndSettle();
+
+      expect(navigateToCalendarCount, 1);
+      expect(
+        find.byKey(const Key('google_calendar_selection_page_root')),
+        findsNothing,
+      );
     },
   );
 
