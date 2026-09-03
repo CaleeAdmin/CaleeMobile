@@ -269,6 +269,10 @@ void main() {
 
         // Should navigate to GoogleCalendarSelectionPage.
         expect(find.byType(GoogleCalendarSelectionPage), findsOneWidget);
+        expect(
+          find.byKey(const Key('google_calendar_selection_page_root')),
+          findsOneWidget,
+        );
       },
     );
 
@@ -348,6 +352,10 @@ void main() {
         // No extra refreshBootstrap call — lifecycle resume handles that.
         expect(session.refreshBootstrapCallCount, 0);
         expect(find.byType(GoogleCalendarSelectionPage), findsOneWidget);
+        expect(
+          find.byKey(const Key('google_calendar_selection_page_root')),
+          findsOneWidget,
+        );
 
         // The selection page fetches calendars for the correct connection.
         expect(hubClient.lastCalledConnectionId, 'conn2');
