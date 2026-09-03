@@ -198,6 +198,7 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
         : (email != null && email.isNotEmpty ? email : 'Connected');
 
     return CaleeListRow(
+      key: const Key('calendar_collections_google_calendar_connection_row'),
       title: 'Google Calendar',
       subtitle: subtitle,
       leading: Icon(
