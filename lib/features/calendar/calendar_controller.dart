@@ -262,6 +262,16 @@ class CalendarController extends ChangeNotifier {
     _requestReminderRefresh(CalendarReminderRefreshReason.eventCreated);
   }
 
+  /// [destinationCalendar] is where the event should end up. When it names a
+  /// calendar other than the one the event is in, Hub moves the event there as
+  /// part of this same mutation. Null (and a destination equal to the event's
+  /// current calendar) is an ordinary in-place update.
+  ///
+  /// The unconditional [loadMonth] below is what makes a move converge: the
+  /// event's calendar has changed, so its colour, its visibility under the
+  /// hidden-calendar filter and which calendar it groups under are all
+  /// different now. Reloading from the server is the only way to get all of
+  /// that right, and it is why nothing here patches the local copy.
   Future<void> updateEvent({
     required ClientEvent event,
     required String title,
@@ -272,6 +282,7 @@ class CalendarController extends ChangeNotifier {
     String? description,
     String? recurrence,
     String? editScope,
+    ClientCalendar? destinationCalendar,
   }) async {
     await repository.updateEvent(
       event: event,
@@ -283,6 +294,7 @@ class CalendarController extends ChangeNotifier {
       description: description,
       recurrence: recurrence,
       editScope: editScope,
+      destinationCalendar: destinationCalendar,
     );
     await loadMonth();
     _requestReminderRefresh(CalendarReminderRefreshReason.eventUpdated);

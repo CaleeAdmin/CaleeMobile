@@ -107,6 +107,7 @@ Widget _buildSheet({
               description,
               recurrence,
               editScope,
+              destinationCalendar,
             }) async {
               onUpdateRecurrence?.call(recurrence);
             },

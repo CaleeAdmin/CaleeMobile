@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 
-const _kTermsAndConditionsUrl = 'https://portal.calee.com.au/terms';
+import '../../ui/calee_legal_links.dart';
 
 class WelcomePage extends StatelessWidget {
   const WelcomePage({
@@ -12,13 +11,6 @@ class WelcomePage extends StatelessWidget {
 
   final VoidCallback onCreateAccount;
   final VoidCallback onSignIn;
-
-  Future<void> _openTerms() async {
-    final uri = Uri.parse(_kTermsAndConditionsUrl);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -75,25 +67,11 @@ class WelcomePage extends StatelessWidget {
                       const SizedBox(height: 24),
                       const _SharedCalendarRecoveryNote(),
                       const SizedBox(height: 8),
-                      Center(
-                        child: TextButton(
-                          onPressed: _openTerms,
-                          style: TextButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
-                            ),
-                            minimumSize: const Size(0, 36),
-                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          ),
-                          child: Text(
-                            'Terms and Conditions',
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.primary,
-                            ),
-                          ),
-                        ),
-                      ),
+                      // Both canonical documents, from the one shared
+                      // widget. This used to be a single "Terms and
+                      // Conditions" button pointing at the Portal terms, so
+                      // the Privacy Policy was not reachable here at all.
+                      const CaleeLegalLinks(),
                     ],
                   ),
                 ),

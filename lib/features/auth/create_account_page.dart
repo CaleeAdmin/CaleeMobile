@@ -1,11 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../data/models/client_bootstrap.dart';
+import '../../ui/calee_legal_links.dart';
 import 'auth_repository.dart';
 import 'create_account_controller.dart';
-
-const _kTermsAndConditionsUrl = 'https://portal.calee.com.au/terms';
 
 class CreateAccountPage extends StatefulWidget {
   const CreateAccountPage({
@@ -69,18 +67,6 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
 
     if (!mounted || result == null) return;
     await widget.onAccountCreated(result);
-  }
-
-  Future<void> _openUrl(String url) async {
-    final uri = Uri.tryParse(url);
-    if (uri == null) return;
-    if (!await launchUrl(uri, mode: LaunchMode.platformDefault)) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Could not open link.')));
-      }
-    }
   }
 
   @override
@@ -302,25 +288,12 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                               ),
                       ),
                       const SizedBox(height: 32),
-                      Center(
-                        child: TextButton(
-                          onPressed: () => _openUrl(_kTermsAndConditionsUrl),
-                          style: TextButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
-                            ),
-                            minimumSize: const Size(0, 36),
-                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          ),
-                          child: Text(
-                            'Terms and Conditions',
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.primary,
-                            ),
-                          ),
-                        ),
-                      ),
+                      // States what creating an account means and offers
+                      // both canonical documents. Deliberately NOT an
+                      // acceptance control: no checkbox, no terms version, no
+                      // accepted-at timestamp, no backend field. See
+                      // CaleeAccountLegalNotice.
+                      const CaleeAccountLegalNotice(),
                     ],
                   );
                 },

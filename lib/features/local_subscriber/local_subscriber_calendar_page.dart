@@ -4,6 +4,7 @@ import 'dart:collection';
 import 'package:flutter/material.dart';
 
 import '../../ui/calee_design.dart';
+import '../../ui/calee_legal_links.dart';
 import '../calendar/shared/calendar_display_event.dart';
 import '../calendar/shared/calendar_display_event_adapters.dart';
 import '../calendar/shared/read_only_calendar_view.dart';
@@ -782,6 +783,19 @@ class _CalendarsSheet extends StatelessWidget {
                     onTap: () => Navigator.of(
                       context,
                     ).pop(_CalendarsSheetAction.learnAboutHome),
+                  ),
+                  // Guest-mode legal access. A signed-out local subscriber
+                  // has no Settings page, so without this the canonical
+                  // Privacy Policy and Terms of Use are not reachable from
+                  // the app at all once past Welcome.
+                  //
+                  // Links only. Guest mode creates no account, so there is
+                  // nothing here to accept and no acceptance is asked for.
+                  const Padding(
+                    padding: EdgeInsets.only(top: 4),
+                    child: CaleeLegalLinks(
+                      key: Key('local_calendar_legal_links'),
+                    ),
                   ),
                   const SizedBox(height: 8),
                 ],

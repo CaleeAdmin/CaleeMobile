@@ -11,6 +11,7 @@
 
 import 'package:calee_mobile/features/onboarding/welcome_page.dart';
 import 'package:calee_mobile/ui/calee_design.dart';
+import 'package:calee_mobile/ui/calee_legal_links.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -60,7 +61,7 @@ void main() {
     // Content is balanced about the middle of the screen rather than pinned
     // to the top — the regression a bare scroll view would introduce.
     final top = tester.getRect(find.byIcon(Icons.tv_outlined)).top;
-    final bottom = tester.getRect(find.text('Terms and Conditions')).bottom;
+    final bottom = tester.getRect(find.byType(CaleeLegalLinks)).bottom;
     final contentCentre = (top + bottom) / 2;
     final screenCentre = _kNormalPhone.height / 2;
     expect((contentCentre - screenCentre).abs(), lessThan(8));
@@ -113,7 +114,8 @@ void main() {
     for (final target in [
       find.widgetWithText(FilledButton, 'Create account'),
       find.widgetWithText(TextButton, 'I already have an account'),
-      find.text('Terms and Conditions'),
+      find.byKey(const Key('legal_terms_link')),
+      find.byKey(const Key('legal_privacy_link')),
     ]) {
       await tester.ensureVisible(target);
       await tester.pumpAndSettle();
@@ -133,7 +135,9 @@ void main() {
       find.widgetWithText(FilledButton, 'Create account'),
     );
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('Terms and Conditions'));
+    await tester.ensureVisible(find.byKey(const Key('legal_terms_link')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const Key('legal_privacy_link')));
     await tester.pumpAndSettle();
 
     expect(tester.takeException(), isNull);

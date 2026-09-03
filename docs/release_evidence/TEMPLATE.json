@@ -1,5 +1,5 @@
 {
-  "schema": "calee-mobile-release-evidence/3",
+  "schema": "calee-mobile-release-evidence/4",
   "version": "REPLACE-WITH-VERSION",
   "build_number": "REPLACE-WITH-BUILD-NUMBER",
 
@@ -24,6 +24,9 @@
       "ios_listing_prepared": false,
       "apple_app_privacy_prepared": false
     },
+
+    "_privacy_policy_url_comment": "The privacy policy URL carried by BOTH store listings. It must be exactly the canonical Calee Privacy Policy. Recording it here is what distinguishes 'a URL was reviewed' from 'the right URL is live in the stores'. Changing this file does NOT change either store listing — that is a manual update in App Store Connect and the Google Play Console.",
+    "privacy_policy_url": "https://calee.com.au/privacy/",
 
     "apple_certificate_expiry": "YYYY-MM-DD",
     "apple_provisioning_profile_expiry": "YYYY-MM-DD"

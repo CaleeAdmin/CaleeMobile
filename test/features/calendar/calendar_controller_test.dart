@@ -65,6 +65,7 @@ class _StubHubClient extends CaleeHubClient {
     required String accessToken,
     required String eventId,
     required String title,
+    String? calendarId,
     String? startsAt,
     String? endsAt,
     bool? allDay,
