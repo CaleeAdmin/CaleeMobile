@@ -321,6 +321,7 @@ class _GoogleCalendarSelectionPageState
     final theme = Theme.of(context);
 
     return CaleeScaffold(
+      key: const Key('google_calendar_selection_page_root'),
       appBar: AppBar(title: const Text('Choose Google Calendars')),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
@@ -384,11 +385,13 @@ class _GoogleCalendarSelectionPageState
             ),
           const SizedBox(height: CaleeSpacing.sectionSpacing),
           FilledButton(
+            key: const Key('google_calendar_sync_selected_button'),
             onPressed: _syncAll,
             child: const Text('Sync selected calendars now'),
           ),
           const SizedBox(height: CaleeSpacing.sm),
           OutlinedButton(
+            key: const Key('google_calendar_view_calendar_button'),
             onPressed: (_syncingIds.isNotEmpty || _isSyncingAll)
                 ? null
                 : widget.onViewCalendar,
@@ -405,6 +408,7 @@ class _GoogleCalendarSelectionPageState
                     : 'Needs attention',
               ),
               _DetailInfoRow(
+                key: const Key('google_calendar_connected_account_row'),
                 label: 'Account',
                 value:
                     widget.connection.externalAccountEmail ?? 'Google Calendar',
@@ -413,6 +417,7 @@ class _GoogleCalendarSelectionPageState
           ),
           const SizedBox(height: CaleeSpacing.sm),
           TextButton(
+            key: const Key('google_calendar_disconnect_button'),
             onPressed: _disconnect,
             style: TextButton.styleFrom(
               foregroundColor: CaleeColors.destructive,
@@ -492,7 +497,11 @@ class _CalendarRow extends StatelessWidget {
                     tooltip: 'Sync now',
                     onPressed: onSync,
                   ),
-          Switch(value: calendar.syncEnabled, onChanged: onToggle),
+          Switch(
+            key: ValueKey('google_calendar_toggle_${calendar.id}'),
+            value: calendar.syncEnabled,
+            onChanged: onToggle,
+          ),
         ],
       ),
     );
@@ -500,7 +509,7 @@ class _CalendarRow extends StatelessWidget {
 }
 
 class _DetailInfoRow extends StatelessWidget {
-  const _DetailInfoRow({required this.label, required this.value});
+  const _DetailInfoRow({super.key, required this.label, required this.value});
 
   final String label;
   final String value;

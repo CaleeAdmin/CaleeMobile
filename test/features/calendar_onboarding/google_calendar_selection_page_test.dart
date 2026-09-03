@@ -26,6 +26,8 @@ class _StubHubClient extends CaleeHubClient {
   final List<ExternalCalendar> _calendars;
   final bool _syncShouldFail;
   final Completer<void>? _syncCompleter;
+  int disconnectCalls = 0;
+  String? disconnectedConnectionId;
 
   @override
   Future<List<ExternalCalendar>> externalCalendarsForConnection({
@@ -87,7 +89,10 @@ class _StubHubClient extends CaleeHubClient {
   Future<void> disconnectExternalCalendarConnection({
     required String accessToken,
     required String connectionId,
-  }) async {}
+  }) async {
+    disconnectCalls += 1;
+    disconnectedConnectionId = connectionId;
+  }
 }
 
 // ── Test helpers ───────────────────────────────────────────────────────────────────
@@ -169,6 +174,10 @@ void main() {
       find.textContaining('Choose which Google calendars to show'),
       findsOneWidget,
     );
+    expect(
+      find.byKey(const Key('google_calendar_selection_page_root')),
+      findsOneWidget,
+    );
   });
 
   testWidgets('shows account email when provided', (tester) async {
@@ -178,6 +187,10 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50));
 
     expect(find.text('user@gmail.com'), findsOneWidget);
+    expect(
+      find.byKey(const Key('google_calendar_connected_account_row')),
+      findsOneWidget,
+    );
   });
 
   testWidgets('shows fallback label when account email is absent', (
@@ -189,6 +202,10 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50));
 
     expect(find.text('Google Calendar connected'), findsOneWidget);
+    expect(
+      find.byKey(const Key('google_calendar_connected_account_row')),
+      findsOneWidget,
+    );
   });
 
   testWidgets('shows calendar row with display name', (tester) async {
@@ -199,6 +216,41 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50));
 
     expect(find.text('Work'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('google_calendar_toggle_cal1')),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('calendar toggles use external calendar IDs', (tester) async {
+    final client = _StubHubClient(
+      calendars: [
+        _fakeCalendar(
+          id: 'cal-a',
+          displayName: 'Same-looking calendar',
+          syncEnabled: true,
+        ),
+        _fakeCalendar(
+          id: 'cal-b',
+          displayName: 'Same-looking calendar',
+          syncEnabled: false,
+        ),
+      ],
+    );
+    await tester.pumpWidget(_wrapPage(hubClient: client));
+    await tester.pump(const Duration(milliseconds: 50));
+
+    final calA = find.byKey(const ValueKey('google_calendar_toggle_cal-a'));
+    final calB = find.byKey(const ValueKey('google_calendar_toggle_cal-b'));
+
+    expect(calA, findsOneWidget);
+    expect(calB, findsOneWidget);
+
+    final switchA = tester.widget<Switch>(calA);
+    final switchB = tester.widget<Switch>(calB);
+
+    expect(switchA.value, isTrue);
+    expect(switchB.value, isFalse);
   });
 
   testWidgets('shows Read-only from Google label on calendar row', (
@@ -218,6 +270,10 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50));
 
     expect(find.text('Sync selected calendars now'), findsOneWidget);
+    expect(
+      find.byKey(const Key('google_calendar_sync_selected_button')),
+      findsOneWidget,
+    );
   });
 
   testWidgets('shows Disconnect Google Calendar button', (tester) async {
@@ -225,6 +281,32 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50));
 
     expect(find.text('Disconnect Google Calendar'), findsOneWidget);
+    expect(
+      find.byKey(const Key('google_calendar_disconnect_button')),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('disconnect selector retains destructive confirmation', (
+    tester,
+  ) async {
+    final client = _StubHubClient();
+    await tester.pumpWidget(_wrapPage(hubClient: client));
+    await tester.pump(const Duration(milliseconds: 50));
+
+    await tester.tap(
+      find.byKey(const Key('google_calendar_disconnect_button')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Disconnect Google Calendar?'), findsOneWidget);
+    expect(client.disconnectCalls, 0);
+
+    await tester.tap(find.text('Disconnect'));
+    await tester.pumpAndSettle();
+
+    expect(client.disconnectCalls, 1);
+    expect(client.disconnectedConnectionId, 'conn1');
   });
 
   testWidgets('shows View calendar button', (tester) async {
@@ -232,6 +314,10 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50));
 
     expect(find.text('View calendar'), findsOneWidget);
+    expect(
+      find.byKey(const Key('google_calendar_view_calendar_button')),
+      findsOneWidget,
+    );
   });
 
   testWidgets('shows empty-state text when no calendars returned', (
@@ -255,7 +341,9 @@ void main() {
     await tester.pumpWidget(_wrapPage(hubClient: client));
     await tester.pump(const Duration(milliseconds: 50));
 
-    await tester.tap(find.text('Sync selected calendars now'));
+    await tester.tap(
+      find.byKey(const Key('google_calendar_sync_selected_button')),
+    );
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
 
