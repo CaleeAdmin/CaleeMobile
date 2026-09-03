@@ -77,6 +77,7 @@ class CalendarCollectionsPage extends StatefulWidget {
     this.autoOpenSubscribeForm = false,
     this.initialSubscriptionUrl,
     this.initialSubscriptionName,
+    this.onNavigateToCalendar,
     super.key,
   });
 
@@ -98,6 +99,11 @@ class CalendarCollectionsPage extends StatefulWidget {
   final bool autoOpenSubscribeForm;
   final String? initialSubscriptionUrl;
   final String? initialSubscriptionName;
+
+  /// Invoked after a provider flow pops back to the Home route so the host
+  /// (CaleeHomePage, via SettingsPage) can select the Calendar tab. Optional so
+  /// existing call sites that do not own tab selection keep working.
+  final VoidCallback? onNavigateToCalendar;
 
   @override
   State<CalendarCollectionsPage> createState() =>
@@ -181,8 +187,10 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
           hubClient: widget.hubClient,
           accessToken: widget.accessToken,
           connection: connection,
-          onViewCalendar: () =>
-              Navigator.of(context).popUntil((route) => route.isFirst),
+          onViewCalendar: () {
+            Navigator.of(context).popUntil((route) => route.isFirst);
+            widget.onNavigateToCalendar?.call();
+          },
           onDone: () => Navigator.of(context).pop(),
         ),
       ),
@@ -198,6 +206,7 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
         : (email != null && email.isNotEmpty ? email : 'Connected');
 
     return CaleeListRow(
+      key: const Key('calendar_collections_google_calendar_connection_row'),
       title: 'Google Calendar',
       subtitle: subtitle,
       leading: Icon(
@@ -305,8 +314,10 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
           services: widget.services,
           accountId: widget.accountId,
           onDone: () {},
-          onViewCalendar: () =>
-              Navigator.of(context).popUntil((r) => r.isFirst),
+          onViewCalendar: () {
+            Navigator.of(context).popUntil((r) => r.isFirst);
+            widget.onNavigateToCalendar?.call();
+          },
         ),
       ),
     );

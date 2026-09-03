@@ -74,16 +74,18 @@ ExternalCalendarConnection _googleConnection({
   'sourceOfTruthPolicy': 'external',
 });
 
-Widget _wrap(_StubHubClient hubClient) => MaterialApp(
-  theme: CaleeTheme.buildThemeData(),
-  home: CalendarCollectionsPage(
-    hubClient: hubClient,
-    accessToken: 'tok',
-    services: const [],
-    accountId: 'acct1',
-    isFamilyUxContext: true,
-  ),
-);
+Widget _wrap(_StubHubClient hubClient, {VoidCallback? onNavigateToCalendar}) =>
+    MaterialApp(
+      theme: CaleeTheme.buildThemeData(),
+      home: CalendarCollectionsPage(
+        hubClient: hubClient,
+        accessToken: 'tok',
+        services: const [],
+        accountId: 'acct1',
+        isFamilyUxContext: true,
+        onNavigateToCalendar: onNavigateToCalendar,
+      ),
+    );
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
@@ -96,6 +98,12 @@ void main() {
 
     expect(find.text('CONNECTED CALENDARS'), findsOneWidget);
     expect(find.text('Google Calendar'), findsOneWidget);
+    expect(
+      find.byKey(
+        const Key('calendar_collections_google_calendar_connection_row'),
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets('shows the connected Google account email when available', (
@@ -127,10 +135,85 @@ void main() {
     await tester.pumpWidget(_wrap(client));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Google Calendar'));
+    await tester.tap(
+      find.byKey(
+        const Key('calendar_collections_google_calendar_connection_row'),
+      ),
+    );
     await tester.pumpAndSettle();
 
     expect(find.byType(GoogleCalendarSelectionPage), findsOneWidget);
+    expect(
+      find.byKey(const Key('google_calendar_selection_page_root')),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets(
+    'View calendar in Google management requests the Calendar tab exactly once',
+    (tester) async {
+      final client = _StubHubClient(connections: [_googleConnection()]);
+      var navigateToCalendarCount = 0;
+      await tester.pumpWidget(
+        _wrap(client, onNavigateToCalendar: () => navigateToCalendarCount++),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.byKey(
+          const Key('calendar_collections_google_calendar_connection_row'),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const Key('google_calendar_selection_page_root')),
+        findsOneWidget,
+      );
+      expect(navigateToCalendarCount, 0);
+
+      final viewCalendar = find.byKey(
+        const Key('google_calendar_view_calendar_button'),
+      );
+      await tester.ensureVisible(viewCalendar);
+      await tester.pumpAndSettle();
+      await tester.tap(viewCalendar);
+      await tester.pumpAndSettle();
+
+      // The management route is popped and the host is asked to select the
+      // Calendar tab exactly once.
+      expect(navigateToCalendarCount, 1);
+      expect(
+        find.byKey(const Key('google_calendar_selection_page_root')),
+        findsNothing,
+      );
+      expect(find.byType(CalendarCollectionsPage), findsOneWidget);
+    },
+  );
+
+  testWidgets('View calendar is a no-op for hosts that do not supply '
+      'onNavigateToCalendar', (tester) async {
+    final client = _StubHubClient(connections: [_googleConnection()]);
+    await tester.pumpWidget(_wrap(client));
+    await tester.pumpAndSettle();
+
+    await tester.tap(
+      find.byKey(
+        const Key('calendar_collections_google_calendar_connection_row'),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final viewCalendar = find.byKey(
+      const Key('google_calendar_view_calendar_button'),
+    );
+    await tester.ensureVisible(viewCalendar);
+    await tester.pumpAndSettle();
+    await tester.tap(viewCalendar);
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(find.byType(CalendarCollectionsPage), findsOneWidget);
   });
 
   testWidgets('disconnect calls disconnectExternalCalendarConnection and '
@@ -141,7 +224,11 @@ void main() {
     await tester.pumpWidget(_wrap(client));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Google Calendar'));
+    await tester.tap(
+      find.byKey(
+        const Key('calendar_collections_google_calendar_connection_row'),
+      ),
+    );
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Disconnect Google Calendar'));
@@ -169,6 +256,12 @@ void main() {
 
     expect(find.text('CONNECTED CALENDARS'), findsOneWidget);
     expect(find.text('No connected calendar accounts'), findsOneWidget);
+    expect(
+      find.byKey(
+        const Key('calendar_collections_google_calendar_connection_row'),
+      ),
+      findsNothing,
+    );
   });
 
   testWidgets(
@@ -186,7 +279,11 @@ void main() {
       await tester.pumpWidget(_wrap(client));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Google Calendar'));
+      await tester.tap(
+        find.byKey(
+          const Key('calendar_collections_google_calendar_connection_row'),
+        ),
+      );
       await tester.pumpAndSettle();
 
       expect(
