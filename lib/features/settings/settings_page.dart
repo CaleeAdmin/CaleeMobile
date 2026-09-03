@@ -579,6 +579,7 @@ class _SettingsPageState extends State<SettingsPage> {
                           accountId: _controller.bootstrap.account.id,
                           isFamilyUxContext:
                               _controller.bootstrap.isFamilyUxContext,
+                          onNavigateToCalendar: widget.onNavigateToCalendar,
                         ),
                       ),
                     )
