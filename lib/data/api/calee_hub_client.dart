@@ -5,7 +5,9 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 
+import '../account_deletion/account_deletion_recovery_credential.dart';
 import '../auth/calee_preferences.dart';
+import '../models/account_deletion_status.dart';
 import '../models/calendar_subscription_validation.dart';
 import '../models/client_bootstrap.dart';
 import '../models/client_caldav_account.dart';
@@ -2131,6 +2133,142 @@ class CaleeHubClient {
     );
   }
 
+  // ── Account deletion (CaleeMobile #556) ───────────────────────────────────
+  //
+  // Two routes, two different authorities, and the difference IS the design.
+  // Contract source: calee-hub-core@c520740795205a32117d9ba047f88b0ff557aeb6,
+  // public/lib/core_account_deletion_api.php and
+  // public/lib/routes_client_api_account_deletion.php.
+  //
+  //   POST /client/v1/account-deletions          bearer + password + phrase
+  //   POST /client/v1/account-deletions/status   recovery credential ONLY
+  //
+  // The second exists because the first cannot cover the case that matters:
+  // the Hub commits the deletion and the response is lost. By the time this
+  // app can ask again the identity that would have authenticated it may be
+  // quiesced, and after completion it will not exist at all.
+
+  /// The exact destructive confirmation phrase the Hub requires
+  /// (`account_deletion_confirmation_phrase()`).
+  ///
+  /// Supplied by [requestAccountDeletion] rather than accepted from a caller:
+  /// there is exactly one correct value, and a parameter would be somewhere for
+  /// a wrong one to come from.
+  static const String accountDeletionConfirmationPhrase =
+      'DELETE MY CALEE ACCOUNT';
+
+  /// Requests permanent deletion of the signed-in account. IRREVERSIBLE.
+  ///
+  /// CALLERS MUST HAVE PERSISTED [recoveryCredential] BEFORE CALLING THIS. Once
+  /// the Hub commits, that credential is the only way back to the operation,
+  /// and a credential still in flight to the Keychain when the response was
+  /// lost is a credential the customer does not have.
+  ///
+  /// [password] is used once, for the Hub's recent re-authentication check. It
+  /// is never persisted, never logged and never put in an exception.
+  ///
+  /// Returns the bounded status projection plus `created` and
+  /// `recoveryCredentialMatched`. A `created: false` result is a REPLAY
+  /// resolving the operation that already existed -- not a second deletion.
+  ///
+  /// THROWS, and how to read it:
+  ///  * [CaleeHubException] carrying the Hub's stable code. Classify it with
+  ///    `AccountDeletionRequestFailure.fromError`; only the failures it
+  ///    reports as pre-acceptance are known to have created nothing.
+  ///  * `code: 'DELETION_RESPONSE_MALFORMED'` (statusCode 0) when a 2xx body
+  ///    did not match the pinned contract. THE OUTCOME IS UNKNOWN -- the
+  ///    operation may well exist. Resolve it with [accountDeletionStatus]; do
+  ///    not mint fresh material, and do not discard what is stored.
+  ///
+  /// A 401 `DELETION_REAUTH_REQUIRED` is surfaced UNCHANGED: it means the
+  /// password was refused, and this one call deliberately opts out of the
+  /// client's automatic refresh-and-retry, which cannot fix a password and
+  /// would spend a refresh -- and, if that refresh failed, sign the customer
+  /// out midway through deleting their account. Any other 401 is an ordinary
+  /// expired bearer and still gets the usual refresh and one retry, which is
+  /// safe here because the Hub's request path is idempotent by construction.
+  Future<AccountDeletionRequestResult> requestAccountDeletion({
+    required String accessToken,
+    required String password,
+    required AccountDeletionRecoveryCredential recoveryCredential,
+  }) async {
+    // Mirrors the Hub's own accept rules, so material it would certainly
+    // reject never travels -- and neither does the password attached to it.
+    if (!recoveryCredential.isWellFormed) {
+      throw const CaleeHubException(
+        statusCode: 0,
+        code: 'DELETION_RECOVERY_MATERIAL_INVALID',
+        message: 'A valid deletion recovery id and secret are required.',
+      );
+    }
+
+    final json = await _postJson(
+      '/client/v1/account-deletions',
+      accessToken: accessToken,
+      body: {
+        'confirmation': accountDeletionConfirmationPhrase,
+        'password': password,
+        'recoveryId': recoveryCredential.recoveryId,
+        'recoverySecret': recoveryCredential.recoverySecret,
+      },
+      shouldRefreshOnUnauthorized: (error) =>
+          error.code != 'DELETION_REAUTH_REQUIRED',
+    );
+
+    try {
+      return AccountDeletionRequestResult.fromJson(_data(json));
+    } on FormatException {
+      // The exception is swallowed rather than chained: nothing derived from a
+      // request that carried a password goes into a message that may be shown
+      // or logged.
+      throw const CaleeHubException(
+        statusCode: 0,
+        code: 'DELETION_RESPONSE_MALFORMED',
+        message: 'Unable to confirm the deletion request. Please try again.',
+      );
+    }
+  }
+
+  /// Reads the deletion-only status for [recoveryCredential].
+  ///
+  /// SENDS NO BEARER TOKEN, and must not: this is the one surface that has to
+  /// keep working after ordinary authentication has stopped. Passing
+  /// `accessToken: null` to [_postJson] both omits the Authorization header and
+  /// bypasses the 401 refresh-and-retry path entirely, so a 404 here can never
+  /// be mistaken for an expired session and can never trigger a sign-out.
+  ///
+  /// The credential is a credential, not a token: it travels in the request
+  /// BODY -- never a URL or query string, where a web server would log it and a
+  /// Referer header would forward it -- and it is accepted by no other Calee
+  /// route.
+  ///
+  /// Throws [CaleeHubException]; classify with
+  /// `AccountDeletionStatusFailure.fromError`. The Hub answers 404
+  /// `DELETION_OPERATION_NOT_FOUND` identically for malformed, unknown and
+  /// wrong material, so that it cannot be used as an oracle -- this client
+  /// cannot distinguish them either.
+  Future<AccountDeletionStatus> accountDeletionStatus({
+    required AccountDeletionRecoveryCredential recoveryCredential,
+  }) async {
+    final json = await _postJson(
+      '/client/v1/account-deletions/status',
+      body: {
+        'recoveryId': recoveryCredential.recoveryId,
+        'recoverySecret': recoveryCredential.recoverySecret,
+      },
+    );
+
+    try {
+      return AccountDeletionStatus.fromJson(_data(json));
+    } on FormatException {
+      throw const CaleeHubException(
+        statusCode: 0,
+        code: 'DELETION_STATUS_MALFORMED',
+        message: 'Unable to read the deletion status. Please try again.',
+      );
+    }
+  }
+
   Future<void> approveDisplayLogin({
     required String accessToken,
     required String token,
@@ -2417,15 +2555,26 @@ class CaleeHubClient {
   // Also uses any previously refreshed token so feature pages don't need to
   // update their stored access token before the next request.
 
+  // [shouldRefreshOnUnauthorized] lets ONE caller narrow which 401s are worth
+  // a refresh. Account deletion needs it: the Hub answers a wrong deletion
+  // password with 401 DELETION_REAUTH_REQUIRED, and refreshing the bearer
+  // token cannot fix a password. Left null -- as every existing caller leaves
+  // it -- the behaviour is exactly what it has always been: every 401 gets one
+  // refresh and one retry.
   Future<Map<String, dynamic>> _withRetry(
     Future<Map<String, dynamic>> Function(String token) doRequest,
-    String accessToken,
-  ) async {
+    String accessToken, {
+    bool Function(CaleeHubException error)? shouldRefreshOnUnauthorized,
+  }) async {
     final effectiveToken = _refreshedToken ?? accessToken;
     try {
       return await doRequest(effectiveToken);
     } on CaleeHubException catch (e) {
       if (e.statusCode != 401 || onUnauthorized == null) rethrow;
+      if (shouldRefreshOnUnauthorized != null &&
+          !shouldRefreshOnUnauthorized(e)) {
+        rethrow;
+      }
       _refreshedToken = null;
       final newToken = await onUnauthorized!();
       if (newToken == null) rethrow;
@@ -2533,8 +2682,10 @@ class CaleeHubClient {
     String path, {
     String? accessToken,
     required Map<String, dynamic> body,
+    bool Function(CaleeHubException error)? shouldRefreshOnUnauthorized,
   }) {
-    // Unauthenticated calls (login, refresh) skip retry.
+    // Unauthenticated calls (login, refresh, deletion status) skip retry --
+    // and send no Authorization header at all.
     if (accessToken == null) {
       return _executeRequest(() async {
         final request = await _httpClient.postUrl(baseUri.resolve(path));
@@ -2547,6 +2698,7 @@ class CaleeHubClient {
     return _withRetry(
       (token) => _doPostJson(path, accessToken: token, body: body),
       accessToken,
+      shouldRefreshOnUnauthorized: shouldRefreshOnUnauthorized,
     );
   }
 
