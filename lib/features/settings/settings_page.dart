@@ -11,6 +11,8 @@ import '../../data/models/client_calendar.dart';
 import '../../ui/calee_legal_links.dart';
 import '../../ui/calee_theme.dart';
 import '../../ui/calee_widgets.dart';
+import '../account_deletion/account_deletion_controller.dart';
+import '../account_deletion/delete_account_page.dart';
 import '../calendar_onboarding/calendar_source_picker_page.dart';
 import '../display_setup/connect_display_page.dart';
 import '../profile/profile_page.dart';
@@ -34,6 +36,7 @@ class SettingsPage extends StatefulWidget {
     this.onBootstrapRefreshed,
     this.reminderCoordinator,
     this.onNavigateToCalendar,
+    this.accountDeletionController,
     this.preferencesOverride,
     this.legalLinkLauncher,
     super.key,
@@ -52,6 +55,16 @@ class SettingsPage extends StatefulWidget {
 
   // Called after manual onboarding "View calendar" to switch the home tab.
   final VoidCallback? onNavigateToCalendar;
+
+  /// The app-level Account Deletion V1 lifecycle (#556).
+  ///
+  /// Null in contexts that do not offer deletion (and in tests that do not
+  /// exercise it), in which case the destructive Delete account row is NOT
+  /// rendered. That is deliberate: the entry point must never exist without
+  /// the coordinator that owns post-acceptance recovery behind it, because a
+  /// request this app could accept but not recover from is worse than no
+  /// Delete account button at all.
+  final AccountDeletionController? accountDeletionController;
 
   /// Test-only override for the local preferences store, so reminder-preference
   /// persistence failures can be simulated in widget tests. Null in production,
@@ -162,6 +175,26 @@ class _SettingsPageState extends State<SettingsPage> {
         builder: (_) => ProfilePage(
           hubClient: widget.hubClient,
           accessToken: widget.accessToken,
+        ),
+      ),
+    );
+  }
+
+  /// Settings -> Account -> Delete account (#556).
+  ///
+  /// Pushes the destructive flow rather than acting on the tap. Nothing is
+  /// submitted from this row: the page explains what permanent deletion is,
+  /// asks for the password again, and requires the exact confirmation phrase
+  /// before anything irreversible is attempted.
+  void _openDeleteAccount(AccountDeletionController controller) {
+    final account = _controller.bootstrap.account;
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => DeleteAccountPage(
+          controller: controller,
+          accessToken: widget.accessToken,
+          accountId: account.id,
+          accountEmail: account.primaryEmail,
         ),
       ),
     );
@@ -314,6 +347,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Widget _buildContent(BuildContext context) {
     final account = _controller.bootstrap.account;
+    final deletionController = widget.accountDeletionController;
     final calendars = _controller.calendars;
     final preferences = _controller.preferences;
     final remindersEnabled = _controller.calendarRemindersEnabled;
@@ -376,6 +410,25 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
               onTap: _openProfile,
             ),
+            // Rendered only when the deletion lifecycle is wired up. An entry
+            // that could submit an irreversible request without the
+            // coordinator behind post-acceptance and cold-launch recovery
+            // would be worse than no entry at all.
+            if (deletionController != null)
+              CaleeListRow(
+                key: const Key('settings_delete_account_row'),
+                title: 'Delete account',
+                subtitle: 'Permanently delete your Calee account',
+                titleStyle: Theme.of(
+                  context,
+                ).textTheme.bodyLarge?.copyWith(color: CaleeColors.destructive),
+                leading: const Icon(
+                  Icons.delete_forever_outlined,
+                  size: 20,
+                  color: CaleeColors.destructive,
+                ),
+                onTap: () => _openDeleteAccount(deletionController),
+              ),
           ],
         ),
 

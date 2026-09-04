@@ -892,6 +892,75 @@ class CaleePreferences {
   static String _calendarOnboardingKey(String accountId) =>
       'calee_calendar_onboarding_status_$accountId';
 
+  /// Removes the onboarding status for ONE account.
+  ///
+  /// Targeted by account id so a shared device keeps every other account's
+  /// onboarding progress. Used by the Account Deletion V1 completion cleanup
+  /// (CaleeMobile #556); never a prefix sweep, which would take other
+  /// accounts' rows with it.
+  Future<void> clearCalendarOnboardingStatus(String accountId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_calendarOnboardingKey(accountId));
+    } catch (_) {
+      // Best-effort; a cleanup failure must not block terminal handling.
+    }
+  }
+
+  /// Removes the four account-owned display preferences cached on this device.
+  ///
+  /// These mirror Hub-owned account settings (week start, clock format, and the
+  /// two default collection ids, which are Hub calendar identifiers belonging to
+  /// the deleted account). They are device-global keys but ACCOUNT-OWNED data,
+  /// so a completed deletion must not leave them behind for the next account to
+  /// inherit. Guest/local calendar subscriptions live under their own key and
+  /// are deliberately untouched -- as is every other preference on the device.
+  Future<void> clearAccountOwnedPreferences() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      for (final key in const [
+        _firstDayOfWeekKey,
+        _timeFormatKey,
+        _defaultCalendarIdKey,
+        _defaultTaskListIdKey,
+      ]) {
+        await prefs.remove(key);
+      }
+    } catch (_) {
+      // Best-effort; a cleanup failure must not block terminal handling.
+    }
+  }
+
+  /// Forgets the reminder-enabled value belonging to ONE account.
+  ///
+  /// Runs through the same serialized read-modify-write transaction as
+  /// [saveCalendarRemindersEnabled], so removing one account's row can never
+  /// lose a concurrent write for another. Every other account's value, and the
+  /// legacy-claim bookkeeping, are preserved exactly: this removes a row, it
+  /// does not reset the record.
+  ///
+  /// Deliberately silent about failure. It is called from terminal deletion
+  /// handling, where a stale boolean for an account that no longer exists is a
+  /// nuisance, not a correctness problem -- and where nothing useful could be
+  /// retried anyway.
+  Future<void> forgetCalendarRemindersForOwner(String ownerKey) {
+    return _runSerialized(() async {
+      try {
+        final store = await _openReminderStore();
+        final loaded = await _loadOrMigrateRecord(store);
+        final record = loaded.record;
+        if (record == null) return;
+        if (!record.valuesByOwner.containsKey(ownerKey)) return;
+
+        final remaining = Map<String, bool>.from(record.valuesByOwner)
+          ..remove(ownerKey);
+        await _commitRecord(store, record.copyWith(valuesByOwner: remaining));
+      } catch (_) {
+        // Best-effort; see the doc comment.
+      }
+    });
+  }
+
   Future<String> loadCalendarOnboardingStatus(String accountId) async {
     try {
       final prefs = await SharedPreferences.getInstance();

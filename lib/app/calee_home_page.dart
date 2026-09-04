@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../data/api/calee_hub_client.dart';
 import '../data/models/client_bootstrap.dart';
+import '../features/account_deletion/account_deletion_controller.dart';
 import '../features/calendar/calendar_page.dart';
 import '../features/chores/chores_page.dart';
 import '../features/meals/meals_page.dart';
@@ -18,6 +19,7 @@ class CaleeHomePage extends StatefulWidget {
     required this.onSignOut,
     this.onBootstrapRefreshed,
     this.reminderCoordinator,
+    this.accountDeletionController,
     this.initialSelectedIndex = 0,
     this.onInitialTabConsumed,
     super.key,
@@ -32,6 +34,11 @@ class CaleeHomePage extends StatefulWidget {
   /// App-level reminder coordinator, threaded to the Calendar and Settings tabs
   /// so explicit event changes and enabling reminders can force a refresh.
   final CalendarReminderCoordinator? reminderCoordinator;
+
+  /// App-level Account Deletion V1 lifecycle (#556), threaded to the Settings
+  /// tab so Settings -> Account -> Delete account can start it. Null in
+  /// contexts that do not offer deletion, which hides the row entirely.
+  final AccountDeletionController? accountDeletionController;
 
   final int initialSelectedIndex;
   // Called once after the first frame when initialSelectedIndex != 0,
@@ -193,6 +200,7 @@ class _CaleeHomePageState extends State<CaleeHomePage> {
         onSignOut: widget.onSignOut,
         onBootstrapRefreshed: widget.onBootstrapRefreshed,
         reminderCoordinator: widget.reminderCoordinator,
+        accountDeletionController: widget.accountDeletionController,
         onNavigateToCalendar: () => setState(() {
           _selectedIndex = _calendarTabIndex;
           _calendarRefreshGeneration++;
