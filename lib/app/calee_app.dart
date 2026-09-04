@@ -16,6 +16,9 @@ import '../features/auth/create_account_page.dart';
 import '../features/auth/login_page.dart';
 import '../features/auth/post_registration_profile_defaults.dart';
 import '../features/auth/session_controller.dart';
+import '../data/account_deletion/account_deletion_recovery_store.dart';
+import '../features/account_deletion/account_deletion_controller.dart';
+import '../features/account_deletion/account_deletion_status_page.dart';
 import '../data/device/device_profile_defaults_provider.dart';
 import '../features/calendar_follow/calendar_follow_intent.dart';
 import '../features/calendar_follow/calendar_follow_link_controller.dart';
@@ -66,6 +69,7 @@ class CaleeAppTestDependencies {
     this.shoppingLinkController,
     this.deviceProfileDefaultsProvider,
     this.reminderCoordinator,
+    this.accountDeletionController,
     this.launchExternalUrl,
   });
 
@@ -81,10 +85,40 @@ class CaleeAppTestDependencies {
   final DeviceProfileDefaultsProvider? deviceProfileDefaultsProvider;
   final CalendarReminderCoordinator? reminderCoordinator;
 
+  /// Replaces the Account Deletion V1 lifecycle (#556) so widget tests can
+  /// drive deletion phases without the secure store or the Hub. Null in
+  /// production and in the many tests that do not exercise deletion, where the
+  /// real controller is built and simply finds no pending operation.
+  final AccountDeletionController? accountDeletionController;
+
   /// Replaces `url_launcher`'s launchUrl so tests can observe external
   /// navigation (e.g. the Calee-for-home marketing page) without platform
   /// channels. Returns whether the URL was opened.
   final Future<bool> Function(Uri url)? launchExternalUrl;
+}
+
+/// A deletion recovery store that holds nothing and answers immediately.
+///
+/// Used ONLY when [CaleeApp.forTesting] is given no
+/// [CaleeAppTestDependencies.accountDeletionController]. An unmocked
+/// `flutter_secure_storage` channel never replies under
+/// `TestDefaultBinaryMessenger`, so a widget test that has nothing to do with
+/// deletion would otherwise hang on the startup read. Tests that DO exercise
+/// deletion inject their own controller, with their own store.
+///
+/// Never reachable from production: the const [AccountDeletionRecoveryStore]
+/// default keeps the real platform secure store there.
+class _EmptyAccountDeletionStorage implements AccountDeletionSecureStorage {
+  const _EmptyAccountDeletionStorage();
+
+  @override
+  Future<String?> read(String key) async => null;
+
+  @override
+  Future<void> write(String key, String value) async {}
+
+  @override
+  Future<void> delete(String key) async {}
 }
 
 class CaleeApp extends StatefulWidget {
@@ -113,7 +147,19 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
   late final DisplayActivationController _displayActivationController;
   late final LocalCalendarSubscriptionRepository _localSubscriptionRepo;
   late final CalendarReminderCoordinator _reminderCoordinator;
+  late final AccountDeletionController _accountDeletionController;
   final _navigatorKey = GlobalKey<NavigatorState>();
+
+  // Whether the one local read that decides deletion precedence has happened.
+  // Startup shows the restore spinner until it has: an operation that may
+  // exist must never be hidden, even for one frame, behind login/onboarding.
+  bool _accountDeletionRestored = false;
+
+  // Whether the deletion lifecycle owned the whole app surface at the last
+  // notification. Used to detect the moment it takes over, which is when any
+  // pushed route (Settings, the delete-account flow) has to come off the
+  // navigator — switching `home` alone would leave them sitting on top.
+  bool _accountDeletionOwnedSurface = false;
 
   // Set to true when the app goes to background; cleared and transport reset on resume.
   bool _transportMayBeStale = false;
@@ -262,6 +308,23 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
         testDeps?.reminderCoordinator ??
         CalendarReminderCoordinator(hubClient: _hubClient);
 
+    // Account Deletion V1 (#556). `endOrdinarySession` is deliberately the
+    // app's EXISTING sign-out, not a second auth mechanism: it clears the Hub
+    // access/refresh tokens and the auth cache, and leaves the deletion
+    // recovery record — which lives outside SessionStore precisely so it
+    // survives this — untouched.
+    _accountDeletionController =
+        testDeps?.accountDeletionController ??
+        AccountDeletionController(
+          hubClient: _hubClient,
+          endOrdinarySession: _sessionController.signOut,
+          recoveryStore: testDeps == null
+              ? const AccountDeletionRecoveryStore()
+              : const AccountDeletionRecoveryStore(
+                  storage: _EmptyAccountDeletionStorage(),
+                ),
+        );
+
     // Listeners must be attached before any controller's init() can deliver
     // an intent, so a notification fired mid-init is never missed.
     _followLinkController.addListener(_onFollowLinkChanged);
@@ -272,6 +335,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
     _shoppingLinkController.addListener(_onShoppingLinkChanged);
     _sessionController.addListener(_onSessionChanged);
     _sessionController.addListener(_onSessionChangedForReminders);
+    _accountDeletionController.addListener(_onAccountDeletionChanged);
 
     // DisplaySetupLinkController.init() is idempotent and, in tests, always
     // backed by a fake (see CaleeAppTestDependencies), so it's called
@@ -298,8 +362,68 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
       );
     }
 
-    _sessionController.restoreSession();
+    unawaited(_startup());
     unawaited(_loadLocalSubscriptions());
+  }
+
+  /// Startup, in the order precedence requires.
+  ///
+  /// The deletion recovery read comes FIRST and is local-only, so a pending
+  /// operation is never hidden behind ordinary session restoration — and a
+  /// device with no recovery material never pays for a status read. Ordinary
+  /// restoration is skipped entirely when a deletion owns the launch: normal
+  /// Hub credentials must not reopen the signed-in app merely to watch it.
+  Future<void> _startup() async {
+    await _accountDeletionController.restore();
+    if (!mounted) return;
+    setState(() => _accountDeletionRestored = true);
+
+    if (_accountDeletionController.ownsAppSurface) {
+      // Off the startup path: the network read must not gate the first frame.
+      unawaited(_accountDeletionController.refreshStatus());
+      return;
+    }
+
+    await _sessionController.restoreSession();
+  }
+
+  /// Rebuilds for a deletion phase change, and clears the navigator the moment
+  /// the deletion lifecycle takes over the whole app.
+  void _onAccountDeletionChanged() {
+    if (!mounted) return;
+    final ownsSurface = _accountDeletionController.ownsAppSurface;
+    if (ownsSurface && !_accountDeletionOwnedSurface) {
+      // Settings and the delete-account flow were pushed above `home`, so
+      // changing `home` would leave them on screen over the recovery surface.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _navigatorKey.currentState?.popUntil((route) => route.isFirst);
+      });
+    }
+    _accountDeletionOwnedSurface = ownsSurface;
+    setState(() {});
+  }
+
+  /// Hands the app back to ordinary signed-out Calee after a terminal
+  /// deletion outcome.
+  ///
+  /// The Hub tokens are already gone, so this lands on the normal signed-out
+  /// experience — the Guest/local calendar screen when this device has
+  /// subscriptions, the welcome screen when it does not. Neither was touched
+  /// by the deletion.
+  Future<void> _onAccountDeletionFinished() async {
+    await _sessionController.restoreSession();
+    if (mounted) setState(() {});
+  }
+
+  /// Retries the deletion recovery read after the secure store was unreachable
+  /// at launch. An unreadable Keychain is not evidence of a deletion, so
+  /// ordinary UX continued — but it must not be assumed empty forever.
+  Future<void> _retryAccountDeletionRestore() async {
+    await _accountDeletionController.restore();
+    if (!mounted) return;
+    if (_accountDeletionController.ownsAppSurface) {
+      unawaited(_accountDeletionController.refreshStatus());
+    }
   }
 
   @override
@@ -313,11 +437,13 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
     _shoppingLinkController.removeListener(_onShoppingLinkChanged);
     _sessionController.removeListener(_onSessionChanged);
     _sessionController.removeListener(_onSessionChangedForReminders);
+    _accountDeletionController.removeListener(_onAccountDeletionChanged);
     _followLinkController.dispose();
     _displaySetupLinkController.dispose();
     _externalCalendarConnectedLinkController.dispose();
     _shoppingLinkController.dispose();
     _displayActivationController.dispose();
+    _accountDeletionController.dispose();
     _sessionController.dispose();
     super.dispose();
   }
@@ -332,6 +458,12 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed && _transportMayBeStale) {
       _transportMayBeStale = false;
       _hubClient.resetTransport();
+      if (_accountDeletionController.restoreDeferred) {
+        unawaited(_retryAccountDeletionRestore());
+      } else if (_accountDeletionController.ownsAppSurface) {
+        // A deletion may have advanced (or finished) while backgrounded.
+        unawaited(_accountDeletionController.refreshStatus());
+      }
       if (_sessionController.isSignedIn) {
         unawaited(_sessionController.refreshBootstrap());
         // Reconcile reminders against the independent 30-day window on resume
@@ -1330,6 +1462,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
           _followLinkController,
           _displaySetupLinkController,
           _shoppingLinkController,
+          _accountDeletionController,
         ]),
         builder: (context, _) => _buildHome(),
       ),
@@ -1348,6 +1481,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
             _followLinkController,
             _displaySetupLinkController,
             _shoppingLinkController,
+            _accountDeletionController,
           ]),
           builder: (context, _) => _buildHome(),
         ),
@@ -1356,6 +1490,24 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
   }
 
   Widget _buildHome() {
+    // ── Account deletion (#556) ─────────────────────────────────────────────
+    //
+    // Ahead of EVERY other surface: session restoration, ordinary sign-in,
+    // onboarding, and the Guest/local-calendar experience. An operation that
+    // may exist must not be hidden behind login, and normal Hub credentials
+    // must not reopen the signed-in app merely to view deletion status.
+    //
+    // Guest/device-local state is only hidden, never touched: once the
+    // deletion reaches a terminal state the signed-out experience returns with
+    // the same local calendars it had.
+    if (!_accountDeletionRestored) return const _SessionRestorePage();
+    if (_accountDeletionController.ownsAppSurface) {
+      return AccountDeletionStatusPage(
+        controller: _accountDeletionController,
+        onFinished: () => unawaited(_onAccountDeletionFinished()),
+      );
+    }
+
     if (_sessionController.isRestoringSession || !_localSubscriptionsLoaded) {
       return const _SessionRestorePage();
     }
@@ -1664,6 +1816,7 @@ class _CaleeAppState extends State<CaleeApp> with WidgetsBindingObserver {
       onSignOut: () => _sessionController.signOut(),
       onBootstrapRefreshed: _sessionController.updateBootstrap,
       reminderCoordinator: _reminderCoordinator,
+      accountDeletionController: _accountDeletionController,
       initialSelectedIndex: _initialHomeTab ?? 0,
       onInitialTabConsumed: _initialHomeTab != null
           ? () => setState(() => _initialHomeTab = null)
