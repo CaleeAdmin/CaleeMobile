@@ -155,6 +155,10 @@ class _CalendarPageState extends State<CalendarPage>
     super.didChangeAppLifecycleState(state);
     if (state != AppLifecycleState.resumed) {
       _wasBackgrounded = true;
+      // Stop re-checking a syncing calendar while the app is away. The resume
+      // path below drives a refresh that restarts the loop if anything is
+      // still pending, so nothing is lost by standing down here.
+      _controller.pauseSyncConvergence();
       return;
     }
     if (!_wasBackgrounded) return;
@@ -665,6 +669,18 @@ class _CalendarPageState extends State<CalendarPage>
         final hasPartialServiceError =
             serviceErrors.isNotEmpty && _controller.calendars.isNotEmpty;
 
+        // A just-added connected calendar that has not finished its first
+        // sync gets a slim strip above the calendar, not a takeover: the rest
+        // of the family's month stays on screen and stays usable.
+        final syncingNames = _controller.syncingCalendars
+            .map((cal) => cal.name)
+            .toList(growable: false);
+        final syncFailedNames = _controller.syncFailedCalendars
+            .map((cal) => cal.name)
+            .toList(growable: false);
+        final hasSyncNotice =
+            syncingNames.isNotEmpty || syncFailedNames.isNotEmpty;
+
         final calendarView = ReadOnlyCalendarView(
           selectedMonth: _controller.selectedMonth,
           selectedDay: _controller.selectedDay,
@@ -728,16 +744,27 @@ class _CalendarPageState extends State<CalendarPage>
           ],
         );
 
+        final banners = <Widget>[
+          if (hasPartialServiceError)
+            CalendarServiceWarningBanner(errors: serviceErrors),
+          if (hasSyncNotice)
+            CalendarSyncingBanner(
+              syncingCalendarNames: syncingNames,
+              failedCalendarNames: syncFailedNames,
+              exhausted: _controller.syncConvergenceExhausted,
+            ),
+        ];
+
         return CaleeScaffold(
           body: SafeArea(
-            child: hasPartialServiceError
-                ? Column(
+            child: banners.isEmpty
+                ? calendarView
+                : Column(
                     children: [
-                      CalendarServiceWarningBanner(errors: serviceErrors),
+                      ...banners,
                       Expanded(child: calendarView),
                     ],
-                  )
-                : calendarView,
+                  ),
           ),
         );
       },

@@ -14,6 +14,8 @@ class CalendarController extends ChangeNotifier {
     required this.repository,
     this.onRequestReminderRefresh,
     NewlyAddedCalendarVisibility? newlyAddedCalendarVisibility,
+    this.syncConvergenceInterval = const Duration(seconds: 5),
+    this.syncConvergenceMaxAttempts = 6,
   }) : newlyAddedCalendarVisibility =
            newlyAddedCalendarVisibility ??
            NewlyAddedCalendarVisibility.instance {
@@ -32,6 +34,16 @@ class CalendarController extends ChangeNotifier {
   /// Calendars added since the last load, which must be visible as soon as
   /// they appear. See [NewlyAddedCalendarVisibility].
   final NewlyAddedCalendarVisibility newlyAddedCalendarVisibility;
+
+  /// Gap between automatic re-checks while a just-added subscription calendar
+  /// is still syncing. See [_scheduleSyncConvergence].
+  final Duration syncConvergenceInterval;
+
+  /// How many automatic re-checks a syncing calendar gets before Calee stops
+  /// and says so. Bounded on purpose: a feed that never converges must become
+  /// a passive, honest "Still syncing. Pull to refresh." rather than an
+  /// indefinite spinner and an indefinite poll.
+  final int syncConvergenceMaxAttempts;
 
   /// Invoked to request an independent upcoming-reminder refresh after an
   /// explicit change (event CRUD) or a manual calendar refresh. Deliberately
@@ -72,10 +84,86 @@ class CalendarController extends ChangeNotifier {
 
   bool _disposed = false;
 
+  // ── Initial-sync convergence ──────────────────────────────────────────────
+
+  Timer? _syncConvergenceTimer;
+  int _syncConvergenceAttempts = 0;
+
+  /// True once the automatic re-checks have been used up and a calendar is
+  /// still syncing. The UI switches from "Syncing…" to a passive
+  /// "Still syncing. Pull to refresh." — Calee stops polling but never
+  /// pretends the calendar is empty.
+  bool syncConvergenceExhausted = false;
+
+  /// Visible calendars Hub has told us are still completing their first
+  /// authoritative sync. Hidden calendars are excluded: a calendar the user
+  /// has switched off must not put a banner on the screen.
+  List<ClientCalendar> get syncingCalendars => calendars
+      .where((cal) => cal.isInitialSyncPending && isCalendarVisible(cal.id))
+      .toList(growable: false);
+
+  /// Visible calendars whose first authoritative sync failed.
+  List<ClientCalendar> get syncFailedCalendars => calendars
+      .where((cal) => cal.hasInitialSyncError && isCalendarVisible(cal.id))
+      .toList(growable: false);
+
   @override
   void dispose() {
     _disposed = true;
+    // Nothing may keep polling past dispose: the timer is the only thing here
+    // that outlives a build, so cancelling it is what makes "no polling after
+    // dispose" true rather than merely likely.
+    _cancelSyncConvergence();
     super.dispose();
+  }
+
+  /// Stops the automatic re-check loop and forgets its progress. Called on
+  /// dispose, when the app is backgrounded ([pauseSyncConvergence]), and
+  /// whenever a load shows nothing is syncing any more.
+  void _cancelSyncConvergence() {
+    _syncConvergenceTimer?.cancel();
+    _syncConvergenceTimer = null;
+  }
+
+  /// Stops re-checking while the app is not in the foreground. The next
+  /// resume drives a [refreshInBackground], which restarts the loop from
+  /// scratch if anything is still syncing.
+  void pauseSyncConvergence() {
+    _cancelSyncConvergence();
+  }
+
+  /// Arms one automatic re-check when — and only when — a visible calendar is
+  /// still syncing.
+  ///
+  /// Deliberately reuses [refreshInBackground] (and therefore the existing
+  /// repository and load-sequencing) rather than adding a second networking
+  /// path: the re-check is an ordinary silent reload, it cannot flash a
+  /// spinner over the calendar, and [refreshInBackground] already declines
+  /// while another load is in flight, so re-checks cannot stack.
+  void _scheduleSyncConvergence() {
+    _cancelSyncConvergence();
+
+    if (_disposed) return;
+
+    if (syncingCalendars.isEmpty) {
+      // Converged (or the calendar was hidden/removed). Reset so a LATER add
+      // gets its own full budget of re-checks.
+      _syncConvergenceAttempts = 0;
+      syncConvergenceExhausted = false;
+      return;
+    }
+
+    if (_syncConvergenceAttempts >= syncConvergenceMaxAttempts) {
+      syncConvergenceExhausted = true;
+      return;
+    }
+
+    _syncConvergenceTimer = Timer(syncConvergenceInterval, () {
+      _syncConvergenceTimer = null;
+      if (_disposed) return;
+      _syncConvergenceAttempts++;
+      unawaited(refreshInBackground());
+    });
   }
 
   Future<void> loadMonth() => _load(showLoadingIndicator: true);
@@ -148,6 +236,10 @@ class CalendarController extends ChangeNotifier {
     hiddenCalendarIds.removeAll(newlyAddedCalendarVisibility.take());
     error = null;
     isLoading = false;
+    // Arm (or stand down) the automatic re-check for a just-added calendar
+    // that is still syncing. Runs after hiddenCalendarIds is settled so a
+    // calendar the user has switched off is never polled for.
+    _scheduleSyncConvergence();
     notifyListeners();
   }
 

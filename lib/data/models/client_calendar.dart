@@ -97,6 +97,54 @@ class CalendarCapabilities {
   final bool canRemoveAttachments;
 }
 
+/// How far a subscription ("connected") calendar has got through its FIRST
+/// authoritative synchronisation, as reported by Hub's additive
+/// `subscriptionSyncState` field.
+///
+/// The distinction this exists to make: a subscription Calee has never
+/// successfully fetched must NOT be drawn as an empty calendar. Calee knows
+/// the feed validated and how many events it claimed to hold; it just does not
+/// have them yet. Showing "No events" there is a lie, and it is the lie the
+/// user hit after "Calendar added to Calee".
+///
+/// [ready] genuinely covers zero events too: a feed that was fetched
+/// successfully and contains nothing is ready-and-empty, and gets the ordinary
+/// empty-calendar UI, not a syncing state.
+///
+/// Null (the field absent) means either "not a subscription calendar" or "an
+/// older Hub that predates the field". Both must behave exactly as CaleeMobile
+/// did before this contract existed — never as [syncing], which would put a
+/// permanent banner on every calendar against an old backend.
+enum CalendarSyncState {
+  /// An authoritative refresh has succeeded. What is shown is what the feed
+  /// contains, including when that is nothing.
+  ready,
+
+  /// Registered, but its first authoritative refresh has not completed. Calee
+  /// does not yet know what this calendar contains.
+  syncing,
+
+  /// The first authoritative refresh failed. Truthful, and deliberately
+  /// carries no backend detail — Hub never sends one.
+  error;
+
+  /// Parses the wire value. An unrecognised string is treated as null rather
+  /// than guessed at: a future state this build does not understand must not
+  /// be silently rendered as one it does.
+  static CalendarSyncState? fromJson(Object? value) {
+    switch (value) {
+      case 'ready':
+        return CalendarSyncState.ready;
+      case 'syncing':
+        return CalendarSyncState.syncing;
+      case 'error':
+        return CalendarSyncState.error;
+      default:
+        return null;
+    }
+  }
+}
+
 /// v1 always returns 'series' -- see docs/attachment-investigation-findings.md
 /// on calee-hub-core for why per-occurrence attachments are out of scope.
 /// Modeled as an enum (rather than a bare String, unlike e.g.
@@ -225,6 +273,7 @@ class ClientCalendar {
     this.sourceColor,
     this.appearanceMode = 'source_metadata',
     this.hasServerAppearanceContract = true,
+    this.subscriptionSyncState,
     this.capabilities = const CalendarCapabilities(
       canEditAppearance: true,
       canEditEvents: false,
@@ -299,6 +348,12 @@ class ClientCalendar {
           json.containsKey('capabilities') &&
           rawCapabilities is Map<String, dynamic>,
       capabilities: capabilities,
+      // Additive. Absent on an older Hub and null for non-subscription
+      // calendars; CalendarSyncState.fromJson returns null for both, which is
+      // exactly the pre-contract behaviour.
+      subscriptionSyncState: CalendarSyncState.fromJson(
+        json['subscriptionSyncState'],
+      ),
     );
   }
 
@@ -354,6 +409,24 @@ class ClientCalendar {
   /// a current backend); [ClientCalendar.fromJson] always sets it from the
   /// payload.
   final bool hasServerAppearanceContract;
+
+  /// How far this subscription calendar has got through its first
+  /// authoritative sync, or null when that is not a meaningful question here
+  /// (not a subscription, or an older Hub). See [CalendarSyncState].
+  final CalendarSyncState? subscriptionSyncState;
+
+  /// True only when Hub has positively said this calendar has not finished its
+  /// first sync. Null — an old backend, or a non-subscription calendar — is
+  /// deliberately NOT syncing: the truthful thing to do when Calee has not
+  /// been told is to behave as it always did.
+  bool get isInitialSyncPending =>
+      subscriptionSyncState == CalendarSyncState.syncing;
+
+  /// True when Hub has said this calendar's first authoritative refresh
+  /// failed. Distinct from [isInitialSyncPending]: retrying will not help on
+  /// its own, so the UI says so rather than showing an endless "Syncing…".
+  bool get hasInitialSyncError =>
+      subscriptionSyncState == CalendarSyncState.error;
 
   bool get isCalendarKind => primaryKind == 'calendar';
   bool get isTaskKind => primaryKind == 'tasks';

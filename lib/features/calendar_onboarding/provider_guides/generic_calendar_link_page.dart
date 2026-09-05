@@ -282,8 +282,13 @@ class _GenericCalendarLinkPageState extends State<GenericCalendarLinkPage> {
       if (!mounted) return;
       Navigator.of(context).push(
         MaterialPageRoute<void>(
-          builder: (_) =>
-              CalendarAddedSuccessPage(onViewCalendar: widget.onViewCalendar),
+          builder: (_) => CalendarAddedSuccessPage(
+            onViewCalendar: widget.onViewCalendar,
+            // Carried straight through from the create response, so the
+            // success page says what actually happened rather than promising
+            // events Calee may not have yet.
+            syncState: added.subscriptionSyncState,
+          ),
         ),
       );
     } catch (error) {
