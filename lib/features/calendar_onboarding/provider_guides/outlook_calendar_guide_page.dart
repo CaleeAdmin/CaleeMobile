@@ -142,8 +142,13 @@ class _OutlookCalendarGuidePageState extends State<OutlookCalendarGuidePage> {
         if (!mounted) return;
         nav.push(
           MaterialPageRoute<void>(
-            builder: (_) =>
-                CalendarAddedSuccessPage(onViewCalendar: widget.onViewCalendar),
+            builder: (_) => CalendarAddedSuccessPage(
+              onViewCalendar: widget.onViewCalendar,
+              // This flow detects the new calendar by diffing the
+              // calendars list rather than creating it, so the sync state
+              // comes from the discovered calendar itself.
+              syncState: newCalendars.first.subscriptionSyncState,
+            ),
           ),
         );
       } else {

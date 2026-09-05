@@ -104,8 +104,10 @@ class _AppleIcloudCalendarGuidePageState
 
       Navigator.of(context).push(
         MaterialPageRoute<void>(
-          builder: (_) =>
-              CalendarAddedSuccessPage(onViewCalendar: widget.onViewCalendar),
+          builder: (_) => CalendarAddedSuccessPage(
+            onViewCalendar: widget.onViewCalendar,
+            syncState: added.subscriptionSyncState,
+          ),
         ),
       );
     } catch (error) {
