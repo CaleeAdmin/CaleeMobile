@@ -5,6 +5,7 @@ import 'package:calee_mobile/data/auth/calee_preferences.dart';
 import 'package:calee_mobile/data/models/client_calendar.dart';
 import 'package:calee_mobile/features/calendar/calendar_controller.dart';
 import 'package:calee_mobile/features/calendar/calendar_repository.dart';
+import 'package:calee_mobile/features/calendar/newly_added_calendar_visibility.dart';
 import 'package:calee_mobile/features/notifications/calendar_reminder_coordinator.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -208,6 +209,7 @@ CalendarController _controllerWithHub(
   StoredPreferences? prefs,
   Future<void> Function(CalendarReminderRefreshReason reason)?
   onRequestReminderRefresh,
+  NewlyAddedCalendarVisibility? newlyAddedCalendarVisibility,
 }) => CalendarController(
   repository: CalendarRepository(
     hubClient: hub,
@@ -215,6 +217,8 @@ CalendarController _controllerWithHub(
     preferences: _StubPrefs(prefs ?? const StoredPreferences()),
   ),
   onRequestReminderRefresh: onRequestReminderRefresh,
+  newlyAddedCalendarVisibility:
+      newlyAddedCalendarVisibility ?? NewlyAddedCalendarVisibility(),
 );
 
 /// Lets pending microtasks (a repository fetch reaching the hub stub) run
@@ -264,6 +268,48 @@ final _setupMonth = DateTime(2026, 8, 1);
 /// Australia/Perth, where it renders as 1:30 PM–2:30 PM on 4 August).
 final _setupDay = () {
   final local = DateTime.parse('2026-08-04T05:30:00Z').toLocal();
+  return DateTime(local.year, local.month, local.day);
+}();
+
+// ─── Newly added connected calendar (the "Under 12s" defect) ─────────────────
+
+const _under12sCalendarId = 'portal:under-12s';
+
+const _under12sCalendar = ClientCalendar(
+  id: _under12sCalendarId,
+  serviceId: 'portal',
+  serviceName: 'Calee Portal',
+  name: 'Under 12s',
+  components: [],
+  primaryKind: 'calendar',
+  supportsEvents: true,
+  supportsTasks: false,
+  supportsChores: false,
+  readOnly: true,
+  isSubscription: true,
+  source: 'portal',
+);
+
+const _round4Event = ClientEvent(
+  id: 'round-4',
+  calendarId: _under12sCalendarId,
+  serviceId: 'portal',
+  serviceName: 'Calee Portal',
+  title: 'Under 12s - Round 4 Home Fixture',
+  startsAt: '2026-10-24T01:00:00Z',
+  endsAt: '2026-10-24T02:00:00Z',
+  allDay: false,
+  recurring: false,
+  readOnly: true,
+  source: 'portal',
+);
+
+final _round4Month = DateTime(2026, 10, 1);
+
+/// The local day the Round 4 fixture falls on, derived from its UTC instant so
+/// the assertion holds in any host timezone.
+final _round4Day = () {
+  final local = DateTime.parse('2026-10-24T01:00:00Z').toLocal();
   return DateTime(local.year, local.month, local.day);
 }();
 
@@ -702,6 +748,97 @@ void main() {
       ctrl.showAllCalendars();
 
       expect(ctrl.hiddenCalendarIds, isEmpty);
+    });
+  });
+
+  // ── Newly added connected calendar visibility ───────────────────────────────
+
+  group('CalendarController newly added calendar visibility', () {
+    /// Puts the controller in the state the user was in before adding:
+    /// existing calendars loaded, one of them hidden by choice, and a stale
+    /// hidden entry for the id the new calendar will arrive with.
+    Future<(CalendarController, _MutableStubHubClient)> loadedWithHiddenIds({
+      required NewlyAddedCalendarVisibility newlyAdded,
+    }) async {
+      final hub = _MutableStubHubClient(
+        calendars: [_calendar('cal1'), _calendar('cal2')],
+      );
+      final ctrl = _controllerWithHub(
+        hub,
+        newlyAddedCalendarVisibility: newlyAdded,
+      );
+      ctrl.selectedMonth = _round4Month;
+      ctrl.selectedDay = _round4Day;
+      await ctrl.loadMonth();
+
+      ctrl.toggleCalendarVisibility('cal2'); // an existing, deliberate choice
+      // A same-id entry left behind by an earlier "Under 12s" that this client
+      // never saw disappear — the state that showed the new calendar unchecked.
+      ctrl.toggleCalendarVisibility(_under12sCalendarId);
+      return (ctrl, hub);
+    }
+
+    test('a just-added connected calendar is visible and its events render '
+        'on the next load', () async {
+      final newlyAdded = NewlyAddedCalendarVisibility();
+      final (ctrl, hub) = await loadedWithHiddenIds(newlyAdded: newlyAdded);
+
+      // The add succeeded ("Calendar added to Calee") and the calendar and its
+      // already-available events are now in hub's payload.
+      newlyAdded.record(_under12sCalendarId);
+      hub.calendarsPayload = [
+        _calendar('cal1'),
+        _calendar('cal2'),
+        _under12sCalendar,
+      ];
+      hub.eventsPayload = [_round4Event];
+
+      await ctrl.refresh();
+
+      expect(ctrl.isCalendarVisible(_under12sCalendarId), isTrue);
+      expect(ctrl.eventsForDay(_round4Day).map((e) => e.title), [
+        'Under 12s - Round 4 Home Fixture',
+      ]);
+    });
+
+    test('adding one calendar leaves other hidden calendars hidden', () async {
+      final newlyAdded = NewlyAddedCalendarVisibility();
+      final (ctrl, hub) = await loadedWithHiddenIds(newlyAdded: newlyAdded);
+
+      newlyAdded.record(_under12sCalendarId);
+      hub.calendarsPayload = [
+        _calendar('cal1'),
+        _calendar('cal2'),
+        _under12sCalendar,
+      ];
+
+      await ctrl.refresh();
+
+      expect(ctrl.isCalendarVisible('cal2'), isFalse);
+      expect(ctrl.isCalendarVisible('cal1'), isTrue);
+      expect(ctrl.hiddenCalendarIds, {'cal2'});
+    });
+
+    test('hiding the new calendar afterwards still works and survives a '
+        'reload', () async {
+      final newlyAdded = NewlyAddedCalendarVisibility();
+      final (ctrl, hub) = await loadedWithHiddenIds(newlyAdded: newlyAdded);
+
+      newlyAdded.record(_under12sCalendarId);
+      hub.calendarsPayload = [
+        _calendar('cal1'),
+        _calendar('cal2'),
+        _under12sCalendar,
+      ];
+      hub.eventsPayload = [_round4Event];
+      await ctrl.refresh();
+
+      ctrl.toggleCalendarVisibility(_under12sCalendarId);
+      await ctrl.refresh();
+
+      expect(ctrl.isCalendarVisible(_under12sCalendarId), isFalse);
+      expect(ctrl.eventsForDay(_round4Day), isEmpty);
+      expect(ctrl.isCalendarVisible('cal2'), isFalse);
     });
   });
 

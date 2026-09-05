@@ -4,6 +4,7 @@ import '../../../data/api/calee_hub_client.dart';
 import '../../../data/auth/calee_preferences.dart';
 import '../../../data/models/client_bootstrap.dart';
 import '../../../ui/calee_design.dart';
+import '../../calendar/newly_added_calendar_visibility.dart';
 import '../calendar_added_success_page.dart';
 import '../calendar_onboarding_status.dart';
 
@@ -86,12 +87,13 @@ class _AppleIcloudCalendarGuidePageState
     setState(() => _isSubmitting = true);
 
     try {
-      await widget.hubClient.subscribeCalendarFromLink(
+      final added = await widget.hubClient.subscribeCalendarFromLink(
         accessToken: widget.accessToken,
         serviceId: service.id,
         name: _nameController.text.trim(),
         url: _urlController.text.trim(),
       );
+      NewlyAddedCalendarVisibility.instance.record(added.id);
 
       await CaleePreferences().saveCalendarOnboardingStatus(
         widget.accountId,

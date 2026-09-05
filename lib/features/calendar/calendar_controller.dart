@@ -7,12 +7,16 @@ import '../../data/models/calendar_service_error.dart';
 import '../../data/models/client_calendar.dart';
 import '../notifications/calendar_reminder_coordinator.dart';
 import 'calendar_repository.dart';
+import 'newly_added_calendar_visibility.dart';
 
 class CalendarController extends ChangeNotifier {
   CalendarController({
     required this.repository,
     this.onRequestReminderRefresh,
-  }) {
+    NewlyAddedCalendarVisibility? newlyAddedCalendarVisibility,
+  }) : newlyAddedCalendarVisibility =
+           newlyAddedCalendarVisibility ??
+           NewlyAddedCalendarVisibility.instance {
     final now = DateTime.now();
     today = DateTime(now.year, now.month, now.day);
     selectedDay = today;
@@ -24,6 +28,10 @@ class CalendarController extends ChangeNotifier {
   }
 
   final CalendarRepository repository;
+
+  /// Calendars added since the last load, which must be visible as soon as
+  /// they appear. See [NewlyAddedCalendarVisibility].
+  final NewlyAddedCalendarVisibility newlyAddedCalendarVisibility;
 
   /// Invoked to request an independent upcoming-reminder refresh after an
   /// explicit change (event CRUD) or a manual calendar refresh. Deliberately
@@ -134,6 +142,10 @@ class CalendarController extends ChangeNotifier {
     hiddenCalendarIds.removeWhere(
       (id) => !calendars.any((cal) => cal.id == id),
     );
+    // A calendar the user has just added is visible on arrival, whatever a
+    // same-id entry left behind in the hidden set says. Only those ids are
+    // dropped, so every other hidden choice survives untouched.
+    hiddenCalendarIds.removeAll(newlyAddedCalendarVisibility.take());
     error = null;
     isLoading = false;
     notifyListeners();
