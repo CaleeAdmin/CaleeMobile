@@ -5,6 +5,7 @@ import '../../../data/auth/calee_preferences.dart';
 import '../../../data/models/calendar_subscription_validation.dart';
 import '../../../data/models/client_bootstrap.dart';
 import '../../../ui/calee_design.dart';
+import '../../calendar/newly_added_calendar_visibility.dart';
 import '../calendar_added_success_page.dart';
 import '../calendar_onboarding_status.dart';
 
@@ -260,7 +261,7 @@ class _GenericCalendarLinkPageState extends State<GenericCalendarLinkPage> {
     setState(() => _isSubmitting = true);
 
     try {
-      await widget.hubClient.subscribeCalendarFromLink(
+      final added = await widget.hubClient.subscribeCalendarFromLink(
         accessToken: widget.accessToken,
         serviceId: service.id,
         name: _nameController.text.trim(),
@@ -269,6 +270,9 @@ class _GenericCalendarLinkPageState extends State<GenericCalendarLinkPage> {
             ? null
             : _colorController.text.trim(),
       );
+      // A calendar the user just added must be visible in Calendar, not left
+      // unchecked behind "Calendar added to Calee".
+      NewlyAddedCalendarVisibility.instance.record(added.id);
 
       await CaleePreferences().saveCalendarOnboardingStatus(
         widget.accountId,

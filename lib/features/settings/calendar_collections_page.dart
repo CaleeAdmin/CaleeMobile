@@ -7,6 +7,7 @@ import '../../data/models/client_bootstrap.dart';
 import '../../data/models/client_calendar.dart';
 import '../../data/models/external_calendar_connection.dart';
 import '../../ui/calee_design.dart';
+import '../calendar/newly_added_calendar_visibility.dart';
 import '../calendar/widgets/calendar_error_state.dart';
 import '../calendar/widgets/calendar_widget_helpers.dart';
 import '../calendar_onboarding/calendar_source_picker_page.dart';
@@ -422,13 +423,14 @@ class _CalendarCollectionsPageState extends State<CalendarCollectionsPage> {
                 );
               }
 
-              await widget.hubClient.subscribeCalendarFromLink(
+              final added = await widget.hubClient.subscribeCalendarFromLink(
                 accessToken: widget.accessToken,
                 serviceId: selectedService.id,
                 name: name,
                 url: url,
                 color: color,
               );
+              NewlyAddedCalendarVisibility.instance.record(added.id);
             },
       ),
     );

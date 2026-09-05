@@ -7,6 +7,7 @@ import 'package:calee_mobile/data/api/calee_hub_client.dart';
 import 'package:calee_mobile/data/models/calendar_subscription_validation.dart';
 import 'package:calee_mobile/data/models/client_bootstrap.dart';
 import 'package:calee_mobile/data/models/client_calendar.dart';
+import 'package:calee_mobile/features/calendar/newly_added_calendar_visibility.dart';
 import 'package:calee_mobile/features/calendar_onboarding/provider_guides/generic_calendar_link_page.dart';
 import 'package:calee_mobile/ui/calee_theme.dart';
 import 'package:flutter/material.dart';
@@ -661,6 +662,29 @@ void main() {
       expect(client.subscribeCallCount, 1);
       expect(client.lastSubscribedUrl, 'https://example.com/normalized.ics');
       expect(find.text('Calendar added to Calee'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    '10b. a successful add records the new calendar so Calendar shows it',
+    (tester) async {
+      // Drain anything an earlier test left behind, so this asserts only what
+      // this add records.
+      NewlyAddedCalendarVisibility.instance.take();
+      final client = _connectedClient(validateResult: _validResult);
+      await tester.pumpWidget(_wrap(client));
+      await tester.pumpAndSettle();
+      await _fillNameAndUrl(tester);
+
+      await tester.tap(find.text('Check calendar'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Add to Calee'));
+      await tester.pumpAndSettle();
+
+      // The id the subscribe response returned — the calendar the user just
+      // added must not stay unchecked in the calendar selector.
+      expect(NewlyAddedCalendarVisibility.instance.take(), {'cal1'});
     },
   );
 
